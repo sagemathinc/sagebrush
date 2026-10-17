@@ -1,0 +1,345 @@
+ZoneInfo('UTC') -> ('UTC', "zoneinfo.ZoneInfo(key='UTC')", [(datetime.timedelta(0), datetime.timedelta(0), 'UTC'), (datetime.timedelta(0), datetime.timedelta(0), 'UTC')])
+no_cache('UTC') -> "zoneinfo.ZoneInfo(key='UTC')"
+ZoneInfo('America/New_York') -> ('America/New_York', "zoneinfo.ZoneInfo(key='America/New_York')", [(datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT'), (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST')])
+no_cache('America/New_York') -> "zoneinfo.ZoneInfo(key='America/New_York')"
+ZoneInfo('Europe/London') -> ('Europe/London', "zoneinfo.ZoneInfo(key='Europe/London')", [(datetime.timedelta(seconds=3600), datetime.timedelta(seconds=3600), 'BST'), (datetime.timedelta(0), datetime.timedelta(0), 'GMT')])
+no_cache('Europe/London') -> "zoneinfo.ZoneInfo(key='Europe/London')"
+ZoneInfo('Australia/Lord_Howe') -> ('Australia/Lord_Howe', "zoneinfo.ZoneInfo(key='Australia/Lord_Howe')", [(datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030'), (datetime.timedelta(seconds=39600), datetime.timedelta(seconds=1800), '+11')])
+no_cache('Australia/Lord_Howe') -> "zoneinfo.ZoneInfo(key='Australia/Lord_Howe')"
+ZoneInfo('Etc/GMT+5') -> ('Etc/GMT+5', "zoneinfo.ZoneInfo(key='Etc/GMT+5')", [(datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), '-05'), (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), '-05')])
+no_cache('Etc/GMT+5') -> "zoneinfo.ZoneInfo(key='Etc/GMT+5')"
+ZoneInfo('Etc/GMT-14') -> ('Etc/GMT-14', "zoneinfo.ZoneInfo(key='Etc/GMT-14')", [(datetime.timedelta(seconds=50400), datetime.timedelta(0), '+14'), (datetime.timedelta(seconds=50400), datetime.timedelta(0), '+14')])
+no_cache('Etc/GMT-14') -> "zoneinfo.ZoneInfo(key='Etc/GMT-14')"
+ZoneInfo('America/Argentina/Buenos_Aires') -> ('America/Argentina/Buenos_Aires', "zoneinfo.ZoneInfo(key='America/Argentina/Buenos_Aires')", [(datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03'), (datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03')])
+no_cache('America/Argentina/Buenos_Aires') -> "zoneinfo.ZoneInfo(key='America/Argentina/Buenos_Aires')"
+ZoneInfo('Pacific/Chatham') -> ('Pacific/Chatham', "zoneinfo.ZoneInfo(key='Pacific/Chatham')", [(datetime.timedelta(seconds=45900), datetime.timedelta(0), '+1245'), (datetime.timedelta(seconds=49500), datetime.timedelta(seconds=3600), '+1345')])
+no_cache('Pacific/Chatham') -> "zoneinfo.ZoneInfo(key='Pacific/Chatham')"
+ZoneInfo('Africa/Casablanca') -> ('Africa/Casablanca', "zoneinfo.ZoneInfo(key='Africa/Casablanca')", [(datetime.timedelta(seconds=3600), datetime.timedelta(0), '+01'), (datetime.timedelta(seconds=3600), datetime.timedelta(0), '+01')])
+no_cache('Africa/Casablanca') -> "zoneinfo.ZoneInfo(key='Africa/Casablanca')"
+ZoneInfo('Asia/Kolkata') -> ('Asia/Kolkata', "zoneinfo.ZoneInfo(key='Asia/Kolkata')", [(datetime.timedelta(seconds=19800), datetime.timedelta(0), 'IST'), (datetime.timedelta(seconds=19800), datetime.timedelta(0), 'IST')])
+no_cache('Asia/Kolkata') -> "zoneinfo.ZoneInfo(key='Asia/Kolkata')"
+ZoneInfo('America/St_Johns') -> ('America/St_Johns', "zoneinfo.ZoneInfo(key='America/St_Johns')", [(datetime.timedelta(days=-1, seconds=77400), datetime.timedelta(seconds=3600), 'NDT'), (datetime.timedelta(days=-1, seconds=73800), datetime.timedelta(0), 'NST')])
+no_cache('America/St_Johns') -> "zoneinfo.ZoneInfo(key='America/St_Johns')"
+ZoneInfo('Europe/Dublin') -> ('Europe/Dublin', "zoneinfo.ZoneInfo(key='Europe/Dublin')", [(datetime.timedelta(seconds=3600), datetime.timedelta(0), 'IST'), (datetime.timedelta(0), datetime.timedelta(days=-1, seconds=82800), 'GMT')])
+no_cache('Europe/Dublin') -> "zoneinfo.ZoneInfo(key='Europe/Dublin')"
+ZoneInfo('Antarctica/Troll') -> ('Antarctica/Troll', "zoneinfo.ZoneInfo(key='Antarctica/Troll')", [(datetime.timedelta(seconds=7200), datetime.timedelta(seconds=7200), '+02'), (datetime.timedelta(0), datetime.timedelta(0), '+00')])
+no_cache('Antarctica/Troll') -> "zoneinfo.ZoneInfo(key='Antarctica/Troll')"
+ZoneInfo('America/Sao_Paulo') -> ('America/Sao_Paulo', "zoneinfo.ZoneInfo(key='America/Sao_Paulo')", [(datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03'), (datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03')])
+no_cache('America/Sao_Paulo') -> "zoneinfo.ZoneInfo(key='America/Sao_Paulo')"
+ZoneInfo('') !! ValueError ZoneInfo keys must be normalized relative paths, got:  | context: None
+no_cache('') !! ValueError ZoneInfo keys must be normalized relative paths, got:  | context: None
+ZoneInfo('.') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: . | context: None
+no_cache('.') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: . | context: None
+ZoneInfo('..') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: .. | context: None
+no_cache('..') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: .. | context: None
+ZoneInfo('/UTC') !! ValueError ZoneInfo keys may not be absolute paths, got: /UTC | context: None
+no_cache('/UTC') !! ValueError ZoneInfo keys may not be absolute paths, got: /UTC | context: None
+ZoneInfo('UTC/') !! ValueError ZoneInfo keys must be normalized relative paths, got: UTC/ | context: None
+no_cache('UTC/') !! ValueError ZoneInfo keys must be normalized relative paths, got: UTC/ | context: None
+ZoneInfo('America/../UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/../UTC | context: None
+no_cache('America/../UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/../UTC | context: None
+ZoneInfo('America//New_York') !! ValueError ZoneInfo keys must be normalized relative paths, got: America//New_York | context: None
+no_cache('America//New_York') !! ValueError ZoneInfo keys must be normalized relative paths, got: America//New_York | context: None
+ZoneInfo('./UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: ./UTC | context: None
+no_cache('./UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: ./UTC | context: None
+ZoneInfo('America/./New_York') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/./New_York | context: None
+no_cache('America/./New_York') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/./New_York | context: None
+ZoneInfo('Nonexistent/Zone') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Nonexistent/Zone' | context: ModuleNotFoundError
+no_cache('Nonexistent/Zone') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Nonexistent/Zone' | context: ModuleNotFoundError
+ZoneInfo('America') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America' | context: IsADirectoryError
+no_cache('America') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America' | context: IsADirectoryError
+ZoneInfo('America/') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/ | context: None
+no_cache('America/') !! ValueError ZoneInfo keys must be normalized relative paths, got: America/ | context: None
+ZoneInfo('Amrica/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Amrica/New_York' | context: ModuleNotFoundError
+no_cache('Amrica/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Amrica/New_York' | context: ModuleNotFoundError
+ZoneInfo('america/new_york') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key america/new_york' | context: ModuleNotFoundError
+no_cache('america/new_york') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key america/new_york' | context: ModuleNotFoundError
+ZoneInfo('UTC\ud800') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key UTC\ud800' | context: UnicodeEncodeError
+no_cache('UTC\ud800') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key UTC\ud800' | context: UnicodeEncodeError
+ZoneInfo('a\x00b') !! ValueError embedded null byte | context: None
+no_cache('a\x00b') !! ValueError embedded null byte | context: None
+ZoneInfo('../zoneinfo/UTC') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: ../zoneinfo/UTC | context: None
+no_cache('../zoneinfo/UTC') !! ValueError ZoneInfo keys must refer to subdirectories of TZPATH, got: ../zoneinfo/UTC | context: None
+ZoneInfo('x/../../UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: x/../../UTC | context: None
+no_cache('x/../../UTC') !! ValueError ZoneInfo keys must be normalized relative paths, got: x/../../UTC | context: None
+ZoneInfo(5) !! TypeError expected str, bytes or os.PathLike object, not int | context: None
+no_cache(5) !! TypeError expected str, bytes or os.PathLike object, not int | context: None
+ZoneInfo(b'UTC') !! TypeError Can't mix strings and bytes in path components | context: TypeError
+no_cache(b'UTC') !! TypeError Can't mix strings and bytes in path components | context: TypeError
+ZoneInfo(None) !! TypeError expected str, bytes or os.PathLike object, not NoneType | context: None
+no_cache(None) !! TypeError expected str, bytes or os.PathLike object, not NoneType | context: None
+ZoneInfo(1.5) !! TypeError expected str, bytes or os.PathLike object, not float | context: None
+no_cache(1.5) !! TypeError expected str, bytes or os.PathLike object, not float | context: None
+ZoneInfo('zone.tab') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('zone.tab') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('tzdata.zi') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('tzdata.zi') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('iso3166.tab') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('iso3166.tab') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('leapseconds') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('leapseconds') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('zones') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key zones' | context: FileNotFoundError
+no_cache('zones') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key zones' | context: FileNotFoundError
+ZoneInfo('__init__.py') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('__init__.py') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('America/__init__.py') !! ValueError Invalid TZif file: magic not found | context: None
+no_cache('America/__init__.py') !! ValueError Invalid TZif file: magic not found | context: None
+ZoneInfo('__init__/UTC') -> ('__init__/UTC', "zoneinfo.ZoneInfo(key='__init__/UTC')", [(datetime.timedelta(0), datetime.timedelta(0), 'UTC'), (datetime.timedelta(0), datetime.timedelta(0), 'UTC')])
+no_cache('__init__/UTC') -> "zoneinfo.ZoneInfo(key='__init__/UTC')"
+ZoneInfo('America/__init__/New_York') -> ('America/__init__/New_York', "zoneinfo.ZoneInfo(key='America/__init__/New_York')", [(datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT'), (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST')])
+no_cache('America/__init__/New_York') -> "zoneinfo.ZoneInfo(key='America/__init__/New_York')"
+ZoneInfo('__init__') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key __init__' | context: FileNotFoundError
+no_cache('__init__') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key __init__' | context: FileNotFoundError
+ZoneInfo('__pycache__') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key __pycache__' | context: IsADirectoryError
+no_cache('__pycache__') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key __pycache__' | context: IsADirectoryError
+ZoneInfo('America.Argentina/Buenos_Aires') -> ('America.Argentina/Buenos_Aires', "zoneinfo.ZoneInfo(key='America.Argentina/Buenos_Aires')", [(datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03'), (datetime.timedelta(days=-1, seconds=75600), datetime.timedelta(0), '-03')])
+no_cache('America.Argentina/Buenos_Aires') -> "zoneinfo.ZoneInfo(key='America.Argentina/Buenos_Aires')"
+ZoneInfo('Etc.x/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Etc.x/UTC' | context: ModuleNotFoundError
+no_cache('Etc.x/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Etc.x/UTC' | context: ModuleNotFoundError
+ZoneInfo('a..b/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key a..b/UTC' | context: ModuleNotFoundError
+no_cache('a..b/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key a..b/UTC' | context: ModuleNotFoundError
+ZoneInfo('America./New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America./New_York' | context: ModuleNotFoundError
+no_cache('America./New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America./New_York' | context: ModuleNotFoundError
+ZoneInfo('.America/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key .America/New_York' | context: ModuleNotFoundError
+no_cache('.America/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key .America/New_York' | context: ModuleNotFoundError
+ZoneInfo('America/Argentina') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America/Argentina' | context: IsADirectoryError
+no_cache('America/Argentina') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America/Argentina' | context: IsADirectoryError
+ZoneInfo('UTC/x') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key UTC/x' | context: ModuleNotFoundError
+no_cache('UTC/x') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key UTC/x' | context: ModuleNotFoundError
+ZoneInfo('America\x00/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America\x00/New_York' | context: ModuleNotFoundError
+no_cache('America\x00/New_York') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key America\x00/New_York' | context: ModuleNotFoundError
+ZoneInfo('posixrules') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key posixrules' | context: FileNotFoundError
+no_cache('posixrules') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key posixrules' | context: FileNotFoundError
+ZoneInfo('localtime') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key localtime' | context: FileNotFoundError
+no_cache('localtime') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key localtime' | context: FileNotFoundError
+ZoneInfo('Factory') -> ('Factory', "zoneinfo.ZoneInfo(key='Factory')", [(datetime.timedelta(0), datetime.timedelta(0), '-00'), (datetime.timedelta(0), datetime.timedelta(0), '-00')])
+no_cache('Factory') -> "zoneinfo.ZoneInfo(key='Factory')"
+ZoneInfo('right/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key right/UTC' | context: ModuleNotFoundError
+no_cache('right/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key right/UTC' | context: ModuleNotFoundError
+ZoneInfo('posix/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key posix/UTC' | context: ModuleNotFoundError
+no_cache('posix/UTC') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key posix/UTC' | context: ModuleNotFoundError
+ZoneInfo('Etc/UTC\ud800/x') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Etc/UTC\ud800/x' | context: ModuleNotFoundError
+no_cache('Etc/UTC\ud800/x') !! zoneinfo._common.ZoneInfoNotFoundError 'No time zone found with key Etc/UTC\ud800/x' | context: ModuleNotFoundError
+ZoneInfo(key=) -> "zoneinfo.ZoneInfo(key='UTC')"
+ZoneInfo() !! TypeError ZoneInfo() missing required argument 'key' (pos 1) | context: None
+ZoneInfo(2 args) !! TypeError ZoneInfo() takes at most 1 argument (2 given) | context: None
+no_cache(key=) -> "zoneinfo.ZoneInfo(key='UTC')"
+same True False False
+eq False True
+after clear only_keys False
+after clear False
+strong cache, held True
+clear_cache(only_keys=5) !! TypeError 'int' object is not iterable | context: None
+clear_cache(['UTC']) !! TypeError clear_cache() takes no positional arguments | context: None
+clear_cache(only_keys=('UTC', 'nope')) -> None
+clear_cache(only_keys=()) -> None
+str subclass key Key zoneinfo.ZoneInfo(key='Europe/London')
+key -> 'America/New_York'
+set key !! AttributeError readonly attribute | context: None
+del key !! AttributeError readonly attribute | context: None
+__module__ -> ('zoneinfo', 'ZoneInfo', 'ZoneInfo', ['ZoneInfo', 'tzinfo', 'object'])
+__doc__ -> None
+doc utcoffset -> 'Retrieve a timedelta representing the UTC offset in a zone at the given datetime.'
+doc dst -> 'Retrieve a timedelta representing the amount of DST applied in a zone at the given datetime.'
+doc tzname -> 'Retrieve a string containing the abbreviation for the time zone that applies in a zone at a given datetime.'
+doc fromutc -> 'Given a datetime with local time in UTC, retrieve an adjusted datetime in local time.'
+doc __reduce__ -> 'Function for serialization with the pickle protocol.'
+doc from_file -> None
+doc no_cache -> None
+doc clear_cache -> None
+doc _unpickle -> None
+doc __init_subclass__ -> 'Function to initialize subclasses.'
+weakref -> True
+utcoffset(None) -> [datetime.timedelta(0), datetime.timedelta(days=-1, seconds=68400), None]
+dst(None) -> [datetime.timedelta(0), datetime.timedelta(0), None]
+tzname(None) -> ['UTC', '-05', None]
+time tz -> [datetime.timedelta(0), None]
+utcoffset(5) !! AttributeError 'int' object has no attribute 'toordinal' | context: None
+utcoffset() !! TypeError utcoffset() takes exactly 1 positional argument (0 given) | context: None
+utcoffset(dt=) !! TypeError utcoffset() takes exactly 1 positional argument (0 given) | context: None
+fromutc(5) !! TypeError fromutc: argument must be a datetime | context: None
+fromutc(naive) !! ValueError fromutc: dt.tzinfo is not self | context: None
+fromutc(other) !! ValueError fromutc: dt.tzinfo is not self | context: None
+fromutc(self) -> datetime.datetime(2026, 7, 1, 8, 0, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))
+fromutc(object=) !! TypeError ZoneInfo.fromutc() takes no keyword arguments | context: None
+subclass dt -> (datetime.timedelta(days=-1, seconds=72000), "DT(2026, 11, 1, 1, 30, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))", "DT(2026, 11, 1, 1, 30, fold=1, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))")
+pickle 0 -> b'c__builtin__\ngetattr\np0\n(czoneinfo\nZoneInfo\np1\nV_unpickle\np2\ntp3\nRp4\n(ccopy_reg\n_reconstructor\np5\n(c__main__\nKey\np6\nc__builtin__\nunicode\np7\nVEurope/London\np8\ntp9\nRp10\nI1\ntp11\nRp12\n.'
+pickle no_cache 0 -> b'c__builtin__\ngetattr\np0\n(czoneinfo\nZoneInfo\np1\nV_unpickle\np2\ntp3\nRp4\n(VEurope/London\np5\nI0\ntp6\nRp7\n.'
+pickle 1 -> b'c__builtin__\ngetattr\nq\x00(czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02tq\x03Rq\x04(ccopy_reg\n_reconstructor\nq\x05(c__main__\nKey\nq\x06c__builtin__\nunicode\nq\x07X\r\x00\x00\x00Europe/Londonq\x08tq\tRq\nK\x01tq\x0bRq\x0c.'
+pickle no_cache 1 -> b'c__builtin__\ngetattr\nq\x00(czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02tq\x03Rq\x04(X\r\x00\x00\x00Europe/Londonq\x05K\x00tq\x06Rq\x07.'
+pickle 2 -> b'\x80\x02c__builtin__\ngetattr\nq\x00czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02\x86q\x03Rq\x04c__main__\nKey\nq\x05X\r\x00\x00\x00Europe/Londonq\x06\x85q\x07\x81q\x08K\x01\x86q\tRq\n.'
+pickle no_cache 2 -> b'\x80\x02c__builtin__\ngetattr\nq\x00czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02\x86q\x03Rq\x04X\r\x00\x00\x00Europe/Londonq\x05K\x00\x86q\x06Rq\x07.'
+pickle 3 -> b'\x80\x03cbuiltins\ngetattr\nq\x00czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02\x86q\x03Rq\x04c__main__\nKey\nq\x05X\r\x00\x00\x00Europe/Londonq\x06\x85q\x07\x81q\x08K\x01\x86q\tRq\n.'
+pickle no_cache 3 -> b'\x80\x03cbuiltins\ngetattr\nq\x00czoneinfo\nZoneInfo\nq\x01X\t\x00\x00\x00_unpickleq\x02\x86q\x03Rq\x04X\r\x00\x00\x00Europe/Londonq\x05K\x00\x86q\x06Rq\x07.'
+pickle 4 -> b'\x80\x04\x95m\x00\x00\x00\x00\x00\x00\x00\x8c\x08builtins\x94\x8c\x07getattr\x94\x93\x94\x8c\x08zoneinfo\x94\x8c\x08ZoneInfo\x94\x93\x94\x8c\t_unpickle\x94\x86\x94R\x94\x8c\x08__main__\x94\x8c\x03Key\x94\x93\x94\x8c\rEurope/London\x94\x85\x94\x81\x94K\x01\x86\x94R\x94.'
+pickle no_cache 4 -> b'\x80\x04\x95V\x00\x00\x00\x00\x00\x00\x00\x8c\x08builtins\x94\x8c\x07getattr\x94\x93\x94\x8c\x08zoneinfo\x94\x8c\x08ZoneInfo\x94\x93\x94\x8c\t_unpickle\x94\x86\x94R\x94\x8c\rEurope/London\x94K\x00\x86\x94R\x94.'
+pickle 5 -> b'\x80\x05\x95m\x00\x00\x00\x00\x00\x00\x00\x8c\x08builtins\x94\x8c\x07getattr\x94\x93\x94\x8c\x08zoneinfo\x94\x8c\x08ZoneInfo\x94\x93\x94\x8c\t_unpickle\x94\x86\x94R\x94\x8c\x08__main__\x94\x8c\x03Key\x94\x93\x94\x8c\rEurope/London\x94\x85\x94\x81\x94K\x01\x86\x94R\x94.'
+pickle no_cache 5 -> b'\x80\x05\x95V\x00\x00\x00\x00\x00\x00\x00\x8c\x08builtins\x94\x8c\x07getattr\x94\x93\x94\x8c\x08zoneinfo\x94\x8c\x08ZoneInfo\x94\x93\x94\x8c\t_unpickle\x94\x86\x94R\x94\x8c\rEurope/London\x94K\x00\x86\x94R\x94.'
+unpickle same -> True
+unpickle no_cache -> ("zoneinfo.ZoneInfo(key='Europe/London')", False)
+reduce -> (True, True, ('UTC', 1))
+reduce no_cache -> ('UTC', 0)
+_unpickle -> ["zoneinfo.ZoneInfo(key='UTC')", "zoneinfo.ZoneInfo(key='UTC')", "zoneinfo.ZoneInfo(key='UTC')", "zoneinfo.ZoneInfo(key='UTC')", "zoneinfo.ZoneInfo(key='UTC')"]
+_unpickle bad !! TypeError 'str' object cannot be interpreted as an integer | context: None
+_unpickle kw !! TypeError _unpickle() takes exactly 2 positional arguments (1 given) | context: None
+copy -> (True, True)
+from_file -> (False, False, None, [(datetime.timedelta(seconds=3600), datetime.timedelta(seconds=3600), 'BST'), (datetime.timedelta(0), datetime.timedelta(0), 'GMT')])
+from_file key -> ("zoneinfo.ZoneInfo(key='London')", 'London', 'London')
+from_file key=5 str !! TypeError __str__ returned non-string (type int) | context: None
+from_file file_obj= !! TypeError from_file() takes at least 1 positional argument (0 given) | context: None
+pickle from_file !! PicklingError Cannot pickle a ZoneInfo file from a file stream. | context: None
+copy from_file !! PicklingError Cannot pickle a ZoneInfo file from a file stream. | context: None
+from_file not cached -> False
+from_file custom -> 'zoneinfo.ZoneInfo.from_file(<Repr file>)'
+from_file read fails !! AttributeError 'int' object has no attribute 'read' | context: None
+subclass -> ("Z2(key='UTC')", True, False, 'WeakValueDictionary', 'Z2', "Z3(key='UTC')")
+subclass pickle -> True
+subclass from_file -> "Z2(key='k')"
+subclass after clear -> True
+subclass __new__ -> "Z4(key='Europe/London')"
+NY 2026-03-08 01:59:59 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-03-08 01:59:59 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-03-08 02:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-03-08 02:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-03-08 02:30:00 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-03-08 02:30:00 fold=1 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-03-08 03:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-03-08 03:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-11-01 00:59:59 fold=0 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-11-01 00:59:59 fold=1 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-11-01 01:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-11-01 01:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-11-01 01:30:00 fold=0 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2026-11-01 01:30:00 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-11-01 02:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2026-11-01 02:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 1883-11-18 12:03:57 fold=0 -> (datetime.timedelta(days=-1, seconds=68638), datetime.timedelta(0), 'LMT', 0)
+NY 1883-11-18 12:03:57 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 0001-01-01 00:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=68638), datetime.timedelta(0), 'LMT', 0)
+NY 0001-01-01 00:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=68638), datetime.timedelta(0), 'LMT', 0)
+NY 9999-12-31 23:59:59 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 9999-12-31 23:59:59 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 2100-07-01 00:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 2100-07-01 00:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT', 1)
+NY 1970-01-01 00:00:00 fold=0 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY 1970-01-01 00:00:00 fold=1 -> (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST', 0)
+NY fromtimestamp 1772953199 -> "datetime.datetime(2026, 3, 8, 1, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1772953199 -> "datetime.datetime(2026, 3, 8, 17, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 1772953200 -> "datetime.datetime(2026, 3, 8, 3, 0, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1772953200 -> "datetime.datetime(2026, 3, 8, 18, 0, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 1793512799 -> "datetime.datetime(2026, 11, 1, 1, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1793512799 -> "datetime.datetime(2026, 11, 1, 16, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 1793512800 -> "datetime.datetime(2026, 11, 1, 1, 0, fold=1, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1793512800 -> "datetime.datetime(2026, 11, 1, 17, 0, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 1793516399 -> "datetime.datetime(2026, 11, 1, 1, 59, 59, fold=1, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1793516399 -> "datetime.datetime(2026, 11, 1, 17, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 1793516400 -> "datetime.datetime(2026, 11, 1, 2, 0, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 1793516400 -> "datetime.datetime(2026, 11, 1, 18, 0, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp -2717650800 -> "datetime.datetime(1883, 11, 18, 12, 0, fold=1, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp -2717650800 -> "datetime.datetime(1883, 11, 19, 3, 36, 20, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp -2717650801 -> "datetime.datetime(1883, 11, 18, 12, 3, 57, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp -2717650801 -> "datetime.datetime(1883, 11, 19, 3, 36, 19, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 0 -> "datetime.datetime(1969, 12, 31, 19, 0, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 0 -> "datetime.datetime(1970, 1, 1, 10, 0, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+NY fromtimestamp 253402300799 -> "datetime.datetime(9999, 12, 31, 18, 59, 59, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+LH fromtimestamp 253402300799 !! OverflowError date value out of range | context: None
+NY fromtimestamp -62135596800 !! OverflowError date value out of range | context: None
+LH fromtimestamp -62135596800 -> "datetime.datetime(1, 1, 1, 10, 36, 20, tzinfo=zoneinfo.ZoneInfo(key='Australia/Lord_Howe'))"
+LH 2026-04-05 01:30:00 fold=0 -> (datetime.timedelta(seconds=39600), datetime.timedelta(seconds=1800), '+11')
+LH 2026-04-05 01:30:00 fold=1 -> (datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030')
+LH 2026-04-05 01:45:00 fold=0 -> (datetime.timedelta(seconds=39600), datetime.timedelta(seconds=1800), '+11')
+LH 2026-04-05 01:45:00 fold=1 -> (datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030')
+LH 2026-10-04 02:15:00 fold=0 -> (datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030')
+LH 2026-10-04 02:15:00 fold=1 -> (datetime.timedelta(seconds=39600), datetime.timedelta(seconds=1800), '+11')
+LH 2026-10-04 01:59:00 fold=0 -> (datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030')
+LH 2026-10-04 01:59:00 fold=1 -> (datetime.timedelta(seconds=37800), datetime.timedelta(0), '+1030')
+astimezone -> ["datetime.datetime(2026, 11, 1, 1, 30, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))", "datetime.datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"]
+arith -> "datetime.datetime(2026, 3, 8, 12, 0, tzinfo=zoneinfo.ZoneInfo(key='America/New_York'))"
+compare -> True
+__all__ -> ['ZoneInfo', 'reset_tzpath', 'available_timezones', 'TZPATH', 'ZoneInfoNotFoundError', 'InvalidTZPathWarning']
+dir -> ['InvalidTZPathWarning', 'TZPATH', 'ZoneInfo', 'ZoneInfoNotFoundError', '_common', '_tzpath', 'available_timezones', 'reset_tzpath']
+TZPATH type -> 'tuple'
+nope !! AttributeError module 'zoneinfo' has no attribute 'nope' | context: None
+ZoneInfoNotFoundError -> ('zoneinfo._common', ['ZoneInfoNotFoundError', 'KeyError', 'LookupError', 'Exception', 'BaseException', 'object'], 'Exception raised when a ZoneInfo key is not found.')
+InvalidTZPathWarning -> ('zoneinfo._tzpath', ['InvalidTZPathWarning', 'RuntimeWarning', 'Warning', 'Exception', 'BaseException', 'object'])
+not found str -> "'No time zone found with key x'"
+reset_tzpath('x') !! TypeError tzpaths must be a list or tuple, not <class 'str'>: 'x' | context: None
+reset_tzpath(b'x') !! TypeError tzpaths must be a list or tuple, not <class 'bytes'>: b'x' | context: None
+reset_tzpath(['rel']) !! ValueError Paths should be absolute but found the following relative paths:
+    rel | context: None
+reset_tzpath(['/abs', 'rel', 'also']) !! ValueError Paths should be absolute but found the following relative paths:
+    rel
+    also | context: None
+reset_tzpath([1]) !! TypeError expected str, bytes or os.PathLike object, not int | context: None
+reset_tzpath([b'/x']) !! TypeError All elements of a tzpath sequence must be strings or os.PathLike objects which convert to strings. | context: None
+reset_tzpath([]) -> (None, ())
+reset_tzpath(('/a', '/b')) -> (None, ('/a', '/b'))
+reset_tzpath(None) -> (None, ())
+PYTHONTZPATH='rel:/abs' ('/abs',) [('InvalidTZPathWarning', 'Invalid paths specified in PYTHONTZPATH environment variable. Paths should be absolute but found the following relative paths:\n    rel')]
+PYTHONTZPATH='/a:/b' ('/a', '/b') []
+PYTHONTZPATH='' () []
+PYTHONTZPATH=':' () [('InvalidTZPathWarning', 'Invalid paths specified in PYTHONTZPATH environment variable. Paths should be absolute but found the following relative paths:\n    \n    ')]
+empty TZPATH zone -> "zoneinfo.ZoneInfo(key='Europe/London')"
+available_timezones -> ('set', True, True, False, False, False, True)
+pure -> ("ZoneInfo(key='America/New_York')", 'zoneinfo', True, False, [(datetime.timedelta(days=-1, seconds=72000), datetime.timedelta(seconds=3600), 'EDT'), (datetime.timedelta(days=-1, seconds=68400), datetime.timedelta(0), 'EST')])
+pure fromutc fold -> ["datetime.datetime(2026, 11, 1, 0, 30, tzinfo=ZoneInfo(key='America/New_York'))", "datetime.datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo(key='America/New_York'))", "datetime.datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ZoneInfo(key='America/New_York'))", "datetime.datetime(2026, 11, 1, 2, 30, tzinfo
+pure reduce from_file !! PicklingError Cannot pickle a ZoneInfo file created from a file stream. | context: None
+new() !! TypeError ZoneInfo() missing required argument 'key' (pos 1) | context: None
+new(a,b) !! TypeError ZoneInfo() takes at most 1 argument (2 given) | context: None
+new(x=) !! TypeError ZoneInfo() missing required argument 'key' (pos 1) | context: None
+new(key,key=) !! TypeError ZoneInfo() takes at most 1 argument (2 given) | context: None
+new(key=,x=) !! TypeError ZoneInfo() takes at most 1 keyword argument (2 given) | context: None
+no_cache() !! TypeError no_cache() missing required argument 'key' (pos 1) | context: None
+no_cache(a,b) !! TypeError no_cache() takes at most 1 argument (2 given) | context: None
+no_cache(x=) !! TypeError no_cache() missing required argument 'key' (pos 1) | context: None
+no_cache(k,key=) !! TypeError no_cache() takes at most 1 argument (2 given) | context: None
+clear(a) !! TypeError clear_cache() takes no positional arguments | context: None
+clear(a,b) !! TypeError clear_cache() takes at most 1 argument (2 given) | context: None
+clear(x=) !! TypeError clear_cache() got an unexpected keyword argument 'x' | context: None
+clear(only_keys=None) -> None
+utcoffset() !! TypeError utcoffset() takes exactly 1 positional argument (0 given) | context: None
+utcoffset(a,b) !! TypeError utcoffset() takes at most 1 argument (2 given) | context: None
+utcoffset(dt=) !! TypeError utcoffset() takes exactly 1 positional argument (0 given) | context: None
+utcoffset(d,x=) !! TypeError utcoffset() takes at most 1 argument (2 given) | context: None
+dst() !! TypeError dst() takes exactly 1 positional argument (0 given) | context: None
+tzname(a,b) !! TypeError tzname() takes at most 1 argument (2 given) | context: None
+unbound utcoffset() !! TypeError unbound method ZoneInfo.utcoffset() needs an argument | context: None
+unbound utcoffset(5, d) !! TypeError descriptor 'utcoffset' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+unbound dst(5, d) !! TypeError descriptor 'dst' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+unbound tzname() !! TypeError unbound method ZoneInfo.tzname() needs an argument | context: None
+fromutc() !! TypeError ZoneInfo.fromutc() takes exactly one argument (0 given) | context: None
+fromutc(a,b) !! TypeError ZoneInfo.fromutc() takes exactly one argument (2 given) | context: None
+fromutc(x=) !! TypeError ZoneInfo.fromutc() takes no keyword arguments | context: None
+unbound fromutc(5,d) !! TypeError descriptor 'fromutc' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+unbound fromutc() !! TypeError unbound method ZoneInfo.fromutc() needs an argument | context: None
+unpickle() !! TypeError _unpickle() takes exactly 2 positional arguments (0 given) | context: None
+unpickle(a) !! TypeError _unpickle() takes exactly 2 positional arguments (1 given) | context: None
+unpickle(a,b,c) !! TypeError _unpickle() takes at most 2 arguments (3 given) | context: None
+unpickle(a,x=) !! TypeError _unpickle() takes exactly 2 positional arguments (1 given) | context: None
+unpickle(a,-1) -> "zoneinfo.ZoneInfo(key='UTC')"
+unpickle(a,1.5) !! TypeError 'float' object cannot be interpreted as an integer | context: None
+unpickle(a,2**70) -> "zoneinfo.ZoneInfo(key='UTC')"
+unpickle(a,256) -> False
+from_file() !! TypeError from_file() takes at least 1 positional argument (0 given) | context: None
+from_file(a,b,c) !! TypeError from_file() takes at most 2 arguments (3 given) | context: None
+from_file(x=) !! TypeError from_file() takes at least 1 positional argument (0 given) | context: None
+from_file(a,key=,x=) !! TypeError from_file() takes at most 2 arguments (3 given) | context: None
+from_file(a,b,key=) !! TypeError from_file() takes at most 2 arguments (3 given) | context: None
+from_file(a,x=) !! TypeError from_file() got an unexpected keyword argument 'x' | context: None
+from_file(a,file_obj=) !! TypeError from_file() got an unexpected keyword argument 'file_obj' | context: None
+reduce(1) !! TypeError ZoneInfo.__reduce__() takes no arguments (1 given) | context: None
+reduce(x=) !! TypeError ZoneInfo.__reduce__() takes no keyword arguments | context: None
+unbound reduce() !! TypeError unbound method ZoneInfo.__reduce__() needs an argument | context: None
+unbound reduce(5) !! TypeError descriptor '__reduce__' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+init_subclass on ZoneInfo !! TypeError cannot set '_weak_cache' attribute of immutable type 'zoneinfo.ZoneInfo' | context: None
+repr unbound !! TypeError descriptor '__repr__' requires a 'zoneinfo.ZoneInfo' object but received a 'int' | context: None
+str unbound !! TypeError descriptor '__str__' requires a 'zoneinfo.ZoneInfo' object but received a 'int' | context: None
+repr() !! TypeError descriptor '__repr__' of 'zoneinfo.ZoneInfo' object needs an argument | context: None
+repr(z, 1) !! TypeError expected 0 arguments, got 1 | context: None
+key unbound !! TypeError descriptor 'key' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+key repr -> "<member 'key' of 'zoneinfo.ZoneInfo' objects>"
+key set unbound !! TypeError descriptor 'key' for 'zoneinfo.ZoneInfo' objects doesn't apply to a 'int' object | context: None
+tp new int !! TypeError zoneinfo.ZoneInfo.__new__(int): int is not a subtype of zoneinfo.ZoneInfo | context: None
+tp new () !! TypeError zoneinfo.ZoneInfo.__new__(): not enough arguments | context: None
+tp new 5 !! TypeError zoneinfo.ZoneInfo.__new__(X): X is not a type object (int) | context: None
+tp new subclass -> "Z2(key='UTC')"
