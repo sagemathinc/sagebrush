@@ -28,7 +28,9 @@ test("a Python object into int64 or uint64 converts through NumPy's protocol, on
 // (astra CORR-3D5-1: float64 and complex128 products in NumPy's
 // reduction order over transposed, reversed and Fortran layouts, axes
 // and initial=, her 384-case grids)
-for (const name of ["numpy_prod_order_cases.py", "numpy_prod3d64_cases.py", "numpy_prod3d128_cases.py"]) {
+// (CORR-948-1: broadcast axes' zero strides, and her 648-case probe of
+// broadcasts, reversals, steps, transposes, axis tuples and initial=)
+for (const name of ["numpy_prod_order_cases.py", "numpy_prod3d64_cases.py", "numpy_prod3d128_cases.py", "numpy_prod_broadcast_cases.py", "numpy_prod_stride_cases.py"]) {
   test(`numpy prod in NumPy's order: ${name}`, () => {
     const want = execFileSync("python3", [TEST + name], { encoding: "utf8" });
     const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + name], { encoding: "utf8" });

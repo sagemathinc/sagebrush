@@ -1804,11 +1804,10 @@ function mulIn(rt: DType, what: string): (p: number, x: number) => number {
 // and its order for a C-contiguous array reduced whole); over several
 // axes of another layout NumPy's iterator reorders axes and buffers:
 // refused, never a product in another order. Every other dtype in the
-// order NumPy's reduction iterator visits them: the reduced axes
-// outermost-first by the size of their strides (ties in their own
-// order), each walked in its own direction, a negative stride not
-// reversed (the reduction's NPY_ITER_DONT_NEGATE_STRIDES: astra
-// CORR-76A-2, CORR-3D5-1)
+// order NumPy's reduction iterator visits them (iterAxisOrder, a
+// broadcast axis's zero stride included), each walked in its own
+// direction, a negative stride not reversed (the reduction's
+// NPY_ITER_DONT_NEGATE_STRIDES: astra CORR-76A-2, CORR-3D5-1, CORR-948-1)
 function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: number[]; rst: number[] } {
   if (rt === D.float32 || rt.name === "float16" || rt === D.complex64) {
     const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
@@ -1817,9 +1816,49 @@ function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: 
     }
     return { off: a.offset, rshape, rst };
   }
-  const red = ax.map((i, k) => ({ n: a.shape[i], st: a.strides[i], k }));
-  red.sort((p, q) => Math.abs(q.st) - Math.abs(p.st) || p.k - q.k);
-  return { off: a.offset, rshape: red.map((r) => r.n), rst: red.map((r) => r.st) };
+  // (the reduced axes in the order of all the axes NumPy's iterator
+  // chooses for the input and the result, whose reduced axes have stride 0)
+  const nd = a.ndim, outSt = new Array(nd).fill(0);
+  for (let i = nd - 1, st = 1; i >= 0; i--) if (!ax.includes(i)) {
+    outSt[i] = st;
+    st *= a.shape[i];
+  }
+  const order = iterAxisOrder(nd, [a.strides, outSt]).filter((i) => ax.includes(i)).reverse();
+  return { off: a.offset, rshape: order.map((i) => a.shape[i]), rst: order.map((i) => a.strides[i]) };
+}
+// NumPy's nditer axis ordering (npyiter_find_best_axis_ordering): the
+// axes innermost first, an insertion sort from C order that moves an axis
+// inward past another while some operand's stride there is larger, a
+// zero stride saying nothing (the scan goes on past it), and C order
+// winning when operands disagree
+function iterAxisOrder(nd: number, strides: number[][]): number[] {
+  const perm: number[] = [];
+  for (let i = nd - 1; i >= 0; i--) perm.push(i);
+  for (let i0 = 1; i0 < nd; i0++) {
+    let ipos = i0;
+    const a0 = perm[i0];
+    for (let i1 = i0 - 1; i1 >= 0; i1--) {
+      let ambig = true, swap = false;
+      const a1 = perm[i1];
+      for (const st of strides) {
+        const s0 = st[a0], s1 = st[a1];
+        if (s0 !== 0 && s1 !== 0) {
+          if (Math.abs(s1) <= Math.abs(s0)) swap = false;
+          else if (ambig) swap = true;
+          ambig = false;
+        }
+      }
+      if (!ambig) {
+        if (swap) ipos = i1;
+        else break;
+      }
+    }
+    if (ipos !== i0) {
+      perm.splice(i0, 1);
+      perm.splice(ipos, 0, a0);
+    }
+  }
+  return perm;
 }
 function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean): NDArray {
   const nd = a.ndim;
