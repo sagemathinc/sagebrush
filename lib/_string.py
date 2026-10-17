@@ -44,10 +44,13 @@ def _get_integer(s):
     return acc
 
 
-def formatter_parser(format_string):
+def formatter_parser(format_string, /):
     if not isinstance(format_string, str):
         raise TypeError("expected str, got %s" % type(format_string).__name__)
-    return _markup(format_string)
+    # (the string's own characters, as the C code reads the payload: a str
+    # subclass's __len__, __getitem__, __iter__ or __str__ is not read,
+    # astra's CORR-484-1; str.join copies them, exactly a str)
+    return _markup("".join((format_string,)))
 
 
 def _markup(s):
@@ -130,9 +133,10 @@ def _parse_field(s, pos, end):
     return name, "", conv, pos
 
 
-def formatter_field_name_split(field_name):
+def formatter_field_name_split(field_name, /):
     if not isinstance(field_name, str):
         raise TypeError("expected str, got %s" % type(field_name).__name__)
+    field_name = "".join((field_name,))
     end = len(field_name)
     i = 0
     while i < end and field_name[i] not in ".[":
