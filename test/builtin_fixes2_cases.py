@@ -83,3 +83,60 @@ t("real.__get__ None", lambda: int.real.__get__(None, int) is int.real)
 t("real.__get__ wrong", lambda: int.real.__get__("x"))
 t("real.__get__ none at all", lambda: int.real.__get__())
 t("doc getset", lambda: type.__dict__["__name__"].__get__(int))
+
+
+# (@sagebrush-astra's review of 1f3f19fc: CORR-1F3-1..4)
+t("constructor codec", lambda: "abc".encode("constructor"))
+t("constructor decode", lambda: b"abc".decode("constructor"))
+t("toString codec", lambda: b"abc".decode("toString"))
+def sig(b, err="strict"):
+    try:
+        return b.decode("utf-8-sig", err)
+    except UnicodeDecodeError as e:
+        return (e.encoding, e.object, e.start, e.end, e.reason)
+t("utf-8-sig error", lambda: (sig(b"\xef\xbb\xbfA\xffB"), sig(b"A\xffB"), sig(b"\xef\xbbA"), sig(b"\xef\xbb\xbf\xed\xa0\x80", "surrogatepass")))
+def sige(s):
+    try:
+        return s.encode("utf-8-sig")
+    except UnicodeEncodeError as e:
+        return (e.encoding, e.object, e.start, e.end)
+t("utf-8-sig encode error", lambda: (sige("x\ud800y"), sige("ok")))
+t("surrogateescape partial", lambda: (b"\xd8\x00A".decode("utf-16-be", "surrogateescape"), b"\x80\x00\x00\x11\x00".decode("utf-32-be", "surrogateescape")))
+t("surrogateescape partial 2", lambda: (b"\xd8\x00\x00".decode("utf-16-be", "surrogateescape"), b"\xff\xfe\x00\xd8".decode("utf-16", "surrogateescape")))
+t("surrogateescape utf8 run", lambda: b"a\xe2\x82b\xf0\x9f\x98".decode("utf-8", "surrogateescape"))
+for args in (("ascii", "a", 2**63, 1, "why"), ("ascii", "a", 0, -2**63 - 1, "why")):
+    t("ctor bounds %r" % (args[2:4],), lambda args=args: UnicodeEncodeError(*args))
+class Ix:
+    def __index__(self):
+        return 0
+t("ctor index", lambda: UnicodeEncodeError("a", "abc", Ix(), 1, "r").start)
+e = UnicodeEncodeError("ascii", "a", 0, 1, "why")
+for attr, v in (("start", "x"), ("start", 2**63), ("start", True), ("end", 1.5), ("start", Ix()), ("encoding", 1), ("reason", 5)):
+    def setit(attr=attr, v=v):
+        f = UnicodeEncodeError("ascii", "a", 0, 1, "why")
+        setattr(f, attr, v)
+        return (getattr(f, attr), str(f))
+    t("set %s %r" % (attr, v if not isinstance(v, Ix) else "Ix"), setit)
+def objnone():
+    f = UnicodeEncodeError("ascii", "a", 0, 1, "why")
+    f.object = None
+    return str(f)
+t("object None", objnone)
+def dobj():
+    d = UnicodeDecodeError("a", b"x", 0, 1, "r")
+    d.object = "str"
+    return str(d)
+t("decode object str", dobj)
+t("big positions", lambda: (str(UnicodeEncodeError("a", "abc", 2**63 - 1, 2**63 - 1, "r")), str(UnicodeEncodeError("a", "abc", -2**63, -2**63, "r"))))
+t("start past end", lambda: (lambda f: (setattr(f, "start", 5), str(f))[1])(UnicodeEncodeError("ascii", "a", 0, 1, "why")))
+class S(str):
+    pass
+enc, obj, why = S("ascii"), S("abc"), S("why")
+E2 = UnicodeEncodeError(enc, obj, 0, 1, why)
+t("identity", lambda: (E2.encoding is enc, E2.object is obj, E2.reason is why, str(E2)))
+class R(str):
+    def __str__(self):
+        return "custom"
+t("reason __str__", lambda: str(UnicodeEncodeError("ascii", "a", 0, 1, R("why"))))
+B = bytearray(b"ab")
+t("decode object bytes", lambda: (type(UnicodeDecodeError("a", B, 0, 1, "r").object), UnicodeDecodeError("a", b"ab", 0, 1, "r").object))

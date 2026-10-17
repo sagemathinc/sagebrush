@@ -837,18 +837,23 @@ const UnicodeError = exc("UnicodeError", ValueError);
 // UnicodeEncodeError(encoding, object, start, end, reason), and Decode's
 // and Translate's, as CPython's (Objects/exceptions.c): the arguments
 // parsed as "UOnnU" (Decode's object any bytes-like, kept as bytes;
-// Translate's without the encoding), the five attributes, and __str__
-// naming the character (or byte) at start when the range is one long,
-// else "characters in position start-end-1"
+// Translate's without the encoding), each kept as given (a str subclass
+// too), start and end C ssize_t values; the start and end attributes take
+// only an int (their setters, unlike the constructor, no __index__); and
+// __str__ checking the object's type, naming the character (or byte) when
+// the range is one long and inside it, else "characters in position
+// start-end-1" with C's ssize_t arithmetic, positions exact
 {
+  const SMAX = 2n ** 63n - 1n, SMIN = -(2n ** 63n);
+  const ssize = (v: any): number | bigint => {
+    if (typeof v === "bigint" && (v > SMAX || v < SMIN)) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    return v;
+  };
   const kinds: [string, boolean, boolean][] = [["UnicodeEncodeError", true, false], ["UnicodeDecodeError", true, true], ["UnicodeTranslateError", false, false]];
   for (const [name, hasEnc, bytesObj] of kinds) {
     exc(name, UnicodeError, (c) => {
       const n = hasEnc ? 5 : 4;
-      const strArg = (i: number, v: any): string => {
-        const u = unbox(v);
-        return typeof u === "string" ? u : raise(T.TypeError, `argument ${i} must be str, not ${typeName(v)}`);
-      };
+      const strArg = (i: number, v: any): any => (typeof unbox(v) === "string" ? v : raise(T.TypeError, `argument ${i} must be str, not ${typeName(v)}`));
       method(c, "__init__", (self: any, ...args: any[]) => {
         self.args = tuple(args);
         if (args.length !== n) raise(T.TypeError, `function takes exactly ${n} arguments (${args.length} given)`);
@@ -858,28 +863,36 @@ const UnicodeError = exc("UnicodeError", ValueError);
         if (bytesObj) {
           const b = O.bufferOf(o);
           if (b === undefined) raise(T.TypeError, `a bytes-like object is required, not '${typeName(o)}'`);
-          self.object = new PyBytes(b.slice());
+          self.object = typeOf(o) === T.bytes ? o : new PyBytes(b.slice());
         } else self.object = strArg(hasEnc ? 2 : 1, o);
-        self.start = O.index(args[i++]);
-        self.end = O.index(args[i++]);
+        self.$start = ssize(O.index(args[i++]));
+        self.$end = ssize(O.index(args[i++]));
         self.reason = strArg(n, args[i++]);
         return null;
       });
+      for (const k of ["start", "end"] as const) {
+        getset(c, k, (self: any) => self[`$${k}`] ?? null, (self: any, v: any) => {
+          const u = unbox(v);
+          if (!O.isPyInt(u)) raise(T.TypeError, "an integer is required");
+          self[`$${k}`] = ssize(typeof u === "boolean" ? +u : u);
+        });
+      }
       method(c, "__str__", (self: any) => {
         if (self.object === undefined) return "";
-        const isBytes = self.object instanceof PyBytes;
-        const len = isBytes ? self.object.n : SP.cpLen(self.object);
-        // (the one-character form only for a range of one inside the object)
-        const start = Number(self.start), end = Number(self.end);
+        const ob = unbox(self.object);
+        if (bytesObj ? !(ob instanceof PyBytes) : typeof ob !== "string") raise(T.TypeError, `UnicodeError 'object' attribute must be a ${bytesObj ? "bytes" : "string"}`);
+        const len = BigInt(bytesObj ? ob.n : SP.cpLen(ob));
+        const start = BigInt(self.$start), end = BigInt(self.$end);
         const what = name === "UnicodeEncodeError" ? "encode" : name === "UnicodeDecodeError" ? "decode" : "translate";
         const pre = hasEnc ? `'${str(self.encoding)}' codec can't ${what}` : `can't ${what}`;
-        if (start >= 0 && start < len && end <= len && end === start + 1) {
-          if (isBytes) return `${pre} byte 0x${self.object.a[start].toString(16).padStart(2, "0")} in position ${start}: ${str(self.reason)}`;
-          const ch = [...self.object][start].codePointAt(0)!;
+        if (start >= 0n && start < len && end >= 0n && end <= len && end === start + 1n) {
+          const at = Number(start);
+          if (bytesObj) return `${pre} byte 0x${ob.a[at].toString(16).padStart(2, "0")} in position ${start}: ${str(self.reason)}`;
+          const ch = [...ob][at].codePointAt(0)!;
           const esc = ch <= 0xff ? `\\x${ch.toString(16).padStart(2, "0")}` : ch <= 0xffff ? `\\u${ch.toString(16).padStart(4, "0")}` : `\\U${ch.toString(16).padStart(8, "0")}`;
           return `${pre} character '${esc}' in position ${start}: ${str(self.reason)}`;
         }
-        return `${pre} ${isBytes ? "bytes" : "characters"} in position ${start}-${end - 1}: ${str(self.reason)}`;
+        return `${pre} ${bytesObj ? "bytes" : "characters"} in position ${start}-${BigInt.asIntN(64, end - 1n)}: ${str(self.reason)}`;
       });
     });
   }
