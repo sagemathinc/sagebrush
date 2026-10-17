@@ -2329,3 +2329,48 @@ test("an index's computed base is made once when an end refers to it: s(tick()).
     "30", "1", "30", "1", "[10 20 30 40 99 60 70 80]", "[1 2]", "1", "[10 20 30 40 99 60 70 7]", "1",
     "[10 20 30 40 99 60 70 80]", "1", "[10 20 30 40 99 60 70 80]", "1"]);
 });
+
+test("edge values from the catalog probe: rem(x, 0), prod of complex, polyval with Inf and single, find(0), inv(-0), median of logical, max/min argument forms, size arguments, and inputs refused where the pages list other classes", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(size(x)) ' ' mat2str(x, 6)])`;
+  const tryIt = (e: string) => `try, x = ${e}; disp('ran'), catch err, disp('refused'), end`;
+  assert.deepEqual(run([
+    show("rem(5, 0)"), show("prod([1+2i 3])"), show("polyval([1 0], Inf)"), show("polyval(single([1 2]), 2)"), show("find(0)"), show("find([0 0])"),
+    show("inv(-0)"), show("median([true false true])"), show("max([1 5; 7 2], [], [1 2])"), show("max([true false], [false false])"),
+    show("ones(2, 'like', int16(1))"), show("zeros([])"), show("eye(2, 'like', single(1))"), "disp(strjoin(strsplit('a  b', ' ', 'CollapseDelimiters', true), '|'))",
+  ].join("\n")), [
+    "double [1 1] NaN", "double [1 1] 3+6i", "double [1 1] Inf", "single [1 1] 4", "double [0 0] []", "double [1 0] zeros(1,0)",
+    "double [1 1] -Inf", "logical [1 1] true", "double [1 1] 7", "logical [1 2] [true false]",
+    "int16 [2 2] [1 1;1 1]", "double [0 0] []", "single [2 2] [1 0;0 1]", "a|b",
+  ]);
+  assert.deepEqual(run([
+    tryIt("rem(5, Inf)"), tryIt("sum([1 2; 3 4], zeros(1, 0))"), tryIt("sum([1 2; 3 4], [1 2; 3 4])"), tryIt("max([1 5; 7 2], 'all', 2)"),
+    tryIt("max([1 5; 7 2], [], [1 2; 3 4])"), tryIt("max([1 5], [])"), tryIt("max([1 5], [2 3], 2)"), tryIt("ones(1, '', 'like', int16(1))"),
+    tryIt("ones(1, [2 3])"), tryIt("eye([2 2 2])"), tryIt("reshape(1:6, [6])"), tryIt("median([true false])"), tryIt("median('abc')"), tryIt("mode('abc')"),
+    tryIt("norm(int8(3))"), tryIt("inv(true)"), tryIt("eig(int8(2))"), tryIt("var(int8([1 2]))"), tryIt("std('abc')"), tryIt("polyfit(int32([1 2 3]), [1 2 3], 1)"),
+    tryIt("fzero(@(x) cos(x) - x, int8(1))"), tryIt("interp1([1 2 3], [10 20 30], 4, 'linear', 1 + 2i)"), tryIt("interp1([1 2 3], [10 20 30], 4, 'linear', [1 2])"),
+    tryIt("strrep({1, 2}, 'a', 'b')"), tryIt("strcat(1, 'b')"), tryIt("strsplit('a b', '')"), tryIt("strsplit('a b', ' ', 'CollapseDelimiters', [1 2])"),
+    tryIt("arrayfun(@(x) x, 1:3, 'UniformOutput', [])"), tryIt("num2str(pi, -1)"), tryIt("linspace(Inf, 1, 5)"), tryIt("linspace(0, 1, [2 3])"),
+    tryIt("polyfit([1 2 3], [1 2 3], -1)"), tryIt("cell('abc')"), tryIt("sprintf(5)"), tryIt("1:'c'"), tryIt("isfield(5, 'a')"),
+    tryIt("norm([1 2; 3 4], [1 2; 3 4])"), tryIt("norm([1 2], 0)"), tryIt("max([1 5], [1+2i 3])"), tryIt("polyfit(1:3, [1 2 3], 3)"),
+    tryIt("interp1([1 2 3], [10 20 30], 1 + 2i)"), tryIt("cumsum([1 2; 3 4], 'all')"), tryIt("sum([1 2; 3 4], [])"),
+    tryIt("mod(5, Inf)"), tryIt("mod([1 2], [Inf 1])"),
+  ].join("\n")), [
+    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "ran",
+    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+  ]);
+  assert.deepEqual(run([
+    "disp(isfield(5, 'a'))", "disp(isfield(struct('a', 1), 5))", show("sprintf('%d', 1 + 2i)"), show("sprintf('')"), show("linspace(0, 1, NaN)"),
+    "s = regexp('xyz', '(?<d>\\d+)', 'names'); disp(mat2str(size(s)))", show("det(single(2))"), show("cumsum(int8([100 100]))"),
+    "disp(sprintf('%5.2f|', 'ab'))", show("mode(zeros(1, 0))"), show("max([1 5; 7 2], [], 'all')"),
+    show("prod(complex(zeros(1, 0)))"), show("prod(complex(zeros(0, 3)))"), show("prod(complex(zeros(3, 0)), 2)"), show("prod([1+2i 3; 2 1i], 2)"),
+    show("max([1 NaN 3], 'omitnan')"), show("min([4 NaN 2], 'omitnan')"),
+  ].join("\n")), ["0", "0", "char [1 1] '1'", "char [1 0] ''", "double [1 1] NaN", "[0 0]", "single [1 1] 2", "int8 [1 2] [100 127]",
+    "97.00|98.00|", "double [1 1] NaN", "double [1 1] 7",
+    "double [1 1] 1", "double [1 3] [1 1 1]", "double [3 1] [1;1;1]", "double [2 1] [3+6i;0+2i]",
+    "double [1 1] 3", "double [1 1] 2"]);
+});

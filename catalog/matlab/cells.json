@@ -19,8 +19,12 @@
         "expected": "\nans =\n\n     1     4     9    16\n\n"
       }
     ],
-    "differs": [],
-    "status": "full",
+    "differs": [
+      "It refuses some inputs Octave accepts, e.g. arrayfun(@(x) 1:x, 'abc', 'UniformOutput', false).",
+      "It accepts some inputs Octave refuses: arrayfun(@(x) 1:x, true, 'UniformOutput', false) gives cell 1x1 {double 1x1 1}.",
+      "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
+    ],
+    "status": "partial",
     "see_also": [
       "cellfun"
     ],
