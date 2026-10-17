@@ -1057,6 +1057,16 @@ method(T.bool, "__repr__", (x: any) => (x ? "True" : "False"));
 
 const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, errors: any = undefined) => {
   if (encoding !== undefined && x instanceof PyBytes) return decode(x, encoding, errors);
+  // (a __str__ returning a str subclass instance gives that instance, as
+  // CPython's PyObject_Str; str's own __str__ gives an exact copy)
+  if (x !== null && typeof x === "object" && !(x instanceof FloatBox)) {
+    const f = lookupType(typeOf(x), "__str__");
+    if (f !== undefined) {
+      const r = f(x);
+      if (typeof r === "string" || r instanceof StrLayout) return r;
+      raise(T.TypeError, `__str__ returned non-string (type ${typeName(r)})`);
+    }
+  }
   return str(x);
 });
 S.$kw = (pos, names, values) => S(...bindArgs("str", sig(["object", "encoding", "errors"]), pos, names, values));
@@ -1503,7 +1513,8 @@ method(S, "__mod__", (s: string, x: any) => O.strFormatOpHook.f(s, x));
 method(S, "__eq__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? s === x : NotImplemented));
 method(S, "__lt__", (s: string, x: any) => ((x = unbox(x)), typeof x === "string" ? O.strCmp(s, x) < 0 : NotImplemented));
 method(S, "__hash__", (s: any) => O.hashAny(unbox(s)));
-method(S, "__str__", (s: string) => s);
+// (an exact str, of a subclass's too: its overrides gone, as CPython's)
+method(S, "__str__", (s: any) => (s instanceof StrLayout ? s.$v : s));
 method(S, "__getnewargs__", (s: any) => tuple([unbox(s)]));
 method(S, "__repr__", (s: string) => repr(s));
 method(S, "__format__", (s: string, spec: string) => format(s, spec));
