@@ -1904,6 +1904,27 @@ def _struct_name(S):
     return "%s: %s" % (_type_of(S), n) if n is not None else _inline(S)
 
 
+def _image_universe(cod, empty):
+    """The universe of the image of a set under a map to cod, as Magma's
+    (checked against Magma 2.18): a structure Sagebrush knows as a universe
+    (the integers, rationals, a finite field, Integers(m), a polynomial
+    ring) itself; a set of such elements, for a nonempty image, the set's
+    universe (map<Integers() -> {Rationals() | 1, 2, 3} | ...> gives the
+    rationals', into {1, 2, 3} the integers'), but for an empty one the set
+    itself, which Sagebrush has no universe for; else None (refused)."""
+    known = lambda u: _is_struct(u) or isinstance(u, (_MFinField, _MResRing, _MFFPolyRing))
+    if known(cod):
+        return cod
+    if isinstance(cod, MSet) and not empty:
+        if cod.universe is not None:
+            return cod.universe if known(cod.universe) else None
+        w = getattr(cod, "_inf", None)
+        w = _infer_from(cod.items) if w is None else w
+        if w is _ZZ or w is _QQ:
+            return w
+    return None
+
+
 class MMap:
     """A map made by map< A -> B | ... >, pmap< ... > or hom< ... > (rule
     forms), from Magma's documentation (Mappings) and checked against
@@ -1932,11 +1953,14 @@ class MMap:
             # the image of a set of elements: over the codomain, as Magma's,
             # empty or not (f({Integers() | }) for f into the rationals is
             # the rationals', never the integers' its elements would infer,
-            # astra2 on e0db098b); a codomain Sagebrush doesn't know as a
-            # universe leaves it unknown
-            t = _set([self(y) for y in x.ordered()], derived=True)
-            if _is_struct(self.cod) or isinstance(self.cod, _MFinField):
-                t.universe = self.cod
+            # astra2 on e0db098b); a universe Sagebrush can't give it is
+            # refused, never left to be inferred (CORR-3FA-1)
+            items = [self(y) for y in x.ordered()]
+            u = _image_universe(self.cod, not items)
+            if u is None:
+                raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
+            t = _set(items, derived=True)
+            t.universe = u
             return t
         if self.parts is not None:
             return self.parts[1](self.parts[0](x))
@@ -6576,8 +6600,10 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     Insert (the declared universe, else that of an element); Magma's
     errors if not."""
     w = _universe(s, True)
-    if isinstance(getattr(s, "universe", None), (_MFinField, _MFFPolyRing)):
-        w = ("struct", s.universe)  # (declared, and known to _coerce_struct)
+    if isinstance(getattr(s, "universe", None), (_MFinField, _MFFPolyRing, _MResRing)):
+        # (declared, and known to _coerce_struct: Integers(5) too, so that 7
+        # appended is 2, never 7, CORR-3FA-1)
+        w = ("struct", s.universe)
     if w is None:
         return x
     if w[0] == "struct":
@@ -6705,7 +6731,7 @@ class Perm(tuple):
 def Sort(s, f=None):
     items = list(s)
     if f is None:
-        return _carry(MSeq(sorted(items)), s)
+        return _carry(MSeq(sorted(items), _declared(s)), s)
     import functools
     order = sorted(range(len(items)), key=functools.cmp_to_key(lambda i, j: f(items[i], items[j])))
     # the permutation taking positions in the result to positions in s
@@ -6738,7 +6764,7 @@ def IsEmpty(s):
 
 
 def Seqset(s):
-    return _carry(MSet(s), s)
+    return _carry(MSet(s, universe=_declared(s)), s)
 
 
 @_signature("Subsets", "SetEnum", ret="SetEnum")
@@ -6771,18 +6797,27 @@ def _subsets(S, k):
 
 
 def SetToSequence(s):
-    return _carry(MSeq(s.ordered() if isinstance(s, MSet) else s), s)
+    return _carry(MSeq(s.ordered() if isinstance(s, MSet) else s, _declared(s)), s)
 
 
 Setseq = SetToSequence
 
 
 def SequenceToSet(s):
-    return _carry(MSet(s), s)
+    return _carry(MSet(s, universe=_declared(s)), s)
 
 
 def Set(s):
-    return _carry(MSet(s), s)
+    return _carry(MSet(s, universe=_declared(s)), s)
+
+
+def _declared(s):
+    """The universe s was made with (a structure, as {R | } or an image
+    under a map has it), which a conversion of it keeps, as Magma's:
+    Setseq(f({})) for f into a polynomial ring over GF(7) is that ring's
+    sequence, what is appended goes into it (CORR-3FA-1); None for none."""
+    u = getattr(s, "universe", None)
+    return u if u is not None and (_is_struct(u) or isinstance(u, (_MFinField, _MResRing, _MFFPolyRing))) else None
 
 
 def Eltseq(x):
