@@ -1055,6 +1055,70 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
   assert.match(out, /\nend\n$/);
 });
 
+test("matrices over a finite field refuse what Magma refuses, in its words, and what Sagebrush doesn't do yet, in words", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // [statement, where, what Magma says] (checked against Magma 2.18)
+  const cases = [
+    ["A + B;", "'+'", "Bad argument types\nArgument types given: AlgMatElt[FldFin], ModMatFldElt[FldFin]"],
+    ["B * A;", "'*'", "Arguments have incompatible degrees"],
+    ["S^-1;", "'^'", "Argument 1 is not invertible"],
+    ["Matrix(F, 2, 2, [1, 2, 3, 1/5]);", "'Matrix'", "Cannot coerce sequence element 4 into the coefficient ring"],
+    ["Matrix(F, 2, 2, [1, 2, 3]);", "'Matrix'", "Sequence should have length 4"],
+    ["Matrix(F, [[1, 2], [3]]);", "'Matrix'", "Element 2 of sequence does not have length 2"],
+    ["A + Matrix(GF(7), 2, 2, [1, 2, 3, 4]);", "'+'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["A * GF(7)!1;", "'*'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], FldFinElt"],
+    ["A * 0.5;", "'*'", "Arguments are not compatible\nArgument types given: AlgMatElt[FldFin], FldReElt"],
+    ["A^(1/2);", "'^'", "Bad argument types\nArgument types given: AlgMatElt[FldFin], AlgMatElt[FldFin]"],
+    ["A eq B;", "'eq'", "Arguments have incompatible degrees"],
+    ["A[1,2] := 1/5;", ":=", "RHS cannot be coerced into the coefficient ring"],
+    ["A[3,1] := 1;", ":=", "Matrix row index is not in the range [1 .. 2]"],
+    ["A[1,3] := 1;", ":=", "Matrix column index is not in the range [1 .. 2]"],
+    ["A[<1,2>] := 1;", ":=", "Bad matrix row index type"],
+    ["A[3,1];", "'[]'", "Index 1 (3) should be in the range [1 .. 2]"],
+    ["Determinant(B);", "'Determinant'", "Argument 1 is not square"],
+  ];
+  const own = [
+    ["A + Matrix(Integers(), 2, 2, [1, 2, 3, 4]);", "arithmetic of a matrix over a finite field and a AlgMatElt is not supported yet"],
+    ["Matrix(F, 0, 0, []);", "a matrix with no rows or no columns is not supported yet"],
+    ["ElementaryDivisors(A);", "ElementaryDivisors of a matrix or vector over a finite field is not supported yet"],
+    ["EchelonForm(A);", "EchelonForm of a matrix or vector over a finite field is not supported yet"],
+    ["{A};", "a set of matrices or vectors over a finite field is not supported yet"],
+    ["A lt A;", "ordering of polynomials and matrices is not supported yet"],
+    ["Matrix(GF(1031, 2), 1, 2, [1, 2]);", "Matrix over a finite field of more than 1048576 elements, not a prime field, is not supported yet"],
+    ["A[1] * B[1];", "this arithmetic of vectors over a finite field is not supported yet"],
+  ];
+  const src = "F := GF(5); A := Matrix(F, 2, 2, [1, 2, 3, 4]); B := Matrix(F, 2, 3, [1, 2, 3, 4, 5, 6]); S := Matrix(F, 2, 2, [1, 2, 2, 4]);\n" +
+    [...cases.map((c) => c[0]), ...own.map((c) => c[0])].join("\n") + "\nA;\n\"end\";\n";
+  const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
+  const flat = out.replace(/\s+/g, " ");
+  for (const [stmt, where, said] of cases)
+    assert.ok(flat.includes(`Runtime error in ${where}: ${said.replace(/\s+/g, " ")}`), `${stmt}\n${out}`);
+  for (const [stmt, said] of own)
+    assert.ok(flat.includes(said), `${stmt}\n${out}`);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  // (the refused writes left A as it was)
+  assert.match(out, /\n\[1 2\]\n\[3 4\]\nend\n$/);
+});
+
+test("matrix arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const t0 = Date.now();
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+    "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.match(out, /a matrix of more than \d+ entries is not supported yet/);
+  assert.equal((out.match(/a product of matrices over a finite field of more than 2000000 entry products is not supported yet/g) ?? []).length, 2, r.stdout);
+  for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
+    assert.ok(out.includes(`${what} of matrices over a finite field of more than 2000000 entry products is not supported yet`), what + r.stdout);
+  assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
+  assert.match(r.stdout, /\n150\n1\nend\n$/);
+  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+});
+
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
@@ -1140,7 +1204,6 @@ test("a matrix's entry A[i, j] is read and assigned as Magma does, also of a mat
     ["Matrix column index is not in the range [1 .. 2]", 1], ["Illegal number of indices", 1], ["Bad matrix column index type", 1]] as const)
     assert.equal(out.split("Runtime error in :=: " + said + "\n").length - 1, n, said + out);
   assert.ok(out.includes("[1 2]\n[3 4]\n"), out);  // (unchanged by the refused writes)
-  assert.ok(out.replace(/\s+/g, " ").includes("Matrix over a finite field is not supported yet; instead: Sage mode"), out);
   // (an entry is one number: it printed the whole matrix before)
   assert.match(out, /\n-5\nend\n$/);
 });
