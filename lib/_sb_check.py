@@ -74,7 +74,8 @@ def finish(error=None):
                 ns = None
                 out = _json.dumps(r)
                 return
-            if not (v is True or v is False or isinstance(v, str)):
+            # (True or a message only: a verdict of False says no why, and is not one, CORR-04A-1)
+            if not (v is True or isinstance(v, str)):
                 r.update(ok=False, error="its verdict is not True, a message or {\"undecided\": reason}")
                 ns = None
                 out = _json.dumps(r)
