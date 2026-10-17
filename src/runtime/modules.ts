@@ -537,17 +537,26 @@ newBuiltinModule("_time", (m) => {
   // in 0..ZONE_DIR_MAX (zoneinfo/_tzpath.py's bound + 1), checked first;
   // os.listdir's OSError for what cannot be listed)
   const ZONE_DIR_MAX = (1 << 16) + 1;
-  fn(m, "_zonedir", (path: any, limit: any) => {
+  // (and at most chars characters of names in all: past them, None, before
+  // the name that would cross them is kept (daybreak2's HARD-TZB-1: names
+  // near NAME_MAX each). chars is an int in 0..ZONE_DIR_CHARS_MAX, zoneinfo/
+  // _tzpath.py's bound)
+  const ZONE_DIR_CHARS_MAX = 1 << 21;
+  fn(m, "_zonedir", (path: any, limit: any, chars: any) => {
     const fs = require("fs");
     const max = zoneReadLimit("_zonedir", limit, ZONE_DIR_MAX);
+    const maxChars = zoneReadLimit("_zonedir", chars, ZONE_DIR_CHARS_MAX);
     const name = String(path);
     let dir: any;
     try {
       dir = fs.opendirSync(at(name));
       const out: string[] = [];
+      let used = 0;
       while (out.length < max) {
         const e = dir.readSync();
         if (e === null) break;
+        used += e.name.length;
+        if (used > maxChars) return null;
         out.push(e.name);
       }
       return out;

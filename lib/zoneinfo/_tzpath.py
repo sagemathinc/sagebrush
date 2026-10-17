@@ -152,8 +152,9 @@ def available_timezones():
         except Exception:  # pragma: nocover
             return False
 
-    # Sagebrush: the walk has a budget of entries, across all of TZPATH
-    budget = [_MAX_ENTRIES]
+    # Sagebrush: the walk has a budget of names and one of characters, across
+    # all of TZPATH and the keys it keeps
+    budget = [_MAX_ENTRIES, _MAX_CHARS]
     for tz_root in TZPATH:
         if not os.path.exists(tz_root):
             continue
@@ -178,6 +179,8 @@ def available_timezones():
                     continue
 
                 if valid_key(fpath):
+                    # (Sagebrush: each key kept spends its characters)
+                    _spend(budget, len(key))
                     valid_zones.add(key)
 
     if "posixrules" in valid_zones:
@@ -192,6 +195,19 @@ def available_timezones():
 # path a user may choose; past them it refuses, rather than read a tree of
 # any size (the host's /usr/share/zoneinfo has about 2000)
 _MAX_ENTRIES = 1 << 16
+# (and the most characters the walk keeps: the names it lists, the paths of
+# the directories it has yet to walk and the keys it returns; daybreak2's
+# HARD-TZB-1: 65536 keys near PATH_MAX each are a quarter of a billion)
+_MAX_CHARS = 1 << 21
+
+
+def _spend(budget, chars):
+    if chars > budget[1]:
+        raise NotImplementedError(
+            f"zoneinfo: available_timezones() past Sagebrush's bound of "
+            f"{_MAX_CHARS} characters of names on TZPATH"
+        )
+    budget[1] -= chars
 
 
 def _walk(top, budget):
@@ -205,9 +221,13 @@ def _walk(top, budget):
     while stack:
         root = stack.pop()
         try:
-            names = _time._zonedir(root, budget[0] + 1)
+            names = _time._zonedir(root, budget[0] + 1, budget[1])
         except OSError:
             continue
+        if names is None:
+            # (the names would cross the characters left)
+            _spend(budget, budget[1] + 1)
+        _spend(budget, sum(map(len, names)))
         if len(names) > budget[0]:
             raise NotImplementedError(
                 f"zoneinfo: available_timezones() past Sagebrush's bound of "
@@ -221,6 +241,8 @@ def _walk(top, budget):
         for name in reversed(dirnames):
             path = os.path.join(root, name)
             if not os.path.islink(path):
+                # (a directory yet to walk keeps its whole path)
+                _spend(budget, len(path))
                 stack.append(path)
 
 
