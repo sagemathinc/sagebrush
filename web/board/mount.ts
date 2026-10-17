@@ -35,7 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
-import { asksOf } from "./ask";
+import { asksOf, ASK_LIMITS } from "./ask";
 import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode } from "./code";
 import { BoardCodes } from "./codes";
@@ -493,11 +493,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   board.onAnswer = answer;
   // (a question's answer checked: its check run in the board's interpreter,
   // in a copy of the board's names, with a deadline; the verdict kept with
-  // the answer, the check's words and the hints shown so far only here)
+  // the answer, the check's words and the hints shown so far only here.
+  // One Check is bounded as a whole: the check and its computed hints share
+  // 2 x checkMs, at most 20 s; a computed hint is computed once for an
+  // answer, HARD-A19-1)
+  const hintTexts = new Map<string, string>();
   const check = async (id: string, given: AskAnswer) => {
     const c = engine(), a = doc && asksOf(doc).find((p) => p.ask.id === id)?.ask;
     if (viewing || !c || !a?.check) return;
     const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000;
+    const until = Date.now() + Math.min(2 * ms, 20_000), left = () => Math.min(ms, until - Date.now());
     board.askFeedback.set(id, { pending: true });
     redraw().catch(fail);
     const r = await c.evaluate(mode, a.check, given, ms);
@@ -506,10 +511,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the hints shown after this attempt: the computed ones computed now, with the same answer)
     const wrong = (a.attempts ?? 0) + (outcome === "wrong" ? 1 : 0);
     const hints: (string | null)[] = [];
-    for (const [k, h] of (a.hints ?? []).slice(0, wrong).entries()) {
+    for (const [k, h] of (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).entries()) {
       if (typeof h === "string") { hints[k] = null; continue; }
-      const got = await c.evaluate(mode, h.code, given, ms);
+      const key = JSON.stringify([id, h.code, given]), kept = hintTexts.get(key);
+      if (kept !== undefined) { hints[k] = kept; continue; }
+      if (left() < 1) { hints[k] = "(this hint was not computed: this check's time ran out)"; continue; }
+      const got = await c.evaluate(mode, h.code, given, left());
       hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
+      // (kept when it was computed: one that failed may be computed again, with time again)
+      if (got.ok && typeof got.value === "string") { if (hintTexts.size >= 1000) hintTexts.clear(); hintTexts.set(key, got.value); }
     }
     board.askFeedback.set(id, { message, hints });
     if (viewing) return;

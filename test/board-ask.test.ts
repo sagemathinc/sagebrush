@@ -156,6 +156,9 @@ test("a question's check, hints and next as written: lint", () => {
   assert.deepEqual(p({ input: "number", hints: ["h"], next: { wrong: "a" }, checkMs: 100, example: 1 }).map((s) => s.split(":")[0]), ["warning hints", "warning next", "warning checkMs", "warning example"]);
   assert.deepEqual(p({ input: "radio", options: ["a"], check: "True", example: "b" }), [`error example: "b" is not one of its options' values ("a")`]);
   assert.deepEqual(p({ input: "text", result: "right" }), ["error result: a verdict with no answer: the verdict is the answer's"]);
+  // (at most 10 hints: one Check computes no more, HARD-A19-1)
+  assert.deepEqual(p({ input: "text", check: "True", hints: Array.from({ length: 11 }, (_, i) => `hint ${i}`) }), ["error hints: more than 10 hints: the board shows the first 10"]);
+  assert.deepEqual(p({ input: "text", check: "True", hints: Array.from({ length: 10 }, (_, i) => `hint ${i}`) }), []);
 });
 
 test("board check: `next` names an item of the question's page", () => {

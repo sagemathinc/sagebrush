@@ -25,7 +25,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { cleanDoc, formatError, isBoard, type AskAnswer, type BoardDoc, type DocAsk } from "../web/board/doc";
-import { asksOf } from "../web/board/ask";
+import { asksOf, ASK_LIMITS } from "../web/board/ask";
 import { checkText, FILE_MAX, readBounded } from "./board-check";
 import { CLI_READER } from "./board-cli";
 import { runBoard, type Evaluate } from "./board-run";
@@ -62,6 +62,9 @@ export function readCases(raw: unknown, asks: Map<string, DocAsk>): { checks: Ch
   const checks = raw.checks ?? [], sequences = raw.sequences ?? [];
   if (!Array.isArray(checks) || !Array.isArray(sequences)) return "checks and sequences are lists";
   if (checks.length + sequences.length > CASES_MAX) return `more than ${CASES_MAX} cases`;
+  // (every answer of a sequence a case too, counted before anything runs, HARD-A19-2)
+  let total = checks.length;
+  for (const s of sequences) if (isObj(s) && Array.isArray(s.answers) && (total += s.answers.length) > CASES_MAX) return `more than ${CASES_MAX} cases, counting each answer of a sequence`;
   const seen = new Set<string>();
   for (const [i, c] of checks.entries()) {
     if (!isObj(c) || typeof c.case_id !== "string" || typeof c.ask_id !== "string") return `checks[${i}]: a case has a case_id and an ask_id (strings)`;
@@ -192,7 +195,7 @@ export async function boardTry(argv: string[]): Promise<number> {
       }
       // each hint, as shown: a computed one with its question's first wrong answer
       for (const [id, a] of asks) {
-        for (const [index, h] of (a.hints ?? []).entries()) {
+        for (const [index, h] of (a.hints ?? []).slice(0, ASK_LIMITS.hints).entries()) {
           if (outOfTime) return;
           if (typeof h === "string") { report.hints.push({ ask_id: id, index, rendered: h, error: null, timed_out: false }); continue; }
           const r = await ev(h.code, firstWrong.has(id) ? firstWrong.get(id) : null, a.checkMs ?? 2000);
@@ -211,7 +214,7 @@ export async function boardTry(argv: string[]): Promise<number> {
           result = v.outcome;
           last = answer;
           outcomes.push(v.outcome);
-          if (v.outcome === "wrong") { wrong++; for (let k = 0; k < Math.min(wrong, a.hints?.length ?? 0); k++) if (!shown.includes(k)) shown.push(k); }
+          if (v.outcome === "wrong") { wrong++; for (let k = 0; k < Math.min(wrong, a.hints?.length ?? 0, ASK_LIMITS.hints); k++) if (!shown.includes(k)) shown.push(k); }
         }
         const copy = JSON.parse(bytes.toString("utf8"));
         setProgress(copy, s.ask_id, { answer: last, attempts, result });

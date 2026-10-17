@@ -88,6 +88,9 @@ test("board try: a case whose names can't be copied runs alone; inline --case; c
   refuse({ checks: [{ case_id: "a", ask_id: "nope", answer: 1 }] }, /no question has the id "nope"/);
   refuse({ checks: [{ case_id: "a", ask_id: "q", answer: 1 }, { case_id: "a", ask_id: "q", answer: 2 }] }, /the case_id "a" is there twice/);
   refuse({ checks: [{ case_id: "a", ask_id: "q" }] }, /an answer, or a note/);
+  // (each answer of a sequence counts as a case: one long sequence can't pass the cap, HARD-A19-2)
+  refuse({ sequences: [{ ask_id: "q", answers: Array.from({ length: 10_001 }, () => 1) }] }, /more than 10000 cases, counting each answer of a sequence/);
+  refuse({ checks: Array.from({ length: 6000 }, (_, i) => ({ case_id: `c${i}`, ask_id: "q", answer: 1 })), sequences: [{ ask_id: "q", answers: Array.from({ length: 4001 }, () => 1) }] }, /counting each answer of a sequence/);
   // (no cases, and no question with an example: nothing to try)
   const none = run(["board", "try", f]);
   assert.equal(none.status, 2);
