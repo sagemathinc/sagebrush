@@ -11,11 +11,42 @@
 
 import { T, raise, typeOf, typeName, isinstance, callObj, getattr, PyDict, dictSet, dictKeyOf, tuple, FloatBox, toPyExc, newException, builtin, unbox } from "./object";
 import { newBuiltinModule, importModule } from "./modules";
-import { mkfloat, toArray } from "./ops";
-import { floatRepr, repr as pyRepr } from "./format";
+import { mkfloat, toArray, index, pollInterrupt } from "./ops";
+import { floatRepr, decimalOf, repr as pyRepr } from "./format";
 import * as SP from "./strpos";
 
+// Stop reaches every long loop here (HARD-C0E-2): a scan of characters
+// polls at every 4096th, a loop over values, frames or escapes every 4096
+// steps (step), so that a huge flat loads or dumps, or a default() that keeps
+// the traversal going, stops at once.
+let steps = 0;
+function step() {
+  if (++steps >= 4096) {
+    steps = 0;
+    pollInterrupt();
+  }
+}
+const scanPoll = (i: number) => {
+  if ((i & 4095) === 0) pollInterrupt();
+};
+
+// A Py_ssize_t argument, as CPython's "n" converts it: the index protocol,
+// an OverflowError past 64 bits (CORR-C0E-3)
+function ssize(x: any): number {
+  const v = index(x);
+  if (typeof v === "bigint") {
+    if (v > 9223372036854775807n || v < -9223372036854775808n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    return Number(v);
+  }
+  return v;
+}
+
 const HEX = "0123456789abcdef";
+// The deepest nesting either way, arrays and objects (the empty innermost
+// one too): CPython's C module is limited by its C stack, about 8 MB (40000
+// levels pass, 60000 fail, on CPython 3.14 here); a fixed budget makes level
+// 40001 a RecursionError every time, HARD-C0E-1.
+export const MAX_DEPTH = 40000;
 const hex4 = (c: number) => "\\u" + HEX[(c >> 12) & 15] + HEX[(c >> 8) & 15] + HEX[(c >> 4) & 15] + HEX[c & 15];
 
 // ------------------------------------------------------------------ strings out
@@ -25,6 +56,7 @@ function encodeAscii(s: string): string {
   let out = "", last = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
+    scanPoll(i);
     if (c >= 0x20 && c <= 0x7e && c !== 0x22 && c !== 0x5c) continue;
     if (i > last) out += s.slice(last, i);
     out += esc(c, true);
@@ -37,6 +69,7 @@ function encodeUnicode(s: string): string {
   let out = "", last = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
+    scanPoll(i);
     if (c >= 0x20 && c !== 0x22 && c !== 0x5c) continue;
     if (i > last) out += s.slice(last, i);
     out += esc(c, false);
@@ -85,22 +118,34 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     if (typeof r !== "string") raise(T.TypeError, `encoder() must return a string, not ${typeName(r)}`);
     return r;
   };
-  const ind: string | null = indent === null ? null : strOf(indent);
-  const ks = strOf(keySep), is = strOf(itemSep);
+  // (the separators str, or subclasses read by contents, as make_encoder's
+  // "U" arguments, CORR-C0E-2; an indent that isn't one refused where CPython's
+  // encoder first adds it to a str)
+  const sepOf = (x: any, n: number): string => {
+    if (!isinstance(x, T.str)) raise(T.TypeError, `make_encoder() argument ${n} must be str, not ${x === null ? "None" : typeName(x)}`);
+    return strOf(x);
+  };
+  const ks = sepOf(keySep, 5), is = sepOf(itemSep, 6);
+  const indBad = indent !== null && !isinstance(indent, T.str);
+  const ind: string | null = indent === null ? null : indBad ? "" : strOf(indent);
+  const indent1 = () => {
+    if (indBad) raise(T.TypeError, `can only concatenate str (not "${typeName(indent)}") to str`);
+  };
   const sorted = importModule("builtins").sorted;
   const allow = !!O_truth(allowNan), skip = !!O_truth(skipKeys), sortk = !!O_truth(sortKeys);
 
   const floatStr = (o: any): string => {
-    const v = o instanceof FloatBox ? o.v : typeof o === "number" ? o : callObj(T.float, [o]);
-    const fv = v instanceof FloatBox ? v.v : v;
+    // (a subclass's stored value, its __float__ not called, CORR-C0E-1)
+    const v = typeof o === "number" ? o : unbox(o);
+    const fv: number = v instanceof FloatBox ? v.v : v;
     if (fv !== fv || fv === Infinity || fv === -Infinity) {
       if (!allow) raise(T.ValueError, "Out of range float values are not JSON compliant: " + pyRepr(o));
       return fv !== fv ? "NaN" : fv > 0 ? "Infinity" : "-Infinity";
     }
-    if (typeof o === "number" || o instanceof FloatBox) return floatRepr(fv);
-    return callObj(getattr(T.float, "__repr__"), [o]);
+    return floatRepr(fv);
   };
-  const intStr = (o: any): string => (typeof o === "number" ? String(o) : typeof o === "bigint" ? o.toString() : callObj(getattr(T.int, "__repr__"), [o]));
+  // (a big int's digits within sys's int_max_str_digits, CORR-C0E-6)
+  const intStr = (o: any): string => (typeof o === "number" ? String(o) : typeof o === "bigint" ? decimalOf(o) : callObj(getattr(T.int, "__repr__"), [o]));
 
   // a scalar's text, or null for a container or another object
   const scalar = (o: any): string | null => {
@@ -108,7 +153,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       case "string": return enc(o);
       case "boolean": return o ? "true" : "false";
       case "number": return Number.isInteger(o) ? String(o) : floatStr(o);
-      case "bigint": return o.toString();
+      case "bigint": return decimalOf(o);
     }
     if (o === null) return "null";
     if (o instanceof FloatBox) return floatStr(o);
@@ -128,6 +173,9 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
   const stack: Frame[] = [];
   const keyText = new Map<string, string>();
 
+  const deeper = () => {
+    if (stack.length >= MAX_DEPTH) raise(T.RecursionError, "maximum recursion depth exceeded while encoding a JSON object");
+  };
   const enter = (o: any) => {
     if (!check) return;
     if (seen.has(o)) raise(T.ValueError, "Circular reference detected");
@@ -150,9 +198,11 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     if (t.$mro.includes(T.dict)) return openDict(o, level);
     enter(o);
     const n = callObj(dflt, [o]);
+    deeper();
     stack.push({ kind: DEFAULT, o, items: [n], i: 0, sep: "", nl: null, level, key: null, inValue: false });
   }
   function openList(o: any, items: any[], level: number) {
+    deeper();
     if (items.length === 0) {
       out += "[]";
       return;
@@ -161,6 +211,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     out += "[";
     let nl: string | null = null, sep = is;
     if (ind !== null) {
+      indent1();
       level++;
       nl = "\n" + ind.repeat(level);
       sep = is + nl;
@@ -169,6 +220,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     stack.push({ kind: LIST, o, items, i: 0, sep, nl, level, key: null, inValue: false });
   }
   function openDict(o: any, level: number) {
+    deeper();
     let items: any[];
     let raw = false;
     let live: Iterator<[any, any]> | null = null;
@@ -192,6 +244,11 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       }
       items = [];
       for (const [mk, v] of d.$m) items.push(tuple([dictKeyOf(d, mk), v]));
+    } else if (o instanceof PyDict && o.$m.size === 0) {
+      // (an empty subclass instance is "{}", its items() not called, as
+      // CPython's C encoder; a nonempty one's items() is, CORR-C0E-5)
+      out += "{}";
+      return;
     } else {
       items = toArray(callObj(T.list, [callObj(getattr(o, "items"), [])]));
       if (items.length === 0) {
@@ -204,6 +261,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     out += "{";
     let nl: string | null = null, sep = is;
     if (ind !== null) {
+      indent1();
       level++;
       nl = "\n" + ind.repeat(level);
       sep = is + nl;
@@ -215,6 +273,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
   function run(o: any, level: number) {
     value(o, level);
     while (stack.length) {
+      step();
       const f = stack[stack.length - 1];
       if (f.inValue) {
         // (its current item's value is written: the frame goes on)
@@ -248,6 +307,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
       // a dict
       let wrote = false;
       for (;;) {
+        step();
         let it: any;
         if (f.live) {
           const r = f.live.next();
@@ -284,7 +344,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
         else if (key === false) k = "false";
         else if (key === null) k = "null";
         else if (typeof key === "number") k = Number.isInteger(key) ? String(key) : floatStr(key);
-        else if (typeof key === "bigint") k = key.toString();
+        else if (typeof key === "bigint") k = decimalOf(key);
         else if (key instanceof FloatBox) k = floatStr(key);
         else {
           const kt = typeOf(key);
@@ -318,7 +378,7 @@ function makeEncoder(markers: any, dflt: any, encoder: any, indent: any, keySep:
     stack.length = 0;
     seen.clear();
     try {
-      run(o, Number(_level ?? 0));
+      run(o, ssize(_level ?? 0));
     } catch (e) {
       const pe = toPyExc(e);
       // (the notes, innermost first: each frame encoding an item when it was raised)
@@ -362,11 +422,13 @@ function scanString(s: string, end: number, strict: boolean, p: SP.Pos | null): 
   const n = s.length;
   let chunks: string[] | null = null, from = end, surrogate = false;
   for (;;) {
+    step();
     let i = from;
     let c = 0;
     for (; i < n; i++) {
       c = s.charCodeAt(i);
       if (c === 0x22 || c === 0x5c || c < 0x20) break;
+      scanPoll(i);
     }
     if (i >= n) fail("Unterminated string starting at", s, begin, p);
     if (c < 0x20) {
@@ -444,13 +506,17 @@ function makeScanner(ctx: any): any {
   const plainFloat = parseFloat === T.float, plainInt = parseInt === T.int;
 
   return builtin((string: any, idx: any) => {
-    if (typeof string !== "string") raise(T.TypeError, `first argument must be a string, not ${typeName(string)}`);
-    const s: string = string;
-    const p = SP.pairs(s);
-    const i0 = Number(idx);
+    // (a str subclass read by its contents, CORR-C0E-4; idx by the index
+    // protocol, and one at or past the end is the StopIteration's own value,
+    // not clamped, CORR-C0E-3)
+    if (!isinstance(string, T.str)) raise(T.TypeError, `first argument must be a string, not ${typeName(string)}`);
+    const s: string = strOf(string);
+    const i0 = ssize(idx);
     if (i0 < 0) raise(T.ValueError, "idx cannot be negative");
-    const start = p === null ? i0 : SP.unitOf(p, i0);
+    const p = SP.pairs(s);
     const n = s.length;
+    if (i0 >= (p === null ? n : SP.cpOf(p, n))) throw newException(T.StopIteration, [i0]);
+    const start = p === null ? i0 : SP.unitOf(p, i0);
 
     const number = (i: number): [any, number] | null => {
       let j = i;
@@ -459,12 +525,12 @@ function makeScanner(ctx: any): any {
       if (d0 === 0x30) j++;
       else if (d0 >= 0x31 && d0 <= 0x39) {
         j++;
-        while (j < n && s.charCodeAt(j) >= 0x30 && s.charCodeAt(j) <= 0x39) j++;
+        while (j < n && s.charCodeAt(j) >= 0x30 && s.charCodeAt(j) <= 0x39) scanPoll(++j);
       } else return null;
       let isFloat = false;
       if (s.charCodeAt(j) === 0x2e && s.charCodeAt(j + 1) >= 0x30 && s.charCodeAt(j + 1) <= 0x39) {
         j += 2;
-        while (j < n && s.charCodeAt(j) >= 0x30 && s.charCodeAt(j) <= 0x39) j++;
+        while (j < n && s.charCodeAt(j) >= 0x30 && s.charCodeAt(j) <= 0x39) scanPoll(++j);
         isFloat = true;
       }
       const e = s.charCodeAt(j);
@@ -474,7 +540,7 @@ function makeScanner(ctx: any): any {
         if (sg === 0x2b || sg === 0x2d) k++;
         if (s.charCodeAt(k) >= 0x30 && s.charCodeAt(k) <= 0x39) {
           k++;
-          while (k < n && s.charCodeAt(k) >= 0x30 && s.charCodeAt(k) <= 0x39) k++;
+          while (k < n && s.charCodeAt(k) >= 0x30 && s.charCodeAt(k) <= 0x39) scanPoll(++k);
           j = k;
           isFloat = true;
         }
@@ -486,7 +552,7 @@ function makeScanner(ctx: any): any {
     };
 
     const ws = (i: number) => {
-      while (i < n && isWs(s.charCodeAt(i))) i++;
+      while (i < n && isWs(s.charCodeAt(i))) scanPoll(++i);
       return i;
     };
 
@@ -511,10 +577,12 @@ function makeScanner(ctx: any): any {
     let i = start;
     let v: any;
     for (;;) {
+      step();
       // a value at i
       if (i >= n) stop(i, p);
       const c = s.charCodeAt(i);
       if (c === 0x5b) {
+        if (stack.length >= MAX_DEPTH) raise(T.RecursionError, "maximum recursion depth exceeded while decoding a JSON array from a unicode string");
         i = ws(i + 1);
         if (s.charCodeAt(i) === 0x5d) {
           v = [];
@@ -524,6 +592,7 @@ function makeScanner(ctx: any): any {
           continue;
         }
       } else if (c === 0x7b) {
+        if (stack.length >= MAX_DEPTH) raise(T.RecursionError, "maximum recursion depth exceeded while decoding a JSON object from a unicode string");
         i = ws(i + 1);
         const c2 = s.charCodeAt(i);
         if (c2 === 0x22) {
@@ -554,6 +623,7 @@ function makeScanner(ctx: any): any {
       // the value ends at i: into the open containers, closing those it ends
       let more = false;
       while (stack.length) {
+        step();
         const f = stack[stack.length - 1];
         i = ws(i);
         const d = s.charCodeAt(i);
@@ -617,7 +687,7 @@ newBuiltinModule("_json", (m) => {
     if (!isinstance(s, T.str)) raise(T.TypeError, `first argument must be a string, not ${typeName(s)}`);
     const str = strOf(s);
     const p = SP.pairs(str);
-    const e = Number(end);
+    const e = ssize(end);
     if (e < 0 || e > (p === null ? str.length : SP.cpOf(p, str.length))) raise(T.ValueError, "end is out of bounds");
     const [v, u] = scanString(str, p === null ? e : SP.unitOf(p, e), O_truth(strict), p);
     return tuple([v, p === null ? u : SP.cpOf(p, u)]);
