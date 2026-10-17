@@ -717,8 +717,19 @@ export function buildClassOf(b: any): any {
 // The namespace a class body runs in, made before it (CPython's
 // __build_class__: the metaclass resolved, its __prepare__ called); a
 // replaced __build_class__, given a stand-in body afterwards, a Map
+// (the bases first updated, as its update_bases: a base that isn't a class
+// replaced by what its __mro_entries__ gives, PEP 560; the statement's own
+// bases array then holds the new ones, and $orig the originals, its
+// __orig_bases__)
 export function classNamespace(name: string, bases: any[], kwNames: string[], kwValues: any[], bc: any): Map<string, any> | Ty.PreparedNs {
-  return bc === defaultBuildClass ? Ty.classNamespace(name, bases, kwNames, kwValues) : new Map();
+  if (bc !== defaultBuildClass) return new Map();
+  const ub = Ty.updateBases(bases);
+  if (ub !== bases) {
+    // (__orig_bases__: the very tuple the __mro_entries__ calls were given)
+    (bases as any).$orig = (ub as any).$orig;
+    bases.splice(0, bases.length, ...ub);
+  }
+  return Ty.classNamespace(name, bases, kwNames, kwValues);
 }
 // A class body's __module__: its __name__, as LOAD_NAME there, the
 // namespace's (a prepared one's), then the globals' and the builtins'
@@ -732,6 +743,8 @@ export function classLocals(ns: Map<string, any> | Ty.PreparedNs): any {
 }
 export function classDef(name: string, qualname: string, module: string, bases: any[], ns: Map<string, any> | Ty.PreparedNs, kwNames: string[], kwValues: any[], cell?: Ty.PyCell, bc: any = B.builtins.__build_class__): any {
   if (bc !== defaultBuildClass) return Obj.callKw(bc, [Obj.pyfn(() => null, name), name, ...bases], kwNames, kwValues);
+  const orig = (bases as any).$orig;
+  if (orig !== undefined) ns.set("__orig_bases__", orig);
   const cls = Ty.makeClass(name, bases, ns, module, qualname, kwNames, kwValues);
   // CPython's __build_class__: type.__new__ must have set the class cell
   // (a metaclass may drop __classcell__ on the way)

@@ -3,6 +3,7 @@ defaultdict, Counter, ChainMap, UserDict, UserList, UserString."""
 
 import sys as _sys
 import _collections_abc
+_GenericAlias = _collections_abc.GenericAlias
 
 # (as CPython's: collections.abc is _collections_abc)
 _sys.modules["collections.abc"] = _collections_abc
@@ -230,9 +231,7 @@ class deque:
         self.extend(items)
         return self
 
-    @classmethod
-    def __class_getitem__(cls, item):
-        return cls
+    __class_getitem__ = classmethod(_GenericAlias)
 
 
 # ---------------------------------------------------------------- namedtuple

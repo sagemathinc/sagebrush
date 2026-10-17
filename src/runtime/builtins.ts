@@ -417,6 +417,9 @@ function issubclassImpl(c: any, spec: any): boolean {
   return c.$mro.includes(spec) || subclassHook(spec, c);
 }
 
+hooks.isinstance = isinstanceImpl;
+hooks.issubclass = issubclassImpl;
+
 function hasattrImpl(o: any, name: string): boolean {
   if (typeof name !== "string") raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
   try {
