@@ -475,13 +475,19 @@ function rawEscDecode(b: Uint8Array, errors: string): string {
       i = j;
       continue;
     }
-    out.push("\\".repeat(run - 1));
+    if (run > 1) out.push("\\".repeat(run - 1));
     const start = j - 1, big = b[j] === 85;
     let count = big ? 8 : 4, k = j + 1, v = 0;
     for (; count && k < n && isHex(b[k]); k++, count--) v = v * 16 + parseInt(String.fromCharCode(b[k]), 16);
     // (a non-hex byte ends the digits, and is not part of the error)
     const reason = count ? (big ? "truncated \\UXXXXXXXX escape" : "truncated \\uXXXX escape") : v > 0x10ffff ? "\\Uxxxxxxxx out of range" : null;
-    if (reason === null) out.push(String.fromCodePoint(v));
+    // (a lone low surrogate right after a lone high one would be one
+    // character in the joined string: refused, as SP.glue does, CORR-D77-4)
+    if (reason === null) {
+      const prev = out.length ? out[out.length - 1] : "";
+      if (v >= 0xdc00 && v < 0xe000 && prev.length === 1 && (prev.charCodeAt(0) & 0xfc00) === 0xd800) SP.refuseMerge();
+      out.push(String.fromCodePoint(v));
+    }
     else if (errors === "ignore") {}
     else if (errors === "replace") out.push("\ufffd");
     else if (errors === "backslashreplace") for (let q = start; q < k; q++) out.push(`\\x${hex(b[q], 2)}`);
