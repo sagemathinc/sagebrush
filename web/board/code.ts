@@ -621,6 +621,15 @@ export class BoardCode {
   private waits = new Set<() => void>();
   private asks = new Map<number, { w: Worker; settle: (d: any) => void }>();
   private kernel: any = null;
+  /** The completions of `before`, the code on the caret's line up to it, as
+   * the notebook's Tab asks its interpreter ({ complete }, src/interactive.ts):
+   * the names, and the prefix of `before` they complete; null before the
+   * interpreter runs, or if it restarted meanwhile. */
+  async complete(before: string): Promise<{ matches: string[]; prefix: string } | null> {
+    if (!(await this.ready) || !this.kernel) return null;
+    const m = await this.kernel.ask({ complete: before }, this.mode, null);
+    return m && Array.isArray(m.matches) ? { matches: m.matches.filter((x: unknown) => typeof x === "string"), prefix: typeof m.prefix === "string" ? m.prefix : "" } : null;
+  }
   private analyzer: Worker | null = null;
   private root: HTMLElement | null = null;
   private outputs: ResizeObserver[] = [];

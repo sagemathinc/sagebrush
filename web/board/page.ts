@@ -34,6 +34,7 @@ import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
+import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
 
@@ -219,6 +220,8 @@ if (fromParent) {
   }
 }
 
+// (the function search's indexes, by language, as fetched)
+const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
 const host: BoardHost = {
@@ -366,6 +369,17 @@ const host: BoardHost = {
   duplicate: file ? undefined : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   // (an exported file's or a frame's empty board opens as any other)
   editBlank: !file,
+  // the function search beside a code item being written: the notebook's
+  // indexes, at the site's root, each fetched once (a failure: tried again
+  // at the next search); not in an exported file, which has no site
+  docs: file ? undefined : (lang) => {
+    const f = DOC_INDEX[lang];
+    if (!f) return Promise.resolve(null);
+    return (docIndexes[lang] ??= fetch(new URL("../" + f, import.meta.url)).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${f}: ${r.status}`)))).then((d) => prepareIndex(d, lang)).catch((e) => {
+      delete docIndexes[lang];
+      throw e;
+    }));
+  },
 };
 
 const mounted = mountBoard(document.getElementById("board")!, host);
