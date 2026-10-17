@@ -590,9 +590,28 @@ try {
         const m = await ev("(() => { const r = document.querySelector('.board-toolbar .tb-more').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, b: r.bottom }; })()");
         await mouse("mouseMoved", m.x, m.y);
         await sleep(1000);
-        const tip = await ev("(() => { const b = document.querySelector('.board-toolbar .tb-more'), s = getComputedStyle(b, '::after'); return { op: s.opacity, vis: s.visibility, text: s.content, pe: s.pointerEvents, hover: b.matches(':hover') }; })()");
-        check(tip.op === "1" && tip.vis === "visible" && /Every tool/.test(tip.text) && tip.pe === "none" && tip.hover, "⋯ hovered: its tip shows, below it, taking no pointer, the button still hovered: " + JSON.stringify(tip));
+        const tipOf = (sel) => ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}), t = document.querySelector('.sbb .board-tip'), br = b.getBoundingClientRect(), root = t?.parentElement.getBoundingClientRect(), r = t?.getBoundingClientRect(); return t && { shown: !t.hidden && r.width > 0, text: t.textContent, pe: getComputedStyle(t).pointerEvents, hover: b.matches(':hover'), below: r.top >= br.bottom, inside: r.left >= Math.max(root.left, 0) && r.right <= Math.min(root.right, innerWidth), x: [Math.round(r.left), Math.round(r.right)], w: innerWidth }; })()`);
+        const tip = await tipOf(".board-toolbar .tb-more");
+        check(tip?.shown && /Every tool/.test(tip.text) && tip.pe === "none" && tip.hover && tip.below && tip.inside, "⋯ hovered: its tip shows, below it, within the board, taking no pointer, the button still hovered: " + JSON.stringify(tip));
         await mouse("mouseMoved", 5, 400);
+        await sleep(100);
+        check(await ev("document.querySelector('.sbb .board-tip').hidden"), "...and goes when the pointer leaves");
+        // (on a narrow screen the first and last buttons' tips stay within the board, astra's UI-158-1)
+        for (const width of [390, 320]) {
+          await send("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+          await sleep(300);
+          for (const sel of [".board-toolbar [data-tool]", ".board-toolbar .tb-more"]) {
+            const c = await ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+            await mouse("mouseMoved", c.x, c.y);
+            await sleep(900);
+            const t = await tipOf(sel);
+            check(t?.shown && t.inside && t.below, `at ${width} px, the ${sel.includes("more") ? "last (⋯)" : "first"} button's tip is within the board: ` + JSON.stringify(t));
+            await mouse("mouseMoved", 5, 400);
+            await sleep(100);
+          }
+        }
+        await send("Emulation.clearDeviceMetricsOverride");
+        await sleep(300);
       }
       const tools = () => ev("[...document.querySelectorAll('.board-toolbar [data-tool]')].map((b) => b.dataset.tool).join()");
       check((await tools()) === "note,code,image,group,connect,draw", `the default tools: ${await tools()}`);
