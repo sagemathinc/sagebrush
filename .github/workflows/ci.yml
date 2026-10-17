@@ -141,6 +141,7 @@ jobs:
           bun web/board/test-channel.mjs
           bun web/board/test-merge.mjs
           bun web/board/test-cached-store.mjs
+          bun web/board/test-complete.mjs
           bun web/board/test-syncdb.mjs
           bun web/board/test-mermaid-export.mjs
           bun web/board/test-fromhtml.mjs

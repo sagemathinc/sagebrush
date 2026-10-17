@@ -68,6 +68,25 @@ function started(kernel: any, ms: number, waits: Set<() => void>): Promise<boole
   });
 }
 
+/** What an interpreter's completions may hold: no more names, nor longer, nor more text in all (daybreak2's HARD-CH-1). */
+export const COMPLETION_LIMITS = { matches: 5_000, name: 256, total: 200_000 } as const; // (numpy's and Sage's names fit: dir(numpy) has some 600)
+/** An interpreter's answer to { complete: before }, taken only within
+ * COMPLETION_LIMITS and as the contract says: a prefix that ends `before`,
+ * names that each begin with it.  Anything else is refused (null: Tab then
+ * does nothing), never kept in part. */
+export function admitCompletion(m: unknown, before: string): { matches: string[]; prefix: string } | null {
+  if (!m || typeof m !== "object") return null;
+  const { matches, prefix } = m as { matches?: unknown; prefix?: unknown };
+  if (!Array.isArray(matches) || matches.length > COMPLETION_LIMITS.matches) return null;
+  if (typeof prefix !== "string" || prefix.length > before.length || !before.endsWith(prefix)) return null;
+  let total = 0;
+  for (const x of matches) {
+    if (typeof x !== "string" || x.length > COMPLETION_LIMITS.name || !x.startsWith(prefix)) return null;
+    if ((total += x.length) > COMPLETION_LIMITS.total) return null;
+  }
+  return { matches: matches.slice(), prefix };
+}
+
 export class BoardCode {
   /** resolves when the interpreter and the notebook are ready (false: they could not be loaded) */
   readonly ready: Promise<boolean>;
@@ -627,8 +646,7 @@ export class BoardCode {
    * interpreter runs, or if it restarted meanwhile. */
   async complete(before: string): Promise<{ matches: string[]; prefix: string } | null> {
     if (!(await this.ready) || !this.kernel) return null;
-    const m = await this.kernel.ask({ complete: before }, this.mode, null);
-    return m && Array.isArray(m.matches) ? { matches: m.matches.filter((x: unknown) => typeof x === "string"), prefix: typeof m.prefix === "string" ? m.prefix : "" } : null;
+    return admitCompletion(await this.kernel.ask({ complete: before }, this.mode, null), before);
   }
   private analyzer: Worker | null = null;
   private root: HTMLElement | null = null;
