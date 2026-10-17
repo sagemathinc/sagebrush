@@ -56,7 +56,7 @@ test("json nesting: 40000 levels pass, 40001 are a RecursionError, loads and dum
     "    return d",
     "for n in [40000, 40001]:",
     "    print(n, t(lambda: json.loads('[' * n + ']' * n)), t(lambda: json.loads('{\"a\":' * (n - 1) + '{}' + '}' * (n - 1))),",
-    "          t(lambda: json.dumps(lists(n))), t(lambda: json.dumps(dicts(n))), t(lambda: json.dumps(lists(n), indent=1)))",
+    "          t(lambda: json.dumps(lists(n))), t(lambda: json.dumps(dicts(n))), t(lambda: json.dumps(lists(n), indent=0)))",
   ].join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
   assert.equal(out, "40000 ok ok ok ok ok\n40001 RecursionError RecursionError RecursionError RecursionError RecursionError");

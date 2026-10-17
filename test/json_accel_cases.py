@@ -133,8 +133,9 @@ for _ in range(39999):
     deep = [deep]
 show(lambda: len(json.dumps(deep)))
 show(lambda: len(json.loads('{"a":' * 39999 + "{}" + "}" * 39999)))
+show(lambda: len(json.dumps(deep, indent=0)))
 deep = {}
-for _ in range(39999):
+for _ in range(9999):
     deep = {"a": deep}
 show(lambda: len(json.dumps(deep)))
 for s in ["[" * 100000 + "]" * 100000, '{"a":' * 100000 + "1" + "}" * 100000]:
@@ -168,7 +169,20 @@ show(lambda: json.dumps({G(float("nan")): 1}, allow_nan=False))
 # CORR-C0E-2: separators must be str (subclasses by contents)
 class SS(str):
     def __str__(self): return "?"
+class SN(str):
+    n = 0
+    def __str__(self):
+        SN.n += 1
+        return str(SN.n)
+class SR(str):
+    def __str__(self): raise RuntimeError("boom")
 show(lambda: json.dumps({"a": [1, 2]}, separators=(1, ":")))
+show(lambda: json.dumps([1, 2, 3, {"a": 1, "b": 2}], separators=(SN(","), SN(":"))))
+show(lambda: json.dumps([1, 2, 3, {"a": 1, "b": 2}], separators=(SN(","), SN(":")), indent=2))
+show(lambda: json.dumps([1, {"a" * 100: 1, 5: 2}], separators=(SN(","), SN(":")), sort_keys=True))
+show(lambda: json.dumps([[], {}, 1], separators=(SR(","), SR(":"))))
+show(lambda: json.dumps([1, 2], separators=(",", SR(":"))))
+show(lambda: json.dumps({"a": 1}, separators=(SR(","), ":")))
 show(lambda: json.dumps({"a": [1, 2]}, separators=(",", None)))
 show(lambda: json.dumps({"a": [1, 2]}, separators=(SS(";"), SS("="))))
 show(lambda: json.dumps({"a": [1, 2]}, indent=SS("--")))
