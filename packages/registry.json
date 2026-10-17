@@ -30,6 +30,7 @@
           {
             "test": "test_coverage_sorteddict.test_ref_counts",
             "error": "AttributeError",
+            "message": "module 'gc' has no attribute 'get_objects'",
             "reason": "gc.get_objects is not available: Sagebrush runs on a JavaScript engine, whose heap cannot be listed; the test counts CPython references, not what sortedcontainers computes"
           }
         ]

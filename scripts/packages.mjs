@@ -108,7 +108,8 @@ export function readPackages(root) {
       files[`${dir}/${f}`] = bytes.toString("utf8");
     }
     // (a curated package's known differences from CPython, pypi-tests/README.md:
-    // each upstream test allowed to fail here, only with exactly this error)
+    // each upstream test allowed to fail here, only with exactly this error:
+    // its type and its message's first line, as pypi-tests/harness.py prints it)
     let known = [];
     if (existsSync(join(at, "known.json"))) {
       if (!m.source?.pypi) bad("known.json is for curated PyPI packages (packages/pypi-<name>)");
@@ -119,15 +120,16 @@ export function readPackages(root) {
       } catch (e) {
         bad(`known.json is not JSON (${e.message})`);
       }
-      if (!k || !Array.isArray(k.tests) || Object.keys(k).length !== 1) bad('known.json must be {"tests": [{test, error, reason}, ...]}');
+      if (!k || !Array.isArray(k.tests) || Object.keys(k).length !== 1) bad('known.json must be {"tests": [{test, error, message, reason}, ...]}');
       for (const t of k.tests) {
-        if (!t || typeof t !== "object" || Object.keys(t).sort().join() !== "error,reason,test") bad("each known difference is {test, error, reason}");
+        if (!t || typeof t !== "object" || Object.keys(t).sort().join() !== "error,message,reason,test") bad("each known difference is {test, error, message, reason}");
         if (typeof t.test !== "string" || !/^test_\w+(\.test\w*)?$/.test(t.test)) bad(`known test ${JSON.stringify(t.test)} must name an upstream test, module.function`);
         if (typeof t.error !== "string" || !/^[A-Z]\w*(Error|Exception)$/.test(t.error)) bad(`known test ${t.test}: error must be an exception's name, raised instead of passing`);
+        if (typeof t.message !== "string" || /[\r\n]/.test(t.message) || t.message.length > 200) bad(`known test ${t.test}: message must be the error's first line, as the harness prints it (at most 200 characters)`);
         if (typeof t.reason !== "string" || t.reason.trim().length < 10) bad(`known test ${t.test}: give the reason in plain words`);
       }
       if (new Set(k.tests.map((t) => t.test)).size !== k.tests.length) bad("known.json lists a test twice");
-      known = k.tests.map((t) => ({ test: t.test, error: t.error, reason: t.reason }));
+      known = k.tests.map((t) => ({ test: t.test, error: t.error, message: t.message, reason: t.reason }));
     }
     const id = `${m.name}@${m.version}`;
     for (const mod of py.modules) {
