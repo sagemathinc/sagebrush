@@ -1519,7 +1519,9 @@ class Emitter {
         if (e.cell) return `_m.cell_lit([${rows.join(", ")}])`;
         if (rows.length === 0) return "_m.hcat([])";
         if (rows.length === 1) return `_m.hcat(${rows[0]})`;
-        return `_m.vcat([${rows.map((r) => `_m.hcat(${r})`).join(", ")}])`;
+        // (the rows stay complex until vcat joins them, which makes the whole literal real when no
+        // imaginary part is nonzero, as Octave does)
+        return `_m.vcat([${rows.map((r) => `_m.hcat(${r}, False)`).join(", ")}])`;
       }
       case "anon": return this.anon(e, scope);
       case "handle": {
