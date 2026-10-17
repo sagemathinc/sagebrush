@@ -1755,3 +1755,23 @@ test("BaseRing, CoefficientRing, CyclotomicField and a number field's Basis, as 
     assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|ZeroDivision/.test(o), e + " => " + o);
   }
 });
+
+test("a collection over a number field coerces its items as Magma's, declared or inferred, another cyclotomic field's where its field embeds (CORR-E65-1, CORR-E65-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's; astra2 on e65af60e)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["K<z>:=CyclotomicField(5); Type([z,1][2]); Type([z,1/2][2]); Type(Setseq({z,1})[1]); [z, 1/2];", "K<z>:=CyclotomicField(5); N<y>:=CyclotomicField(10); x:=[K|y]; x; Parent(x[1]) eq K;", "K<z>:=CyclotomicField(4); M<w>:=CyclotomicField(8); x:=[M|z]; x; Parent(x[1]) eq M;", "K<z>:=CyclotomicField(3); M<w>:=CyclotomicField(6); [M|z]; [K|w];", "K<z>:=CyclotomicField(5); M<w>:=CyclotomicField(1); [K|w]; Parent([K|w][1]) eq K;", "K<z>:=CyclotomicField(15); M<w>:=CyclotomicField(10); [K|w, w^2+1/2];", "P<t>:=PolynomialRing(Rationals()); L<b>:=NumberField(t^2-3); Type([b,1][2]); [b, 1/2]; [L|1, b];"].join("\n"));
+  assert.equal(ok, "FldCycElt\nFldCycElt\nFldCycElt\n[\n    z,\n    1/2\n]\n[\n    -z^3\n]\ntrue\n[\n    w^2\n]\ntrue\n[\n    w - 1\n]\n[\n    z + 1\n]\n[\n    1\n]\ntrue\n[\n    -z^7 + z^6 + z^3 - z^2 + 1,\n    1/2*(2*z^3 + 1)\n]\nFldNumElt\n[\n    b,\n    1/2\n]\n[\n    1,\n    b\n]\nend\n", ok);
+  const P = "P<t>:=PolynomialRing(Rationals()); L<b>:=NumberField(t^2-3); J<c>:=NumberField(t^2-5); K<z>:=CyclotomicField(5); M<w>:=CyclotomicField(7); ";
+  const errs: [string, string][] = [["x:=[K|w];", "Runtime error in [ ... ]: Coerce failed for sequence element"],
+    ["x:={K|w};", "Runtime error in { ... }: Cannot coerce argument 1 into the universe"], ["x:={@K|w@};", "Runtime error in {@ ... @}: Cannot coerce argument 1 into the universe"],
+    ["x:={*K|w*};", "Runtime error in sub< ... >: Cannot coerce argument 1 into the universe"], ["x:=[K|b];", "Runtime error in [ ... ]: Coerce failed for sequence element"],
+    ["x:=[L|c];", "Runtime error in [ ... ]: Coerce failed for sequence element"], ["x:=[L|z];", "Runtime error in [ ... ]: Coerce failed for sequence element"],
+    ["x:=[b, z];", "Runtime error in [ ... ]: No valid universe containing all elements"],
+    ["N<y>:=CyclotomicField(15); x:=[K|y];", "Runtime error in [ ... ]: Coerce failed for sequence element"]];
+  for (const [e, m] of errs) {
+    const o = run(P + e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
+  }
+});
