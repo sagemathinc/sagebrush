@@ -60,9 +60,13 @@ test("json.dumps and json.loads of 30000 small dicts are at least 3x json's pure
 
 // The nesting budget (HARD-C0E-1): 40000 levels, the empty innermost one
 // counted, pass both ways and level 40001 is a RecursionError, for arrays
-// and objects. (CPython's own limit, its C stack, is past 40001, so this
-// boundary is ours: test/json_accel_cases.py compares 40000 and 100000.)
-test("json nesting: 40000 levels pass, 40001 are a RecursionError, loads and dumps", () => {
+// and objects, 100000 too, with dumps' note. (CPython's own limit is its
+// C stack, so its host's: 100000 levels fail on our VMs and pass on
+// GitHub's runners. This boundary is Sagebrush's, the same on every host:
+// the scanner and encoder keep their own stacks, so it holds under a JS
+// stack far smaller than Node's default too.)
+for (const stack of [null, 200])
+test(`json nesting: 40000 levels pass, 40001 and 100000 are a RecursionError, loads and dumps${stack === null ? "" : `, under --stack-size=${stack}`}`, () => {
   const code = [
     "import json",
     "def t(f):",
@@ -79,12 +83,14 @@ test("json nesting: 40000 levels pass, 40001 are a RecursionError, loads and dum
     "    d = {}",
     "    for _ in range(n - 1): d = {'a': d}",
     "    return d",
-    "for n in [40000, 40001]:",
+    "for n in [40000, 40001, 100000]:",
     "    print(n, t(lambda: json.loads('[' * n + ']' * n)), t(lambda: json.loads('{\"a\":' * (n - 1) + '{}' + '}' * (n - 1))),",
     "          t(lambda: json.dumps(lists(n))), t(lambda: json.dumps(dicts(n))), t(lambda: json.dumps(lists(n), indent=0)))",
+    "try: json.dumps(lists(100000))",
+    "except RecursionError as e: print(e.__notes__[0], len(e.__notes__))",
   ].join("\n");
-  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
-  assert.equal(out, "40000 ok ok ok ok ok\n40001 RecursionError RecursionError RecursionError RecursionError RecursionError");
+  const out = execFileSync(process.execPath, [...(stack === null ? [] : [`--stack-size=${stack}`]), __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim();
+  assert.equal(out, "40000 ok ok ok ok ok\n40001 RecursionError RecursionError RecursionError RecursionError RecursionError\n100000 RecursionError RecursionError RecursionError RecursionError RecursionError\nwhen serializing list item 0 40000");
 });
 
 // Stop (INTR[0]) reaches every long loop (HARD-C0E-2). Set before a call of
