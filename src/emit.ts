@@ -188,6 +188,7 @@ export class Emitter {
         return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
       }
       case "class": {
+        if (id[0] === "$") return this.classTemp(id);
         // (one read of the namespace: a prepared one's __getitem__ once)
         const t = this.temp();
         return `((${t} = $ns.get(${q(id)})) !== undefined ? ${t} : ${this.loadRes(r.outer, id, true)})`;
@@ -227,11 +228,21 @@ export class Emitter {
       case "global":
         return `${this.gns(id)}${prop(id)} = ${value};`;
       case "class":
+        if (id[0] === "$") return `${this.classTemp(id)} = ${value};`;
         return `$ns.set(${q(id)}, ${value});`;
       case "classcell":
         // (nonlocal __class__)
         return `${this.cellOf(r.scope)}.v = ${value};`;
     }
+  }
+
+  // A temp the front end made ("$" names: match's subject and captures) in
+  // a class body: a JS variable of the body's function, not the namespace
+  // (CPython's are on its stack, never in the class's __dict__)
+  classTemp(id: string): string {
+    const v = js(id);
+    if (!this.fn.temps.includes(v)) this.fn.temps.push(v);
+    return v;
   }
 
   // An except clause's name at its end: None, then deleted, through the
