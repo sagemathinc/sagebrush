@@ -1,0 +1,34 @@
+// polynomial rings over finite fields: printing, arithmetic, factorization
+F := GF(7); R<x> := PolynomialRing(F);
+f := x^3 + 2*x + 5; f; Type(f); Parent(f); R;
+g := 3*x^2 - 1; f + g; f * g; f - 2*g; -f; f^2; 10*f; f*F!3;
+f div g; f mod g; Quotrem(f, g);
+GCD(f*g, g*(x+1)); LCM(x^2-1, x-1); GCD(R!0, R!0); GCD(x, 3);
+Factorization(f*g); Factorization(x^7 - x); Factorization(3*x^2 + 3);
+Roots(x^7 - x); Roots(f);
+IsIrreducible(f); IsIrreducible(x^2+1); IsIrreducible(x^2+x+3); IsIrreducible(R!3);
+Degree(f); Degree(R!0); LeadingCoefficient(g); Coefficients(f); Coefficients(R!0); Coefficient(f, 1); Coefficient(f, 9);
+Evaluate(f, 3); Evaluate(f, F!3); Derivative(f); Derivative(f, 2); Evaluate(f, x + 1);
+f eq x^3 + 2*x - 2; x eq 1; IsZero(f - f); R!0; R!5; R![1,2,3]; R!x; R!(F!3); Parent(R!3);
+x / 2; x + 1/2; x^7; (x+1)^7; Factorization(R!3); Roots(R!3);
+x in R; 3 in R; Type(R); x eq R.1; R eq PolynomialRing(GF(7)); Characteristic(R);
+<x, 1>; [x, x^2];
+s := [x, 1]; s; Type(s[2]); s2 := [x]; Append(~s2, 3); Type(s2[2]); s2;
+[R | 1, 2]; Type([R | 1, 2][1]); x in [x, x^2]; Index([x, x^2], x^2); Derivative(x^5 + x, 10^9);
+x^3000 + 1 eq (x^1500)^2 + 1; Degree((3*x^2)^20000);
+K<w> := GF(9); S<y> := PolynomialRing(K);
+h := y^2 + w*y + w^3; h; Factorization(h); Roots(y^2 - w); IsIrreducible(h);
+h^3; Evaluate(h, w); Coefficients(h); Parent(h);
+Factorization(y^9 - y); Roots(y^9 - y); Factorization(y^4 - w);
+P := PolynomialRing(GF(5)); P; t := P.1; t^2 + 1; Factorization(t^4 - 1);
+L := GF(4); Q := PolynomialRing(L); Q.1^2 + L.1;
+M<u> := GF(8); T<z> := PolynomialRing(M); Factorization(z^8 - z); Roots(z^3 + z + 1);
+E<a> := GF(1031, 2); U<v> := PolynomialRing(E);
+k := (a + 1)*v^2 + 2*a*v + 5; k; -k; a*v; (a+3)*v; v + a + 1;
+R<x> := PolynomialRing(GF(7)); (x + 3)^40; <(x + 3)^30, 1>;
+// one ring for each field: naming it again renames it
+R2<t> := PolynomialRing(GF(7)); x; R eq R2; x + t; Parent(x);
+// AssignNames: a procedure, reached by any name
+K9<w> := GF(9); P9<z> := PolynomialRing(K9); an := AssignNames; an(~P9, ["u"]); z; P9;
+AssignNames := func< a, b | a + b >; AssignNames(2, 3);
+"end";
