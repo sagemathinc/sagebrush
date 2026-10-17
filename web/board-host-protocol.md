@@ -203,7 +203,9 @@ most 64 KiB and nested at most 4 deep, `name` and `revision` those posted on
 the channel, `page` a page of that board, `item` a question of that page
 with a `decide` that `sagebrush board check` accepts. **The question and its
 options come from the board posted on that channel, never from the
-message.** Only `note` is the frame's. Sagebrush provides this check as
+message.** Only `note` is the frame's. A host that can no longer read the exact board it
+posted (for example, one pinned by its SHA-256) refuses: it never decides
+against another version. Sagebrush provides this check as
 `decideRequest(posted, message)` in `sagebrush-board/submission`. It returns
 `{ ok: true, request: { id, name, revision, page, item, prompt, options, answer } }`,
 where `prompt` is the question's title and text (Markdown), `options` is
