@@ -168,3 +168,16 @@ show('hash', lambda: hash([1]))
 show('dict user TypeError', lambda: {BadHash(): 1})
 show('dict user ValueError', lambda: {BadHash2(): 1})
 show('set user TypeError', lambda: {BadHash()})
+import pickle
+class S:
+    __slots__ = ("a", "b")
+class D(S):
+    pass
+s = S(); s.a = 1
+d = D(); d.a = 2; d.x = 3
+print(s.__getstate__(), d.__getstate__(), S().__getstate__())
+r = pickle.loads(pickle.dumps(s)); print(r.a, hasattr(r, "b"))
+r = pickle.loads(pickle.dumps(d, 4)); print(r.a, r.x)
+print(pickle.dumps(s, 4).hex())
+try: s.__reduce_ex__(1)
+except TypeError as e: print(e)

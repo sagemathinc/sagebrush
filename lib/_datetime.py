@@ -10,3 +10,13 @@ for _c in (date, datetime, time, timedelta, timezone, tzinfo):
     _c.__module__ = "datetime"
     _pyjs_types.c_name(_c, "datetime." + _c.__name__)
 del _c
+
+
+# (a timezone reduces as the C type's: its constructor's arguments, no
+# state; _pydatetime's tzinfo.__reduce__ would add its __slots__' values)
+def _timezone_reduce(self):
+    return (type(self), self.__getinitargs__())
+
+
+timezone.__reduce__ = _timezone_reduce
+del _timezone_reduce
