@@ -290,16 +290,23 @@ test("a copy of a value that shares its parts is admitted before it is made: x :
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
+  // (only the refusal is timed, the point of the test: about 9.5 s on the
+  // test VMs, 3 s of it starting up; GitHub's runners have taken 2.4 times
+  // as long, so 40 s leaves headroom. Without the admission the doubled
+  // value exhausts the 96 MiB heap or reaches the 60 s spawn timeout)
   const t0 = Date.now();
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: "x := 1; for i in [1..40] do x := [x, x]; end for;\n1;\n", encoding: "utf8", timeout: 60000 });
+  const took = Date.now() - t0;
   assert.equal(r.signal, null, r.stderr);
   assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
   assert.match(r.stdout, /\n1\n$/);
+  assert.ok(took < 40000, `${took} ms`);
   // (a value of 40000 sequences is copied as before; at the default heap,
-  // since each copy of it costs tens of megabytes)
-  const c = spawnSync(process.execPath, [cli, "--magma"], { input: "y := [ [i, i^2] : i in [1..40000] ]; z := y; #z;\n", encoding: "utf8", timeout: 60000 });
+  // since each copy of it costs tens of megabytes; untimed, under its own
+  // spawn timeout only)
+  const c = spawnSync(process.execPath, [cli, "--magma"], { input: "y := [ [i, i^2] : i in [1..40000] ]; z := y; #z;\n", encoding: "utf8", timeout: 120000 });
+  assert.equal(c.signal, null, c.stderr);
   assert.equal(c.stdout, "40000\n", c.stderr);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
 });
 
 test("records nested deep or sharing their parts are bounded when copied too (HARD-319-1)", () => {
