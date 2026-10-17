@@ -29,10 +29,25 @@ test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never r
     "np.array([2**53], np.uint64) + np.array([1], np.uint64)", "(lambda a: a.__setitem__(0, 2**53 + 1))(np.zeros(3, dtype=np.int64))",
     "(lambda a: a.__setitem__(slice(None), 2**53 + 1))(np.zeros(3, dtype=np.int64))", "np.full(2, 2**53 + 1)", "np.full(2, 2**53 + 1, dtype=np.int64)",
     "np.arange(2**53, 2**53 + 4)", "np.array([2**53]) == np.int64(2**53 + 1)", "np.array([0]) + np.int64(2**53 + 1)",
-    "-np.array([1], np.uint64)", "np.array([type('I', (), {'__int__': lambda s: 2**53 + 1, '__float__': lambda s: 2.0**53})()], dtype=np.int64)",
+    "-np.array([1], np.uint64)", "np.array([type('B', (), {'__int__': lambda s: 2**53 + 1, '__index__': lambda s: 7})()], dtype=np.int64)", "np.array([type('I', (), {'__int__': lambda s: 2**53 + 1, '__float__': lambda s: 2.0**53})()], dtype=np.int64)",
   ];
   const src = "import numpy as np\n" + cases.map((c) => `try:\n    print(repr(${c}))\nexcept NotImplementedError as e:\n    print(type(e).__name__, e)`).join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" }).trimEnd().split("\n");
   assert.equal(out.length, cases.length);
   out.forEach((l, i) => assert.match(l, /^NotImplementedError u?int64 values beyond 2\*\*53 are not supported yet$/, cases[i]));
+});
+
+// (astra CORR-1B4-2: a float32 product over several axes of a view whose
+// order NumPy's iterator chooses (reordered axes, flipped strides) is
+// refused, never a product in another order)
+test("a float32 product NumPy orders by its iterator is refused", () => {
+  const src = `import numpy as np
+c = np.array([1e-30, 1e30, 1e30, 1e-30, 1, 1e-30, 1e30, 1, 1e-30, 1e30, 1, 1], np.float32).reshape(2, 3, 2)
+for f in (lambda: np.prod(c[::-1]), lambda: np.prod(c[::-1], axis=(0, 1)), lambda: np.prod(c[:, ::-1], keepdims=True), lambda: np.prod(c[:, ::-1], initial=1e30), lambda: np.prod(c.T), lambda: np.prod(c, axis=(0, 2)), lambda: np.prod(np.asfortranarray(c))):
+    try:
+        print(f())
+    except NotImplementedError as e:
+        print(type(e).__name__, "several axes" in str(e))`;
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" }).trimEnd().split("\n");
+  assert.deepEqual(out, Array(7).fill("NotImplementedError True"));
 });

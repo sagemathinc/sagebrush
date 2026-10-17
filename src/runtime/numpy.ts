@@ -647,13 +647,18 @@ function admitWide(v: any, dt: DType): number {
     return BigInt(n) === v ? n : wideRefuse(dt);
   }
   if (v instanceof Obj.FloatBox) return castNum(dt, v.v);
+  // (an int subclass by its own __int__ if it overrides int's, as NumPy
+  // converts it; a NumPy scalar or another subclass by its value)
+  const t = Obj.typeOf(v);
+  const ownInt = Obj.lookupType(t, "__int__");
+  if (Obj.isinstance(v, T.int) && ownInt !== undefined && ownInt !== T.int.$dict.get("__int__")) return admitWide(Ty.intCall(v), dt);
   const u = Obj.unbox(v);
   if (u !== v) return admitWide(u, dt);
   if (v !== null && typeof v === "object" && v.$npscalar !== undefined) return admitWide(v.$npscalar, dt);
   if (v instanceof PyComplex) raise(T.TypeError, "can't convert complex to float");
-  for (const name of ["__index__", "__int__"]) {
-    if (Obj.lookupType(Obj.typeOf(v), name) !== undefined) return admitWide(name === "__index__" ? O.index(v) : Ty.intCall(v), dt);
-  }
+  // (another object as int() converts it, NumPy's order: __int__, then
+  // __index__, then a float)
+  if (ownInt !== undefined || Obj.lookupType(t, "__index__") !== undefined) return admitWide(Ty.intCall(v), dt);
   const f = Ty.floatCallSafe(v);
   if (f === undefined) return raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(v)}'`);
   return castNum(dt, f);
@@ -1789,15 +1794,16 @@ function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   const outShape = keep.map((i) => a.shape[i]);
   const out = empty(outShape, rt);
-  // (the reduced axes outermost-first by stride; a negative one reversed)
-  let off = a.offset;
-  const red = ax.map((i) => ({ n: a.shape[i], st: a.strides[i] }));
-  for (const r of red) if (r.st < 0 && r.n > 0) {
-    off += r.st * (r.n - 1);
-    r.st = -r.st;
+  // (the reduced elements in their logical order: NumPy's inner loop over
+  // one axis, and its order for a C-contiguous array reduced whole; a
+  // float32 product over several axes of another layout follows NumPy's
+  // iterator, which reorders axes, flips strides and buffers: refused,
+  // never a product in another order)
+  const off = a.offset;
+  const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
+  if ((rt === D.float32 || rt.name === "float16") && rshape.filter((n) => n > 1).length > 1 && !(ax.length === nd && a.isC())) {
+    raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`);
   }
-  red.sort((p, q) => q.st - p.st);
-  const rshape = red.map((r) => r.n), rst = red.map((r) => r.st);
   const mul = mulIn(rt, "prod");
   const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
   const d = a.data, od = out.data;
