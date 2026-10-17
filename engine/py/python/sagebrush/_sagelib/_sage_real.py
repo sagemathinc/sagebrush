@@ -2771,8 +2771,9 @@ def _cpow(x, y):
     """x ** y for Python floats as Sage computes it: 0.0 to -infinity is
     +infinity (Python raises ZeroDivisionError), to a finite negative power
     ZeroDivisionError "zero to a negative power"; -infinity to a power is
-    real (C's pow), an overflow an infinity; a negative finite base to a
-    fractional power is Python's complex number, as in Sage."""
+    real (C's pow); a finite overflow raises OverflowError, and a negative
+    finite base to a fractional power is Python's complex number, as in
+    Sage."""
     inf = float("inf")
     # (y an odd integer: the sign of a negative base survives)
     odd = -inf < y < inf and y == math.floor(y) and math.fmod(y, 2) != 0
@@ -2787,8 +2788,8 @@ def _cpow(x, y):
         if y > -inf:
             raise ZeroDivisionError("zero to a negative power") from None
         return inf
-    except OverflowError:
-        return -inf if x < 0 and odd else inf
+    # (a finite result past the doubles raises OverflowError, as in Sage:
+    # CORR-FAB-1)
 
 
 def _arith(a, b, op, R):

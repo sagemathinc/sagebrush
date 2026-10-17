@@ -505,3 +505,15 @@ explicitly coerced control => 1 Real Field with 30 bits of precision
 (52, 'RDF', '1^inf') => 1.00000000000000 Real Field with 52 bits of precision
 (52, 'RDF', '1^nan') => 1.00000000000000 Real Field with 52 bits of precision
 (52, 'RDF(-inf)^2') => +infinity Real Field with 52 bits of precision
+54 R(1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+54 1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+54 R(-1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+54 -1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+54 R(1e200)^-inf -> 0.0 float
+54 R(-inf)^3.0 -> -inf float
+100 R(1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+100 1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+100 R(-1e200)^3.0 !! OverflowError (34, 'Numerical result out of range')
+100 -1e200^R(3) !! OverflowError (34, 'Numerical result out of range')
+100 R(1e200)^-inf -> 0.0 float
+100 R(-inf)^3.0 -> -inf float
