@@ -1051,6 +1051,17 @@ test("polynomials over a finite field refuse what Magma refuses, in its words, a
     // the procedure is reached: checked as the call is made, CORR-53E-1)
     ["AssignNames(~R, <\"t\">);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, Tup"],
     ["AssignNames(~R, 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, RngIntElt"],
+    // (the generic checks mark references too; types before lengths)
+    ["AssignNames(~R, \"t\");", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, MonStgElt"],
+    ["AssignNames(~R, true);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, BoolElt"],
+    ["AssignNames(~R, [\"t\"], 1);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt], RngIntElt"],
+    ["AssignNames(~R, [1, 2]);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[RngIntElt]"],
+    ["AssignNames(~R);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~"],
+    ["Gcd([RngIntElt]);", "'Gcd'", "Bad argument types\nArgument types given: SeqEnum[Cat]"],
+    ["Gcd(RngIntElt);", "'Gcd'", "Bad argument types\nArgument types given: Cat[RngIntElt]"],
+    ["Gcd(5);", "'Gcd'", "Bad argument types\nArgument types given: RngIntElt"],
+    ["Gcd([1, 2], 3);", "'Gcd'", "Bad argument types\nArgument types given: SeqEnum[RngIntElt], RngIntElt"],
+    ["Lcm([RngIntElt]);", "'Lcm'", "Bad argument types\nArgument types given: SeqEnum[Cat]"],
     ["AssignNames(~R, {\"t\"});", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SetEnum[MonStgElt]"],
     ["names := [\"t\"]; AssignNames(R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin], SeqEnum[MonStgElt] ~"],
     ["AssignNames(~R, ~names);", "'AssignNames'", "Bad argument types\nArgument types given: RngUPol[FldFin] ~, SeqEnum[MonStgElt] ~"],
