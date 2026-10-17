@@ -14,6 +14,7 @@
 
 import type { Board } from "./board";
 import type { BoardDoc, DocGroup, DocNote } from "./doc";
+import { docHead, entryExamples, searchIndex, type DocEntry } from "../docsearch";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
 import { icon } from "./icons";
@@ -32,6 +33,10 @@ export interface InPlaceHost {
   run(id: string): void;
   /** the board's code highlighter (its language), once the notebook is loaded */
   highlight(id: string): ((src: string) => string) | null;
+  /** Tab's completions of the code before the caret, in a language (none: Tab indents) */
+  complete(mode: string, before: string): Promise<{ matches: string[]; prefix: string } | null>;
+  /** the function search's index of a language; none: no search box */
+  docs: ((lang: string) => Promise<DocEntry[] | null>) | null;
   images: ImageStore | null;
 }
 
@@ -220,9 +225,16 @@ export class InPlace {
     const fallback = (s: string) => (lang === "python" || lang === "sage" ? highlightPython(s, lang === "sage") : esc(s));
     const paint = () => { pre.innerHTML = (this.host.highlight(this.id) ?? fallback)(ta.value); };
     ta.addEventListener("input", paint);
+    ta.addEventListener("input", () => this.refilter());
+    ta.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== ta) this.closeCompleter(); }, 150));
     ta.addEventListener("keydown", (e) => {
+      // (the completions listed: ↑/↓ choose, Tab or Enter take one, Esc closes the list, not the item)
+      if (this.comp && this.completerKey(e)) return;
       if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
+        // (after a name or obj.: its completions, as the notebook's Tab; else indent)
+        const s0 = ta.selectionStart, before = ta.value.slice(ta.value.lastIndexOf("\n", s0 - 1) + 1, s0);
+        if (ta.selectionEnd === s0 && /[\w.]$/.test(before)) { void this.tabComplete(ta, before); return; }
         ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end");
         ta.dispatchEvent(new Event("input"));
       } else if (e.key === "Enter" && e.shiftKey) {
@@ -236,6 +248,106 @@ export class InPlace {
     this.code = ta;
     return (this.codePart = part);
   }
+  // ---- Tab completion, as the notebook's (web/notebook/notebook.js): the
+  // interpreter of the code's language completes the name before the caret;
+  // one match, or a longer common prefix, is inserted; several are listed at
+  // the caret, filtered as one types.
+  // (`matches`: the ones listed, at most SHOWN of those that fit what is
+  // typed, `more` the rest: what ↑/↓, Enter and a press choose among is
+  // what is shown, astra's UI-7A6-1)
+  private comp: { ta: HTMLTextAreaElement; start: number; all: string[]; matches: string[]; more: number; sel: number; dot: number } | null = null;
+  private completer: HTMLUListElement | null = null;
+  private async tabComplete(ta: HTMLTextAreaElement, before: string) {
+    const value = ta.value, pos = ta.selectionStart;
+    const m = await this.host.complete(this.language(), before);
+    // (stale: the code or the caret moved meanwhile, or the item was left)
+    if (this.ended || ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta || !m?.matches.length) return;
+    let common = m.matches[0];
+    for (const x of m.matches) while (!x.startsWith(common)) common = common.slice(0, -1);
+    if (common.length > m.prefix.length) insertText(ta, common.slice(m.prefix.length));
+    if (m.matches.length > 1) {
+      this.comp = { ta, start: pos - m.prefix.length, all: m.matches, matches: m.matches.slice(0, SHOWN), more: Math.max(0, m.matches.length - SHOWN), sel: 0, dot: m.prefix.lastIndexOf(".") };
+      this.showCompleter();
+    }
+  }
+  private showCompleter() {
+    const c = this.comp!;
+    const word = c.ta.value.slice(c.start, c.ta.selectionStart), dot = word.lastIndexOf(".") + 1;
+    let ul = this.completer;
+    if (!ul) {
+      ul = this.completer = document.createElement("ul");
+      ul.className = "be-completer sbb-layer";
+      ul.setAttribute("role", "listbox");
+      ul.setAttribute("aria-label", "Completions");
+      // (a press on one takes it; the focus stays in the code)
+      ul.addEventListener("mousedown", (e) => {
+        const li = (e.target as Element).closest("li");
+        e.preventDefault();
+        if (li?.getAttribute("role") === "option") this.acceptCompletion([...ul!.children].indexOf(li));
+      });
+      document.body.append(ul);
+    }
+    ul.replaceChildren(...c.matches.map((m, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.id = `be-comp-${i}`;
+      li.setAttribute("aria-selected", String(i === c.sel));
+      li.textContent = m.slice(dot);
+      return li;
+    }));
+    if (c.more) {
+      const li = document.createElement("li");
+      li.className = "be-comp-more";
+      li.setAttribute("role", "presentation");
+      li.textContent = `${c.more} more: type to narrow`;
+      ul.append(li);
+    }
+    ul.hidden = false;
+    c.ta.setAttribute("aria-activedescendant", `be-comp-${c.sel}`);
+    const r = caretRect(c.ta);
+    ul.style.left = `${Math.max(4, Math.min(r.left, innerWidth - ul.offsetWidth - 4))}px`;
+    ul.style.top = `${r.bottom + 2}px`;
+    ul.children[c.sel]?.scrollIntoView({ block: "nearest" });
+  }
+  private closeCompleter() {
+    this.comp?.ta.removeAttribute("aria-activedescendant");
+    this.comp = null;
+    if (this.completer) this.completer.hidden = true;
+  }
+  private acceptCompletion(i = this.comp?.sel ?? 0) {
+    const c = this.comp;
+    if (!c) return;
+    const word = c.ta.value.slice(c.start, c.ta.selectionStart), m = c.matches[i];
+    this.closeCompleter();
+    if (m?.startsWith(word)) insertText(c.ta, m.slice(word.length));
+  }
+  // (the list as the word before the caret changes)
+  private refilter() {
+    const c = this.comp;
+    if (!c) return;
+    const word = c.ta.value.slice(c.start, c.ta.selectionStart);
+    if (c.ta.selectionStart < c.start || !/^[\w.]*$/.test(word) || word.lastIndexOf(".") !== c.dot) return this.closeCompleter();
+    const fit = c.all.filter((m) => m.startsWith(word));
+    if (!fit.length) return this.closeCompleter();
+    c.matches = fit.slice(0, SHOWN);
+    c.more = fit.length - c.matches.length;
+    c.sel = Math.min(c.sel, c.matches.length - 1);
+    this.showCompleter();
+  }
+  // (a key while the list shows: true if it was the list's)
+  private completerKey(e: KeyboardEvent): boolean {
+    const c = this.comp!;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      c.sel = (c.sel + (e.key === "ArrowDown" ? 1 : c.matches.length - 1)) % c.matches.length;
+      this.showCompleter();
+    } else if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey) this.acceptCompletion();
+    else if (e.key === "Escape") this.closeCompleter();
+    else return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
   private detailField(src: string): HTMLElement {
     this.detail = area("be-detail", src, "Detail, shown when zoomed in (Markdown)");
     const f = markdownField(this.detail);
@@ -280,6 +392,7 @@ export class InPlace {
       );
     }
     b.append(sw, tool("ip-delete", "Delete", "trash", () => this.del()));
+    if (!this.group && this.host.docs) b.append(this.docSearch(this.host.docs));
     // (a press on the toolbar leaves the focus, and the keyboard, where they are)
     b.addEventListener("mousedown", (e) => { if ((e.target as Element).closest("button")) e.preventDefault(); });
     document.body.append(b);
@@ -308,12 +421,165 @@ export class InPlace {
       q(".ip-detail")!.hidden = !!this.detail;
       q(".ip-link")!.hidden = !!this.ref;
       q(".ip-image")!.title = this.pic ? "Another picture" : "Add a picture";
+      const ds = q(".ip-docs");
+      if (ds) ds.hidden = !this.hasCode;
     }
     const s = q(".ip-swatch")!;
     s.style.background = this.color ?? "";
     s.classList.toggle("none", !this.color);
     if (this.color) this.el.style.setProperty("--c", this.color);
     else this.el.style.removeProperty("--c");
+  }
+
+  // The function search, as the notebook's (William: while a code item is
+  // edited): the functions of its language, by name or what they do; one
+  // chosen shows its documentation, and its examples can go into the code.
+  private docPanel: HTMLElement | null = null;
+  private docSearch(docs: (lang: string) => Promise<DocEntry[] | null>): HTMLElement {
+    const box = document.createElement("span");
+    box.className = "ip-docs";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "ip-docs-q";
+    input.placeholder = "Search functions";
+    input.setAttribute("aria-label", "Search the functions of the code's language");
+    input.setAttribute("autocomplete", "off");
+    input.spellcheck = false;
+    const list = document.createElement("ul");
+    list.className = "ip-docs-list";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+    input.maxLength = 200;
+    let found: DocEntry[] = [], sel = 0, loading = false;
+    const mark = () => [...list.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === sel)));
+    const note = (s: string) => { found = []; list.replaceChildren(Object.assign(document.createElement("li"), { className: "ip-docs-note", textContent: s })); list.hidden = false; };
+    // (one index load waited on at a time, whatever is typed meanwhile; when
+    // it comes, what the box holds then is searched, if the box is still
+    // being used: nothing typed meanwhile is kept, and a search that Esc
+    // emptied, or whose box was left, shows nothing; astra's CORR-7A6-2,
+    // daybreak2's HARD-BEC-1)
+    const search = async () => {
+      if (!input.value.trim()) { list.hidden = true; found = []; return; }
+      if (loading) return;
+      loading = true;
+      // (how many index loads it has waited on, said for its tests)
+      box.dataset.loads = String(Number(box.dataset.loads ?? 0) + 1);
+      let idx: DocEntry[] | null = null;
+      try { idx = await docs(this.language()); } catch { idx = null; } finally { loading = false; }
+      const q = input.value.trim();
+      if (this.ended || !q || document.activeElement !== input) return;
+      if (!idx) return note(`No function search for ${LANGUAGES[this.language()] ?? this.language()} here`);
+      found = searchIndex(idx, q, 12);
+      if (!found.length) return note("No function matches");
+      sel = 0;
+      list.replaceChildren(...found.map((e) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        const h = document.createElement("code");
+        h.textContent = docHead(e);
+        const s = document.createElement("span");
+        s.textContent = e.summary ?? "";
+        li.append(h, s);
+        return li;
+      }));
+      mark();
+      list.hidden = false;
+    };
+    input.addEventListener("input", () => void search());
+    input.addEventListener("keydown", (e) => {
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && found.length) {
+        e.preventDefault();
+        sel = (sel + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length;
+        mark();
+        list.children[sel]?.scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter" && found[sel]) {
+        e.preventDefault();
+        this.openDoc(found[sel]);
+      } else if (e.key === "Escape" && (!list.hidden || input.value)) {
+        // (Esc empties the search first; again, it leaves the item)
+        e.preventDefault();
+        e.stopPropagation();
+        input.value = "";
+        list.hidden = true;
+        found = [];
+      }
+    });
+    input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) list.hidden = true; }, 150));
+    input.addEventListener("focus", () => { if (found.length) list.hidden = false; else if (input.value.trim()) void search(); });
+    list.addEventListener("mousedown", (e) => {
+      const li = (e.target as Element).closest("li");
+      const i = li ? [...list.children].indexOf(li) : -1;
+      e.preventDefault();
+      if (found[i]) this.openDoc(found[i]);
+    });
+    box.append(input, list);
+    return box;
+  }
+  // A function's documentation, under the toolbar.
+  private openDoc(e: DocEntry) {
+    this.docPanel?.remove();
+    const p = (this.docPanel = document.createElement("div"));
+    p.className = "ip-doc";
+    p.setAttribute("role", "dialog");
+    p.setAttribute("aria-label", docHead(e));
+    const h = document.createElement("code");
+    h.className = "ip-doc-head";
+    h.textContent = docHead(e);
+    const body = document.createElement("pre");
+    body.className = "ip-doc-body";
+    body.textContent = e.doc || e.summary || "";
+    const ex = entryExamples(e), row = document.createElement("div");
+    row.className = "ip-doc-row";
+    if (ex) {
+      const ins = document.createElement("button");
+      ins.type = "button";
+      ins.className = "ip-doc-insert";
+      ins.textContent = "Insert its examples";
+      ins.onclick = () => this.insertCode(ex);
+      row.append(ins);
+    }
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "ip-doc-close";
+    x.textContent = "Close";
+    x.onclick = () => this.closeDoc();
+    row.append(x);
+    p.append(h, body, row);
+    p.addEventListener("keydown", (k) => { if (k.key === "Escape") { k.preventDefault(); k.stopPropagation(); this.closeDoc(); } });
+    this.bar.querySelector<HTMLElement>(".ip-docs-list")!.hidden = true;
+    this.bar.append(p);
+    this.placeDoc();
+  }
+  // (beside the item, where there is room, so that the code stays in view; else under the toolbar)
+  private placeDoc() {
+    const p = this.docPanel;
+    if (!p) return;
+    p.style.width = "";
+    const r = this.el.getBoundingClientRect(), b = this.bar.getBoundingClientRect();
+    // (on the side with more room, narrower if it must be, down to 300 px)
+    const right = innerWidth - r.right - 20, left = r.left - 20, w = Math.min(p.offsetWidth, Math.max(right, left));
+    const x = w < 300 ? null : right >= left ? r.right + 12 : r.left - 12 - w;
+    if (x === null) { p.style.left = p.style.top = ""; p.style.right = "0"; return; }
+    p.style.width = `${w}px`;
+    p.style.right = "auto";
+    p.style.left = `${x - b.left}px`;
+    p.style.top = `${Math.max(clearTop(), Math.min(r.top, innerHeight - p.offsetHeight - 8)) - b.top}px`;
+  }
+  private closeDoc() {
+    this.docPanel?.remove();
+    this.docPanel = null;
+    if (!this.ended) this.code?.focus({ preventScroll: true });
+  }
+  // (code put in at the caret, on lines of its own: one undo step of the field)
+  private insertCode(src: string) {
+    const ta = this.code;
+    if (!ta || this.ended) return;
+    if (this.hideCode) this.toggleCode();
+    ta.focus({ preventScroll: true });
+    const k = ta.selectionStart, v = ta.value;
+    const pre = k > 0 && v[k - 1] !== "\n" ? "\n" : "", post = k < v.length && v[k] !== "\n" ? "\n" : "";
+    insertText(ta, pre + src.replace(/\s+$/, "") + post);
+    this.closeDoc();
   }
 
   private addPart(k: "title" | "text" | "code" | "detail" | "ref") {
@@ -417,7 +683,7 @@ export class InPlace {
     // leaving: a press anywhere else (or Esc)
     on(document, "pointerdown", (e: PointerEvent) => {
       const t = e.target as Element;
-      if (this.el.contains(t) || this.bar.contains(t) || t.closest?.(".sb-fileinput")) return;
+      if (this.el.contains(t) || this.bar.contains(t) || this.completer?.contains(t) || t.closest?.(".sb-fileinput")) return;
       // (its grip drags it, still being written, William's B2)
       if (this.host.board.gripAt(e.clientX, e.clientY, e.pointerType === "touch") === this.id) return;
       this.end();
@@ -474,6 +740,7 @@ export class InPlace {
     if (top < top0) top = r.bottom + 8 + bh <= innerHeight ? r.bottom + 8 : top0;
     b.style.top = Math.round(Math.min(top, innerHeight - bh - 8)) + "px";
     b.style.left = Math.round(Math.max(8, Math.min(innerWidth - bw - 8, r.left))) + "px";
+    this.placeDoc();
   }
 
   // Room for the toolbar above the item or below it, so that it covers
@@ -568,6 +835,7 @@ export class InPlace {
     for (const f of this.off) f();
     this.off = [];
     this.bar.remove();
+    this.completer?.remove();
     for (const ta of this.el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea, input")) ta.readOnly = true;
   }
   // (its element is built again from the document)
@@ -580,6 +848,8 @@ export class InPlace {
 // Where the board is clear of the top bar and the Edit toolbar (page coordinates).
 const clearTop = () => Math.max(48, document.querySelector(".board-toolbar:not([hidden])")?.getBoundingClientRect().bottom ?? 0) + 6;
 
+// (the completions listed at most: the notebook's 500)
+const SHOWN = 500;
 const LANGUAGES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
@@ -590,6 +860,37 @@ function area(cls: string, value: string, placeholder: string) {
   ta.value = value;
   ta.placeholder = placeholder;
   return ta;
+}
+
+// Text put in a field as typed (the field's own undo keeps it).
+function insertText(ta: HTMLTextAreaElement, s: string) {
+  ta.focus({ preventScroll: true });
+  if (!document.execCommand("insertText", false, s)) {
+    ta.setRangeText(s, ta.selectionStart, ta.selectionEnd, "end");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+// The caret of a highlighted field, on the page: in its highlighted copy, laid out as its text is.
+function caretRect(ta: HTMLTextAreaElement): { left: number; bottom: number } {
+  const pre = ta.previousElementSibling, k = ta.selectionStart;
+  const fall = ta.getBoundingClientRect();
+  if (!(pre instanceof HTMLPreElement)) return { left: fall.left, bottom: fall.bottom };
+  const walk = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+  let n = 0;
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+    const len = t.textContent!.length;
+    if (n + len >= k) {
+      const r = document.createRange();
+      r.setStart(t, k - n);
+      r.collapse(true);
+      const b = r.getClientRects()[0] ?? r.getBoundingClientRect();
+      if (b && (b.left || b.bottom)) return { left: b.left, bottom: b.bottom };
+      break;
+    }
+    n += len;
+  }
+  return { left: fall.left, bottom: fall.bottom };
 }
 
 function button(cls: string, label: string) {

@@ -149,6 +149,10 @@ export class BoardCodes {
   generation(id: string): number {
     return this.of(id)?.generation(id) ?? 0;
   }
+  /** Tab's completions for code in `mode` (its interpreter's, if it runs: none is started for it) */
+  complete(mode: BoardMode, before: string): Promise<{ matches: string[]; prefix: string } | null> {
+    return this.engine(mode, false)?.complete(before) ?? Promise.resolve(null);
+  }
   /** a code item's code, highlighted in its language */
   highlight(src: string, id: string): string | null {
     const e = this.of(id) ?? [...this.engines.values()][0];

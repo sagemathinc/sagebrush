@@ -102,9 +102,11 @@ test("Magma 2.18 prints the same for every example but the listed ones", () => {
 
 test("the index carries each example, and the search box's Insert takes its input", () => {
   const index = JSON.parse(spawnSync(process.execPath, [cli, "-m", "_magma_docsearch", "--index"], { encoding: "utf8" }).stdout);
-  // docExamples from web/index.html, as the page runs it
-  const html = readFileSync(join(root, "web", "index.html"), "utf8");
-  const src = /^function docExamples\(doc, lang\) \{[\s\S]*?^\}/m.exec(html)![0];
+  // docExamples from web/docsearch.ts, which the notebook page and the
+  // board's code editor share, as they run it (its types taken off)
+  const ts = readFileSync(join(root, "web", "docsearch.ts"), "utf8");
+  const src = /^export function docExamples\(doc: string, lang: string\): string \{[\s\S]*?^\}/m.exec(ts)![0]
+    .replace(/^export function docExamples\(doc: string, lang: string\): string/, "function docExamples(doc, lang)").replace(/: string\[\]/g, "");
   const docExamples = new Function(`${src}; return docExamples;`)() as (doc: string, lang: string) => string;
   for (const e of index) {
     const lines = inputs(examples[e.key ?? e.name]);

@@ -381,6 +381,7 @@
 // and tools for agents.  web/build.ts bundles it, with web/notebook, into one
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
+import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
@@ -1657,46 +1658,21 @@ addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventD
 // as Sagebrush has them (docs-index-python.json, lib/_python_docsearch.py).
 // Ranked as lib/_pyjs_docsearch.py ranks: every word must match; the name
 // counts most.  A language without an index says so.
-const DOC_INDEX = { sage: "docs-index.json", python: "docs-index-python.json", matlab: "docs-index-matlab.json", magma: "docs-index-magma.json" };
+// (the indexes, their ranking and their examples: web/docsearch.ts, shared with the board's code editor)
 const docIndexes = {};
 function loadDocIndex(lang = nb.mode) {
   if (!DOC_INDEX[lang]) return Promise.resolve(null);
-  docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => d.map((e) => ({
-    // (a catalog entry's aliases are names of it too: catalog/SCHEMA.md)
-    ...e, lang, _name: [e.name, ...(e.aliases ?? [])].join(" ").toLowerCase(), _words: new Set([e.name, ...(e.aliases ?? [])].flatMap(docWords)),
-    _lasts: [e.name, ...(e.aliases ?? [])].map((n) => n.toLowerCase().split(".").at(-1)), _sum: e.summary.toLowerCase(), _doc: e.doc.toLowerCase(),
-    // (a count in the older indexes; the catalog's entries list their examples, catalog/SCHEMA.md)
-    _nex: Array.isArray(e.examples) ? e.examples.length : e.examples || 0,
-  }))).catch((e) => {
+  docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => prepareIndex(d, lang)).catch((e) => {
     // (offline, an index never used online isn't kept: the next search tries again)
     delete docIndexes[lang];
     throw e;
   });
   return docIndexes[lang];
 }
-const docWords = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-function docScore(e, words, phrase) {
-  let total = 0;
-  for (const w of words) {
-    if (e._words.has(w)) total += 10;
-    else if (e._name.includes(w)) total += 6;
-    else if (e._sum.includes(w)) total += 3;
-    else if (e._doc.includes(w)) total += 1;
-    else return 0;
-  }
-  if (e._lasts.includes(phrase) || e._lasts.includes(phrase.replaceAll(" ", "_"))) total += 20;
-  if (e.open_problem && words.includes("open")) total += 5;
-  return total;
-}
 async function searchDocs(query, limit = 20) {
-  const words = docWords(query);
-  if (!words.length) return [];
-  const phrase = query.trim().toLowerCase();
+  if (!docWords(query).length) return [];
   const idx = await loadDocIndex();
-  if (!idx) return null;
-  return idx.map((e) => [docScore(e, words, phrase), e]).filter(([s]) => s > 0)
-    .sort((a, b) => b[0] - a[0] || a[1].name.length - b[1].name.length || (a[1].name < b[1].name ? -1 : 1))
-    .slice(0, limit).map(([, e]) => e);
+  return idx ? searchIndex(idx, query, limit) : null;
 }
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
 // (the results under the search box, which is in the toolbar's middle: moved
@@ -1708,9 +1684,6 @@ function placeDocList() {
 }
 addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
 let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
-// (a signature that starts with "(" follows the name; any other, as MATLAB's
-// "M = max(A)", is a whole call form: catalog/SCHEMA.md; its first form here)
-const docHead = (e) => { const f = (e.signature || "").split("\n")[0]; return f && !f.startsWith("(") ? f : e.name + (f || (e.kind === "class" ? "" : "()")); };
 function showDocList() {
   docList.innerHTML = docHits.length
     ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
@@ -1784,34 +1757,12 @@ function openDoc(e) {
   $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();
 }
-// the sage: lines of a docstring (with their ....: continuations), as a cell;
-// for MATLAB's, the lines after its prompt, >> (lib/_matlab_docsearch.py);
-// for Magma's, the lines after its prompt, "> " (lib/_magma_docsearch.py)
-function docExamples(doc, lang) {
-  const out = [];
-  for (const line of doc.split("\n")) {
-    const t = line.trim();
-    if (lang === "matlab") {
-      if (line.startsWith(">> ")) out.push(line.slice(3));
-      continue;
-    }
-    if (lang === "magma") {
-      if (t.startsWith("> ")) out.push(t.slice(2));
-      continue;
-    }
-    if (t.startsWith("sage: ")) out.push(t.slice(6));
-    else if (t.startsWith("....: ")) out.push(t.slice(6));
-    else if (t === "....:") out.push("");
-  }
-  return out.join("\n");
-}
 $("#docclose").onclick = () => docDlg.close();
 $("#docinsert").onclick = () => {
   // (a catalog entry's examples are its own: catalog/SCHEMA.md; the older
   // indexes' are in the docstring)
   // (each with the imports it needs, its setup: it runs in a fresh notebook, CORR-012-1)
-  const setup = Array.isArray(docOpen?.examples) ? [...new Set(docOpen.examples.flatMap((x) => (x.setup || "").split("\n").filter(Boolean)))] : [];
-  const code = Array.isArray(docOpen?.examples) ? [...setup, ...(setup.length ? [""] : []), docOpen.examples.map((x) => x.code).join("\n\n")].join("\n") : docExamples(docOpen?.doc ?? "", docOpen?.lang);
+  const code = docOpen ? entryExamples(docOpen) : "";
   docDlg.close();
   if (!code || docOpen.lang !== nb.mode) return;
   const cell = nb.addCell(code, null, true);

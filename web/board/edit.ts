@@ -14,6 +14,7 @@ import { inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, type AskAnswer, type 
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
+import type { DocEntry } from "../docsearch";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -91,6 +92,10 @@ export class Editor {
   onRun: ((id: string) => void) | null = null;
   /** the code highlighter (HTML), once the notebook is loaded: code is written in the notebook's editor */
   highlight: ((id: string) => ((src: string) => string) | null) | null = null;
+  /** Tab's completions in a code item's language (mount.ts: its interpreter's) */
+  complete: ((mode: string, before: string) => Promise<{ matches: string[]; prefix: string } | null>) | null = null;
+  /** the function search's index of a language (the host's), or none */
+  docs: ((lang: string) => Promise<DocEntry[] | null>) | null = null;
   /** where pictures are kept (images.ts) */
   images: ImageStore | null = null;
   /** choose pictures to add (mount.ts): "Picture…" in the sticker picker, a note that is only a picture */
@@ -1041,6 +1046,8 @@ export class Editor {
       remove: (d, id) => remove(this.pg(d), id),
       run: (id) => this.onRun?.(id),
       highlight: (id) => this.highlight?.(id) ?? null,
+      complete: (mode, before) => this.complete?.(mode, before) ?? Promise.resolve(null),
+      docs: this.docs ? (lang) => this.docs!(lang) : null,
       get images() { return ed.images; },
     };
   }
