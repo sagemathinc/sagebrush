@@ -420,7 +420,7 @@ def _define_top(g, name, f):
 class MSeq(list):
     """A Magma sequence: 1-based, printed [ 1, 2, 3 ]."""
 
-    __slots__ = ("universe", "sample", "_inf", "_wit")
+    __slots__ = ("universe", "sample", "_inf", "_wit", "_null")
 
     def __init__(self, it=(), universe=None, sample=None):
         list.__init__(self, it)
@@ -474,7 +474,7 @@ class MRange:
 class MSet:
     """A Magma set (also indexed sets {@ @} and multisets {* *})."""
 
-    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf")
+    __slots__ = ("items", "keys", "kind", "universe", "range", "_inf", "_null")
 
     def __init__(self, it=(), kind="set", universe=None):
         self.items, self.keys, self.kind, self.universe, self.range = [], {}, kind, universe, None
@@ -726,6 +726,8 @@ def _seq(items, universe=None):
     t = MSeq(_as_inferred(items, inf), universe)
     if universe is None:
         t._inf = inf  # (Magma fixes it as the sequence is made)
+        if not items:
+            t._null = True  # (written empty, [] or an empty comprehension: no universe)
     return t
 
 
@@ -747,30 +749,36 @@ def _set_universe(items):
     return items
 
 
-def _set(items, universe=None):
+def _set(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "set")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
-def _iset(items, universe=None):
+def _iset(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "indexed")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
-def _mset(items, universe=None):
+def _mset(items, universe=None, derived=False):
     items = _into_universe(list(items), universe, "multi")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
     if universe is None:
         m._inf = inf
+        if not items and not derived:
+            m._null = True  # (written empty, {} or an empty comprehension: no universe)
     return m
 
 
@@ -1834,7 +1842,7 @@ class MMap:
     def __call__(self, x):
         if isinstance(x, MSet) and not _in(x, self.dom):
             # the image of a set of elements
-            return _set([self(y) for y in x.ordered()])
+            return _set([self(y) for y in x.ordered()], derived=True)
         if self.parts is not None:
             return self.parts[1](self.parts[0](x))
         if self.inverse_of is not None:
@@ -1955,7 +1963,7 @@ def Inverse(f):
 def Image(f):
     """The image of a map given by its graph."""
     if isinstance(f, MMap) and f.graph is not None:
-        return _set([b for _, b in f.graph])
+        return _set([b for _, b in f.graph], derived=True)
     raise MagmaError("Image of this map is not supported yet", "'Image'")
 
 
@@ -4539,7 +4547,9 @@ def _elt_type(s):
         return "FldRatElt"
     types = []
     for y in _iter(s):
-        t = _ext_type(y)
+        # (a category in a sequence is Cat, its own type Cat[RngIntElt]:
+        # SeqEnum[Cat], as Magma's)
+        t = "Cat" if isinstance(y, _Cat) else _ext_type(y)
         if t not in types:
             types.append(t)
     if not types:
@@ -4562,9 +4572,13 @@ def _bad_types(name, args, pos=None):
     if name.endswith(":="):
         # x +:= y: Magma doesn't list the types
         return MagmaError("Bad argument types", "'%s'" % name, True, pos)
+    # (an argument given by reference, f(~x), is marked "~", as Magma's:
+    # the procedure call being made is that intrinsic's, _refcall)
+    rc = _REFCALL[0]
+    refs = rc[1] if rc is not None and rc[0] is globals().get(name) else ()
     # (no arguments: "Argument types given:" ends the line, as Magma's)
     return MagmaError("Bad argument types\nArgument types given:" + "".join(
-        (", " if i else " ") + _ext_type(a) for i, a in enumerate(args)), "'%s'" % name, True, pos)
+        (", " if i else " ") + _ext_type(a) + (" ~" if i in refs else "") for i, a in enumerate(args)), "'%s'" % name, True, pos)
 
 
 # ------------------------------------------------------------------ signatures
@@ -4719,12 +4733,12 @@ def AssignNames(*args):
         raise bad()
     R, names = args
     if isinstance(R, _MFFPolyRing):
-        if not isinstance(names, MSeq):
+        # (a sequence of strings, then of one: [1, 2] is Bad argument types,
+        # ["t", "u"] and [] "must have length 1", as Magma's)
+        if not isinstance(names, MSeq) or any(not isinstance(c, str) or isinstance(c, _Cat) for c in names):
             raise bad()
         if len(names) != 1:
             raise _arg_error("AssignNames", "Argument 2 must have length 1")
-        if not isinstance(names[0], str) or isinstance(names[0], _Cat):
-            raise bad()
         return _assign_gen_names(R, [names[0]])
     return _assign_gen_names(R, names)
 
@@ -5475,12 +5489,43 @@ def IsPrimePower(n):
     return False
 
 
+def _null_int_collection(name, given):
+    """An empty collection given to Gcd or Lcm, as Magma's (checked against
+    Magma 2.18): of the integers (a range, a declared universe, one emptied)
+    its Gcd is 0 and Lcm 1; written empty with no universe ([], {}, an
+    empty comprehension) "Illegal null set/sequence"; over the rationals or
+    a finite field "GCD (LCM) not defined for field"; of polynomials
+    refused in words.  An empty one made otherwise (Setseq, Sort, join, ...,
+    which carry no universe here) is taken as the integers', as before."""
+    s = given[0]
+    if isinstance(s, MRange):
+        return
+    u, inf = getattr(s, "universe", None), getattr(s, "_inf", None)
+    if u is _ZZ or inf is _ZZ:
+        return
+    if u is None and getattr(s, "_null", False):
+        raise _arg_error(name, "Illegal null set/sequence")
+    if u is _QQ or inf is _QQ or isinstance(u, _MFinField):
+        raise _arg_error(name, "%s not defined for field" % name.upper())
+    if isinstance(u, (_sp.PolynomialRing_, _MFFPolyRing)):
+        raise MagmaError("%s of an empty collection of polynomials is not supported yet" % name, "'%s'" % name)
+    if u is None:
+        return
+    raise _bad_types(name, given)
+
+
 def Gcd(*args):
+    given = args
     if len(args) > 2:
         raise _bad_types("Gcd", args)  # (two arguments, or one sequence)
     if len(args) == 2:
         _no_rationals("Gcd", *args)
     if len(args) == 1:
+        if not isinstance(args[0], (MSeq, MRange, MSet)):
+            raise _bad_types("Gcd", given)
+        if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
+            _null_int_collection("Gcd", given)
+            return 0
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args)
@@ -5489,6 +5534,10 @@ def Gcd(*args):
         for a in args[1:]:
             g = g.gcd(a)
         return g
+    if not all(_int(a) for a in args):
+        # (integers only, as Magma's: [RngIntElt] is SeqEnum[Cat], never a
+        # Python error)
+        raise _bad_types("Gcd", given)
     return _sa.gcd(*args)
 
 
@@ -5496,12 +5545,20 @@ GCD = GreatestCommonDivisor = Gcd
 
 
 def Lcm(*args):
+    given = args
     if len(args) > 2:
         raise _bad_types("Lcm", args)
     if len(args) == 1:
+        if not isinstance(args[0], (MSeq, MRange, MSet)):
+            raise _bad_types("Lcm", given)
+        if (args[0].size() if isinstance(args[0], MRange) else len(args[0])) == 0:
+            _null_int_collection("Lcm", given)
+            return 1
         args = tuple(args[0])
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args, lcm=True)
+    if not all(_int(a) or isinstance(a, _sp.Polynomial) for a in args):
+        raise _bad_types("Lcm", given)
     return _sa.lcm(*args)
 
 
