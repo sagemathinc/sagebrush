@@ -277,7 +277,7 @@ raises an error, and then the check decides nothing.
 
 | helper | right when |
 |---|---|
-| `close(answer, expected, rel=, abs=)` | $\lvert a - e\rvert \le \max(\mathrm{rel}\,\lvert e\rvert, \mathrm{abs})$. Give at least one tolerance. It is exact when every number is rational: `close(1.1, 1, abs=0.1)` is wrong, since the float $1.1$ is a little more than $11/10$. nan is never close; an infinity is close only to itself. |
+| `close(answer, expected, rel=, abs=)` | $\lvert a - e\rvert \le \max(\mathrm{rel}\,\lvert e\rvert, \mathrm{abs})$. Give at least one tolerance. It is exact when every number is rational, complex ones included: `close(1.1, 1, abs=0.1)` is wrong, since the float $1.1$ is a little more than $11/10$. With an irrational or a Sage real it compares floats, and can't decide when the tolerance is finer than their precision or a value is beyond a float. nan is never close; an infinity is close only to itself. |
 | `same_set(answer, expected)` | they are equal as sets |
 | `same_multiset(answer, expected)` | they are equal with their repeats |
 | `same_sequence(answer, expected, ordered=True)` | they are equal item by item (`ordered=False`: as multisets) |
@@ -292,9 +292,9 @@ raises an error, and then the check decides nothing.
 - With assumptions in force (`assume(...)`), it only simplifies.
 
 A text answer (`"input": "text"`) is a string. The helpers read strings with parsers that never run them as code:
-- `parse_number` reads an integer, a decimal or a fraction, exactly;
+- `parse_number` reads an integer, a decimal (also `1.2e+3`, an exponent of at most 1000) or a fraction, exactly;
 - `parse_list` reads `1, 2, 3` or `{1, 2, 3}` (one level);
-- `parse_expression` (Sage) reads `2x^2 + 3(x - 1)`, with `sin`, `sqrt`, `pi`, … At most 1000 characters, 100 levels of parentheses, and no number to a power above 1000.
+- `parse_expression` (Sage) reads `2x^2 + 3(x - 1)`, with `sin`, `sqrt`, `pi`, … Its numbers are `parse_number`'s, so `1e-3` is $1/1000$ (and `2e` is $2e$); `2e3x` is refused as ambiguous. At most 1000 characters, 100 levels of parentheses, and no number to a power above 1000.
 
 A reason reports one bounded difference ("it is missing $2$", "item 3 is $4$, not $3$", "they differ at $x = 1/2$"). For a small answer that can show much of the expected one.
 

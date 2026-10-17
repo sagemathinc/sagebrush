@@ -20,6 +20,7 @@ raises: the check then decides nothing.
 
 import itertools
 import math
+from fractions import Fraction
 
 __all__ = ["Verdict", "CannotDecide", "close", "same_set", "same_multiset", "same_sequence",
            "same_group", "same_permutation", "symbolic_equal", "parse_number", "parse_list", "parse_expression"]
@@ -174,6 +175,8 @@ def parse_number(s):
         if q == 0:
             raise ValueError("not a number: a fraction over 0")
         return sign * Fraction(int(m.group(2)), q)
+    if m.group(5) is not None and builtins_abs(int(m.group(5))) > 1000:
+        raise ValueError("not a number: an exponent beyond 1000")
     v = Fraction(m.group(4)) * (Fraction(10) ** int(m.group(5) or 0))
     v = sign * v
     return int(v) if v.denominator == 1 and "." not in m.group(4) and m.group(5) is None else v
@@ -260,8 +263,13 @@ class _Parser:
         self.S = S
         self.src = s
         self.toks = []
+        # (2e3x: 2000x or 2*e3x? refused rather than read either way)
+        if re.search(r"(?:\d|\.)[eE][+-]?\d+[A-Za-z_.]", s):
+            raise ValueError("parse_expression: a number in scientific notation followed by a name: write 2e3*x or 2*e3x")
         pos = 0
-        tok = re.compile(r"\s*(?:(\d+(?:\.\d*)?|\.\d+)|([A-Za-z_][A-Za-z_0-9]*)|(\*\*|[-+*/^(),]))")
+        # (a number as parse_number reads it, scientific too: 1e-3 is 1/1000,
+        # never 1*e - 3; "2e" alone, or 2e followed by a name, is 2*e)
+        tok = re.compile(r"\s*(?:((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+(?![A-Za-z_0-9.]))?)|([A-Za-z_][A-Za-z_0-9]*)|(\*\*|[-+*/^(),]))")
         while pos < len(s):
             if s[pos:].strip() == "":
                 break
@@ -343,9 +351,10 @@ class _Parser:
         S = self.S
         kind, v = self.take()
         if kind == "num":
-            if len(v) > 30:
+            if len(v) > 36:
                 raise ValueError("parse_expression: a number of more than 30 digits")
-            return S.SR(S.QQ(parse_number(v)) if "." in v else S.Integer(int(v)))
+            q = parse_number(v)
+            return S.SR(S.Integer(q) if isinstance(q, int) else S.QQ(q.numerator) / S.QQ(q.denominator))
         if kind == "name":
             if v in _FUNCTIONS:
                 self.take("(")
@@ -384,8 +393,8 @@ def _number(v, what):
     for conv in (float, complex):
         try:
             return conv(v)
-        except (TypeError, ValueError, OverflowError):
-            continue
+        except OverflowError:
+            raise
         except Exception:
             continue
     raise TypeError("%s: %s is not a number" % (what, type(v).__name__))
@@ -411,36 +420,112 @@ def close(answer, expected, rel=None, abs=None):
     """
     if rel is None and abs is None:
         raise ValueError("close: give a tolerance, rel= or abs=")
-    r = 0.0 if rel is None else float(rel)
-    a = 0.0 if abs is None else float(abs)
-    if not (r >= 0 and a >= 0 and math.isfinite(r) and math.isfinite(a)):
-        raise ValueError("close: a tolerance is a finite number, at least 0")
+    # (each tolerance checked as it is, before any conversion: a tiny
+    # negative one must not round to -0.0, CORR-230-2)
+    tols = []
+    for t in (rel, abs):
+        if t is None:
+            tols.append((Fraction(0), 0.0))
+            continue
+        q = _rational(t)
+        if q is not None:
+            if q < 0:
+                raise ValueError("close: a tolerance is a finite number, at least 0")
+            tols.append((q, float(q) if q < 10 ** 300 else math.inf))
+            continue
+        f = _number(t, "close: a tolerance")
+        if isinstance(f, complex) or not (f >= 0 and math.isfinite(f)):
+            raise ValueError("close: a tolerance is a finite number, at least 0")
+        tols.append((None, f))
     if isinstance(answer, str):
         answer = parse_number(answer)
     if isinstance(expected, str):
         expected = parse_number(expected)
-    # (exactly, when the numbers and the tolerances are all rational)
-    q = [_rational(v) for v in (answer, expected, rel or 0, abs or 0)]
-    if None not in q:
-        qa, qe, qr, qb = q
-        d, tol = builtins_abs(qa - qe), max(qr * builtins_abs(qe), qb)
-        if d <= tol:
+    # (exactly, when both are numbers with rational parts, complex ones too:
+    # |d|^2 <= max(rel^2 |e|^2, abs^2), nothing rounded, CORR-230-1)
+    qa, qe = _exact_complex(answer), _exact_complex(expected)
+    if qa is not None and qe is not None and tols[0][0] is not None and tols[1][0] is not None:
+        (qr, _), (qb, _) = tols
+        dr, di = qa[0] - qe[0], qa[1] - qe[1]
+        d2, e2 = dr * dr + di * di, qe[0] * qe[0] + qe[1] * qe[1]
+        if d2 <= max(qr * qr * e2, qb * qb):
             return _right()
-        return _wrong("off by %s%s, more than the tolerance" % (_sci(float(d)), " (relative %s)" % _sci(float(d / builtins_abs(qe))) if qe else ""))
-    x = _number(answer, "close: the answer")
-    e = _number(expected, "close: the expected value")
-    if x != x or e != e or (isinstance(x, complex) and (x.real != x.real or x.imag != x.imag)):
-        return _wrong("it is not a number") if x != x else Verdict(None, "the expected value is not a number")
+        return _wrong("off by %s%s, more than the tolerance" % (
+            _sci_exact(d2, root=True), " (relative %s)" % _sci_exact(d2 / e2, root=True) if e2 else ""))
+    # (inexactly: an irrational or a Sage real on one side; a value floats
+    # can't hold, or a right verdict finer than floats can resolve, is
+    # undecided rather than a lossy right, CORR-230-1)
+    r, a = tols[0][1], tols[1][1]
+    try:
+        x = _number(answer, "close: the answer")
+        e = _number(expected, "close: the expected value")
+    except OverflowError:
+        return Verdict(None, "the numbers are too large to compare with an inexact value")
+    nan = lambda z: (z.real != z.real or z.imag != z.imag) if isinstance(z, complex) else z != z
+    if nan(x):
+        return _wrong("it is not a number")
+    if nan(e):
+        return Verdict(None, "the expected value is not a number")
     inf = lambda z: math.isinf(z.real) or math.isinf(z.imag) if isinstance(z, complex) else math.isinf(z)
     if inf(x) or inf(e):
         return _right() if x == e else _wrong("it is %s, not %s" % (_inf(x), _inf(e)))
     d = builtins_abs(x - e)
     tol = max(r * builtins_abs(e), a)
+    if not (math.isfinite(d) and math.isfinite(tol)):
+        return Verdict(None, "the numbers are too large to compare with an inexact value")
     if d <= tol:
+        if tol < 4 * 2.220446049250313e-16 * max(builtins_abs(x), builtins_abs(e)):
+            return Verdict(None, "the tolerance is finer than the inexact value's precision")
         return _right()
     rd = d / builtins_abs(e) if e != 0 else None
     return _wrong("off by %s%s, more than the tolerance" % (
         _sci(d), " (relative %s)" % _sci(rd) if rd is not None else ""))
+
+
+def _exact_complex(v):
+    """v as exact (real, imaginary) Fractions: an int, Fraction, finite
+    float, complex of finite parts, or Sage rational; else None."""
+    if isinstance(v, complex):
+        if not (math.isfinite(v.real) and math.isfinite(v.imag)):
+            return None
+        return (Fraction(v.real), Fraction(v.imag))
+    q = _rational(v)
+    return None if q is None else (q, Fraction(0))
+
+
+def _sci_exact(q, root=False):
+    """a non-negative Fraction (its square root, with root) for a reason, to
+    3 significant digits (truncated), however small or large: integer
+    arithmetic, no underflow to 0, no overflow."""
+    n, d = q.numerator, q.denominator
+    if n == 0:
+        return "$0$"
+    # (k with 100 <= v * 10^k < 1000, v the value: from the digit counts,
+    # then corrected)
+    est = (len(str(n)) - len(str(d))) // (2 if root else 1)
+    k = 2 - est
+    for _ in range(8):
+        if root:
+            v = math.isqrt(n * 10 ** (2 * k) // d) if k >= 0 else math.isqrt(n // (d * 10 ** (-2 * k)))
+        else:
+            v = n * 10 ** k // d if k >= 0 else n // (d * 10 ** (-k))
+        if v < 100:
+            k += 1
+        elif v >= 1000:
+            k -= 1
+        else:
+            break
+    exp = 2 - k
+    digits = str(v).rstrip("0") or "0"
+    mant = digits[0] + ("." + digits[1:] if len(digits) > 1 else "")
+    if -4 <= exp < 6:
+        f = Fraction(v, 10 ** k) if k >= 0 else Fraction(v * 10 ** (-k))
+        whole, frac = divmod(f.numerator, f.denominator)
+        if frac == 0:
+            return "$%d$" % whole
+        places = max(k, 0)
+        return "$%s$" % ("%d.%s" % (whole, str(frac * 10 ** places // f.denominator).rjust(places, "0").rstrip("0")))
+    return "$%s \\times 10^{%d}$" % (mant, exp)
 
 
 import builtins as _b
