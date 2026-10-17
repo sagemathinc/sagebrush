@@ -3542,6 +3542,8 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
     if not len(t):
         t._wit = w
         return t
+    if t.kind == "multi" and _multi_collides((a, b), lambda o: _elt_into(o, w)):
+        raise MagmaError("a multiset operation where different elements coincide in the universe is not supported yet", "'%s'" % op, True, pos)
     items = []
     for y in (list(t) if t.kind == "multi" else t.items):
         z = _elt_into(y, w)
@@ -3549,6 +3551,29 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
             raise unsupported()
         items.append(z)
     return MSet(items, t.kind)
+
+
+def _multi_collides(srcs, coerce):
+    """Whether two different elements of one of the multisets srcs become
+    one element coerced (coerce, as the set operation coerces them): Magma
+    then keeps a count Sagebrush doesn't model (GF(5)'s {* *} join
+    {* 1, 6, 11 *} is {* 1 *}, with {* 1, 1 *} over a number field
+    {* 1^^2 *}: astra2's WA-028).  One pass, by hashing."""
+    for x in srcs:
+        if getattr(x, "kind", None) != "multi":
+            continue
+        seen = {}
+        for o in x.items:
+            c = coerce(o)
+            if c is None or c is _NOCOERCE:
+                continue
+            try:
+                p = seen.setdefault(c, o)
+            except TypeError:
+                return True  # (not hashable: not certified)
+            if p is not o and not (type(p) is type(o) and p == o):
+                return True
+    return False
 
 
 def _set_result(t, op, a, b, pos, message, mode="any"):
@@ -3561,6 +3586,8 @@ def _set_result(t, op, a, b, pos, message, mode="any"):
     u = _pair_universe(op, a, b, pos, message)
     if not len(t) or u is None:
         return _carry(t, a, b, mode=mode)
+    if t.kind == "multi" and _multi_collides((a, b), lambda o: _coerce_struct(o, u)):
+        raise MagmaError("a multiset operation where different elements coincide in the universe is not supported yet", "'%s'" % op, True, pos)
     items = []
     for x in (list(t) if t.kind == "multi" else t.items):
         y = _coerce_struct(x, u)
