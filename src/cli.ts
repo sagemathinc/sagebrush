@@ -12,7 +12,7 @@ import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { oneLine } from "./terminal-text";
-import { initParser, compile, execModule, R, libDir, findModuleSource } from "./compile";
+import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames } from "./compile";
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
@@ -302,9 +302,10 @@ function mainModule(file: string): any {
 
 // ------------------------------------------------------------------ the prompt
 
-// Module names importable from sys.path (and the builtin modules).
+// Module names importable from sys.path (and the builtin modules and the
+// packages').
 function moduleNames(): string[] {
-  const names = new Set<string>(R.builtinModuleNames());
+  const names = new Set<string>([...R.builtinModuleNames(), ...packageModuleNames()]);
   const fs = require("fs");
   for (const d of R.toArray(R.importModule("sys").path) as string[]) {
     const emb: Record<string, string> | undefined = (globalThis as any).__PYJS_LIB__;

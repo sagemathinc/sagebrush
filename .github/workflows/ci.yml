@@ -157,8 +157,8 @@ jobs:
         run: python3 sage-tests/run.py -v
       - name: symbolic calculus (limits, solve, taylor) in the WebAssembly engine
         run: python3 sage-tests/run_calculus.py
-      - name: the Python package's copies of lib/ (and the 3D viewer's) are up to date; the board format's JSON Schema is as web/board/doc.ts says
-        run: scripts/sync-python-package.sh --check && node scripts/gen-viewer3d.mjs --check && node cdn/build.mjs --check && node scripts/board-format-schema.mjs --check
+      - name: the Python package's copies of lib/ (and the 3D viewer's) are up to date; the board format's JSON Schema is as web/board/doc.ts says; the packages' registry pins their files
+        run: node scripts/packages.mjs --check && scripts/sync-python-package.sh --check && node scripts/gen-viewer3d.mjs --check && node cdn/build.mjs --check && node scripts/board-format-schema.mjs --check
       - name: Magma mode (modular forms, elliptic curves), checked against Magma's output
         run: python3 magma-tests/run.py -v
       - name: MATLAB mode, checked against GNU Octave's output (and MATLAB's documented display)

@@ -41,7 +41,7 @@
 // (web/replay-env.ts ClockRecord).
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
-import { initParser, R, libDir } from "./compile";
+import { initParser, R, libDir, packageModuleNames } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
@@ -247,6 +247,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   const moduleNames = () => [
     ...R.builtinModuleNames(),
     ...Object.keys((globalThis as any).__PYJS_LIB__ ?? {}).map((k) => k.split("/")[0].replace(/\.py$/, "")),
+    ...packageModuleNames(),
   ];
 
   // Run Python, reporting an exception as a traceback on stderr; false if it raised.
