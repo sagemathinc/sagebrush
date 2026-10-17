@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 // printed here, so they are left out of the comparison).
 const TEST = __dirname + "/../../test/";
 const carets = (s: string) => s.split("\n").filter((l) => !/^\s+[~^]+\s*$/.test(l));
-for (const name of ["new_init_cases.py", "traceback_exc_cases.py", "traceback_late_import_cases.py"])
+for (const name of ["new_init_cases.py", "traceback_exc_cases.py", "traceback_late_import_cases.py", "traceback_suspend_cases.py"])
   test(`${name}: CPython's output`, () => {
     const want = carets(execFileSync("python3", [TEST + name], { encoding: "utf8" }));
     const got = carets(execFileSync(process.execPath, [__dirname + "/../src/cli.js", TEST + name], { encoding: "utf8" }));
@@ -104,4 +104,46 @@ test("re-raised tracebacks stay within the stack limit, cut and refused past it"
   assert.ok(r.frames <= 200, `${r.frames} frames kept`);
   assert.equal(r.cut, true);
   assert.equal(r.refused, "which frame caught this exception is unknown: its traceback is deeper than the 200 JavaScript frames kept");
+});
+
+// Refused where the frames aren't known, never empty or stale: an exception
+// raised by Python code but caught only by the runtime (next's default,
+// hasattr: CORR-581-1), and one thrown into a generator (its yield's line
+// isn't kept); a cause never raised has none, as CPython's
+test("traceback.format_exc refuses frames it can't know: caught by the runtime, thrown into a generator", () => {
+  const code = [
+    "import traceback",
+    "def show(label):",
+    "    try: print(label, traceback.format_exc().splitlines()[-1])",
+    "    except NotImplementedError as e: print(label, 'refused:', e)",
+    "stop = StopIteration('remembered')",
+    "class I:",
+    "    def __next__(self): raise stop",
+    "next(I(), 'default')",
+    "try: raise ValueError('later') from stop",
+    "except ValueError: show('next default')",
+    "missing = AttributeError('missing')",
+    "class C:",
+    "    @property",
+    "    def value(self): raise missing",
+    "hasattr(C(), 'value')",
+    "try: raise ValueError('later') from missing",
+    "except ValueError: show('hasattr')",
+    "def gen():",
+    "    try: yield 1",
+    "    except KeyError: yield traceback.format_exc()",
+    "g = gen(); next(g)",
+    "try: g.throw(KeyError('thrown'))",
+    "except NotImplementedError as e: print('throw refused:', e)",
+    "try: raise ValueError('later') from ValueError('never raised')",
+    "except ValueError: show('never raised')",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split("\n");
+  const runtime = "refused: which frame caught this exception is unknown: it was caught by the runtime (as hasattr, or a default of getattr or next, does), which keeps no record of where";
+  assert.deepEqual(out, [
+    `next default ${runtime}`,
+    `hasattr ${runtime}`,
+    "throw refused: which frame caught this exception is unknown: it was thrown into a generator, at a yield whose line is not kept",
+    "never raised ValueError: later",
+  ]);
 });
