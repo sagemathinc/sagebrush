@@ -365,7 +365,13 @@ function openChannel(me) {
 - Ask items, `sb board answers` and the controls are built in the order of
   /scratch/sagebrush-reviews/boards-both-ways-plan.md.
 - The nonce, the channel, `revision`, `answers`, `received`, `refused` and
-  `checkSubmission` are new. So are `decide`, `decided` and `decideRequest`;
-  the frame sends `decide` once it has the Submit bar. test/board-host-protocol.test.ts runs the
-  example host above against simulated frames, a navigated one too. Until the frame supports them, it ignores the
-  port and `revision`, and shows no Submit.
+  `checkSubmission` are new. So are `decide`, `decided` and `decideRequest`.
+  test/board-host-protocol.test.ts runs the example host above against
+  simulated frames, a navigated one too.
+- The frame (web/board/page.ts, channel.ts) takes the nonce and the port,
+  and has the Submit bar: **Submit** in its top bar, on a page with
+  questions, opens a panel with the comment field (its math typeset under
+  it) and **Send**. A question with a `decide` has **Get feedback on my
+  words**. web/board/test-submit.mjs plays a host against the real frame:
+  each message passes `checkSubmission` or `decideRequest`, and every
+  answer from the host is shown as this file says.
