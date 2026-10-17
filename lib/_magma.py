@@ -2823,6 +2823,19 @@ def _pow(a, b, pos=None, op="^"):
         if isinstance(b, MReal) and not isinstance(a, MReal):
             a = MReal.of(a, b.prec)  # (in the exponent's field, CORR-C682-1)
         return MReal.of(a) ** b
+    if isinstance(a, _smat.Matrix) and isinstance(b, int) and not isinstance(b, bool) and b < 0 and a._base in (_sa.ZZ, _sa.QQ) \
+            and a.nrows() == a.ncols():
+        # (a negative power exists only for a unit determinant, over the
+        # integers 1 or -1, and stays over the matrix's ring, as Magma's:
+        # the inverse below is over the rationals; astra2's CORR-CA8-1)
+        a._pow_admit(b)
+        d = a.det()
+        if d == 0 or (a._base is _sa.ZZ and d not in (1, -1)):
+            raise MagmaError("Argument 1 is not invertible", "'%s'" % op, True, pos)
+        r = a ** b
+        if a._base is _sa.ZZ:
+            r = _MMatrix(_sa.ZZ, [[int(x) for x in row] for row in r._rows], r.ncols())
+        return _mod_result(r, "^", a, b)
     return _mod_result(a ** b, "^", a, b)
 
 
@@ -3732,6 +3745,13 @@ def _empty_identity(op, s, pos):
             return _MMatrix(u.base_ring(), [[k if i == j else 0 for j in range(n)] for i in range(m)], n)
         raise unsupported()
     w = getattr(s, "_wit", None)
+    if isinstance(w, _MModMat):
+        # (a module of matrices has a zero but no one, square or not, as
+        # Magma's: astra2's CORR-CA8-2)
+        if k:
+            raise MagmaError("Universe has no one element", where, True, pos)
+        n = w.nrows()
+        return _MModMat(w._base, [[0] * n for _ in range(n)], n)
     if w is not None:
         z = _elt_into(k, w)
         if z is None or z is _NOCOERCE:
