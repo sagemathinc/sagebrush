@@ -13,15 +13,6 @@ def count(start=0, step=1):
         n += step
 
 
-def repeat(obj, times=None):
-    if times is None:
-        while True:
-            yield obj
-    else:
-        for i in range(times):
-            yield obj
-
-
 import operator as _operator
 
 _NULL = object()
@@ -362,6 +353,46 @@ def _ssize(x):
     if not -9223372036854775808 <= x <= 9223372036854775807:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return x
+
+
+class repeat:
+    """repeat(object [,times]) -> create an iterator which returns the object
+for the specified number of times.  If not specified, returns the object
+endlessly."""
+
+    # (as CPython's: times a Py_ssize_t, given or not (None is no count:
+    # a TypeError), a negative one none; its repr shows what is left)
+    __slots__ = ("_obj", "_cnt")
+
+    def __new__(cls, object, times=_NULL):
+        self = super().__new__(cls)
+        self._obj = object
+        if times is _NULL:
+            self._cnt = -1
+        else:
+            n = _ssize(times)
+            self._cnt = n if n > 0 else 0
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._cnt == 0:
+            raise StopIteration
+        if self._cnt > 0:
+            self._cnt -= 1
+        return self._obj
+
+    def __repr__(self):
+        if self._cnt == -1:
+            return "%s(%r)" % (type(self).__name__, self._obj)
+        return "%s(%r, %d)" % (type(self).__name__, self._obj, self._cnt)
+
+    def __length_hint__(self):
+        if self._cnt == -1:
+            raise TypeError("len() of unsized object")
+        return self._cnt
 
 
 def product(*args, repeat=1):

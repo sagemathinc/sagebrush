@@ -15,6 +15,16 @@ __all__ = ["ChainMap", "Counter", "OrderedDict", "UserDict", "UserList",
 
 # ---------------------------------------------------------------- deque
 
+from operator import index as _index
+
+
+def _slice_index(v):
+    # (an index bound as CPython's _PyEval_SliceIndexNotNone)
+    if not hasattr(type(v), "__index__"):
+        raise TypeError("slice indices must be integers or have an __index__ method")
+    return _index(v)
+
+
 class deque:
     """Two stacks: _l holds the left part reversed, _r the right part, so
     both ends and indexing are O(1) (amortized)."""
@@ -171,16 +181,18 @@ class deque:
     def count(self, x):
         return self._l.count(x) + self._r.count(x)
 
-    def index(self, x, start=0, stop=None):
+    def index(self, x, start=0, stop=_sys.maxsize):
+        # (start and stop as CPython's: slice indices, through __index__)
+        start, stop = _slice_index(start), _slice_index(stop)
         items = self._items()
-        if stop is None:
-            stop = len(items)
         try:
             return items.index(x, start, stop)
         except ValueError:
             raise ValueError("%r is not in deque" % (x,)) from None
 
     def insert(self, i, x):
+        # (the index converted first, then the size checked, as CPython's)
+        i = _index(i)
         if self._maxlen is not None and len(self) >= self._maxlen:
             raise IndexError("deque already at its maximum size")
         items = self._items()
@@ -199,6 +211,7 @@ class deque:
         self._l, self._r = self._r, self._l
 
     def rotate(self, n=1):
+        n = _index(n)
         k = len(self)
         if k <= 1:
             return
@@ -448,115 +461,470 @@ class defaultdict(dict):
         return new
 
 
+# Counter: CPython 3.14's (Lib/collections/__init__.py, with its pure-Python
+# _count_elements; PSF License, see cdn/LICENSE-CPython.txt and NOTICE.md)
+from itertools import chain as _chain
+from itertools import repeat as _repeat
+from itertools import starmap as _starmap
+from operator import eq as _eq
+from operator import itemgetter as _itemgetter
+from reprlib import recursive_repr as _recursive_repr
+
+heapq = None    # Counter.most_common's lazy import, as CPython's
+
+
+def _count_elements(mapping, iterable):
+    'Tally elements from the iterable.'
+    mapping_get = mapping.get
+    for elem in iterable:
+        mapping[elem] = mapping_get(elem, 0) + 1
+
+try:                                    # Load C helper function if available
+    from _collections import _count_elements
+except ImportError:
+    pass
+
 class Counter(dict):
+    '''Dict subclass for counting hashable items.  Sometimes called a bag
+    or multiset.  Elements are stored as dictionary keys and their counts
+    are stored as dictionary values.
+
+    When constructed from a Mapping or Counter, the original object's
+    values will be used as the initial counts.
+
+    >>> c = Counter('abcdeabcdabcaba')  # count elements from a string
+
+    >>> c.most_common(3)                # three most common elements
+    [('a', 5), ('b', 4), ('c', 3)]
+    >>> sorted(c)                       # list all unique elements
+    ['a', 'b', 'c', 'd', 'e']
+    >>> ''.join(sorted(c.elements()))   # list elements with repetitions
+    'aaaaabbbbcccdde'
+    >>> sum(c.values())                 # total of all counts
+    15
+
+    >>> c['a']                          # count of letter 'a'
+    5
+    >>> for elem in 'shazam':           # update counts from an iterable
+    ...     c[elem] += 1                # by adding 1 to each element's count
+    >>> c['a']                          # now there are seven 'a'
+    7
+    >>> del c['b']                      # remove all 'b'
+    >>> c['b']                          # now there are zero 'b'
+    0
+
+    >>> d = Counter('simsalabim')       # make another counter
+    >>> c.update(d)                     # add in the second counter
+    >>> c['a']                          # now there are nine 'a'
+    9
+
+    >>> c.clear()                       # empty the counter
+    >>> c
+    Counter()
+
+    Note:  If a count is set to zero or reduced to zero, it will remain
+    in the counter until the entry is deleted or the counter is cleared:
+
+    >>> c = Counter('aaabbc')
+    >>> c['b'] -= 2                     # reduce the count of 'b' by two
+    >>> c.most_common()                 # 'b' is still in, but its count is zero
+    [('a', 3), ('c', 1), ('b', 0)]
+
+    '''
+    # References:
+    #   http://en.wikipedia.org/wiki/Multiset
+    #   http://www.gnu.org/software/smalltalk/manual-base/html_node/Bag.html
+    #   http://www.java2s.com/Tutorial/Cpp/0380__set-multiset/Catalog0380__set-multiset.htm
+    #   http://code.activestate.com/recipes/259174/
+    #   Knuth, TAOCP Vol. II section 4.6.3
+
     def __init__(self, iterable=None, /, **kwds):
-        dict.__init__(self)
+        '''Create a new, empty Counter object.  And if given, count elements
+        from an input iterable.  Or, initialize the count from another mapping
+        of elements to their counts.
+
+        >>> c = Counter()                           # a new, empty counter
+        >>> c = Counter('gallahad')                 # a new counter from an iterable
+        >>> c = Counter({'a': 4, 'b': 2})           # a new counter from a mapping
+        >>> c = Counter(a=4, b=2)                   # a new counter from keyword args
+
+        '''
+        super().__init__()
         self.update(iterable, **kwds)
 
     def __missing__(self, key):
+        'The count of elements not in the Counter is zero.'
+        # Needed so that self[missing_item] does not raise KeyError
         return 0
 
     def total(self):
+        'Sum of the counts'
         return sum(self.values())
 
     def most_common(self, n=None):
-        items = sorted(self.items(), key=lambda kv: kv[1], reverse=True)
-        return items if n is None else items[:n]
+        '''List the n most common elements and their counts from the most
+        common to the least.  If n is None, then list all element counts.
+
+        >>> Counter('abracadabra').most_common(3)
+        [('a', 5), ('b', 2), ('r', 2)]
+
+        '''
+        # Emulate Bag.sortedByCount from Smalltalk
+        if n is None:
+            return sorted(self.items(), key=_itemgetter(1), reverse=True)
+
+        # Lazy import to speedup Python startup time
+        global heapq
+        if heapq is None:
+            import heapq
+
+        return heapq.nlargest(n, self.items(), key=_itemgetter(1))
 
     def elements(self):
-        for k, v in self.items():
-            for _ in range(v):
-                yield k
+        '''Iterator over elements repeating each as many times as its count.
+
+        >>> c = Counter('ABCABC')
+        >>> sorted(c.elements())
+        ['A', 'A', 'B', 'B', 'C', 'C']
+
+        Knuth's example for prime factors of 1836:  2**2 * 3**3 * 17**1
+
+        >>> import math
+        >>> prime_factors = Counter({2: 2, 3: 3, 17: 1})
+        >>> math.prod(prime_factors.elements())
+        1836
+
+        Note, if an element's count has been set to zero or is a negative
+        number, elements() will ignore it.
+
+        '''
+        # Emulate Bag.do from Smalltalk and Multiset.begin from C++.
+        return _chain.from_iterable(_starmap(_repeat, self.items()))
+
+    # Override dict methods where necessary
 
     @classmethod
     def fromkeys(cls, iterable, v=None):
-        raise NotImplementedError("Counter.fromkeys() is undefined.  Use Counter(iterable) instead.")
+        # There is no equivalent method for counters because the semantics
+        # would be ambiguous in cases such as Counter.fromkeys('aaabbc', v=2).
+        # Initializing counters to zero values isn't necessary because zero
+        # is already the default value for counter lookups.  Initializing
+        # to one is easily accomplished with Counter(set(iterable)).  For
+        # more exotic cases, create a dictionary first using a dictionary
+        # comprehension or dict.fromkeys().
+        raise NotImplementedError(
+            'Counter.fromkeys() is undefined.  Use Counter(iterable) instead.')
 
     def update(self, iterable=None, /, **kwds):
+        '''Like dict.update() but add counts instead of replacing them.
+
+        Source can be an iterable, a dictionary, or another Counter instance.
+
+        >>> c = Counter('which')
+        >>> c.update('witch')           # add elements from another iterable
+        >>> d = Counter('watch')
+        >>> c.update(d)                 # add elements from another counter
+        >>> c['h']                      # four 'h' in which, witch, and watch
+        4
+
+        '''
+        # The regular dict.update() operation makes no sense here because the
+        # replace behavior results in some of the original untouched counts
+        # being mixed-in with all of the other counts for a mismash that
+        # doesn't have a straight-forward interpretation in most counting
+        # contexts.  Instead, we implement straight-addition.  Both the inputs
+        # and outputs are allowed to contain zero and negative counts.
+
         if iterable is not None:
-            if isinstance(iterable, dict):
-                for k, v in iterable.items():
-                    self[k] = self.get(k, 0) + v
+            if isinstance(iterable, _collections_abc.Mapping):
+                if self:
+                    self_get = self.get
+                    for elem, count in iterable.items():
+                        self[elem] = count + self_get(elem, 0)
+                else:
+                    # fast path when counter is empty
+                    super().update(iterable)
             else:
-                for k in iterable:
-                    self[k] = self.get(k, 0) + 1
+                _count_elements(self, iterable)
         if kwds:
             self.update(kwds)
 
     def subtract(self, iterable=None, /, **kwds):
+        '''Like dict.update() but subtracts counts instead of replacing them.
+        Counts can be reduced below zero.  Both the inputs and outputs are
+        allowed to contain zero and negative counts.
+
+        Source can be an iterable, a dictionary, or another Counter instance.
+
+        >>> c = Counter('which')
+        >>> c.subtract('witch')             # subtract elements from another iterable
+        >>> c.subtract(Counter('watch'))    # subtract elements from another counter
+        >>> c['h']                          # 2 in which, minus 1 in witch, minus 1 in watch
+        0
+        >>> c['w']                          # 1 in which, minus 1 in witch, minus 1 in watch
+        -1
+
+        '''
         if iterable is not None:
-            if isinstance(iterable, dict):
-                for k, v in iterable.items():
-                    self[k] = self.get(k, 0) - v
+            self_get = self.get
+            if isinstance(iterable, _collections_abc.Mapping):
+                for elem, count in iterable.items():
+                    self[elem] = self_get(elem, 0) - count
             else:
-                for k in iterable:
-                    self[k] = self.get(k, 0) - 1
+                for elem in iterable:
+                    self[elem] = self_get(elem, 0) - 1
         if kwds:
             self.subtract(kwds)
 
     def copy(self):
+        'Return a shallow copy.'
         return self.__class__(self)
 
-    def __delitem__(self, k):
-        if k in self:
-            dict.__delitem__(self, k)
+    def __reduce__(self):
+        return self.__class__, (dict(self),)
+
+    def __delitem__(self, elem):
+        'Like dict.__delitem__() but does not raise KeyError for missing values.'
+        if elem in self:
+            super().__delitem__(elem)
 
     def __repr__(self):
         if not self:
-            return "%s()" % self.__class__.__name__
-        return "%s({%s})" % (self.__class__.__name__, ", ".join("%r: %r" % kv for kv in self.most_common()))
+            return f'{self.__class__.__name__}()'
+        try:
+            # dict() preserves the ordering returned by most_common()
+            d = dict(self.most_common())
+        except TypeError:
+            # handle case where values are not orderable
+            d = dict(self)
+        return f'{self.__class__.__name__}({d!r})'
+
+    # Multiset-style mathematical operations discussed in:
+    #       Knuth TAOCP Volume II section 4.6.3 exercise 19
+    #       and at http://en.wikipedia.org/wiki/Multiset
+    #
+    # Outputs guaranteed to only include positive counts.
+    #
+    # To strip negative and zero counts, add-in an empty counter:
+    #       c += Counter()
+    #
+    # Results are ordered according to when an element is first
+    # encountered in the left operand and then by the order
+    # encountered in the right operand.
+    #
+    # When the multiplicities are all zero or one, multiset operations
+    # are guaranteed to be equivalent to the corresponding operations
+    # for regular sets.
+    #     Given counter multisets such as:
+    #         cp = Counter(a=1, b=0, c=1)
+    #         cq = Counter(c=1, d=0, e=1)
+    #     The corresponding regular sets would be:
+    #         sp = {'a', 'c'}
+    #         sq = {'c', 'e'}
+    #     All of the following relations would hold:
+    #         set(cp + cq) == sp | sq
+    #         set(cp - cq) == sp - sq
+    #         set(cp | cq) == sp | sq
+    #         set(cp & cq) == sp & sq
+    #         (cp == cq) == (sp == sq)
+    #         (cp != cq) == (sp != sq)
+    #         (cp <= cq) == (sp <= sq)
+    #         (cp < cq) == (sp < sq)
+    #         (cp >= cq) == (sp >= sq)
+    #         (cp > cq) == (sp > sq)
+
+    def __eq__(self, other):
+        'True if all counts agree. Missing counts are treated as zero.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return all(self[e] == other[e] for c in (self, other) for e in c)
+
+    def __ne__(self, other):
+        'True if any counts disagree. Missing counts are treated as zero.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return not self == other
+
+    def __le__(self, other):
+        'True if all counts in self are a subset of those in other.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return all(self[e] <= other[e] for c in (self, other) for e in c)
+
+    def __lt__(self, other):
+        'True if all counts in self are a proper subset of those in other.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return self <= other and self != other
+
+    def __ge__(self, other):
+        'True if all counts in self are a superset of those in other.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return all(self[e] >= other[e] for c in (self, other) for e in c)
+
+    def __gt__(self, other):
+        'True if all counts in self are a proper superset of those in other.'
+        if not isinstance(other, Counter):
+            return NotImplemented
+        return self >= other and self != other
 
     def __add__(self, other):
+        '''Add counts from two counters.
+
+        >>> Counter('abbb') + Counter('bcc')
+        Counter({'b': 4, 'c': 2, 'a': 1})
+
+        '''
         if not isinstance(other, Counter):
             return NotImplemented
         result = Counter()
-        for k, v in self.items():
-            n = v + other[k]
-            if n > 0:
-                result[k] = n
-        for k, v in other.items():
-            if k not in self and v > 0:
-                result[k] = v
+        for elem, count in self.items():
+            newcount = count + other[elem]
+            if newcount > 0:
+                result[elem] = newcount
+        for elem, count in other.items():
+            if elem not in self and count > 0:
+                result[elem] = count
         return result
 
     def __sub__(self, other):
+        ''' Subtract count, but keep only results with positive counts.
+
+        >>> Counter('abbbc') - Counter('bccd')
+        Counter({'b': 2, 'a': 1})
+
+        '''
         if not isinstance(other, Counter):
             return NotImplemented
         result = Counter()
-        for k, v in self.items():
-            n = v - other[k]
-            if n > 0:
-                result[k] = n
-        for k, v in other.items():
-            if k not in self and v < 0:
-                result[k] = -v
+        for elem, count in self.items():
+            newcount = count - other[elem]
+            if newcount > 0:
+                result[elem] = newcount
+        for elem, count in other.items():
+            if elem not in self and count < 0:
+                result[elem] = 0 - count
         return result
 
     def __or__(self, other):
+        '''Union is the maximum of value in either of the input counters.
+
+        >>> Counter('abbb') | Counter('bcc')
+        Counter({'b': 3, 'c': 2, 'a': 1})
+
+        '''
         if not isinstance(other, Counter):
             return NotImplemented
         result = Counter()
-        for k in list(self) + [k for k in other if k not in self]:
-            n = max(self[k], other[k])
-            if n > 0:
-                result[k] = n
+        for elem, count in self.items():
+            other_count = other[elem]
+            newcount = other_count if count < other_count else count
+            if newcount > 0:
+                result[elem] = newcount
+        for elem, count in other.items():
+            if elem not in self and count > 0:
+                result[elem] = count
         return result
 
     def __and__(self, other):
+        ''' Intersection is the minimum of corresponding counts.
+
+        >>> Counter('abbb') & Counter('bcc')
+        Counter({'b': 1})
+
+        '''
         if not isinstance(other, Counter):
             return NotImplemented
         result = Counter()
-        for k, v in self.items():
-            n = min(v, other[k])
-            if n > 0:
-                result[k] = n
+        for elem, count in self.items():
+            other_count = other[elem]
+            newcount = count if count < other_count else other_count
+            if newcount > 0:
+                result[elem] = newcount
         return result
 
     def __pos__(self):
-        return Counter({k: v for k, v in self.items() if v > 0})
+        'Adds an empty counter, effectively stripping negative and zero counts'
+        result = Counter()
+        for elem, count in self.items():
+            if count > 0:
+                result[elem] = count
+        return result
 
     def __neg__(self):
-        return Counter({k: -v for k, v in self.items() if v < 0})
+        '''Subtracts from an empty counter.  Strips positive and zero counts,
+        and flips the sign on negative counts.
+
+        '''
+        result = Counter()
+        for elem, count in self.items():
+            if count < 0:
+                result[elem] = 0 - count
+        return result
+
+    def _keep_positive(self):
+        '''Internal method to strip elements with a negative or zero count'''
+        nonpositive = [elem for elem, count in self.items() if not count > 0]
+        for elem in nonpositive:
+            del self[elem]
+        return self
+
+    def __iadd__(self, other):
+        '''Inplace add from another counter, keeping only positive counts.
+
+        >>> c = Counter('abbb')
+        >>> c += Counter('bcc')
+        >>> c
+        Counter({'b': 4, 'c': 2, 'a': 1})
+
+        '''
+        for elem, count in other.items():
+            self[elem] += count
+        return self._keep_positive()
+
+    def __isub__(self, other):
+        '''Inplace subtract counter, but keep only results with positive counts.
+
+        >>> c = Counter('abbbc')
+        >>> c -= Counter('bccd')
+        >>> c
+        Counter({'b': 2, 'a': 1})
+
+        '''
+        for elem, count in other.items():
+            self[elem] -= count
+        return self._keep_positive()
+
+    def __ior__(self, other):
+        '''Inplace union is the maximum of value from either counter.
+
+        >>> c = Counter('abbb')
+        >>> c |= Counter('bcc')
+        >>> c
+        Counter({'b': 3, 'c': 2, 'a': 1})
+
+        '''
+        for elem, other_count in other.items():
+            count = self[elem]
+            if other_count > count:
+                self[elem] = other_count
+        return self._keep_positive()
+
+    def __iand__(self, other):
+        '''Inplace intersection is the minimum of corresponding counts.
+
+        >>> c = Counter('abbb')
+        >>> c &= Counter('bcc')
+        >>> c
+        Counter({'b': 1})
+
+        '''
+        for elem, count in self.items():
+            other_count = other[elem]
+            if other_count < count:
+                self[elem] = other_count
+        return self._keep_positive()
 
 
 # ChainMap: CPython 3.14's (Lib/collections/__init__.py; PSF License, see
