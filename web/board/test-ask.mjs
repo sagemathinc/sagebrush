@@ -229,7 +229,9 @@ try {
   await type("5");
   await press(K(".board-ask-check"));
   await until("window.sagebrush.board.snapshot().doc.nodes[1].result !== undefined", 30000);
-  await sleep(300);
+  // (the card's text waited for, not read after a fixed tick, which raced the redraw)
+  const cardShows = (re) => until(`${re}.test(${q$(K(), "?.textContent")} ?? "")`, 10000);
+  await cardShows(/Not yet/);
   let q = await node("k");
   check(q.answer === 5 && q.result === "wrong" && q.attempts === 1, "a wrong answer: kept, counted, wrong: " + JSON.stringify(q));
   const kText = () => ev(q$(K(), ".textContent"));
@@ -241,7 +243,7 @@ try {
   await setK("7");
   await press(K(".board-ask-check"));
   await until("window.sagebrush.board.snapshot().doc.nodes[1].attempts === 2", 30000);
-  await sleep(300);
+  await cardShows(/Hint 2/);
   t = await kText();
   check(/Hint 2/.test(t) && /7 is not one of those/.test(t), "wrong twice: the computed hint, with this answer: " + t.slice(0, 300));
   // (its card as tall as what the check said, also when that changes and the
@@ -253,7 +255,7 @@ try {
   await setK("4");
   await press(K(".board-ask-check"));
   await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'right'", 30000);
-  await sleep(300);
+  await cardShows(/Right/);
   q = await node("k");
   check(q.answer === 4 && q.attempts === 3 && /Right/.test(await kText()) && (await ev(q$(K("a.board-ref"), "?.getAttribute('href')"))) === "#good", "right: kept, counted, sent on to `next.right`: " + JSON.stringify([q.answer, q.attempts, q.result]) + " " + (await kText()).slice(0, 300));
   // (another answer: the verdict was the last one's, so it goes)
@@ -282,7 +284,10 @@ try {
   const t0 = Date.now();
   await press('.board-ask[data-ask="many"] .board-ask-check');
   await until("window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === 'many').attempts === 6", 30000);
-  const took = Date.now() - t0, manyText = await ev(q$('.board-ask[data-ask="many"]', ".textContent"));
+  const took = Date.now() - t0;
+  // (the card drawn again with what the check said: waited for, not read at once, which raced the redraw)
+  await until(`/this check's time ran out/.test(${q$('.board-ask[data-ask="many"]', "?.textContent")} ?? "")`, 10000);
+  const manyText = await ev(q$('.board-ask[data-ask="many"]', ".textContent"));
   // (unbounded, six hints of 2 s each and the runs of the code before them: past 20 s; bounded, the check, the hints' 4 s and a run of the code at the end)
   check(took < 12000 && /this check's time ran out/.test(manyText), `one Check with six endless computed hints ends within its budget (${took} ms): ` + manyText.slice(0, 300));
   // (right twice: no hint, which only wrong attempts reveal, CORR-A19-5)
@@ -383,6 +388,20 @@ try {
   await sleep(300);
   const [gq, g2q] = [await node("g"), await node("g2")];
   check(gq.result === "right" && g2q.result === "right", "two Checks at once: each right from the state the code leaves: " + JSON.stringify([gq, g2q].map((q) => [q.answer, q.result, q.attempts])));
+  // (a check that can't decide, a verdict object's: an error, said so as such, not counted)
+  await ev(`${B}.load(${JSON.stringify({ title: "Undecided", layout: "grid", columns: 2, nodes: [
+    { id: "vc", code: "class V:\n    def __sagebrush_verdict__(s):\n        return {'undecided': 'no proof either way'}" },
+    { id: "u", kind: "ask", input: "number", text: "Equal?", check: "V()" },
+  ] })}).then(() => 1)`);
+  await until(`!!document.querySelector('.board-ask[data-ask="u"] .board-ask-check')`, 20000);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(500);
+  await ev(`(() => { const n = ${q$('.board-ask[data-ask="u"] input[type=number]')}; n.value = "1"; return 1; })()`);
+  await press('.board-ask[data-ask="u"] .board-ask-check');
+  await until("window.sagebrush.board.snapshot().doc.nodes[1].result === 'error'", 30000);
+  await sleep(300);
+  const ut = await ev(q$('.board-ask[data-ask="u"]', ".textContent")), uq = await node("u");
+  check(/The check could not decide: no proof either way/.test(ut) && !uq.attempts, "a check that can't decide: said so, not counted: " + ut.slice(-120));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
