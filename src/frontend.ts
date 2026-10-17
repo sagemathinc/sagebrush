@@ -7,6 +7,7 @@ import * as A from "./ast";
 import { parse as pyparse, PegenError } from "../pyparse/src/index";
 import { PySingleton } from "../pyparse/src/helpers";
 import { PyComplex } from "../pyparse/src/pegen";
+import { unparse, UnparseUnsupported } from "./unparse";
 
 export class PySyntaxError extends Error {
   constructor(
@@ -193,6 +194,61 @@ class Convert {
     throw new PySyntaxError(`${what} is not supported yet`, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
   }
 
+  // `from __future__ import annotations`: an annotation is then the str of
+  // its source, as CPython's ast_unparse writes it, never evaluated
+  futureAnnotations = false;
+  annot(n: any): A.Expr {
+    if (!this.futureAnnotations) return this.expr(n);
+    this.checkStringized(n, "annot");
+    let v: string;
+    try {
+      v = unparse(n);
+    } catch (e) {
+      if (!(e instanceof UnparseUnsupported)) throw e;
+      return this.unsupported(n, `an annotation with ${e.message} under from __future__ import annotations`);
+    }
+    return { k: "Const", line: n.lineno ?? 1, value: { t: "str", v } };
+  }
+  // A stringized annotation is still checked as CPython's symtable checks it,
+  // in an annotation block that binds nothing: where it is directly in the
+  // annotation ("annot"), in a lambda, or in a comprehension of a kind
+  private checkStringized(n: any, ctx: string) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach((x) => this.checkStringized(x, ctx));
+    const err = (msg: string): never => {
+      const l = n.lineno ?? 1;
+      throw new PySyntaxError(msg, this.filename, l, this.lines[l - 1] ?? "", (n.col_offset ?? 0) + 1);
+    };
+    const COMP: Record<string, string> = { ListComp: "list comprehension", SetComp: "set comprehension", DictComp: "dict comprehension", GeneratorExp: "generator expression" };
+    const t = n._type;
+    if (t === "NamedExpr" && ctx === "annot") err("named expression cannot be used within an annotation");
+    if (t === "Yield" || t === "YieldFrom") {
+      if (ctx === "annot") err("yield expression cannot be used within an annotation");
+      if (ctx !== "lambda") err(`'yield' inside ${COMP[ctx]}`);
+    }
+    if (t === "Await") {
+      if (ctx === "annot") err("await expression cannot be used within an annotation");
+      if (ctx === "lambda") err("'await' outside async function");
+      if (ctx !== "GeneratorExp") err("asynchronous comprehension outside of an asynchronous function");
+    }
+    if (t === "Lambda") {
+      this.checkStringized(n.args, ctx);
+      return this.checkStringized(n.body, "lambda");
+    }
+    if (t in COMP) {
+      // (the first iterable is evaluated where the comprehension is)
+      this.checkStringized(n.generators[0].iter, ctx);
+      if (t !== "GeneratorExp" && n.generators.some((g: any) => g.is_async)) err("asynchronous comprehension outside of an asynchronous function");
+      n.generators.forEach((g: any, i: number) => {
+        this.checkStringized(g.target, t);
+        if (i) this.checkStringized(g.iter, t);
+        this.checkStringized(g.ifs, t);
+      });
+      return this.checkStringized(t === "DictComp" ? [n.key, n.value] : n.elt, t);
+    }
+    for (const k in n) if (k !== "_type") this.checkStringized(n[k], ctx);
+  }
+
   // Whether the innermost function is an `async def` (await, async for and
   // async with are only allowed there), and a counter for desugaring temps.
   private inAsync = false;
@@ -336,7 +392,7 @@ class Convert {
       case "AugAssign":
         return { k: "AugAssign", line, target: this.expr(s.target), op: this.binop(s.op._type), value: this.expr(s.value) };
       case "AnnAssign":
-        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple, annotation: this.expr(s.annotation) };
+        return { k: "AnnAssign", line, target: this.expr(s.target), value: s.value ? this.expr(s.value) : null, simple: !!s.simple, annotation: this.annot(s.annotation), stringized: this.futureAnnotations };
       case "Return":
         return { k: "Return", line, value: s.value ? this.expr(s.value) : null };
       case "If":
@@ -364,7 +420,12 @@ class Convert {
       case "Import":
         return { k: "Import", line, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "ImportFrom":
-        if (s.module === "__future__") return null;
+        // (a future import changes the compiler: annotations is honoured,
+        // as strings; the others are Python 3's behaviour already)
+        if (s.module === "__future__") {
+          if (s.names.some((a: any) => a.name === "annotations")) this.futureAnnotations = true;
+          return null;
+        }
         return { k: "ImportFrom", line, module: s.module ?? "", level: s.level ?? 0, names: s.names.map((a: any) => ({ name: a.name, asname: a.asname ? this.m(a.asname) : this.m(a.name) !== a.name ? this.m(a.name) : null })) };
       case "Global":
         return { k: "Global", line, names: s.names.map((n: string) => this.m(n)) };
@@ -605,14 +666,14 @@ class Convert {
     const a = s.args;
     const out: [string, A.Expr][] = [];
     const add = (p: any) => {
-      if (p && p.annotation) out.push([this.m(p.arg), this.expr(p.annotation)]);
+      if (p && p.annotation) out.push([this.m(p.arg), this.annot(p.annotation)]);
     };
     a.args.forEach(add);
     a.posonlyargs.forEach(add);
     add(a.vararg);
     a.kwonlyargs.forEach(add);
     add(a.kwarg);
-    if (s.returns) out.push(["return", this.expr(s.returns)]);
+    if (s.returns) out.push(["return", this.annot(s.returns)]);
     return out;
   }
 

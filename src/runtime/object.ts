@@ -203,8 +203,23 @@ export function setTypeAttr(cls: PyType, name: string, value: any) {
   bumpVersion(cls);
 }
 
+// (as setTypeAttr: CPython's type.__setattr__ with no value, the same
+// TypeError for a builtin class, a data descriptor of the metaclass
+// deleting it: a class's __annotations__)
 export function delTypeAttr(cls: PyType, name: string) {
-  if (cls.$ctor === null && cls.$module === "builtins") raise(T.TypeError, `cannot delete '${name}' attribute of immutable type '${cls.$name}'`);
+  if (cls.$ctor === null && cls.$module === "builtins") raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${cls.$name}'`);
+  const d = lookupType(typeOf(cls), name);
+  if (d !== undefined && d !== null && typeof d === "object") {
+    // (type's own writable ones without a deleter, __name__ or __doc__:
+    // CPython's check_set_special_type_attr)
+    if (typeOf(d) === T.getset_descriptor && d.owner === T.type && d.set !== null && d.del === null) raise(T.TypeError, `cannot delete '${name}' attribute of immutable type '${cls.$name}'`);
+    const del = lookupType(typeOf(d), "__delete__");
+    if (del !== undefined) {
+      del(d, cls);
+      bumpVersion(cls);
+      return;
+    }
+  }
   if (!cls.$dict.delete(name)) raise(T.AttributeError, `type object '${cls.$name}' has no attribute '${name}'`);
   bumpVersion(cls);
 }
