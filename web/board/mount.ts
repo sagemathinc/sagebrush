@@ -547,7 +547,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         if (ok) dirty.delete(mode);
         return ok;
       };
-      const evaluate = (code: string, within: number) => { dirty.add(mode); return ops.evaluate(code, given, within); };
+      const evaluate = (code: string, within: number, by?: number) => { dirty.add(mode); return ops.evaluate(code, given, within, by); };
       const r: Evaluated = (await reset(REFRESH_MS)) ? await evaluate(test, ms) : { ok: false, error: `the board's code didn't finish running again within ${REFRESH_MS / 1000} s, so it wasn't checked` };
       const outcome = !r.ok ? "error" : r.value === true ? "right" : "wrong";
       const message = !r.ok ? "The check failed: " + (r.error ?? "it could not run") : typeof r.value === "string" ? r.value : null;
@@ -558,7 +558,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       for (const [k, h] of (a.hints ?? []).slice(0, Math.min(wrong, ASK_LIMITS.hints)).entries()) {
         if (typeof h === "string") { hints[k] = null; continue; }
         if (left() < 1 || !(await reset(until - Date.now())) || left() < 1) { hints[k] = "(this hint was not computed: this check's time ran out)"; continue; }
-        const got = await evaluate(h.code, left());
+        // (all of it, the interpreter taking it up too, by the hints' shared deadline, HARD-729-1)
+        const got = await evaluate(h.code, left(), until);
         hints[k] = got.ok && typeof got.value === "string" ? got.value : "(this hint could not be computed: " + (got.ok ? "it gave no text" : got.error ?? "it could not run") + ")";
       }
       await reset(REFRESH_MS);
