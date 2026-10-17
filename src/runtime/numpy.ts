@@ -2820,10 +2820,16 @@ newBuiltinModule("_numpy", (m) => {
     dragon4Scientific(toNum(x), { precision: optInt(precision), unique: O.truth(unique), trim: trimOf(trim), sign: O.truth(sign), padLeft: optInt(padLeft), expDigits: optInt(expDigits), minDigits: optInt(minDigits), f32: O.truth(f32) }));
   fn("printopt", (k: string) => (typeof k === "string" && Object.hasOwn(printopts, k) ? (printopts as any)[k] : null));
   fn("format_float", (x: any) => positional(toNum(x), printopts.precision, true));
+  // (a float32 scalar's repr and str, as NumPy's: its shortest digits,
+  // positional when 1e-4 <= |x| < 1e6 (float32's six decimal digits) or
+  // zero, else scientific with a two-digit exponent: 3.8923753e+13, 1e+06)
   fn("format_f32", (x: any) => {
     const v = toNum(x);
     if (!Number.isFinite(v)) return F.floatRepr(v);
-    return F.floatRepr(Number(shortestF32(Math.abs(v))) * (v < 0 || Object.is(v, -0) ? -1 : 1));
+    const a = Math.abs(v), sign = v < 0 || Object.is(v, -0) ? "-" : "";
+    const d = Number(shortestF32(a));
+    if (a === 0 || (a >= 1e-4 && a < 1e6)) return F.floatRepr(d * (sign ? -1 : 1));
+    return sign + d.toExponential().replace(/e([+-])(\d)$/, "e$10$2");
   });
   fn("from_flat", (data: any, shape: any, dtype: any) => {
     // a Python list of numbers -> array (fast path for lib code)
