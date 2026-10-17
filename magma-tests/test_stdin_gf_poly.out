@@ -159,4 +159,7 @@ t
 true
 2*t
 Univariate Polynomial Ring in t over GF(7)
+u
+Univariate Polynomial Ring in u over GF(3^2)
+5
 end

@@ -28,4 +28,7 @@ k := (a + 1)*v^2 + 2*a*v + 5; k; -k; a*v; (a+3)*v; v + a + 1;
 R<x> := PolynomialRing(GF(7)); (x + 3)^40; <(x + 3)^30, 1>;
 // one ring for each field: naming it again renames it
 R2<t> := PolynomialRing(GF(7)); x; R eq R2; x + t; Parent(x);
+// AssignNames: a procedure, reached by any name
+K9<w> := GF(9); P9<z> := PolynomialRing(K9); an := AssignNames; an(~P9, ["u"]); z; P9;
+AssignNames := func< a, b | a + b >; AssignNames(2, 3);
 "end";
