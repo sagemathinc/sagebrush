@@ -33,3 +33,44 @@ test("re.sub parses an other-kind template once per call, not once per match", (
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" }).trim().split("\n");
   assert.deepEqual(out, ["sequence item 0: expected str instance, bytes found", "True"]);
 });
+
+// (astra's CORR-C0F-1: __import__'s fromlist through the iterator
+// protocol, each item imported before the next is asked for, in the
+// __all__ walk too; each in a fresh process, compared with CPython)
+const fromlistSnippets: Record<string, string[]> = {
+  "a generator fromlist, each child imported before the next item": [
+    "import importlib, sys",
+    "seen = []",
+    "def items():",
+    "    yield 'metadata'",
+    "    seen.append('importlib.metadata' in sys.modules)",
+    "    raise RuntimeError('stop')",
+    "try: __import__('importlib', fromlist=items())",
+    "except RuntimeError as e: print('raised', e)",
+    "print(seen, 'importlib.metadata' in sys.modules)",
+  ],
+  "a generator __all__ for '*'": [
+    "import importlib, sys",
+    "seen = []",
+    "def names():",
+    "    yield 'metadata'",
+    "    seen.append('importlib.metadata' in sys.modules)",
+    "importlib.__all__ = names()",
+    "__import__('importlib', fromlist=['*'])",
+    "print(seen, 'importlib.metadata' in sys.modules)",
+  ],
+  "a list subclass's __iter__, not its payload": [
+    "import importlib, sys",
+    "class Names(list):",
+    "    def __iter__(self):",
+    "        yield 'metadata'",
+    "__import__('importlib', fromlist=Names(['no_such_child']))",
+    "print('importlib.metadata' in sys.modules, 'importlib.no_such_child' in sys.modules)",
+  ],
+};
+for (const [name, lines] of Object.entries(fromlistSnippets))
+  test(`__import__: ${name}, as CPython`, () => {
+    const code = lines.join("\n");
+    const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
+  });

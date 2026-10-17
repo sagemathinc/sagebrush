@@ -2,7 +2,7 @@
 
 import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
+import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -153,8 +153,12 @@ const hasAttr = (o: any, name: string): boolean => {
 // imported as its child; a child that does not exist is passed over, for
 // the from-import to report, unless it is None in sys.modules; '*' is its
 // __all__'s names)
+// (each item through the iterator protocol, a list subclass's __iter__
+// included, and validated and imported before the next is asked for, as
+// CPython's `for x in fromlist`: astra's CORR-C0F-1)
 function handleFromlist(m: any, fromlist: any, recursive: boolean): void {
-  for (const x of O.toArray(fromlist)) {
+  const it = O.iter(fromlist);
+  for (let x = it.$next(); x !== DONE; x = it.$next()) {
     if (!isinstance(x, T.str)) {
       const where = recursive ? `${getattr(m, "__name__")}.__all__` : "``from list''";
       raise(T.TypeError, `Item in ${where} must be str, not ${typeName(x)}`);
