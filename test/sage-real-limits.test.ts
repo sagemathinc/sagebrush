@@ -32,10 +32,10 @@ test("a RealField precision past 2^20 bits is refused before the field is made (
   ]));
   assert.equal(r.status, 0, r.stderr.slice(-400));
   assert.equal(r.stdout,
-    "10^9 refused RealField(1000000000): a precision of more than 1048576 bits is not available in sagebrush yet\n" +
-    "10^9 one refused RealField(1000000000): a precision of more than 1048576 bits is not available in sagebrush yet\n" +
-    "2^20+1 refused RealField(1048577): a precision of more than 1048576 bits is not available in sagebrush yet\n" +
-    "CC refused RealField(1000000000): a precision of more than 1048576 bits is not available in sagebrush yet\n" +
+    "10^9 refused RealField(1000000000): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
+    "10^9 one refused RealField(1000000000): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
+    "2^20+1 refused RealField(1048577): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
+    "CC refused RealField(1000000000): a precision past the limit of 1048576 bits is not available in sagebrush yet\n" +
     "2^20 ok RealNumberMP\n");
 });
 

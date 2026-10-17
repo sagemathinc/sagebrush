@@ -1143,7 +1143,7 @@ def RealField(prec=53, sci_not=False, rnd="RNDN"):
     if prec > _EXACT_BITS:
         # (HARD-RRQ-1: rounding to prec bits builds integers of that size;
         # checked before the cache holds the field)
-        raise NotImplementedError("RealField(%d): a precision of more than %d bits is not available in sagebrush yet" % (prec, _EXACT_BITS))
+        raise NotImplementedError("RealField(%d): a precision past the limit of %d bits is not available in sagebrush yet" % (prec, _EXACT_BITS))
     if prec == 53 and rnd == "RNDN":
         return _sa().RR
     key = (prec, rnd)
