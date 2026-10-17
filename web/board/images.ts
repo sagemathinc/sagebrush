@@ -7,6 +7,7 @@
 
 import type { BoardDoc, DocNode } from "./doc";
 import { PixelBudget, dataUrl, imageSize } from "../image-size";
+import { openDb } from "./idb-open";
 
 /** A picture a note shows, by its name in the document's `images`. */
 export interface ImageInfo {
@@ -29,10 +30,9 @@ let dbp: Promise<IDBDatabase | null> | null = null;
 function db(): Promise<IDBDatabase | null> {
   return (dbp ??= new Promise((resolve) => {
     try {
-      const r = indexedDB.open(DB, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => resolve(null);
+      // (bounded, web/board/idb-open.ts: one that never opens is no store, as none at all is)
+      // (one that didn't open: none now, and tried again by a later use)
+      openDb(DB, 1, (d) => d.createObjectStore(STORE), () => { dbp = null; }).then(resolve, () => { dbp = null; resolve(null); });
     } catch {
       resolve(null); // (no IndexedDB here: an exported file opened from disk, say; pictures are kept in memory)
     }

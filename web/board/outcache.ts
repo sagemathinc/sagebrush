@@ -13,6 +13,10 @@
 //
 // IdbOutputCache is this browser's (IndexedDB); a host may give another (in
 // CoCalc, a file beside the board's).
+import { openDb } from "./idb-open";
+
+// (after an open that failed, how long before one is tried again)
+const OPEN_RETRY_MS = 30_000;
 
 export interface CachedOutputs {
   key: string;
@@ -147,6 +151,7 @@ const done = (t: IDBTransaction) => new Promise<void>((res, rej) => { t.oncomple
  */
 export class IdbOutputCache implements OutputCache {
   private db: Promise<IDBDatabase> | null = null;
+  private failedAt = -Infinity;
   // (each operation after the one before it, in the order asked: a drop
   // asked after a put is never overtaken by it, SEC-975-4)
   private queue: Promise<unknown> = Promise.resolve();
@@ -158,16 +163,20 @@ export class IdbOutputCache implements OutputCache {
   /** @param engine the id of the engine computing what is put (recorded with each entry) */
   constructor(readonly engine?: string, readonly name = "sagebrush-outputs", readonly caps = { doc: DOC_CAP, all: ALL_CAP }) {}
   private open(): Promise<IDBDatabase> {
-    return (this.db ??= new Promise((res, rej) => {
-      const r = indexedDB.open(this.name, 1);
-      r.onupgradeneeded = () => {
-        const db = r.result;
+    // (bounded, web/board/idb-open.ts: an open that never answers fails, and
+    // the next operation tries again, as one closed for another page's upgrade does)
+    // (a database that didn't open: not tried again for OPEN_RETRY_MS, so
+    // that queued operations fail at once rather than 3 s each)
+    if (!this.db && Date.now() - this.failedAt < OPEN_RETRY_MS) return Promise.reject(new Error(`${this.name}: not open (it did not open recently)`));
+    if (!this.db) {
+      const p: Promise<IDBDatabase> = openDb(this.name, 1, (db) => {
         db.createObjectStore("entries", { keyPath: ["doc", "key"] }).createIndex("doc", "doc");
         db.createObjectStore("docs", { keyPath: "doc" });
-      };
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    }));
+      }, () => { if (this.db === p) this.db = null; });
+      this.db = p;
+      p.catch(() => { if (this.db === p) { this.db = null; this.failedAt = Date.now(); } });
+    }
+    return this.db;
   }
   get(doc: string, keys: string[]): Promise<Map<string, CachedOutputs>> {
     return this.inOrder(() => this.getNow(doc, keys));
