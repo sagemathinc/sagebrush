@@ -81,7 +81,7 @@ try {
 } finally {
   chrome.kill("SIGKILL");
   await sleep(300);
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 console.log(failures ? `${failures} of ${count} failed` : `all ${count} passed`);
 process.exit(failures ? 1 : 0);
