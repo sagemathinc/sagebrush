@@ -662,6 +662,16 @@ def _into_universe(items, universe, kind):
             except MagmaError:
                 raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
         return out
+    if isinstance(universe, _sp.PolynomialRing_) and any(_num(x) for x in items):
+        # (a number in [Q[x] | 2] is a constant polynomial, as Magma's; one
+        # not integral doesn't go into Z[x])
+        d, out = _udesc(universe), []
+        for k, x in enumerate(items):
+            y = _into(x, d, universe) if d is not None and _num(x) else x
+            if y is _NOCOERCE:
+                raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
+            out.append(y)
+        return out
     ff = isinstance(universe, _MFinField)
     if not ff and not ((universe is _ZZ or universe is _QQ) and any(_is_ff(x) for x in items)):
         # (the rationals' elements are rationals, the integral ones too)
@@ -6568,7 +6578,11 @@ def _into(x, d, ring):
         return MReal.of(x) if num or isinstance(x, MReal) else _NOCOERCE
     if t in ("ZX", "QX"):
         if num:
-            return x if t == "QX" or _Fraction(x).denominator == 1 else _NOCOERCE
+            if t == "ZX" and _Fraction(x).denominator != 1:
+                return _NOCOERCE
+            # (a constant of the ring, as Magma's: 2 put in a sequence over
+            # Q[x] is a polynomial, and S[1] div 3 is 2/3, never 0)
+            return ring(x) if isinstance(ring, _sp.PolynomialRing_) else x
         if isinstance(x, _sp.Polynomial) and dx[0] in ("ZX", "QX"):
             c = [_m_num(v) for v in x.list()]
             if t == "ZX" and any(_Fraction(v).denominator != 1 for v in c):
