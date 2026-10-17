@@ -20,3 +20,25 @@ for an, a in reals:
             show("%s %s %s" % (an, on, bn), lambda: op(a, b))
             if bn not in [n for n, _ in reals]:
                 show("%s %s %s" % (bn, on, an), lambda: op(b, a))
+
+# operands are rounded into the coarser field before the arithmetic (a 53-bit
+# midpoint of R30 rounds to even first); x^0, 1^y and an infinite base keep
+# Sage's identities in the field the power is in
+def show3(label, f, scale=0):
+    try:
+        r=f()
+        print(label, '=>', r.exact_rational()/QQ(2)^scale if scale else repr(r), r.parent() if hasattr(r,'parent') else type(r).__name__)
+    except Exception as e: print(label, '!!', type(e).__name__, e)
+R=RealField(30)
+a=R(2)^940
+b=RR(1+QQ(1)/2^30)*RR(2)^1100
+show3('small + midpoint',lambda:a+b,1100)
+show3('midpoint + small',lambda:b+a,1100)
+show3('explicitly coerced control',lambda:a+R(b),1100)
+for p in [30,52]:
+    R=RealField(p)
+    for name, T in [('float',float), ('RDF',RDF)]:
+        show3(str((p,name,'0^0')),lambda:R(0)^T(0))
+        show3(str((p,name,'1^inf')),lambda:R(1)^T('inf'))
+        show3(str((p,name,'1^nan')),lambda:R(1)^T('nan'))
+    show3(str((p,'RDF(-inf)^2')),lambda:RDF('-inf')^R(2))

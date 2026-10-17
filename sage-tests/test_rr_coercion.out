@@ -488,3 +488,20 @@ RRbig == bool -> False bool
 bool == RRbig -> False bool
 RRbig < bool -> False bool
 bool < RRbig -> True bool
+small + midpoint => 1 Real Field with 30 bits of precision
+midpoint + small => 1 Real Field with 30 bits of precision
+explicitly coerced control => 1 Real Field with 30 bits of precision
+(30, 'float', '0^0') => 1.0000000 Real Field with 30 bits of precision
+(30, 'float', '1^inf') => 1.0000000 Real Field with 30 bits of precision
+(30, 'float', '1^nan') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '0^0') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '1^inf') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF', '1^nan') => 1.0000000 Real Field with 30 bits of precision
+(30, 'RDF(-inf)^2') => +infinity Real Field with 30 bits of precision
+(52, 'float', '0^0') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'float', '1^inf') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'float', '1^nan') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '0^0') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '1^inf') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF', '1^nan') => 1.00000000000000 Real Field with 52 bits of precision
+(52, 'RDF(-inf)^2') => +infinity Real Field with 52 bits of precision
