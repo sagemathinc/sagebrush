@@ -178,6 +178,10 @@ TABLE = {
     "IntegralBasis": (["number fields"], "A basis of the ring of integers over Z."),
     "ClassNumber": (["number fields"], "The class number of a number field."),
     "ClassGroup": (["number fields"], "The class group of a number field, with its map to ideals."),
+    "CyclotomicField": (["number fields"], "The cyclotomic field Q(zeta_n), its generator printed zeta_n until named."),
+    "Basis": (["number fields"], "The power basis 1, a, ..., a^(d-1) of a number field."),
+    "BaseRing": (["polynomials", "matrices", "number fields"], "The ring a polynomial ring, matrix or number field is over."),
+    "CoefficientRing": (["polynomials", "matrices", "number fields"], "The same as BaseRing, for a polynomial ring, matrix or number field."),
     "UnitGroup": (["number fields"], "The unit group of a number field, with its map to units."),
     "Regulator": (["number fields"], "The regulator of a number field."),
     "UnitRank": (["number fields"], "The rank of the unit group of a number field."),
@@ -801,6 +805,23 @@ q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
 > G := ClassGroup(QuadraticField(-14));
 > #G;
 4""",
+    "CyclotomicField": """\
+> K<z> := CyclotomicField(5);
+> z^5;
+1
+> Degree(K);
+4""",
+    "Basis": """\
+> K<w> := QuadraticField(-5);
+> Basis(K);
+[ 1, w ]""",
+    "BaseRing": """\
+> P<x> := PolynomialRing(GF(7));
+> BaseRing(P);
+Finite field of size 7""",
+    "CoefficientRing": """\
+> CoefficientRing(Matrix(Rationals(), 2, 2, [1, 2, 3, 4]));
+Rational Field""",
     "UnitGroup": """\
 > U := UnitGroup(QuadraticField(-1));
 > #U;

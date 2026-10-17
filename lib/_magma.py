@@ -722,8 +722,28 @@ def _res_items(items, R, kind):
     return out
 
 
+def _cyc_items(items, where):
+    """A literal with a cyclotomic field's elements: with integers,
+    rationals and elements of that field only; Magma's error with another
+    number field's or a polynomial in a sequence (as seen in Magma
+    2.18); else refused (another cyclotomic field's: Magma makes a larger
+    one)."""
+    c = next((x for x in items if _cyc_elt(x)), None)
+    if c is None:
+        return
+    for x in items:
+        if x is _UNDEF or (isinstance(x, (int, _Fraction)) and not isinstance(x, bool)) or (_cyc_elt(x) and x.parent() is c.parent()):
+            continue
+        if where == "[ ... ]" and ((isinstance(x, _MNFElt) and not _cyc_elt(x)) or isinstance(x, _sp.Polynomial)):
+            raise MagmaError("No valid universe containing all elements", "[ ... ]")
+        what = "another cyclotomic field's element" if _cyc_elt(x) else "a %s" % _type_of(x)
+        raise MagmaError("a collection of a cyclotomic field's elements and %s is not supported yet" % what, where)
+
+
 def _seq(items, universe=None):
     items = list(items)
+    if universe is None:
+        _cyc_items(items, "[ ... ]")
     if universe is None and any(isinstance(x, _MResElt) for x in items):
         items = _res_items(items, None, "seq")
     if universe is None:
@@ -762,6 +782,9 @@ def _set_universe(items):
 
 
 def _set(items, universe=None, derived=False):
+    items = list(items)
+    if universe is None:
+        _cyc_items(items, "{ ... }")
     items = _into_universe(list(items), universe, "set")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
@@ -773,6 +796,9 @@ def _set(items, universe=None, derived=False):
 
 
 def _iset(items, universe=None, derived=False):
+    items = list(items)
+    if universe is None:
+        _cyc_items(items, "{@ ... @}")
     items = _into_universe(list(items), universe, "indexed")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
@@ -784,6 +810,9 @@ def _iset(items, universe=None, derived=False):
 
 
 def _mset(items, universe=None, derived=False):
+    items = list(items)
+    if universe is None:
+        _cyc_items(items, "{* ... *}")
     items = _into_universe(list(items), universe, "multi")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
@@ -2421,6 +2450,8 @@ def _arith_rule(op, a, b, pos):
         return _ffmat_check(op, a, b, pos)
     if _ff_check(op, a, b, pos):
         return
+    if _cyc_elt(a) or _cyc_elt(b):
+        _cyc_check(o, a, b, pos)
     A, B = _ak(a), _ak(b)
     err = lambda code: _incompatible(code, o, a, b, pos)
     unsupported = lambda what: MagmaError("%s is not supported yet" % what, "'%s'" % o, True, pos)
@@ -2909,6 +2940,13 @@ def _common(d, e):
     types), "C" (not compatible) or "G" (incompatible degrees)."""
     if d == e:
         return None
+    if any(p[0] == "NF" and p[1] in _CYC_IDS for p in (d, e)):
+        # (a cyclotomic field's elements with integers and rationals; with
+        # another cyclotomic field's Magma finds a larger one, with others
+        # its errors not modelled: refused)
+        if d[0] in ("Z", "Q") or e[0] in ("Z", "Q"):
+            return None
+        raise MagmaError("a cyclotomic field's elements together with these other values are not supported yet")
     for p, q in ((d, e), (e, d)):
         a, b = p[0], q[0]
         if a in _BASES and b in _BASES:
@@ -3034,6 +3072,8 @@ def _struct_eq(a, b, op, pos):
 
 
 def _eq(a, b, pos=None, op="eq"):
+    if _cyc_elt(a) or _cyc_elt(b):
+        _cyc_check(op, a, b, pos)
     if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
@@ -4020,6 +4060,10 @@ def _container(v):
 def _atomic(v):
     if isinstance(v, (bool, int, str, _Fraction, MReal, _MResElt)) or _is_ff(v):
         return True
+    if isinstance(v, _MNFElt) and v.parent()._quadratic:
+        # (a quadratic field's, as Magma prints them: [ 1, K.1 ]; another
+        # number field's one to a line)
+        return True
     if isinstance(v, MTuple):
         return _nested(v, lambda: all(_atomic(x) for x in v))
     return False
@@ -4808,7 +4852,7 @@ _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum S
                "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt "
                # (and those of signatures: ISA(AlgMatElt, MtrxS))
                "GrpPermElt GrpPerm RngIntResElt RngIntRes ModTupRngElt ModTupFldElt AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
-               "FldNum FldQuad FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
+               "FldNum FldQuad FldCyc FldCycElt FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
 
@@ -4830,15 +4874,21 @@ def _type_name(x):
         return "RngInt"
     if x is _QQ:
         return "FldRat"
+    if isinstance(x, RealField_):
+        return "FldRe"
     if type(x).__name__ == "MList":
         return "List"
     # (number fields: Magma 2.18's names; a field made by QuadraticField is
     # its own type, with its own order and elements)
+    if isinstance(x, _MCycField):
+        return "FldCyc"
     if isinstance(x, _MNumberField):
         return "FldQuad" if x._quadratic else "FldNum"
     if isinstance(x, _MOrder):
         return "RngQuad" if x.K._quadratic else "RngOrd"
     if isinstance(x, _MNFElt):
+        if isinstance(x.parent(), _MCycField):
+            return "FldCycElt"
         return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
     if isinstance(x, _MVector):
         return "ModTupFldElt" if x._base is _sa.QQ else "ModTupRngElt"
@@ -4925,8 +4975,12 @@ def _ext_type(x):
         return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
     if isinstance(x, _Cat):
         return "Cat[%s]" % x
+    if isinstance(x, _MCycField):
+        return "FldCyc[FldRat]"
+    if isinstance(x, _MNFElt):
+        return "%s[FldRat]" % _type_name(x)
     if isinstance(x, _MNumberField):
-        return "FldNum[FldRat]"
+        return "FldQuad[FldRat]" if x._quadratic else "FldNum[FldRat]"
     if isinstance(x, _sp.PolynomialRing_):
         return "RngUPol[%s]" % _ring_cat(x.base_ring())
     if isinstance(x, MMap):
@@ -5162,6 +5216,8 @@ def _nonzero_poly(name, f):
 
 
 def Coefficients(f):
+    if _cyc_elt(f):
+        raise _bad_types("Coefficients", (f,))
     if isinstance(f, _MFFPoly):
         return MSeq(f.p._c)
     # (the zero polynomial's are [], as Magma's)
@@ -7054,6 +7110,12 @@ def Eltseq(x):
             return MSeq([x])
         P = _sff.GF(F.p)
         return MSeq([P(int(c)) for c in x.list()])
+    if isinstance(x, _MNFElt):
+        # (its rational coefficients on 1, a, ..., a^(d-1), in the
+        # rationals as Magma's)
+        c = list(x._c)
+        c += [0] * (x.parent().degree() - len(c))
+        return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
     return MSeq(x)
 
 
@@ -7502,10 +7564,11 @@ class _MNFElt(_snf.NumberFieldElement):
         d = 1
         for x in c:
             d = d * x.denominator // _math.gcd(d, x.denominator)
+        v = self._K._magma_var()
         if d == 1 or sum(1 for x in c if x) <= 1:
-            return _snf._repr_poly(c, self._K._name)
+            return _snf._repr_poly(c, v)
         num = [x * d for x in c]
-        return "1/%d*(%s)" % (d, _snf._repr_poly(num, self._K._name))
+        return "1/%d*(%s)" % (d, _snf._repr_poly(num, v))
 
     def _magma_parent(self):
         return self._K
@@ -7515,13 +7578,21 @@ class _MNumberField(_snf.NumberField_absolute):
     _element_class = _MNFElt
     _magma_block = True
 
-    def __init__(self, f, quadratic=False):
-        super().__init__(f, "$.1")
+    def __init__(self, f, quadratic=False, irreducible=False):
+        super().__init__(f, "$.1", irreducible=irreducible)
         self._quadratic = quadratic
         self._order = None
 
     def _magma_names(self, names):
         self._name = names[0]
+
+    def _magma_var(self):
+        # (its generator unnamed: K.1 for the variable K holding the field,
+        # as Magma prints it, $.1 when none does)
+        if self._name != "$.1":
+            return self._name
+        v = _global_name(self)
+        return "%s.1" % v if v is not None else "$.1"
 
     def _magma_gen(self, i):
         return self.gen()
@@ -7651,6 +7722,218 @@ def QuadraticField(d):
     if s in (0, 1):
         raise MagmaError("QuadraticField of a square (Magma's rational field) is not supported yet")
     return _MNumberField([-s, 0, 1], quadratic=True)
+
+
+# (the degree of a cyclotomic field built: Phi_n is made in O(2^k d) steps
+# (k <= 9 primes of n, d its degree), never factored; but invariants of the
+# field (its maximal order, class group) cost far more with the degree)
+_CYCLO_DEGREE_MAX = 24
+# (Magma's own bound: "not small", checked against Magma 2.18, 2^30 is)
+_CYCLO_SMALL = 1 << 30
+# (its class group and units, by the engine's search, only up to this
+# degree, measured on the test VMs: of degree 12 (orders 13, 21, 28, 36)
+# 7 to 8 s; of degree 16 CyclotomicField(17)'s more than 60 s, of degree
+# 18 about 40 s, of degree 20 and 24 more than 60 s; Magma 2.18 took more
+# than 60 s for CyclotomicField(23) and those of degree 24)
+_CYCLO_CLASS_MAX = 12
+
+
+class _MCycField(_MNumberField):
+    """CyclotomicField(n): Q(zeta_n), defined by the n-th cyclotomic
+    polynomial, its generator printed zeta_n until named; one field for
+    each n, as Magma's (a name given to one is the generator's of every
+    CyclotomicField(n)).  Checked against Magma 2.18."""
+
+    def __init__(self, n, f):
+        super().__init__(f, irreducible=True)
+        self._cyclotomic_order = n
+        self._name = "zeta_%d" % n
+
+    def _magma_gen(self, i):
+        # (of degree 1, n = 1 or 2, the generator is the root, 1 or -1)
+        return self(-self._f[0]) if self._n == 1 else self.gen()
+
+    def __repr__(self):
+        return "Cyclotomic Field of order %d and degree %d" % (self._cyclotomic_order, self._n)
+
+    def _class_admit(self):
+        if self._n > _CYCLO_CLASS_MAX:
+            raise MagmaError("the class group or units of a cyclotomic field of degree more than %d are not supported yet" % _CYCLO_CLASS_MAX)
+
+    def _bnfdata(self):
+        self._class_admit()
+        return super()._bnfdata()
+
+    def _proven_bnf(self, what):
+        self._class_admit()
+        return super()._proven_bnf(what)
+
+    def _magma_coerce(self, x):
+        if isinstance(x, _MNFElt) and x.parent() is not self:
+            if isinstance(x.parent(), _MCycField):
+                # (Magma's has it where zeta_m is in Q(zeta_n))
+                raise MagmaError("coercion of an element of another cyclotomic field is not supported yet", "'!'", False)
+            raise MagmaError("Illegal coercion\nLHS: FldCyc\nRHS: %s" % _type_of(x), "'!'", False)
+        return super()._magma_coerce(x)
+
+
+_CYC = {}
+_CYC_IDS = set()
+
+
+def _cyc_elt(x):
+    return isinstance(x, _MNFElt) and isinstance(x.parent(), _MCycField)
+
+
+def _cyclotomic_poly(n, ps):
+    """Phi_n, constant first, n > 2 with the distinct primes ps: the product
+    of (1 - x^d)^mu(n/d) over the divisors d of n, as power series to its
+    degree (each factor a pass over the coefficients)."""
+    D = n
+    for p in ps:
+        D = D // p * (p - 1)
+    c = [1] + [0] * D
+    for mask in range(1 << len(ps)):
+        m, k = 1, 0
+        for i, p in enumerate(ps):
+            if mask >> i & 1:
+                m *= p
+                k += 1
+        d = n // m
+        if d > D:
+            continue
+        if k % 2 == 0:
+            # (times 1 - x^d)
+            for i in range(D, d - 1, -1):
+                c[i] -= c[i - d]
+        else:
+            # (divided by 1 - x^d: times 1 + x^d + x^2d + ...)
+            for i in range(d, D + 1):
+                c[i] += c[i - d]
+    return c
+
+
+def CyclotomicField(n):
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise _bad_types("CyclotomicField", (n,))
+    if n <= 0 or n >= _CYCLO_SMALL:
+        raise _arg_error("CyclotomicField", "Argument 1 (%d) is not small and positive" % n)
+    K = _CYC.get(n)
+    if K is not None:
+        return K
+    ps, m, p = [], n, 2
+    while p * p <= m:
+        if m % p == 0:
+            ps.append(p)
+            while m % p == 0:
+                m //= p
+        p += 1
+    if m > 1:
+        ps.append(m)
+    d = n
+    for p in ps:
+        d = d // p * (p - 1)
+    if d > _CYCLO_DEGREE_MAX:
+        raise MagmaError("CyclotomicField of degree more than %d is not supported yet" % _CYCLO_DEGREE_MAX, "'CyclotomicField'")
+    f = [-1, 1] if n == 1 else [1, 1] if n == 2 else _cyclotomic_poly(n, ps)
+    K = _CYC[n] = _MCycField(n, f)
+    _CYC_IDS.add(id(K))
+    return K
+
+
+def _cyc_check(o, a, b, pos):
+    """a o b, one of them a cyclotomic field's element (o an arithmetic
+    operator, eq or ne): returns where the number field rules compute it as
+    Magma does (with an integer or rational, or an element of the same
+    field; a power by an integer); Magma's error where it was seen (checked
+    against Magma 2.18); else refused: Magma computes with another
+    cyclotomic field's elements in a larger one, with matrices, ..."""
+    ca = _cyc_elt(a)
+    x, y = (a, b) if ca else (b, a)
+    num = lambda v: isinstance(v, (int, _Fraction)) and not isinstance(v, bool)
+    own = num(y) or (_cyc_elt(y) and y.parent() is x.parent())
+    both = lambda: MagmaError("Bad argument types\nArgument types given: FldCycElt[FldRat], FldCycElt[FldRat]", "'%s'" % o, True, pos)
+    if o == "^":
+        if ca and isinstance(b, int) and not isinstance(b, bool):
+            return
+        if ca and own:
+            raise both()
+    elif o in ("div", "mod"):
+        if own:
+            raise both()
+    elif o in ("+", "-", "*", "/", "eq", "ne"):
+        if own:
+            if o == "/" and y is b and (b == 0):
+                raise MagmaError("Argument 2 is not non-zero", "'/'", True, pos)
+            return
+        # (Magma's words for these, as seen: a polynomial added, a real
+        # multiplied, a finite field's element added)
+        if (o == "+" and (isinstance(y, _sp.Polynomial) or _is_ff(y))) or (o == "*" and isinstance(y, MReal)):
+            raise _bad_types(o, (a, b), pos)
+        if isinstance(y, _MNFElt) and not _cyc_elt(y) and o != "ne":
+            ext = lambda v: ("FldQuadElt[FldRat]" if v.parent()._quadratic else "FldNumElt[FldRat]") if not _cyc_elt(v) else "FldCycElt[FldRat]"
+            raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (ext(a), ext(b)), "'%s'" % o, True, pos)
+    raise MagmaError("'%s' of a cyclotomic field's element and %s is not supported yet" % (o, "an element of another cyclotomic field" if _cyc_elt(y) else "a %s" % _type_of(y)), "'%s'" % o, True, pos)
+
+
+def _base_ring(name, x):
+    """BaseRing(x) and CoefficientRing(x): the ring of a polynomial ring,
+    of a matrix, vector or matrix space, of a polynomial; the rationals of
+    the rationals and of a number field; the integers of its maximal order
+    (BaseRing).  Magma's Bad argument types for what it has none of, as
+    seen; refused for anything else.  Checked against Magma 2.18."""
+    zq = lambda R: _ZZ if R == _sp.ZZ else _QQ if R == _sp.QQ else None
+    r = None
+    if isinstance(x, _sp.PolynomialRing_):
+        r = zq(x.base_ring())
+    elif isinstance(x, _sp.Polynomial):
+        r = zq(x.parent().base_ring())
+    elif isinstance(x, (_MFFPolyRing, _MFFMat, _MFFMatSpace)):
+        r = x.F
+    elif isinstance(x, _MFFPoly):
+        r = x.R.F
+    elif x is _QQ or isinstance(x, _snf.NumberField_absolute):
+        r = _QQ
+    elif isinstance(x, _MOrder):
+        r = _ZZ
+    elif isinstance(x, (_smat.Matrix, _smat.MatrixSpace_)):
+        r = zq(x.base_ring())
+    elif isinstance(x, _MVector):
+        r = zq(x._base)
+    if r is not None:
+        return r
+    if x is _ZZ or isinstance(x, (_MFinField, _MResRing, RealField_, _MResElt, _Fraction, MSeq, MRange)) or _is_ff(x) or (
+            isinstance(x, int) and not isinstance(x, bool)) or isinstance(x, _MNFElt):
+        if isinstance(x, _MNFElt):
+            t = "FldCycElt" if _cyc_elt(x) else "FldQuadElt" if x.parent()._quadratic else "FldNumElt"
+            raise MagmaError("Bad argument types\nArgument types given: %s[FldRat]" % t, "'%s'" % name, True)
+        raise _bad_types(name, (x,))
+    raise MagmaError("%s of a %s is not supported yet" % (name, _type_of(x)), "'%s'" % name)
+
+
+def BaseRing(x):
+    return _base_ring("BaseRing", x)
+
+
+def CoefficientRing(x):
+    return _base_ring("CoefficientRing", x)
+
+
+def Basis(K):
+    """Basis(K), K a number field: 1, a, ..., a^(d-1) for its generator a,
+    as Magma's (checked against Magma 2.18); of an integer Magma's error;
+    of anything else refused (an order's prints in names Sagebrush doesn't
+    give)."""
+    if isinstance(K, _snf.NumberField_absolute):
+        g = K._magma_gen(1)
+        out, y = [], K(1)
+        for i in range(K.degree()):
+            out.append(y)
+            y = y * g
+        return MSeq(out)
+    if isinstance(K, int) and not isinstance(K, bool):
+        raise _bad_types("Basis", (K,))
+    raise MagmaError("Basis of a %s is not supported yet" % _type_of(K), "'Basis'")
 
 
 def MaximalOrder(K):
@@ -8656,6 +8939,8 @@ for _n in ("Gcd", "GCD", "GreatestCommonDivisor", "Lcm", "LCM", "LeastCommonMult
                                                                  (isinstance(x, MSeq) and _held(k) is not None) for k, x in enumerate(a)) else False)
 for _n in ("Parent", "Type", "ISA", "Sprint", "Sprintf"):
     _FF_SIGS[_n] = lambda a: True
+for _n in ("BaseRing", "CoefficientRing"):
+    _FF_SIGS[_n] = lambda a: len(a) == 1 and isinstance(a[0], (_MFFPolyRing, _MFFPoly, _MFFMat, _MFFMatSpace))
 for _n in ("Append", "Include", "Exclude", "Insert", "Index", "Position", "Reverse"):
     _FF_SIGS[_n] = _ff_collection
 
