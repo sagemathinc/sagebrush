@@ -383,6 +383,53 @@ try {
   await sleep(300);
   const [gq, g2q] = [await node("g"), await node("g2")];
   check(gq.result === "right" && g2q.result === "right", "two Checks at once: each right from the state the code leaves: " + JSON.stringify([gq, g2q].map((q) => [q.answer, q.result, q.attempts])));
+  // (a question's id is its page's own: page 2's q, the id of page 1's, is
+  // checked by its own check, its feedback and verdict its own, also when
+  // the reader goes to another page while it runs: CORR-B21-2's sibling for Check)
+  await ev(`${B}.load(${JSON.stringify({ title: "Two pages", pages: [
+    { id: "one", title: "One", nodes: [{ id: "q", kind: "ask", input: "number", text: "Page one: 1?", check: "answer == 1 or 'page one says no'" }] },
+    { id: "two", title: "Two", nodes: [{ id: "q", kind: "ask", input: "number", text: "Page two: 2?", check: "answer == 2 or 'page two says no'" }] },
+  ] })}).then(() => 1)`);
+  const Q = '.board-ask[data-ask="q"]';
+  const onPage = (n) => until(`(${q$(Q, "?.textContent")} || "").includes(${JSON.stringify(n === 1 ? "Page one" : "Page two")}) && !!${q$(Q + " .board-ask-check")}`, 20000);
+  const pageQ = (i) => ev(`JSON.stringify(window.sagebrush.board.snapshot().doc.pages[${i}].nodes[0])`).then(JSON.parse);
+  const setQ = (v) => ev(`(() => { const n = ${q$(Q + " input[type=number]")}; n.value = ${JSON.stringify(v)}; return 1; })()`);
+  await onPage(1);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  await setQ("5");
+  await press(Q + " .board-ask-check");
+  await until("window.sagebrush.board.snapshot().doc.pages[0].nodes[0].attempts === 1", 30000);
+  await sleep(300);
+  check(/page one says no/.test(await ev(q$(Q, ".textContent"))), "page 1's q: its own check's words");
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await onPage(2);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  let pt = await ev(q$(Q, ".textContent"));
+  check(!/says no/.test(pt), "page 2's q, the same id: none of page 1's feedback: " + pt.slice(0, 120));
+  await setQ("5");
+  await press(Q + " .board-ask-check");
+  await until("window.sagebrush.board.snapshot().doc.pages[1].nodes[0].attempts === 1", 30000);
+  await sleep(300);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/page two says no/.test(pt) && !/page one/.test(pt), "page 2's q: checked by its own check: " + pt.slice(0, 160));
+  await ev(`document.querySelector('[data-sbb="pgprev"]').click(), 1`);
+  await onPage(1);
+  await sleep(300);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/page one says no/.test(pt) && !/page two/.test(pt), "back on page 1: its own feedback, none of page 2's: " + pt.slice(0, 160));
+  // (Check on page 2, and to page 1 before it finishes: the verdict is page 2's q's, page 1's untouched)
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await onPage(2);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  await setQ("2");
+  await ev(`(() => { ${q$(Q + " .board-ask-check")}.click(); document.querySelector('[data-sbb="pgprev"]').click(); return 1; })()`);
+  await until("window.sagebrush.board.snapshot().doc.pages[1].nodes[0].attempts === 2", 30000);
+  await sleep(500);
+  const [p1q, p2q] = [await pageQ(0), await pageQ(1)];
+  check(p2q.answer === 2 && p2q.result === "right" && p1q.answer === 5 && p1q.result === "wrong" && p1q.attempts === 1, "a Check whose page is left while it runs: kept with its own page's q, page 1's untouched: " + JSON.stringify([p1q, p2q].map((x) => [x.answer, x.result, x.attempts])));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
