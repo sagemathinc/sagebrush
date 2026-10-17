@@ -653,6 +653,10 @@ def _into_universe(items, universe, kind):
         return _res_items(items, universe, kind)
     if isinstance(universe, (_MFFMatSpace, _MFFVecSpace)):
         raise MagmaError("a collection over a matrix or vector space over a finite field is not supported yet", _UNIVERSE_FAIL[kind])
+    if isinstance(universe, _snf.NumberField_absolute) and any(_num(x) or isinstance(x, _MNFElt) for x in items):
+        # (each item coerced as Magma's: [K | w] of another field's w is
+        # its error, or w in K where its field is in K; astra2 CORR-E65-1)
+        return _nf_items(items, universe, kind)
     if isinstance(universe, _MFFPolyRing):
         # (a polynomial ring over a finite field: each item coerced, as R!x)
         out = []
@@ -728,9 +732,16 @@ def _cyc_items(items, where):
     number field's or a polynomial in a sequence (as seen in Magma
     2.18); else refused (another cyclotomic field's: Magma makes a larger
     one)."""
-    c = next((x for x in items if _cyc_elt(x)), None)
+    c = next((x for x in items if _cyc_elt(x)), None) or next((x for x in items if isinstance(x, _MNFElt)), None)
     if c is None:
-        return
+        return items
+    if not _cyc_elt(c):
+        # (another number field's elements with integers and rationals:
+        # those coerced into it, as Magma's [b, 1]; with anything else as
+        # they were)
+        if all(x is _UNDEF or _num(x) or (isinstance(x, _MNFElt) and x.parent() is c.parent()) for x in items):
+            return _nf_items(items, c.parent(), "seq")
+        return items
     for x in items:
         if x is _UNDEF or (isinstance(x, (int, _Fraction)) and not isinstance(x, bool)) or (_cyc_elt(x) and x.parent() is c.parent()):
             continue
@@ -738,12 +749,15 @@ def _cyc_items(items, where):
             raise MagmaError("No valid universe containing all elements", "[ ... ]")
         what = "another cyclotomic field's element" if _cyc_elt(x) else "a %s" % _type_of(x)
         raise MagmaError("a collection of a cyclotomic field's elements and %s is not supported yet" % what, where)
+    # (the integers and rationals among them are the field's, as Magma's
+    # [z, 1]: astra2 CORR-E65-2)
+    return _nf_items(items, c.parent(), "seq")
 
 
 def _seq(items, universe=None):
     items = list(items)
     if universe is None:
-        _cyc_items(items, "[ ... ]")
+        items = _cyc_items(items, "[ ... ]")
     if universe is None and any(isinstance(x, _MResElt) for x in items):
         items = _res_items(items, None, "seq")
     if universe is None:
@@ -784,7 +798,7 @@ def _set_universe(items):
 def _set(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        _cyc_items(items, "{ ... }")
+        items = _cyc_items(items, "{ ... }")
     items = _into_universe(list(items), universe, "set")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
@@ -798,7 +812,7 @@ def _set(items, universe=None, derived=False):
 def _iset(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        _cyc_items(items, "{@ ... @}")
+        items = _cyc_items(items, "{@ ... @}")
     items = _into_universe(list(items), universe, "indexed")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
@@ -812,7 +826,7 @@ def _iset(items, universe=None, derived=False):
 def _mset(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        _cyc_items(items, "{* ... *}")
+        items = _cyc_items(items, "{* ... *}")
     items = _into_universe(list(items), universe, "multi")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
@@ -7783,6 +7797,54 @@ _CYC_IDS = set()
 
 def _cyc_elt(x):
     return isinstance(x, _MNFElt) and isinstance(x.parent(), _MCycField)
+
+
+def _cyc_embed(x, K):
+    """x, an element of Q(zeta_m), in the cyclotomic field K = Q(zeta_n)
+    when Q(zeta_m) is in it, else None: with m' and n' the even ones of m,
+    2m and n, 2n (Q(zeta_m) is Q(zeta_2m) for m odd), when m' divides n';
+    zeta_m is zeta_n'^(n'/m'), and for n odd zeta_2n is -zeta_n^((n+1)/2).
+    As Magma's ([Q(zeta_5) | zeta_10] is -z^3; checked against Magma
+    2.18)."""
+    m, n = x.parent()._cyclotomic_order, K._cyclotomic_order
+    mp = m if m % 2 == 0 else 2 * m
+    N = n if n % 2 == 0 else 2 * n
+    if N % mp:
+        return None
+    e = (N // m) % N
+    z = K._magma_gen(1)
+    img = z ** e if N == n else (-1) ** e * z ** (e * (n + 1) // 2)
+    r, p = K(0), K(1)
+    for c in x._c:
+        r = r + p * K(c)
+        p = p * img
+    return r
+
+
+def _nf_items(items, K, kind):
+    """The items of a collection whose universe is the number field K, as
+    Magma coerces them: integers and rationals into K, K's own elements as
+    they are, another cyclotomic field's element when its field is in K
+    (_cyc_embed); else Magma's error (another number field's element, a
+    cyclotomic field's not in K); else refused."""
+    fail = lambda k: MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
+    out = []
+    for k, x in enumerate(items):
+        if x is _UNDEF or (isinstance(x, _MNFElt) and x.parent() is K):
+            out.append(x)
+        elif _num(x):
+            y = _into(x, _udesc(K), K)
+            if y is _NOCOERCE:
+                raise fail(k)
+            out.append(y)
+        elif isinstance(x, _MNFElt):
+            y = _cyc_embed(x, K) if _cyc_elt(x) and isinstance(K, _MCycField) else None
+            if y is None:
+                raise fail(k)
+            out.append(y)
+        else:
+            raise MagmaError("a collection over a number field holding a %s is not supported yet" % _type_of(x), _UNIVERSE_FAIL[kind])
+    return out
 
 
 def _cyclotomic_poly(n, ps):
