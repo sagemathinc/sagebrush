@@ -156,13 +156,15 @@ test("available_timezones: budgets of names and of characters (names read, direc
     // in all; and 11000 names of 200 characters, past the default 2097152)
     mkdirSync(join(dir, "long"));
     copyFileSync(PINNED + "/Europe/London", join(dir, "long", "z".repeat(200)));
+    mkdirSync(join(dir, "empty"));
     mkdirSync(join(dir, "wide"));
     for (let i = 0; i < 11000; i++) writeFileSync(join(dir, "wide", String(i).padStart(200, "w")), "");
     const code = [
       "import zoneinfo, zoneinfo._tzpath as T",
       `d = ${JSON.stringify(dir)}`,
       "zoneinfo.reset_tzpath([d + '/a', d + '/b'])",
-      "for bound in (7, 6, 5):",
+      // (2 roots and 7 names: 9)
+      "for bound in (9, 8, 6):",
       "    T._MAX_ENTRIES = bound",
       "    try: print(bound, sorted(zoneinfo.available_timezones()))",
       "    except NotImplementedError as e: print(bound, e)",
@@ -171,27 +173,45 @@ test("available_timezones: budgets of names and of characters (names read, direc
       "try: zoneinfo.available_timezones()",
       "except NotImplementedError as e: print('big', e)",
       "zoneinfo.reset_tzpath([d + '/long'])",
+      // (the root's own characters, then 400)
       "for chars in (400, 399, 199):",
-      "    T._MAX_CHARS = chars",
+      "    T._MAX_CHARS = len(d + '/long') + chars",
       "    try: print(chars, [len(k) for k in zoneinfo.available_timezones()])",
-      "    except NotImplementedError as e: print(chars, e)",
+      "    except NotImplementedError as e: print(chars, str(e).replace(str(T._MAX_CHARS), 'root+%d' % chars))",
       "T._MAX_CHARS = 1 << 21",
       "zoneinfo.reset_tzpath([d + '/wide'])",
       "try: zoneinfo.available_timezones()",
       "except NotImplementedError as e: print('wide', e)",
+      // (daybreak2's HARD-TZB-2: roots spend too, missing or empty ones included)
+      "T._MAX_ENTRIES = 5",
+      "for roots in (['/nonexistent-%d' % i for i in range(5)], ['/nonexistent-%d' % i for i in range(6)], [d + '/a/Sub'] * 2 + ['/nonexistent'] * 3, [d + '/empty'] * 6):",
+      "    zoneinfo.reset_tzpath(roots)",
+      "    try: print(len(roots), sorted(zoneinfo.available_timezones()))",
+      "    except NotImplementedError as e: print(len(roots), e)",
+      "T._MAX_ENTRIES = 1 << 16",
+      "T._MAX_CHARS = 30",
+      "zoneinfo.reset_tzpath(['/' + 'x' * 30])",
+      "try: zoneinfo.available_timezones()",
+      "except NotImplementedError as e: print('long root', e)",
     ].join("\n");
     const out = run(process.execPath, ["--max-old-space-size=128", __dirname + "/../src/cli.js", "-c", code], {}).filter(Boolean);
     assert.deepEqual(out, [
-      "7 ['Four', 'One', 'Sub/Three', 'Two']",
+      "9 ['Four', 'One', 'Sub/Three', 'Two']",
+      "8 zoneinfo: available_timezones() past Sagebrush's bound of 8 names on TZPATH",
       "6 zoneinfo: available_timezones() past Sagebrush's bound of 6 names on TZPATH",
-      "5 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
       "big zoneinfo: available_timezones() past Sagebrush's bound of 65536 names on TZPATH",
       "400 [200]",
       // (the key's 200 cross what the name left)
-      "399 zoneinfo: available_timezones() past Sagebrush's bound of 399 characters of names on TZPATH",
+      "399 zoneinfo: available_timezones() past Sagebrush's bound of root+399 characters of names on TZPATH",
       // (the name itself crosses them, as _zonedir reads it)
-      "199 zoneinfo: available_timezones() past Sagebrush's bound of 199 characters of names on TZPATH",
+      "199 zoneinfo: available_timezones() past Sagebrush's bound of root+199 characters of names on TZPATH",
       "wide zoneinfo: available_timezones() past Sagebrush's bound of 2097152 characters of names on TZPATH",
+      "5 []",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      // (a/Sub twice: 2 roots and 1 name each, then a missing one: 5 spent, the next refused)
+      "5 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      "6 zoneinfo: available_timezones() past Sagebrush's bound of 5 names on TZPATH",
+      "long root zoneinfo: available_timezones() past Sagebrush's bound of 30 characters of names on TZPATH",
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
