@@ -433,7 +433,7 @@ superType.$customGet = true;
 // __class__ or super() (the class body passes it to type.__new__ as
 // __classcell__), and types.CellType.
 // (src/runtime/index.ts: a __classdictcell__'s dict made the class's own)
-export const classDictHooks: { bind: ((c: PyCell, cls: PyType) => void) | null } = { bind: null };
+export const classDictHooks: { bind: ((c: PyCell, cls: PyType) => void) | null; view: ((ns: Map<string, any>) => PyDict) | null } = { bind: null, view: null };
 export class PyCell {
   constructor(public v: any = undefined) {}
 }
@@ -793,12 +793,13 @@ export function makeClass(name: string, bases: any[], ns: Map<string, any> | Pre
   return buildClass(name, bases, ns, module, qualname, kw, T.type);
 }
 
+// The namespace a metaclass is given: the class body's own, a dict over
+// it (the one its __classdict__ is: classDictHooks.view), not a copy, as
+// CPython's
 function nsDict(ns: Map<string, any>, module: string, qualname: string): PyDict {
-  const d = new PyDict();
-  if (!ns.has("__module__")) dictSet(d, "__module__", module);
-  if (!ns.has("__qualname__")) dictSet(d, "__qualname__", qualname);
-  for (const [k, v] of ns) dictSet(d, k, v);
-  return d;
+  if (!ns.has("__module__")) ns.set("__module__", module);
+  if (!ns.has("__qualname__")) ns.set("__qualname__", qualname);
+  return classDictHooks.view!(ns);
 }
 
 function buildClass(name: string, bases: any[], ns: Map<string, any>, module: string, qualname: string, kw: Map<string, any>, meta: PyType): PyType {
