@@ -623,7 +623,7 @@ export class Board {
   // (an item's content as drawn: a question's whole definition, and whether it
   // can be answered now, CORR-448-1, CORR-448-3)
   private keyOf(it: Item): string {
-    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify([it.ask, this.askFeedback.get(it.ask.id) ?? null, !!this.onCheck, this.askDecided.get(this.askScope + it.ask.id) ?? null, !!this.onDecide]) + (this.onAnswer ? "+" : "-") : "");
+    return contentKey(it) + (it.ask ? "\u0000" + JSON.stringify([it.ask, this.askFeedback.get(this.askScope + it.ask.id) ?? null, !!this.onCheck, this.askDecided.get(this.askScope + it.ask.id) ?? null, !!this.onDecide]) + (this.onAnswer ? "+" : "-") : "");
   }
   /** Ask the host which of a question's `decide` options the reader's words show (mount.ts); none: no host to ask. */
   onDecide: ((id: string, words: string) => void) | null = null;
@@ -675,12 +675,12 @@ export class Board {
   /** A question's answer checked by its check (mount.ts): the answer the controls hold. None: no Check (no interpreter). */
   onCheck: ((id: string, answer: AskAnswer) => void) | null = null;
   /** What the last check of each question said, and its hints so far, rendered (mount.ts); `pending` while it runs. */
-  askFeedback = new Map<string, { pending?: boolean; message?: string | null; hints?: (string | null)[] }>();
+  askFeedback = new Map<string, { pending?: boolean; message?: string | null; hints?: (string | null)[] }>();  // (by page and question, askScope + id)
 
   private askCheckEl(a: DocAsk, id: string, current: () => AskAnswer | undefined, can: boolean): HTMLElement {
     const box = document.createElement("div");
     box.className = "board-ask-checked";
-    const fb = this.askFeedback.get(id);
+    const fb = this.askFeedback.get(this.askScope + id);
     if (can && this.onCheck) {
       const b = document.createElement("button");
       b.type = "button";

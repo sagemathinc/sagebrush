@@ -402,6 +402,75 @@ try {
   await sleep(300);
   const ut = await ev(q$('.board-ask[data-ask="u"]', ".textContent")), uq = await node("u");
   check(/The check could not decide: no proof either way/.test(ut) && !uq.attempts, "a check that can't decide: said so, not counted: " + ut.slice(-120));
+  // (a question's id is its page's own: page 2's q, the id of page 1's, is
+  // checked by its own check, its feedback and verdict its own, also when
+  // the reader goes to another page while it runs: CORR-B21-2's sibling for Check)
+  await ev(`${B}.load(${JSON.stringify({ title: "Two pages", pages: [
+    { id: "one", title: "One", nodes: [{ id: "q", kind: "ask", input: "number", text: "Page one: 1?", check: "answer == 1 or 'page one says no'" }] },
+    { id: "two", title: "Two", nodes: [{ id: "q", kind: "ask", input: "number", text: "Page two: 2?", check: "answer == 2 or 'page two says no'" }] },
+  ] })}).then(() => 1)`);
+  const Q = '.board-ask[data-ask="q"]';
+  const onPage = (n) => until(`(${q$(Q, "?.textContent")} || "").includes(${JSON.stringify(n === 1 ? "Page one" : "Page two")}) && !!${q$(Q + " .board-ask-check")}`, 20000);
+  const pageQ = (i) => ev(`JSON.stringify(window.sagebrush.board.snapshot().doc.pages[${i}].nodes[0])`).then(JSON.parse);
+  const setQ = (v) => ev(`(() => { const n = ${q$(Q + " input[type=number]")}; n.value = ${JSON.stringify(v)}; return 1; })()`);
+  await onPage(1);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  await setQ("5");
+  await press(Q + " .board-ask-check");
+  await until("window.sagebrush.board.snapshot().doc.pages[0].nodes[0].attempts === 1", 30000);
+  await sleep(300);
+  check(/page one says no/.test(await ev(q$(Q, ".textContent"))), "page 1's q: its own check's words");
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await onPage(2);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  let pt = await ev(q$(Q, ".textContent"));
+  check(!/says no/.test(pt), "page 2's q, the same id: none of page 1's feedback: " + pt.slice(0, 120));
+  await setQ("5");
+  await press(Q + " .board-ask-check");
+  await until("window.sagebrush.board.snapshot().doc.pages[1].nodes[0].attempts === 1", 30000);
+  await sleep(300);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/page two says no/.test(pt) && !/page one/.test(pt), "page 2's q: checked by its own check: " + pt.slice(0, 160));
+  await ev(`document.querySelector('[data-sbb="pgprev"]').click(), 1`);
+  await onPage(1);
+  await sleep(300);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/page one says no/.test(pt) && !/page two/.test(pt), "back on page 1: its own feedback, none of page 2's: " + pt.slice(0, 160));
+  // (Check on page 2, and to page 1 before it finishes: the verdict is page 2's q's, page 1's untouched)
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await onPage(2);
+  await ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  await sleep(300);
+  await setQ("2");
+  await ev(`(() => { ${q$(Q + " .board-ask-check")}.click(); document.querySelector('[data-sbb="pgprev"]').click(); return 1; })()`);
+  await until("window.sagebrush.board.snapshot().doc.pages[1].nodes[0].attempts === 2", 30000);
+  await sleep(500);
+  const [p1q, p2q] = [await pageQ(0), await pageQ(1)];
+  check(p2q.answer === 2 && p2q.result === "right" && p1q.answer === 5 && p1q.result === "wrong" && p1q.attempts === 1, "a Check whose page is left while it runs: kept with its own page's q, page 1's untouched: " + JSON.stringify([p1q, p2q].map((x) => [x.answer, x.result, x.attempts])));
+  // (the pages reordered: no feedback goes with the place, to the other page's
+  // q now there; astra's CORR-F11-1 at f112eca4)
+  // (page one's q: 5, wrong, "page one says no"; page two's: 2, right; page 1 shown)
+  await onPage(1);
+  await ev(`window.sagebrush.board.edit((d) => { d.pages.reverse(); }).then(() => 1)`);
+  await onPage(2);
+  await sleep(500);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/Page two: 2\?/.test(pt) && /Right/.test(pt) && !/says no/.test(pt), "the pages reordered: page two's q, now first, shows none of page one's feedback: " + pt.slice(0, 160));
+  await ev(`document.querySelector('[data-sbb="pgnext"]').click(), 1`);
+  await until(`(${q$(Q, "?.textContent")} || "").includes("Page one")`, 20000);
+  await sleep(500);
+  pt = await ev(q$(Q, ".textContent"));
+  check(/Page one: 1\?/.test(pt) && !/page two/.test(pt), "and page one's q, now second, none of page two's: " + pt.slice(0, 160));
+  // (a Check running when the pages are reordered: dropped, its verdict recorded on neither page's q; by page id, in id order)
+  const byPage = () => ev(`JSON.stringify(window.sagebrush.board.snapshot().doc.pages.map((p) => [p.id, p.nodes[0].answer, p.nodes[0].result, p.nodes[0].attempts]).sort())`);
+  await setQ("1");
+  const before = await byPage();
+  await ev(`(() => { ${q$(Q + " .board-ask-check")}.click(); window.sagebrush.board.edit((d) => { d.pages.reverse(); }); return 1; })()`);
+  await sleep(5000);
+  const after = await byPage();
+  check(after === before, "a Check running as the pages are reordered: dropped, neither page's q changed: " + after + " (before " + before + ")");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
