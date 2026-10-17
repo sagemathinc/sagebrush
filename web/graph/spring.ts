@@ -19,7 +19,10 @@
 // on its own, then the parts are packed in rows, largest first.
 
 export type SpringNode = { id: string; w: number; h: number; fixed?: { x: number; y: number } | null };
-export type SpringOpts = { seed: number; iterations?: number; gap?: number };
+/** length: the distance between two linked boxes' edges the forces aim at
+ * (Fruchterman and Reingold's k), in place of the mean box size plus gap;
+ * at least MIN_LENGTH and at most MAX_LENGTH, else springLayout refuses (null). */
+export type SpringOpts = { seed: number; iterations?: number; gap?: number; length?: number };
 export type Positions = Map<string, { x: number; y: number }>;
 
 /** Past these, springLayout refuses (null). */
@@ -42,6 +45,8 @@ export const MIN_ITERATIONS = 50;
  * forces: it is not iterated. */
 export const MAX_ITERATIONS = 1000;
 export const MAX_FRAMES = 300;
+export const MIN_LENGTH = 1;
+export const MAX_LENGTH = 1e5;
 export const PART_COST = 64;
 const DEFAULT_ITERATIONS = 300;
 const FINAL_SWEEPS = 60;
@@ -73,12 +78,12 @@ class Part {
   done = 0;
   L: number;
   t0: number;
-  constructor(bodies: Body[], links: [number, number][], iterations: number, gap: number) {
+  constructor(bodies: Body[], links: [number, number][], iterations: number, gap: number, length: number | null) {
     this.bodies = bodies;
     this.links = links;
     this.iterations = iterations;
     const size = bodies.reduce((s, b) => s + Math.max(b.w, b.h), 0) / Math.max(bodies.length, 1);
-    this.L = Math.max(40, size) + gap;
+    this.L = length ?? Math.max(40, size) + gap;
     this.t0 = (this.L * Math.sqrt(bodies.length)) / 4;
   }
   step(gap: number): void {
@@ -156,6 +161,8 @@ type Plan = { parts: Part[]; all: Body[]; gap: number; left: number };
 function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts): Plan | null {
   if (nodes.length > MAX_NODES || edges.length > MAX_EDGES) return null;
   const gap = opts.gap ?? 24;
+  const length = opts.length ?? null;
+  if (length !== null && !(typeof length === "number" && length >= MIN_LENGTH && length <= MAX_LENGTH)) return null;
   const index = new Map<string, number>();
   nodes.forEach((nd, i) => index.set(nd.id, i));
   // the connected parts (union-find, in input order)
@@ -195,7 +202,7 @@ function plan(nodes: SpringNode[], edges: [string, string][], opts: SpringOpts):
     partLinks.get(r)!.push([where.get(a)!, where.get(b)!]);
   }
   for (const [r, g] of groups) {
-    const part = new Part(g.map((i) => all[i]), partLinks.get(r) ?? [], g.length > 1 ? iterations : 0, gap);
+    const part = new Part(g.map((i) => all[i]), partLinks.get(r) ?? [], g.length > 1 ? iterations : 0, gap, length);
     const side = part.L * Math.sqrt(g.length);
     for (const b of part.bodies) if (!b.fixed) { b.x = random() * side; b.y = random() * side; }
     parts.push(part);
