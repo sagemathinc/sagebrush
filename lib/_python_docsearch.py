@@ -1,7 +1,7 @@
 """Python mode's functions for the notebook's search box: what Sagebrush
 provides of numpy (with linalg, fft, random and polynomial), scipy.integrate
 and scipy.io, math, cmath, fractions, itertools, functools, collections,
-random, bisect, heapq and matplotlib (pyplot, Axes, Figure), as JSON entries in the form of
+random, bisect, heapq, time, datetime and matplotlib (pyplot, Axes, Figure), as JSON entries in the form of
 lib/_pyjs_docsearch.py's index.
 
     sagebrush -m _python_docsearch --index    (web/build.ts: docs-index-python.json)
@@ -25,7 +25,7 @@ MODULES = [
     ("scipy.integrate", "scipy.integrate", ""), ("scipy.io", "scipy.io", ""),
     ("math", "math", ""), ("cmath", "cmath", ""), ("fractions", "fractions", ""), ("itertools", "itertools", ""),
     ("functools", "functools", ""), ("collections", "collections", ""), ("random", "random", ""),
-    ("bisect", "bisect", ""), ("heapq", "heapq", ""),
+    ("bisect", "bisect", ""), ("heapq", "heapq", ""), ("time", "time", ""), ("datetime", "datetime", ""),
     # (matplotlib's pyplot, and the methods of its Axes and Figure, by matplotlib's names)
     ("matplotlib.pyplot", "matplotlib.pyplot", ""), ("matplotlib.axes.Axes", "matplotlib.pyplot", "Axes"),
     ("matplotlib.figure.Figure", "matplotlib.pyplot", "Figure"),
@@ -101,7 +101,28 @@ def build_index():
         e["doc"] = (e.get("doc") or e["summary"]) + _examples_text([(x["code"], x["expected"]) for x in e["examples"]])
         out.append(e)
     out += _rest(seen, [e["name"] for e in out])
+    out += [e for e in _module_notes() if e["name"] not in seen]
     return out + _pypi(set(e["name"] for e in out))
+
+
+# (a module's own entry, where what it does here needs saying: the host's
+# time zone, and what refuses)
+_NOTES = {
+    "time": "time: the host's clocks, and its time zone: UTC unless the host gives one. On a UTC or GMT host "
+            "everything is exact. With another zone, UTC offsets are exact (localtime()'s fields, tm_gmtoff, "
+            "timezone, altzone, daylight), but tm_isdst is shown as unknown and refuses any other use, and "
+            "tm_zone, tzname and strftime's %Z refuse (NotImplementedError), as do mktime() with an isdst of 0 or 1 "
+            "or a skipped or repeated local time; tzname is then not in dir(time). strptime() and tzset() refuse.",
+    "datetime": "datetime: CPython's datetime (its pure-Python _pydatetime, with the C module's messages). With a "
+                "host time zone other than UTC or GMT, astimezone() of a naive datetime, or with no argument, "
+                "refuses (NotImplementedError: it needs the zone's name); strptime() refuses (it needs calendar "
+                "and locale).",
+}
+
+
+def _module_notes():
+    return [{"name": m, "module": m, "kind": "module", "signature": "", "summary": t, "doc": t, "examples": [],
+             "open_problem": False, "catalog": False} for m, t in _NOTES.items()]
 
 
 def _pypi(seen):

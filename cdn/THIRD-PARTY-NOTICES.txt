@@ -55,6 +55,18 @@ Copyright (c) 2001 Python Software Foundation. See
   Sagebrush's own import system; `lib/importlib/metadata/__init__.py`:
   CPython 3.14's `PackageNotFoundError`, `version()` and name normalization,
   over Sagebrush's package registry.
+- `lib/_pytime.py`: CPython 3.14's `time` module, a C module there
+  (`Modules/timemodule.c` and the struct sequence of `Objects/structseq.c`:
+  `struct_time`, `gmtime`, `localtime`, `mktime`, `asctime`, `ctime`,
+  `strftime`'s argument checks, `sleep`'s, and `init_timezone`), ported to
+  Python over Sagebrush's clocks and the host's time zone (the builtin module
+  `time` is made from it). Its `strftime`
+  writes what glibc 2.39's does in the C locale, matched by comparison with
+  CPython on glibc (no glibc code is used).
+- `lib/_pydatetime.py`: CPython 3.14's `Lib/_pydatetime.py`, changed (the PSF
+  License's clause 3 on derivative works): its messages, `IsoCalendarDate`'s
+  repr and `datetime`'s repr are the C `_datetime` module's, each change marked
+  "Sagebrush: as C _datetime". `lib/datetime.py` is CPython 3.14's, unchanged.
 - `lib/_string.py`: CPython 3.14's `_string` module, a C module there
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
