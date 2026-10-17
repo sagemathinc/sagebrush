@@ -2243,10 +2243,7 @@ method(list, "__iadd__", (a: any[], b: any) => {
 // so an alias sees it; [1] *= Index() made a new list)
 method(list, "__imul__", (a: any[], n: any) => {
   if (lookupType(typeOf(n), "__index__") === undefined) raise(T.TypeError, `can't multiply sequence by non-int of type '${typeName(n)}'`);
-  const r: any[] = O.mul(a.slice(), O.index(n));
-  a.length = 0;
-  for (const v of r) a.push(v);
-  return a;
+  return O.listInplaceRepeat(a, n);
 });
 method(list, "__add__", (a: any[], b: any) => (Array.isArray(b) && !(b as any).$t ? [...a, ...b] : NotImplemented));
 list.$dict.set("__hash__", null);
