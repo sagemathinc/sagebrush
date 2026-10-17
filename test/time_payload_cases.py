@@ -176,3 +176,30 @@ class TP(tuple):
 tp = TP((1, 2))
 show('tuple subclass copy', lambda: (tuple(tp), type(tuple(tp)).__name__, tuple(tp) is tp))
 show('list of tuple subclass iter', lambda: list(TupleIter((1, 2))))
+
+# ---- datetime's constructors: every integer argument converted, in order, before any check (astra's note on 6f3746ea)
+calls = []
+class C:
+    def __init__(s, v, t): s.v, s.t = v, t
+    def __index__(s):
+        calls.append(s.t)
+        if s.v is None: raise TypeError('bad ' + s.t)
+        return s.v
+def t2(label, f):
+    del calls[:]
+    try: r = repr(f())
+    except Exception as e: r = '%s: %s' % (type(e).__name__, e)
+    print(label, '->', r, calls)
+t2('dt month 13, hour index', lambda: D.datetime(2020, 13, 1, C(1, 'h')))
+t2('dt month 13, bad hour', lambda: D.datetime(2020, 13, 1, C(None, 'h')))
+t2('dt bad fold, month 13', lambda: D.datetime(2020, 13, 1, fold=C(None, 'f')))
+t2('dt all index', lambda: D.datetime(C(2020,'y'), C(1,'m'), C(2,'d'), C(3,'h'), C(4,'mi'), C(5,'s'), C(6,'us'), fold=C(0,'f')))
+t2('dt hour 24 then bad tz', lambda: D.datetime(2020, 1, 1, 24, tzinfo=1))
+t2('dt bad tz, month 13', lambda: D.datetime(2020, 13, 1, tzinfo=1))
+t2('dt month 13, hour 2**31', lambda: D.datetime(2020, 13, 1, 2**31))
+t2('dt fold 2, hour 24', lambda: D.datetime(2020, 1, 1, 24, fold=2))
+t2('time hour 24, bad tz', lambda: D.time(24, tzinfo=1))
+t2('time fold bad, hour 24', lambda: D.time(24, fold=C(None, 'f')))
+t2('time all index', lambda: D.time(C(1,'h'), C(2,'m'), C(3,'s'), C(4,'u'), fold=C(1,'f')))
+t2('time fold 2 hour 24', lambda: D.time(24, fold=2))
+t2('date month 13 bad day', lambda: D.date(2020, 13, C(None, 'd')))

@@ -1077,6 +1077,44 @@ export function len(x: any): number {
   raise(T.TypeError, `object of type '${typeName(x)}' has no len()`);
 }
 
+// The size list(x) presizes for, as CPython's PyObject_LengthHint after
+// taking x's iterator: len(x), or, where it raises TypeError,
+// __length_hint__ (TypeError and NotImplemented: no guess). Called for its
+// errors: anything else __len__ or __length_hint__ raises, a hint that is
+// not an int, negative or past a C ssize_t, and a guess too large to
+// allocate (a MemoryError: past a JS array's length here). Only a
+// Python-level __len__ or __length_hint__ can do any of that, so builtins
+// are not asked.
+export function lengthHint(x: any): void {
+  if (x === null || typeof x !== "object") return;
+  const lf = special(x, "__len__"), hf = special(x, "__length_hint__");
+  if (lf?.$pyfn !== true && hf?.$pyfn !== true) return;
+  let n: number | bigint | undefined;
+  if (lf !== undefined) {
+    try {
+      n = len(x);
+    } catch (e: any) {
+      if (!isExc(e, T.TypeError)) throw e;
+    }
+  }
+  if (n === undefined && hf !== undefined) {
+    let v: any;
+    try {
+      v = hf(x);
+    } catch (e: any) {
+      if (isExc(e, T.TypeError)) return;
+      throw e;
+    }
+    if (v === NotImplemented) return;
+    if (!isPyInt(v)) raise(T.TypeError, `__length_hint__ must be an integer, not ${typeName(v)}`);
+    const b = BigInt(v);
+    if (b > 9223372036854775807n || b < -9223372036854775808n) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+    if (b < 0n) raise(T.ValueError, "__length_hint__() should return >= 0");
+    n = b;
+  }
+  if (n !== undefined && BigInt(n) > 4294967295n) raise(T.MemoryError);
+}
+
 const HASH_MOD = (1n << 61n) - 1n;
 
 function hashInt(x: number | bigint): number {

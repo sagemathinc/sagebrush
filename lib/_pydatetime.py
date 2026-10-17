@@ -1844,6 +1844,11 @@ class datetime(date):
             self.__setstate(year, month)
             self._hashcode = -1
             return self
+        # Sagebrush: as C _datetime, every integer argument converted, in
+        # order, before any range is checked
+        year, month, day = _c_int(year), _c_int(month), _c_int(day)
+        hour, minute, second = _c_int(hour), _c_int(minute), _c_int(second)
+        microsecond, fold = _c_int(microsecond), _c_int(fold)
         year, month, day = _check_date_fields(year, month, day)
         hour, minute, second, microsecond, fold = _check_time_fields(
             hour, minute, second, microsecond, fold)
