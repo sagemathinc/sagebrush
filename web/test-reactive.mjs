@@ -95,13 +95,15 @@ try {
   r = await run(4);
   ok(JSON.stringify(r?.errors) === "[]" && JSON.stringify(r?.ran) === "[4,5]", `breaking it runs both (${JSON.stringify(r)})`);
 
-  // the budget: a slow cell below waits, stale
+  // the budget: a slow cell below waits, stale (its estimate in notebook.js's
+  // secs() form: "N ms" under a second, "X.Y s" from one: the cell's first
+  // `import time` adds its cost to the 600 ms)
   await ev("sagebrush.notebook.setBudget(300); true");
   await set([null, null, null, null, null, "import time\ntime.sleep(0.6)\nq = p\nprint('slow', q)"]);
   await run(5);
   r = await run(4);
   ok(JSON.stringify(r?.ran) === "[4]" && JSON.stringify(r?.stale) === "[5]", `with a 300 ms budget, a 600 ms dependent is left stale (${JSON.stringify(r)}; ${await out(5)})`);
-  ok((await has(5, "stale")) && /stale: not rerun automatically \(it takes about \d+ ms\)/.test(await ev("sagebrush.notebook.cells()[5].time.textContent")), "...and says so");
+  ok((await has(5, "stale")) && /stale: not rerun automatically \(it takes about (\d+ ms|\d+(\.\d)? s)\)/.test(await ev("sagebrush.notebook.cells()[5].time.textContent")), "...and says so");
   ok((await out(5)) === "slow 1", "...showing its last output");
   await ev("sagebrush.notebook.setBudget(Infinity); true");
 
