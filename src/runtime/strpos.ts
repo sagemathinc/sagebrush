@@ -114,15 +114,22 @@ export function pairs(s: string): Pos | null {
     lastEntry.key = lastKey!;
     cache.set(lastKey!, lastEntry);
   }
+  // (and the string last asked about forgotten before s is looked up: a
+  // scan that Stop interrupts leaves no last string whose slots are no
+  // longer known, PERF-DA5-1)
+  const wasBig = lastBig;
+  lastKey = null;
+  lastVal = null;
+  lastBig = false;
+  lastEntry = null;
   lastTouched = false;
-  const p = longPairs(s, lastBig);
+  const p = longPairs(s, wasBig);
   lastKey = s;
   return (lastVal = p);
 }
-// (wasBig: lastKey, just found unequal to s, is bigKey)
+// (wasBig: lastKey, just found unequal to s, is bigKey; lastBig and
+// lastEntry are set only once s is found or indexed)
 function longPairs(s: string, wasBig: boolean): Pos | null {
-  lastBig = false;
-  lastEntry = null;
   if (!wasBig && bigKey !== null && s.length === bigKey.length) compares.n++;
   if (!wasBig && s === bigKey) {
     bigKey = s;

@@ -126,14 +126,25 @@ test("indexing a new string equal to the last one indexed is not slower: json.lo
 // holds one body of a huge string, not two (HARD-3F4-1). Two 20-million-unit
 // strings with a pair (the cache's big entry), the first dropped once the
 // second is indexed: the heap keeps about one of them.
-test("adopting an equal string keeps one body of it alive, not two", () => {
+// The same after a scan of another string that Stop interrupts
+// (PERF-DA5-1): the interrupted ask leaves no last string behind.
+for (const interrupted of [false, true])
+test(`adopting an equal string keeps one body of it alive, not two${interrupted ? ", after an interrupted scan" : ""}`, () => {
   const code = [
+    `const { INTR } = require(${JSON.stringify(__dirname + "/../src/runtime/interrupt.js")});`,
+    `const rt = require(${JSON.stringify(__dirname + "/../src/runtime/index.js")});`,
     `const sp = require(${JSON.stringify(__dirname + "/../src/runtime/strpos.js")});`,
     "const collect = globalThis.gc, heap = () => (collect(), collect(), process.memoryUsage().heapUsed);",
     "const N = 20_000_000;",
     "const base = heap();",
     "let a = 'x'.repeat(N) + '\\u{1F600}';",
     "sp.pairs(a);",
+    ...(interrupted ? [
+      "INTR[0] = 1;",
+      "let stopped = false;",
+      "try { sp.pairs('\\u{1F600}' + 'z'.repeat(2_000_000)); } catch (e) { stopped = rt.formatException(e).includes('KeyboardInterrupt'); }",
+      "if (!stopped) throw new Error('not interrupted');",
+    ] : []),
     "let b = ('y' + 'x'.repeat(N - 1)).replace('y', 'x') + '\\u{1F600}';",  // (equal to a, another object)
     "if (a !== b) throw new Error('not equal');",
     "sp.pairs(b); sp.pairs(b);",
