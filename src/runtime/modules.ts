@@ -502,7 +502,10 @@ newBuiltinModule("_time", (m) => {
   };
   for (const [k, d] of Object.entries(docs)) m[k].__doc__ = d;
   // (the host's zone: (Intl's IANA name or None, the TZ variable as given
-  // or None). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
+  // or None, TZ's zone name as Intl canonicalizes it or None where Intl
+  // does not take it, whether the host's zoneinfo has a file for that name
+  // or None where TZ is not a zone name, Intl's zone canonicalized the same
+  // way). Intl canonicalizes Etc/GMT and UCT to "UTC", whose glibc
   // abbreviations differ, so where TZ is set it decides; a browser has none)
   fn(m, "_zone", () => {
     let z: unknown;
@@ -512,7 +515,29 @@ newBuiltinModule("_time", (m) => {
       z = undefined;
     }
     const env = typeof process !== "undefined" ? process.env?.TZ : undefined;
-    return tuple([typeof z === "string" && z !== "" ? z : null, typeof env === "string" ? env : null]);
+    const canonical = (name: string): string | null => {
+      try {
+        return new Intl.DateTimeFormat("en-US", { timeZone: name }).resolvedOptions().timeZone;
+      } catch {
+        return null;
+      }
+    };
+    let canon: string | null = null, file: boolean | null = null;
+    if (typeof env === "string") {
+      const name = env.startsWith(":") ? env.slice(1) : env;
+      if (/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(name)) {
+        canon = canonical(name);
+        try {
+          // (where glibc reads it: TZDIR, else /usr/share/zoneinfo)
+          const fs = require("fs");
+          file = fs.statSync((process.env.TZDIR || "/usr/share/zoneinfo") + "/" + name).isFile();
+        } catch {
+          file = false;
+        }
+      }
+    }
+    const host = typeof z === "string" && z !== "" ? z : null;
+    return tuple([host, typeof env === "string" ? env : null, canon, file, host === null ? null : canonical(host)]);
   });
   // (the host zone's local fields at a UTC second, from JS's Date (ICU's
   // tzdata): (year, month, day, hour, minute, second, utcoffset), the offset

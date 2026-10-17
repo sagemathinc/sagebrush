@@ -12,7 +12,10 @@ The host's zone: UTC unless the host gives one.
   browser in UTC) and a GMT host (Etc/GMT, GMT0, Etc/GMT0, Etc/GMT+0,
   Etc/GMT-0 or Etc/Greenwich), everything is exact. tm_isdst is 0, and the
   abbreviation is "UTC" or "GMT", as glibc gives it.
-- Any other zone: the UTC offsets are exact, from JavaScript's Date (ICU's
+- A zone named as glibc reads one (TZ a name, or :name, that the host's
+  zoneinfo has a file for, which ICU's tzdata, under JavaScript's Date,
+  holds too), or the host's own zone where TZ is not set: the UTC offsets
+  are exact, from JavaScript's Date (ICU's
   tzdata), so localtime()'s fields, tm_gmtoff, timezone, altzone and
   daylight are exact. The rest is not known here yet (it needs tzdata's
   flags and abbreviations, a later change):
@@ -29,6 +32,11 @@ The host's zone: UTC unless the host gives one.
     or repeats: glibc's answer for those depends on its own state, so it
     is not guessed.
   - strftime's %s, which is mktime's, refuses likewise.
+- Any other TZ (a POSIX rule such as "EST5EDT,M3.2.0,M11.1.0", a path to a
+  zoneinfo file, a name with no file or one Date does not take as given):
+  JavaScript's Date does not read it as glibc does, so localtime(), ctime(),
+  mktime(), timezone, altzone, daylight and tzname, and everything local
+  built on them, raise NotImplementedError naming TZ.
 - tzset() is refused: the host's zone is read once, at import.
 - strptime() is refused, naming what it lacks, until CPython's _strptime
   (which needs calendar, enum, locale and encodings) can run here.
@@ -42,19 +50,36 @@ from operator import index as _index
 
 _UTC_ZONES = {"UTC", "Etc/UTC", "Etc/UCT", "Etc/Universal", "Etc/Zulu"}
 _GMT_ZONES = {"Etc/GMT", "GMT0", "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich"}
-_intl, _tzenv = _time._zone()
+_intl, _tzenv, _tzcanon, _tzfile, _tzhost = _time._zone()
+_bad = None  # (a TZ whose local times are not known here: why)
 if _tzenv is not None:
     _name = _tzenv[1:] if _tzenv.startswith(":") else _tzenv
     _abbr = "UTC" if _name in _UTC_ZONES else "GMT" if _name in _GMT_ZONES else None
     _host = None if _abbr is not None else (_name or "''")
+    if _abbr is None:
+        if _name.startswith("/") or _name.startswith("."):
+            _bad = "a path to a zoneinfo file"
+        elif _tzcanon is None and _tzfile is not True:
+            _bad = "a POSIX TZ rule" if "," in _name or any("0" <= c <= "9" for c in _name) else "not a zone name known here"
+        elif _tzcanon is None:
+            _bad = "a zone ICU's tzdata does not hold"
+        elif _tzfile is not True:
+            _bad = "a name with no file in the host's zoneinfo"
+        elif _tzcanon != _tzhost:
+            _bad = "a zone JavaScript's Date does not take as given"
+        if _bad is not None:
+            _bad = ("time: the host's time zone TZ=%r (%s) is not available in Sagebrush yet: glibc reads it in a way "
+                    "JavaScript's Date does not, so its local times are refused, not guessed" % (_tzenv, _bad))
 elif _intl is None or _intl in ("UTC", "Etc/UTC", "Etc/Unknown"):
     _abbr, _host = "UTC", None
 else:
     _abbr, _host = None, _intl
-del _intl, _tzenv
+del _intl, _tzenv, _tzcanon, _tzfile, _tzhost
 
 
 def _refuse(what):
+    if _bad is not None:
+        raise NotImplementedError(_bad)
     raise NotImplementedError("%s is not known for the host's time zone %s here: it needs tzdata's "
                               "daylight-saving flags and abbreviations, not yet in Sagebrush" % (what, _host))
 
@@ -234,6 +259,21 @@ _INT_MAX, _INT_MIN = 2**31 - 1, -2**31
 _TIME_T_MAX, _TIME_T_MIN = 2**63 - 1, -2**63
 
 
+# (CPython's C functions read a builtin's own value: a float, int, str or
+# tuple subclass's methods are not called on these)
+def _int_value(v):
+    """v as C's integer conversions read it: an int's own value, or what
+    __index__ gives for anything else."""
+    n = v if issubclass(type(v), int) else _index(v)
+    # (int.__pos__: an exact int of a subclass's value)
+    return n if type(n) is int else int.__pos__(n)
+
+
+def _cwrap(n):
+    """n in a C int, as C (CPython builds with -fwrapv) wraps it."""
+    return ((n - _INT_MIN) % 2**32) + _INT_MIN
+
+
 def _days(y, m, d):
     """Days since 1970-01-01 of a proleptic Gregorian date (any integers)."""
     y -= m <= 2
@@ -257,13 +297,14 @@ def _from_days(z):
 
 def _time_t(secs):
     """A timestamp as _PyTime_ObjectToTime_t takes it, rounding down."""
-    if isinstance(secs, float):
+    if issubclass(type(secs), float):
+        secs = float.__float__(secs)
         if secs != secs:
             raise ValueError("Invalid value NaN (not a number)")
         if not (-9.223372036854775808e18 <= secs < 9.223372036854775808e18):
             raise OverflowError("timestamp out of range for platform time_t")
         return int(_math.floor(secs))
-    n = _index(secs)
+    n = _int_value(secs)
     if not _TIME_T_MIN <= n <= _TIME_T_MAX:
         raise OverflowError("timestamp out of range for platform time_t")
     return n
@@ -275,7 +316,7 @@ def _overflow():
 
 def _year_out(tm_year):
     # (tm_year + 1900 as CPython computes it, in a C int: past INT_MAX it wraps)
-    return ((tm_year + 1900 - _INT_MIN) % 2**32) + _INT_MIN
+    return _cwrap(tm_year + 1900)
 
 
 def _broken(n, offset):
@@ -313,6 +354,8 @@ def _offset(n):
     instants JavaScript's Date holds."""
     if _abbr is not None:
         return 0
+    if _bad is not None:
+        raise NotImplementedError(_bad)
     f = _time._local(n)
     if f is None:
         raise NotImplementedError("time: the host's time zone %s is known here only within JavaScript's dates "
@@ -338,7 +381,7 @@ When 'seconds' is not passed in, convert the current time instead."""
 
 def _cint(v):
     """A field as PyArg_ParseTuple's 'i' takes it."""
-    n = _index(v)
+    n = _int_value(v)
     if n > _INT_MAX:
         raise OverflowError("signed integer is greater than maximum")
     if n < _INT_MIN:
@@ -353,21 +396,38 @@ def _cmod7(v):
 
 def _tmarg(t, fn):
     """CPython's gettmarg: a struct tm (C's fields: tm_year - 1900, tm_mon
-    0-11, tm_wday Sunday=0, tm_yday 0-365) from a 9-tuple or struct_time."""
-    if not isinstance(t, tuple):
+    0-11, tm_wday Sunday=0, tm_yday 0-365) from a 9-tuple or struct_time,
+    its stored items read (a tuple subclass's methods unused), then a
+    struct_time's tm_zone (a str) and tm_gmtoff (a C long)."""
+    if not issubclass(type(t), tuple):
         raise TypeError("Tuple or struct_time argument required")
-    if len(t) != 9:
+    if tuple.__len__(t) != 9:
         raise TypeError("%s(): illegal time tuple argument" % fn)
-    v = [x if i == 8 and x is _UNKNOWN_DST else _cint(x) for i, x in enumerate(t)]
+    v = []
+    for i in range(9):
+        x = tuple.__getitem__(t, i)
+        v.append(x if i == 8 and x is _UNKNOWN_DST else _cint(x))
     if v[0] < _INT_MIN + 1900:
         raise OverflowError("year out of range")
     tm = {"year": v[0] - 1900, "mon": v[1] - 1, "mday": v[2], "hour": v[3], "min": v[4], "sec": v[5],
-          "wday": _cmod7(v[6] + 1), "yday": v[7] - 1, "isdst": v[8], "zone": None, "gmtoff": 0}
+          "wday": _cmod7(_cwrap(v[6] + 1)), "yday": v[7] - 1, "isdst": v[8], "zone": None, "gmtoff": 0}
     if type(t) is struct_time:
         zone, gmtoff = t._extra
+        if zone is not None and zone is not _UNKNOWN_ZONE:
+            # (PyUnicode_AsUTF8: a str, without lone surrogates)
+            if not issubclass(type(zone), str):
+                raise TypeError("bad argument type for built-in operation")
+            zone = str.__str__(zone)
+            for i, c in enumerate(zone):
+                if "\ud800" <= c <= "\udfff":
+                    raise UnicodeEncodeError("utf-8", zone, i, i + 1, "surrogates not allowed")
         tm["zone"] = zone
         if gmtoff is not None:
-            tm["gmtoff"] = _index(gmtoff)
+            # (PyLong_AsLong)
+            g = _int_value(gmtoff)
+            if not _TIME_T_MIN <= g <= _TIME_T_MAX:
+                raise OverflowError("Python int too large to convert to C long")
+            tm["gmtoff"] = g
     return tm
 
 
@@ -455,6 +515,8 @@ def _wall(tm):
 def _mktime(tm):
     w = _wall(tm)
     isdst = tm["isdst"]
+    if _bad is not None:
+        raise NotImplementedError(_bad)
     if _abbr is not None:
         # (a zone with no daylight saving: glibc moves a requested
         # daylight-saving time back an hour)
@@ -716,8 +778,9 @@ Commonly used format codes:
 Other codes may be available on your platform.  See documentation for
 the C library strftime function.
 """
-    if not isinstance(format, str):
+    if not issubclass(type(format), str):
         raise TypeError("strftime() argument 1 must be str, not %s" % ("None" if format is None else type(format).__name__))
+    format = str.__str__(format)
     if time_tuple is None:
         tm = _local_tm(None)
     else:
@@ -738,14 +801,15 @@ a floating-point number for subsecond precision."""
     # (as CPython 3.14.8's _PyTime_FromSecondsObject: the seconds as int64
     # nanoseconds, checked before anything waits, then the sign: daybreak2's
     # HARD-DCB-1, a huge request never reaches the host's wait)
-    if isinstance(seconds, float):
+    if issubclass(type(seconds), float):
+        seconds = float.__float__(seconds)
         if seconds != seconds:
             raise ValueError("Invalid value NaN (not a number)")
         if not (-9.223372036854775808e18 <= seconds * 1e9 <= 9.223372036854775807e18):
             raise OverflowError("timestamp out of range for C PyTime_t")
     else:
         try:
-            seconds = _index(seconds)
+            seconds = _int_value(seconds)
         except TypeError:
             t = type(seconds)
             name = t.__qualname__ if t.__module__ == "builtins" else "%s.%s" % (t.__module__, t.__qualname__)
@@ -809,14 +873,17 @@ def _init_timezone(now):
     return jan, jul, int(jan != jul), (t, t + YEAR // 2)
 
 
-timezone, altzone, daylight, _probes = _init_timezone(int(time()))
+if _bad is None:
+    timezone, altzone, daylight, _probes = _init_timezone(int(time()))
 if _abbr is not None:
     tzname = (_abbr, _abbr)
 
 
 def __getattr__(name):
-    if name == "tzname":
-        _refuse("tzname")
+    # (tzname where it is not known; timezone, altzone and daylight too
+    # where TZ is not available here: not in the module's dict, as tzname)
+    if name == "tzname" or (_bad is not None and name in ("timezone", "altzone", "daylight")):
+        _refuse(name)
     raise AttributeError("module 'time' has no attribute '%s'" % name)
 
 
