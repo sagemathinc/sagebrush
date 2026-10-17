@@ -1200,12 +1200,21 @@ test("Gcd and Lcm of an empty collection: of the integers 0 and 1, of nothing Ma
   const { join } = require("node:path");
   // (checked against Magma 2.18: a range, a declared universe and a
   // sequence emptied of its integers keep the integers; [] and {} have none)
+  // (made empty otherwise, by Setseq, Sort, join, meet or diff, the
+  // integers' too: CORR-A1A-1)
   const src = "Gcd([1..0]); Lcm([1..0]); Gcd([Integers() | ]); Lcm([Integers() | ]); Gcd({Integers() | });\n" +
-    "S := [1]; Exclude(~S, 1); Gcd(S); Lcm(S);\nGcd([]);\nLcm({});\n\"end\";\n";
+    "S := [1]; Exclude(~S, 1); Gcd(S); Lcm(S);\n" +
+    "Gcd(Setseq({Integers() | })); Lcm(Seqset([Integers() | ])); Gcd(Sort([Integers() | ])); Lcm({Integers() | } join {Integers() | });\n" +
+    "Gcd({Integers() | } meet {Integers() | }); Lcm({1} diff {1});\n" +
+    "Gcd([]);\nLcm({});\nGcd([ x : x in [1..5] | x gt 9 ]);\nLcm({ x : x in [1..5] | x gt 9 });\n" +
+    "Gcd([Rationals() | ]);\nLcm([GF(5) | ]);\nP<t> := PolynomialRing(Integers()); Gcd([P | ]);\n\"end\";\n";
   const out = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8" }).stdout as string;
-  assert.match(out, /^0\n1\n0\n1\n0\n0\n1\n/);
-  assert.ok(out.includes("Runtime error in 'Gcd': Illegal null set/sequence"), out);
-  assert.ok(out.includes("Runtime error in 'Lcm': Illegal null set/sequence"), out);
+  assert.match(out, /^0\n1\n0\n1\n0\n0\n1\n0\n1\n0\n1\n0\n1\n/);
+  assert.equal(out.split("Runtime error in 'Gcd': Illegal null set/sequence").length - 1, 2, out);
+  assert.equal(out.split("Runtime error in 'Lcm': Illegal null set/sequence").length - 1, 2, out);
+  assert.ok(out.includes("Runtime error in 'Gcd': GCD not defined for field"), out);
+  assert.ok(out.includes("Runtime error in 'Lcm': LCM not defined for field"), out);
+  assert.ok(out.replace(/\s+/g, " ").includes("Gcd of an empty collection of polynomials is not supported yet"), out);
   assert.match(out, /\nend\n$/);
 });
 
