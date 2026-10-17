@@ -100,7 +100,47 @@ def build_index():
         e = dict(e, module=_index_module(e["name"]))
         e["doc"] = (e.get("doc") or e["summary"]) + _examples_text([(x["code"], x["expected"]) for x in e["examples"]])
         out.append(e)
-    return out + _rest(seen, [e["name"] for e in out])
+    out += _rest(seen, [e["name"] for e in out])
+    return out + _pypi(set(e["name"] for e in out))
+
+
+def _pypi(seen):
+    """The curated PyPI packages' entries (packages/pypi-*/, the build's
+    registry): each module, saying its pinned version, that it is from PyPI,
+    how to import it and each known difference from CPython
+    (packages/pypi-<name>/known.json), and its public classes and functions"""
+    import builtins
+    reader = getattr(builtins, "__pyjs_package_registry__", None)
+    reg = _json.loads(reader()) if reader is not None else None
+    out = []
+    for pid, pkg in sorted(((reg or {}).get("packages") or {}).items()):
+        info = pkg.get("pypi")
+        if not info:
+            continue
+        mods = sorted(m for m, p in reg["modules"].items() if p == pid and "." not in m)
+        note = "From PyPI, pinned version %s (%s)" % (info["version"], pid.rsplit("@", 1)[0])
+        known = "".join(" Known difference: %s: %s." % (k["test"].split(".")[-1], k["reason"]) for k in info.get("known") or [])
+        for modname in mods:
+            summary = "%s %s: `import %s`. %s; imported on first use.%s" % (info["project"], info["version"], modname, note, known)
+            out.append({"name": modname, "module": modname, "kind": "module", "signature": "", "summary": summary, "doc": summary,
+                        "examples": [], "open_problem": False, "catalog": False, "pypi": {"project": info["project"], "version": info["version"], "known": info.get("known") or []}})
+            try:
+                mod = __import__(modname)
+            except Exception:
+                continue
+            for n in sorted(dir(mod)):
+                full = modname + "." + n
+                obj = getattr(mod, n, None)
+                if n.startswith("_") or full in seen or not callable(obj) or isinstance(obj, type(_sys)):
+                    continue
+                where = getattr(obj, "__module__", None)
+                if not (isinstance(where, str) and where.split(".")[0] == modname):
+                    continue
+                seen.add(full)
+                summary = (_summary(obj) + " " if _summary(obj) else "") + "(%s.)" % note
+                out.append({"name": full, "module": modname, "kind": "class" if isinstance(obj, type) else "function", "signature": "", "summary": summary,
+                            "doc": summary, "examples": [], "open_problem": False, "catalog": False, "pypi": {"project": info["project"], "version": info["version"]}})
+    return out
 
 
 def _rest(seen, documented=()):

@@ -28,7 +28,7 @@ const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const MODES = new Set(["python", "sage", "matlab", "magma"]);
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // (beside the code, not pinned: the manifest, a README, licenses and notices)
-const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*)$/;
+const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|known\.json)$/;
 // (a relative path inside the package: no "..", no absolute or odd names)
 const safePath = (p) => typeof p === "string" && p !== "" && !p.startsWith("/") && p.split("/").every((s) => s !== "" && s !== "." && s !== ".." && /^[A-Za-z0-9_.-]+$/.test(s));
 
@@ -79,6 +79,19 @@ export function readPackages(root) {
     if (m.requires !== undefined && (!Array.isArray(m.requires) || m.requires.length)) bad("requires is not supported yet: []");
     if (m.catalog !== undefined && m.catalog !== null) bad("catalog is not supported yet: null");
     if (m.wasm !== undefined) bad("wasm is not supported yet");
+    // (a curated PyPI package, packages/pypi-<name>/, records the wheel it is
+    // from; scripts/pypi-import.mjs --check re-derives it from that wheel)
+    if (dir.startsWith("pypi-") !== (m.source?.pypi !== undefined)) bad("a packages/pypi-<name> directory is exactly a package with source.pypi");
+    if (m.source !== undefined) {
+      const p = m.source?.pypi;
+      if (!p || typeof p !== "object" || Object.keys(m.source).length !== 1) bad("source must be {pypi: {...}}");
+      if (typeof p.project !== "string" || dir !== "pypi-" + p.project.toLowerCase().replace(/[-_.]+/g, "-")) bad(`source.pypi.project must be the project this directory is named for`);
+      if (p.version !== m.version) bad("source.pypi.version must be the package's version");
+      if (typeof p.filename !== "string" || !/^[A-Za-z0-9_.]+-[0-9.]+-[A-Za-z0-9_.]+-none-any\.whl$/.test(p.filename)) bad("source.pypi.filename must be a pure-Python wheel's");
+      if (typeof p.url !== "string" || !p.url.startsWith("https://files.pythonhosted.org/") || !p.url.endsWith("/" + p.filename)) bad("source.pypi.url must be the wheel's on files.pythonhosted.org");
+      if (typeof p.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(p.sha256)) bad("source.pypi.sha256 must be the wheel's SHA-256");
+      if (typeof p.license !== "string" || !p.license) bad("source.pypi.license must be its license");
+    }
     if (!m.files || typeof m.files !== "object" || Array.isArray(m.files)) bad("files must map each file to its SHA-256");
     // (every file pinned, and only files that are there)
     const present = walk(at, bad).filter((f) => !DOCS.test(f));
@@ -94,6 +107,30 @@ export function readPackages(root) {
       pins[f] = sum;
       files[`${dir}/${f}`] = bytes.toString("utf8");
     }
+    // (a curated package's known differences from CPython, pypi-tests/README.md:
+    // each upstream test allowed to fail here, only with exactly this error:
+    // its type and its message's first line, as pypi-tests/harness.py prints it)
+    let known = [];
+    if (existsSync(join(at, "known.json"))) {
+      if (!m.source?.pypi) bad("known.json is for curated PyPI packages (packages/pypi-<name>)");
+      if (lstatSync(join(at, "known.json")).isSymbolicLink()) bad("known.json is a symbolic link");
+      let k;
+      try {
+        k = JSON.parse(readFileSync(join(at, "known.json"), "utf8"));
+      } catch (e) {
+        bad(`known.json is not JSON (${e.message})`);
+      }
+      if (!k || !Array.isArray(k.tests) || Object.keys(k).length !== 1) bad('known.json must be {"tests": [{test, error, message, reason}, ...]}');
+      for (const t of k.tests) {
+        if (!t || typeof t !== "object" || Object.keys(t).sort().join() !== "error,message,reason,test") bad("each known difference is {test, error, message, reason}");
+        if (typeof t.test !== "string" || !/^test_\w+(\.test\w*)?$/.test(t.test)) bad(`known test ${JSON.stringify(t.test)} must name an upstream test, module.function`);
+        if (typeof t.error !== "string" || !/^[A-Z]\w*(Error|Exception)$/.test(t.error)) bad(`known test ${t.test}: error must be an exception's name, raised instead of passing`);
+        if (typeof t.message !== "string" || /[\r\n]/.test(t.message) || t.message.length > 200) bad(`known test ${t.test}: message must be the error's first line, as the harness prints it (at most 200 characters)`);
+        if (typeof t.reason !== "string" || t.reason.trim().length < 10) bad(`known test ${t.test}: give the reason in plain words`);
+      }
+      if (new Set(k.tests.map((t) => t.test)).size !== k.tests.length) bad("known.json lists a test twice");
+      known = k.tests.map((t) => ({ test: t.test, error: t.error, message: t.message, reason: t.reason }));
+    }
     const id = `${m.name}@${m.version}`;
     for (const mod of py.modules) {
       const rel = mod.split(".").join("/");
@@ -103,7 +140,7 @@ export function readPackages(root) {
       if (existsSync(join(lib, rel + ".py")) || existsSync(join(lib, rel, "__init__.py"))) bad(`module ${mod} is also in lib/, which would shadow it`);
       modules[mod] = id;
     }
-    packages[id] = { dir, root: py.root, manifest_sha256: sha256(raw), files: pins };
+    packages[id] = { dir, root: py.root, manifest_sha256: sha256(raw), files: pins, ...(m.source?.pypi ? { pypi: { project: m.source.pypi.project, version: m.source.pypi.version, known } } : {}) };
   }
   const sorted = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
   return { registry: { format: 1, modules: sorted(modules), packages: sorted(packages) }, files };
