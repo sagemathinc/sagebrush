@@ -1,0 +1,62 @@
+{
+  "implementation_revision": "2fb25571e80d2355e8eedff6114b9c2a02de0634",
+  "baseline_source_revision": "0f9d473635875c280cd5018bed179d0a555c2114",
+  "baseline_build_revision": "b1edde78a91d04b4fcfbfe23eda87c841d08eeae",
+  "baseline_build_note": "Frozen bench additions only; production source identical to source baseline and rebase base 23526b2c.",
+  "corpus": {
+    "host": "sagebrush-3",
+    "node": "v26.12.0",
+    "driver_python": "3.12.3",
+    "cases": 304,
+    "identical": 304,
+    "timeouts": 0,
+    "comparison": "input case/source, decoded stdout/stderr, exit status and timeout flags; only seconds excluded",
+    "directory": "/home/user/wt/run-0cb7149bb",
+    "path_note": "After rebuilt in original baseline path to compare all diagnostics without normalization."
+  },
+  "targeted_tests": {
+    "command": "node --test dist/test/iter-fixes.test.js dist/test/builtin-args.test.js",
+    "passed": 5,
+    "failed": 0,
+    "oracle": "CPython 3.14"
+  },
+  "native_diagnostics": {
+    "cause_cases": 2,
+    "identical": 2,
+    "note": "Native stack line/column locations are not claimed invariant."
+  },
+  "reviewer_probes": {
+    "callback_cases": 17,
+    "identical": 17,
+    "native_hook_cases": 7,
+    "same_exception_and_cause": 7
+  },
+  "full_ci": {
+    "host": "sagebrush",
+    "revision": "2fb25571e80d2355e8eedff6114b9c2a02de0634",
+    "result": "RESULT 2fb25571e: all passed (any crowd failures passed alone)",
+    "npm_isolated_passed": 921,
+    "npm_isolated_failed": 0,
+    "npm_skipped": 1,
+    "browser_commands": 84,
+    "logs": "/scratch/sbremote/logs/2fb25571e/",
+    "crowd_failures": "6 npm timing tests and 3 browser commands; full npm suite and all failed browser commands passed in isolation",
+    "sync_precheck_rc": 0
+  },
+  "reviews": {
+    "behavior": "CLEAR by @sagebrush-astra on 2fb25571; independent 17 callback probes, 7 malformed hooks and 5 tests; full CI subsequently passed at the same executable revision.",
+    "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2 on 2fb25571; full CI subsequently passed at the same executable revision and sent for final acknowledgement."
+  },
+  "post_validation_production_change": "None.",
+  "measurement": {
+    "model": "claude-haiku-4-5-20251001",
+    "primary_before_runs": 30,
+    "primary_after_runs": 30,
+    "superseded_after_runs": 30,
+    "primary_before_coverage": 72,
+    "primary_after_coverage": 79,
+    "possible_criteria": 90,
+    "grading": "manual by implementing agent, not blind; omissions and contradictions score zero",
+    "final_after_revision": "2fb25571e80d2355e8eedff6114b9c2a02de0634"
+  }
+}
