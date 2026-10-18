@@ -1,0 +1,168 @@
+QQ M[1,2] -> 6 | QQ
+QQ M[-1,-1] -> 10 | QQ
+QQ list(M) -> [(1, 2, 3), (4, 5, 6), (7, 8, 10)] | [vec[QQ, QQ, QQ], vec[QQ, QQ, QQ], vec[QQ, QQ, QQ]]
+QQ iter first -> (1, 2, 3) | vec[QQ, QQ, QQ]
+QQ M.list() -> [1, 2, 3, 4, 5, 6, 7, 8, 10] | [QQ, QQ, QQ, QQ, QQ, QQ, QQ, QQ, QQ]
+QQ M.rows() -> [(1, 2, 3), (4, 5, 6), (7, 8, 10)] | [vec[QQ, QQ, QQ], vec[QQ, QQ, QQ], vec[QQ, QQ, QQ]]
+QQ M.columns() -> [(1, 4, 7), (2, 5, 8), (3, 6, 10)] | [vec[QQ, QQ, QQ], vec[QQ, QQ, QQ], vec[QQ, QQ, QQ]]
+QQ M.row(1) -> (4, 5, 6) | vec[QQ, QQ, QQ]
+QQ M.column(2) -> (3, 6, 10) | vec[QQ, QQ, QQ]
+QQ M[0] -> (1, 2, 3) | vec[QQ, QQ, QQ]
+QQ M[0][1] -> 2 | QQ
+QQ M[:,0] -> [1]
+[4]
+[7] | mat[QQ, QQ, QQ]
+QQ M[0:2,0:2] -> [1 2]
+[4 5] | mat[QQ, QQ, QQ, QQ]
+QQ M[0:2,0:2][1,1] -> 5 | QQ
+QQ M.dict() -> {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6, (2, 0): 7, (2, 1): 8, (2, 2): 10} | {(0, 0): QQ, (0, 1): QQ, (0, 2): QQ, (1, 0): QQ, (1, 1): QQ, (1, 2): QQ, (2, 0): QQ, (2, 1): QQ, (2, 2): QQ}
+QQ M.diagonal() -> [1, 5, 10] | [QQ, QQ, QQ]
+QQ M.trace() -> 16 | QQ
+QQ M.det() -> -3 | QQ
+QQ sum(M.list()) -> 46 | QQ
+QQ max(M.list()) -> 10 | QQ
+QQ M.charpoly() -> x^3 - 16*x^2 - 12*x + 3 | Univariate Polynomial Ring in x over Rational Field
+QQ M.charpoly().list() -> [3, -12, -16, 1] | [QQ, QQ, QQ, QQ]
+QQ (M*M)[0,0] -> 30 | QQ
+QQ (M+M)[0,0] -> 2 | QQ
+QQ (2*M)[0,0] -> 2 | QQ
+QQ M.transpose()[0,1] -> 4 | QQ
+QQ M.echelon_form()[0,0] -> 1 | QQ
+QQ M*vector -> (6, 15, 25) | vec[QQ, QQ, QQ]
+QQ (M*vector)[0] -> 6 | QQ
+QQ 0x0 trace -> 0 | QQ
+QQ 0x0 det -> 1 | QQ
+QQ 0x0 list -> [] | []
+ZZ M[1,2] -> 6 | ZZ
+ZZ M[-1,-1] -> 10 | ZZ
+ZZ list(M) -> [(1, 2, 3), (4, 5, 6), (7, 8, 10)] | [vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ]]
+ZZ iter first -> (1, 2, 3) | vec[ZZ, ZZ, ZZ]
+ZZ M.list() -> [1, 2, 3, 4, 5, 6, 7, 8, 10] | [ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ]
+ZZ M.rows() -> [(1, 2, 3), (4, 5, 6), (7, 8, 10)] | [vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ]]
+ZZ M.columns() -> [(1, 4, 7), (2, 5, 8), (3, 6, 10)] | [vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ], vec[ZZ, ZZ, ZZ]]
+ZZ M.row(1) -> (4, 5, 6) | vec[ZZ, ZZ, ZZ]
+ZZ M.column(2) -> (3, 6, 10) | vec[ZZ, ZZ, ZZ]
+ZZ M[0] -> (1, 2, 3) | vec[ZZ, ZZ, ZZ]
+ZZ M[0][1] -> 2 | ZZ
+ZZ M[:,0] -> [1]
+[4]
+[7] | mat[ZZ, ZZ, ZZ]
+ZZ M[0:2,0:2] -> [1 2]
+[4 5] | mat[ZZ, ZZ, ZZ, ZZ]
+ZZ M[0:2,0:2][1,1] -> 5 | ZZ
+ZZ M.dict() -> {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6, (2, 0): 7, (2, 1): 8, (2, 2): 10} | {(0, 0): ZZ, (0, 1): ZZ, (0, 2): ZZ, (1, 0): ZZ, (1, 1): ZZ, (1, 2): ZZ, (2, 0): ZZ, (2, 1): ZZ, (2, 2): ZZ}
+ZZ M.diagonal() -> [1, 5, 10] | [ZZ, ZZ, ZZ]
+ZZ M.trace() -> 16 | ZZ
+ZZ M.det() -> -3 | ZZ
+ZZ sum(M.list()) -> 46 | ZZ
+ZZ max(M.list()) -> 10 | ZZ
+ZZ M.charpoly() -> x^3 - 16*x^2 - 12*x + 3 | Univariate Polynomial Ring in x over Integer Ring
+ZZ M.charpoly().list() -> [3, -12, -16, 1] | [ZZ, ZZ, ZZ, ZZ]
+ZZ (M*M)[0,0] -> 30 | ZZ
+ZZ (M+M)[0,0] -> 2 | ZZ
+ZZ (2*M)[0,0] -> 2 | ZZ
+ZZ M.transpose()[0,1] -> 4 | ZZ
+ZZ M.echelon_form()[0,0] -> 1 | ZZ
+ZZ M*vector -> (6, 15, 25) | vec[ZZ, ZZ, ZZ]
+ZZ (M*vector)[0] -> 6 | ZZ
+ZZ 0x0 trace -> 0 | ZZ
+ZZ 0x0 det -> 1 | ZZ
+ZZ 0x0 list -> [] | []
+QQfrac M[0,0] -> 1/2 | QQ
+QQfrac M[0,1] -> 2 | QQ
+QQfrac list -> [1/2, 2, 3, 1/3] | [QQ, QQ, QQ, QQ]
+QQfrac trace -> 5/6 | QQ
+QQfrac det -> -35/6 | QQ
+QQfrac inverse -> [-2/35 12/35]
+[18/35 -3/35] | mat[QQ, QQ, QQ, QQ]
+QQfrac inverse.list -> [-2/35, 12/35, 18/35, -3/35] | [QQ, QQ, QQ, QQ]
+QQ f.list() -> [2, -1, 0, 3] | [QQ, QQ, QQ, QQ]
+QQ f.coefficients() -> [2, -1, 3] | [QQ, QQ, QQ]
+QQ f.coefficients(sparse=False) -> [2, -1, 0, 3] | [QQ, QQ, QQ, QQ]
+QQ f.dict() -> {0: 2, 1: -1, 3: 3} | {0: QQ, 1: QQ, 3: QQ}
+QQ list(f) -> [2, -1, 0, 3] | [QQ, QQ, QQ, QQ]
+QQ f[0] -> 2 | QQ
+QQ f[3] -> 3 | QQ
+QQ f[7] -> 0 | QQ
+QQ f.leading_coefficient() -> 3 | QQ
+QQ f.constant_coefficient() -> 2 | QQ
+QQ f(2) -> 24 | QQ
+QQ f.degree() -> 3 | ZZ
+QQ P(5).list() -> [5] | [QQ]
+QQ f.derivative().list() -> [-1, 0, 9] | [QQ, QQ, QQ]
+QQ (f*f).list() -> [4, -4, 1, 12, -6, 0, 9] | [QQ, QQ, QQ, QQ, QQ, QQ, QQ]
+QQ f.monic().list() -> [2/3, -1/3, 0, 1] | [QQ, QQ, QQ, QQ]
+ZZ f.list() -> [2, -1, 0, 3] | [ZZ, ZZ, ZZ, ZZ]
+ZZ f.coefficients() -> [2, -1, 3] | [ZZ, ZZ, ZZ]
+ZZ f.coefficients(sparse=False) -> [2, -1, 0, 3] | [ZZ, ZZ, ZZ, ZZ]
+ZZ f.dict() -> {0: 2, 1: -1, 3: 3} | {0: ZZ, 1: ZZ, 3: ZZ}
+ZZ list(f) -> [2, -1, 0, 3] | [ZZ, ZZ, ZZ, ZZ]
+ZZ f[0] -> 2 | ZZ
+ZZ f[3] -> 3 | ZZ
+ZZ f[7] -> 0 | ZZ
+ZZ f.leading_coefficient() -> 3 | ZZ
+ZZ f.constant_coefficient() -> 2 | ZZ
+ZZ f(2) -> 24 | ZZ
+ZZ f.degree() -> 3 | ZZ
+ZZ P(5).list() -> [5] | [ZZ]
+ZZ f.derivative().list() -> [-1, 0, 9] | [ZZ, ZZ, ZZ]
+ZZ (f*f).list() -> [4, -4, 1, 12, -6, 0, 9] | [ZZ, ZZ, ZZ, ZZ, ZZ, ZZ, ZZ]
+ZZ f.monic().list() -> [2/3, -1/3, 0, 1] | [QQ, QQ, QQ, QQ]
+QQ v[0] -> 1 | QQ
+QQ v[-1] -> 3 | QQ
+QQ list(v) -> [1, 2, 3] | [QQ, QQ, QQ]
+QQ v.list() -> [1, 2, 3] | [QQ, QQ, QQ]
+QQ iter first -> 1 | QQ
+QQ v[0:2] -> (1, 2) | vec[QQ, QQ]
+QQ v[0:2][0] -> 1 | QQ
+QQ v+v -> (2, 4, 6) | vec[QQ, QQ, QQ]
+QQ (v+v)[0] -> 2 | QQ
+QQ 2*v -> (2, 4, 6) | vec[QQ, QQ, QQ]
+QQ (2*v)[0] -> 2 | QQ
+QQ v*v -> 14 | QQ
+QQ v.dot_product(v) -> 14 | QQ
+QQ sum(v) -> 6 | QQ
+QQ v.dict() -> {0: 1, 1: 2, 2: 3} | {0: QQ, 1: QQ, 2: QQ}
+QQ v.norm()^2 -> 14 | Symbolic Ring
+QQ tuple(v) -> (1, 2, 3) | [QQ, QQ, QQ]
+ZZ v[0] -> 1 | ZZ
+ZZ v[-1] -> 3 | ZZ
+ZZ list(v) -> [1, 2, 3] | [ZZ, ZZ, ZZ]
+ZZ v.list() -> [1, 2, 3] | [ZZ, ZZ, ZZ]
+ZZ iter first -> 1 | ZZ
+ZZ v[0:2] -> (1, 2) | vec[ZZ, ZZ]
+ZZ v[0:2][0] -> 1 | ZZ
+ZZ v+v -> (2, 4, 6) | vec[ZZ, ZZ, ZZ]
+ZZ (v+v)[0] -> 2 | ZZ
+ZZ 2*v -> (2, 4, 6) | vec[ZZ, ZZ, ZZ]
+ZZ (2*v)[0] -> 2 | ZZ
+ZZ v*v -> 14 | ZZ
+ZZ v.dot_product(v) -> 14 | ZZ
+ZZ sum(v) -> 6 | ZZ
+ZZ v.dict() -> {0: 1, 1: 2, 2: 3} | {0: ZZ, 1: ZZ, 2: ZZ}
+ZZ v.norm()^2 -> 14 | Symbolic Ring
+ZZ tuple(v) -> (1, 2, 3) | [ZZ, ZZ, ZZ]
+VectorSpace(QQ,3)(0) -> (0, 0, 0) | vec[QQ, QQ, QQ]
+VectorSpace(QQ,3).zero() -> (0, 0, 0) | vec[QQ, QQ, QQ]
+VectorSpace(QQ,3).basis()[0] -> (1, 0, 0) | vec[QQ, QQ, QQ]
+VectorSpace(QQ,3)([1,2,3]) -> (1, 2, 3) | vec[QQ, QQ, QQ]
+sum(VectorSpace(QQ,3)([1,2,3])) -> 6 | QQ
+sum(VectorSpace(QQ,3).zero()) -> 0 | QQ
+vector([1/2,2])[1] -> 2 | QQ
+sum(vector([1/2,3/2])) -> 2 | QQ
+assigned QQ vector -> (3, 4) | vec[QQ, QQ]
+sum(assigned QQ vector) -> 7 | QQ
+QQv*QQm -> (1, 2) | vec[QQ, QQ]
+QQm*QQv -> (1, 2) | vec[QQ, QQ]
+QQv*ZZm -> (1, 2) | vec[QQ, QQ]
+ZZm*QQv -> (1, 2) | vec[QQ, QQ]
+ZZv*QQm -> (1, 2) | vec[QQ, QQ]
+QQm*ZZv -> (1, 2) | vec[QQ, QQ]
+ZZv*ZZm -> (1, 2) | vec[ZZ, ZZ]
+ZZm*ZZv -> (1, 2) | vec[ZZ, ZZ]
+QQv/2 -> (1, 2) | vec[QQ, QQ]
+QQv/QQ(2) -> (1, 2) | vec[QQ, QQ]
+QQv/2*1 -> 1 | QQ
+ZZv/2 -> (1, 2) | vec[QQ, QQ]
+ZZv/QQ(2) -> (1, 2) | vec[QQ, QQ]
+ZZv/2*1 -> 1 | QQ

@@ -61,9 +61,43 @@ class Vector(list):
         import _sage_expr
         return _sage_expr._latex_vector(self)
 
+    # the ring when known (ZZ, QQ or SR; a series ring for a SeriesVector):
+    # over QQ an integral entry stays stored as an int and is handed out
+    # as an element of QQ when read (no copy of the vector)
+    _ring = None
+
     def __init__(self, entries=()):
         # (read boundedly: a Vector is built from any iterable)
         list.__init__(self, _bounded_list(entries))
+
+    def __getitem__(self, i):
+        x = list.__getitem__(self, i)
+        if isinstance(i, slice):
+            if type(self) is not Vector:
+                return x
+            # (a slice is a vector over the same ring, as in Sage)
+            w = Vector(x)
+            if self._ring is not None:
+                w._ring = self._ring
+            return w
+        # (an integral entry of a QQ vector is stored as an int: Sage hands
+        # it out with parent QQ)
+        return _qq_entry(x) if self._ring is _sa().QQ else x
+
+    def __iter__(self):
+        if self._ring is _sa().QQ:
+            return map(_qq_entry, list.__iter__(self))
+        return list.__iter__(self)
+
+    def dict(self):
+        """The nonzero entries, by position.
+
+        EXAMPLES::
+
+            sage: vector(QQ, [1, 0, 3]).dict()
+            {0: 1, 2: 3}
+        """
+        return {i: x for i, x in enumerate(self) if x != 0}
 
     def __repr__(self):
         return "(" + ", ".join(repr(x) for x in self) + ")"
@@ -102,7 +136,12 @@ class Vector(list):
             if len(self) != other.nrows():
                 raise ArithmeticError("vector and matrix of incompatible sizes")
             sv = _raw_entries(self)
-            return Vector(_norm(sum((a * b for a, b in zip(sv, c)), 0)) for c in other._raw_columns())
+            w = Vector(_norm(sum((a * b for a, b in zip(sv, c)), 0)) for c in other._raw_columns())
+            # (over QQ when either factor is, integral entries too, as in
+            # Sage: astra's CORR-DE2-2)
+            if other._base is _sa().QQ or self.base_ring() is _sa().QQ:
+                w._ring = _sa().QQ
+            return w
         if isinstance(other, (list, tuple)):
             # the dot product
             if len(other) != len(self):
@@ -115,8 +154,15 @@ class Vector(list):
 
     def __truediv__(self, other):
         try:
-            return Vector(_norm(_F(a) / _F(other)) for a in self)
+            w = Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
+            w = None
+        if w is not None:
+            # (a quotient of rationals is a vector over QQ, integral entries
+            # too: vector([2, 4]) / 2 is (1, 2) over QQ, astra's CORR-DE2-2)
+            w._ring = _sa().QQ
+            return w
+        else:
             if _is_symbolic_function(other):
                 return NotImplemented
             return Vector(_norm(a / other) for a in self)
@@ -2208,7 +2254,7 @@ class VectorSpace_QQ(FreeModule_):
             (1, 2, 3/4)
         """
         if isinstance(x, int) and x == 0:
-            return Vector([0] * self._degree)
+            return self.zero()
         v = _bounded_list(x, self._degree)
         if len(v) != self._degree:
             raise TypeError("entries must be a list of length %d" % self._degree)
@@ -2226,7 +2272,13 @@ class VectorSpace_QQ(FreeModule_):
         """
         import _sage_ffmat
         n, _ = _shape(self._degree, self._degree)
-        return _sage_ffmat._Basis([Vector(int(i == j) for j in range(n)) for i in range(n)])
+        return _sage_ffmat._Basis([self._qq_vector(int(i == j) for j in range(n)) for i in range(n)])
+
+    @staticmethod
+    def _qq_vector(entries):
+        w = Vector(entries)
+        w._ring = _sa().QQ
+        return w
 
     gens = basis
 
@@ -2250,7 +2302,9 @@ class VectorSpace_QQ(FreeModule_):
             sage: VectorSpace(QQ, 2).zero()
             (0, 0)
         """
-        return Vector([0] * self._degree)
+        w = Vector([0] * self._degree)
+        w._ring = _sa().QQ
+        return w
 
     def basis_matrix(self):
         """The identity matrix.
@@ -2495,6 +2549,9 @@ def vector(*args):
         return _sage_ffmat.vector(ff, entries)
     v = Vector(_norm(x) for x in entries)
     sa = _sa()
+    if ring is None and v.base_ring() is sa.QQ:
+        # (vector([1/2, 2]) is over QQ by its entries: its 2 is in QQ)
+        v._ring = sa.QQ
     if ring is sa.QQ or ring is sa.ZZ:
         if ring is sa.ZZ and any(not isinstance(x, int) for x in v):
             raise TypeError("no conversion of this rational to integer")
