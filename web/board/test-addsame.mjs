@@ -1,5 +1,5 @@
 // Another item of the selected item's kind, below it (William's item 7):
-// its control by the selected item (a "+", or a chip with its kind's name),
+// its control by the selected item (a "+" just outside its top right corner),
 // B or Alt+Enter on the selected item, Alt+Enter in its editor (a code item
 // run first).  Checked: its kind and look (a code item's language, a note's
 // color and shape, a question's way of being answered), its place (below,
@@ -218,19 +218,6 @@ try {
   check((await fresh()).length === 1, "...a press and its own release there: one added");
   await leave(); await undoKey();
 
-  // the other look: a chip "+ Code" under the item's bottom edge, which adds the same
-  await ev("window.board.addSameStyle = 'chip', window.board.request(), 1");
-  check(await select("c1"), "(c1 selected again)");
-  const c1b = await box("c1");
-  const chip = await ev(`(() => { const r = window.board.clientRect("c1"); return { x: r.left + r.width / 2, y: r.top + r.height + 6 + 11 }; })()`);
-  check(await ev(`window.board.addSameAt(${chip.x}, ${chip.y}) === "c1" && window.board.addSame?.label === "Code"`), "the chip look: under the item's bottom edge, named for its kind (Code)");
-  await click(chip.x, chip.y);
-  await settle(n0 + 1);
-  made = await fresh();
-  const n6 = made[0] && await box(made[0].id);
-  check(made.length === 1 && made[0].code === "" && n6 && Math.abs(n6.y - (c1b.y + c1b.h + GAP)) < 1.5, "...a click on it adds a code item below: " + JSON.stringify([made, n6]));
-  await leave(); await undoKey();
-  await ev("window.board.addSameStyle = 'plus', 1");
 
   // the new item's real size, measured once laid out: a tall question, a narrow one, over nothing; a group as large as it shows (astra's CORR-2B8-1, CORR-2B8-2)
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Sizes", nodes: [
