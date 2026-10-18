@@ -242,10 +242,11 @@ jobs:
           python3 sage-tests/run_calculus.py
           python3 magma-tests/run.py -v
           python3 matlab-tests/run.py -v
-      - name: a fresh CPython extension, with the audit's regressions and Sage's tests
+      - name: a fresh CPython extension, with the audit's regressions, the MCP server and Sage's tests
         run: |
           python3 -m pip install maturin
           (cd engine/py && maturin build --release --out dist)
           python3 -m pip install engine/py/dist/*.whl
           python3 engine/py/test_audit.py
+          python3 engine/py/test_mcp.py
           python3 sage-tests/run_cpython.py -v

@@ -11,6 +11,18 @@ Tools: `sage` (Sage syntax in a persistent session), `python`, `reset`,
 computation has a time limit and is interrupted (Ctrl-C) when it is
 exceeded; a session that does not stop is restarted.
 
+Every tool result is text for people and, for clients of protocol
+2025-06-18 or later, structuredContent described by the tool's
+outputSchema: {result, text, status, assumes, error}.  status says what the
+result rests on, never more than the engine knows: "proven"; "conditional"
+(on the hypotheses in assumes, such as GRH); "heuristic" (assumes includes
+something unproven that is not a named conjecture, such as a probable
+prime); "unknown" (code run by the sage and python tools: the server cannot
+tell what it relied on).  An error has isError true and error {type,
+exception, message, traceback}, where type is one of ERROR_TYPES;
+"unimplemented" is Sagebrush's refusal (NotImplementedError), never a
+wrong answer.
+
 The protocol (JSON-RPC 2.0, one message per line) is implemented here
 directly, so the server needs nothing beyond this package.
 """
@@ -193,14 +205,23 @@ TOOLS = [
     },
     {
         "name": "factor",
-        "description": "Factor an integer (ECM; any size that ECM can split), e.g. n = \"2^128 + 1\".",
+        "description": "Factor an integer (ECM; any size that ECM can split), e.g. n = \"2^128 + 1\". The result is [[p, e], ...]; "
+        "prime factors above 3.3e24 are probable primes (Baillie-PSW), not proven, and are then listed in assumes.",
         "inputSchema": {"type": "object", "properties": {"n": {"type": "string", "description": "an integer or an integer expression"}}, "required": ["n"]},
         "annotations": {"readOnlyHint": True},
     },
     {
         "name": "number_field",
-        "description": "Invariants of the number field Q[x]/(f): degree, signature, discriminant, integral basis, class group, class number, regulator, unit rank and torsion (class group and units assume GRH).",
-        "inputSchema": {"type": "object", "properties": {"polynomial": {"type": "string", "description": "an irreducible polynomial in x, e.g. \"x^3 - 11\""}}, "required": ["polynomial"]},
+        "description": "Invariants of the number field Q[x]/(f): degree, signature, discriminant, integral basis, class group, class number, regulator, unit rank and torsion. "
+        "The class group and regulator are proven without GRH when the engine's certificate goes through, else they assume GRH; each invariant says which (certified, assumes).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "polynomial": {"type": "string", "description": "an irreducible polynomial in x, e.g. \"x^3 - 11\""},
+                "proof": {"type": "boolean", "default": True, "description": "try to prove the class group and regulator without GRH (the engine's certificate; it refuses beyond its limits, and the GRH result is given then); false skips it"},
+            },
+            "required": ["polynomial"],
+        },
         "annotations": {"readOnlyHint": True},
     },
     {
@@ -215,7 +236,242 @@ TOOLS = [
     },
 ]
 
+STATUSES = ["proven", "conditional", "heuristic", "unknown"]
+
+ERROR_TYPES = [
+    "unimplemented",  # NotImplementedError: Sagebrush refuses rather than guess
+    "syntax",  # the code does not parse
+    "exception",  # anything else the code raised (exception names the class)
+    "interrupted",  # interrupted (a cancelled request)
+    "timeout",  # the time limit was reached
+    "session",  # the session process died (out of memory, ...) and was restarted
+    "invalid_arguments",  # the tool's arguments were missing or malformed
+]
+
+_STRINGS = {"type": "array", "items": {"type": "string"}}
+_BIG = {"type": "string", "pattern": "^-?[0-9]+$", "description": "an integer, as a decimal string (of any size)"}
+_FACTORIZATION = {
+    "type": "object",
+    "properties": {
+        "n": _BIG,
+        "unit": {"type": "integer", "enum": [1, -1]},
+        "factors": {"type": "array", "items": {"type": "array", "items": {"type": ["string", "integer"]}, "minItems": 2, "maxItems": 2},
+                    "description": "[p, e] for each prime p dividing n, ascending: n = unit * prod p^e"},
+    },
+    "required": ["n", "unit", "factors"],
+}
+
+
+def _invariant(value, description):
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "value": value,
+            "certified": {"type": "boolean", "description": "proven (assumes is empty)"},
+            "assumes": dict(_STRINGS, description="what the value rests on, if not certified"),
+        },
+        "required": ["value", "certified", "assumes"],
+    }
+
+
+_ERROR = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string", "enum": ERROR_TYPES},
+        "exception": {"type": ["string", "null"], "description": "the Python exception's class, for errors raised by the code"},
+        "message": {"type": "string"},
+        "traceback": {"type": "string"},
+    },
+    "required": ["type", "exception", "message", "traceback"],
+}
+
+
+def _output_schema(result, extra=None):
+    props = {
+        "result": {"anyOf": [result, {"type": "null"}], "description": "the result as data (null after an error)"},
+        "text": {"type": "string", "description": "the result as printed, for people (the text content)"},
+        "status": {"type": "string", "enum": STATUSES, "description": "what the result rests on: proven; conditional on assumes (a named conjecture such as GRH); heuristic (assumes includes something unproven, such as a probable prime); unknown (the server cannot tell)"},
+        "assumes": dict(_STRINGS, description="every hypothesis the result depends on (empty when proven)"),
+        "error": {"anyOf": [_ERROR, {"type": "null"}]},
+    }
+    props.update(extra or {})
+    return {"type": "object", "properties": props, "required": ["result", "text", "status", "assumes", "error"]}
+
+
+_CODE_EXTRA = {
+    "stdout": {"type": "string", "description": "what the code printed"},
+    "plots": dict(_STRINGS, description="the URIs of the plots shown, each also an SVG resource in the content"),
+    "seconds": {"type": "number"},
+    "restarted": {"type": "boolean", "description": "the session had stopped and was restarted: earlier variables are gone"},
+}
+_CODE_RESULT = {"type": "string", "description": "repr of the value of the last line (null if none, or a plot)"}
+
+OUTPUT_SCHEMAS = {
+    "sage": _output_schema(_CODE_RESULT, _CODE_EXTRA),
+    "python": _output_schema(_CODE_RESULT, _CODE_EXTRA),
+    "search_docs": _output_schema({"type": "string", "description": "the matches, as the text (JSON {entries, omitted} when json is true)"}),
+    "reset": _output_schema({"type": "string"}),
+    "guide": _output_schema({"type": "string", "description": "the guide (Markdown)"}),
+    "factor": _output_schema(_FACTORIZATION),
+    "number_field": _output_schema({
+        "type": "object",
+        "properties": {
+            "polynomial": {"type": "string"},
+            "degree": {"type": "integer"},
+            "signature": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2, "description": "[r1, r2] (proven: certified root isolation)"},
+            "discriminant": _invariant(_BIG, "the discriminant of the maximal order"),
+            "discriminant_factorization": _invariant(_FACTORIZATION, "its factorization (probable primes above 3.3e24 are assumed prime)"),
+            "integral_basis": _invariant(_STRINGS, "a basis of the maximal order, in terms of a, a root of the polynomial"),
+            "class_group": _invariant({"type": "object", "properties": {"order": {"type": "integer"}, "invariants": {"type": "array", "items": {"type": "integer"}}}, "required": ["order", "invariants"]},
+                                      "the class number and the invariants of the class group, largest first"),
+            "regulator": _invariant({"type": "string", "description": "a decimal, its digits correct"}, "the regulator"),
+            "unit_rank": _invariant({"type": "integer"}, "r1 + r2 - 1 (Dirichlet)"),
+            "torsion_order": _invariant({"type": "integer"}, "the number of roots of unity"),
+            "not_certified_because": {"type": ["string", "null"], "description": "why the class group and regulator are not proven without GRH (null if they are)"},
+        },
+        "required": ["polynomial", "degree", "signature", "discriminant", "discriminant_factorization", "integral_basis", "class_group", "regulator", "unit_rank", "torsion_order", "not_certified_because"],
+    }),
+    "newforms": _output_schema({
+        "type": "array",
+        "description": "the Galois orbits, in LMFDB order",
+        "items": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "LMFDB's label N.k.a.x"},
+                "dimension": {"type": "integer"},
+                "traces": dict(_STRINGS, description="[tr a_1, tr a_2, ...] (decimal strings), the coefficients of the trace form"),
+                "trace_form": {"type": "string"},
+                "hecke_operator": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}, "description": "T = sum r T_q as [[q, r]]"},
+                "charpoly": {"type": "string", "description": "the characteristic polynomial of T on the orbit (irreducible over QQ)"},
+            },
+            "required": ["label", "dimension", "traces", "trace_form", "hecke_operator", "charpoly"],
+        },
+    }),
+}
+
+# (structuredContent and outputSchema are in the protocol from this version)
+STRUCTURED_SINCE = "2025-06-18"
+
 GUIDE_URI = "sagebrush://guide"
+
+
+# ---- run in the session (the shortcut tools): the result as data, and
+# what it rests on
+
+def _status(assumes):
+    if not assumes:
+        return "proven"
+    return "conditional" if all(a == "GRH" for a in assumes) else "heuristic"
+
+
+def _union(*lists):
+    out = []
+    for xs in lists:
+        out += [x for x in xs if x not in out]
+    return out
+
+
+def _factor_data(n):
+    """factor(n) as {n, unit, factors: [[p, e]]}, with the primes not
+    proven prime (BPSW above 3.3e24) in assumes."""
+    from sagebrush.sage import Integer, factor, is_prime
+
+    n = Integer(n)
+    F = factor(n)
+    if F.value() != n:
+        raise RuntimeError("factor: the factorization's product %s is not %s" % (F.value(), n))
+    assumes = []
+    for p, _ in F:
+        try:
+            ok = is_prime(p, proof=True)
+        except NotImplementedError:
+            assumes.append("%s is prime (Baillie-PSW)" % p)
+            continue
+        if not ok:
+            raise RuntimeError("factor: %s was reported prime but is composite" % p)
+    result = {"n": str(n), "unit": int(F.unit), "factors": [[str(p), int(e)] for p, e in F]}
+    return {"result": result, "text": str(F), "status": _status(assumes), "assumes": assumes}
+
+
+def _number_field_data(f, proof=True):
+    """The invariants of Q[x]/(f), each with what it rests on: the
+    class group and regulator proven without GRH when the engine's
+    certificate goes through (and proof is true), else conditional."""
+    from sagebrush.sage import QQ, NumberField, PolynomialRing
+
+    R = PolynomialRing(QQ, "x")
+    K = NumberField(R(f), "a")
+    order = list(K._nfdata().get("assumes", []))  # (probable primes)
+
+    def inv(value, assumes):
+        return {"value": value, "certified": not assumes, "assumes": list(assumes)}
+
+    D = K.discriminant()
+    DF = _factor_data(D)
+    r1, r2 = K.signature()
+    why = None
+    if proof:
+        try:
+            G, reg, bnf = K.class_group(proof=True), K.regulator(proof=True), []
+        except NotImplementedError as e:
+            why = str(e)
+    else:
+        why = "not asked (proof=false)"
+    if why is not None:
+        G, reg = K.class_group(proof=False), K.regulator(proof=False)
+        bnf = _union(K._bnfdata().get("assumes", ["GRH"]), order)
+    # (with no fundamental units the regulator is 1, by definition)
+    reg_assumes = [] if r1 + r2 == 1 else bnf
+    w = K.number_of_roots_of_unity()
+    w_assumes = [] if K._nfdata().get("w_proven") else ["the roots of unity found are all"]
+    res = {
+        "polynomial": str(K.polynomial()),
+        "degree": int(K.degree()),
+        "signature": [int(r1), int(r2)],
+        "discriminant": inv(str(D), order),
+        "discriminant_factorization": inv(DF["result"], DF["assumes"]),
+        "integral_basis": inv([str(b) for b in K.integral_basis()], order),
+        "class_group": inv({"order": int(G.order()), "invariants": [int(c) for c in G.invariants()]}, bnf),
+        "regulator": inv(str(reg), reg_assumes),
+        "unit_rank": inv(int(r1 + r2 - 1), []),
+        "torsion_order": inv(int(w), w_assumes),
+        "not_certified_because": why,
+    }
+    assumes = _union(order, DF["assumes"], bnf, w_assumes)
+    def on(assumes):
+        return "proven, without GRH" if not assumes else "assumes " + "; ".join(assumes)
+
+    text = "\n".join([
+        "field: %s" % K,
+        "degree: %s" % K.degree(),
+        "signature: (%s, %s)" % (r1, r2),
+        "discriminant: %s = %s" % (D, DF["text"]),
+        "integral basis: %s" % (K.integral_basis(),),
+        "class group: %s (%s)" % (G, on(bnf)),
+        "class number: %s" % G.order(),
+        "unit group: %s" % K.unit_group(),
+        "regulator: %s (%s)" % (reg, on(reg_assumes)),
+    ] + (["not proven without GRH: %s" % why] if why else []))
+    return {"result": res, "text": text, "status": _status(assumes), "assumes": assumes}
+
+
+def _newforms_data(N, k):
+    """The newform orbits of level N and weight k (proven by the engine:
+    exact linear algebra on modular symbols)."""
+    from sagebrush.sage import newform_orbits
+
+    orbits = newform_orbits(N, k)
+    res = [{
+        "label": o.label(),
+        "dimension": int(o.dimension()),
+        "traces": [str(t) for t in o.traces()],
+        "trace_form": o.trace_form(),
+        "hecke_operator": [[int(q), int(r)] for q, r in o.hecke_operator()],
+        "charpoly": str(o.charpoly()),
+    } for o in orbits]
+    text = "\n\n".join(str(o) for o in orbits) or "There are no newforms of level %d and weight %d." % (N, k)
+    return {"result": res, "text": text, "status": "proven", "assumes": []}
 
 
 class Server:
@@ -227,6 +483,7 @@ class Server:
         self.work = threading.Lock()  # one computation at a time
         self.plots = 0
         self.threads = []
+        self.protocol = PROTOCOL_VERSIONS[0]
 
     # ---- transport
     def send(self, msg):
@@ -249,79 +506,120 @@ class Server:
             self.session = Session()
         return self.session
 
-    def run(self, code, mode="sage", timeout=60, isolated=False):
+    def run(self, code, mode="sage", timeout=60, isolated=False, data=False):
+        """Run code in the session: (content, structured, is_error).  With
+        data, the code leaves {result, text, status, assumes} in
+        __sagebrush_data__ (the shortcut tools); otherwise the status is
+        "unknown"."""
         timeout = max(1.0, min(float(timeout or 60), 3600.0))
         with self.work:
-            r = self.sess().run(code, mode=mode, timeout=timeout, isolated=isolated)
+            r = self.sess().run(code, mode=mode, timeout=timeout, isolated=isolated, data=data)
         content = []
         text = []
+        plots = []
+        d = r.get("data") if data else None
         if r.get("restarted") and not r.get("error"):
             text.append("(The session had stopped and was restarted; earlier variables are gone.)")
         if r.get("stdout"):
             text.append(r["stdout"].rstrip("\n"))
         if r.get("result") is not None:
             text.append(r["result"])
+        if d is not None:
+            text.append(d["text"])
         if r.get("error"):
             text.append(r["error"])
-        for mime, data in r.get("displays", []):
+        for mime, svg in r.get("displays", []):
             self.plots += 1
             uri = "sagebrush://plot/%d.svg" % self.plots
-            text.append("[plot: %s (SVG, %d bytes)]" % (uri, len(data)))
-            content.append({"type": "resource", "resource": {"uri": uri, "mimeType": mime, "text": data}})
+            plots.append(uri)
+            text.append("[plot: %s (SVG, %d bytes)]" % (uri, len(svg)))
+            content.append({"type": "resource", "resource": {"uri": uri, "mimeType": mime, "text": svg}})
         if not text:
             text.append("(no output)")
-        return [_text("\n".join(text))] + content, bool(r.get("error"))
+        text = "\n".join(text)
+        error = r.get("error_info")
+        if r.get("error") and error is None:  # (a session without error_info)
+            error = {"type": "exception", "exception": None, "message": r["error"], "traceback": r["error"]}
+        if error is not None:
+            structured = {"result": None, "status": "unknown", "assumes": []}
+        elif data:
+            if d is None:
+                raise RuntimeError("the tool's code left no result")
+            structured = {"result": d["result"], "status": d["status"], "assumes": d["assumes"]}
+        else:
+            structured = {"result": r.get("result"), "status": "unknown", "assumes": []}
+        structured.update(text=text, error=error)
+        if not data:
+            structured.update(stdout=r.get("stdout", ""), plots=plots, seconds=float(r.get("seconds", 0.0)), restarted=bool(r.get("restarted")))
+        return [_text(text)] + content, structured, error is not None
 
     # ---- tools
     def call_tool(self, name, args):
+        """(content, structuredContent, is_error) for one tool call."""
+        def plain(s):
+            return [_text(s)], {"result": s, "text": s, "status": "unknown", "assumes": [], "error": None}, False
+
         if name in ("sage", "python"):
             if not isinstance(args.get("code"), str):
-                raise ValueError("`code` (a string) is required")
+                raise _Invalid("`code` (a string) is required")
             return self.run(args["code"], mode=name, timeout=args.get("timeout", 60))
         if name == "reset":
             if self.session is not None:
                 with self.work:
                     self.session.restart()
-            return [_text("The session was restarted.")], False
+            return plain("The session was restarted.")
         if name == "guide":
-            return [_text(GUIDE)], False
+            return plain(GUIDE)
         if name == "search_docs":
-            return [_text(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full")), bool(args.get("json"))))], False
+            return plain(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full")), bool(args.get("json"))))
         if name == "factor":
             n = str(args.get("n", "")).strip()
-            if not n:
-                raise ValueError("`n` is required")
-            return self.run("__n = Integer(%s)\nprint(factor(__n))" % n, isolated=True, timeout=args.get("timeout", 120))
+            if not n or "\n" in n:
+                raise _Invalid("`n` (an integer expression on one line) is required")
+            code = "from sagebrush.mcp_server import _factor_data\n__sagebrush_data__ = _factor_data(Integer(%s))" % n
+            return self.run(code, isolated=True, timeout=args.get("timeout", 120), data=True)
         if name == "number_field":
             f = str(args.get("polynomial", "")).strip()
             if not f:
-                raise ValueError("`polynomial` is required")
-            code = (
-                "R.<x> = QQ[]\nK.<a> = NumberField(R(%s))\n" % json.dumps(f)
-                + "print('field:', K)\nprint('degree:', K.degree())\nprint('signature:', K.signature())\n"
-                "print('discriminant:', K.discriminant(), '=', factor(K.discriminant()))\n"
-                "print('integral basis:', K.integral_basis())\n"
-                "G = K.class_group()\nprint('class group:', G, '(GRH)')\nprint('class number:', K.class_number())\n"
-                "U = K.unit_group()\nprint('unit group:', U)\nprint('regulator:', K.regulator())\n"
-            )
-            return self.run(code, isolated=True, timeout=args.get("timeout", 300))
+                raise _Invalid("`polynomial` is required")
+            proof = args.get("proof", True)
+            if not isinstance(proof, bool):
+                raise _Invalid("`proof` must be true or false")
+            code = "from sagebrush.mcp_server import _number_field_data\n__sagebrush_data__ = _number_field_data(%s, %s)" % (json.dumps(f), proof)
+            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True)
         if name == "newforms":
-            n = int(args.get("level"))
-            k = int(args.get("weight", 2) or 2)
-            code = "for o in newform_orbits(%d, %d):\n    print(o)\n    print()" % (n, k)
-            return self.run(code, isolated=True, timeout=args.get("timeout", 300))
+            try:
+                n = int(args.get("level"))
+                k = int(args.get("weight", 2) or 2)
+            except (TypeError, ValueError):
+                raise _Invalid("`level` (and `weight`) must be integers")
+            code = "from sagebrush.mcp_server import _newforms_data\n__sagebrush_data__ = _newforms_data(%d, %d)" % (n, k)
+            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True)
         raise KeyError(name)
+
+    def structured(self):
+        return self.protocol >= STRUCTURED_SINCE
 
     def handle_tool_call(self, rid, params):
         name = params.get("name")
         args = params.get("arguments") or {}
         try:
-            content, is_error = self.call_tool(name, args)
-            self.reply(rid, {"content": content, "isError": is_error})
+            content, structured, is_error = self.call_tool(name, args)
         except KeyError:
             self.error(rid, -32602, "unknown tool: %s" % name)
+            self.running.pop(rid, None)
+            return
         except Exception as e:
-            self.reply(rid, {"content": [_text("%s: %s" % (type(e).__name__, e))], "isError": True})
+            kind = "invalid_arguments" if isinstance(e, _Invalid) else "unimplemented" if isinstance(e, NotImplementedError) else "exception"
+            message = "%s: %s" % ("Invalid arguments" if kind == "invalid_arguments" else type(e).__name__, e)
+            content, is_error = [_text(message)], True
+            structured = {"result": None, "text": message, "status": "unknown", "assumes": [],
+                          "error": {"type": kind, "exception": None if kind == "invalid_arguments" else type(e).__name__, "message": str(e), "traceback": ""}}
+        try:
+            out = {"content": content, "isError": is_error}
+            if self.structured():
+                out["structuredContent"] = structured
+            self.reply(rid, out)
         finally:
             self.running.pop(rid, None)
 
@@ -340,8 +638,9 @@ class Server:
             return
         if method == "initialize":
             v = params.get("protocolVersion")
+            self.protocol = v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
             self.reply(rid, {
-                "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
+                "protocolVersion": self.protocol,
                 "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False}},
                 "serverInfo": {"name": "sagebrush", "title": "Sagebrush", "version": _version()},
                 "instructions": INSTRUCTIONS,
@@ -349,7 +648,10 @@ class Server:
         elif method == "ping":
             self.reply(rid, {})
         elif method == "tools/list":
-            self.reply(rid, {"tools": TOOLS})
+            if self.structured():
+                self.reply(rid, {"tools": [dict(t, outputSchema=OUTPUT_SCHEMAS[t["name"]]) for t in TOOLS]})
+            else:
+                self.reply(rid, {"tools": TOOLS})
         elif method == "tools/call":
             self.running[rid] = True
             t = threading.Thread(target=self.handle_tool_call, args=(rid, params), daemon=True)
@@ -390,6 +692,10 @@ class Server:
             t.join()
         if self.session is not None:
             self.session.close()
+
+
+class _Invalid(ValueError):
+    """A tool's arguments are missing or malformed."""
 
 
 def _version():
