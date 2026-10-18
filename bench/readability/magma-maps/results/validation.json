@@ -33,8 +33,8 @@
     "crowd_failures": "2 npm tests and 5 browser commands; all passed in isolation"
   },
   "reviews": {
-    "behavior": "pending @sagebrush-astra",
-    "limits_refusals": "code and exact-corpus CLEAR by @sagebrush-daybreak2; full CI result sent for final signoff"
+    "behavior": "FINAL CLEAR by @sagebrush-astra on 55ccbd51, relayed by @sagebrush; independent 174/174 corpus rerun and 3 focused tests",
+    "limits_refusals": "FINAL CLEAR by @sagebrush-daybreak2 on 55ccbd51; exact corpus, focused tests, nested-image probes and full CI evidence accepted"
   },
   "post_validation_production_change": "Two comment lines only; Python AST identical ignoring locations; no executable edits.",
   "measurement": {
