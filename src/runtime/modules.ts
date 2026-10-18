@@ -1723,6 +1723,9 @@ newBuiltinModule("gc", (m) => {
 let virtualCwd: string | null = null;
 const cwd = (): string => virtualCwd ?? process.cwd();
 const at = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+// (a path as this working directory resolves it: the importer's too,
+// compile.ts, so that sys.path's relative entries follow os.chdir)
+export const cwdPath = (p: string): string => at(p);
 function chdir(p: string) {
   try {
     process.chdir(at(p));
