@@ -499,6 +499,13 @@ class Rational(_Fraction):
 
     __slots__ = ()
 
+    def __new__(cls, numerator=0, denominator=None):
+        # (a real number as QQ converts it: the simplest rational that
+        # rounds to it, Rational(0.1) is 1/10, not the double's exact value)
+        if denominator is None and not isinstance(numerator, (int, _Fraction, str)) and _real_kind(numerator) is not None:
+            return _simplest_rational(numerator, "Rational of a real number", literal=True)
+        return _Fraction.__new__(cls, numerator, denominator)
+
     def __repr__(self):
         if self._denominator == 1:
             return str(self._numerator)
@@ -1206,16 +1213,24 @@ def _real_kind(x):
 
 
 def _real_qq(x):
-    """The exact rational value of a real number x, as Sage converts it."""
+    """The exact rational value of a real number x (its binary value, as
+    x.exact_rational(); QQ(x) is the simplest rational rounding to x)."""
     import math
     mp = getattr(x, "_mp", None)
     if mp is not None:
         # (an RR element past the doubles: its exact value, not its float)
         return QQ(mp.exact_rational())
+    if _real_kind(x) in ("float", "rdf"):
+        # (the double itself, whatever a subclass's __float__ or
+        # as_integer_ratio say: astra's CORR-28E-1)
+        f = float.__float__(x)
+        if not math.isfinite(f):
+            raise ValueError("cannot convert NaN or infinity to rational number")
+        return _QQ_exact(f)
     if isinstance(x, float) and not math.isfinite(x):
         raise ValueError("cannot convert NaN or infinity to rational number")
     try:
-        return QQ(x)
+        return _QQ_exact(x)
     except (OverflowError, ValueError):
         raise ValueError("cannot convert NaN or infinity to rational number") from None
 
@@ -1249,7 +1264,7 @@ def _integral_modulus(n):
                 return int(r.numerator)
         return NotImplemented
     if kind == "rr":
-        r = QQ(n)
+        r = _real_qq(n)
         if r.denominator != 1:
             raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
         return int(r.numerator)
@@ -1287,11 +1302,39 @@ def _simplest_in(lo, hi, lo_closed, hi_closed):
 _SIMPLEST_MAX_PREC = 1 << 14
 
 
-def _simplest_rational(x):
+def _literal_digits(lit):
+    """The significant digits of a decimal literal as Sage counts them for
+    its precision: the digits before any exponent, without the point and
+    the leading zeros (trailing zeros count): 1.000000000000000 has 16."""
+    s = lit.strip().lstrip("+-").replace("_", "")
+    for c in "eE":
+        s = s.split(c)[0]
+    return len(s.replace(".", "").lstrip("0"))
+
+
+def _round_to_bits(q, bits):
+    """q > 0 rounded to `bits` significant bits, to nearest, ties to even
+    (an exact rational)."""
+    e = q.numerator.bit_length() - q.denominator.bit_length() - bits
+    while True:
+        m = q / QQ(2) ** e
+        if m < 2 ** (bits - 1):
+            e -= 1
+        elif m >= 2 ** bits:
+            e += 1
+        else:
+            break
+    n, r = divmod(m.numerator, m.denominator)
+    if 2 * r > m.denominator or (2 * r == m.denominator and n % 2):
+        n += 1
+    return QQ(n) * QQ(2) ** e
+
+
+def _simplest_rational(x, what="divmod with a real number", literal=False):
     """The simplest rational that rounds to x in x's field (RR,
     RealField(p) in any rounding mode, RDF, or a float's 53 bits), as Sage
-    converts such a number to QQ (in divmod, and for x % q): QQ(RR(0.1)) is
-    1/10. The interval is the field's own: to nearest, half an ulp each side
+    converts such a number to QQ (QQ(x), and in divmod and x % q): QQ(RR(0.1))
+    is 1/10. The interval is the field's own: to nearest, half an ulp each side
     (a quarter below a power of 2), the ends included when the significand
     is even; toward zero in magnitude (RNDZ, RNDD above 0, RNDU below), from
     |x| up to the next value, |x| included; away from zero (RNDA, RNDU above
@@ -1310,7 +1353,20 @@ def _simplest_rational(x):
     else:
         p, rnd = 53, "RNDN"
     if p > _SIMPLEST_MAX_PREC:
-        raise NotImplementedError("divmod with a real number of more than %d bits of precision is not implemented" % _SIMPLEST_MAX_PREC)
+        raise NotImplementedError("%s of more than %d bits of precision is not implemented" % (what, _SIMPLEST_MAX_PREC))
+    lit = None
+    if literal and rnd == "RNDN":
+        # (checked first: an integral value must not slip past them,
+        # astra's CORR-28E-3a)
+        if getattr(x, "_lit_ambiguous", None) is not None:
+            raise NotImplementedError("QQ of x + 0 or x * 1 for a decimal literal x is not implemented: Sage keeps x a literal "
+                                      "when 0 or 1 is a Python int and not when it is an Integer, which are one type here; "
+                                      "use QQ(x) itself, QQ(float(x)), or QQ('decimal string')")
+        lit = getattr(x, "_lit", None)
+        if lit is not None and _literal_digits(lit) > 15:
+            raise NotImplementedError("QQ of a decimal literal of more than 15 significant digits is not implemented "
+                                      "(Sage gives it more than 53 bits): use QQ('%s') for its exact value, "
+                                      "or QQ(float(x)) for its double" % lit.lstrip("+"))
     X = _real_qq(x)
     if X.denominator == 1:
         # an integral value is itself, as in Sage (1e300 is that integer)
@@ -1330,6 +1386,20 @@ def _simplest_rational(x):
     m = int(m)
     ulp = QQ(2) ** e
     below = ulp / 2 if m == 2 ** (p - 1) else ulp  # the gap under A
+    if lit is not None:
+        # A decimal literal not yet used in arithmetic (QQ(1e-20)), as Sage
+        # converts one (found by experiment, not from its source): the
+        # interval is centred on the literal's decimal value rounded to
+        # p + 1 bits, rather than on its p-bit value: QQ(1e-20) is
+        # 1/99999999999999990439 (QQ(float(1e-20)), 1/99999999999999997962).
+        # (a literal of more than 15 digits was refused above: Sage gives
+        # it more than 53 bits, and here every literal has 53)
+        try:
+            D = abs(_Fraction(lit.replace("_", "")))
+        except (ValueError, ZeroDivisionError):
+            D = None
+        if D:
+            A = _round_to_bits(D, p + 1)
     if rnd == "RNDN":
         closed = m % 2 == 0
         r = _simplest_in(A - below / 2, A + ulp / 2, closed, closed)
@@ -1369,9 +1439,9 @@ def _rr_remainder(x, q):
     (ties to even), rounded to the field; NaN when q is 0 or x is not
     finite."""
     P = x.parent()
-    Q = QQ(P(q))
+    Q = _real_qq(P(q))
     try:
-        X = QQ(x)
+        X = _real_qq(x)
     except (OverflowError, ValueError):
         X = None
     if X is None or Q == 0:
@@ -1399,18 +1469,59 @@ def _intdiv(a, b):
 
 
 def Integer(x):
-    """The integer x.
+    """The integer x.  A real number must be integral: Integer(3.0) is 3,
+    and Integer(3.5) is a TypeError (int() would truncate it).
 
     EXAMPLES::
 
-        sage: Integer(7), Integer('123456789012345678901234567890')
-        (7, 123456789012345678901234567890)
+        sage: Integer(7), Integer('123456789012345678901234567890'), Integer(2.0^70)
+        (7, 123456789012345678901234567890, 1180591620717411303424)
+        sage: Integer(3.5)
+        Traceback (most recent call last):
+        ...
+        TypeError: Attempt to coerce non-integral RealNumber to Integer
     """
+    if not isinstance(x, int) and _real_kind(x) is not None:
+        return _integral_real(x)
     return int(x)
 
 
+def _integral_real(x):
+    """A real number (a float, RDF or RR element) as an int, as Sage
+    converts it to ZZ: exactly when it is integral, else TypeError (for an
+    infinity or a NaN too in RR; a float's are Python's OverflowError and
+    ValueError, as in Sage)."""
+    if _real_kind(x) == "rr":
+        try:
+            r = _real_qq(x)
+        except ValueError:
+            r = None
+        if r is None or r.denominator != 1:
+            raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
+        return int(r.numerator)
+    # (the double itself: a subclass's __float__ is not consulted, astra's
+    # CORR-28E-1)
+    f = float.__float__(x)
+    # __int__ is called once, as Sage does, and its answer must be the
+    # double's own integral value (astra's CORR-28E-1)
+    n = int(x)
+    if not (_math.isfinite(f) and f.is_integer()) or n != int(f):
+        raise TypeError("cannot convert non-integral float to integer")
+    return n
+
+
 def _QQ(x, d=None):
-    """QQ(2, 3) or QQ("2/3") or QQ(0.75): the exact rational."""
+    """QQ(2, 3) or QQ("2/3") or QQ(0.75).  A real number (a float, RDF or RR
+    element) becomes the simplest rational that rounds to it, an integral
+    one itself, as in Sage: QQ(0.1) is 1/10, not the double's exact value
+    3602879701896397/36028797018963968 (that is x.exact_rational())."""
+    if d is None and _real_kind(x) is not None:
+        return _simplest_rational(x, "QQ of a real number", literal=True)
+    return _QQ_exact(x, d)
+
+
+def _QQ_exact(x, d=None):
+    """The exact rational x (or x/d); a real number's exact binary value."""
     if d is not None and d == 0:
         raise ZeroDivisionError("rational division by zero")
     if d is None and hasattr(x, "_rational_"):

@@ -988,6 +988,10 @@ class Matrix:
                     # (ZZ(x) truncates a real: float(1.5) became 1, a wrong
                     # entry; only an integral value is an integer, as in
                     # Sage: astra's CORR-552-1)
+                    if sa._real_kind(x) is not None:
+                        # (exactly, without QQ's precision limit: astra's
+                        # CORR-28E-2)
+                        return sa._integral_real(x)
                     q = sa.QQ(x)
                     if q.denominator != 1:
                         raise TypeError
