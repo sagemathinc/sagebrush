@@ -9860,9 +9860,18 @@ def IsIsomorphic(A, B):
             return _iso_result(A.n == B.n)
         S = A if isinstance(A, _MSymGroup) else B
         return _iso_result(S.n == 3)
+    for x in (A, B):
+        if isinstance(x, _MNumberField) and not isinstance(x, _MCycField) and x.degree() == 1:
+            # (Magma makes NumberField of a linear polynomial the rationals,
+            # FldRat, which IsIsomorphic refuses as Bad argument types; this
+            # field is kept as one of degree 1: refused, whatever the other
+            # argument, astra CORR-530-1)
+            raise MagmaError("IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet", "'IsIsomorphic'")
     if isinstance(A, _MNumberField) and isinstance(B, _MNumberField):
         if A.degree() != B.degree():
             return _iso_result(False)
+        if A.degree() == 1:
+            return _iso_result(True)  # (CyclotomicField(1) and (2): both the rationals)
         if A.degree() != 2:
             raise MagmaError("IsIsomorphic of number fields of degree more than 2 is not supported yet", "'IsIsomorphic'")
         return _iso_result(_rational_square(_quadratic_disc(A) * _quadratic_disc(B)))
