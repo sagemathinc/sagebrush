@@ -425,6 +425,50 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+/// Sagebrush's PNG module (engine/raster), as the browser's _sbraster
+/// (src/runtime/raster.ts): `svg` drawn at `scale` pixels per SVG unit on
+/// a `width` x `height` picture (0 x 0: the drawing's size), on
+/// `background` (a CSS color, "" for transparent), with the PNG text
+/// chunks `text`; (the PNG, the characters the font lacked).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn raster_render<'py>(py: Python<'py>, svg: String, scale: f32, width: u32, height: u32, background: String, dpi: f32, text: Vec<(String, String)>) -> PyResult<(Bound<'py, pyo3::types::PyBytes>, String)> {
+    let size = if width == 0 && height == 0 { None } else { Some((width, height)) };
+    let r = py.detach(|| sagebrush_raster::render_png(&svg, scale, size, &background, dpi, &text));
+    match r {
+        Ok((png, missing)) => Ok((pyo3::types::PyBytes::new(py, &png), missing)),
+        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
+        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+    }
+}
+
+/// The most a PNG file read may be, in bytes (lib/_png.py MAX_FILE_BYTES).
+const RASTER_MAX_FILE_BYTES: usize = 256 << 20;
+
+/// A PNG file's pixels: (width, height, channels, float32 values as bytes,
+/// little-endian), as the browser's _sbraster.decode.  `png` is borrowed
+/// from the caller's bytes (not copied), and refused above 256 MiB here,
+/// before anything is read (daybreak2's limits review).
+#[pyfunction]
+fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, Bound<'py, pyo3::types::PyBytes>)> {
+    if png.len() > RASTER_MAX_FILE_BYTES {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "a PNG of {} bytes: Sagebrush reads at most {}", png.len(), RASTER_MAX_FILE_BYTES)));
+    }
+    let r = py.detach(|| sagebrush_raster::decode_png(png));
+    match r {
+        Ok((w, h, ch, v)) => {
+            let mut b = Vec::with_capacity(4 * v.len());
+            for x in v {
+                b.extend_from_slice(&x.to_le_bytes());
+            }
+            Ok((w, h, ch, pyo3::types::PyBytes::new(py, &b)))
+        }
+        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
+        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+    }
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -453,6 +497,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(newspace, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
     m.add_submodule(&mf)?;
+    let raster = PyModule::new(m.py(), "raster")?;
+    raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
+    raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
+    m.add_submodule(&raster)?;
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)

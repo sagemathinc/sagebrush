@@ -65,7 +65,7 @@ PYPI.forEach((text, i) => (PARTS["pypi-" + i] = () => text));
 const PYPI_PARTS = PYPI.map((_, i) => "pypi-" + i);
 
 const PACKAGES = [
-  { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona"], artistic: "engine/py" },
+  { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona", "dejavu"], artistic: "engine/py" },
   { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "psage", "cpython"] },
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
@@ -186,7 +186,9 @@ function render(pkg) {
     ...(standard ? ["-".repeat(72), "The Apache License 2.0 (standard text, for the crates above without license files)", "-".repeat(72), "", APACHE_TEXT, ""] : []),
     ...(pkg.web ? webSection() : []),
   ];
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  // (no trailing whitespace on any line: some license texts carry it, and
+  // git diff --check refuses it)
+  return out.join("\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 // The npm packages in the notebook page's bundles, and KaTeX's fonts.

@@ -48,6 +48,19 @@ g.show(gridlines=True, figsize=(7, 3)); g.save('cubic.svg')
   `aspect_ratio`, `gridlines`, `frame`, `axes`, `figsize`,
   `scale='loglog'|'semilogx'|'semilogy'`, `ticks`, `legend_loc` and
   `show_legend`.
+- Labels, titles and `text` take TeX between dollars, as in Sage:
+  `axes_labels=['$x$', '$\\pi(x)$']` sets an italic x and a Greek pi
+  (matplotlib's mathtext subset: symbols, sub- and superscripts, `\frac`
+  and `\sqrt` inline, `\mathrm`, `\mathbf`).  Text outside dollars is
+  shown as written, so `'\\pi(x)'` without them is those six characters,
+  as in Sage.
+- `g.save('name.svg')` writes SVG and `g.save('name.png')` PNG, drawn by the
+  same module as `savefig`'s (below; in the Python package it is built into
+  the extension).  The PNG is `figsize` inches at `dpi` pixels per inch,
+  640 x 480 by default, on white (`transparent=True` for none).  Sage crops
+  its PNG to the drawing, so Sage's are a little smaller (629 x 469 for
+  the default).  `.eps`, `.pdf`, `.pgf`, `.ps` and `.sobj`, which Sage also
+  writes, are not implemented; other extensions are Sage's error.
 - Expressions come from Sagebrush's own symbolic engine (Rust,
   `engine/sym`): `var('y z')`, `x`, `pi`, `e`, `sin`, `exp`, `sqrt` and the
   rest build expressions that print like Sage (`sin(x^2)/x`), simplify,

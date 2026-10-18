@@ -93,16 +93,31 @@ fn render(svg: &[u8], scale: f32, size: Option<(u32, u32)>, background: &[u8], d
     }
     let pairs: Vec<(String, String)> = strings.chunks(2).map(|kv| (kv[0].clone(), kv[1].clone())).collect();
     let background = std::str::from_utf8(background).map_err(|_| "a background color that is not UTF-8".to_string())?;
-    let bg = if background.is_empty() { None } else { svg::color(background)? };
-    // drawn on nothing, the background composited when written (pngio::encode)
-    let (pix, out) = svg::render(svg, scale, size, None)?;
-    let png = pngio::encode(&pix, bg, dpi, &pairs)?;
+    let (png, missing) = render_png(svg, scale, size, background, dpi, &pairs)?;
     let mut r = Vec::with_capacity(png.len() + 4);
     r.extend_from_slice(&(png.len() as u32).to_le_bytes());
     r.extend_from_slice(&png);
-    let missing: String = out.missing.iter().collect();
     r.extend_from_slice(missing.as_bytes());
     Ok(r)
+}
+
+/// rs_render for Rust callers (the CPython extension, engine/py): the PNG
+/// and the characters the font lacked.  size None: the drawing's own;
+/// background a CSS color, "" or "none" for transparent.
+pub fn render_png(svg: &str, scale: f32, size: Option<(u32, u32)>, background: &str, dpi: f32, text: &[(String, String)]) -> Result<(Vec<u8>, String), String> {
+    let bg = if background.is_empty() { None } else { svg::color(background)? };
+    // drawn on nothing, the background composited when written (pngio::encode)
+    let (pix, out) = svg::render(svg, scale, size, None)?;
+    let png = pngio::encode(&pix, bg, dpi, text)?;
+    Ok((png, out.missing.iter().collect()))
+}
+
+/// rs_decode for Rust callers: width, height, channels and the float32
+/// values, row by row.
+pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, u32, Vec<f32>), String> {
+    let img = pngio::decode(bytes, MAX_AXIS, MAX_PIXELS)?;
+    let (ch, v) = pngio::to_float(&img);
+    Ok((img.width, img.height, ch as u32, v))
 }
 
 /// # Safety
@@ -114,12 +129,11 @@ pub unsafe extern "C" fn rs_decode(png: *const u8, len: usize) -> u32 {
 }
 
 fn decode(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let img = pngio::decode(bytes, MAX_AXIS, MAX_PIXELS)?;
-    let (ch, v) = pngio::to_float(&img);
+    let (w, h, ch, v) = decode_png(bytes)?;
     let mut r = Vec::with_capacity(12 + 4 * v.len());
-    r.extend_from_slice(&img.width.to_le_bytes());
-    r.extend_from_slice(&img.height.to_le_bytes());
-    r.extend_from_slice(&(ch as u32).to_le_bytes());
+    r.extend_from_slice(&w.to_le_bytes());
+    r.extend_from_slice(&h.to_le_bytes());
+    r.extend_from_slice(&ch.to_le_bytes());
     for x in v {
         r.extend_from_slice(&x.to_le_bytes());
     }
