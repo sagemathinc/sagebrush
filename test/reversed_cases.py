@@ -139,3 +139,10 @@ for src in [(1, 2, 3), 'xyz']:
     r = R(src)
     r.size = 'user size'; r.index = 'user index'; r.seq = 'user seq'
     print('subclass attributes', type(src).__name__, r.size, r.index, r.seq, r.__length_hint__(), list(r), r.__length_hint__())
+
+
+# ...and so do the names the runtime once used for its own fields and methods
+for src in [(1, 2, 3), 'xyz']:
+    r = R(src)
+    r.a = 'user a'; r.i = 'user i'; r.get = 'user get'; r.end = 'user end'
+    print('subclass runtime names', type(src).__name__, r.a, r.i, r.get, r.end, r.__length_hint__(), list(r), r.__length_hint__(), r.end, sorted(k for k in vars(r)))

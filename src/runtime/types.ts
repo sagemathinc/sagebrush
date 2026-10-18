@@ -3008,9 +3008,12 @@ iteratorType("filter", FilterIter, (predicate: any, iterable: any) => new Filter
 // IndexError, which ends the iteration)
 const PAST_END = {};
 export class ReversedIter {
-  // ($size: the sequence's current length, for __length_hint__: a list's
-  // storage, as list's own reverse iterator, else len())
-  constructor(public a: any, public i: number, public get: (i: number) => any, public $size: () => number) {}
+  // (its fields and methods are the runtime's, $-named, so that a subclass's
+  // instance may have attributes of any name, as CPython's: $a the sequence,
+  // $i the next index, $get the item getter, $size the sequence's current
+  // length for __length_hint__, a list's storage, as list's own reverse
+  // iterator, else len())
+  constructor(public $a: any, public $i: number, public $get: (i: number) => any, public $size: () => number) {}
   // As CPython's reversed_next: the item at the index taken before the read,
   // and then that index less one (a getter that calls next on the same
   // iterator reads the same index again, and the outer read still moves on
@@ -3020,29 +3023,29 @@ export class ReversedIter {
   // however the sequence grows. (Before, a list cleared or shortened under
   // the iterator gave a SystemError, and a getter's error was skipped over.)
   $next(): any {
-    const index = this.i;
+    const index = this.$i;
     if (index >= 0) {
       let item: any;
       try {
-        item = this.get(index);
+        item = this.$get(index);
       } catch (e: any) {
-        this.end();
+        this.$end();
         const x = toPyExc(e);
         if (isinstance(x, T.IndexError) || isinstance(x, T.StopIteration)) return DONE;
         throw e;
       }
       if (item !== PAST_END) {
-        this.i = index - 1;
+        this.$i = index - 1;
         return item;
       }
     }
-    this.end();
+    this.$end();
     return DONE;
   }
-  end(): void {
-    this.i = -1;
-    this.a = null;
-    this.get = () => PAST_END;
+  $end(): void {
+    this.$i = -1;
+    this.$a = null;
+    this.$get = () => PAST_END;
     this.$size = () => 0;
   }
 }
@@ -3067,8 +3070,8 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
 // once ended, without asking the sequence; else the items left, the
 // sequence's current length asked each time, 0 if it is now shorter)
 method(T.reversed, "__length_hint__", (it: ReversedIter) => {
-  const index = it.i;
-  if (index < 0 || it.a === null) return 0;
+  const index = it.$i;
+  if (index < 0 || it.$a === null) return 0;
   const size = it.$size(), position = index + 1;
   return size < position ? 0 : position;
 });
@@ -3622,7 +3625,7 @@ subclassable(T.map, MapIter, ["f", "its", "strict"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
 subclassable(T.enumerate, Enumerate, ["it", "i"]);
-subclassable(T.reversed, ReversedIter, ["a", "i", "get"]);
+subclassable(T.reversed, ReversedIter);
 subclassable(staticmethod, PyStaticMethod, ["f"]);
 subclassable(classmethod, PyClassMethod, ["f"]);
 // property subclasses commonly override __init__ and call super().__init__.
