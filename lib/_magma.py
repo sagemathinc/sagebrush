@@ -513,6 +513,7 @@ class MSet:
 
     def __iter__(self):
         if self.kind == "multi":
+            self._check_order()  # (a multiset hands out its items in order too, astra CORR-7E2-2)
             for x in self.items:
                 for _ in range(self.keys[_key(x)][1]):
                     yield x
@@ -522,16 +523,22 @@ class MSet:
     def ordered(self):
         if self.kind == "indexed":
             return list(self.items)
+        self._check_order()
+        try:
+            return sorted(self.items, key=_sortkey)
+        except TypeError:
+            return list(self.items)
+
+    def _check_order(self):
+        """Refused where Magma's order of the elements is its own and not
+        modelled: two or more groups, or vectors (their printing and
+        enumeration both come here)."""
         if len(self.keys) > 1 and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in self.items):
             # (Magma's order of the groups in a set is its own: not modelled)
             raise MagmaError("the order of a set of permutation groups is not supported yet")
         if len(self.keys) > 1 and any(isinstance(x, _MVector) for x in self.items):
             # (nor of vectors: {(1 0), (0 1)} prints (0 1) first)
             raise MagmaError("the order of a set of vectors is not supported yet")
-        try:
-            return sorted(self.items, key=_sortkey)
-        except TypeError:
-            return list(self.items)
 
     def __eq__(self, other):
         if not isinstance(other, MSet):
@@ -7282,7 +7289,7 @@ def _declared(s):
     Setseq(f({})) for f into a polynomial ring over GF(7) is that ring's
     sequence, what is appended goes into it (CORR-3FA-1); None for none."""
     u = getattr(s, "universe", None)
-    return u if u is not None and (_is_struct(u) or isinstance(u, (_MFinField, _MResRing, _MFFPolyRing))) else None
+    return u if u is not None and (_is_struct(u) or isinstance(u, (_MFinField, _MResRing, _MFFPolyRing, _MVectorSpace))) else None
 
 
 def Eltseq(x):
@@ -7301,6 +7308,8 @@ def Eltseq(x):
         c = list(x._c)
         c += [0] * (x.parent().degree() - len(c))
         return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
+    if isinstance(x, MSeq) and isinstance(x.universe, _MVectorSpace):
+        return _carry(MSeq(x, x.universe), x)  # (its vector space kept, astra CORR-7E2-1)
     return MSeq(x)
 
 

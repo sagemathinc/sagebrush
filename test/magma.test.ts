@@ -1978,6 +1978,9 @@ test("VectorSpace, KSpace and RSpace as Magma's: unit vectors, coercion, members
   // (a collection over a vector space: each element coerced into it, as V!x,
   // when made, appended, included, assigned, and for in and Index)
   assert.equal(run("V := VectorSpace(Rationals(), 3); [V| [1,2,3], 0]; [V| ]; {V| [1,2,3]}; {@V| [1,2,3], V.1 @};\nS := [V| V.1]; Append(S, [1,2,3]); Append(~S, 0); S; Include({V| V.1}, [0,1,0]) eq {V.1, V.2};\nS := [V| V.1]; [1,2,3] in S; V.1 in S; V.2 in S; [1,0,0] in S; 0 in S; Vector([1,0,0]) in S; Index(S, V.1); Position(S, [1,0,0]); Index(S, 0);\nT := {V| V.1}; [1,0,0] in T; Vector([1,0,0]) in T; [1,0,0] notin T;\n[1,0,0] in Basis(V); [1,0,0] in Generators(V); Universe(Basis(V)); Universe(Generators(V)); Index(Basis(V), [0,0,1]);\nS := [V| V.1]; S[2] := [1,2,3]; S;\nW := RSpace(Integers(), 2); [W| [4,5], W.2];"), "[\n    (1 2 3),\n    (0 0 0)\n]\n[]\n{\n    (1 2 3)\n}\n{@\n    (1 2 3),\n    (1 0 0)\n@}\n[\n    (1 0 0),\n    (1 2 3)\n]\n[\n    (1 0 0),\n    (0 0 0)\n]\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\n1\n1\n0\ntrue\ntrue\nfalse\ntrue\ntrue\nFull Vector space of degree 3 over Rational Field\nFull Vector space of degree 3 over Rational Field\n3\n[\n    (1 0 0),\n    (1 2 3)\n]\n[\n    (4 5),\n    (0 1)\n]\nend\n");
+  // (conversions keep the vector space: what goes in later is coerced, astra
+  // CORR-7E2-1; astra's five cases)
+  assert.equal(run("V := VectorSpace(Rationals(),2); S := Setseq({V|}); Append(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Seqset([V|]); Include(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Setseq({V|V.1}); [1,0] in S;\nV := VectorSpace(Rationals(),2); S := Eltseq([V|]); Append(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Set([V|]); Include(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); Universe(Setseq({V|V.1})); Universe(Seqset([V| V.2])); Universe(Eltseq([V| V.1]));"), "[\n    (1 2)\n]\n{\n    (1 2)\n}\ntrue\n[\n    (1 2)\n]\n{\n    (1 2)\n}\nFull Vector space of degree 2 over Rational Field\nFull Vector space of degree 2 over Rational Field\nFull Vector space of degree 2 over Rational Field\nend\n");
   const errs: [string, string][] = [
     ["V := VectorSpace(Rationals(), 3); x := V.4;", "Runtime error in '.': Argument 2 (4) should be in the range [1 .. 3]"],
     ["V := VectorSpace(Rationals(), 3); x := V.0;", "Runtime error in '.': Argument 2 (0) should be in the range [1 .. 3]"],
@@ -2037,7 +2040,13 @@ test("VectorSpace, KSpace and RSpace as Magma's: unit vectors, coercion, members
     ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := \"a\" in S;", "Runtime error in 'in': No valid universe containing all elements"],
     ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Vector(Rationals(), [1,0]) in S;", "Runtime error in 'in': No valid universe containing all elements"],
     ["V := VectorSpace(Rationals(), 3); x := [V| V.1] cat [V| V.2];", "concatenating sequences over a vector space is not supported yet"],
-    ["V := VectorSpace(Rationals(), 10^4); v := V.1; x := [V| v : i in [1..101]];", "a collection of vectors with more than"]
+    ["V := VectorSpace(Rationals(), 10^4); v := V.1; x := [V| v : i in [1..101]];", "a collection of vectors with more than"],
+    // (astra CORR-7E2-2: a multiset's enumeration, Sprint, a set in a tuple)
+    ["V := VectorSpace(Rationals(),2); for v in {* V.1,V.2 *} do v; end for;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); for v in {* V.2,V.1 *} do v; end for;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); Sprint({V.1,V.2});", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); <{V.1,V.2}>;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); {* V.2, V.1 *};", "the order of a set of vectors is not supported yet"]
   ];
   for (const [e, m] of errs) {
     const o = run(e).replace(/\s+/g, " ");
