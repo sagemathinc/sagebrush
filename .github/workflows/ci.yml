@@ -259,5 +259,6 @@ jobs:
           python3 -m pip install engine/py/dist/*.whl
           python3 engine/py/test_audit.py
           python3 engine/py/test_certify.py
+          python3 engine/py/test_bench.py
           python3 engine/py/test_mcp.py
           python3 sage-tests/run_cpython.py -v

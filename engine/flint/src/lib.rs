@@ -72,7 +72,9 @@ fn fmpz_big(f: *const c_long) -> BigInt {
 }
 
 /// A scalar fmpz on the stack.
-struct Fmpz(c_long);
+/// An integer as FLINT holds it (benchmarks time FLINT's calls without
+/// converting their results; `big` converts).
+pub struct Fmpz(c_long);
 
 impl Fmpz {
     fn new() -> Fmpz {
@@ -81,7 +83,7 @@ impl Fmpz {
         unsafe { fmpz_init(&mut f.0) };
         f
     }
-    fn big(&self) -> BigInt {
+    pub fn big(&self) -> BigInt {
         fmpz_big(&self.0)
     }
 }
@@ -142,22 +144,38 @@ impl FMat {
     }
 
     pub fn det(&self) -> BigInt {
+        self.det_raw().big()
+    }
+
+    /// det, left as FLINT's integer.
+    pub fn det_raw(&self) -> Fmpz {
         let mut d = Fmpz::new();
         // SAFETY: square matrix (FLINT aborts otherwise).
         unsafe { fmpz_mat_det(&mut d.0, &self.m) };
-        d.big()
+        d
     }
 
     /// (B, den, rank) with B / den the reduced row echelon form.
     pub fn rref(&self) -> (FMat, BigInt, usize) {
+        let (b, den, r) = self.rref_raw();
+        (b, den.big(), r)
+    }
+
+    /// rref, with den left as FLINT's integer.
+    pub fn rref_raw(&self) -> (FMat, Fmpz, usize) {
         let mut b = FMat::zero(self.rows(), self.cols());
         let mut den = Fmpz::new();
         // SAFETY: b has the shape of self.
         let r = unsafe { fmpz_mat_rref(&mut b.m, &mut den.0, &self.m) };
-        (b, den.big(), r as usize)
+        (b, den, r as usize)
     }
 
     pub fn inv(&self) -> Option<(FMat, BigInt)> {
+        self.inv_raw().map(|(b, den)| (b, den.big()))
+    }
+
+    /// inv, with den left as FLINT's integer.
+    pub fn inv_raw(&self) -> Option<(FMat, Fmpz)> {
         let mut b = FMat::zero(self.rows(), self.cols());
         let mut den = Fmpz::new();
         // SAFETY: shapes match.
@@ -165,11 +183,16 @@ impl FMat {
         if ok == 0 {
             None
         } else {
-            Some((b, den.big()))
+            Some((b, den))
         }
     }
 
     pub fn solve(&self, rhs: &FMat) -> Option<(FMat, BigInt)> {
+        self.solve_raw(rhs).map(|(x, den)| (x, den.big()))
+    }
+
+    /// solve, with den left as FLINT's integer.
+    pub fn solve_raw(&self, rhs: &FMat) -> Option<(FMat, Fmpz)> {
         let mut x = FMat::zero(self.cols(), rhs.cols());
         let mut den = Fmpz::new();
         // SAFETY: shapes match.
@@ -177,7 +200,7 @@ impl FMat {
         if ok == 0 {
             None
         } else {
-            Some((x, den.big()))
+            Some((x, den))
         }
     }
 
@@ -195,15 +218,15 @@ impl FMat {
 
     /// det(x I - self), constant term first.
     pub fn charpoly(&self) -> Vec<BigInt> {
-        // SAFETY: init/clear pair; square matrix.
-        unsafe {
-            let mut cp = std::mem::zeroed::<FmpzPoly>();
-            fmpz_poly_init(&mut cp);
-            fmpz_mat_charpoly(&mut cp, &self.m);
-            let v = parse_poly(&take_string(fmpz_poly_get_str(&cp)));
-            fmpz_poly_clear(&mut cp);
-            v
-        }
+        self.charpoly_poly().coeffs()
+    }
+
+    /// charpoly, left as FLINT's polynomial.
+    pub fn charpoly_poly(&self) -> FPoly {
+        let mut cp = FPoly::empty();
+        // SAFETY: valid polynomial; square matrix.
+        unsafe { fmpz_mat_charpoly(&mut cp.p, &self.m) };
+        cp
     }
 }
 

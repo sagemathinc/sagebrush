@@ -1,0 +1,889 @@
+{
+ "schema": "sagebrush-bench/1",
+ "host": {
+  "cpu": "AMD EPYC 7B13",
+  "cores": 48,
+  "usable_cores": 48,
+  "memory": "188.7 GiB",
+  "os": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+  "python": "CPython 3.14.8",
+  "sagebrush": {
+   "version": "0.7.2",
+   "git": null
+  },
+  "date": "2026-10-18T19:00:30Z",
+  "load_start": [
+   0.94,
+   1.02,
+   2.49
+  ],
+  "load_end": [
+   0.96,
+   1.02,
+   2.45
+  ]
+ },
+ "tiers": [
+  "quick",
+  "standard"
+ ],
+ "repeat": 3,
+ "timeout_s": 900,
+ "suites": [
+  {
+   "name": "sagelayer",
+   "title": "exact linear algebra and Z[x] through the Sage layer, against Sage (one core)",
+   "claim": "README.md (In the Sage layer: det, rref and inverse ... close to Sage itself); bench/linalg/README.md, The Sage layer",
+   "reproduce": "sagebrush bench sagelayer",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.sage (the Sage layer, under this Python)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sage": {
+     "label": "Sage (its default algorithms)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    }
+   },
+   "results": [
+    {
+     "case": "det ZZ 20x20",
+     "params": {
+      "setup": "M = matrix(ZZ, mat(20, 20, 1009, 504))",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.00014619137086972368,
+       "min_s": 0.00014611680538442645,
+       "max_s": 0.00014677338922889534,
+       "times_s": [
+        0.00014611680538442645,
+        0.00014619137086972368,
+        0.00014677338922889534
+       ],
+       "calls_per_sample": 817,
+       "answer": "1:1511810435926925991"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 6.744914103335832e-05,
+       "min_s": 6.727017411495004e-05,
+       "max_s": 6.782297678486386e-05,
+       "times_s": [
+        6.744914103335832e-05,
+        6.782297678486386e-05,
+        6.727017411495004e-05
+       ],
+       "calls_per_sample": 1723,
+       "answer": "1:1511810435926925991"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 2.1674311730289024
+     },
+     "check": "agree"
+    },
+    {
+     "case": "det ZZ 50x50",
+     "params": {
+      "setup": "M = matrix(ZZ, mat(50, 50, 1009, 504))",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.001778891622932145,
+       "min_s": 0.0017650136065699893,
+       "max_s": 0.001781150327886161,
+       "times_s": [
+        0.001778891622932145,
+        0.0017650136065699893,
+        0.001781150327886161
+       ],
+       "calls_per_sample": 61,
+       "answer": "1:16411020798526049"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0007497041974573361,
+       "min_s": 0.0007472845859903283,
+       "max_s": 0.0007619721019199558,
+       "times_s": [
+        0.0007497041974573361,
+        0.0007619721019199558,
+        0.0007472845859903283
+       ],
+       "calls_per_sample": 157,
+       "answer": "1:16411020798526049"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 2.3727913341893454
+     },
+     "check": "agree"
+    },
+    {
+     "case": "det ZZ 100x100",
+     "params": {
+      "setup": "M = matrix(ZZ, mat(100, 100, 1009, 504))",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.008653894999952172,
+       "min_s": 0.00865282350007744,
+       "max_s": 0.00886402707133779,
+       "times_s": [
+        0.00865282350007744,
+        0.008653894999952172,
+        0.00886402707133779
+       ],
+       "calls_per_sample": 14,
+       "answer": "1:756789271440538067"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.004157188481527825,
+       "min_s": 0.0041461555555104964,
+       "max_s": 0.004250071481456635,
+       "times_s": [
+        0.004250071481456635,
+        0.0041461555555104964,
+        0.004157188481527825
+       ],
+       "calls_per_sample": 27,
+       "answer": "1:756789271440538067"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 2.081670109114645
+     },
+     "check": "agree"
+    },
+    {
+     "case": "det QQ 10x10",
+     "params": {
+      "setup": "M = matrix(QQ, [[QQ(a) / b for a, b in row] for row in qmat_parts(10)])",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 8.931254829090407e-05,
+       "min_s": 8.889466567525828e-05,
+       "max_s": 9.175053491801758e-05,
+       "times_s": [
+        8.889466567525828e-05,
+        8.931254829090407e-05,
+        9.175053491801758e-05
+       ],
+       "calls_per_sample": 1346,
+       "answer": "1:117273506539196927"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 8.711573117344064e-06,
+       "min_s": 8.650829603722328e-06,
+       "max_s": 8.836669392530697e-06,
+       "times_s": [
+        8.650829603722328e-06,
+        8.711573117344064e-06,
+        8.836669392530697e-06
+       ],
+       "calls_per_sample": 13451,
+       "answer": "1:117273506539196927"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 10.252172264167735
+     },
+     "check": "agree"
+    },
+    {
+     "case": "det QQ 20x20",
+     "params": {
+      "setup": "M = matrix(QQ, [[QQ(a) / b for a, b in row] for row in qmat_parts(20)])",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.00033819030927604383,
+       "min_s": 0.0003330091065286116,
+       "max_s": 0.00034503024054702796,
+       "times_s": [
+        0.00034503024054702796,
+        0.00033819030927604383,
+        0.0003330091065286116
+       ],
+       "calls_per_sample": 291,
+       "answer": "1:102226846369704233"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0001047249732618769,
+       "min_s": 0.00010385602495416007,
+       "max_s": 0.00010789123885962824,
+       "times_s": [
+        0.0001047249732618769,
+        0.00010789123885962824,
+        0.00010385602495416007
+       ],
+       "calls_per_sample": 1122,
+       "answer": "1:102226846369704233"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 3.2293186500068125
+     },
+     "check": "agree"
+    },
+    {
+     "case": "det QQ 40x40",
+     "params": {
+      "setup": "M = matrix(QQ, [[QQ(a) / b for a, b in row] for row in qmat_parts(40)])",
+      "call": "copy(M).det()",
+      "answer": "fpq([r])"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.002008863618175383,
+       "min_s": 0.002004643272713028,
+       "max_s": 0.002015517818158101,
+       "times_s": [
+        0.002008863618175383,
+        0.002004643272713028,
+        0.002015517818158101
+       ],
+       "calls_per_sample": 55,
+       "answer": "1:1645402125917184411"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0005067689499992412,
+       "min_s": 0.0005037391999940155,
+       "max_s": 0.0005067703999975492,
+       "times_s": [
+        0.0005067703999975492,
+        0.0005067689499992412,
+        0.0005037391999940155
+       ],
+       "calls_per_sample": 200,
+       "answer": "1:1645402125917184411"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 3.964062159251057
+     },
+     "check": "agree"
+    },
+    {
+     "case": "inverse QQ 20x20",
+     "params": {
+      "setup": "M = matrix(QQ, [[QQ(a) / b for a, b in row] for row in qmat_parts(20)])",
+      "call": "copy(M).inverse()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.0020232331481666835,
+       "min_s": 0.002019169444422544,
+       "max_s": 0.0020682820185255776,
+       "times_s": [
+        0.0020682820185255776,
+        0.0020232331481666835,
+        0.002019169444422544
+       ],
+       "calls_per_sample": 54,
+       "answer": "400:509613507674102106"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0015519669102501117,
+       "min_s": 0.0015427730769284281,
+       "max_s": 0.0015858201281960832,
+       "times_s": [
+        0.0015858201281960832,
+        0.0015427730769284281,
+        0.0015519669102501117
+       ],
+       "calls_per_sample": 78,
+       "answer": "400:509613507674102106"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 1.3036574006855748
+     },
+     "check": "agree"
+    },
+    {
+     "case": "inverse QQ 40x40",
+     "params": {
+      "setup": "M = matrix(QQ, [[QQ(a) / b for a, b in row] for row in qmat_parts(40)])",
+      "call": "copy(M).inverse()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.012952330900043307,
+       "min_s": 0.012951514999986102,
+       "max_s": 0.013044910000098752,
+       "times_s": [
+        0.012951514999986102,
+        0.012952330900043307,
+        0.013044910000098752
+       ],
+       "calls_per_sample": 10,
+       "answer": "1600:2169035857437955325"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.013813449888807049,
+       "min_s": 0.013628088888759117,
+       "max_s": 0.013851538888856239,
+       "times_s": [
+        0.013813449888807049,
+        0.013628088888759117,
+        0.013851538888856239
+       ],
+       "calls_per_sample": 9,
+       "answer": "1600:2169035857437955325"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.9376608308789319
+     },
+     "check": "agree"
+    },
+    {
+     "case": "rref QQ 30x40",
+     "params": {
+      "setup": "M = matrix(QQ, mat(30, 40, 1009, 504))",
+      "call": "copy(M).echelon_form()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.002771952558125418,
+       "min_s": 0.0027612062790996236,
+       "max_s": 0.0027940048605033067,
+       "times_s": [
+        0.0027940048605033067,
+        0.002771952558125418,
+        0.0027612062790996236
+       ],
+       "calls_per_sample": 43,
+       "answer": "1200:2112436860390737384"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.00225239720002719,
+       "min_s": 0.0022495831999913207,
+       "max_s": 0.0022556866000013544,
+       "times_s": [
+        0.0022495831999913207,
+        0.00225239720002719,
+        0.0022556866000013544
+       ],
+       "calls_per_sample": 50,
+       "answer": "1200:2112436860390737384"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 1.230667733955608
+     },
+     "check": "agree"
+    },
+    {
+     "case": "rref QQ 60x70",
+     "params": {
+      "setup": "M = matrix(QQ, mat(60, 70, 1009, 504))",
+      "call": "copy(M).echelon_form()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.014544442499982324,
+       "min_s": 0.014540477500077031,
+       "max_s": 0.014566258749937333,
+       "times_s": [
+        0.014540477500077031,
+        0.014544442499982324,
+        0.014566258749937333
+       ],
+       "calls_per_sample": 8,
+       "answer": "4200:2297811037620871793"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.011996849909172108,
+       "min_s": 0.011940531818089023,
+       "max_s": 0.01231025818180404,
+       "times_s": [
+        0.01231025818180404,
+        0.011940531818089023,
+        0.011996849909172108
+       ],
+       "calls_per_sample": 11,
+       "answer": "4200:2297811037620871793"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 1.2123551273957736
+     },
+     "check": "agree"
+    },
+    {
+     "case": "charpoly ZZ 30x30",
+     "params": {
+      "setup": "M = matrix(ZZ, mat(30, 30, 1009, 504))",
+      "call": "copy(M).charpoly()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.0008671135801566678,
+       "min_s": 0.0008523018320534514,
+       "max_s": 0.0008687534351088462,
+       "times_s": [
+        0.0008671135801566678,
+        0.0008523018320534514,
+        0.0008687534351088462
+       ],
+       "calls_per_sample": 131,
+       "answer": "31:542646509903672389"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0017829383333567725,
+       "min_s": 0.0017719209833558125,
+       "max_s": 0.0017922684999878886,
+       "times_s": [
+        0.0017922684999878886,
+        0.0017719209833558125,
+        0.0017829383333567725
+       ],
+       "calls_per_sample": 60,
+       "answer": "31:542646509903672389"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.486339636056922
+     },
+     "check": "agree"
+    },
+    {
+     "case": "charpoly ZZ 60x60",
+     "params": {
+      "setup": "M = matrix(ZZ, mat(60, 60, 1009, 504))",
+      "call": "copy(M).charpoly()",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.007282873062536055,
+       "min_s": 0.007282479375021467,
+       "max_s": 0.0072992118749652946,
+       "times_s": [
+        0.007282873062536055,
+        0.007282479375021467,
+        0.0072992118749652946
+       ],
+       "calls_per_sample": 16,
+       "answer": "61:717561555678792674"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.018241185571501513,
+       "min_s": 0.018155537142904774,
+       "max_s": 0.018365245714448974,
+       "times_s": [
+        0.018241185571501513,
+        0.018365245714448974,
+        0.018155537142904774
+       ],
+       "calls_per_sample": 7,
+       "answer": "61:717561555678792674"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.39925437050068724
+     },
+     "check": "agree"
+    },
+    {
+     "case": "gcd ZZ[x] degree 148",
+     "params": {
+      "setup": "R = PolynomialRing(ZZ, 'x')\nf, g, h = R(poly(100, 23, 11, 1)), R(poly(100, 19, 9, 7)), R(poly(100 // 2, 13, 6, 5))\na, b = f * h, g * h",
+      "call": "a.gcd(b)",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.00018902206951073217,
+       "min_s": 0.00018875927330116763,
+       "max_s": 0.00019528860979490324,
+       "times_s": [
+        0.00018875927330116763,
+        0.00018902206951073217,
+        0.00019528860979490324
+       ],
+       "calls_per_sample": 633,
+       "answer": "50:2198440940679421280"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 1.540285425271952e-05,
+       "min_s": 1.53804420103098e-05,
+       "max_s": 1.6063421391719982e-05,
+       "times_s": [
+        1.6063421391719982e-05,
+        1.540285425271952e-05,
+        1.53804420103098e-05
+       ],
+       "calls_per_sample": 7760,
+       "answer": "50:2198440940679421280"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 12.271885873188635
+     },
+     "check": "agree"
+    },
+    {
+     "case": "gcd ZZ[x] degree 448",
+     "params": {
+      "setup": "R = PolynomialRing(ZZ, 'x')\nf, g, h = R(poly(300, 23, 11, 1)), R(poly(300, 19, 9, 7)), R(poly(300 // 2, 13, 6, 5))\na, b = f * h, g * h",
+      "call": "a.gcd(b)",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.001304465303787132,
+       "min_s": 0.00130279291141373,
+       "max_s": 0.0013193939113897372,
+       "times_s": [
+        0.001304465303787132,
+        0.0013193939113897372,
+        0.00130279291141373
+       ],
+       "calls_per_sample": 79,
+       "answer": "150:434200238259980804"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 5.5571638154838096e-05,
+       "min_s": 5.533212397857685e-05,
+       "max_s": 5.622536280647495e-05,
+       "times_s": [
+        5.5571638154838096e-05,
+        5.533212397857685e-05,
+        5.622536280647495e-05
+       ],
+       "calls_per_sample": 2081,
+       "answer": "150:434200238259980804"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 23.473580176861578
+     },
+     "check": "agree"
+    },
+    {
+     "case": "gcd ZZ[x] degree 1498",
+     "params": {
+      "setup": "R = PolynomialRing(ZZ, 'x')\nf, g, h = R(poly(1000, 23, 11, 1)), R(poly(1000, 19, 9, 7)), R(poly(1000 // 2, 13, 6, 5))\na, b = f * h, g * h",
+      "call": "a.gcd(b)",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.003343293333300883,
+       "min_s": 0.0033402539394239393,
+       "max_s": 0.00353747481820006,
+       "times_s": [
+        0.00353747481820006,
+        0.0033402539394239393,
+        0.003343293333300883
+       ],
+       "calls_per_sample": 33,
+       "answer": "500:1272809752433609968"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.001602642727282893,
+       "min_s": 0.0015964046969836063,
+       "max_s": 0.0016214165151530215,
+       "times_s": [
+        0.0016214165151530215,
+        0.001602642727282893,
+        0.0015964046969836063
+       ],
+       "calls_per_sample": 66,
+       "answer": "500:1272809752433609968"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 2.0861126914849417
+     },
+     "check": "agree"
+    },
+    {
+     "case": "product ZZ[x] degree 999",
+     "params": {
+      "setup": "R = PolynomialRing(ZZ, 'x')\nf, g = R(poly(1000, 1000003, 500001, 1)), R(poly(1000, 1000033, 500016, 7))",
+      "call": "f * g",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.0010755275268683783,
+       "min_s": 0.001068906129031318,
+       "max_s": 0.0010760775268707182,
+       "times_s": [
+        0.0010755275268683783,
+        0.0010760775268707182,
+        0.001068906129031318
+       ],
+       "calls_per_sample": 93,
+       "answer": "1999:2188492370473808160"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 9.987613010737303e-05,
+       "min_s": 9.9235904920346e-05,
+       "max_s": 0.00010161059216108873,
+       "times_s": [
+        0.00010161059216108873,
+        9.987613010737303e-05,
+        9.9235904920346e-05
+       ],
+       "calls_per_sample": 1199,
+       "answer": "1999:2188492370473808160"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 10.768614339703786
+     },
+     "check": "agree"
+    },
+    {
+     "case": "product ZZ[x] degree 9999",
+     "params": {
+      "setup": "R = PolynomialRing(ZZ, 'x')\nf, g = R(poly(10000, 1000003, 500001, 1)), R(poly(10000, 1000033, 500016, 7))",
+      "call": "f * g",
+      "answer": "fpq(r.list())"
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.012342362222221305,
+       "min_s": 0.012319066666653574,
+       "max_s": 0.012368868777735366,
+       "times_s": [
+        0.012319066666653574,
+        0.012342362222221305,
+        0.012368868777735366
+       ],
+       "calls_per_sample": 9,
+       "answer": "19999:2094688354581776664"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.0019574463934330824,
+       "min_s": 0.0018900313114529842,
+       "max_s": 0.0020141678688545294,
+       "times_s": [
+        0.0019574463934330824,
+        0.0020141678688545294,
+        0.0018900313114529842
+       ],
+       "calls_per_sample": 61,
+       "answer": "19999:2094688354581776664"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 6.305338559271888
+     },
+     "check": "agree"
+    }
+   ]
+  },
+  {
+   "name": "charpoly",
+   "title": "exact charpolys of T_q on modular symbols for Gamma0(N) (one thread)",
+   "claim": "README.md (Performance: proven exact charpolys 3.9-7.8x faster than Sage's default path, 1.1-4.7x faster than LinBox); results/engine-exact.md",
+   "reproduce": "sagebrush bench charpoly",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.modsym.charpoly_exact (one thread; everything, proven)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sage": {
+     "label": "Sage, T.charpoly() (default; Hecke matrix built before timing)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    },
+    "sage-linbox": {
+     "label": "Sage, LinBox: (d T over ZZ).charpoly(algorithm='linbox') (heuristic)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    }
+   },
+   "results": [
+    {
+     "case": "N=389 T_2",
+     "params": {
+      "N": 389,
+      "q": 2
+     },
+     "tier": "quick",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.0006283437837909504,
+       "min_s": 0.0006254169729701872,
+       "max_s": 0.0006349097783763805,
+       "times_s": [
+        0.0006349097783763805,
+        0.0006283437837909504,
+        0.0006254169729701872
+       ],
+       "calls_per_sample": 185,
+       "answer": "34:246815775403677487"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.00048358372385405633,
+       "min_s": 0.00047811456066658566,
+       "max_s": 0.0004903665271987817,
+       "times_s": [
+        0.00048358372385405633,
+        0.00047811456066658566,
+        0.0004903665271987817
+       ],
+       "calls_per_sample": 239,
+       "answer": "34:246815775403677487"
+      },
+      "sage-linbox": {
+       "status": "ok",
+       "median_s": 0.001351014634165927,
+       "min_s": 0.0013472199877979597,
+       "max_s": 0.0013999019512062304,
+       "times_s": [
+        0.0013999019512062304,
+        0.001351014634165927,
+        0.0013472199877979597
+       ],
+       "calls_per_sample": 82,
+       "answer": "34:246815775403677487"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 1.2993484949890126,
+      "sagebrush/sage-linbox": 0.46509028688565585
+     },
+     "check": "agree"
+    },
+    {
+     "case": "N=1001 T_3",
+     "params": {
+      "N": 1001,
+      "q": 3
+     },
+     "tier": "standard",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.01448764111106963,
+       "min_s": 0.014341527666652433,
+       "max_s": 0.014977559888898718,
+       "times_s": [
+        0.01448764111106963,
+        0.014341527666652433,
+        0.014977559888898718
+       ],
+       "calls_per_sample": 9,
+       "answer": "117:1792151237553412172"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 0.03745269249975536,
+       "min_s": 0.03743714975007606,
+       "max_s": 0.03748740724995514,
+       "times_s": [
+        0.03743714975007606,
+        0.03745269249975536,
+        0.03748740724995514
+       ],
+       "calls_per_sample": 4,
+       "answer": "117:1792151237553412172"
+      },
+      "sage-linbox": {
+       "status": "ok",
+       "median_s": 0.11478996000005282,
+       "min_s": 0.11415014999874984,
+       "max_s": 0.11585402000127942,
+       "times_s": [
+        0.11585402000127942,
+        0.11478996000005282,
+        0.11415014999874984
+       ],
+       "calls_per_sample": 1,
+       "answer": "117:1792151237553412172"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.3868250890417094,
+      "sagebrush/sage-linbox": 0.12621000226032802
+     },
+     "check": "agree"
+    }
+   ]
+  }
+ ]
+}
