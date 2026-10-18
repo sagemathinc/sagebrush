@@ -3225,6 +3225,18 @@ class _RealLiteralMP(RealNumberMP):
     def __pos__(self):
         return self
 
+    # (abs(x) and x^1 are plain numbers in Sage, while +x, x.real() and
+    # x.conjugate() stay the literal: RealNumberMP's own return self there,
+    # astra's CORR-A29-1)
+    def __abs__(self):
+        return RealNumberMP.__abs__(self._same())
+
+    abs = __abs__
+
+    def __pow__(self, n, mod=None):
+        r = RealNumberMP.__pow__(self, n, mod)
+        return self._same() if r is self else r
+
     def __float__(self):
         # (its digits read at 53 bits, then as a double, as Sage converts it:
         # float(1.2345678901234567) is not the 57-bit value's double, and a
