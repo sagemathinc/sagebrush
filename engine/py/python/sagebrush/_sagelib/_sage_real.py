@@ -1400,14 +1400,31 @@ def _rr_big_mp(x):
     return x._mp if isinstance(x, _BIG) else None
 
 
+def _lit_of(x):
+    """The decimal digits of a literal x (RealNumber('1e-20')), or None.  An
+    x + 0 or x * 1 that may or may not still be a literal in Sage (pyjs
+    cannot tell a Python int from an Integer: lib/_sage_lang.py
+    _literal_identity) is refused: its digits and its value give different
+    numbers in another precision (astra's CORR-28E-3)."""
+    if getattr(x, "_lit_ambiguous", None) is not None:
+        raise NotImplementedError("converting x + 0 or x * 1 for a decimal literal x to another precision is not implemented: "
+                                  "Sage keeps x a literal when 0 or 1 is a Python int and not when it is an Integer, which "
+                                  "are one type here; convert x itself, or float(x)")
+    return getattr(x, "_lit", None)
+
+
 def _to_real(R, x, base=10):
     prec, rnd = R._prec, R._rnd
+    # (at 53 bits to nearest a literal's digits and its value are the same
+    # number: neither is read differently, ambiguous or not)
+    same = prec == 53 and rnd == "RNDN"
     # (an element of RR past the doubles is its 53-bit value, not its float;
     # a decimal literal's, its digits: RealField(100)(1e400) is 1e400)
     big = _rr_big_mp(x)
     if big is not None:
-        if x._lit is not None:
-            return _parse(R, x._lit)
+        lit = None if same else _lit_of(x)
+        if lit is not None:
+            return _parse(R, lit)
         x = big
     if isinstance(x, RealNumberMP):
         if x._special:
@@ -1423,7 +1440,7 @@ def _to_real(R, x, base=10):
         _rational_bits(x)
         m, e = _round_q(x.numerator, x.denominator, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
-    lit = getattr(x, "_lit", None)
+    lit = None if same else _lit_of(x)
     if lit is not None:
         return _parse(R, lit)
     if isinstance(x, float):
@@ -4191,7 +4208,7 @@ class RealIntervalField_:
             q = x._q()
             return self._mk(q, q)
         if isinstance(x, float):
-            lit = getattr(x, "_lit", None)
+            lit = _lit_of(x)
             q = _F(lit) if lit is not None else _F(x)
             return self._mk(q, q)
         if isinstance(x, str):
@@ -4260,11 +4277,11 @@ def _tree_q(x):
 
 
 def _exact_lo(x, prec):
-    return _F(getattr(x, "_lit", None) or x) if not isinstance(x, RealIntervalElement) else x._lo
+    return _F(_lit_of(x) or x) if not isinstance(x, RealIntervalElement) else x._lo
 
 
 def _exact_hi(x, prec):
-    return _F(getattr(x, "_lit", None) or x) if not isinstance(x, RealIntervalElement) else x._hi
+    return _F(_lit_of(x) or x) if not isinstance(x, RealIntervalElement) else x._hi
 
 
 RIF = RealIntervalField(53)
@@ -4405,7 +4422,7 @@ class RealIntervalElement:
 
     def __contains__(self, x):
         try:
-            q = _F(getattr(x, "_lit", None) or x) if not isinstance(x, RealNumberMP) else x._q()
+            q = _F(_lit_of(x) or x) if not isinstance(x, RealNumberMP) else x._q()
         except (TypeError, ValueError):
             return False
         return self._lo <= q <= self._hi
