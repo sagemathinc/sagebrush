@@ -291,7 +291,8 @@ fn class_group_data(result: crate::nf::bnf::Bnf) -> BnfData {
         w_proven: result.w_proven, certified: result.certified, assumed_primes: result.assumed_primes }
 }
 
-/// Precision zero denotes the rank-zero regulator, exactly 1.
+/// Precision zero denotes the rank-zero regulator, exactly 1. Otherwise the
+/// fixed-point formatter uses fixed notation from 10^-4 up, scientific below.
 fn regulator_decimal(value: &BigInt, precision: u32, digits: usize) -> String {
     if precision == 0 { "1".to_string() } else { fixed_to_decimal(value, precision, digits) }
 }

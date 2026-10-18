@@ -84,9 +84,12 @@ pub struct Bnf {
     pub r2: usize,
     pub disc: BigInt,
     pub group: ClassGroup,
-    /// the regulator (1 when the unit rank is 0), and to `prec` bits
+    /// Diagnostic f64 regulator (1 when the unit rank is zero).
     pub regulator: f64,
+    /// Returned fixed-point regulator: R = reg_fixed / 2^prec. The determinant
+    /// has already been shifted down from its rank-dependent scale.
     pub reg_fixed: BigInt,
+    /// Binary fractional bits of reg_fixed; zero denotes the rank-zero value 1.
     pub prec: u32,
     /// the number of roots of unity, and whether that is proven (else a
     /// lower bound)
@@ -835,6 +838,8 @@ fn try_units(field: &Field, rels: &[Relation], elems: &[Vec<BigInt>], factor_bas
             eprintln!("  h* R* / est {:.4} at {:.1} ms", ratio, ms());
         }
         if ratio <= std::f64::consts::SQRT_2 {
+            // The heuristic may return uncertified. Missing bounds skip the
+            // certificate; imprecise bounds allow at most two precision doublings.
             let Some(lo) = log_hr_lower_bound.as_ref() else {
                 let reg_fixed = &cov >> (prec as usize * (r - 1));
                 return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });

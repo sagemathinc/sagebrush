@@ -35,3 +35,11 @@ Run `python3 scripts/check-review-comments.py --base <branch-base>` before
 review. It checks newly added comment lines, so existing history can be cleaned
 up deliberately without making an unrelated change responsible for the whole
 repository. Its vocabulary covers `CORR-`, `HARD-`, `LIMIT-`, `astra` and `HOLD`.
+
+The number-field pilot migrates only the settings formerly read inside the
+general BNF implementation. `bnfinit` and `bnfinit_with` now use explicit
+`BnfConfig::default()` values; diagnostic callers must explicitly construct
+`BnfConfig::from_debug_env()` in a debug build. This is not a claim that the
+whole engine ignores environment variables. The quadratic routines still read
+`QCL_DEBUG` and `QCL_NOCERT`, and `nf/embed.rs` still reads `QCL_LLLITER`.
+Those are the next configuration-migration candidates, outside this pilot.
