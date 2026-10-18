@@ -68,6 +68,26 @@ test("\\frac keeps its grouping inline", async () => {
   cases.forEach(([tex, want], i) => assert.equal(texts[i], want, tex));
 });
 
+test("spacing between a fraction and its neighbours hides nothing (astra's CORR-578-1)", async () => {
+  // (each spacing command, then a space so that a letter after it is not
+  // read as part of its name, as in TeX; the drawn text must hold the
+  // grouped fraction: 1/\,\frac{a}{b} is 1/(a/b), not 1/ a/b)
+  const spaces = ["\\,", "\\;", "\\:", "\\!", "\\ ", "\\quad", "\\qquad", "~", ""];
+  const cases: [string, string][] = spaces.flatMap((sp): [string, string][] => [
+    [`1/${sp} \\frac{a}{b}`, "(a/b)"],
+    [`2${sp} \\frac{1}{3}`, "(1/3)"],
+    [`\\frac{a}{b}${sp} c`, "(a/b)"],
+    [`\\frac{a}{b}${sp} ^2`, "(a/b)"],
+  ]);
+  const texs = JSON.stringify(JSON.stringify(cases.map((c) => c[0])));
+  const got = await run(`import _graphics, json\nraise ValueError(json.dumps([_graphics._tex_text(t) for t in json.loads(${texs})]))`);
+  const texts: string[] = JSON.parse(got.slice("ValueError: ".length));
+  cases.forEach(([tex, want], i) => assert.ok(texts[i].includes(want), tex + " -> " + texts[i]));
+  // (and after an operator a fraction needs no group: 1 +\, 1/2)
+  const plain = await run(`import _graphics\nraise ValueError(_graphics._tex_text(r'1 +\\, \\frac{1}{2}'))`);
+  assert.ok(plain.endsWith("1/2") && !plain.includes("("), plain);
+});
+
 test("Graphics.save refuses an infinite, NaN, zero or negative dpi or figsize before any arithmetic on it", async () => {
   // (daybreak2's limits review: int(width * dpi) ran first, an OverflowError
   // escaped for dpi=inf)

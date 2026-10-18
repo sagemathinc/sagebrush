@@ -147,7 +147,9 @@ _TEX_ONE_ARG = {"mathrm", "rm", "text", "textrm", "operatorname", "mathsf", "mat
 # (what may follow a fraction without grouping it: operators and relations)
 _TEX_AFTER_FRAC = set("+-=<>,;)]}|") | {"\\" + n for n in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv",
                                                          "propto", "to", "rightarrow", "in", "pm", "mp", "times", "cdot", "div",
-                                                         "quad", "qquad", "right", ",", ";", ":", " ")}
+                                                         "right")}
+# (spacing: invisible to a fraction's neighbours, which are looked for past it)
+_TEX_SPACING = {"\\" + n for n in (",", ";", ":", "!", " ", "quad", "qquad")} | {"~"}
 
 
 def _tex_simple(ts, single):
@@ -333,9 +335,11 @@ def _tex_svg(tex):
                     f = "%s/%s" % (a, b)
                     # (and the whole fraction grouped when a factor or a
                     # script is next to it: 2\\frac{1}{3} is 2(1/3), not 21/3)
-                    rest = [t for t in toks[pos[0]:] if not t.isspace()]
+                    # (spacing skipped on both sides: 1/\\,\\frac{a}{b} is
+                    # 1/(a/b), astra's CORR-578-1)
+                    rest = [t for t in toks[pos[0]:] if not t.isspace() and t not in _TEX_SPACING]
                     import re
-                    before = re.sub(r"<[^>]*>", "", "".join(out)).rstrip("\u200b")
+                    before = re.sub(r"<[^>]*>", "", "".join(out)).rstrip("\u200b\u2009\u2005\u2003\u00a0 ")
                     if style.get("nested") or (rest and rest[0] not in _TEX_AFTER_FRAC) or (before and (before[-1].isalnum() or before[-1] in ")]/.")):
                         f = "(" + f + ")"
                     out.append(f)
