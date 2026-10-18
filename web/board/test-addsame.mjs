@@ -186,6 +186,35 @@ try {
   check(n5 && Math.abs(n5.x - m1.x) < 1 && Math.abs(n5.y - (m1.y + m1.h + GAP)) < 1.5 && (await overlaps(made[0].id)).length === 0, "...below it in the group, over nothing: " + JSON.stringify([m1, n5]));
   await leave(); await undoKey();
 
+  // B twice at once, or held down: one item (daybreak2's INPUT-AS-2)
+  check(await select("c3"), "(c3 selected)");
+  await ev("(() => { for (const k of [0, 1]) document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true })); return 1; })()");
+  await settle(n0 + 1);
+  await sleep(800);
+  check((await fresh()).length === 1, "B twice at once: one new item: " + (await fresh()).length);
+  await leave(); await undoKey();
+  check(await select("c3"), "(c3 selected again)");
+  await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', repeat: true, bubbles: true, cancelable: true })), 1");
+  await sleep(800);
+  check(!(await fresh()).length, "a held key's repeat adds nothing");
+  // the control's press: only its own pointer's release adds; a cancelled press adds nothing (INPUT-AS-1)
+  check(await select("c1"), "(c1 selected again)");
+  const p2 = await ev(`(() => { const r = window.board.clientRect("c1"); return { x: r.left + r.width + 4 + 11, y: r.top + 11 }; })()`);
+  const pe = (type, id, on = "window") => ev(`(${on === "board" ? "window.board.el" : "window"}).dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { pointerId: ${id}, clientX: ${p2.x}, clientY: ${p2.y}, isPrimary: true, button: 0, buttons: ${type === "pointerdown" ? 1 : 0}, pointerType: "mouse", bubbles: true, cancelable: true })), 1`);
+  await pe("pointerdown", 7, "board");
+  await pe("pointerup", 8);
+  await sleep(600);
+  check(!(await fresh()).length, "another pointer's release on the control: nothing added");
+  await pe("pointercancel", 7);
+  await pe("pointerup", 7);
+  await sleep(600);
+  check(!(await fresh()).length, "...the press cancelled, then its pointer released there: nothing added");
+  await pe("pointerdown", 9, "board");
+  await pe("pointerup", 9);
+  await settle(n0 + 1);
+  check((await fresh()).length === 1, "...a press and its own release there: one added");
+  await leave(); await undoKey();
+
   // the other look: a chip "+ Code" under the item's bottom edge, which adds the same
   await ev("window.board.addSameStyle = 'chip', window.board.request(), 1");
   check(await select("c1"), "(c1 selected again)");

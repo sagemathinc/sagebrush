@@ -698,6 +698,7 @@ export class InPlace {
       // (Alt+Enter: a code item run, then another item of its kind below it, written in; as the notebook's "run, insert a cell below")
       else if (e.key === "Enter" && e.altKey && !e.shiftKey) {
         e.preventDefault();
+        if (e.repeat) return;
         void (async () => { if (this.hasCode) await this.run(); await this.host.addSame(this.id); })();
       }
       else if (e.key === "Enter" && e.target === this.title && !e.shiftKey) {
