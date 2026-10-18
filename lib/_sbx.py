@@ -311,13 +311,22 @@ def _poly(p, budget):
     for n in names:
         if not _NAME.match(n):
             raise _err("a polynomial whose variable is %r can't be exported: name the ring's variables (in Magma, P<x> := PolynomialRing(Rationals()))" % n)
+    dense = any(_modname(c) + "." + c.__name__ == "_sage_poly.Polynomial" for c in type(p).__mro__)
+    if dense:
+        # a dense univariate polynomial: its dict() scans every coefficient,
+        # so the budget takes them all (as its list() would), before the scan
+        budget.take(max(int(p.degree()) + 1, 1))
     if hasattr(p, "dict"):
-        terms = sorted(p.dict().items(), key=lambda kv: (-sum(kv[0]), [-e for e in kv[0]]))
+        # (keys: exponent tuples in several variables, an int exponent in
+        # one, as in Sage)
+        items = [(e if isinstance(e, tuple) else (int(e),), c) for e, c in p.dict().items()]
+        terms = sorted(items, key=lambda kv: (-sum(kv[0]), [-e for e in kv[0]]))
         terms = [(_Fraction(c), tuple(zip(names, e))) for e, c in terms]
     else:
         coeffs = list(p.list())
         terms = [(_Fraction(c), ((names[0], k),)) for k, c in reversed(list(enumerate(coeffs)))]
-    budget.take(len(terms))
+    if not dense:
+        budget.take(len(terms))
     text = _poly_text(terms)
     if len(text) > LIMITS["string"]:
         raise _err("a polynomial of more than %d characters, more than sbx carries" % LIMITS["string"])
