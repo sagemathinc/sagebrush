@@ -1,0 +1,2135 @@
+{
+  "grading": "Manual, binary coverage of all claims in each frozen compound criterion; no partial credit. Omissions and contradictions are documented separately in per-answer notes. This is stricter than correctness of the main point alone.",
+  "records": [
+    {
+      "id": "Q01",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 46.056,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 97,
+        "cache_creation_input_tokens": 62935,
+        "cache_read_input_tokens": 275318,
+        "output_tokens": 3217,
+        "output_tokens_details": {
+          "thinking_tokens": 1376
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 62935,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1075,
+            "cache_read_input_tokens": 65983,
+            "cache_creation_input_tokens": 2372,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 2372
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 97,
+          "outputTokens": 3217,
+          "cacheReadInputTokens": 275318,
+          "cacheCreationInputTokens": 62935,
+          "webSearchRequests": 0,
+          "costUSD": 0.1695838,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1376,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 11,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's how the general number-field computation certifies the class number and regulator:\n\n## Stopping Heuristic vs. Certificate\n\n**Stopping Heuristic** (bnf.rs:1105-1109):\nThe algorithm stops when `h* R* / hr_est \u2264 \u221a2`, where:\n- `h* R*` is the computed product of the class number multiple and regulator from relations\n- `hr_est` is Bach's estimate (bnf.rs:673, residue_estimate), a numerically estimated lower bound based on an Euler product, with **no error guarantee**\n\n**Certificate** (bnf.rs:1110-1154, certify.rs):\nOnly after the heuristic stopping condition is met, if `log_hr_lo` is available, the code:\n1. Computes `h*` exactly via `lattice_group_exact` (determinants from exact integer computation)\n2. Bounds `R*` from below using `regulator_bounds_t` (certify.rs:139), which:\n   - Takes genuine units from kernel vectors of the relation matrix\n   - Computes their logarithms with **certified error bounds** via `log_embedding_err` (embed.rs)\n   - Returns bounds on the regulator `R*` and the units' transformation matrix `T`\n3. Verifies the condition `h* R*_hi < 2 h R_lo` via `below_twice_ball` (certify.rs:358)\n   - Where `R_lo` comes from the **proven lower bound** for `log(hR)` (certify.rs:108, via Belabas-Friedman Theorem 1)\n\n## What Remains Assumed\n\n**The Generalized Riemann Hypothesis (GRH)**\n\nThe entire certificate depends on Theorem 1 of Belabas and Friedman (certify.rs:9-12, references \"Math. Comp. 84, 2015; arXiv:1305.0035\"), which provides a proven error bound `E(X)` under GRH:\n\n- `|log \u03ba_K - f_K(X)| \u2264 E(X)` \n- Where `\u03ba_K` is the Dedekind zeta residue and `f_K(X)` estimates it from prime ideals of norm `< X`\n\nAs stated in certify.rs line 1 and bnf.rs line 17-18: **\"h and R proven under GRH alone\"**",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Calls the residue estimate a lower bound, describes bounding R from below, and omits remaining maximal-order assumptions."
+    },
+    {
+      "id": "Q01",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 26.167,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 49,
+        "cache_creation_input_tokens": 48396,
+        "cache_read_input_tokens": 77325,
+        "output_tokens": 2081,
+        "output_tokens_details": {
+          "thinking_tokens": 792
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 48396,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 749,
+            "cache_read_input_tokens": 44346,
+            "cache_creation_input_tokens": 9470,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 9470
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 49,
+          "outputTokens": 2081,
+          "cacheReadInputTokens": 77325,
+          "cacheCreationInputTokens": 48396,
+          "webSearchRequests": 0,
+          "costUSD": 0.1149785,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 792,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 8,
+      "is_error": false,
+      "answer": "Now I have all the information needed. Let me provide a comprehensive answer about the certification mechanism for class number and regulator.\n\n## Answer\n\n### The Stopping Heuristic vs. the Certificate\n\n**Stopping Heuristic** (`source/engine/classgroup/src/nf/bnf.rs:1109`):\nThe algorithm stops when `h* R* / hr_est \u2264 sqrt(2)`, where:\n- `h*` and `R*` are the computed multiples of the class number and regulator\n- `hr_est` is Bach's residue estimate (from `source/engine/classgroup/src/nf/bnf.rs:162-188`)\n\nThis stopping rule is **heuristic only** \u2014 it has no proven error bound. It estimates whether the current computation has converged to the true h and R.\n\n**The Certificate** (`source/engine/classgroup/src/nf/certify.rs:1-21`):\nOnce stopped, certification applies a different test that does have proven bounds under GRH:\n- **Lower bound for log(hR)**: From Belabas and Friedman's Theorem 1 (`certify.rs:36-58, 103-120`), which under GRH bounds `|log \u03ba_K - f_K(X)| \u2264 E(X)` where E(X) is explicit.\n- **Upper bound for R**: From certified error bounds on unit logarithms (`certify.rs:133-245`), where units are integer combinations of relation elements with proven error tracking.\n- **Exact value of h\\***: From exact determinant computations (`certify.rs:206`).\n- **The certification test** (`certify.rs:358-365`): `h* R*_hi < 2 \u00b7 hR_lo` in logarithms, ensuring both h and R are exact.\n\n### What Remains Assumed\n\nA certified result `(h, R)` assumes:\n\n1. **The Generalized Riemann Hypothesis (GRH)** \u2014 this is the foundation of the Belabas-Friedman lower bound (stated in `certify.rs:11`, used throughout `certify.rs` and in `grh.rs`)\n\n2. **Correctness of the number field normalization** \u2014 the order basis and discriminant computation (lines 619-625 in `bnf.rs`)\n\n3. **The root-of-unity count w** \u2014 The field structure assumes that `w` candidates (certified exactly by `api::roots_of_unity` or stated as a lower bound; see `bnf.rs:54-57`) is correct\n\n4. **Polynomial primality assumptions**: The maximal order computation assumes certain probable primes are actually prime (see `assumed_primes` field in `bnf.rs:64`, documented in `order.rs`)\n\nThe `bnf.certified` flag (`bnf.rs:60`) is `true` only when the certificate holds; when `false`, the result still rests on the stopping heuristic's estimate.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Separates the heuristic, rigorous inequality, GRH and maximal-order assumptions."
+    },
+    {
+      "id": "Q01",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 31.726,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 63785,
+        "cache_read_input_tokens": 168872,
+        "output_tokens": 2419,
+        "output_tokens_details": {
+          "thinking_tokens": 926
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 63785,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1228,
+            "cache_read_input_tokens": 66816,
+            "cache_creation_input_tokens": 2389,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 2389
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 2419,
+          "cacheReadInputTokens": 168872,
+          "cacheCreationInputTokens": 63785,
+          "webSearchRequests": 0,
+          "costUSD": 0.1566252,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 926,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 10,
+      "is_error": false,
+      "answer": "Based on the source code, I can now provide a comprehensive answer about the certification of class number and regulator.\n\n## Certificate vs. Stopping Heuristic\n\n**Stopping Heuristic** (bnf.rs:16-20, `try_units` function ~line 1109):\n- Halts the relation search when: `h* R* < \u221a2 \u00d7 estimate`\n- The estimate comes from `residue_estimate()` (bnf.rs:162-188), a numerical Bach-style formula with no proven error bounds\n- `R*` is a numerically identified covolume from the unit lattice\n\n**Certificate** (certify.rs:1-20, bnf.rs:1003-1131):\n- Proves under GRH alone: `h* R*_hi < 2 h R_lo` in logarithmic form (`below_twice_ball`, certify.rs:358-365)\n- Where:\n  - `h*` is **exact** from determinants (computed exactly via `lattice_group_exact`, imag.rs)\n  - `R*_hi` is a **proven upper bound** from genuine units' logarithms with certified error bounds (`regulator_bounds_t`, certify.rs:139-245; `log_embedding_err`, embed.rs)\n  - `h R_lo` is a **proven lower bound** from Belabas-Friedman Theorem 1 (`log_hr_lower_ball`, certify.rs:336-353)\n\nThe two are independent: the certificate doesn't use the stopping estimate; the heuristic initiates the search.\n\n## What Remains Assumed by a Certified Result\n\nPer bnf.rs:58-60 and proof.rs:94-150:\n\n1. **Generalized Riemann Hypothesis (GRH)**: The entire lower bound from certify.rs (Theorem 1) holds only under GRH. The proof.rs file shows an unconditional certificate is available but requires `proof=True` mode, which uses absolute bounds instead (zimmert.rs).\n\n2. **Roots of unity count `w`**: Must be proven exactly. When `w_proven = true` (bnf.rs:57), roots are verified exactly via `crate::api::roots_of_unity()`. If not proven, the result carries `w_proven = false` and the certify module refuses to generate a certificate (proof.rs:167-169).\n\n3. **Maximal order primality assumptions**: The field's maximal order computation may rely on probable primes (bnf.rs:64, proof.rs:141-145). These are stored in `assumed_primes` and must be empty for the unconditional certificate.\n\n**In summary:** A GRH-certified result (bnf.rs `certified = true`) proves h and R under GRH alone, with the regulator's error bounds fixed; it assumes only GRH, proven roots of unity, and exact primality of the maximal order.",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Incorrectly transfers the unconditional proof requirement for complete roots of unity to the GRH analytic certificate."
+    },
+    {
+      "id": "Q02",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 50.413,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 47132,
+        "cache_read_input_tokens": 169109,
+        "output_tokens": 4439,
+        "output_tokens_details": {
+          "thinking_tokens": 2754
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 47132,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1070,
+            "cache_read_input_tokens": 48615,
+            "cache_creation_input_tokens": 3087,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 3087
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 4439,
+          "cacheReadInputTokens": 169109,
+          "cacheCreationInputTokens": 47132,
+          "webSearchRequests": 0,
+          "costUSD": 0.1334429,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2754,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 12,
+      "is_error": false,
+      "answer": "Based on the source code, here's a comprehensive answer about the factor-base bound for the general number-field algorithm (Buchmann's subexponential method):\n\n## Where and How to Change the Factor-Base Bound\n\n**Source location:** `source/engine/classgroup/src/nf/bnf.rs:643-644`\n\nThe bound is computed as:\n```rust\nlet fb_min: f64 = std::env::var(\"QCL_FBMIN\").ok().and_then(|v| v.parse().ok()).unwrap_or(50.0);\nlet bound = (t_grh.max(fb_min).ceil() as u64).max(2);\n```\n\n**How to change it:** Set the `QCL_FBMIN` environment variable (e.g., `QCL_FBMIN=100` for a minimum of 100).\n\n## The Automatic Choice\n\nThe automatic factor-base bound (`t_grh`) is computed at line 640 using:\n- **Default:** Grenie and Molteni's search algorithm (`source/engine/classgroup/src/nf/grh.rs`) to find the smallest T such that prime ideals of norm < T generate the class group (GRH-certified)\n- **Fallback:** If no witness is found, uses the uniform bound `4 log\u00b2|d|` \n- **Override:** Set `QCL_UNIFORM` environment variable to skip the search and use only the uniform bound\n\nThen: `bound = max(t_grh, fb_min).ceil().max(2)`\n\n## The Minimum\n\nThe minimum factor-base bound is **2** (hard-coded at line 644: `.max(2)`), with a practical default minimum of **50.0** from `fb_min` (line 643).\n\n## Residue-Estimate Window vs. Factor-Base Bound\n\nThese are **independent**, set at different scales at `source/engine/classgroup/src/nf/bnf.rs:637`:\n\n- **Residue-estimate window:** `x = \u230a4(log|d|)\u00b2\u230b.clamp(1024, 32768)` \n  - The `residue_estimate()` function (lines 162-188) computes Bach's weighted average over primes **up to 2x** (line 163), with the average taken over the **interval [x, 2x)** (line 181)\n  \n- **Factor-base bound:** `t_grh.max(fb_min)` where `t_grh` comes from GRH analysis \n  - Can be much larger than the residue window, independent of the 4(log|d|)\u00b2 formula\n\nThe `split` data structure is computed at line 638 for primes up to `max(t_unif, 2x)` to cover both the GRH bound and residue estimates (line 673).",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Automatic bound, floor, environment controls and separate residue window explained."
+    },
+    {
+      "id": "Q02",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 49.117,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 113,
+        "cache_creation_input_tokens": 47627,
+        "cache_read_input_tokens": 522320,
+        "output_tokens": 4218,
+        "output_tokens_details": {
+          "thinking_tokens": 1505
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 47627,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1144,
+            "cache_read_input_tokens": 52634,
+            "cache_creation_input_tokens": 413,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 413
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 113,
+          "outputTokens": 4218,
+          "cacheReadInputTokens": 522320,
+          "cacheCreationInputTokens": 47627,
+          "webSearchRequests": 0,
+          "costUSD": 0.168689,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1505,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 17,
+      "is_error": false,
+      "answer": "Based on the source code, here's the answer about the factor-base bound in the general number-field algorithm:\n\n## Where and How to Change the Factor-Base Bound\n\nYou would modify the bound in **`source/engine/classgroup/src/nf/bnf.rs` lines 643-644**:\n\n```rust\nlet fb_min: f64 = std::env::var(\"QCL_FBMIN\").ok().and_then(|v| v.parse().ok()).unwrap_or(50.0);\nlet bound = (t_grh.max(fb_min).ceil() as u64).max(2);\n```\n\nChanges can be made:\n- Directly in code: modify the `fb_min` default value or the calculation\n- Via environment variable: set `QCL_FBMIN` (e.g., `QCL_FBMIN=100`)\n\n## The Automatic Choice\n\nThe bound is automatically determined at **line 640** as:\n```rust\nlet t_grh = if std::env::var(\"QCL_UNIFORM\").is_ok() { \n    t_unif \n} else { \n    super::grh::class_group_bound_certified(n, r1, &dk, &norms, t_unif)\n};\n```\n\nThe final bound takes the maximum: `max(t_grh, fb_min).ceil()` where:\n- `t_grh` comes from the certified class group bound algorithm or the uniform bound `4\u00b7(ln|d|)\u00b2`\n- `fb_min` defaults to 50.0 (from `QCL_FBMIN` environment variable)\n\n## Minimum Value\n\nThe absolute minimum is **2** (from `.max(2)` in line 644), but the practical minimum is 50.0 set by `fb_min`.\n\n## Residue-Estimate Window Difference\n\nThe residue-estimate window differs fundamentally at **lines 162-188** (`residue_estimate` function) and **line 637**:\n\n- **Residue-estimate window**: uses primes up to `2\u00b7x` where `x = ((4\u00b7(ln|d|)\u00b2) as u64).clamp(1024, 32768)`\n  - Based on discriminant magnitude\n  - Used to estimate the class number and regulator\n  \n- **Factor-base bound**: uses primes up to `max(t_grh, 50.0)` where `t_grh` is from certified bounds\n  - Based on class group-theoretic bounds (Minkowski/Zimmert)\n  - Used to select prime ideals that generate the class group\n\nThe residue estimate is a heuristic based on discriminant size; the factor-base bound is a proven bound ensuring completeness.",
+      "criteria": [
+        0,
+        1,
+        1
+      ],
+      "grading_note": "Later identifies the general factor-base bound with Minkowski/Zimmert, contradicting its earlier GRH explanation."
+    },
+    {
+      "id": "Q02",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 51.411,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 129,
+        "cache_creation_input_tokens": 43834,
+        "cache_read_input_tokens": 383630,
+        "output_tokens": 4850,
+        "output_tokens_details": {
+          "thinking_tokens": 2580
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 43834,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1275,
+            "cache_read_input_tokens": 47459,
+            "cache_creation_input_tokens": 1795,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1795
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 129,
+          "outputTokens": 4850,
+          "cacheReadInputTokens": 383630,
+          "cacheCreationInputTokens": 43834,
+          "webSearchRequests": 0,
+          "costUSD": 0.15041,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2580,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 15,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's how the factor-base bound works in the general number-field algorithm:\n\n## Where and How to Change the Factor-Base Bound\n\nThe factor-base bound is set via the **`QCL_FBMIN` environment variable** (source/engine/classgroup/src/nf/bnf.rs:643):\n\n```rust\nlet fb_min: f64 = std::env::var(\"QCL_FBMIN\").ok().and_then(|v| v.parse().ok()).unwrap_or(50.0);\nlet bound = (t_grh.max(fb_min).ceil() as u64).max(2);\n```\n\nTo change it, set the environment variable to a floating-point value before running the algorithm.\n\n## Automatic Choice of the Bound\n\nThe automatic factor-base bound (`t_grh`) comes from two algorithms (line 640):\n\n1. **Default**: Grenie and Molteni's certificate algorithm (`class_group_bound_certified`), computing a small explicit bound from their search method (nf/grh.rs)\n2. **If `QCL_UNIFORM` is set**: The uniform bound from `uniform_bound()`, which is `4 log^2 |d_K|` (grh.rs:267-277)\n\nThe bound used is the maximum of the computed bound and the minimum specified by `QCL_FBMIN`.\n\n## Minimum Bound\n\nThe minimum bound is determined by:\n- **`QCL_FBMIN`** environment variable (defaults to **50.0**)  \n- **Hard minimum** of **2** (line 644): `(t_grh.max(fb_min).ceil() as u64).max(2)`\n\n## How the Residue-Estimate Window Differs from the Bound\n\nThe residue-estimate window and factor-base bound serve different purposes:\n\n- **Residue-estimate window**: Uses parameter `x = 4 log^2(|d_K|)` clamped to `[2^10, 2^15]` (line 637). The `residue_estimate()` function (lines 162-188) integrates over the range `[x, 2x)` using primes up to `2x` to estimate h\u00b7R.\n\n- **Factor-base bound**: Determined by `t_grh`, computed via sophisticated search; typically much smaller than the uniform bound.\n\n- **Splitting data**: Computed up to `max(t_unif, 2\u00b7x)` (line 638) to safely provide enough primes for both the bound calculation and residue estimation.\n\nThe key difference: the residue window is a fixed computational region for the h\u00b7R estimate, while the factor-base bound is an adaptively-computed threshold for which prime ideals generate the class group.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Both bound choices and residue window explained."
+    },
+    {
+      "id": "Q03",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 42.047,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 42671,
+        "cache_read_input_tokens": 235626,
+        "output_tokens": 3909,
+        "output_tokens_details": {
+          "thinking_tokens": 2463
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 42671,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 938,
+            "cache_read_input_tokens": 46994,
+            "cache_creation_input_tokens": 1097,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1097
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 3909,
+          "cacheReadInputTokens": 235626,
+          "cacheCreationInputTokens": 42671,
+          "webSearchRequests": 0,
+          "costUSD": 0.1285226,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2463,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 8,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what the low-level bnf result's assumes list can contain and when entries are added:\n\n## Contents of the Assumes List\n\nThe assumes list (constructed by `assumes_with` at **source/engine/web/src/lib.rs:130-142**) can contain:\n\n1. **\"GRH\"** \u2014 Always included\n2. **\"the roots of unity found are all\"** \u2014 When `w_proven=False` \n3. **\"h R is near its estimate (uncertified stopping rule)\"** \u2014 When `certified=False`\n4. **\"{p} is prime (Baillie-PSW)\"** entries \u2014 One for each probable prime p > 2^64 in the discriminant\n\n## When Each Entry is Added\n\n- **\"GRH\"**: Always added at the start (line 131)\n- **Roots of unity assumption**: Added if `w_proven` is False (lines 132-133)\n- **h R stopping rule assumption**: Added if `certified` is False (lines 135-136)\n- **Probable primes**: Added from the `assumed_primes` field, which is populated in **source/engine/classgroup/src/nf/order.rs:245-264** (`maximal_order_assuming`). A prime is added if:\n  - It has more than 64 bits (> 2^64), AND\n  - It divides the initial discriminant of the equation order\n\n## Is `certified=True` Sufficient?\n\n**No.** `certified=True` only removes one assumption. The list would contain just `[\"GRH\"]` only if:\n- `certified=True` AND\n- `w_proven=True` AND  \n- `assumed_primes` is empty (no probable primes > 2^64 in the discriminant)\n\nEven with `certified=True`, if `w_proven=False` or if `assumed_primes` is non-empty, additional assumptions remain.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "All four assumption sources and certified flag independence identified."
+    },
+    {
+      "id": "Q03",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 46.764,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 89,
+        "cache_creation_input_tokens": 78035,
+        "cache_read_input_tokens": 216667,
+        "output_tokens": 4084,
+        "output_tokens_details": {
+          "thinking_tokens": 2555
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 78035,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1308,
+            "cache_read_input_tokens": 55287,
+            "cache_creation_input_tokens": 28168,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 28168
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 89,
+          "outputTokens": 4084,
+          "cacheReadInputTokens": 216667,
+          "cacheCreationInputTokens": 78035,
+          "webSearchRequests": 0,
+          "costUSD": 0.1982457,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2555,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 10,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's the answer:\n\n## Low-level BNF Result's Assumes List\n\nThe `Bnf` struct in **source/engine/classgroup/src/nf/bnf.rs:64** has:\n```rust\npub assumed_primes: Vec<BigInt>,\n```\n\nThis list can contain **probable prime factors of the discriminant** (those with more than 64 bits).\n\n### When Each Entry is Added\n\nIn **source/engine/classgroup/src/nf/order.rs:245-264**, the `maximal_order_assuming` function shows when entries are added:\n\n```rust\nfor (p, e) in factor(&d)? {\n    if p.bits() > 64 {\n        assumed.push(p.clone());  // Added at line 251\n    }\n    // ... rest of Round 2 algorithm\n}\n```\n\n**Each prime with more than 64 bits is added when factoring the discriminant.**\n\n### Is `certified=True` Sufficient?\n\n**No, `certified=True` is NOT sufficient** to guarantee the assumes list is just `['GRH']`.\n\nThe `certified` flag only indicates that the class group and regulator were proven under GRH (source/engine/classgroup/src/nf/bnf.rs:58-60). Looking at the web layer in **source/engine/web/src/lib.rs:130-141**, the full assumes list can contain:\n\n1. **\"GRH\"** - always assumed\n2. **\"the roots of unity found are all\"** - if `!w_proven`\n3. **\"h R is near its estimate\"** - if `!certified` (stopping rule)\n4. **\"{prime} is prime (Baillie-PSW)\"** - for each entry in `assumed_primes`\n\nTo guarantee the list is just `['GRH']`, you would need:\n- `certified=True` (no stopping rule assumption)\n- `w_proven=True` (all roots of unity found)\n- `assumed_primes.is_empty()` (no probable primes in discriminant factorization)",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Distinguishes assumed_primes storage from the serialized assumes list."
+    },
+    {
+      "id": "Q03",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 45.552,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 97,
+        "cache_creation_input_tokens": 45435,
+        "cache_read_input_tokens": 381607,
+        "output_tokens": 4198,
+        "output_tokens_details": {
+          "thinking_tokens": 2081
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 45435,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1007,
+            "cache_read_input_tokens": 50160,
+            "cache_creation_input_tokens": 695,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 695
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 97,
+          "outputTokens": 4198,
+          "cacheReadInputTokens": 381607,
+          "cacheCreationInputTokens": 45435,
+          "webSearchRequests": 0,
+          "costUSD": 0.15011770000000002,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2081,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 11,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what I found:\n\n## What the assumes list contains\n\nThe low-level bnf result's `assumed_primes` list can contain:\n\n1. **Probable primes > 2^64** that divide the field discriminant (from `maximal_order_assuming` in `engine/classgroup/src/nf/order.rs:245-264`)\n\nWhen the assumes list is formatted for display (via `assumes_with` in `engine/web/src/lib.rs:130-142`), it also includes:\n\n2. **\"GRH\"** (always added)\n3. **\"the roots of unity found are all\"** (if `w_proven` is False)  \n4. **\"h R is near its estimate (uncertified stopping rule)\"** (if `certified` is False)\n\n## When each entry is added\n\nIn `order.rs:245-264` (`maximal_order_assuming`):\n- **Lines 248-251**: For each prime factor `p` of the discriminant `d`, if `p.bits() > 64`, the prime is added to `assumed_primes` regardless of exponent\n\nAdditional assumptions added in `web/src/lib.rs:130-142`:\n- **Line 131**: \"GRH\" is added unconditionally\n- **Lines 132-133**: \"the roots of unity found are all\" is added when `w_proven == false`\n- **Lines 135-136**: \"h R is near its estimate...\" is added when `certified == false`\n- **Lines 138-139**: Each probable prime is formatted and added\n\n## Is certified=True sufficient to guarantee just ['GRH']?\n\n**No.** Even with `certified=True`, the assumptions list can contain:\n- \"GRH\" (always)\n- \"the roots of unity found are all\" (if `w_proven` is False \u2014 this is independent from `certified`)\n- Any probable primes > 2^64 from the discriminant (independent of `certified`)\n\nThe `certified` flag only controls whether the \"h R is near its estimate...\" assumption is included. It doesn't affect the roots of unity assumption or the probable prime assumptions.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "All assumption conditions identified."
+    },
+    {
+      "id": "Q04",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 56.424,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 105,
+        "cache_creation_input_tokens": 56385,
+        "cache_read_input_tokens": 440016,
+        "output_tokens": 4867,
+        "output_tokens_details": {
+          "thinking_tokens": 1943
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 56385,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1003,
+            "cache_read_input_tokens": 61148,
+            "cache_creation_input_tokens": 657,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 657
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 105,
+          "outputTokens": 4867,
+          "cacheReadInputTokens": 440016,
+          "cacheCreationInputTokens": 56385,
+          "webSearchRequests": 0,
+          "costUSD": 0.18121160000000003,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1943,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 22,
+      "is_error": false,
+      "answer": "Perfect! Now I have the complete trace. Let me summarize the flow:\n\n## Summary: Heuristic Stopping Threshold with Failed Analytic Certificate\n\n### Rust Low-Level Return (source/engine/classgroup/src/nf/bnf.rs)\n\nWhen the general algorithm reaches its heuristic stopping threshold but the analytic certificate fails:\n\n1. **Heuristic stopping rule** (line 16): The search stops when h* R* < sqrt(2) \u00d7 estimate of h R\n2. **Certificate verification** (lines 1007-1152): The code then tries to verify the certificate (h* R* < 2 \u00d7 proven lower bound for h R)\n3. **Failed certificate returns** (line 1112, 1152): When the certificate fails despite reaching the heuristic threshold:\n   ```rust\n   return Some(Found { \n       group: ClassGroup { h, cyc }, \n       reg, reg_fixed, prec, \n       certified: false,  // \u2190 key: certificate failed\n       reg_digits: 20 \n   });\n   ```\n\n### Rust to JSON (source/engine/web/src/lib.rs:130-142)\n\nThe `assumes_with` function builds the assumptions list:\n```rust\nfn assumes_with(w_proven: bool, certified: bool, primes: &[BigInt]) -> Value {\n    let mut a: Vec<String> = vec![\"GRH\".into()];\n    if !w_proven { a.push(\"the roots of unity found are all\".into()); }\n    if !certified {\n        a.push(\"h R is near its estimate (uncertified stopping rule)\".into());  // \u2190 added when certified=false\n    }\n    ...\n}\n```\n\nThe \"bnf\" endpoint (line 590) returns:\n```rust\n\"assumes\": assumes_with(b.w_proven, b.certified, &b.assumed_primes)\n```\n\n### Python with Different Proof Parameters (source/lib/_sage_nf.py:567-679)\n\n#### **proof=None** (default)\n- Calls `_bnf_checked(proof=None)` at line 678\n- `_bnf_checked` (lines 567-577) checks for assumptions containing \"estimate\"\n- Since `proof is not False` is **True**, it raises `NotImplementedError` with message about the estimate assumption\n\n#### **proof=False**\n- Calls `_bnf_checked(proof=False)` at line 678\n- `_bnf_checked` checks for \"estimate\" in assumptions\n- Since `proof is not False` is **False**, the condition at line 575 is skipped\n- Returns the result anyway, accepting the estimate assumption\n\n#### **proof=True**\n- Calls `_proven_bnf(\"class_group\")` at line 676\n- Attempts to get the engine's unconditional certificate via `_nf().bnf_certify(self._f)` (line 604)\n- If that fails or exceeds limits, raises `NotImplementedError` saying the unconditional certificate is unavailable (line 609)\n- Never accepts the heuristic estimate result\n\n**Source paths:**\n- source/engine/classgroup/src/nf/bnf.rs:1007-1152 (Found struct, certified flag)\n- source/engine/web/src/lib.rs:124-142 (assumes_with function)\n- source/engine/web/src/lib.rs:587-590 (\"bnf\" endpoint)\n- source/lib/_sage_nf.py:567-577 (_bnf_checked method)\n- source/lib/_sage_nf.py:638-679 (class_group method with proof parameter dispatch)",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Correct fallback and Python proof modes; omits the bounded precision retries."
+    },
+    {
+      "id": "Q04",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 77.928,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 169,
+        "cache_creation_input_tokens": 90019,
+        "cache_read_input_tokens": 1275549,
+        "output_tokens": 6651,
+        "output_tokens_details": {
+          "thinking_tokens": 3114
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 90019,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1247,
+            "cache_read_input_tokens": 91470,
+            "cache_creation_input_tokens": 3969,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 3969
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 169,
+          "outputTokens": 6651,
+          "cacheReadInputTokens": 1275549,
+          "cacheCreationInputTokens": 90019,
+          "webSearchRequests": 0,
+          "costUSD": 0.34101690000000007,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 3114,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 24,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what happens when the general algorithm reaches its heuristic stopping threshold but the analytic certificate fails or is unavailable:\n\n## Low-Level Return (Rust)\n\nIn **source/engine/classgroup/src/nf/bnf.rs:1109-1152**, when the ratio `h* R* / hr_est <= sqrt(2)` (heuristic stopping threshold):\n\n1. If `log_hr_lo` is `None` (no analytic certificate bounds available):\n   - Returns immediately: `Found { ..., certified: false, ... }` at line 1112\n\n2. If certificate is attempted and **fails** (None result at line 1150):\n   - Returns: `Found { ..., certified: false, ... }` at line 1152\n\nThe `certified: bool` field indicates whether the certificate succeeded.\n\n## Python class_group with proof parameter\n\n**source/lib/_sage_nf.py:638-679** and **567-577**:\n\nThe result flows through `_bnfdata()` \u2192 `_bnf_checked(proof)`, which consults the \"assumes\" list built by **source/engine/web/src/lib.rs:130-142**:\n\n```rust\nif !certified {\n    a.push(\"h R is near its estimate (uncertified stopping rule)\".into());\n}\n```\n\n### Three proof modes:\n\n- **proof=None** (default): Raises `NotImplementedError` if \"estimate\" substring appears in assumes list (line 575)\n- **proof=False**: Accepts the heuristic result even with \"estimate\" assumption \n- **proof=True**: Calls `_proven_bnf()` which uses `bnf_certify()` (unconditional certificate, no GRH). Never returns the heuristic estimate; raises `NotImplementedError` if the certificate refuses or fails\n\n**Source paths:**\n- Low-level decision: source/engine/classgroup/src/nf/bnf.rs:1109-1152\n- Assumption string: source/engine/web/src/lib.rs:135-136\n- Python dispatch: source/lib/_sage_nf.py:567-577, 638-679",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Correct fallback and proof modes; omits the precision retries."
+    },
+    {
+      "id": "Q04",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 70.264,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 129,
+        "cache_creation_input_tokens": 108485,
+        "cache_read_input_tokens": 806485,
+        "output_tokens": 5795,
+        "output_tokens_details": {
+          "thinking_tokens": 2711
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 108485,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 977,
+            "cache_read_input_tokens": 111589,
+            "cache_creation_input_tokens": 2316,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 2316
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 129,
+          "outputTokens": 5795,
+          "cacheReadInputTokens": 806485,
+          "cacheCreationInputTokens": 108485,
+          "webSearchRequests": 0,
+          "costUSD": 0.3267224999999999,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2711,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 22,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what happens when the general algorithm reaches its heuristic stopping threshold but the analytic certificate fails or is unavailable:\n\n## Low-Level Return (Rust)\n\n**source/engine/classgroup/src/nf/bnf.rs:1109-1152** (`try_units` function)\n\nWhen `ratio <= sqrt(2)` (where `ratio = h* R* / heuristic_estimate`), the algorithm checks for an analytic certificate:\n\n```rust\nif ratio <= std::f64::consts::SQRT_2 {\n    let Some(lo) = log_hr_lo.as_ref() else {\n        // Certificate unavailable or failed\n        return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });\n    };\n    // ... try to certify ...\n    match cert {\n        Some((h2, cyc2, rel, d)) => { /* certified: true */ }\n        None => {\n            // Certificate failed\n            return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });\n        }\n    }\n}\n```\n\nReturns a `Bnf` struct with **`certified: false`**.\n\n## Python Binding Conversion\n\n**source/engine/web/src/lib.rs:130-142** (`assumes_with` function)\n\nThe Rust `certified: false` is converted to a JSON \"assumes\" array:\n\n```rust\nif !certified {\n    a.push(\"h R is near its estimate (uncertified stopping rule)\".into());\n}\n```\n\n## Python class_group Calls\n\n**source/lib/_sage_nf.py:638-679** (`class_group` method, `_bnf_checked` method)\n\n**proof=True**: Calls `_proven_bnf()` \u2192 `bnf_certify()` (unconditional certificate). Raises `NotImplementedError` if unavailable.\n\n**proof=False**: Calls `_bnf_checked(False)` \u2192 returns heuristic result, accepting the \"estimate\" assumption (line 575-576: skips the check since `proof is not False`).\n\n**proof=None**: Calls `_bnf_checked(None)`. Since `proof is not False`, if \"estimate\" appears in assumptions, raises `NotImplementedError` (line 575-576).\n\nThe distinction: **proof=False accepts the heuristic stopping rule's result; proof=None (default) rejects it unless certified**.",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Correct fallback and proof modes; omits the precision retries."
+    },
+    {
+      "id": "Q05",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 23.411,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 49,
+        "cache_creation_input_tokens": 10917,
+        "cache_read_input_tokens": 40534,
+        "output_tokens": 1969,
+        "output_tokens_details": {
+          "thinking_tokens": 874
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 10917,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1280,
+            "cache_read_input_tokens": 7706,
+            "cache_creation_input_tokens": 8631,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 8631
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 49,
+          "outputTokens": 1969,
+          "cacheReadInputTokens": 40534,
+          "cacheCreationInputTokens": 10917,
+          "webSearchRequests": 0,
+          "costUSD": 0.035781400000000005,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 874,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 7,
+      "is_error": false,
+      "answer": "Looking at the code, I can provide a detailed answer about the algorithm structure.\n\n## Order of Gathering Relations in a Round\n\nThe `collect` function (source/engine/classgroup/src/relations.rs:160-416) executes the following sequence:\n\n1. **Polynomial generation and sieving** (lines 213-249):\n   - Selects the first prime q\u2081 (least covered factor-base prime or \"free\" for real quadratic fields)\n   - Selects partner primes to form the leading coefficient `a`\n   - Computes 2^(k-1) sign combinations for the polynomial B value\n\n2. **Trial division search** (lines 273-413):\n   - For each sign combination, computes polynomial roots modulo sieved primes (lines 286-300)\n   - Performs fast sieving accumulation (lines 301-320)\n   - Trial-divides positions above the sieve threshold (lines 321-409)\n   - Collects three types of relations:\n     - **Full relations** (v == 1): when the value factors completely over the factor base (lines 365-374)\n     - **Partial relations** combined via large primes: when one unfactored prime remains below the large-prime bound (lines 375-405)\n\n## Effect of Deficient Factor-Base Columns\n\nThe `counts` vector tracks coverage for each factor-base prime. When a column is deficient (count == 0):\n\n- **Line 220-221**: Presence of uncovered columns triggers \"covering mode\"\n- **Line 251**: A capacity cap of 3 is imposed: `let cap = if qs.iter().any(|&i| counts[i] == 0) { 3 } else { usize::MAX };`\n  - This limits relations taken per polynomial to force exploration of different `a` values\n- **Line 227-229**: The least-covered primes are prioritized for selection as q\u2081 in the next iteration\n- **Line 369, 397**: Each relation updates counts for all its primes: `counts[i] += 1`\n\n## Termination of Outer Search\n\nThe main loop (line 211) terminates when either:\n\n1. **Goal reached**: `out.len() >= want` (desired number of relations collected)\n2. **Idle timeout**: `idle >= 50_000` (too many consecutive polynomials without progress)\n\n**Line 414**: The idle counter tracks polynomial attempts since last success:\n```\nidle = if out.len() > before { 0 } else { idle + (1 << (k - 1)) };\n```\n- Resets to 0 when a relation is found\n- Increments by 2^(k-1) (number of sign choices) when no relation is found in the round",
+      "criteria": [
+        0,
+        0,
+        0
+      ],
+      "grading_note": "Answers for the quadratic sieve collector, not the general number-field algorithm."
+    },
+    {
+      "id": "Q05",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 40.249,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 20169,
+        "cache_read_input_tokens": 100673,
+        "output_tokens": 3548,
+        "output_tokens_details": {
+          "thinking_tokens": 2043
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 20169,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1654,
+            "cache_read_input_tokens": 17607,
+            "cache_creation_input_tokens": 7982,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 7982
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 3548,
+          "cacheReadInputTokens": 100673,
+          "cacheCreationInputTokens": 20169,
+          "webSearchRequests": 0,
+          "costUSD": 0.0682183,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2043,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 8,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here are the answers to your questions:\n\n## Order of Gathering Relations in a Round\n\nIn `relations.rs:collect()` (lines 160-417), a round proceeds as follows:\n\n1. **Prime Selection** (lines 213-230): Selects the first factor `q_1` either as the least-covered prime when any column has count 0, or via a \"free\" random selection for real quadratic fields.\n\n2. **Coefficient Set Construction** (lines 231-248): Builds `a_idx` containing `q_1` and potential partner primes, choosing partners to make `a` close to a target size.\n\n3. **Polynomial Generation** (lines 273-413): For each of 2^(k-1) sign combinations (where k = |a_idx|):\n   - Constructs polynomial coefficient `b` via CRT (lines 274-281)\n   - Computes `c = (b\u00b2 - D) / 4a` (line 284)\n   - Computes roots modulo sieved primes (lines 287-300)\n   - Sieves over the range [\u2212m, m] (lines 301-320)\n   - For each sieve location above threshold: trial divides by sieved primes (lines 332-354), adds contributions from factors in `a` (lines 355-357), and creates full or partial relations (lines 365-405)\n\n## How Deficient Columns Affect Searches\n\nThe `counts` vector tracks how many relations each factor-base prime appears in. When a column is deficient (count = 0):\n\n- **Next prime selection** (lines 220-230): `q_1` is chosen from `qs.iter().min()` to make the least-covered prime the first factor.\n- **Relation capping** (line 251): Relations per polynomial are limited to 3 instead of unlimited, ensuring deficient columns receive relations quickly rather than hoarding them on well-covered columns.\n\nThe outer loop in `imag.rs` (lines 176-195) resets deficient columns' counts to 0 to prioritize them in the next round.\n\n## Outer Search Termination\n\nThe `collect()` function terminates via the while loop at line 211:\n- **Primary**: `out.len() >= want` \u2014 collected enough relations\n- **Timeout**: `idle >= 50_000` \u2014 too many polynomials tried without finding relations (line 414: idle increments by 2^(k-1) per polynomial)\n\nThe broader outer loop in `imag.rs:class_group_certified()` (lines 160-209) terminates when:\n- Linear algebra succeeds and returns `Some((g, certified))` (lines 203-206)\n- 200 rounds complete without convergence, returning error (line 210)",
+      "criteria": [
+        0,
+        0,
+        0
+      ],
+      "grading_note": "Answers for quadratic collect()/imag.rs, including the wrong outer budget."
+    },
+    {
+      "id": "Q05",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 42.999,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 91,
+        "cache_creation_input_tokens": 23012,
+        "cache_read_input_tokens": 236163,
+        "output_tokens": 3137,
+        "output_tokens_details": {
+          "thinking_tokens": 1077
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 23012,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1163,
+            "cache_read_input_tokens": 42218,
+            "cache_creation_input_tokens": 1811,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1811
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 99,
+          "outputTokens": 3138,
+          "cacheReadInputTokens": 256163,
+          "cacheCreationInputTokens": 38609,
+          "webSearchRequests": 0,
+          "costUSD": 0.11862329999999999,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1077,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 16,
+      "is_error": false,
+      "answer": "Based on the source code, here's how the algorithm gathers relations and terminates:\n\n## Order of gathering relations per round\n\nIn `source/engine/classgroup/src/relations.rs:collect()` (line 160-417), each round follows this sequence:\n\n1. **Prime selection**: Chooses a first prime `q1` from candidates (line 213-230):\n   - Selects the **least-covered prime** from `counts` (primes with fewest relations), or\n   - For real quadratic fields, sometimes a \"free\" prime targeting a size near `target = sqrt(|D|)/(2m)`\n\n2. **Polynomial construction**: Builds a product `a = q1 * q2 * ... * qk` of factor-base primes as the leading coefficient (line 231-249)\n\n3. **Sieving phase**: For each sign-choice of `b` values (line 273-413):\n   - Computes polynomial Q(x) = ax\u00b2 + bx + c\n   - Sieves with primes \u2264 `sieve_bound` to find smooth values (line 301-320)\n   - Tests candidates above the sieve threshold (line 321-409)\n\n4. **Trial division and relation extraction** (line 332-405):\n   - Trial-divides with sieved primes\n   - Extracts relation if fully smooth, or pairs large primes (partials)\n   - Updates `counts[i]` for each prime appearing in a relation (line 369, 397)\n\nThe round terminates when `want` relations are collected or `idle` exceeds 50,000 polynomials (line 211).\n\n## How deficient columns affect next searches\n\nIn `source/engine/classgroup/src/nf/bnf.rs`, lines 728-755:\n\n- After elimination (line 778), if `eliminate_with()` returns `Reduced::Deficient(col)`, that column is added to a `forced` set (line 783)\n- In the **next round**, the algorithm specifically targets these forced columns (line 736): searches products `P_i * (random small primes)` until a relation contains the deficient prime\n- This ensures every factor-base prime eventually appears in relations (line 250: \"while some column has no relation, take only a few from each a\")\n\n## Termination of outer search\n\nThe outer loop (line 702: `for round in 0..60`) terminates when:\n\n1. **Certificate condition satisfied** (line 810, 1109-1142): h* R* / estimate \u2264 \u221a2 **and** the certified bound holds: h* R*_hi < 2 \u00d7 h R_lo (from GRH, `nf/certify.rs`)\n2. **Maximum rounds exhausted**: If 60 rounds complete without convergence, returns error \"no convergence\" (line 817)\n\nThe algorithm increases `want` (desired relations) between rounds (line 815) based on how many more relations are needed for rank or coverage.",
+      "criteria": [
+        0,
+        0,
+        1
+      ],
+      "grading_note": "Mixes the quadratic collection order with the general collector. Correct forced-column and 60-round locations, but does not describe general targeting before random pairs. Also wrongly makes certification mandatory for return."
+    },
+    {
+      "id": "Q06",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 51.419,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 105,
+        "cache_creation_input_tokens": 31269,
+        "cache_read_input_tokens": 240826,
+        "output_tokens": 4712,
+        "output_tokens_details": {
+          "thinking_tokens": 2678
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 31269,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1154,
+            "cache_read_input_tokens": 35167,
+            "cache_creation_input_tokens": 1522,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1522
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 105,
+          "outputTokens": 4712,
+          "cacheReadInputTokens": 240826,
+          "cacheCreationInputTokens": 31269,
+          "webSearchRequests": 0,
+          "costUSD": 0.11028560000000001,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2678,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 12,
+      "is_error": false,
+      "answer": "Now I have all the information needed. Let me provide a concise answer.\n\n## How a Computed Regulator Becomes the Public Decimal String\n\nThe regulator computation produces a **fixed-point representation** that is converted to a decimal string through these steps:\n\n**The Conversion Process:**\n\n1. **Fixed-point representation** (api.rs:293):\n```rust\nlet regulator = if b.prec == 0 { \"1\".to_string() } \n                else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };\n```\n\n2. **The `fixed_to_decimal` function** (api.rs:233):\n   - Takes `x / 2^prec` where `x` is `reg_fixed` (a BigInt) and `prec` is the precision in bits\n   - Converts to a decimal string with `digits` significant digits\n   - Uses **arbitrary-precision arithmetic** (BigInt), not floating-point\n\n**Role of Fixed-Point Precision (`prec`):**\n- The regulator is computed as a fixed-point integer `reg_fixed` representing the actual value divided by `2^prec`\n- This avoids floating-point rounding errors during computation (bnf.rs:1140-1141)\n- Example: if `reg_fixed = 12345` and `prec = 16`, the value is `12345 / 2^16`\n\n**Certificate-Controlled Digits (`reg_digits`):**\n- Determined by the relative error bound from the regulator certificate (bnf.rs:1139):\n  ```rust\n  let reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n  ```\n- `rel` is the relative error of the regulator bounds from `certify::regulator_bounds` (certify.rs:243)\n- Ensures only **certified correct digits** are displayed (clamped to 1-20 significant digits)\n\n**Unit-Rank-Zero Case:**\n- When the unit rank is 0: `prec = 0`, `reg_fixed = BigInt::one()` (bnf.rs:1009)\n- The public string is simply the literal string `\"1\"` (api.rs:293)\n- The regulator is exactly 1, needing no fractional representation\n\n**Does the public string come from the diagnostic f64 value?**\n- **No.** The `regulator: f64` field in the Bnf struct is purely diagnostic/informational\n- The public string is built from the exact `reg_fixed` and `prec` via `fixed_to_decimal`\n- This preserves accuracy beyond what f64 (53-bit mantissa) can represent",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Correct fixed-point boundary and rank-zero value, but omits uncertified digit fallback and small-value notation threshold."
+    },
+    {
+      "id": "Q06",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 60.236,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 113,
+        "cache_creation_input_tokens": 35700,
+        "cache_read_input_tokens": 258034,
+        "output_tokens": 5332,
+        "output_tokens_details": {
+          "thinking_tokens": 2992
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 35700,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 804,
+            "cache_read_input_tokens": 40786,
+            "cache_creation_input_tokens": 334,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 334
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 113,
+          "outputTokens": 5332,
+          "cacheReadInputTokens": 258034,
+          "cacheCreationInputTokens": 35700,
+          "webSearchRequests": 0,
+          "costUSD": 0.12397640000000001,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2992,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 13,
+      "is_error": false,
+      "answer": "Based on my examination of the source code, here's how a computed regulator becomes a public decimal string:\n\n## The Conversion Process\n\n**api.rs:293-294, 334, 357** \u2014 The conversion happens in three places following this pattern:\n```rust\nlet regulator = if b.prec == 0 { \"1\".to_string() } \n                else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };\n```\n\nThe `fixed_to_decimal` function (**api.rs:232-285**) converts the fixed-point value `x / 2^prec` to a decimal string with `digits` significant digits.\n\n## Role of Fixed-Point Precision\n\nThe regulator is stored in fixed-point format as `reg_fixed / 2^prec`:\n- **reg_fixed** (bnf.rs:52): A `BigInt` holding the numerator\n- **prec** (bnf.rs:53): A `u32` specifying the precision in bits\n\nFor example, when certified (bnf.rs:1140): `let reg_fixed = &d >> (prec as usize * (r - 1));` shifts the determinant `d` right by `prec * (r-1)` bits to isolate the regulator portion of the scaled lattice determinant.\n\n## Certificate-Controlled Digits\n\n**bnf.rs:1139** shows how `reg_digits` is computed from the certificate's error bound:\n```rust\nlet reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n```\n\nWhere `rel` is the relative error bound returned by `regulator_bounds()` (**certify.rs:134**). The documentation (**bnf.rs:61-62**) states: \"the regulator's correct significant digits (when certified; else 20)\". When not certified, `reg_digits` defaults to 20.\n\n## Unit-Rank-Zero Case\n\nWhen `prec == 0` (unit rank zero \u2014 the field has only roots of unity as units):\n- **bnf.rs:1009** and **proof.rs:254** both return:\n```rust\nprec: 0, reg_fixed: BigInt::one(), reg_digits: 20\n```\n- The public string is hardcoded as **\"1\"** (**api.rs:293, 334**)\n\nThe `prec == 0` flag explicitly marks this degenerate case.\n\n## Diagnostic f64 vs. Public String\n\n**No, the public string does NOT come from the diagnostic f64 value.**\n\nThe `regulator: f64` field (**bnf.rs:51**) is an approximate diagnostic value used internally for stopping rules and numerical work. The public string comes entirely from:\n1. The exact **fixed-point representation** `reg_fixed / 2^prec`, and\n2. The **certificate-controlled `reg_digits`** that specify how many decimal places to display\n\nThe `fixed_to_decimal` function (**api.rs:248, 259-261, 279-284**) handles formatting: it converts the fixed-point value, rounds to `reg_digits` significant figures, and chooses between fixed decimal notation and scientific notation based on magnitude.",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Correct fixed-point and digit fallback; mentions scientific notation without its threshold."
+    },
+    {
+      "id": "Q06",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 82.739,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 193,
+        "cache_creation_input_tokens": 36083,
+        "cache_read_input_tokens": 525545,
+        "output_tokens": 7013,
+        "output_tokens_details": {
+          "thinking_tokens": 3675
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 36083,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 720,
+            "cache_read_input_tokens": 40808,
+            "cache_creation_input_tokens": 695,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 695
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 193,
+          "outputTokens": 7013,
+          "cacheReadInputTokens": 525545,
+          "cacheCreationInputTokens": 36083,
+          "webSearchRequests": 0,
+          "costUSD": 0.1599785,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 3675,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 23,
+      "is_error": false,
+      "answer": "Based on the source code, here's how a computed regulator becomes the public decimal string:\n\n## Fixed-Point Representation\n\nThe regulator is computed and stored in fixed-point form:\n- **`reg_fixed`** (BigInt): The numerator\n- **`prec`** (u32): The precision in bits (denominator is 2^prec)\n- Actual value: `reg_fixed / 2^prec`\n\nThe diagnostic f64 value `regulator` is computed via `to_f64(x, prec)` but is **NOT** used for the public string\u2014only for internal estimates and testing.\n\n## Certificate-Controlled Digits\n\nThe number of correct significant digits is determined by the certificate's error bound in **certify.rs:243**:\n\n```rust\nlet rel = hi.sub(&lo, 64).div(&lo.add(&hi, 64), 64)...  // relative error bound\n```\n\nThen in **bnf.rs:1139** (and proof.rs:732), this controls digits shown:\n\n```rust\nlet reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n```\n\nThe formula `-rel.log10()` converts the relative error to log\u2081\u2080 precision; subtracting 1 is conservative. The result is clamped to 1-20 significant digits.\n\n## Unit-Rank-Zero Case\n\nWhen there are no free units (rank r = 0), **bnf.rs:1009** returns:\n\n```rust\nFound { ..., reg_fixed: BigInt::one(), prec: 0, ... }\n```\n\nThis triggers the special case in **api.rs:293**:\n\n```rust\nlet regulator = if b.prec == 0 { \"1\".to_string() } else { fixed_to_decimal(...) };\n```\n\nReturning the string `\"1\"` directly.\n\n## Public Decimal String Generation\n\nFor unit rank > 0, **api.rs:293** calls:\n\n```rust\nfixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits)\n```\n\nThe `fixed_to_decimal` function (**api.rs:233-285**) converts `reg_fixed / 2^prec` to a decimal string with exactly `reg_digits` significant digits, using:\n- Fixed notation for reasonable magnitudes (10\u207b\u2074 and up)\n- Scientific notation for very small values\n- Proper rounding via `(&x * 10^k + 2^(prec-1)) >> prec`\n\n**The public string comes entirely from the fixed-point representation and certificate-controlled digit count\u2014not from the diagnostic f64 value.**",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Correct fixed-point and notation threshold; omits uncertified 20-digit fallback."
+    },
+    {
+      "id": "Q07",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 65.043,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 169,
+        "cache_creation_input_tokens": 75452,
+        "cache_read_input_tokens": 1181478,
+        "output_tokens": 5661,
+        "output_tokens_details": {
+          "thinking_tokens": 2544
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 75452,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1075,
+            "cache_read_input_tokens": 78485,
+            "cache_creation_input_tokens": 2387,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 2387
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 169,
+          "outputTokens": 5661,
+          "cacheReadInputTokens": 1181478,
+          "cacheCreationInputTokens": 75452,
+          "webSearchRequests": 0,
+          "costUSD": 0.2975258,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2544,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 22,
+      "is_error": false,
+      "answer": "Based on the source code analysis:\n\n## At the Python Low-Level nf Boundary\n\nA polynomial coefficient `Fraction(-5, 2)` is **rejected with a TypeError**:\n\n**Source: `source/engine/py/python/sagebrush/nf.py:19-29`** (`_ints()` function):\n```python\ndef _ints(f):\n    # integers exactly (a coefficient -5/2 became -2: the systematic\n    # review's NFD-F3)\n    from fractions import Fraction\n    out = []\n    for c in f:\n        q = Fraction(c)\n        if q.denominator != 1:\n            raise TypeError(\"coefficients must be integers, not %s\" % (c,))\n        out.append(str(q.numerator))\n    return out\n```\n\nThe comment references a prior bug where `-5/2` was incorrectly converted to `-2` (documented in the systematic review as NFD-F3). The same validation occurs in `source/lib/_sage_nf.py:129-135` (`_exact_int()` function).\n\n## Coefficient and Class-Group Integer Representation Across Engine Call\n\n**Accepted coefficients:**\n- Converted to **decimal string representation** before passing to the Rust engine (line 28: `str(q.numerator)`)\n\n**Returned class-group integers:**\n- Come from the engine as **decimal strings in JSON** format\n- Converted back to Python `int`: `r[\"cyc\"] = [int(c) for c in r[\"cyc\"]]` (line 83 in nf.py)\n\n**Source: `source/engine/web/src/lib.rs:1-12` and `276-277`:**\n> \"Big integers are decimal strings\"\n> `fn big(v: &[BigInt]) -> Vec<String>` converts BigInt to strings for JSON serialization\n\n## Maintained Package Copies\n\nThe engine uses internal sagebrush packages from the Rust side:\n- **`sagebrush_bigint::BigInt`** \u2014 arbitrary-precision integer arithmetic  \n- **`sagebrush_poly`** \u2014 polynomial operations (irreducibility testing, factorization)\n- **`sagebrush_interrupt`** \u2014 interrupt handling\n\n**Source: `source/engine/classgroup/src/api.rs:9-11, 56`**",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Integer rejection is correct. Does not cover all output representations; package-copy answer gives Rust dependencies instead."
+    },
+    {
+      "id": "Q07",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 68.598,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 169,
+        "cache_creation_input_tokens": 60776,
+        "cache_read_input_tokens": 826863,
+        "output_tokens": 5966,
+        "output_tokens_details": {
+          "thinking_tokens": 2424
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 60776,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1276,
+            "cache_read_input_tokens": 60751,
+            "cache_creation_input_tokens": 5445,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 5445
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 169,
+          "outputTokens": 5966,
+          "cacheReadInputTokens": 826863,
+          "cacheCreationInputTokens": 60776,
+          "webSearchRequests": 0,
+          "costUSD": 0.23423729999999998,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2424,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 29,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here are the answers to your questions:\n\n## What Happens to Fraction(-5, 2) at the Python Low-Level nf Boundary\n\nIn `source/engine/py/python/sagebrush/nf.py:19-29` (and identical `source/lib/sagebrush/nf.py:19-29`), the `_ints()` function handles polynomial coefficients:\n\n```python\ndef _ints(f):\n    # integers exactly (a coefficient -5/2 became -2: the systematic\n    # review's NFD-F3)\n    from fractions import Fraction\n    out = []\n    for c in f:\n        q = Fraction(c)\n        if q.denominator != 1:\n            raise TypeError(\"coefficients must be integers, not %s\" % (c,))\n        out.append(str(q.numerator))\n    return out\n```\n\n**Action**: `Fraction(-5, 2)` would be **rejected with a TypeError** because its denominator \u2260 1. The numerator is never extracted; non-integer coefficients are refused entirely.\n\n## Coefficient and Return Value Representation Across the Engine Call\n\n**Accepted coefficients** (in `_ints()`):\n- Converted to `Fraction` objects for validation\n- Only those with `denominator == 1` pass\n- Valid coefficients are converted to `str(q.numerator)` strings sent to the engine\n\n**Engine call via `call(\"nf_data\", f=_ints(f))` and siblings**:\n- The underlying Rust engine (source/engine/classgroup/src/) receives coefficients as `BigInt` values\n- Returns `BnfData` struct (api.rs:213-230) with:\n  - `h: BigInt` (class number)\n  - `cyc: Vec<BigInt>` (cyclic invariants)\n\n**Returned class-group integers**:\n- In `source/engine/web/src/lib.rs:276-278`, `BigInt` values are serialized as decimal strings via `.to_string()`\n- Python layer (nf.py:81-83) converts them back: `int(r[\"h\"])` and `[int(c) for c in r[\"cyc\"]]`\n\n## Maintained Package Copies\n\nFour maintained copies exist:\n\n1. **`source/engine/py/python/sagebrush/nf.py`** - Main Rust engine Python bindings\n2. **`source/lib/sagebrush/nf.py`** - Identical mirror copy\n3. **`source/engine/py/python/sagebrush/_sagelib/_sage_nf.py`** - Sage-compatible wrapper with number field classes\n4. **`source/lib/_sage_nf.py`** - Identical mirror of Sage wrapper",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Exact rejection and all four maintained files correct; omits disc and regulator representation at the return boundary."
+    },
+    {
+      "id": "Q07",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 43.151,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 97,
+        "cache_creation_input_tokens": 70154,
+        "cache_read_input_tokens": 476735,
+        "output_tokens": 3889,
+        "output_tokens_details": {
+          "thinking_tokens": 1615
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 70154,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 818,
+            "cache_read_input_tokens": 74688,
+            "cache_creation_input_tokens": 886,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 886
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 97,
+          "outputTokens": 3889,
+          "cacheReadInputTokens": 476735,
+          "cacheCreationInputTokens": 70154,
+          "webSearchRequests": 0,
+          "costUSD": 0.20752350000000003,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1615,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 18,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what happens at the Python low-level nf boundary:\n\n## Polynomial Coefficient `Fraction(-5, 2)` Handling\n\n**source/lib/sagebrush/nf.py:19-29** and **source/engine/py/python/sagebrush/nf.py:19-29** (_ints function):\n\nThe coefficient `Fraction(-5, 2)` is **rejected with a TypeError**:\n- Converted to `Fraction(-5, 2)` \n- Denominator is checked: `if q.denominator != 1` \n- Raises: `TypeError(\"coefficients must be integers, not Fraction(-5, 2)\")`\n- This is documented in a comment referencing \"the systematic review's NFD-F3\"\n\n## Accepted Coefficients\n\nOnly integer coefficients (denominator == 1) are accepted:\n- `Fraction(c)` is created from the input\n- Must have `denominator == 1` \n- **Conversion to engine**: `str(q.numerator)` - converted to string representation\n- Transmitted to Rust engine via JSON as string list in `f` parameter\n\nExample: `_ints([-11, 0, 0, 1])` \u2192 `[\"-11\", \"0\", \"0\", \"1\"]`\n\n## Returned Class-Group Integers Representation\n\n**source/lib/sagebrush/nf.py:73-84** (bnf function):\n\n```python\nr = call(\"bnf\", f=_ints(f))\nr[\"h\"] = int(r[\"h\"])              # class number\nr[\"cyc\"] = [int(c) for c in r[\"cyc\"]]  # invariants\n```\n\n- Engine returns JSON strings\n- Converted back to Python `int` using `int()` for:\n  - `r[\"h\"]` (class number)\n  - `r[\"cyc\"]` (class group invariant list elements)\n  - `r[\"disc\"]`, `r[\"pi\"]`, `r[\"pi_den\"]`, etc.\n\n## Maintained Package Copies\n\n**Two parallel maintained copies**:\n1. **source/lib/sagebrush/nf.py** and **source/lib/_sage_nf.py** - main library\n2. **source/engine/py/python/sagebrush/nf.py** and **source/engine/py/python/sagebrush/_sagelib/_sage_nf.py** - engine integration copies\n\nThese are identical copies (same functions, classes, and logic) for integrating with the Rust engine **engine/classgroup** (MIT/Apache-licensed, clean-room implementation).",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Exact rejection, integer conversions and four copies correct; omits regulator remaining a string."
+    },
+    {
+      "id": "Q08",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 23.56,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 33,
+        "cache_creation_input_tokens": 33179,
+        "cache_read_input_tokens": 55515,
+        "output_tokens": 2095,
+        "output_tokens_details": {
+          "thinking_tokens": 1054
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 33179,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 891,
+            "cache_read_input_tokens": 36844,
+            "cache_creation_input_tokens": 1755,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1755
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 33,
+          "outputTokens": 2095,
+          "cacheReadInputTokens": 55515,
+          "cacheCreationInputTokens": 33179,
+          "webSearchRequests": 0,
+          "costUSD": 0.0824175,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1054,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 5,
+      "is_error": false,
+      "answer": "Based on the source code, here's what NumberField's unconditional proof path cache stores and the cross-checks it performs:\n\n## What the Cache Stores\n\n**File:** `/scratch/sagebrush-reviews/readability/sessions/readability-Q08-1-b5pza2os/source/lib/_sage_nf.py`\n\nThe cache `self._bnf_proof` (lines 601-607) stores:\n- The result of `_nf().bnf_certify(self._f)` - the engine's unconditional certificate without GRH\n- OR a string containing the error message if the certificate cannot be computed\n\n## Independent Quadratic Cross-Checks\n\nFor quadratic fields (degree 2), `_proven_bnf()` (lines 579-636) performs these independent checks:\n\n1. **|d| \u2265 1000** (line 615-626): Compare class number (`h`) and invariants (`cyc`) from the proven certificate against `quadratic_class_group_data()` \n\n2. **0 < d \u2264 10^5** (line 627-630): If quadratic algorithms failed, compare class number against `_count_real_classes(D)` (indefinite form reduction)\n\n3. **-10^5 \u2264 d < 0** (line 631-634): Compare class number against `_count_reduced_forms(D)` (imaginary form reduction)\n\n## On Disagreement\n\n- **Raises RuntimeError** (lines 625, 629, 633) with the specific mismatch: \"the proven class group [X] disagrees with the quadratic algorithms' [Y]\" or similar\n- Indicates either a bug or that GRH is false for the quadratic algorithms\n\n## If Quadratic Shortcut Fails\n\n- Try-catch (lines 616-621) catches ValueError/RuntimeError from `_quadratic_bnfdata()`\n- Sets `g = None`, so the quadratic cross-check is skipped\n- **The proof stands solely on the certificate** (line 619 comment)\n- Falls back to reduced form checks (lines 627-634) if the discriminant is in range\n\nThe checks are recorded in `self._bnf_proof_check` (line 635) to track which checks ran.",
+      "criteria": [
+        0,
+        1,
+        0
+      ],
+      "grading_note": "Cross-check routing correct; cache explanation omits refusal conversion and maximal-order admission; omits regulator not being cross-checked."
+    },
+    {
+      "id": "Q08",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 40.243,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 81,
+        "cache_creation_input_tokens": 80496,
+        "cache_read_input_tokens": 173146,
+        "output_tokens": 3644,
+        "output_tokens_details": {
+          "thinking_tokens": 1991
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 80496,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 2006,
+            "cache_read_input_tokens": 58501,
+            "cache_creation_input_tokens": 27415,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 27415
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 81,
+          "outputTokens": 3644,
+          "cacheReadInputTokens": 173146,
+          "cacheCreationInputTokens": 80496,
+          "webSearchRequests": 0,
+          "costUSD": 0.19660760000000002,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1991,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 13,
+      "is_error": false,
+      "answer": "Looking at the source code, I found the answer in the NumberField's caching and cross-check logic.\n\n## Cache and Quadratic Cross-Checks\n\n**What the cache stores (_sage_nf.py:547-565):**\n\nThe `_bnfdata` cache in `NumberField_absolute._bnfdata()` stores the Buchmann-class group (bnf) data. For quadratic fields with |d| \u2265 1000, it first attempts fast quadratic algorithms, storing that result. If they fail, it falls back to the general unconditional certificate algorithm (from `_nf().bnf()`).\n\n**Independent quadratic cross-checks (_sage_nf.py:579-636, `_proven_bnf` method):**\n\nWhen `proof=True`, the proven result is independently verified by:\n\n1. **For |d| \u2265 1000** (line 615-626): Compare class number and invariants against `quadratic_class_group_data()` \n2. **For 0 < d \u2264 10^5** (line 627-630): Cross-check class number against the count of reduced indefinite forms via `_count_real_classes()`\n3. **For -10^5 \u2264 d < 0** (line 631-634): Cross-check class number against the count of reduced forms via `_count_reduced_forms()`\n\n**On disagreement (line 624-625):**\n\n```python\nif int(g[\"h\"]) != p[\"h\"] or cyc != p[\"cyc\"]:\n    raise RuntimeError(\"the proven class group %s disagrees with the quadratic algorithms' %s\" % (p[\"cyc\"], cyc))\n```\n\nA `RuntimeError` is raised\u2014this indicates either a bug in the implementation or (for quadratic algorithms) that GRH is false.\n\n**If the quadratic shortcut fails (line 618-621):**\n\n```python\nexcept (ValueError, RuntimeError):\n    # (the quadratic algorithms failed: the proof stands\n    # on the certificate; forms check it where cheap)\n    g = None\n```\n\nThe code continues with only the general unconditional certificate (proof.rs:certify). Forms-based checks still run where applicable (\u226410^5).\n\n**Source locations:**\n- Cache and shortcut: `/source/lib/_sage_nf.py:547-565` (_bnfdata method)\n- Cross-checks: `/source/lib/_sage_nf.py:579-636` (_proven_bnf method)\n- Forms checks: `/source/lib/_sage_nf.py:29-83` (_count_reduced_forms, _count_real_classes)",
+      "criteria": [
+        0,
+        1,
+        0
+      ],
+      "grading_note": "Describes the ordinary cache and incorrectly calls bnf unconditional. Cross-check fallback described; omits check cache and regulator exclusion."
+    },
+    {
+      "id": "Q08",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 22.511,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 57,
+        "cache_creation_input_tokens": 34459,
+        "cache_read_input_tokens": 139928,
+        "output_tokens": 1961,
+        "output_tokens_details": {
+          "thinking_tokens": 555
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 34459,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 803,
+            "cache_read_input_tokens": 39167,
+            "cache_creation_input_tokens": 712,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 712
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 57,
+          "outputTokens": 1961,
+          "cacheReadInputTokens": 139928,
+          "cacheCreationInputTokens": 34459,
+          "webSearchRequests": 0,
+          "costUSD": 0.0927728,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 555,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 9,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what NumberField's unconditional proof path cache does:\n\n## Cache Structure\n\nThe cache stores two attributes:\n- **`_bnf_proof`** (source: `/scratch/sagebrush-reviews/readability/sessions/readability-Q08-3-xz0ibyim/source/lib/_sage_nf.py:607`): The proven certificate from `bnf_certify()`, including class number, invariants, and regulator with full proof details\n- **`_bnf_proof_check`** (source: `/scratch/sagebrush-reviews/readability/sessions/readability-Q08-3-xz0ibyim/source/lib/_sage_nf.py:635`): A tuple tracking which independent cross-checks were performed\n\n## Independent Quadratic Cross-Checks (for degree-2 fields only)\n\nThe method `_proven_bnf()` (source: lines 579-636) performs independent verification:\n\n1. **|d| \u2265 1000**: Compares class number and invariants against `quadratic_class_group_data()` (the quadratic algorithm shortcut)\n2. **0 < d \u2264 10\u2075**: If quadratic algorithms fail, validates class number against `_count_real_classes()` (reduced indefinite forms)\n3. **-10\u2075 \u2264 d < 0**: Validates class number against `_count_reduced_forms()` (enumeration of reduced forms)\n\n## Disagreement Handling (line 625)\n\nA mismatch between the proven result and the independent check raises:\n```\nRuntimeError(\"the proven class group %s disagrees with the quadratic algorithms' %s\" ...)\n```\n\nThis indicates either a bug or that GRH is false.\n\n## Quadratic Shortcut Failure (lines 551-554, 617-621)\n\nIf the quadratic algorithm fails (raises `ValueError` or `RuntimeError`) when |d| \u2265 1000, the general algorithm `bnf()` is invoked as fallback, with the proof still performed unconditionally via `bnf_certify()` rather than relying on the failed quadratic shortcut.\n\nThe regulator is not cross-checked.",
+      "criteria": [
+        0,
+        0,
+        1
+      ],
+      "grading_note": "Records cross-check cache and regulator exclusion, but omits cached refusals and asserts an unrelated general-bnf fallback in the proof path."
+    },
+    {
+      "id": "Q09",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 58.227,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 89,
+        "cache_creation_input_tokens": 38030,
+        "cache_read_input_tokens": 276960,
+        "output_tokens": 5023,
+        "output_tokens_details": {
+          "thinking_tokens": 2838
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 38030,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1026,
+            "cache_read_input_tokens": 42550,
+            "cache_creation_input_tokens": 900,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 900
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 89,
+          "outputTokens": 5023,
+          "cacheReadInputTokens": 276960,
+          "cacheCreationInputTokens": 38030,
+          "webSearchRequests": 0,
+          "costUSD": 0.12896,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2838,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 13,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what the `extra-primes` argument does and how the factor base and relation elements are organized:\n\n## The `extra-primes` Argument\n\nIn `bnf_relations` (source/engine/classgroup/src/api.rs:351), the `extra` parameter is `&[u64]`. According to the comment at source/engine/classgroup/src/nf/bnf.rs:613-615:\n\n> \"bnfinit, with every prime ideal above the rational primes `extra` also in the factor base (as columns), and the relations returned: so that the S-units for S containing those primes can be read off.\"\n\nThe `extra` parameter adds all prime ideals above the specified rational primes as columns in the factor base beyond the standard generator bound. This enables extraction of S-units where S contains those primes.\n\n## Factor-Base Column Ordering\n\nThe factor base is constructed in two passes (bnf.rs:662-669):\n\n1. **First pass** (`pass=true`): All prime ideals `q` where `q.norm() < bound` OR the rational prime above `q` is in the `extra` list\n2. **Second pass** (`pass=false`): All remaining prime ideals with `norm >= bound` not in `extra`\n\nWithin each rational prime `p`, all its ideals are added consecutively. The variable `ngen` (bnf.rs:670) counts the ideals from the first pass\u2014these are the \"generator\" columns actually used for class group computation. The comment at bnf.rs:497-500 clarifies that only `fb[..ngen]` are columns; relations with the others are dropped since they aren't needed to generate the group.\n\n## Coordinate System of Returned Relation Elements\n\nThe returned elements in `RelationData.elems` (api.rs:344-349) are given as `Vec<(Vec<BigInt>, BigInt)>` representing `(numerators, denominator)`. \n\nThe conversion from order coordinates to power-basis coordinates is done at api.rs:359-364:\n\n```rust\nlet num: Vec<BigInt> = (0..n).map(|j| \n  (0..n).map(|i| &x[i] * &r.order.basis[i][j]).sum()\n).collect();\n(num, r.order.den.clone())\n```\n\nThis multiplies the order-coordinate element `x` by the integral basis matrix `B` (where rows give basis elements in power-basis form) and divides by the denominator. The result is coefficients on the power basis `{1, a, a\u00b2, ..., a^(n-1)}` where `a` is the defining field element. Per api.rs:39, the basis consists of \"rows of numerators over the power basis, / den\".",
+      "criteria": [
+        0,
+        1,
+        1
+      ],
+      "grading_note": "Generating prefix and coordinate conversion correct; omits sorting/deduplication of extra primes."
+    },
+    {
+      "id": "Q09",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 74.915,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 169,
+        "cache_creation_input_tokens": 37717,
+        "cache_read_input_tokens": 588018,
+        "output_tokens": 6115,
+        "output_tokens_details": {
+          "thinking_tokens": 3048
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 37717,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 801,
+            "cache_read_input_tokens": 42280,
+            "cache_creation_input_tokens": 857,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 857
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 169,
+          "outputTokens": 6115,
+          "cacheReadInputTokens": 588018,
+          "cacheCreationInputTokens": 37717,
+          "webSearchRequests": 0,
+          "costUSD": 0.16497980000000004,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 3048,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 23,
+      "is_error": false,
+      "answer": "Based on the source code, here's what I found:\n\n## What the `extra-primes` argument changes\n\nFrom **nf/bnf.rs:613-615**, the `extra` argument to `bnfinit_with()` includes every prime ideal above those extra rational primes as columns in the factor base, allowing S-units for S containing those primes to be read off.\n\nSpecifically, in **nf/bnf.rs:651-659**, prime ideals above extra rational primes are added to the factor base even if their norm is above the bound, whereas normally only prime ideals with norm < bound are included as columns.\n\n## Factor-base column ordering\n\nThe factor base columns are ordered by rational prime (ascending), with all factor ideals above a given rational prime grouped together consecutively. This comes from **nf/bnf.rs:662-669**, which iterates through rational primes from `above` (built from `primes_up_to(bound-1)` plus extra primes) in order, adding all their factor ideals to the factor base. Factor ideals with norm < bound (or above extra primes) are added in the first pass, others in the second pass.\n\nThe factor base returned in RelationData is restricted to `fb[..ngen]` (**nf/bnf.rs:812**), containing only those ideals with norm below the bound.\n\n## Coordinate system of returned relation elements\n\nFrom **api.rs:359-364**, relation elements are converted from order basis coordinates to power basis coordinates:\n- Returned as numerators `num` with common denominator `den`\n- Numerators are computed as: `num[j] = sum_i (x[i] * order.basis[i][j])` where `x` is the element on the order basis and `order.basis` is the integral basis\n- Relations themselves (**relations.rs:108**) are `Vec<(usize, i64)>`: pairs of (column index, exponent) in sparse sorted representation",
+      "criteria": [
+        0,
+        0,
+        1
+      ],
+      "grading_note": "Coordinate conversion correct. Omits extra sorting/deduplication and incorrectly says returned prefix contains only norms below the bound."
+    },
+    {
+      "id": "Q09",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 64.701,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 161,
+        "cache_creation_input_tokens": 40615,
+        "cache_read_input_tokens": 560610,
+        "output_tokens": 5328,
+        "output_tokens_details": {
+          "thinking_tokens": 2591
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 40615,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1026,
+            "cache_read_input_tokens": 45306,
+            "cache_creation_input_tokens": 729,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 729
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 161,
+          "outputTokens": 5328,
+          "cacheReadInputTokens": 560610,
+          "cacheCreationInputTokens": 40615,
+          "webSearchRequests": 0,
+          "costUSD": 0.16409199999999996,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2591,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 19,
+      "is_error": false,
+      "answer": "Based on the source code, here's what the `extra-primes` argument does and how the coordinate systems work:\n\n## What `extra-primes` Changes\n\nThe `extra` argument to `bnf_relations` (api.rs:351) adds all prime ideals above those rational primes as columns to the factor base, even if their norms are >= the bound. Per the documentation in bnf.rs:613-615: \"every prime ideal above the rational primes `extra` also in the factor base (as columns), and the relations returned: so that the S-units for S containing those primes can be read off.\"\n\n## Factor-Base Column Ordering\n\nThe factor base construction (bnf.rs:645-670) uses a two-pass algorithm:\n\n1. **Pass 1 (true):** Adds all prime ideals `q` where:\n   - `norm(q) < bound`, OR  \n   - The rational prime `q.p` is in `extra`\n   \n   These form the \"columns\" (ngen ideals in bnf.rs:670)\n\n2. **Pass 2 (false):** Adds remaining prime ideals (those not in pass 1)\n\nWithin each pass, ideals are grouped by their rational prime p and processed in the order that rational primes appear.\n\nThe returned `RelationData.fb` (api.rs:351-365) contains only the first group (column ideals), as `fb: fld.fb[..fld.ngen]` (bnf.rs:812).\n\n## Coordinate System of Returned Elements\n\nRelation elements are returned in **power-basis coordinates** `K = Q[x]/(f)` as `(numerators, denominator)`:\n\n- In bnf.rs:812, elements are stored in **order coordinates** (`Vec<BigInt>` in order basis)\n- In api.rs:359-362, they're converted to power basis by: `num[j] = sum_i(elem[i] * basis[i][j])` for each power-basis coefficient j\n- The denominator is `order.den`, making elements of the form `(num_0 + num_1*a + ... + num_(n-1)*a^(n-1)) / den` where `a` is the root of f\n\nThe relations themselves (bnf.rs:713) are sparse vectors of (column_index, exponent) pairs representing valuations.",
+      "criteria": [
+        0,
+        1,
+        1
+      ],
+      "grading_note": "Two-pass layout and power-basis conversion correct; omits sorting/deduplication."
+    },
+    {
+      "id": "Q10",
+      "repetition": 1,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 24.766,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 65,
+        "cache_creation_input_tokens": 66495,
+        "cache_read_input_tokens": 224546,
+        "output_tokens": 2024,
+        "output_tokens_details": {
+          "thinking_tokens": 585
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 66495,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 748,
+            "cache_read_input_tokens": 71731,
+            "cache_creation_input_tokens": 184,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 184
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 65,
+          "outputTokens": 2024,
+          "cacheReadInputTokens": 224546,
+          "cacheCreationInputTokens": 66495,
+          "webSearchRequests": 0,
+          "costUSD": 0.1656296,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 585,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 9,
+      "is_error": false,
+      "answer": "Based on the source code, here's the explanation of the two unconditional-certificate limits:\n\n## The Two Limits\n\n**1. `norm_max` (default: 1,000,000)**\n   - The bound on **M**, the norm bound for ideal class representatives in step 1 of the certificate\n   - M is the minimum of Minkowski's and Zimmert's bounds (both proportional to \u221a|discriminant|)\n   - Represents the largest norm of prime ideals that must be shown to generate the class group\n\n**2. `index_max` (default: 1,000,000)**\n   - The bound on **B**, the unit index in step 2 of the certificate  \n   - Computed as floor(R'/R_low), where R' is the regulator found and R_low is Zimmert's proven lower bound\n   - Bounds the index [O* : U'] where U' is the unit subgroup spanned by units found\n\n## Caller Overrides\n\nThe low-level Python API (`sagebrush.nf.bnf_certify`) at **source/lib/sagebrush/nf.py:87** accepts optional overrides:\n```python\ndef bnf_certify(f, norm_max=None, index_max=None):\n```\n\nThese are passed through the Rust API (`source/engine/classgroup/src/api.rs:325`) where defaults are applied:\n```rust\nlet limits = crate::nf::proof::Limits { \n    norm_max: norm_max.unwrap_or(d.norm_max), \n    index_max: index_max.unwrap_or(d.index_max) \n};\n```\n\n## How Exceeding Limits Surfaces\n\n**Low-level Python API** (`sagebrush.nf.bnf_certify`):\n- Raises `ValueError` starting with \"beyond the limits of the unconditional certificate\" \n- Includes which bound (norm or index), the value, limit, and ratio exceeded\n- Example at **source/lib/sagebrush/nf.py:94-95**\n\n**Sage-style NumberField API** (`_sage_nf.NumberField.class_group`):\n- When `proof=True` calls `_proven_bnf()` \u2192 `bnf_certify()`\n- Catches the ValueError and re-raises as `NotImplementedError` with context\n- Example at **source/lib/_sage_nf.py:671-673**: \n  > \"NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it)\"\n\nThe refusal mechanism (constant `REFUSED` at **source/engine/classgroup/src/nf/proof.rs:92**) ensures the certificate refuses before attempting computation when bounds would be exceeded.",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Limits, defaults and overrides correct; does not identify cached ValueError messages in the Sage refusal path."
+    },
+    {
+      "id": "Q10",
+      "repetition": 2,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 38.89,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 113,
+        "cache_creation_input_tokens": 67922,
+        "cache_read_input_tokens": 459549,
+        "output_tokens": 3345,
+        "output_tokens_details": {
+          "thinking_tokens": 1180
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 67922,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1256,
+            "cache_read_input_tokens": 72283,
+            "cache_creation_input_tokens": 1059,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1059
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 113,
+          "outputTokens": 3345,
+          "cacheReadInputTokens": 459549,
+          "cacheCreationInputTokens": 67922,
+          "webSearchRequests": 0,
+          "costUSD": 0.1986369,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1180,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 16,
+      "is_error": false,
+      "answer": "Based on the source code, here are the two unconditional-certificate limits and how they work:\n\n## The Two Limits\n\n**1. norm_max (Default: 1,000,000)**\n- Controls the Minkowski or Zimmert bound M for ideal class representatives\n- Defined at `engine/classgroup/src/nf/proof.rs:74-75`\n- When exceeded, the error specifies \"the Minkowski bound for the norms of ideal class representatives is X, above the limit 1000000\"\n\n**2. index_max (Default: 1,000,000)**  \n- Controls the unit index bound B (the index of units found in the unit group, per Zimmert's lower bound)\n- Defined at `engine/classgroup/src/nf/proof.rs:74-75`\n- When exceeded, the error says \"the bound on the index of the units found in the unit group...is X, above the limit 1000000\"\n\n## Where Callers Supply Overrides\n\n**Low-level Python API** (`source/engine/py/python/sagebrush/nf.py:87-106`):\n```python\nbnf_certify(f, norm_max=None, index_max=None)\n```\nOptional parameters default to None; if None, the Rust engine uses `Limits::default()` (both fields 1,000,000).\n\n**Rust public API** (`source/engine/classgroup/src/api.rs:325-332`):\n```rust\npub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<...>\n```\nUnwraps to defaults via `Limits::default()` if None.\n\n## How Exceeding Limits Surfaces\n\n**Low-level Python API:**\n- Raises `ValueError` starting with `\"beyond the limits of the unconditional certificate\"` (proof.rs:92, api.rs:323)\n- Message includes the bound name, value, limit, and ratio: e.g., \"beyond the limits... the Minkowski bound... is 2205315, above the limit 1000000 (2.205 times it)\"\n\n**Sage-style NumberField API** (`source/lib/_sage_nf.py:604-609`):\n- The `_proven_bnf()` method catches the `ValueError` from `bnf_certify()` and re-raises as `NotImplementedError`\n- Message format: `\"class_group with proof=True: beyond the limits of the unconditional certificate: [original error message]\"`\n- Example from docstring (line 673): `NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound...`\n\nThe distinction is intentional: the low-level API reports limits via ValueError (a data-validation error), while the Sage-style API uses NotImplementedError (the proof cannot be provided for this field).",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Limits, defaults and overrides correct; does not identify cached ValueError messages."
+    },
+    {
+      "id": "Q10",
+      "repetition": 3,
+      "sha": "accfd3d73961fd477c6b107a45add9bd62634e56",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 38.039,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 81,
+        "cache_creation_input_tokens": 68338,
+        "cache_read_input_tokens": 379766,
+        "output_tokens": 3523,
+        "output_tokens_details": {
+          "thinking_tokens": 1725
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 68338,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 957,
+            "cache_read_input_tokens": 72135,
+            "cache_creation_input_tokens": 1623,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1623
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 81,
+          "outputTokens": 3523,
+          "cacheReadInputTokens": 379766,
+          "cacheCreationInputTokens": 68338,
+          "webSearchRequests": 0,
+          "costUSD": 0.19234860000000004,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1725,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 14,
+      "is_error": false,
+      "answer": "Based on the source code, here's the explanation of the two unconditional-certificate limits:\n\n## The Two Limits\n\n1. **norm_bound** (Minkowski/Zimmert bound for ideal norms) \u2014 default **10^6**\n   - Bounds the norm of prime ideal class representatives\n   - Calculated as the smaller of Minkowski's bound and Zimmert's bound (Invent. Math. 62, 1981)\n\n2. **index_bound** (unit index bound) \u2014 default **10^6**  \n   - Bounds the index of units found\n   - Derived from Zimmert's lower bound for the regulator\n\n## Caller Overrides\n\n**Low-level Python API** (`source/lib/sagebrush/nf.py:87-106`):\n- Function: `bnf_certify(f, norm_max=None, index_max=None)`\n- Parameters `norm_max` and `index_max` allow overriding the default limits\n- When omitted (None), engine uses its built-in defaults\n\n## How Exceeding Them Surfaces\n\n**Low-level Python API**:\n- Raises `ValueError` with message prefix: `\"beyond the limits of the unconditional certificate\"`\n- Message details which bound exceeded and by what factor\n\n**Sage-style NumberField API** (`source/lib/_sage_nf.py:579-636, 638-679`):\n- Methods `class_group(proof=True)`, `unit_group(proof=True)`, `regulator(proof=True)` call `_proven_bnf()`\n- The `_proven_bnf()` method (lines 603-609) catches `ValueError` from `bnf_certify()` and converts it to `NotImplementedError`\n- Example (`source/lib/_sage_nf.py:673`):\n  ```\n  NotImplementedError: class_group with proof=True: beyond the limits of the \n  unconditional certificate: the Minkowski bound for the norms of ideal class \n  representatives is 2205315, above the limit 1000000 (2.205 times it)\n  ```",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Meanings/defaults correct; does not trace overrides through Rust Limits or identify the refusal cache."
+    }
+  ]
+}
