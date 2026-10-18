@@ -616,6 +616,43 @@ def _div(A, B):
         return A / B
 
 
+def _cpow_int(A, B, r):
+    """a complex base to a nonzero integer power below 100 in magnitude, as Octave
+    gives it: binary powering from 1 (and 1 / that for a negative power), not numpy's
+    power, whose square a a has the imaginary part a b + b a (-0 for -3+0i, where
+    Octave has 9+0i); other elements keep r. (An exponent with a zero imaginary part
+    counts as real)"""
+    real = np.ones(np.shape(B), bool)
+    if B.dtype.kind == "c":
+        real, B = B.imag == 0, B.real
+    B = B.astype(np.float64)
+    m = real & (B == np.floor(B)) & (np.abs(B) < 100) & (B != 0) & (A != 0)
+    if not np.any(m):
+        return r
+    A, B, m, r = np.broadcast_arrays(A, B, m, r)
+    n = np.where(m, np.abs(B), 0).astype(np.int64)
+    acc, p = np.ones(A.shape, np.complex128), A.astype(np.complex128)
+    while np.any(n):
+        acc = np.where(n & 1, acc * p, acc)
+        p = p * p
+        n = n >> 1
+    if np.any(m & (B < 0)):
+        # 1 / acc by Smith's algorithm dividing by the denominator (numpy's divide
+        # multiplies by its reciprocal, which rounds differently)
+        c, d = acc.real, acc.imag
+        big = np.abs(c) >= np.abs(d)
+        q = np.where(big, d / c, c / d)
+        den = np.where(big, c + d * q, c * q + d)
+        re = np.where(big, (1.0 + 0.0 * q) / den, (1.0 * q + 0.0) / den)
+        im = np.where(big, (0.0 - 1.0 * q) / den, (0.0 * q - 1.0) / den)
+        zero = (c == 0) & (d == 0)
+        re, im = np.where(zero, np.inf, re), np.where(zero, np.nan, im)
+        inv = np.empty(acc.shape, np.complex128)
+        inv.real, inv.imag = re, im  # (re + 1j * im would lose a -0 imaginary part)
+        acc = np.where(B < 0, inv, acc)
+    return np.where(m, acc, r)
+
+
 def _pow(A, B):
     if A.dtype.kind != "c" and B.dtype.kind != "c":
         # a negative base to a fractional power is complex
@@ -623,6 +660,8 @@ def _pow(A, B):
             A = A.astype(np.complex128)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         r = A ** B
+        if A.dtype.kind == "c" or B.dtype.kind == "c":
+            r = _cpow_int(A, B, r)
     # (1.^NaN and NaN.^0 are NaN in MATLAB, as power's IEEE table says, not IEEE's 1)
     odd = ((A == 1) & np.isnan(B)) | (np.isnan(A) & (B == 0))
     if np.any(odd):
