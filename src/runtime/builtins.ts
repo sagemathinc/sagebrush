@@ -56,9 +56,16 @@ Ty.getset(streamType, "closed", () => false);
 // All of data to fd, however much each write takes: a descriptor may be a
 // non-blocking pipe (a parent's, or Node's own), whose write takes only what
 // fits and refuses with EAGAIN when full; then a wait of 1 ms doubling to 50
-// ms, not a spin.  (One writeSync dropped the rest of a large print.)
-const writePause = new Int32Array(new SharedArrayBuffer(4));
+// ms, not a spin.  (One writeSync dropped the rest of a large print.)  In a
+// page, which has no Buffer and, without cross-origin isolation, no
+// SharedArrayBuffer, one write of the string, as before.
+let writePause: Int32Array | undefined;
 export function writeAll(fd: number, s: string): void {
+  if (typeof Buffer !== "function" || typeof SharedArrayBuffer !== "function") {
+    writeSync(fd, s);
+    return;
+  }
+  const pause = (writePause ??= new Int32Array(new SharedArrayBuffer(4)));
   const data = Buffer.from(s, "utf8");
   for (let off = 0, wait = 1; off < data.length; ) {
     let n = 0;
@@ -71,7 +78,7 @@ export function writeAll(fd: number, s: string): void {
       off += n;
       wait = 1;
     } else {
-      Atomics.wait(writePause, 0, 0, wait);
+      Atomics.wait(pause, 0, 0, wait);
       wait = Math.min(2 * wait, 50);
     }
   }
