@@ -57,26 +57,28 @@ Ty.getset(streamType, "closed", () => false);
 // non-blocking pipe (a parent's, or Node's own), whose write takes only what
 // fits and refuses with EAGAIN when full; then a wait of 1 ms doubling to 50
 // ms, not a spin.  (One writeSync dropped the rest of a large print.)  Only
-// with Node's fs (Node, Deno and Bun all report process.versions.node): in a
-// page, fs is the web build's shim, whose writeSync takes the whole string
-// and returns nothing, and there may be no SharedArrayBuffer; there, one
-// write of the string, as before.
+// with Node's fs (Node, Deno and Bun all report process.versions.node): the
+// web build's fs shim (marked webShim), whose writeSync takes the whole
+// string and returns nothing, and a runtime without SharedArrayBuffer get one
+// write of the string, as before.  A writeSync that returns no count, such as
+// that shim in a page that has Node's process (an embedding), wrote it all.
 let writePause: Int32Array | undefined;
 export function writeAll(fd: number, s: string): void {
   const g = globalThis as any;
-  if (!(typeof g.process === "object" && g.process.versions?.node) || typeof SharedArrayBuffer !== "function") {
+  if (!(typeof g.process === "object" && g.process.versions?.node) || typeof SharedArrayBuffer !== "function" || (writeSync as any).webShim) {
     writeSync(fd, s);
     return;
   }
   const pause = (writePause ??= new Int32Array(new SharedArrayBuffer(4)));
   const data = Buffer.from(s, "utf8");
   for (let off = 0, wait = 1; off < data.length; ) {
-    let n = 0;
+    let n: unknown = 0;
     try {
       n = writeSync(fd, data, off);
     } catch (e: any) {
       if (e?.code !== "EAGAIN") throw e;
     }
+    if (typeof n !== "number") return;
     if (n > 0) {
       off += n;
       wait = 1;
