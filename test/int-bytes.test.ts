@@ -26,3 +26,19 @@ test("int.from_bytes and int.to_bytes are linear", () => {
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8", timeout: 120000 });
   assert.equal(out.trim(), "True True");
 });
+
+// (padding costs nothing but the output: a negative value's padding is
+// written as 0xff, not made as a BigInt and its digits; with V8's heap
+// capped at 128 MiB, a 100 MB padded result, whose bytes live outside that
+// heap, still converts; daybreak2's limits finding on 6ce60e6b)
+test("int.to_bytes pads without making the padding as a number", () => {
+  const src = [
+    "n = 100_000_000",
+    "b = (-1).to_bytes(n, 'big', signed=True)",
+    "c = (-(2**61) - 7).to_bytes(n, 'little', signed=True)",
+    "d = (2**61 + 7).to_bytes(1000, 'big')",
+    "print(len(b), b[:2], b[-2:], c[:8], c[-2:], d[:2], d[-8:])",
+  ].join("\n");
+  const out = execFileSync(process.execPath, ["--max-old-space-size=128", __dirname + "/../src/cli.js", "-c", src], { encoding: "utf8", timeout: 120000 });
+  assert.equal(out.trim(), String.raw`100000000 b'\xff\xff' b'\xff\xff' b'\xf9\xff\xff\xff\xff\xff\xff\xdf' b'\xff\xff' b'\x00\x00' b' \x00\x00\x00\x00\x00\x00\x07'`);
+});
