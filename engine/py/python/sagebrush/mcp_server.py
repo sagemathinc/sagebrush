@@ -734,11 +734,16 @@ class Server:
             code = "from sagebrush.mcp_server import _number_field_data\n__sagebrush_data__ = _number_field_data(%s, %s)" % (json.dumps(coeffs), proof)
             return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
         if name == "newforms":
-            try:
-                n = int(args.get("level"))
-                k = int(args.get("weight", 2) or 2)
-            except (TypeError, ValueError):
-                raise _Invalid("`level` (and `weight`) must be integers")
+            def integer(v, what):
+                # (an int, or a string of digits: 23.5 is not 23)
+                if isinstance(v, str) and v.strip().isdigit():
+                    v = int(v)
+                if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v < 1 << 31:
+                    raise _Invalid("`%s` must be a positive integer" % what)
+                return v
+
+            n = integer(args.get("level"), "level")
+            k = integer(args.get("weight", 2), "weight")
             code = "from sagebrush.mcp_server import _newforms_data\n__sagebrush_data__ = _newforms_data(%d, %d)" % (n, k)
             return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
         raise KeyError(name)
