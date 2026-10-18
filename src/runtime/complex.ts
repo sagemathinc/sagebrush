@@ -23,42 +23,92 @@ export function toC(x: any): [number, number] | undefined {
   return v === undefined ? undefined : [v, 0];
 }
 
+// a ** b as CPython 3.14's complex_pow (Objects/complexobject.c, ported:
+// NOTICE.md), its operations in its order so that the digits agree: an
+// exponent that is an integer of at most 100 by c_powi (repeated squaring
+// with _Py_c_prod, and _Py_c_quot for a negative one), any other by
+// _Py_c_pow (polar form). C's errno is followed as glibc sets it: EDOM from
+// cos or sin of an infinity, or from the quotient's division by zero, is
+// ZeroDivisionError; then _Py_ADJUST_ERANGE2: an infinite part of the
+// result, unless EDOM was set, is OverflowError; any other errno cleared.
 function cpow(a: [number, number], b: [number, number]): PyComplex {
   const [ar, ai] = a, [br, bi] = b;
-  if (br === 0 && bi === 0) return new PyComplex(1, 0);
-  if (ar === 0 && ai === 0) {
-    if (bi !== 0 || br < 0) raise(T.ZeroDivisionError, "zero to a negative or complex power");
-    return new PyComplex(0, 0);
-  }
-  if (bi === 0 && Number.isInteger(br) && Math.abs(br) <= 100) {
-    // repeated squaring, as CPython's c_powi
-    let n = Math.abs(br), rr = 1, ri = 0, xr = ar, xi = ai;
-    while (n > 0) {
-      if (n & 1) [rr, ri] = [rr * xr - ri * xi, rr * xi + ri * xr];
-      [xr, xi] = [xr * xr - xi * xi, 2 * xr * xi];
-      n >>= 1;
+  const st = { edom: false };
+  let re: number, im: number;
+  if (bi === 0 && br === Math.floor(br) && Math.abs(br) <= 100) {
+    [re, im] = cpowi(ar, ai, br, st);
+  } else if (br === 0 && bi === 0) {
+    [re, im] = [1, 0];
+  } else if (ar === 0 && ai === 0) {
+    if (bi !== 0 || br < 0) st.edom = true;
+    [re, im] = [0, 0];
+  } else {
+    const vabs = CR.hypot(ar, ai);
+    let len = glibcPow(vabs, br);
+    const at = CR.atan2(ai, ar);
+    let phase = at * br;
+    if (bi !== 0) {
+      len *= glibcExp(-at * bi);
+      phase += bi * glibcLog(vabs);
     }
-    if (br < 0) return cdiv([1, 0], [rr, ri]);
-    return new PyComplex(rr, ri);
+    // (glibc's cos and sin of an infinity set EDOM)
+    if (phase === Infinity || phase === -Infinity) st.edom = true;
+    re = len * CR.cos(phase);
+    im = len * CR.sin(phase);
   }
-  const vabs = CR.hypot(ar, ai);
-  let len = glibcPow(vabs, br);
-  const at = CR.atan2(ai, ar);
-  let phase = at * br;
-  if (bi !== 0) {
-    len /= glibcExp(at * bi);
-    phase += bi * glibcLog(vabs);
+  if (st.edom) raise(T.ZeroDivisionError, "zero to a negative or complex power");
+  if (isInf(re) || isInf(im)) raise(T.OverflowError, "complex exponentiation");
+  return new PyComplex(re, im);
+}
+// (CPython's c_powi and c_powu: x ** n for an integer n, |n| <= 100)
+function cpowi(xr: number, xi: number, n: number, st: { edom: boolean }): [number, number] {
+  const powu = (k: number): PyComplex => {
+    let r = new PyComplex(1, 0), p = new PyComplex(xr, xi);
+    for (let mask = 1; mask > 0 && k >= mask; mask *= 2) {
+      if (k & mask) r = cmul(r.re, r.im, p.re, p.im);
+      p = cmul(p.re, p.im, p.re, p.im);
+    }
+    return r;
+  };
+  if (n > 0) {
+    const r = powu(n);
+    return [r.re, r.im];
   }
-  const r = new PyComplex(len * CR.cos(phase), len * CR.sin(phase));
-  if (!Number.isFinite(r.re) && Number.isFinite(ar) && Number.isFinite(ai) && Number.isFinite(br) && Number.isFinite(bi)) raise(T.OverflowError, "complex exponentiation");
-  return r;
+  const d = powu(-n);
+  return quot(1, 0, d.re, d.im, st);
+}
+// (CPython's _Py_c_quot, a division by zero setting EDOM, its result then 0)
+function quot(ar: number, ai: number, br: number, bi: number, st: { edom: boolean }): [number, number] {
+  const abr = Math.abs(br), abi = Math.abs(bi);
+  let x: number, y: number;
+  if (abr >= abi) {
+    if (abr === 0) {
+      st.edom = true;
+      x = y = 0;
+    } else {
+      const ratio = bi / br, denom = br + bi * ratio;
+      x = (ar + ai * ratio) / denom;
+      y = (ai - ar * ratio) / denom;
+    }
+  } else if (abi >= abr) {
+    const ratio = br / bi, denom = br * ratio + bi;
+    x = (ar * ratio + ai) / denom;
+    y = (ai * ratio - ar) / denom;
+  } else {
+    x = y = NaN;
+  }
+  if (x !== x && y !== y) [x, y] = recoverQuot(ar, ai, br, bi, x, y);
+  return [x, y];
 }
 export const complexPow = (x: number, y: number) => cpow([x, 0], [y, 0]);
 
 const isInf = (x: number) => x === Infinity || x === -Infinity;
 const isFin = Number.isFinite;
-const sgn = (one: boolean, x: number) => (x < 0 || Object.is(x, -0) ? (one ? -1 : -0) : one ? 1 : 0);
-const copysign0 = (x: number) => (x !== x ? 0 : x); // (a NaN becomes 0; C's copysign(0, nan) is +0 for these NaNs)
+// (C's copysign, below with cmath's helpers: the sign bit of s, a NaN's
+// too. The NaN of an invalid operation, 0 * inf say, is negative on x86-64,
+// in V8 as in C, and C11 Annex G's recoveries below read it.)
+const sgn = (one: boolean, x: number) => copysign(one ? 1 : 0, x);
+const copysign0 = (x: number) => copysign(0, x);
 
 // a * b, with C11 Annex G's recovery of infinities (as CPython 3.14's
 // _Py_c_prod): when both parts come out NaN but an operand is infinite, the
