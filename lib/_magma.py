@@ -2698,7 +2698,7 @@ def _add(a, b, pos=None, op="+"):
         return _ffmat_op("+", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a + b
+        return _mod_result(a + b, "+", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2713,7 +2713,7 @@ def _sub(a, b, pos=None, op="-"):
         return _ffmat_op("-", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a - b
+        return _mod_result(a - b, "-", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2730,7 +2730,7 @@ def _mul(a, b, pos=None, op="*"):
         return _ffmat_op("*", a, b, pos)
     a, b = _ff_operands(a, b)
     try:
-        return a * b
+        return _mod_result(a * b, "*", a, b)
     except TypeError:
         raise _bad_types(op, (a, b), pos)
 
@@ -2747,7 +2747,7 @@ def _neg(a, pos=None):
         return -a
     _arith("-", (a,), pos)
     try:
-        return -a
+        return _mod_result(-a, "-", a)
     except TypeError:
         raise _bad_types("-", (a,), pos)
 
@@ -2767,7 +2767,7 @@ def _div(a, b, pos=None, op="/"):
         a, b = _real_pair(a, b)
         return a / b
     a, b = _ff_operands(a, b)
-    return a / b
+    return _mod_result(a / b, "/", a, b)
 
 
 def _idiv(a, b, pos=None):
@@ -2823,7 +2823,20 @@ def _pow(a, b, pos=None, op="^"):
         if isinstance(b, MReal) and not isinstance(a, MReal):
             a = MReal.of(a, b.prec)  # (in the exponent's field, CORR-C682-1)
         return MReal.of(a) ** b
-    return a ** b
+    if isinstance(a, _smat.Matrix) and isinstance(b, int) and not isinstance(b, bool) and b < 0 and a._base in (_sa.ZZ, _sa.QQ) \
+            and a.nrows() == a.ncols():
+        # (a negative power exists only for a unit determinant, over the
+        # integers 1 or -1, and stays over the matrix's ring, as Magma's:
+        # the inverse below is over the rationals; astra2's CORR-CA8-1)
+        a._pow_admit(b)
+        d = a.det()
+        if d == 0 or (a._base is _sa.ZZ and d not in (1, -1)):
+            raise MagmaError("Argument 1 is not invertible", "'%s'" % op, True, pos)
+        r = a ** b
+        if a._base is _sa.ZZ:
+            r = _MMatrix(_sa.ZZ, [[int(x) for x in row] for row in r._rows], r.ncols())
+        return _mod_result(r, "^", a, b)
+    return _mod_result(a ** b, "^", a, b)
 
 
 def _rat_pow(a, b, op, pos):
@@ -3092,6 +3105,8 @@ def _struct_eq(a, b, op, pos):
 def _eq(a, b, pos=None, op="eq"):
     if _cyc_elt(a) or _cyc_elt(b):
         _cyc_check(op, a, b, pos)
+    if isinstance(a, _MModSpace) or isinstance(b, _MModSpace):
+        raise MagmaError("comparison of a module of matrices is not supported yet", "'%s'" % op, True, pos)
     if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
@@ -3489,13 +3504,26 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
 
     def fits(w, r):
         # (an element the witness's universe certainly takes: an integer,
-        # one of its own structure, a rational into a number field)
+        # one of its own structure, a rational into a number field, a real
+        # field or polynomials over the rationals)
         if isinstance(r, int) and not isinstance(r, bool):
             return True
-        if nf(w) and isinstance(r, _Fraction):
+        if isinstance(r, _Fraction) and (nf(w) or isinstance(w, MReal) or (
+                isinstance(w, _sp.Polynomial) and w.parent().base_ring() == _sp.QQ)):
             return True
         k = _wit_key(w)
         return k is not None and k == _wit_key(r)
+
+    def own(w, d):
+        # (a declared universe that is the witness's own structure: {K | }
+        # for an emptied set of K's elements; a real field of its precision)
+        if isinstance(w, MReal):
+            return isinstance(d, RealField_) and d.prec == w.prec
+        try:
+            p = Parent(w)
+        except MagmaError:
+            return False
+        return p is d or _same_struct(p, d)
 
     unsupported = lambda: MagmaError("a set operation on an emptied set of a structure's elements and this other set is not supported yet", "'%s'" % op, True, pos)
     w = wa if wa is not None else wb
@@ -3513,6 +3541,8 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
             if d is not None and not (d is _ZZ):
                 if nf(w) and isinstance(d, _MFinField):
                     raise MagmaError(message, "'%s'" % op, True, pos)
+                if own(w, d):
+                    continue
                 raise unsupported()
             if d is None and _provenance(x) not in ("null", "int"):
                 raise unsupported()
@@ -3527,6 +3557,8 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
     if not len(t):
         t._wit = w
         return t
+    if t.kind == "multi" and _multi_collides((a, b), lambda o: _elt_into(o, w)):
+        raise MagmaError("a multiset operation where different elements coincide in the universe is not supported yet", "'%s'" % op, True, pos)
     items = []
     for y in (list(t) if t.kind == "multi" else t.items):
         z = _elt_into(y, w)
@@ -3534,6 +3566,29 @@ def _wit_set_result(t, op, a, b, pos, message, mode):
             raise unsupported()
         items.append(z)
     return MSet(items, t.kind)
+
+
+def _multi_collides(srcs, coerce):
+    """Whether two different elements of one of the multisets srcs become
+    one element coerced (coerce, as the set operation coerces them): Magma
+    then keeps a count Sagebrush doesn't model (GF(5)'s {* *} join
+    {* 1, 6, 11 *} is {* 1 *}, with {* 1, 1 *} over a number field
+    {* 1^^2 *}: astra2's WA-028).  One pass, by hashing."""
+    for x in srcs:
+        if getattr(x, "kind", None) != "multi":
+            continue
+        seen = {}
+        for o in x.items:
+            c = coerce(o)
+            if c is None or c is _NOCOERCE:
+                continue
+            try:
+                p = seen.setdefault(c, o)
+            except TypeError:
+                return True  # (not hashable: not certified)
+            if p is not o and not (type(p) is type(o) and p == o):
+                return True
+    return False
 
 
 def _set_result(t, op, a, b, pos, message, mode="any"):
@@ -3546,6 +3601,8 @@ def _set_result(t, op, a, b, pos, message, mode="any"):
     u = _pair_universe(op, a, b, pos, message)
     if not len(t) or u is None:
         return _carry(t, a, b, mode=mode)
+    if t.kind == "multi" and _multi_collides((a, b), lambda o: _coerce_struct(o, u)):
+        raise MagmaError("a multiset operation where different elements coincide in the universe is not supported yet", "'%s'" % op, True, pos)
     items = []
     for x in (list(t) if t.kind == "multi" else t.items):
         y = _coerce_struct(x, u)
@@ -3627,10 +3684,8 @@ def _reduce(op, s, pos=None):
     if op in ("and", "or") and not all(isinstance(x, bool) for x in items):
         raise _bad_types("&" + op, (s,), pos)
     if not items:
-        if op == "+":
-            return 0
-        if op == "*":
-            return 1
+        if op in ("+", "*"):
+            return _empty_identity(op, s, pos)
         if op == "and":
             return True
         if op == "or":
@@ -3658,6 +3713,58 @@ def _reduce(op, s, pos=None):
         else:
             raise MagmaError("unknown reduction &%s" % op)
     return r
+
+
+def _empty_identity(op, s, pos):
+    """&+ and &* of the empty collection s: the zero or the one of its
+    universe, as Magma's (checked against Magma 2.18, astra2's WA-027): of
+    a declared one ([RealField(15) | ] gives 0.000000000000000, [K | ] K's
+    0), of the integers (a range, [Integers() | ], one emptied of its
+    integers), of the rationals one emptied of its rationals, of an emptied
+    one's witness (_remember); Magma's "Illegal null sequence" (set) for a
+    written empty one ([], {}, an empty comprehension); else refused."""
+    k = 0 if op == "+" else 1
+    where = "'&%s'" % op
+    unsupported = lambda: MagmaError("&%s of an empty collection of this universe is not supported yet" % op, where, True, pos)
+    if isinstance(s, MRange):
+        return k
+    u = getattr(s, "universe", None)
+    if u is _ZZ:
+        return k
+    if u is not None:
+        if u is _QQ:
+            return _qelt(k)
+        if isinstance(u, (RealField_, _snf.NumberField_absolute, _sp.PolynomialRing_)):
+            return u(k)
+        if isinstance(u, (_MFinField, _MFFPolyRing, _MResRing)):
+            return _coerce(u, k, pos)
+        if isinstance(u, _smat.MatrixSpace_):
+            m, n = u.nrows(), u.ncols()
+            if k and m != n:
+                raise MagmaError("Universe has no one element", where, True, pos)
+            return _MMatrix(u.base_ring(), [[k if i == j else 0 for j in range(n)] for i in range(m)], n)
+        raise unsupported()
+    w = getattr(s, "_wit", None)
+    if isinstance(w, _MModMat):
+        # (a module of matrices has a zero but no one, square or not, as
+        # Magma's: astra2's CORR-CA8-2)
+        if k:
+            raise MagmaError("Universe has no one element", where, True, pos)
+        n = w.nrows()
+        return _MModMat(w._base, [[0] * n for _ in range(n)], n)
+    if w is not None:
+        z = _elt_into(k, w)
+        if z is None or z is _NOCOERCE:
+            raise unsupported()
+        return z
+    p = _provenance(s)
+    if p == "int":
+        return k
+    if p == "field" and getattr(s, "_inf", None) is _QQ:
+        return _qelt(k)
+    if p == "null" and getattr(s, "kind", None) != "multi":
+        raise MagmaError("Illegal null set" if isinstance(s, MSet) else "Illegal null sequence", where, True, pos)
+    raise unsupported()
 
 
 def _gen(R, i):
@@ -4926,6 +5033,10 @@ def _type_name(x):
         return "GrpPerm"
     if isinstance(x, _MResRing):
         return "RngIntRes"
+    if isinstance(x, _MModMat):
+        return "ModMatFldElt" if x._base is _sa.QQ else "ModMatRngElt"
+    if isinstance(x, _MModSpace):
+        return "ModMatFld" if x.base is _sa.QQ else "ModMatRng"
     if isinstance(x, _smat.Matrix) and (x._base is _sa.ZZ or x._base is _sa.QQ):
         # (a matrix Magma mode made, or one its arithmetic returned: A + A
         # is the underlying matrix class, CORR-803-1)
@@ -4989,6 +5100,8 @@ def _ext_type(x):
         return "%s[FldFin]" % _type_name(x)
     if isinstance(x, _MVector):
         return "%s[%s]" % (_type_name(x), _ring_cat(x._base))
+    if isinstance(x, _MModMat):
+        return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
         return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
     if isinstance(x, _Cat):
@@ -8161,6 +8274,55 @@ class _MMatrix(_smat.Matrix):
         return _MVector(self._rows[i - 1], self._base)
 
 
+class _MModMat(_MMatrix):
+    """A square matrix of a module of matrices, Magma's RMatrixSpace or
+    KMatrixSpace, not its matrix algebra: a product of matrices one of
+    which is not square (A * Transpose(A)), and what Magma keeps there
+    (checked against Magma 2.18, astra2's WA-026)."""
+    __slots__ = ()
+
+    def _magma_parent(self):
+        return _MModSpace(self._base, self.nrows())
+
+
+class _MModSpace:
+    """The parent of an _MModMat (printed only)."""
+
+    def __init__(self, base, n):
+        self.base, self.n = base, n
+
+    def __repr__(self):
+        if self.base is _sa.QQ:
+            return "Full KMatrixSpace of %d by %d matrices over Rational Field" % (self.n, self.n)
+        return "Full RMatrixSpace of %d by %d matrices over Integer Ring" % (self.n, self.n)
+
+
+def _mod_like(M, r):
+    """r, made from M by Transpose, HermiteForm or EchelonForm: of M's
+    module of matrices when M is (as Magma's)."""
+    return _MModMat(r._base, r._rows, r.ncols()) if isinstance(M, _MModMat) and r.is_square() else r
+
+
+def _mod_result(r, op, a, b=None):
+    """r = a op b (b None: -a), a square matrix result kept in a module of
+    matrices as Magma's (checked against Magma 2.18): a product with a
+    factor not square, or with one of a module (the other a matrix or a
+    scalar); a sum or difference of two of a module (with an algebra's
+    matrix it is the algebra's); -B, B^n, B / c of one."""
+    if not isinstance(r, _smat.Matrix) or r.nrows() != r.ncols():
+        return r
+    ma, mb = isinstance(a, _MModMat), isinstance(b, _MModMat)
+    if op == "*" and isinstance(a, _smat.Matrix) and isinstance(b, _smat.Matrix):
+        mod = ma or mb or a.nrows() != a.ncols() or b.nrows() != b.ncols()
+    elif op == "*":
+        mod = ma or mb
+    elif op in ("+", "-") and b is not None:
+        mod = ma and mb
+    else:
+        mod = ma
+    return _MModMat(r._base, r._rows, r.ncols()) if mod else r
+
+
 class _MVectorSpace:
     """The parent of a vector: Magma's full vector space (over the
     rationals) or RSpace (over the integers) of a degree."""
@@ -8809,6 +8971,11 @@ def _ffmat_op(o, a, b, pos):
     if isinstance(a, _MFFMat) and isinstance(b, _MFFMat):
         if o == "*":
             _ffm_admit(a.nrows() * a.ncols() * b.ncols(), F, "a product", "'*'")
+            if a.nrows() == b.ncols() and (a.nrows() != a.ncols() or b.nrows() != b.ncols()):
+                # (Magma's is a square matrix of a KMatrixSpace, ModMatFldElt,
+                # not of the matrix algebra: not modelled over a finite
+                # field, WA-026)
+                raise MagmaError("a square product of matrices over a finite field not square is not supported yet", "'*'", True)
             return _MFFMat(F, a.M * b.M)
         return _MFFMat(F, a.M + b.M if o == "+" else a.M - b.M)
     c = _ffm_scalar(F, b if x is a else a)
@@ -9039,15 +9206,21 @@ def _ff_admit_args(name, args, kw):
 
 
 def HermiteForm(M):
-    return _multi([_mmat(M.hermite_form())], show=1)
+    return _multi([_mod_like(M, _mmat(M.hermite_form()))], show=1)
 
 
 def EchelonForm(M):
     # over Z the Hermite form, over Q the reduced row echelon form
-    return _multi([_mmat(M.echelon_form())], show=1)
+    return _multi([_mod_like(M, _mmat(M.echelon_form()))], show=1)
+
+
+def _no_module(M, name):
+    if isinstance(M, _MModMat):
+        raise MagmaError("%s of a matrix of a module of matrices (a product of matrices not square) is not supported yet" % name, "'%s'" % name)
 
 
 def SmithForm(M):
+    _no_module(M, "SmithForm")
     D, U, V = M.smith_form()
     return _multi([_mmat(D), _mmat(U), _mmat(V)])
 
@@ -9060,6 +9233,7 @@ def LLL(M, *, Delta=None):
     if Delta is not None:
         # the reduced basis depends on Delta, which isn't passed on
         raise MagmaError("LLL with the parameter Delta is not supported yet")
+    _no_module(M, "LLL")
     return _multi([_mmat(M.LLL())], show=1)
 
 
@@ -9074,7 +9248,7 @@ def Determinant(M):
 def Transpose(M):
     if isinstance(M, _MFFMat):
         return _MFFMat(M.F, M.M.transpose())
-    return _mmat(M.transpose())
+    return _mod_like(M, _mmat(M.transpose()))
 
 
 def NumberOfRows(M):

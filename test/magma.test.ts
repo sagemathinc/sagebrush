@@ -1484,6 +1484,18 @@ test("a number put in a collection over a number field, a real field or a matrix
   assert.equal(good, "FldNumElt\nFldNumElt\nFldNumElt\nFldNumElt\nend\n", good);
   const mix = run("Z<u>:=PolynomialRing(Integers()); P<t>:=PolynomialRing(Rationals()); S:={u}; T:={t}; Exclude(~S,u); Exclude(~T,t); R:=S join T;");
   assert.ok(mix.replace(/\s+/g, " ").includes("a set operation on an emptied set of a structure's elements and this other set is not supported yet"), mix);
+  // (a declared empty universe that is the witness's own structure, and
+  // rationals into a real field or Q[y], keep it, as Magma's: checked
+  // against Magma 2.18, astra2's narrowing on a4d77d7b)
+  const own = ["P<y>:=PolynomialRing(Rationals()); U<c>:=NumberField(y^2-5); x:=c+1;", "U:=RealField(15); x:=U!2/7;", "U<y>:=PolynomialRing(Integers()); x:=y^2;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3;", "x:=Matrix(Rationals(),3,3,[1..9]); U:=Parent(x);", "U:=GF(11); x:=U!5;"];
+  const types = ["FldNumElt", "FldReElt", "RngUPolElt", "RngUPolElt", "AlgMatElt", "FldFinElt"];
+  const decl = run(own.flatMap((u) => ["S join {U|}", "{U|} meet S", "S diff {U|}", "{U|} sdiff S"].map((e) => u + ` S:={x}; Exclude(~S,x); R:=${e}; Include(~R,3); v:=Setseq(R)[1]; Type(v); Parent(v) eq U;`)).join("\n"));
+  assert.equal(decl, types.map((t) => `${t}\ntrue\n`.repeat(4)).join("") + "end\n", decl);
+  const rat = run(["U:=RealField(15); x:=U!2/7; S:={x}; Exclude(~S,x); R:=S meet {2/3}; Include(~R,3); v:=Setseq(R)[1]; Type(v); Parent(v) eq U;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3; S:={x}; Exclude(~S,x); R:=S join {2/3}; v:=Setseq(R)[1]; Type(v); Parent(v) eq U;",
+    "U<y>:=PolynomialRing(Rationals()); x:=y/3; S:={x}; Exclude(~S,x); R:={2/3} diff S; v:=Setseq(R)[1]; Type(v); v;"].join("\n"));
+  assert.equal(rat, "FldReElt\ntrue\nRngUPolElt\ntrue\nRngUPolElt\n2/3\nend\n", rat);
 });
 
 test("Matrix checks its shape in Magma's words before it builds anything: no Python error, no silently shortened matrix", () => {
@@ -1790,5 +1802,92 @@ test("a zero cyclotomic element still decides a literal's universe; another fiel
     ["x:=[K | L!3, b];", "Runtime error in [ ... ]: Coerce failed for sequence element"]]) {
     const o = run(P + e).replace(/\s+/g, " ");
     assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
+  }
+});
+
+test("&+ and &* of an empty collection: its universe's zero and one, Magma's error with none (WA-027)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (checked against Magma 2.18: a declared universe's, the integers', an
+  // emptied one's; written empty, Magma's error; astra2's WA-027)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["S:=[RealField(15)|]; x:=&+S; x; Type(x); Parent(x);", "S:=[RealField(15)|]; x:=&*S; x;", "S:={RealField(15)|}; Type(&+S);",
+    "P<y>:=PolynomialRing(Rationals()); K<c>:=NumberField(y^2-5); S:=[K|]; x:=&+S; x; Type(x); Parent(x) eq K; Type(&*S);",
+    "P<y>:=PolynomialRing(Rationals()); S:=[P|]; Type(&+S); &*S;", "S:=[Rationals()|]; Type(&+S);", "S:=[GF(5)|]; x:=&*S; x; Type(x);",
+    "M:=Matrix(Integers(),2,3,[1..6]); S:=[Parent(M)|]; &+S;", "M:=Matrix(Integers(),2,2,[1..4]); S:=[Parent(M)|]; &*S;",
+    "S:=[RealField(15)!1]; Remove(~S,1); x:=&+S; x;", "P<y>:=PolynomialRing(Rationals()); K<c>:=NumberField(y^2-5); S:=[c]; Remove(~S,1); Type(&+S);",
+    "S:=[Integers(6)|]; Type(&+S);", "S:=[1/2]; Remove(~S,1); Type(&+S);", "&+[Integers()|]; &*[1..0]; S:=[1]; Remove(~S,1); &+S;"].join("\n"));
+  assert.equal(ok, "0.000000000000000\nFldReElt\nReal field of precision 15\n1.00000000000000\nFldReElt\n0\nFldNumElt\ntrue\nFldNumElt\n" +
+    "RngUPolElt\n1\nFldRatElt\n1\nFldFinElt\n[0 0 0]\n[0 0 0]\n[1 0]\n[0 1]\n0.000000000000000\nFldNumElt\nRngIntResElt\nFldRatElt\n0\n1\n0\nend\n", ok);
+  const bad = run(["&+[];", "&*{};", "&+[x : x in [1..0]];", "M:=Matrix(Integers(),2,3,[1..6]); S:=[Parent(M)|]; x:=&*S;"].join("\n")).replace(/\s+/g, " ");
+  for (const m of ["Runtime error in '&+': Illegal null sequence", "Runtime error in '&*': Illegal null set", "Runtime error in '&*': Universe has no one element"])
+    assert.ok(bad.includes(m), m + bad);
+  assert.equal(bad.split("Illegal null sequence").length - 1, 2, bad);
+});
+
+test("a multiset operation whose coerced elements would coincide is refused, not miscounted (WA-028)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (Magma 2.18: GF(5)'s emptied {* *} join {* 1, 6, 11 *} is {* 1 *}, a
+  // count Sagebrush doesn't model: refused; without such a coincidence
+  // the counts are Magma's; astra2's WA-028)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  for (const e of ["F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=S join T;", "F:=GF(5); T:={*1,6,11*}; R:={*F|*} join T;",
+    "F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=S sdiff T;", "F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,6,11*}; R:=T diff S;"]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes("a multiset operation where different elements coincide in the universe is not supported yet") && o.endsWith("end "), e + o);
+  }
+  const ok = run(["F:=GF(5); S:={*F!2*}; Exclude(~S,F!2); T:={*1,1*}; R:=S join T; #R;", "P<x>:=PolynomialRing(Rationals()); K<c>:=NumberField(x^2-5); S:={*c*}; Exclude(~S,c); T:={*1,1*}; R:=S join T; #R;",
+    "R:={*1,1*} join {*1*}; #R;"].join("\n"));
+  assert.equal(ok, "2\n2\n3\nend\n", ok);
+});
+
+test("a square product of matrices not square is of a module of matrices, as Magma's (WA-026)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's: ModMatRngElt for A * Transpose(A)
+  // and what Magma keeps there; with an algebra's matrix a sum is the
+  // algebra's; astra2's WA-026)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B); Parent(B); B; Type(Transpose(A)*A);", "A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); Type(B); Parent(B); Type(B^-1);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); I:=Matrix(Integers(),2,2,[1,0,0,1]); Type(B*B); Type(B+B); Type(B-B); Type(B^2); Type(B^0); Type(-B); Type(2*B); Type(B*2);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); I:=Matrix(Integers(),2,2,[1,0,0,1]); Type(Transpose(B)); Type(B*I); Type(I*B); Type(B+I); Type(I-B); Determinant(B); B eq Matrix(Integers(),2,2,[14,32,32,77]);", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(HermiteForm(B)); Type(EchelonForm(B)); Type(Matrix(Integers(),3,3,[1..9])*Transpose(A)*A);", "Type(Matrix(Integers(),2,2,[1..4])*Matrix(Integers(),2,2,[1..4])); B:=Matrix(Integers(),1,2,[1,2]); Type(B*Transpose(B)); Type(Matrix(Integers(),1,1,[2]));"].join("\n"));
+  assert.equal(ok, "ModMatRngElt\nFull RMatrixSpace of 2 by 2 matrices over Integer Ring\n[14 32]\n[32 77]\nModMatRngElt\nModMatFldElt\nFull KMatrixSpace of 2 by 2 matrices over Rational Field\nModMatFldElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nModMatRngElt\nAlgMatElt\nAlgMatElt\n54\ntrue\nModMatRngElt\nModMatRngElt\nModMatRngElt\nAlgMatElt\nModMatRngElt\nAlgMatElt\nend\n", ok);
+  // (over a finite field, and SmithForm and LLL of one: refused)
+  for (const [e, m] of [["A:=Matrix(GF(5),2,3,[1..6]); B:=A*Transpose(A);", "a square product of matrices over a finite field not square is not supported yet"],
+    ["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); X:=SmithForm(B);", "SmithForm of a matrix of a module of matrices (a product of matrices not square) is not supported yet"]]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + o);
+  }
+});
+
+test("a power of an integer or rational matrix is admitted by the size of its entries before it computes (HARD-CA8-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (repeated squaring bounds the number of products, not their size:
+  // [2 0; 0 2]^(10^9) has entries of 10^9 bits; refused before any
+  // squaring, a negative power too; small powers as Magma's)
+  const t0 = Date.now();
+  const src = "M:=Matrix(Integers(),2,2,[2,0,0,2]); X:=M^(10^9);\nX:=M^(-10^9);\nN:=Matrix(Rationals(),3,3,[1/2,1,2,3,5/3,8,13,21,34]); X:=N^(10^7);\n" +
+    "M:=Matrix(Integers(),2,2,[1,1,1,0]); (M^100)[1][1]; (M^-3)[1][1]; Type(M^100);\nA:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B^3); (B^3)[1][1];\n\"end\";\n";
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.signal, null, r.stderr);
+  const out = r.stdout.replace(/\s+/g, " ");
+  assert.equal((out.match(/a power of a \d by \d matrix whose entries could have more than 2097152 bits \(8388608 in all\)/g) ?? []).length, 3, r.stdout);
+  assert.ok(r.stdout.endsWith("573147844013817084101\n-1\nAlgMatElt\nModMatRngElt\n110264\nend\n"), r.stdout);
+  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+});
+
+test("a negative power of an integer matrix needs a unit determinant and stays integral; a module of matrices has a zero but no one (CORR-CA8-1, CORR-CA8-2)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's; astra2 on ca8e1e20)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["A:=Matrix(Integers(),2,3,[1,0,0,0,1,0]); B:=A*Transpose(A); X:=B^-1; Type(X); X;", "M:=Matrix(Integers(),2,2,[1,1,0,1]); X:=M^-1; X; Type(X); Parent(X);", "M:=Matrix(Rationals(),2,2,[1,2,3,4]); M^-1;", "A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); Type(&+S); &+S;", "A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); Type(&+S);"].join("\n"));
+  assert.equal(ok, "ModMatRngElt\n[1 0]\n[0 1]\n[ 1 -1]\n[ 0  1]\nAlgMatElt\nFull Matrix Algebra of degree 2 over Integer Ring\n[  -2    1]\n[ 3/2 -1/2]\nModMatRngElt\n[0 0]\n[0 0]\nModMatFldElt\nend\n", ok);
+  for (const [e, m] of [["A:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); X:=B^-1;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["M:=Matrix(Integers(),2,2,[2,0,0,1]); X:=M^-2;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["M:=Matrix(Rationals(),2,2,[1,2,2,4]); X:=M^-1;", "Runtime error in '^': Argument 1 is not invertible"],
+    ["A:=Matrix(Rationals(),2,3,[1..6]); B:=A*Transpose(A); S:=[B]; Remove(~S,1); X:=&*S;", "Runtime error in '&*': Universe has no one element"]]) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + o);
   }
 });
