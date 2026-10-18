@@ -70,3 +70,96 @@ for bits in [0, 1, 7, 8, 9, 63, 64, 65, 1000, 4096, 100003]:
 print('round trips ok')
 print(int.from_bytes(bytes(range(256)) * 40, 'little') % 1000003, (7**5000).to_bytes(1755, 'big')[:8], (7**5000).to_bytes(1755, 'little')[-8:])
 print(int.from_bytes(bytearray(b'\x00\x01') * 3000) % 99991, int.from_bytes([255] * 5000, signed=True), int.from_bytes(iter([1, 2, 3]), 'little'))
+
+
+# __bytes__ found and bound as a special method, a metaclass's for a class
+# (astra's CORR-E6D-1)
+class StaticBytes:
+    @staticmethod
+    def __bytes__():
+        return b'\x05'
+
+
+class ClassBytes:
+    @classmethod
+    def __bytes__(cls):
+        return b'\x06'
+
+
+class PropBytes:
+    @property
+    def __bytes__(self):
+        return lambda: b'\x07'
+
+
+class CallableBytes:
+    class _C:
+        def __call__(self):
+            return b'\x08'
+    __bytes__ = _C()
+
+
+class Desc:
+    def __get__(self, obj, owner):
+        return lambda: b'\x09'
+
+
+class DescBytes:
+    __bytes__ = Desc()
+
+
+class NoneBytes:
+    __bytes__ = None
+
+
+class MetaBytes(type):
+    def __bytes__(cls):
+        return b'\x0b'
+
+
+class WithMeta(metaclass=MetaBytes):
+    pass
+
+
+for label, f in [('static', lambda: int.from_bytes(StaticBytes())), ('classmethod', lambda: int.from_bytes(ClassBytes())),
+                 ('property', lambda: int.from_bytes(PropBytes())), ('callable', lambda: int.from_bytes(CallableBytes())),
+                 ('descriptor', lambda: int.from_bytes(DescBytes())), ('None', lambda: int.from_bytes(NoneBytes())),
+                 ('metaclass', lambda: int.from_bytes(WithMeta)), ('plain class', lambda: int.from_bytes(StaticBytes))]:
+    print('bytes hook', label, show(f))
+
+
+# signed's truth taken once, after byteorder's type and before its value
+# and before anything is read (astra's CORR-E6D-2)
+class BadBool:
+    def __bool__(self):
+        raise RuntimeError('bool')
+
+
+class CountBool:
+    calls = 0
+
+    def __bool__(self):
+        CountBool.calls += 1
+        return True
+
+
+buf = bytearray(b'\x80')
+
+
+class MutBool:
+    def __bool__(self):
+        buf[0] = 0
+        return True
+
+
+for label, f in [('fb bad bool, bad order', lambda: int.from_bytes(b'\x01', 'x', signed=BadBool())),
+                 ('fb bad bool, int order', lambda: int.from_bytes(b'\x01', 5, signed=BadBool())),
+                 ('fb bad bool, bad source', lambda: int.from_bytes('ab', signed=BadBool())),
+                 ('tb bad bool, bad order', lambda: (1).to_bytes(1, 'x', signed=BadBool())),
+                 ('tb bad bool, int order', lambda: (1).to_bytes(1, 5, signed=BadBool())),
+                 ('tb bad bool, negative length', lambda: (1).to_bytes(-1, signed=BadBool())),
+                 ('tb bad bool, float length', lambda: (1).to_bytes(1.5, signed=BadBool())),
+                 ('fb mutating bool', lambda: int.from_bytes(buf, signed=MutBool())),
+                 ('fb bool once', lambda: (int.from_bytes(b'\xff', signed=CountBool()), CountBool.calls)),
+                 ('tb bool once', lambda: ((-1).to_bytes(1, signed=CountBool()), CountBool.calls))]:
+    print('signed order', label, show(f))

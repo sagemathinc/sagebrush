@@ -1382,9 +1382,14 @@ method(int, "is_integer", () => true);
 method(int, "as_integer_ratio", (x: any) => tuple([x, 1]));
 // (to_bytes and from_bytes: byteorder a str, "little" or "big", as
 // CPython's argument clinic and int_to_bytes_impl check it)
-const littleEndian = (fn: string, byteorder: any): boolean => {
+// (in the order CPython's argument clinic and then the method's body check
+// them: byteorder's type, signed's truth, once, then byteorder's value;
+// astra's CORR-E6D-2)
+const byteorderStr = (fn: string, byteorder: any): string => {
   if (typeof byteorder !== "string" && !isinstance(byteorder, T.str)) raise(T.TypeError, `${fn}() argument 'byteorder' must be str, not ${typeName(byteorder)}`);
-  const b = unbox(byteorder);
+  return unbox(byteorder);
+};
+const littleEndian = (b: string): boolean => {
   if (b === "little") return true;
   if (b !== "big") raise(T.ValueError, "byteorder must be either 'little' or 'big'");
   return false;
@@ -1399,11 +1404,12 @@ const hexBits = (hex: string) => (hex === "0" ? 0 : 4 * (hex.length - 1) + (32 -
 method(int, "to_bytes", (x: any, length: any = 1, byteorder: any = "big", signed: any = false) => {
   const k = O.index(length);
   if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
-  const little = littleEndian("to_bytes", byteorder);
+  const order = byteorderStr("to_bytes", byteorder);
+  const isSigned = O.truth(signed);
+  const little = littleEndian(order);
   const n = Number(k);
   if (n < 0) raise(T.ValueError, "length argument must be non-negative");
   const v = BigInt(x);
-  const isSigned = O.truth(signed);
   if (v < 0n && !isSigned) raise(T.OverflowError, "can't convert negative int to unsigned");
   // (the digits of the value's magnitude only, never of the padding: a
   // negative value's two's complement in 8n bits is ~(-v - 1), which must
@@ -2687,8 +2693,13 @@ function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
 // __index__, in range(0, 256); anything else "cannot convert"
 function objectBytes(x: any): Uint8Array {
   if (x instanceof PyBytes && !(x instanceof PyByteArray) && typeOf(x) === T.bytes) return x.a.subarray(0, x.n);
-  if (typeof x === "object" && x !== null && Ty_lookup(x, "__bytes__") !== undefined) {
-    const r = Ty_lookup(x, "__bytes__")(x);
+  // (the type's __bytes__ as a special method: a staticmethod, a
+  // classmethod, a property or any descriptor bound as CPython binds it, a
+  // metaclass's for a class, a None one a TypeError when called;
+  // astra's CORR-E6D-1)
+  const f = O.lookupSpecial(x, "__bytes__");
+  if (f !== undefined) {
+    const r = f(x);
     if (!(r instanceof PyBytes) || r instanceof PyByteArray) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
     return r.a.subarray(0, r.n);
   }
@@ -3311,7 +3322,9 @@ getset(object, "__dict__", (o) => {
   // digits (a shift per byte was quadratic: 136 ms for 42 KB), made the
   // class's (a subclass called with it, bool's a bool)
   T.int.$dict.set("from_bytes", new PyClassMethod(pyfn((cls: any, b: any, byteorder: any = "big", signed: any = false) => {
-    const little = littleEndian("from_bytes", byteorder);
+    const order = byteorderStr("from_bytes", byteorder);
+    const isSigned = O.truth(signed);
+    const little = littleEndian(order);
     const a = objectBytes(b);
     const n = a.length;
     let hex = "";
@@ -3324,7 +3337,7 @@ getset(object, "__dict__", (o) => {
     }
     parts.push(hex);
     let v = n ? BigInt("0x" + parts.join("")) : 0n;
-    if (O.truth(signed) && n && a[little ? n - 1 : 0] >= 128) v -= 1n << BigInt(8 * n);
+    if (isSigned && n && a[little ? n - 1 : 0] >= 128) v -= 1n << BigInt(8 * n);
     const r = O.normBig(v);
     return cls === T.int ? r : callObj(cls, [r]);
   }, "from_bytes", sig(["cls", "bytes", "byteorder"], { kwonly: ["signed"] }))));
