@@ -732,7 +732,11 @@ def _cyc_items(items, where):
     number field's or a polynomial in a sequence (as seen in Magma
     2.18); else refused (another cyclotomic field's: Magma makes a larger
     one)."""
-    c = next((x for x in items if _cyc_elt(x)), None) or next((x for x in items if isinstance(x, _MNFElt)), None)
+    # (a cyclotomic element first, even a zero one, which is falsy: astra2
+    # on e3d3d0e1)
+    c = next((x for x in items if _cyc_elt(x)), None)
+    if c is None:
+        c = next((x for x in items if isinstance(x, _MNFElt)), None)
     if c is None:
         return items
     if not _cyc_elt(c):
@@ -7839,6 +7843,12 @@ def _nf_items(items, K, kind):
             out.append(y)
         elif isinstance(x, _MNFElt):
             y = _cyc_embed(x, K) if _cyc_elt(x) and isinstance(K, _MCycField) else None
+            if y is None and all(q == 0 for q in list(x._c)[1:]):
+                # (another field's element of rational value goes in as that
+                # rational, as Magma's [K | L!3]: astra2 on e3d3d0e1)
+                c0 = list(x._c)[:1]
+                y = _into(_m_num(_Fraction(c0[0]) if c0 else 0), _udesc(K), K)
+                y = None if y is _NOCOERCE else y
             if y is None:
                 raise fail(k)
             out.append(y)

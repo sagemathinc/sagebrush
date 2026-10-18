@@ -1775,3 +1775,20 @@ test("a collection over a number field coerces its items as Magma's, declared or
     assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
   }
 });
+
+test("a zero cyclotomic element still decides a literal's universe; another field's element of rational value goes into a declared number field as that rational", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's; astra2 on e3d3d0e1)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["P<t>:=PolynomialRing(Rationals()); L<b>:=NumberField(t^2-3); K<z>:=CyclotomicField(5); M<w>:=CyclotomicField(7); x:=[K|L!3]; x; Parent(x[1]) eq K; y:=[K|M!(1/2)]; y; Parent(y[1]) eq K; u:=[L|K!2]; u; Parent(u[1]) eq L;"].join("\n"));
+  assert.equal(ok, "[\n    3\n]\ntrue\n[\n    1/2\n]\ntrue\n[\n    2\n]\ntrue\nend\n", ok);
+  const P = "P<t>:=PolynomialRing(Rationals()); L<b>:=NumberField(t^2-3); K<z>:=CyclotomicField(5); ";
+  for (const [e, m] of [["x:=[b, K!0];", "Runtime error in [ ... ]: No valid universe containing all elements"],
+    ["x:=[K!0, b];", "Runtime error in [ ... ]: No valid universe containing all elements"],
+    ["x:=[z, L!3];", "Runtime error in [ ... ]: No valid universe containing all elements"],
+    ["x:=[K | L!3, b];", "Runtime error in [ ... ]: Coerce failed for sequence element"]]) {
+    const o = run(P + e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
+  }
+});
