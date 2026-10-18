@@ -120,6 +120,15 @@ pub fn class_group(d: &BigInt) -> Result<(ClassGroup, Timing), String> {
 /// analytic certificate holds (h* from exact determinants below twice
 /// Belabas and Friedman's lower bound for h; nf/certify.rs).
 pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), String> {
+    class_group_with(d, true)
+}
+
+/// class_group_certified, with the analytic certificate only if `certify`.
+/// Without it the result is conditional on GRH and on the stopping rule's
+/// estimate (like PARI's quadclassunit), and the flag is false, except
+/// where h is proven without the certificate: |D| below SMALL_D (an
+/// exhaustive count) and h* = 1.
+pub fn class_group_with(d: &BigInt, certify: bool) -> Result<(ClassGroup, Timing, bool), String> {
     let d4 = bigmod(d, 4);
     if !d.is_negative() || !(d4 == 0 || d4 == 1) {
         return Err(format!("{} is not a negative discriminant", d));
@@ -148,7 +157,7 @@ pub fn class_group_certified(d: &BigInt) -> Result<(ClassGroup, Timing, bool), S
     // even x = 256 stays within 4.2% (the acceptance window is 41%).
     let h_est = h_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16));
     tm.h_est = h_est;
-    let log_h_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
+    let log_h_lo = if !certify || std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
     let mut tu = tuning(absd.log10(), bound);
     if debug {
         eprintln!("setup (fb {} primes, h_est) {:.1} ms", n, t0.elapsed().as_secs_f64() * 1e3);
@@ -426,6 +435,24 @@ mod tests {
             assert!(certified, "{} not certified", d);
             let want: Vec<BigInt> = cyc.iter().map(|&c| BigInt::from(c)).collect();
             assert_eq!(g.cyc, want, "cyc({})", d);
+        }
+    }
+
+    #[test]
+    fn certificate_only_skipped_when_asked() {
+        // certify = false: the same group, reported as not certified, except
+        // below SMALL_D, where h is proven by the exhaustive count
+        for d in ["-569701508", "-67128026883063", "-718243867543907291096", "-100000000000000000000000000319"] {
+            let d: BigInt = d.parse().unwrap();
+            let (g1, _, c1) = class_group_with(&d, true).unwrap();
+            let (g0, _, c0) = class_group_with(&d, false).unwrap();
+            assert!(c1, "{} not certified", d);
+            assert!(!c0, "{} certified without the certificate", d);
+            assert_eq!((g0.h, g0.cyc), (g1.h, g1.cyc), "{}", d);
+            assert_eq!(class_group_certified(&d).unwrap().2, true, "{}: the default certifies", d);
+        }
+        for d in ["-3", "-8888", "-57135"] {
+            assert!(class_group_with(&d.parse().unwrap(), false).unwrap().2, "{} below SMALL_D", d);
         }
     }
 }

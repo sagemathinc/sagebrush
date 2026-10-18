@@ -621,8 +621,16 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                        "elems": d.elems.iter().map(|(num, den)| json!([big(num), den.to_string()])).collect::<Vec<_>>() }))
         }
         "quadratic_class_group" => {
-            let (h, cyc, reg, certified) = sagebrush_classgroup::api::quadratic(&big1(v.get("d"))?)?;
-            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "certified": certified, "assumes": assumes(true, certified) }))
+            // certify (default true): false skips the analytic certificate,
+            // leaving the result conditional, like PARI's quadclassunit
+            let certify = match v.get("certify") {
+                None | Some(Value::Null) => true,
+                Some(Value::Bool(b)) => *b,
+                Some(x) => return Err(format!("certify must be true or false, not {}", x)),
+            };
+            let (h, cyc, reg, certified) = sagebrush_classgroup::api::quadratic_with(&big1(v.get("d"))?, certify)?;
+            let status = if certified { "certified (assuming GRH)" } else { "conditional on GRH and the stopping rule's estimate, not certified" };
+            Ok(json!({ "h": h.to_string(), "cyc": big(&cyc), "regulator": reg, "certified": certified, "status": status, "assumes": assumes(true, certified) }))
         }
         "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),
