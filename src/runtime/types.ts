@@ -2803,7 +2803,9 @@ iteratorType("str_ascii_iterator", O.StrIter);
 iteratorType("dict_keyiterator", O.DictIter);
 iteratorType("bytes_iterator", O.BytesIter);
 iteratorType("generator_wrapper", O.GenIter);
-iteratorType("iterator", O.ProtoIter);
+// (CPython's "iterator" is its iterator over __getitem__; a wrapper over a
+// Python iterator is never handed to Python code, iter() giving the object)
+bindClass(O.ProtoIter, iteratorType("iterator", O.GetitemIter));
 
 export class Enumerate {
   constructor(public it: any, public i: any) {}
@@ -2828,6 +2830,20 @@ enumerate.$kw = (pos, names, values) => {
   return enumNew(x, start);
 };
 
+// (zip's and map's strict end, as CPython's zip_next and map_next: the
+// first iterator ended, every other's next taken in turn, the first that
+// gives one named; a later one ended first is shorter than those before)
+function strictEnd(name: string, its: any[], i: number): any {
+  const of = (k: number) => `argument${k === 1 ? " " : "s 1-"}${k}`;
+  if (i > 0) raise(T.ValueError, `${name}() argument ${i + 1} is shorter than ${of(i)}`);
+  for (let j = 1; j < its.length; j++) if (its[j].$next() !== DONE) raise(T.ValueError, `${name}() argument ${j + 1} is longer than ${of(j)}`);
+  // (all ended together: the sources' StopIterations are cleared, as
+  // CPython's check clears them, so the one raised carries no value,
+  // CORR-28A-5)
+  O.lastStop.e = null;
+  return DONE;
+}
+
 export class Zip {
   constructor(public its: any[], public strict: boolean) {}
   $next(): any {
@@ -2836,10 +2852,7 @@ export class Zip {
     const out = new Array(its.length);
     for (let i = 0; i < its.length; i++) {
       const v = its[i].$next();
-      if (v === DONE) {
-        if (this.strict && (i > 0 || its.slice(1).some((it) => it.$next() !== DONE))) raise(T.ValueError, `zip() argument ${i > 0 ? i + 1 : 2} is ${i > 0 ? "shorter" : "longer"} than argument${i > 1 ? "s 1-" + i : " 1"}`);
-        return DONE;
-      }
+      if (v === DONE) return this.strict ? strictEnd("zip", its, i) : DONE;
       out[i] = v;
     }
     return tuple(out);
@@ -2859,22 +2872,33 @@ zip.$kw = (pos, names, values) => {
 (zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
 
 export class MapIter {
-  constructor(public f: any, public its: any[]) {}
+  constructor(public f: any, public its: any[], public strict = false) {}
   $next(): any {
     const args = new Array(this.its.length);
     for (let i = 0; i < this.its.length; i++) {
       const v = this.its[i].$next();
-      if (v === DONE) return DONE;
+      if (v === DONE) return this.strict ? strictEnd("map", this.its, i) : DONE;
       args[i] = v;
     }
     const f = this.f;
     return typeof f === "function" ? f(...args) : callObj(f, args);
   }
 }
-iteratorType("map", MapIter, (f: any, ...xs: any[]) => {
+const map = iteratorType("map", MapIter, (f: any, ...xs: any[]) => {
   if (xs.length === 0) raise(T.TypeError, "map() must have at least two arguments.");
   return new MapIter(f, xs.map(O.iter));
 });
+// (3.14's strict, keyword only: the keywords checked and strict's truth
+// taken before the arguments are counted, as CPython's map_new)
+map.$kw = (pos, names, values) => {
+  if (names.length > 1) raise(T.TypeError, `map() takes at most 1 keyword argument (${names.length} given)`);
+  for (const n of names) if (n !== "strict") raise(T.TypeError, `map() got an unexpected keyword argument '${n}'`);
+  let strict = false;
+  names.forEach((_n, i) => (strict = O.truth(values[i])));
+  if (pos.length < 2) raise(T.TypeError, "map() must have at least two arguments.");
+  return new MapIter(pos[0], pos.slice(1).map(O.iter), strict);
+};
+(map as any).$kwPos = true;
 
 export class FilterIter {
   constructor(public f: any, public it: any) {}
@@ -3436,7 +3460,7 @@ subclassable(bytearray, PyByteArray, ["a", "n"]);
     return null;
   }, sig(["self", "source", "encoding", "errors"]));
 }
-subclassable(T.map, MapIter, ["f", "its"]);
+subclassable(T.map, MapIter, ["f", "its", "strict"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
 subclassable(T.enumerate, Enumerate, ["it", "i"]);

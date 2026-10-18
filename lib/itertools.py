@@ -5,7 +5,30 @@ takewhile, filterfalse, starmap, tee) are objects whose state survives it;
 the others end, as generators do."""
 
 
+_mro = type.__dict__["__mro__"].__get__
+_dict = type.__dict__["__dict__"].__get__
+
+
+def _is_number(x):
+    # (CPython's PyNumber_Check: __index__, __int__ or __float__ in the
+    # type's own slots, or a complex; read from the classes' dicts, so no
+    # metaclass __getattribute__ or __getattr__ runs, CORR-28A-3)
+    for c in _mro(type(x)):
+        d = _dict(c)
+        if "__index__" in d or "__int__" in d or "__float__" in d or c is complex:
+            return True
+    return False
+
+
 def count(start=0, step=1):
+    # (start and step numbers, checked when it is made, as CPython's
+    # count_new: astra3 A27)
+    if not _is_number(start) or not _is_number(step):
+        raise TypeError("a number is required")
+    return _count(start, step)
+
+
+def _count(start, step):
     # (a bool start counts from its int, as Python's: count(False) is 0, 1, ...)
     n = int(start) if type(start) is bool else start
     while True:
@@ -186,10 +209,14 @@ class filterfalse:
 
 
 def groupby(iterable, key=None):
+    # (its iterator taken when it is made, as CPython's: astra3 A27)
+    return _groupby(iter(iterable), key)
+
+
+def _groupby(it, key):
     # (keys compare by identity, then ==, as CPython's PyObject_RichCompareBool:
     # a shared NaN is one group)
     keyfunc = (lambda x: x) if key is None else key
-    it = iter(iterable)
     exhausted = False
     try:
         curr_value = next(it)
@@ -326,7 +353,11 @@ def tee(iterable, n=2):
 
 
 def zip_longest(*args, fillvalue=None):
-    iterators = [iter(it) for it in args]
+    # (the iterators taken when it is made, as CPython's: astra3 A27)
+    return _zip_longest([iter(it) for it in args], fillvalue)
+
+
+def _zip_longest(iterators, fillvalue):
     num_active = len(iterators)
     if not num_active:
         return
@@ -520,7 +551,11 @@ def _combinations_with_replacement(pool, r):
 
 
 def pairwise(iterable):
-    it = iter(iterable)
+    # (its iterator taken when it is made, as CPython's: astra3 A27)
+    return _pairwise(iter(iterable))
+
+
+def _pairwise(it):
     try:
         a = next(it)
     except StopIteration:
