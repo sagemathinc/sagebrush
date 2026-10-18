@@ -116,10 +116,19 @@ def quadratic_class_group(d):
     return int(r["h"]), [int(c) for c in r["cyc"]], r["regulator"]
 
 
-def quadratic_class_group_data(d):
-    """quadratic_class_group as a dict: h, cyc, regulator, certified and
-    assumes."""
-    r = call("quadratic_class_group", d=str(int(d)))
+def quadratic_class_group_data(d, certify=True):
+    """quadratic_class_group as a dict: h, cyc, regulator, certified,
+    status and assumes.
+
+    certify=False skips the analytic certificate (faster, much so for small
+    |d|): the result is then conditional on GRH and on the stopping rule's
+    estimate, like PARI's quadclassunit, and says so: certified False,
+    status "conditional on GRH and the stopping rule's estimate, not
+    certified" (except where h is proven without the certificate), and the
+    estimate among the assumptions."""
+    if certify is not True and certify is not False:
+        raise TypeError("certify must be True or False")
+    r = call("quadratic_class_group", d=str(int(d)), certify=certify)
     r["h"] = int(r["h"])
     r["cyc"] = [int(c) for c in r["cyc"]]
     return r

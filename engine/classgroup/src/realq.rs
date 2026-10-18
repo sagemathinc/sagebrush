@@ -152,6 +152,14 @@ fn negative_norm_relations(fb: &FactorBase, d: &BigInt, want: usize, max_b: u64)
 const MIN_D: f64 = 1e3;
 
 pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
+    class_group_real_with(d, true)
+}
+
+/// class_group_real, with the analytic certificate only if `certify`.
+/// Without it the result is conditional on GRH and on the stopping rule's
+/// estimate (like PARI's quadclassunit), `certified` is false and the
+/// regulator's digits are not proven.
+pub fn class_group_real_with(d: &BigInt, certify: bool) -> Result<(RealQuadratic, Timing), String> {
     let d4 = bigmod(d, 4);
     if !d.is_positive() || !(d4 == 0 || d4 == 1) {
         return Err(format!("{} is not a positive discriminant", d));
@@ -178,7 +186,7 @@ pub fn class_group_real(d: &BigInt) -> Result<(RealQuadratic, Timing), String> {
     let hr_est = absd.sqrt() * l1_estimate(d, ((4.0 * ld * ld) as u64).clamp(1 << 10, 1 << 16)) / 2.0;
     tm.h_est = hr_est;
     // the certificate's proven lower bound for log h R (GRH; nf/certify.rs)
-    let log_hr_lo = if std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
+    let log_hr_lo = if !certify || std::env::var("QCL_NOCERT").is_ok() { None } else { crate::nf::certify::quadratic_log_hr_lower_ball(d, 96) };
     let mut tu = tuning(absd.log10(), bound);
     let mut rels: Vec<Relation> = vec![];
     let mut elems: Vec<Elem> = vec![];
@@ -474,6 +482,23 @@ mod tests {
             let got = to_f64(&r.reg_fixed, r.prec);
             let reg: f64 = reg.parse().unwrap();
             assert!(((got - reg) / reg).abs() < 1e-14, "reg({}) = {} vs {}", d, got, reg);
+        }
+    }
+
+    #[test]
+    fn certificate_only_skipped_when_asked() {
+        // certify = false: the same group and regulator, never reported as
+        // certified
+        for d in ["730136", "1000000009", "54475728456", "10000000000000000000000000000033"] {
+            let d: BigInt = d.parse().unwrap();
+            let (r1, _) = class_group_real_with(&d, true).unwrap();
+            let (r0, _) = class_group_real_with(&d, false).unwrap();
+            assert!(r1.certified, "{} not certified", d);
+            assert!(!r0.certified, "{} certified without the certificate", d);
+            assert_eq!((&r0.group.h, &r0.group.cyc), (&r1.group.h, &r1.group.cyc), "{}", d);
+            let (a, b) = (to_f64(&r0.reg_fixed, r0.prec), to_f64(&r1.reg_fixed, r1.prec));
+            assert!(((a - b) / b).abs() < 1e-14, "reg({}) = {} vs {}", d, a, b);
+            assert!(class_group_real(&d).unwrap().0.certified, "{}: the default certifies", d);
         }
     }
 }
