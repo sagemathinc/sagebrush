@@ -65,7 +65,7 @@ PYPI.forEach((text, i) => (PARTS["pypi-" + i] = () => text));
 const PYPI_PARTS = PYPI.map((_, i) => "pypi-" + i);
 
 const PACKAGES = [
-  { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona"], artistic: "engine/py" },
+  { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona", "dejavu"], artistic: "engine/py" },
   { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "psage", "cpython"] },
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
