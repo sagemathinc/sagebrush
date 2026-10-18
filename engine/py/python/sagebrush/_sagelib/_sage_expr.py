@@ -3705,10 +3705,13 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
     """The sum of f for v from a to b (b may be oo): closed forms for
     polynomials (Faulhaber), geometric terms, binomial coefficients,
     1/k^s (zeta), x^k/k! (exponential); a direct sum for small numeric
-    ranges; otherwise the sum stays unevaluated.
+    ranges; otherwise the sum stays unevaluated.  sum(f, v, a, b) calls
+    it.  (In Sage symbolic_sum is not a global name: import it from
+    sage.calculus.calculus, or call sum(f, v, a, b).)
 
     EXAMPLES::
 
+        sage: from sage.calculus.calculus import symbolic_sum
         sage: var('k n')
         (k, n)
         sage: symbolic_sum(k, k, 1, n), symbolic_sum(k^2, k, 1, n)
@@ -4065,7 +4068,7 @@ class Solution(Expression):
         EXAMPLES::
 
             sage: a = var('a')
-            sage: s = solve(sqrt(x) == a, x)[0]
+            sage: s = solve(sqrt(x) == a, x)[0]  # sagebrush only
             sage: s.subs(a=2)  # sagebrush only
             x == 4
             sage: s.subs(a=-1)  # sagebrush only
