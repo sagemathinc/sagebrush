@@ -1,0 +1,105 @@
+list 0 :: 1
+list 1 :: x0
+list 2 :: (x0*x1)
+list 3 :: ((x0*x1)*x2)
+list 4 :: (((x0*x1)*x2)*x3)
+list 5 :: ((((x0*x1)*x2)*x3)*x4)
+list 6 :: (((x0*x1)*x2)*((x3*x4)*x5))
+list 7 :: ((((x0*x1)*x2)*x3)*((x4*x5)*x6))
+list 8 :: ((((x0*x1)*x2)*x3)*(((x4*x5)*x6)*x7))
+list 9 :: (((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))
+list 10 :: (((((x0*x1)*x2)*x3)*x4)*((((x5*x6)*x7)*x8)*x9))
+list 11 :: ((((x0*x1)*x2)*((x3*x4)*x5))*((((x6*x7)*x8)*x9)*x10))
+list 12 :: ((((x0*x1)*x2)*((x3*x4)*x5))*(((x6*x7)*x8)*((x9*x10)*x11)))
+list 13 :: (((((x0*x1)*x2)*x3)*((x4*x5)*x6))*(((x7*x8)*x9)*((x10*x11)*x12)))
+list 14 :: (((((x0*x1)*x2)*x3)*((x4*x5)*x6))*((((x7*x8)*x9)*x10)*((x11*x12)*x13)))
+list 15 :: (((((x0*x1)*x2)*x3)*(((x4*x5)*x6)*x7))*((((x8*x9)*x10)*x11)*((x12*x13)*x14)))
+list 16 :: (((((x0*x1)*x2)*x3)*(((x4*x5)*x6)*x7))*((((x8*x9)*x10)*x11)*(((x12*x13)*x14)*x15)))
+list 17 :: ((((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))*((((x9*x10)*x11)*x12)*(((x13*x14)*x15)*x16)))
+list 18 :: ((((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))*(((((x9*x10)*x11)*x12)*x13)*(((x14*x15)*x16)*x17)))
+list 19 :: ((((((x0*x1)*x2)*x3)*x4)*((((x5*x6)*x7)*x8)*x9))*(((((x10*x11)*x12)*x13)*x14)*(((x15*x16)*x17)*x18)))
+gen 0 :: 1
+gen z 0 :: z
+gen 1 :: x0
+gen z 1 :: (z*x0)
+gen 2 :: (x0*x1)
+gen z 2 :: ((z*x0)*x1)
+gen 3 :: ((x0*x1)*x2)
+gen z 3 :: ((z*x0)*(x1*x2))
+gen 4 :: ((x0*x1)*(x2*x3))
+gen z 4 :: (((z*x0)*(x1*x2))*x3)
+gen 5 :: (((x0*x1)*(x2*x3))*x4)
+gen z 5 :: (((z*x0)*(x1*x2))*(x3*x4))
+gen 7 :: (((x0*x1)*(x2*x3))*((x4*x5)*x6))
+gen z 7 :: (((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))
+gen 8 :: (((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))
+gen z 8 :: ((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*x7)
+gen 9 :: ((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*x8)
+gen z 9 :: ((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*(x7*x8))
+gen 13 :: ((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*(((x8*x9)*(x10*x11))*x12))
+gen z 13 :: ((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*(((x7*x8)*(x9*x10))*(x11*x12)))
+gen 16 :: ((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*(((x8*x9)*(x10*x11))*((x12*x13)*(x14*x15))))
+gen z 16 :: (((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*(((x7*x8)*(x9*x10))*((x11*x12)*(x13*x14))))*x15)
+gen 17 :: (((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*(((x8*x9)*(x10*x11))*((x12*x13)*(x14*x15))))*x16)
+gen z 17 :: (((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*(((x7*x8)*(x9*x10))*((x11*x12)*(x13*x14))))*(x15*x16))
+gen 23 :: (((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*(((x8*x9)*(x10*x11))*((x12*x13)*(x14*x15))))*(((x16*x17)*(x18*x19))*((x20*x21)*x22)))
+gen z 23 :: (((((z*x0)*(x1*x2))*((x3*x4)*(x5*x6)))*(((x7*x8)*(x9*x10))*((x11*x12)*(x13*x14))))*(((x15*x16)*(x17*x18))*((x19*x20)*(x21*x22))))
+tuple 0 :: 1
+list z 0 :: z
+tuple 1 :: x0
+list z 1 :: (z*x0)
+tuple 2 :: (x0*x1)
+list z 2 :: (z*(x0*x1))
+tuple 6 :: (((x0*x1)*x2)*((x3*x4)*x5))
+list z 6 :: (z*(((x0*x1)*x2)*((x3*x4)*x5)))
+tuple 9 :: (((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))
+list z 9 :: (z*(((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8)))
+cutoff 1 :: ((((x0*x1)*x2)*((x3*x4)*x5))*(((x6*x7)*x8)*(x9*x10)))
+cutoff 2 :: ((((x0*x1)*x2)*((x3*x4)*x5))*(((x6*x7)*x8)*(x9*x10)))
+cutoff 3 :: ((((x0*x1)*x2)*((x3*x4)*x5))*(((x6*x7)*x8)*(x9*x10)))
+cutoff 4 :: ((((x0*x1)*x2)*((x3*x4)*x5))*(((x6*x7)*x8)*(x9*x10)))
+cutoff 8 :: ((((((x0*x1)*x2)*x3)*x4)*x5)*((((x6*x7)*x8)*x9)*x10))
+cutoff 20 :: ((((((((((x0*x1)*x2)*x3)*x4)*x5)*x6)*x7)*x8)*x9)*x10)
+cutoff kw z :: (z*(((x0*x1)*(x2*x3))*((x4*x5)*x6)))
+cutoff float :: TypeError
+sized :: (((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))
+sequence protocol :: ((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*x8)
+list subclass iter :: ((((x0*x1)*x2)*x3)*((x4*x5)*x6))
+dict values :: (((((x0*x1)*x2)*x3)*x4)*(((x5*x6)*x7)*x8))
+map :: ((((x0*x1)*(x2*x3))*((x4*x5)*(x6*x7)))*x8)
+set :: 5
+not iterable :: TypeError
+empty :: [1, 1, 7, 7, z]
+ints :: [24, 3628800, 30, True]
+big :: [True, 256909, True]
+rationals :: 1/8
+reals :: [1.00000000000000e-7, 3.45227121439310, 3.45227121439310]
+matrices in order :: [True, [18 23]
+[10 13], [10 14]
+[14 20]]
+matrices z :: [[4 2]
+[1 1], [4 2]
+[1 1]]
+yield 0
+yield 1
+yield 2
+yield 3
+yield 4
+yield 5
+generator read once in order :: (((y0*y1)*(y2*y3))*(y4*y5))
+getattr hook not asked for __len__ :: 24
+fabricated __len__ streams :: 1.4641000000000004
+__len__ TypeError streams :: 1.4641000000000004
+sized floats :: 1.4641000000000006
+__len__ ValueError before iterating :: ValueError
+len before iter :: (35, ['len', 'iter', 'len'])
+cutoff 9223372036854775808 :: OverflowError
+cutoff 9223372036854775808 empty :: OverflowError
+cutoff 18446744073709551616 :: OverflowError
+cutoff 18446744073709551616 empty :: OverflowError
+cutoff -9223372036854775809 :: OverflowError
+cutoff -9223372036854775809 empty :: OverflowError
+cutoff 9223372036854775807 :: 6
+cutoff 9223372036854775807 empty :: 1
+cutoff Big :: OverflowError
+cutoff Big generator :: OverflowError
