@@ -1354,6 +1354,19 @@ def _simplest_rational(x, what="divmod with a real number", literal=False):
         p, rnd = 53, "RNDN"
     if p > _SIMPLEST_MAX_PREC:
         raise NotImplementedError("%s of more than %d bits of precision is not implemented" % (what, _SIMPLEST_MAX_PREC))
+    lit = None
+    if literal and rnd == "RNDN":
+        # (checked first: an integral value must not slip past them,
+        # astra's CORR-28E-3a)
+        if getattr(x, "_lit_ambiguous", None) is not None:
+            raise NotImplementedError("QQ of x + 0 or x * 1 for a decimal literal x is not implemented: Sage keeps x a literal "
+                                      "when 0 or 1 is a Python int and not when it is an Integer, which are one type here; "
+                                      "use QQ(x) itself, QQ(float(x)), or QQ('decimal string')")
+        lit = getattr(x, "_lit", None)
+        if lit is not None and _literal_digits(lit) > 15:
+            raise NotImplementedError("QQ of a decimal literal of more than 15 significant digits is not implemented "
+                                      "(Sage gives it more than 53 bits): use QQ('%s') for its exact value, "
+                                      "or QQ(float(x)) for its double" % lit.lstrip("+"))
     X = _real_qq(x)
     if X.denominator == 1:
         # an integral value is itself, as in Sage (1e300 is that integer)
@@ -1373,19 +1386,14 @@ def _simplest_rational(x, what="divmod with a real number", literal=False):
     m = int(m)
     ulp = QQ(2) ** e
     below = ulp / 2 if m == 2 ** (p - 1) else ulp  # the gap under A
-    lit = getattr(x, "_lit", None) if literal and rnd == "RNDN" else None
     if lit is not None:
         # A decimal literal not yet used in arithmetic (QQ(1e-20)), as Sage
         # converts one (found by experiment, not from its source): the
         # interval is centred on the literal's decimal value rounded to
         # p + 1 bits, rather than on its p-bit value: QQ(1e-20) is
         # 1/99999999999999990439 (QQ(float(1e-20)), 1/99999999999999997962).
-        # Sage gives a literal of more than 15 digits more than 53 bits;
-        # here every literal has 53, so those are refused.
-        if _literal_digits(lit) > 15:
-            raise NotImplementedError("QQ of a decimal literal of more than 15 significant digits is not implemented "
-                                      "(Sage gives it more than 53 bits): use QQ('%s') for its exact value, "
-                                      "or QQ(float(x)) or QQ(x + 0) for its double" % lit.lstrip("+"))
+        # (a literal of more than 15 digits was refused above: Sage gives
+        # it more than 53 bits, and here every literal has 53)
         try:
             D = abs(_Fraction(lit.replace("_", "")))
         except (ValueError, ZeroDivisionError):
@@ -1494,9 +1502,12 @@ def _integral_real(x):
     # (the double itself: a subclass's __float__ is not consulted, astra's
     # CORR-28E-1)
     f = float.__float__(x)
-    if _math.isfinite(f) and not f.is_integer():
+    # __int__ is called once, as Sage does, and its answer must be the
+    # double's own integral value (astra's CORR-28E-1)
+    n = int(x)
+    if not (_math.isfinite(f) and f.is_integer()) or n != int(f):
         raise TypeError("cannot convert non-integral float to integer")
-    return int(f)
+    return n
 
 
 def _QQ(x, d=None):

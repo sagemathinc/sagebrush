@@ -348,3 +348,10 @@ QQ(F('0.1')) -> 1/10
 Rational(F('0.1')) -> 1/10
 [ 2 -7]
 TypeError
+ZZ(G('2')) -> TypeError: cannot convert non-integral float to integer
+Integer(G('2')) -> TypeError: cannot convert non-integral float to integer
+ZZ(G('2.5')) -> TypeError: cannot convert non-integral float to integer
+ZZ(H('2')) -> 2
+Integer(H('-3')) -> -3
+ZZ(H('2.5')) -> TypeError: cannot convert non-integral float to integer
+3 3

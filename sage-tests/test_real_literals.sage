@@ -423,3 +423,13 @@ print(409, '-1e400', show(lambda: QQ(-1e400)), show(lambda: Rational(-1e400)), s
 print(410, '1e-400', show(lambda: QQ(1e-400)), show(lambda: Rational(1e-400)), show(lambda: QQ(float(1e-400))), show(lambda: QQ(RDF(float(1e-400)))), show(lambda: QQ(RR(float(1e-400)))))
 print(411, '2.2250738585072014e-308', '(17 digits)', show(lambda: QQ(float(2.2250738585072014e-308))), show(lambda: QQ(RDF(float(2.2250738585072014e-308)))), show(lambda: QQ(RR(float(2.2250738585072014e-308)))))
 print(412, '2.225073858507201e-308', '(16 digits)', show(lambda: QQ(float(2.225073858507201e-308))), show(lambda: QQ(RDF(float(2.225073858507201e-308)))), show(lambda: QQ(RR(float(2.225073858507201e-308)))))
+
+# what keeps a literal a literal, as Sage does (x + 0 and x * 1 are not
+# here: Sage keeps the literal for a Python int and not for an Integer, and
+# in Sagebrush's browser runtime those are one type, so QQ refuses them:
+# test/sage-qq-real.test.ts)
+import copy
+for s in ['1e-20', '-1e-30', '7e-19', '1.5e-20', '1e-400', '1e400']:
+    a = RealNumber(s)
+    print(s, QQ(a), QQ(RR(a)), QQ(RealField(53)(a)), QQ(-a), QQ(+a), QQ(-(-a)), QQ(copy.copy(a)), QQ(copy.deepcopy(a)), QQ(max(a, a)),
+          QQ(a - int(0)), QQ(a / int(1)), QQ(a + 0.0), QQ(a * 1.0), QQ(abs(a)), QQ(a.n()), QQ(RR(-a)))

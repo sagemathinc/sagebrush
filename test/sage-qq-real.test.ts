@@ -80,6 +80,28 @@ test("QQ of a literal of more than 15 digits is refused, naming the workarounds;
   const got = await run(long, null);
   assert.match(got, /^ValueError: QQ of a decimal literal of more than 15 significant digits is not implemented/, got);
   assert.match(got, /QQ\('1\.2345678901234567'\)/, got);
-  const after = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\nraise ValueError(str(S.QQ(x + 0)) + ' ' + str(S.QQ(S.RealNumber('0.123456789012345'))))";
+  const after = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\nraise ValueError(str(S.QQ(x + 0.0)) + ' ' + str(S.QQ(S.RealNumber('0.123456789012345'))))";
   assert.equal(await run(after, null), "ValueError: 89163235/72222221 42523979/344444233");
+});
+
+test("an integral literal of more than 15 digits is refused too, before the integral shortcut (CORR-28E-3a)", async () => {
+  // (Sage: QQ(9007199254740993.0) is 9007199254740993, its 54-bit value)
+  for (const f of ["QQ", "Rational"]) {
+    const code = `import sage_all as S\ntry:\n    S.${f}(S.RealNumber('9007199254740993.0'))\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:40])`;
+    assert.equal(await run(code, null), "ValueError: QQ of a decimal literal of more than 15 sig");
+  }
+});
+
+test("x + 0 and x * 1 with an int keep a literal in Sage only for a Python int; here they are refused (CORR-28E-3b)", async () => {
+  // (in this runtime a Sage Integer is a Python int: which rule applies
+  // cannot be known, so QQ refuses rather than guess; under CPython the
+  // two are told apart)
+  const cases = ["x + 0", "0 + x", "x * 1", "1 * x", "sum([x])", "-(x + 0)"];
+  for (const c of cases) {
+    const code = `import sage_all as S\nx = S.RealNumber('1e-20')\ny = ${c}\ntry:\n    S.QQ(y)\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:45])`;
+    assert.equal(await run(code, null), "ValueError: QQ of x + 0 or x * 1 for a decimal literal", c);
+  }
+  // (bools are Python bools everywhere: x + False is the literal, as in Sage)
+  const lit = "import sage_all as S\nx = S.RealNumber('1e-20')\nraise ValueError(str(S.QQ(x + False)) + ' ' + str(S.QQ(x * True)))";
+  assert.equal(await run(lit, null), "ValueError: 1/99999999999999990439 1/99999999999999990439");
 });

@@ -756,22 +756,75 @@ class RealNumber(float):
         return _sage_real._format(Fraction(float(self)), D, no_sci)
 
 
+def _negated_literal(lit):
+    return lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
+
+
+def _literal_identity(x, o, unit):
+    """x + 0 or x * 1 (either side) for a decimal literal x: Sage returns x
+    itself, still a literal, when 0 or 1 is a Python int (a bool too), and
+    a plain number when it is a Sage Integer (found by running Sage).  Under
+    CPython the two are told apart; in pyjs they are one type, so the
+    result is marked _lit_ambiguous and QQ refuses it (it cannot know which
+    rule Sage would follow).  None: not such a case."""
+    lit = getattr(x, "_lit", None)
+    amb = getattr(x, "_lit_ambiguous", None)
+    if (lit is None and amb is None) or not isinstance(o, int) or o != unit:
+        return None
+    import sage_all
+    if isinstance(o, bool) or amb is not None:
+        return x
+    if isinstance(sage_all.Integer, type):
+        return None if isinstance(o, sage_all.Integer) else x
+    r = _RealLiteral(float(x)) if not isinstance(x, _RealBig) else _rr_from_mp(x._mp)
+    r._lit = None
+    r._lit_ambiguous = lit
+    return r
+
+
+def _literal_op(name, unit):
+    base = getattr(RealNumber, name)
+
+    def op(self, o):
+        r = _literal_identity(self, o, unit)
+        return r if r is not None else base(self, o)
+    op.__name__ = name
+    return op
+
+
 class _RealLiteral(RealNumber):
     """A decimal literal of RR: a 53-bit real that remembers its digits."""
 
+    _lit_ambiguous = None
+
     def __reduce__(self):
         return (RealNumber, (float(self),))
+
+    # (as in Sage: copies are the literal itself; a pickle is a plain number)
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
 
     def __neg__(self):
         # -1.1 is still the literal, digits and all, as in Sage:
         # RealField(100)(-1.1) is -1.1000...0, not the negated double
         r = _RealLiteral(-float(self))
-        lit = self._lit
-        r._lit = lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
+        if self._lit is not None:
+            r._lit = _negated_literal(self._lit)
+        else:
+            r._lit = None
+            r._lit_ambiguous = _negated_literal(self._lit_ambiguous)
         return r
 
     def __pos__(self):
         return self
+
+    __add__ = _literal_op("__add__", 0)
+    __radd__ = _literal_op("__radd__", 0)
+    __mul__ = _literal_op("__mul__", 1)
+    __rmul__ = _literal_op("__rmul__", 1)
 
 
 class _RealDigits(RealNumber):
@@ -919,6 +972,24 @@ class _RealBig(RealNumber):
     __truediv__, __rtruediv__ = _bin("/"), _bin("/", True)
     del _bin
 
+    _plain_add, _plain_radd, _plain_mul, _plain_rmul = __add__, __radd__, __mul__, __rmul__
+
+    def __add__(self, o):
+        r = _literal_identity(self, o, 0)
+        return r if r is not None else self._plain_add(o)
+
+    def __radd__(self, o):
+        r = _literal_identity(self, o, 0)
+        return r if r is not None else self._plain_radd(o)
+
+    def __mul__(self, o):
+        r = _literal_identity(self, o, 1)
+        return r if r is not None else self._plain_mul(o)
+
+    def __rmul__(self, o):
+        r = _literal_identity(self, o, 1)
+        return r if r is not None else self._plain_rmul(o)
+
     def __pow__(self, o, mod=None):
         # (pow(x, y, m): Sage's RR ignores the modulus)
         if isinstance(o, int) or type(o).__name__ == "Integer" or (isinstance(o, _Fraction) and o.denominator == 1):
@@ -943,8 +1014,9 @@ class _RealBig(RealNumber):
         r = _rr_from_mp(-self._mp)
         if self._lit is not None:
             # (-1e400 is still the literal, as in Sage)
-            lit = self._lit
-            r._lit = lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
+            r._lit = _negated_literal(self._lit)
+        elif getattr(self, "_lit_ambiguous", None) is not None:
+            r._lit_ambiguous = _negated_literal(self._lit_ambiguous)
         return r
 
     def __pos__(self):
@@ -1312,7 +1384,8 @@ class _RealField:
             sage: RR(1/3), RR(2), RR('1.5')
             (0.333333333333333, 2.00000000000000, 1.50000000000000)
         """
-        if isinstance(x, _RealBig):
+        if isinstance(x, _RealBig) or type(x) is _RealLiteral:
+            # (a literal stays one, as in Sage: QQ(RR(1e-20)) is QQ(1e-20))
             return x
         if isinstance(x, _Fraction):
             import _sage_real
