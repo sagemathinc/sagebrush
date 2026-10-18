@@ -1127,7 +1127,6 @@ newBuiltinModule("math", (m) => {
     const a = bigMul(permComb(n, j, comb), permComb(n - BigInt(j), k - j, comb));
     return comb ? a / permComb(BigInt(k), j, true) : a;
   };
-  // (a lower bound on log2(n), n >= 1)
   // (the product of xs, a balanced tree of pairs, level by level: no
   // recursion; small factors first multiplied as numbers while exact)
   const productOf = (xs: bigint[]): bigint => {
@@ -1168,20 +1167,31 @@ newBuiltinModule("math", (m) => {
     }
     return productOf(factors);
   };
-  const log2Big = (n: bigint) => {
+  // (a lower bound on log2(n), n >= 1)
+  const log2Big = (n: bigint): number => {
+    // (from n's leading 52 bits, not its first hex digit only: that lost
+    // the whole bound for comb(2**61 - 1, 2**60 - 1), astra's finding; less
+    // a margin for Math.log2's rounding)
+    if (n <= 9007199254740991n) return Math.log2(Number(n)) - 1e-9;
     const s = n.toString(16);
-    return (s.length - 1) * 4 + Math.log2(parseInt(s[0], 16));
+    return Math.log2(parseInt(s.slice(0, 13), 16)) + 4 * (s.length - 13) - 1e-9;
   };
   // (the sizes of P and C a lower bound: P(n, k) >= max(n - k + 1, k/e)**k,
-  // C(n, k) >= (n/k)**k for k <= n/2)
+  // C(n, k) >= max(n/k, 2)**k for k <= n/2; the bounds on k alone first,
+  // so a k past them is refused without reading n's digits)
   const permCombBig = (n: bigint, k: bigint, comb: boolean): any => {
     // (k of 0 or 1: 1 or n itself, before any size bound, which reads n's
     // digits: n may be near the largest BigInt; daybreak2's LIMIT-PTREE-1)
     if (k === 0n) return 1;
     if (k === 1n) return O.normBig(n);
     const kf = Number(k);
-    if (comb) tooBig(kf * (log2Big(n) - Math.log2(kf)) - 1);
-    else tooBig(kf * Math.max(log2Big(n - k + 1n), Math.log2(kf / Math.E)) - 1);
+    if (comb) {
+      tooBig(kf - 1);
+      tooBig(kf * (log2Big(n) - Math.log2(kf)) - 1);
+    } else {
+      tooBig(kf * Math.log2(kf / Math.E) - 1);
+      tooBig(kf * log2Big(n - k + 1n) - 1);
+    }
     try {
       if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf));
       return O.normBig(permComb(n, kf, comb));

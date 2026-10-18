@@ -2715,7 +2715,8 @@ def prod(x, z=None, recursion_cutoff=5):
     tuple, range...) halved until a part has at most recursion_cutoff
     factors, multiplied one after another; any other iterable read once,
     its factors merged in blocks of like sizes as they come (z, if given,
-    first among them). As Sage's.
+    first among them); sized means len(x) succeeds, asked before x is
+    iterated. As Sage's.
 
     EXAMPLES::
 
@@ -2730,10 +2731,18 @@ def prod(x, z=None, recursion_cutoff=5):
         True
     """
     cutoff = _operator.index(recursion_cutoff)
+    # (a Py_ssize_t, as Sage's, before x is looked at: astra's CORR-663-2)
+    if not -9223372036854775808 <= cutoff <= 9223372036854775807:
+        raise OverflowError("Python int too large to convert to C ssize_t")
     if cutoff < 1:
         # (Sage's recursion has no end then)
         raise ValueError("recursion_cutoff must be positive")
-    if not hasattr(x, "__len__"):
+    # (sized as Sage tells it: len(x), through the type's length protocol,
+    # before x is iterated; a TypeError from it streams, any other error
+    # is raised; astra's CORR-663-1)
+    try:
+        len(x)
+    except TypeError:
         return _prod_stream(x, z)
     x = list(x)
     if not x:

@@ -87,3 +87,19 @@ yield 3
 yield 4
 yield 5
 generator read once in order :: (((y0*y1)*(y2*y3))*(y4*y5))
+getattr hook not asked for __len__ :: 24
+fabricated __len__ streams :: 1.4641000000000004
+__len__ TypeError streams :: 1.4641000000000004
+sized floats :: 1.4641000000000006
+__len__ ValueError before iterating :: ValueError
+len before iter :: (35, ['len', 'iter', 'len'])
+cutoff 9223372036854775808 :: OverflowError
+cutoff 9223372036854775808 empty :: OverflowError
+cutoff 18446744073709551616 :: OverflowError
+cutoff 18446744073709551616 empty :: OverflowError
+cutoff -9223372036854775809 :: OverflowError
+cutoff -9223372036854775809 empty :: OverflowError
+cutoff 9223372036854775807 :: 6
+cutoff 9223372036854775807 empty :: 1
+cutoff Big :: OverflowError
+cutoff Big generator :: OverflowError

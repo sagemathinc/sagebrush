@@ -84,3 +84,79 @@ def g():
 
 
 t('generator read once in order', lambda: prod(g()))
+
+
+# sized as Sage tells it: len(x) through the type's protocol, asked before
+# x is iterated; a TypeError streams, another error is raised (CORR-663-1)
+class Dynamic:
+    def __getattr__(self, name):
+        if name == '__len__':
+            raise RuntimeError('unexpected length attribute lookup')
+        raise AttributeError(name)
+
+    def __iter__(self):
+        return iter([2, 3, 4])
+
+
+class Fabricated:
+    def __getattr__(self, name):
+        if name == '__len__':
+            return lambda: 4
+        raise AttributeError(name)
+
+    def __iter__(self):
+        return iter([float(1.1)] * 4)
+
+
+class LenTypeError:
+    def __len__(self):
+        raise TypeError('no length')
+
+    def __iter__(self):
+        return iter([float(1.1)] * 4)
+
+
+class LenValueError:
+    def __len__(self):
+        raise ValueError('bad length')
+
+    def __iter__(self):
+        print('iterated')
+        return iter([2, 3])
+
+
+class MutableLength:
+    def __init__(self):
+        self.items = [2, 3, 4]
+        self.log = []
+
+    def __len__(self):
+        self.log.append('len')
+        self.items = [5, 7]
+        return len(self.items)
+
+    def __iter__(self):
+        self.log.append('iter')
+        return iter(self.items)
+
+
+t('getattr hook not asked for __len__', lambda: prod(Dynamic()))
+t('fabricated __len__ streams', lambda: repr(prod(Fabricated())))
+t('__len__ TypeError streams', lambda: repr(prod(LenTypeError())))
+t('sized floats', lambda: repr(prod([float(1.1)] * 4)))
+t('__len__ ValueError before iterating', lambda: prod(LenValueError()))
+m = MutableLength()
+t('len before iter', lambda: (prod(m), m.log))
+
+
+class Big:
+    def __index__(self):
+        return int(2)**int(64)
+
+
+# the cutoff a Py_ssize_t, checked before x is looked at (CORR-663-2)
+for c in [2**63, 2**64, -2**63 - 1, 2**63 - 1]:
+    t('cutoff %d' % c, lambda: prod([2, 3], recursion_cutoff=c))
+    t('cutoff %d empty' % c, lambda: prod([], recursion_cutoff=c))
+t('cutoff Big', lambda: prod([2, 3], recursion_cutoff=Big()))
+t('cutoff Big generator', lambda: prod(LenValueError(), recursion_cutoff=Big()))
