@@ -3018,7 +3018,8 @@ def _shift_count(n, op):
         return int.__int__(n)
     if isinstance(n, float):
         k = int(n)
-        if k != float.__float__(n):
+        # (Sage compares with ==: a subclass's __eq__ runs, CORR-603-1)
+        if not (n == k):
             raise TypeError(bad)
         return k
     if isinstance(n, RealNumberMP):
@@ -3029,12 +3030,35 @@ def _shift_count(n, op):
         if n.denominator != 1:
             raise TypeError(bad)
         return n.numerator
-    if type(n) in (str, bytes):
-        try:
-            return int(n)
-        except ValueError:
-            raise TypeError(bad) from None
+    if isinstance(n, (str, bytes)):
+        # (the native text, subclasses too: no __int__, __str__ or
+        # __bytes__ hook runs, CORR-603-1)
+        t = str.strip(n) if isinstance(n, str) else bytes.decode(bytes.strip(n), "latin-1")
+        k = _sage_int_text(t)
+        if k is None:
+            raise TypeError(bad)
+        return k
     raise TypeError(bad)
+
+
+def _sage_int_text(t):
+    """The integer Sage reads from the stripped text t, or None: a sign
+    (spaces may follow it), underscores anywhere, a 0x, 0o or 0b prefix
+    (else decimal, a leading 0 too), ASCII digits only."""
+    neg = False
+    if t[:1] in ("+", "-"):
+        neg = t[0] == "-"
+        t = str.lstrip(t[1:])
+    t = t.replace("_", "")
+    base = 10
+    if t[:2].lower() in ("0x", "0o", "0b"):
+        base = {"x": 16, "o": 8, "b": 2}[t[1].lower()]
+        t = t[2:]
+    digits = "0123456789abcdef"[:base]
+    if not t or any(c not in digits for c in t.lower()):
+        return None
+    v = int(t, base)
+    return -v if neg else v
 
 
 def _cparts(v):
