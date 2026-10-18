@@ -49,6 +49,31 @@ test("comb and perm of k 0 or 1 read nothing of n", () => {
   assert.throws(() => execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", bounded], { encoding: "utf8", stdio: "pipe" }), /hex digits of a big integer read/);
 });
 
+// (a product known too big for a BigInt is a MemoryError at once, its size
+// bounded from below: comb(2**61 - 1, 2**60 - 1) lost its whole bound when
+// log2(n) was read from n's first hex digit only, and its work began;
+// astra's finding on 663ddbf2. CPython would compute these for ages.)
+test("products past the largest BigInt are refused at once", () => {
+  const src = [
+    "import math, time",
+    "cases = [(math.comb, 2**61 - 1, 2**60 - 1), (math.comb, 2**61 - 1, 2**31), (math.comb, 2**32, 2**30), (math.comb, 2**200 + 3, 2**24),",
+    "         (math.comb, 2**70, 2**40), (math.perm, 2**61 - 1, 2**60 - 1), (math.perm, 2**61, 2**61 - 3), (math.perm, 2**200, 2**23)]",
+    "t = time.perf_counter()",
+    "for f, n, k in cases:",
+    "    try:",
+    "        f(n, k)",
+    "        print('computed', n, k)",
+    "    except MemoryError:",
+    "        pass",
+    "try:",
+    "    math.factorial(2**40)",
+    "except MemoryError:",
+    "    print('refused', time.perf_counter() - t < 2)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8", timeout: 60000 });
+  assert.equal(out.trim(), "refused True");
+});
+
 test("Sage mode's prod is balanced, not quadratic", () => {
   const src = "import time\nt = time.perf_counter(); prod(range(1, 100001)); print(time.perf_counter() - t)";
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", src], { encoding: "utf8" });
