@@ -60,7 +60,11 @@ else {
     Atomics.store(intr, 0, 1);
     Atomics.notify(intr, 0); // (a time.sleep waits on the flag)
   });
-  const worker = new Worker(bundle, { workerData: { sagebrushCli: { argv } } });
+  // (the worker turns on the compile cache before it loads the bundle, as
+  // this thread does: a Worker started on the file itself compiles it anew
+  // every time, about 160 ms)
+  const boot = `try { require("node:module").enableCompileCache?.(); } catch {}\nrequire(${JSON.stringify(bundle)});`;
+  const worker = new Worker(boot, { eval: true, workerData: { sagebrushCli: { argv } } });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

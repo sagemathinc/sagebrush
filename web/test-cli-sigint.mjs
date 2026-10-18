@@ -2,7 +2,7 @@
 // a worker thread): SIGINT raises KeyboardInterrupt inside it, so `except
 // KeyboardInterrupt` and `finally` run; an uncaught one prints CPython's
 // traceback and ends the process by SIGINT (a shell's 130); time.sleep ends
-// at once; a call that does not poll (input() on a pipe) gives way to a
+// at once; a call that does not poll (a read of stdin) gives way to a
 // second Ctrl-C; and stdout and stderr come out in the order written, as on
 // the main thread.  Under Node, Deno and Bun, and the Deno executable when
 // it is built.
@@ -11,7 +11,7 @@
 //   command, with the bundle node scripts/build-cli.mjs puts beside it in
 //   dist/; a .cjs, which Deno runs as CommonJS)
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -35,7 +35,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // "go", and collect what it printed (stdout and stderr apart) and how it ended
 function interrupted(cmd, { signals = 1, gap = 300, limit = 20000, stdin = "ignore" } = {}) {
   return new Promise((resolve) => {
-    const p = spawn(cmd[0], cmd.slice(1), { stdio: [stdin, "pipe", "pipe"] });
+    // (stdin "fifo": a named pipe this side holds open, so a read of it
+    // blocks; a pipe Node makes is a non-blocking socket, read as EOF)
+    let fifo = null;
+    if (stdin === "fifo") {
+      const f = join(dir, `fifo-${Date.now()}-${Math.random()}`);
+      spawnSync("mkfifo", [f]);
+      fifo = openSync(f, "r+");
+    }
+    const p = spawn(cmd[0], cmd.slice(1), { stdio: [fifo ?? stdin, "pipe", "pipe"] });
     let out = "", err = "", sent = 0;
     const t0 = Date.now();
     const timer = setTimeout(() => p.kill("SIGKILL"), limit);
@@ -51,6 +59,7 @@ function interrupted(cmd, { signals = 1, gap = 300, limit = 20000, stdin = "igno
     p.stderr.on("data", (d) => (err += d));
     p.on("close", (code, signal) => {
       clearTimeout(timer);
+      if (fifo !== null) closeSync(fifo);
       resolve({ out, err, code, signal, ms: Date.now() - t0 });
     });
   });
@@ -59,7 +68,8 @@ function interrupted(cmd, { signals = 1, gap = 300, limit = 20000, stdin = "igno
 const caught = file("caught.py", "import time\nprint('go', flush=True)\ntry:\n    try:\n        while True:\n            pass\n    finally:\n        print('finally')\nexcept KeyboardInterrupt:\n    print('caught KeyboardInterrupt')\nprint('after')\n");
 const uncaught = file("uncaught.py", "def spin():\n    while True:\n        pass\nprint('go', flush=True)\nspin()\n");
 const sleeps = file("sleeps.py", "import time\nprint('go', flush=True)\nt = time.monotonic()\ntry:\n    time.sleep(30)\nexcept KeyboardInterrupt:\n    print('slept', round(time.monotonic() - t) < 5)\n");
-const reads = file("reads.py", "print('go', flush=True)\ninput()\n");
+// (sys.stdin.readline: Sagebrush's input() does not read stdin yet)
+const reads = file("reads.py", "import sys\nprint('go', flush=True)\nsys.stdin.readline()\n");
 const order = file("order.py", "import sys\nfor i in range(3):\n    print('out', i)\n    sys.stdout.flush()\n    sys.stderr.write(f'err {i}\\n')\n    sys.stderr.flush()\nprint('last out', flush=True)\nraise ValueError('the end')\n");
 
 let failed = 0;
@@ -74,9 +84,9 @@ for (const [rt, cmd] of runtimes) {
   check(`${rt}: uncaught, CPython's traceback and SIGINT`, r.signal === "SIGINT" && /^Traceback \(most recent call last\):\n[\s\S]*, in spin\n[\s\S]*\nKeyboardInterrupt\n$/.test(r.err), JSON.stringify(r));
   r = await interrupted([...cmd, sleeps]);
   check(`${rt}: time.sleep ends at once`, r.out === "go\nslept True\n" && r.code === 0 && r.ms < 10000, JSON.stringify(r));
-  // (input() on a pipe that stays open: the first Ctrl-C is not seen until the
+  // (a read of a pipe that stays open: the first Ctrl-C is not seen until the
   // read returns; a second within 2 s ends the process)
-  r = await interrupted([...cmd, reads], { signals: 2, gap: 500, stdin: "pipe" });
+  r = await interrupted([...cmd, reads], { signals: 2, gap: 500, stdin: "fifo" });
   check(`${rt}: a second Ctrl-C ends a blocked read`, r.signal === "SIGINT" || /KeyboardInterrupt\n$/.test(r.err), JSON.stringify(r));
   // the order of stdout and stderr, one pipe for both, against the main thread's
   const both = (env) => spawnSync("sh", ["-c", '"$@" 2>&1', "sh", ...cmd, order], { encoding: "utf8", env: { ...process.env, ...env } });
