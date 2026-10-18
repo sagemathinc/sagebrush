@@ -7310,6 +7310,16 @@ def Eltseq(x):
         return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
     if isinstance(x, MSeq) and isinstance(x.universe, _MVectorSpace):
         return _carry(MSeq(x, x.universe), x)  # (its vector space kept, astra CORR-7E2-1)
+    if isinstance(x, MSet):
+        # (a set of vectors, of any kind, or one over a vector space: Magma's
+        # error, which names the vectors' type; astra CORR-5C2-1)
+        u = x.universe if isinstance(x.universe, _MVectorSpace) else None
+        v = next((y for y in x.items if isinstance(y, _MVector)), None)
+        if u is not None or v is not None:
+            et = "%sElt[%s]" % (u._cat(), _ring_cat(u.base)) if u is not None else _ext_type(v)
+            raise MagmaError("Bad argument types\nArgument types given: %s[%s]" % (_type(x), et), "'Eltseq'", True)
+    if isinstance(x, _MVectorSpace):
+        raise _bad_types("Eltseq", (x,))
     return MSeq(x)
 
 
