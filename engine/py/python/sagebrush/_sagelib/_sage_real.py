@@ -2890,16 +2890,7 @@ class RealNumberMP:
         """self 2^n (2^-n for >>), as Sage's: n an integer (an integral
         real or rational too) with |n| < 2^63; a zero keeps its sign, an
         infinity or NaN is itself."""
-        if isinstance(n, int) or type(n).__name__ == "Integer":
-            k = int(n)
-        else:
-            try:
-                q = _F(n) if not isinstance(n, RealNumberMP) else n._q()
-            except (TypeError, ValueError, NotImplementedError):
-                raise TypeError("unsupported operands for %s" % op) from None
-            if q.denominator != 1:
-                raise TypeError("unsupported operands for %s" % op)
-            k = q.numerator
+        k = _shift_count(n, op)
         if abs(k) > (1 << 63) - 1:
             raise OverflowError("n (=%d) must be <= 9223372036854775807" % abs(k))
         if self._special or not self._m:
@@ -3014,6 +3005,36 @@ def _user_float(o):
     import _sage_lang
     from _sage_rdf import RealDoubleElement
     return not isinstance(o, (_sage_lang.RealNumber, RealDoubleElement))
+
+
+def _shift_count(n, op):
+    """The integer count of a shift, as Sage converts it (CORR-3B5-1): an
+    int's own value (bool and int subclasses too, no hook); a float's int()
+    (its __int__, Python's errors for NaN and infinity), refused unless
+    equal to it; an integral real or rational; an integer str or bytes;
+    anything else refused (no ratio hook is read)."""
+    bad = "unsupported operands for %s" % op
+    if isinstance(n, int):
+        return int.__int__(n)
+    if isinstance(n, float):
+        k = int(n)
+        if k != float.__float__(n):
+            raise TypeError(bad)
+        return k
+    if isinstance(n, RealNumberMP):
+        if n._special or not n.is_integer():
+            raise TypeError(bad)
+        return int(n._q())
+    if isinstance(n, _F):
+        if n.denominator != 1:
+            raise TypeError(bad)
+        return n.numerator
+    if type(n) in (str, bytes):
+        try:
+            return int(n)
+        except ValueError:
+            raise TypeError(bad) from None
+    raise TypeError(bad)
 
 
 def _cparts(v):

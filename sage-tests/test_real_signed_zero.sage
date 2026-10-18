@@ -74,3 +74,57 @@ for nm, R in [("R30", RealField(30)), ("R100", RealField(100))]:
         for s in ["-0", "-0.00", "0", "+0", "-0.0", "-1", "-0.1"]:
             show("%s(%r,base=%d)" % (nm, s, b), lambda: R(s, base=b))
             show("1/%s(%r,base=%d)" % (nm, s, b), lambda: 1 / R(s, base=b))
+
+# shift counts as Sage converts them (astra's probes, hook calls logged):
+# an int's value (no hook), a float's int() refused unless equal, an
+# integral real or rational, an integer str or bytes; no ratio hook; else
+# TypeError.  (Python's Fraction is left out: QQ is a Fraction here.)
+calls=[]
+class F(float):
+ def as_integer_ratio(self):
+  calls.append('ratio');return (int(3),int(1))
+class Rat:
+ def as_integer_ratio(self):
+  calls.append('ratio');return (int(2),int(1))
+def show_hook(label, fn):
+ calls.clear()
+ try: print(label, '=>',repr(fn()),calls)
+ except Exception as e:print(label,'!!',type(e).__name__,str(e),calls)
+for p in [30,100]:
+ R=RealField(p)
+ for lab,n in [('str-decimal','2.0'),('str-exponent','2e0'),('str-rational','4/2'),('ratio-object',Rat()),('float-ratio',F(2)),('bytes',b'2'),('str-integer','2'),('float-nan',float('nan'))]:
+  show_hook((p,lab,'left'),lambda:R(1)<<n)
+  show_hook((p,lab,'right'),lambda:R(1)>>n)
+
+import math
+from fractions import Fraction
+calls=[]
+class Ix:
+ def __index__(self):
+  calls.append('index');return int(2)
+class It:
+ def __int__(self):
+  calls.append('int');return int(2)
+class Rat:
+ def as_integer_ratio(self):
+  calls.append('ratio');return (int(2),int(1))
+class FF(float):
+ def __int__(self):
+  calls.append('float-int');return int(4)
+ def as_integer_ratio(self):
+  calls.append('float-ratio');return (int(3),int(1))
+class II(int):
+ def __int__(self):
+  calls.append('int-int');return int(3)
+vals=[('int',int(2)),('bool',True),('float',float(2)),('fractionfloat',float(2.5)),('floatinf',float('inf')),('floatnan',float('nan')),('rr',RR(2)),('rrfrac',RR(2.5)),('r30',RealField(30)(2)),('r100',RealField(100)(2)),('qq',QQ(2)),('qqfrac',QQ(3)/2),('str','2'),('strdec','2.0'),('strexp','2e0'),('strfrac','4/2'),('bytes',b'2'),('bytearray',bytearray(b'2')),('complex',complex(2,0)),('CC',CC(2)),('ix',Ix()),('it',It()),('ratio',Rat()),('ff',FF(2)),('ii',II(2))]
+for p in [30,100]:
+ R=RealField(p)
+ for s in ['0','-0','1','-3','+inf','-inf','NaN']:
+  for label,n in vals:
+   for op in ['<<','>>']:
+    calls.clear()
+    try:
+     x=R(s)<<n if op=='<<' else R(s)>>n
+     out=repr(x)
+    except Exception as e:out=type(e).__name__+': '+str(e)
+    print(p,s,label,op,out,calls)
