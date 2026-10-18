@@ -412,7 +412,9 @@ class RealNumber(float):
             0.666666666666667
         """
         if prec is None and digits is None:
-            return self
+            # (a decimal literal's n() is a plain number, as in Sage)
+            plain = getattr(self, "_lit", None) is None and getattr(self, "_lit_ambiguous", None) is None
+            return self if plain else float.__new__(RealNumber, float(self))
         import _sage_real
         p = _sage_real._approx_prec(_sage_real.digits_to_prec(digits) if digits is not None else prec, 53)
         mp = getattr(self, "_mp", None)
@@ -872,6 +874,7 @@ class _RealBig(RealNumber):
     # conversion into a higher precision, as Sage's RealLiteral; None for a
     # computed value
     _lit = None
+    _lit_ambiguous = None
 
     # float's methods that would act on the backing double (0.0, inf, a
     # subnormal) instead of the value: the value's, or an explicit refusal.
@@ -1027,7 +1030,8 @@ class _RealBig(RealNumber):
 
     def n(self, prec=None, digits=None):
         if prec is None and digits is None:
-            return self
+            # (a decimal literal's n() is a plain number, as in Sage)
+            return self if self._lit is None and getattr(self, "_lit_ambiguous", None) is None else _rr_from_mp(self._mp)
         return self._mp.n(prec, digits)
 
     numerical_approx = N = n

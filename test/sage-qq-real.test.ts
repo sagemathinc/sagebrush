@@ -88,7 +88,7 @@ test("an integral literal of more than 15 digits is refused too, before the inte
   // (Sage: QQ(9007199254740993.0) is 9007199254740993, its 54-bit value)
   for (const f of ["QQ", "Rational"]) {
     const code = `import sage_all as S\ntry:\n    S.${f}(S.RealNumber('9007199254740993.0'))\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:40])`;
-    assert.equal(await run(code, null), "ValueError: QQ of a decimal literal of more than 15 sig");
+    assert.equal(await run(code, null), "ValueError: QQ of a decimal literal of more than 15");
   }
 });
 
@@ -99,7 +99,7 @@ test("x + 0 and x * 1 with an int keep a literal in Sage only for a Python int; 
   const cases = ["x + 0", "0 + x", "x * 1", "1 * x", "sum([x])", "-(x + 0)"];
   for (const c of cases) {
     const code = `import sage_all as S\nx = S.RealNumber('1e-20')\ny = ${c}\ntry:\n    S.QQ(y)\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:45])`;
-    assert.equal(await run(code, null), "ValueError: QQ of x + 0 or x * 1 for a decimal literal", c);
+    assert.equal(await run(code, null), "ValueError: QQ of x + 0 or x * 1 for a decimal literal x", c);
   }
   // (bools are Python bools everywhere: x + False is the literal, as in Sage)
   const lit = "import sage_all as S\nx = S.RealNumber('1e-20')\nraise ValueError(str(S.QQ(x + False)) + ' ' + str(S.QQ(x * True)))";
