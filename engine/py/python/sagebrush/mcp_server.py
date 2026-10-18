@@ -523,16 +523,20 @@ def _number_field_data(coeffs, proof=True):
     why = None
     if proof:
         try:
-            G, reg, bnf = K.class_group(proof=True), K.regulator(proof=True), []
+            G, bnf = K.class_group(proof=True), []
+            reg = K._proven_bnf("regulator")["regulator"]
         except NotImplementedError as e:
             why = str(e)
     else:
         why = "not asked (proof=false)"
     if why is not None:
-        G, reg = K.class_group(proof=False), K.regulator(proof=False)
+        G, reg = K.class_group(proof=False), K._bnf_checked(False)["regulator"]
         bnf = _union(K._bnfdata().get("assumes", ["GRH"]), order)
     # (with no fundamental units the regulator is 1, by definition)
     reg_assumes = [] if r1 + r2 == 1 else bnf
+    # (the engine's decimal string, its digits correct: RR's rounding of it
+    # could change the last digit, astra's CORR-479-3)
+    reg = "1" if r1 + r2 == 1 else str(reg)
     w = K.number_of_roots_of_unity()
     w_assumes = [] if K._nfdata().get("w_proven") else ["the roots of unity found are all"]
     res = {
@@ -540,7 +544,9 @@ def _number_field_data(coeffs, proof=True):
         "degree": int(K.degree()),
         "signature": [int(r1), int(r2)],
         "discriminant": inv(str(D), order),
-        "discriminant_factorization": inv(DF["result"], DF["assumes"]),
+        # (a factorization of the discriminant rests on what the discriminant
+        # does, the maximal order's probable primes: astra's CORR-479-2)
+        "discriminant_factorization": inv(DF["result"], _union(order, DF["assumes"])),
         "integral_basis": inv([str(b) for b in K.integral_basis()], order),
         "class_group": inv({"order": int(G.order()), "invariants": [int(c) for c in G.invariants()]}, bnf),
         "regulator": inv(str(reg), reg_assumes),
