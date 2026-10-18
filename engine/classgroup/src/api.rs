@@ -161,7 +161,7 @@ pub struct PrimeData {
     pub pi: Vec<BigInt>,
     pub pi_den: BigInt,
     /// the probable primes (BPSW, above 2^64) that the maximal order, and so
-    /// this decomposition, assumes prime (the systematic review's R2-NFD-F1)
+    /// this decomposition, assumes prime
     pub assumed_primes: Vec<BigInt>,
 }
 
@@ -195,8 +195,7 @@ pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, String> {
     if !crate::relations::is_prime_u64(p) {
         return Err(format!("{} is not prime", p));
     }
-    // (the factorization modulo p needs p < 2^32: a larger prime reached an
-    // assertion, the systematic review's NFD-F5)
+    // The modular factorization accepts only p < 2^32; refuse before calling it.
     if p >= 1 << 32 {
         return Err(format!("primes above p >= 2^32 are not supported (p = {})", p));
     }
@@ -232,8 +231,7 @@ pub struct BnfData {
 /// A decimal string of x / 2^prec with `digits` significant digits.
 pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
     // `digits` significant digits of x / 2^prec: fixed notation from 10^-4
-    // up, scientific below (10^-100 printed as 0.000... to 30 decimals was
-    // 0: the third review's T6)
+    // up, scientific below, so small nonzero values do not print as zero.
     if x.is_zero() {
         return "0".into();
     }
@@ -284,14 +282,28 @@ pub fn fixed_to_decimal(x: &BigInt, prec: u32, digits: usize) -> String {
     format!("{}{}.{}e-{}", sign, a, if b.is_empty() { "0" } else { b }, z + 1)
 }
 
+/// Preserve the public representation at one boundary: exact integer fields,
+/// and a regulator string made from the fixed-point value, not its f64 estimate.
+fn class_group_data(result: crate::nf::bnf::Bnf) -> BnfData {
+    let regulator = regulator_decimal(&result.reg_fixed, result.prec, result.reg_digits);
+    BnfData { degree: result.n, r1: result.r1, r2: result.r2, disc: result.disc,
+        h: result.group.h, cyc: result.group.cyc, regulator, w: result.w,
+        w_proven: result.w_proven, certified: result.certified, assumed_primes: result.assumed_primes }
+}
+
+/// Precision zero denotes the rank-zero regulator, exactly 1. Otherwise the
+/// fixed-point formatter uses fixed notation from 10^-4 up, scientific below.
+fn regulator_decimal(value: &BigInt, precision: u32, digits: usize) -> String {
+    if precision == 0 { "1".to_string() } else { fixed_to_decimal(value, precision, digits) }
+}
+
 pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
     monic(f)?;
     if f.len() == 2 {
         return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true, certified: true, assumed_primes: vec![] });
     }
     let (b, _) = crate::nf::bnf::bnfinit(f)?;
-    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
-    Ok(BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified, assumed_primes: b.assumed_primes })
+    Ok(class_group_data(b))
 }
 
 /// The unconditional class group and regulator (nf/proof.rs: no GRH).
@@ -331,7 +343,7 @@ pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) 
     let d = crate::nf::proof::Limits::default();
     let limits = crate::nf::proof::Limits { norm_max: norm_max.unwrap_or(d.norm_max), index_max: index_max.unwrap_or(d.index_max) };
     let p = crate::nf::proof::certify(f, &limits)?;
-    let regulator = if p.prec == 0 { "1".to_string() } else { fixed_to_decimal(&p.reg_fixed, p.prec, p.reg_digits) };
+    let regulator = regulator_decimal(&p.reg_fixed, p.prec, p.reg_digits);
     Ok(BnfProofData { degree: p.n, r1: p.r1, r2: p.r2, disc: p.disc, h: p.h, cyc: p.cyc, regulator, w: p.w,
         norm_bound: p.norm_bound, norm_bound_kind: p.norm_bound_kind.name(), fb_bound: p.fb_bound, primes_shown: p.primes_shown,
         reg_lower: p.reg_lower, index_bound: p.index_bound, unit_primes: p.unit_primes, class_primes: p.class_primes })
@@ -354,8 +366,7 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
         return Err("the degree must be at least 2".into());
     }
     let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
-    let regulator = if b.prec == 0 { "1".to_string() } else { fixed_to_decimal(&b.reg_fixed, b.prec, b.reg_digits) };
-    let bnf = BnfData { degree: b.n, r1: b.r1, r2: b.r2, disc: b.disc, h: b.group.h, cyc: b.group.cyc, regulator, w: b.w, w_proven: b.w_proven, certified: b.certified, assumed_primes: b.assumed_primes.clone() };
+    let bnf = class_group_data(b);
     let elems = r.elems.iter().map(|x| {
         // power-basis coordinates: x B / den
         let n = r.order.n;

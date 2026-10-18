@@ -1,0 +1,10493 @@
+[
+  {
+    "id": "fixture-001-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-001-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-002-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "21677",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-002-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "21677",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-003-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "46",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-003-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "46",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-004-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7316798",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-004-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7316798",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-005-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "906876",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-005-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "906876",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-006-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "23",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-006-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "23",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-007-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "43311",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-007-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "43311",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-008-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "34",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-008-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "34",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-009-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "68",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-009-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "68",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-010-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-010-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-011-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "41896",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-011-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "41896",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-012-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-599640",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-012-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-599640",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-013-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "385",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-013-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "385",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-014-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "82",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-014-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "82",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-015-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2255126",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-015-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2255126",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-016-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-46",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-016-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-46",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-017-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5223",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-017-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5223",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-018-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-30",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-018-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-30",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-019-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "18255",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-019-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "18255",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-020-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-42",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-020-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-42",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-021-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7834",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-021-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7834",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-022-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-9756658",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-022-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-9756658",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-023-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-23",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-023-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-23",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-024-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-546",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-024-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-546",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-025-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9886",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-025-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9886",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-026-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "271857",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-026-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "271857",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-027-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "946",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-027-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "946",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-028-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-942",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-028-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-942",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-029-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-029-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-030-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11563",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-030-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11563",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-031-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "309",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-031-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "309",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-032-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "293",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-032-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "293",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-033-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3253",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-033-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3253",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-034-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-034-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-035-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "110",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-035-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "110",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-036-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3492343",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-036-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3492343",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-037-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "36",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-037-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "36",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-038-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "57",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-038-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "57",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-039-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-039-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-040-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-107",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-040-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-107",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-041-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-180147",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-041-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-180147",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-042-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-042-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-043-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1833",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-043-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1833",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-044-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-238",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-044-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-238",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-045-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "42",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-045-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "42",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-046-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-135",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-046-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-135",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-047-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-60799",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-047-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-60799",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-048-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6271",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-048-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6271",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-049-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "7666",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-049-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "7666",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-050-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-148063",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-050-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-148063",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-051-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-051-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-052-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1677678",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-052-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1677678",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-053-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1371",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-053-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1371",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-054-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-527",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-054-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-527",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-055-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "777",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-055-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "777",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-056-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-056-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-057-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-057-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-058-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-058-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-059-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-35",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-059-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-35",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-060-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-424",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-060-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-424",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-061-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-5",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-061-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-5",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-062-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-38",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-062-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-38",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-063-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "10",
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-063-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "10",
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-064-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3123",
+        "-418",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-064-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3123",
+        "-418",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-065-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4089",
+        "-498",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-065-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4089",
+        "-498",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-066-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-066-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-067-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-24",
+        "27",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-067-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-24",
+        "27",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-068-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-303",
+        "-123",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-068-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-303",
+        "-123",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-069-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3439",
+        "-417",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-069-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3439",
+        "-417",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-070-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-347",
+        "-100",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-070-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-347",
+        "-100",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-071-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-739",
+        "-164",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-071-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-739",
+        "-164",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-072-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "41",
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-072-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "41",
+        "10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-073-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1163",
+        "-207",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-073-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1163",
+        "-207",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-074-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1495",
+        "-242",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-074-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1495",
+        "-242",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-075-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "427",
+        "-106",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-075-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "427",
+        "-106",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-076-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-076-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-077-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2996",
+        "-395",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-077-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2996",
+        "-395",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-078-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-078-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-079-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "668",
+        "-142",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-079-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "668",
+        "-142",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-080-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2350",
+        "-332",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-080-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2350",
+        "-332",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-081-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-81",
+        "3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-081-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-81",
+        "3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-082-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-082-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-083-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-492",
+        "-129",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-083-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-492",
+        "-129",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-084-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1434",
+        "-242",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-084-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1434",
+        "-242",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-085-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-22",
+        "-13",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-085-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-22",
+        "-13",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-086-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4074",
+        "-472",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-086-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4074",
+        "-472",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-087-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-47",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-087-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-47",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-088-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-83",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-088-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-83",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-089-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-75",
+        "-110",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-089-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-75",
+        "-110",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-090-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-128",
+        "-38",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-090-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-128",
+        "-38",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-091-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "31",
+        "-24",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-091-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "31",
+        "-24",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-092-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "148",
+        "60",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-092-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "148",
+        "60",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-093-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3642",
+        "-449",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-093-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3642",
+        "-449",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-094-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-34",
+        "-38",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-094-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-34",
+        "-38",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-095-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "69",
+        "-24",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-095-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "69",
+        "-24",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-096-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-408",
+        "-113",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-096-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-408",
+        "-113",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-097-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-33",
+        "49",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-097-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-33",
+        "49",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-098-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-098-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-099-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1655",
+        "-256",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-099-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1655",
+        "-256",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-100-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-367",
+        "-99",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-100-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-367",
+        "-99",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-101-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "70",
+        "-30",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-101-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "70",
+        "-30",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-102-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-438",
+        "-106",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-102-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-438",
+        "-106",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-103-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-103-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-104-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-104-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-105-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-40",
+        "-34",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-105-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-40",
+        "-34",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-106-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-182",
+        "-62",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-106-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-182",
+        "-62",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-107-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-118",
+        "-53",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-107-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-118",
+        "-53",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-108-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "309",
+        "-83",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-108-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "309",
+        "-83",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-109-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-191",
+        "-71",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-109-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-191",
+        "-71",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-110-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-178",
+        "-61",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-110-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-178",
+        "-61",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-111-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1146",
+        "-201",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-111-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1146",
+        "-201",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-112-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "15",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-112-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "15",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-113-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-47",
+        "-40",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-113-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-47",
+        "-40",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-114-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-40",
+        "33",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-114-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-40",
+        "33",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-115-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1722",
+        "-266",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-115-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1722",
+        "-266",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-116-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1098",
+        "-214",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-116-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1098",
+        "-214",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-117-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-467",
+        "-111",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-117-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-467",
+        "-111",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-118-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3149",
+        "-408",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-118-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3149",
+        "-408",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-119-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-24",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-119-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-24",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-120-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1382",
+        "-248",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-120-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1382",
+        "-248",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-121-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-58",
+        "-70",
+        "-29",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-121-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-58",
+        "-70",
+        "-29",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-122-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "14",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-122-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "14",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-123-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "6",
+        "-20",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-123-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "6",
+        "-20",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-124-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-50",
+        "48",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-124-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-50",
+        "48",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-125-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-59",
+        "-82",
+        "-32",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-125-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-59",
+        "-82",
+        "-32",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-126-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "10",
+        "-12",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-126-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "10",
+        "-12",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-127-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-15",
+        "-36",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-127-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-15",
+        "-36",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-128-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-130",
+        "-156",
+        "-46",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-128-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-130",
+        "-156",
+        "-46",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-129-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "-29",
+        "-18",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-129-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "-29",
+        "-18",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-130-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-7",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-130-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-7",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-131-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9",
+        "15",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-131-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9",
+        "15",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-132-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-5",
+        "-2",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-132-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-5",
+        "-2",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-133-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "7",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-133-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "7",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-134-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-15",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-134-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-15",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-135-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-22",
+        "-37",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-135-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-22",
+        "-37",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-136-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-21",
+        "7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-136-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-21",
+        "7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-137-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-73",
+        "-74",
+        "-27",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-137-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-73",
+        "-74",
+        "-27",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-138-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-41",
+        "-54",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-138-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-41",
+        "-54",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-139-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "4",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-139-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "4",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-140-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-67",
+        "-92",
+        "-36",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-140-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-67",
+        "-92",
+        "-36",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-141-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-74",
+        "-98",
+        "-40",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-141-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-74",
+        "-98",
+        "-40",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-142-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "271",
+        "-159",
+        "15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-142-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "271",
+        "-159",
+        "15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-143-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-2",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-143-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-2",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-144-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "-4",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-144-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "-4",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-145-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-379",
+        "-298",
+        "-66",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-145-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-379",
+        "-298",
+        "-66",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-146-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-57",
+        "-86",
+        "-34",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-146-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-57",
+        "-86",
+        "-34",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-147-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-35",
+        "-18",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-147-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-35",
+        "-18",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-148-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9",
+        "-24",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-148-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9",
+        "-24",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-149-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-32",
+        "17",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-149-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-32",
+        "17",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-150-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-131",
+        "-138",
+        "-47",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-150-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-131",
+        "-138",
+        "-47",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-151-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "2",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-151-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "2",
+        "9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-152-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "-23",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-152-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "-23",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-153-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "10",
+        "12",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-153-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "10",
+        "12",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-154-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-174",
+        "-168",
+        "-47",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-154-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-174",
+        "-168",
+        "-47",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-155-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-82",
+        "-94",
+        "-34",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-155-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-82",
+        "-94",
+        "-34",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-156-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-12",
+        "-13",
+        "-8",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-156-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-12",
+        "-13",
+        "-8",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-157-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "27",
+        "99",
+        "15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-157-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "27",
+        "99",
+        "15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-158-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "0",
+        "5",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-158-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "0",
+        "5",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-159-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-86",
+        "95",
+        "-26",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-159-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-86",
+        "95",
+        "-26",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-160-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "-13",
+        "-5",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-160-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "-13",
+        "-5",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-161-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "13",
+        "12",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-161-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "13",
+        "12",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-162-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-209",
+        "-201",
+        "-52",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-162-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-209",
+        "-201",
+        "-52",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-163-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-9",
+        "-8",
+        "-12",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-163-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-9",
+        "-8",
+        "-12",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-164-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-22",
+        "8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-164-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-22",
+        "8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-165-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-120",
+        "-135",
+        "-47",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-165-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-120",
+        "-135",
+        "-47",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-166-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-20",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-166-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-20",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-167-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "-3",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-167-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "-3",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-168-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-2",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-168-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-2",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-169-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-206",
+        "172",
+        "-41",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-169-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-206",
+        "172",
+        "-41",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-170-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "26",
+        "4",
+        "-9",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-170-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "26",
+        "4",
+        "-9",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-171-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "25",
+        "-10",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-171-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "25",
+        "-10",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-172-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-16",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-172-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-16",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-173-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "3",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-173-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "3",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-174-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-51",
+        "-70",
+        "-27",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-174-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-51",
+        "-70",
+        "-27",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-175-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-175-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-176-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-72",
+        "-79",
+        "-32",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-176-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-72",
+        "-79",
+        "-32",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-177-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-16",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-177-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-16",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-178-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-4",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-178-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-4",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-179-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "-2",
+        "-9",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-179-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "-2",
+        "-9",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-180-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "2",
+        "5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-180-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "2",
+        "5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-181-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "14",
+        "-28",
+        "25",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-181-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "14",
+        "-28",
+        "25",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-182-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "3",
+        "-1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-182-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "3",
+        "-1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-183-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "1",
+        "-13",
+        "-10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-183-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "1",
+        "-13",
+        "-10",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-184-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-18",
+        "-39",
+        "-41",
+        "-15",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-184-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-18",
+        "-39",
+        "-41",
+        "-15",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-185-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-4",
+        "3",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-185-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-4",
+        "3",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-186-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-5",
+        "6",
+        "2",
+        "-4",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-186-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-5",
+        "6",
+        "2",
+        "-4",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-187-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "-31",
+        "-38",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-187-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "-31",
+        "-38",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-188-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-35",
+        "33",
+        "-11",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-188-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-35",
+        "33",
+        "-11",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-189-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9",
+        "2",
+        "-8",
+        "-9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-189-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9",
+        "2",
+        "-8",
+        "-9",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-190-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "2",
+        "-4",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-190-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "2",
+        "-4",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-191-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "5",
+        "-3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-191-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "5",
+        "-3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-192-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-12",
+        "-15",
+        "-8",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-192-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-12",
+        "-15",
+        "-8",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-193-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-5",
+        "9",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-193-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-5",
+        "9",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-194-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-5",
+        "-23",
+        "-21",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-194-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-5",
+        "-23",
+        "-21",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-195-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-12",
+        "-17",
+        "-16",
+        "-7",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-195-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-12",
+        "-17",
+        "-16",
+        "-7",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-196-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7",
+        "-9",
+        "-14",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-196-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7",
+        "-9",
+        "-14",
+        "-8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-197-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "-12",
+        "17",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-197-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "-12",
+        "17",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-198-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-16",
+        "-25",
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-198-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-16",
+        "-25",
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-199-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-5",
+        "0",
+        "0",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-199-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-5",
+        "0",
+        "0",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-200-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-4",
+        "0",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-200-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-4",
+        "0",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-201-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "-5",
+        "0",
+        "-6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-201-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "-5",
+        "0",
+        "-6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-202-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "-38",
+        "-45",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-202-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "-38",
+        "-45",
+        "-19",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-203-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-1",
+        "3",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-203-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-1",
+        "3",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-204-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "1",
+        "-6",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-204-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "1",
+        "-6",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-205-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-22",
+        "-26",
+        "-15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-205-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-22",
+        "-26",
+        "-15",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-206-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "3",
+        "6",
+        "-5",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-206-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "3",
+        "6",
+        "-5",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-207-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-1",
+        "-4",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-207-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-1",
+        "-4",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-208-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-44",
+        "35",
+        "-11",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-208-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-44",
+        "35",
+        "-11",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-209-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "2",
+        "-6",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-209-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "2",
+        "-6",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-210-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "5",
+        "2",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-210-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "5",
+        "2",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-211-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-34",
+        "-40",
+        "-16",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-211-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-34",
+        "-40",
+        "-16",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-212-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-14",
+        "18",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-212-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-14",
+        "18",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-213-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "4",
+        "0",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-213-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "4",
+        "0",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-214-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-1",
+        "2",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-214-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-1",
+        "2",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-215-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "2",
+        "-5",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-215-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "2",
+        "-5",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-216-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-5",
+        "-3",
+        "6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-216-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-5",
+        "-3",
+        "6",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-217-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "6",
+        "-1",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-217-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "6",
+        "-1",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-218-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "5",
+        "-5",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-218-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "5",
+        "-5",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-219-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-5",
+        "-25",
+        "-30",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-219-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-5",
+        "-25",
+        "-30",
+        "-14",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-220-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-1",
+        "2",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-220-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-1",
+        "2",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-221-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "6",
+        "2",
+        "6",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-221-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "6",
+        "2",
+        "6",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-222-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "1",
+        "0",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-222-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "1",
+        "0",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-223-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "6",
+        "-1",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-223-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "6",
+        "-1",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-224-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "4",
+        "0",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-224-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "4",
+        "0",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-225-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "25",
+        "-4",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-225-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "25",
+        "-4",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-226-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "-3",
+        "5",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-226-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "-3",
+        "5",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-227-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-28",
+        "30",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-227-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-28",
+        "30",
+        "-8",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-228-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-5",
+        "-2",
+        "-3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-228-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-5",
+        "-2",
+        "-3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-229-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "3",
+        "1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-229-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "3",
+        "1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-230-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "-18",
+        "-30",
+        "-16",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-230-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "-18",
+        "-30",
+        "-16",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-231-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "13",
+        "7",
+        "-14",
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-231-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "13",
+        "7",
+        "-14",
+        "-11",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-232-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "-9",
+        "-8",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-232-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "-9",
+        "-8",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-233-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-9",
+        "9",
+        "-4",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-233-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-9",
+        "9",
+        "-4",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-234-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "0",
+        "4",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-234-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "0",
+        "4",
+        "-6",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-235-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-16",
+        "-23",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-235-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-16",
+        "-23",
+        "-10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-236-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-8",
+        "2",
+        "5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-236-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-8",
+        "2",
+        "5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-237-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "12",
+        "-6",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-237-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "12",
+        "-6",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-238-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "0",
+        "0",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-238-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "0",
+        "0",
+        "-6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-239-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-5",
+        "-6",
+        "-2",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-239-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-5",
+        "-6",
+        "-2",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-240-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-17",
+        "20",
+        "-7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-240-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-17",
+        "20",
+        "-7",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-241-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "3",
+        "1",
+        "-3",
+        "-2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-241-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "3",
+        "1",
+        "-3",
+        "-2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-242-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "6",
+        "3",
+        "-19",
+        "17",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-242-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "6",
+        "3",
+        "-19",
+        "17",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-243-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "0",
+        "2",
+        "2",
+        "-3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-243-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "0",
+        "2",
+        "2",
+        "-3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-244-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "0",
+        "3",
+        "-4",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-244-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "0",
+        "3",
+        "-4",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-245-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-3",
+        "-3",
+        "-4",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-245-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-3",
+        "-3",
+        "-4",
+        "1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-246-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-3",
+        "-2",
+        "-3",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-246-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-3",
+        "-2",
+        "-3",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-247-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "3",
+        "1",
+        "4",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-247-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "3",
+        "1",
+        "4",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-248-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-3",
+        "4",
+        "-1",
+        "3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-248-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-3",
+        "4",
+        "-1",
+        "3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-249-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "2",
+        "3",
+        "-1",
+        "4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-249-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "2",
+        "3",
+        "-1",
+        "4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-250-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-2",
+        "2",
+        "-3",
+        "0",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-250-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-2",
+        "2",
+        "-3",
+        "0",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-251-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "2",
+        "-4",
+        "-3",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-251-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "2",
+        "-4",
+        "-3",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-252-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-3",
+        "-3",
+        "-3",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-252-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-3",
+        "-3",
+        "-3",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-253-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "2",
+        "-4",
+        "-1",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-253-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "2",
+        "-4",
+        "-1",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-254-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-2",
+        "3",
+        "-1",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-254-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-2",
+        "3",
+        "-1",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-255-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "2",
+        "0",
+        "0",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-255-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "2",
+        "0",
+        "0",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-256-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "27",
+        "-30",
+        "19",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-256-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "27",
+        "-30",
+        "19",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-257-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-4",
+        "-2",
+        "-4",
+        "-3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-257-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-4",
+        "-2",
+        "-4",
+        "-3",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-258-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-2",
+        "-2",
+        "-1",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-258-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-2",
+        "-2",
+        "-1",
+        "-2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-259-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-1",
+        "-3",
+        "1",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-259-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-1",
+        "-3",
+        "1",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-260-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "4",
+        "1",
+        "-3",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-260-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "4",
+        "1",
+        "-3",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-261-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "1",
+        "1",
+        "3",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-261-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "1",
+        "1",
+        "3",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-262-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-2",
+        "4",
+        "3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-262-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-2",
+        "4",
+        "3",
+        "3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-263-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "12",
+        "-9",
+        "2",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-263-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "12",
+        "-9",
+        "2",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-264-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-8",
+        "4",
+        "2",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-264-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-8",
+        "4",
+        "2",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-265-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-1",
+        "-2",
+        "4",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-265-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-1",
+        "-2",
+        "4",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-266-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "7",
+        "-15",
+        "11",
+        "1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-266-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "7",
+        "-15",
+        "11",
+        "1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-267-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-3",
+        "-4",
+        "3",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-267-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-3",
+        "-4",
+        "3",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-268-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "1",
+        "-1",
+        "-2",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-268-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "1",
+        "-1",
+        "-2",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-269-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "9",
+        "-17",
+        "11",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-269-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "9",
+        "-17",
+        "11",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-270-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-1",
+        "2",
+        "-2",
+        "-4",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-270-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-1",
+        "2",
+        "-2",
+        "-4",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-271-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "1",
+        "1",
+        "4",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-271-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "1",
+        "1",
+        "4",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-272-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-3",
+        "1",
+        "-4",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-272-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-3",
+        "1",
+        "-4",
+        "2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-273-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "2",
+        "-2",
+        "-1",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-273-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "2",
+        "-2",
+        "-1",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-274-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-3",
+        "3",
+        "-4",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-274-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-3",
+        "3",
+        "-4",
+        "0",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-275-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-2",
+        "2",
+        "1",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-275-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-2",
+        "2",
+        "1",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-276-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "-4",
+        "4",
+        "-3",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-276-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "-4",
+        "4",
+        "-3",
+        "-2",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-277-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "-4",
+        "3",
+        "-2",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-277-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "-4",
+        "3",
+        "-2",
+        "-3",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-278-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "13",
+        "-20",
+        "17",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-278-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "13",
+        "-20",
+        "17",
+        "-4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-279-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-4",
+        "1",
+        "-3",
+        "-1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-279-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-4",
+        "1",
+        "-3",
+        "-1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-280-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-1",
+        "-1",
+        "2",
+        "4",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-280-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-1",
+        "-1",
+        "2",
+        "4",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-281-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "8",
+        "-10",
+        "3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-281-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "8",
+        "-10",
+        "3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-282-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "16",
+        "-20",
+        "17",
+        "-5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-282-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "16",
+        "-20",
+        "17",
+        "-5",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-283-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-3",
+        "3",
+        "-1",
+        "2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-283-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-3",
+        "3",
+        "-1",
+        "2",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-284-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-4",
+        "4",
+        "1",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-284-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-4",
+        "4",
+        "1",
+        "-3",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-285-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "2",
+        "1",
+        "-1",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-285-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "2",
+        "1",
+        "-1",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-286-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-3",
+        "-3",
+        "-3",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-286-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-3",
+        "-3",
+        "-3",
+        "2",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-287-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "2",
+        "1",
+        "0",
+        "-3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-287-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "2",
+        "1",
+        "0",
+        "-3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-288-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-2",
+        "4",
+        "-2",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-288-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-2",
+        "4",
+        "-2",
+        "1",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-289-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "0",
+        "-4",
+        "0",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-289-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "0",
+        "-4",
+        "0",
+        "-1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-290-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "9",
+        "-7",
+        "2",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-290-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "9",
+        "-7",
+        "2",
+        "3",
+        "-3",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-291-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "-3",
+        "4",
+        "-4",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-291-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "-3",
+        "4",
+        "-4",
+        "-4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-292-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-1",
+        "1",
+        "-1",
+        "4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-292-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-1",
+        "1",
+        "-1",
+        "4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-293-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "4",
+        "1",
+        "1",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-293-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "4",
+        "1",
+        "1",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-294-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "-4",
+        "3",
+        "3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-294-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "-4",
+        "3",
+        "3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-295-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-4",
+        "-4",
+        "1",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-295-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-4",
+        "-4",
+        "1",
+        "-2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-296-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "1",
+        "2",
+        "-2",
+        "4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-296-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "1",
+        "2",
+        "-2",
+        "4",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-297-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "45",
+        "-53",
+        "32",
+        "-7",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-297-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "45",
+        "-53",
+        "32",
+        "-7",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-298-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "3",
+        "2",
+        "3",
+        "-1",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-298-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "3",
+        "2",
+        "3",
+        "-1",
+        "1",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-299-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "1",
+        "3",
+        "-1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-299-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "1",
+        "3",
+        "-1",
+        "-1",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-300-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "4",
+        "-4",
+        "-3",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "fixture-300-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "4",
+        "-4",
+        "-3",
+        "2",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-00-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "1",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-00-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "1",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-01-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9",
+        "12",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-01-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9",
+        "12",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-02-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-13",
+        "-6",
+        "-17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-02-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-13",
+        "-6",
+        "-17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-03-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "-3",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-03-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "-3",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-04-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "-9",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-04-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "-9",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-05-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "-17",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-05-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "-17",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-06-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-12",
+        "20",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-06-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-12",
+        "20",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-07-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "17",
+        "-6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-07-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "17",
+        "-6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-08-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "18",
+        "-7",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-08-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "18",
+        "-7",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-09-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "-16",
+        "-14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-09-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "-16",
+        "-14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-10-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "11",
+        "-20",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-10-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "11",
+        "-20",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-11-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "15",
+        "-14",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-11-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "15",
+        "-14",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-12-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-15",
+        "20",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-12-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-15",
+        "20",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-13-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-18",
+        "16",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-13-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-18",
+        "16",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-14-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "15",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-14-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "15",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-15-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-14",
+        "16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-15-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-14",
+        "16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-16-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-17",
+        "-15",
+        "9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-16-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-17",
+        "-15",
+        "9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-17-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "13",
+        "-6",
+        "10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-17-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "13",
+        "-6",
+        "10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-18-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "11",
+        "12",
+        "7",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-18-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "11",
+        "12",
+        "7",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-19-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "13",
+        "-8",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-19-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "13",
+        "-8",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-20-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "11",
+        "16",
+        "-8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-20-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "11",
+        "16",
+        "-8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-21-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-19",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-21-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-19",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-22-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "13",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-22-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "13",
+        "-13",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-23-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-8",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-3-23-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-8",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-00-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-20",
+        "3",
+        "3",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-00-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-20",
+        "3",
+        "3",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-01-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7",
+        "-13",
+        "17",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-01-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7",
+        "-13",
+        "17",
+        "-16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-02-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "-6",
+        "-11",
+        "-8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-02-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "-6",
+        "-11",
+        "-8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-03-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "19",
+        "-15",
+        "13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-03-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "19",
+        "-15",
+        "13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-04-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "16",
+        "-7",
+        "6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-04-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "16",
+        "-7",
+        "6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-05-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "5",
+        "-9",
+        "18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-05-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "5",
+        "-9",
+        "18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-06-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "9",
+        "8",
+        "-8",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-06-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "9",
+        "8",
+        "-8",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-07-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "4",
+        "10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-07-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "4",
+        "10",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-08-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "-19",
+        "-6",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-08-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "-19",
+        "-6",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-09-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-18",
+        "12",
+        "16",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-09-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-18",
+        "12",
+        "16",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-10-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "0",
+        "-12",
+        "-3",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-10-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "0",
+        "-12",
+        "-3",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-11-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-18",
+        "11",
+        "14",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-11-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-18",
+        "11",
+        "14",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-12-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "14",
+        "6",
+        "4",
+        "12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-12-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "14",
+        "6",
+        "4",
+        "12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-13-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "2",
+        "-14",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-13-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "2",
+        "-14",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-14-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "-6",
+        "-11",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-14-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "-6",
+        "-11",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-15-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "7",
+        "-8",
+        "-11",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-15-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "7",
+        "-8",
+        "-11",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-16-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "19",
+        "-18",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-16-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "19",
+        "-18",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-17-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-17",
+        "18",
+        "5",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-17-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-17",
+        "18",
+        "5",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-18-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "19",
+        "19",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-18-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "19",
+        "19",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-19-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "4",
+        "-3",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-19-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "4",
+        "-3",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-20-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "15",
+        "16",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-20-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "15",
+        "16",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-21-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-8",
+        "-17",
+        "16",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-21-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-8",
+        "-17",
+        "16",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-22-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "16",
+        "19",
+        "0",
+        "19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-22-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "16",
+        "19",
+        "0",
+        "19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-23-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "-18",
+        "13",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-4-23-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "-18",
+        "13",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-00-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-17",
+        "9",
+        "-8",
+        "-7",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-00-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-17",
+        "9",
+        "-8",
+        "-7",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-01-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "17",
+        "2",
+        "5",
+        "-17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-01-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "17",
+        "2",
+        "5",
+        "-17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-02-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "-4",
+        "-3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-02-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "-4",
+        "-3",
+        "0",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-03-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "-17",
+        "-4",
+        "15",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-03-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "-17",
+        "-4",
+        "15",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-04-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-19",
+        "-6",
+        "-11",
+        "12",
+        "19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-04-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-19",
+        "-6",
+        "-11",
+        "12",
+        "19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-05-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-17",
+        "-18",
+        "16",
+        "-15",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-05-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-17",
+        "-18",
+        "16",
+        "-15",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-06-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "18",
+        "13",
+        "-3",
+        "-4",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-06-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "18",
+        "13",
+        "-3",
+        "-4",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-07-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "4",
+        "18",
+        "5",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-07-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "4",
+        "18",
+        "5",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-08-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "-9",
+        "-11",
+        "-7",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-08-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "-9",
+        "-11",
+        "-7",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-09-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "-9",
+        "15",
+        "20",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-09-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "-9",
+        "15",
+        "20",
+        "-12",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-10-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "18",
+        "-12",
+        "16",
+        "20",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-10-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "18",
+        "-12",
+        "16",
+        "20",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-11-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "-14",
+        "20",
+        "11",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-11-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "-14",
+        "20",
+        "11",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-12-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-13",
+        "3",
+        "12",
+        "-9",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-12-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-13",
+        "3",
+        "12",
+        "-9",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-13-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "17",
+        "-1",
+        "-6",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-13-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "17",
+        "-1",
+        "-6",
+        "-13",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-14-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "3",
+        "-14",
+        "8",
+        "7",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-14-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "3",
+        "-14",
+        "8",
+        "7",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-15-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-19",
+        "11",
+        "16",
+        "-8",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-15-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-19",
+        "11",
+        "16",
+        "-8",
+        "-10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-16-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-4",
+        "-14",
+        "19",
+        "-11",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-16-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-4",
+        "-14",
+        "19",
+        "-11",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-17-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "0",
+        "19",
+        "-17",
+        "-10",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-17-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "0",
+        "19",
+        "-17",
+        "-10",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-18-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-20",
+        "-14",
+        "4",
+        "19",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-18-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-20",
+        "-14",
+        "4",
+        "19",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-19-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "-3",
+        "-11",
+        "14",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-19-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "-3",
+        "-11",
+        "14",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-20-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-14",
+        "-9",
+        "-6",
+        "5",
+        "-14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-20-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-14",
+        "-9",
+        "-6",
+        "5",
+        "-14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-21-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-19",
+        "13",
+        "3",
+        "-7",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-21-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-19",
+        "13",
+        "3",
+        "-7",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-22-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-19",
+        "-1",
+        "8",
+        "-19",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-22-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-19",
+        "-1",
+        "8",
+        "-19",
+        "17",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-23-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "-20",
+        "-11",
+        "14",
+        "9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-5-23-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "-20",
+        "-11",
+        "14",
+        "9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-00-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "2",
+        "-10",
+        "5",
+        "-19",
+        "-10",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-00-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "2",
+        "-10",
+        "5",
+        "-19",
+        "-10",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-01-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-18",
+        "8",
+        "-3",
+        "4",
+        "-17",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-01-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-18",
+        "8",
+        "-3",
+        "4",
+        "-17",
+        "4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-02-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "-15",
+        "6",
+        "-1",
+        "-3",
+        "10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-02-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "-15",
+        "6",
+        "-1",
+        "-3",
+        "10",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-03-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "19",
+        "-20",
+        "-2",
+        "-11",
+        "14",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-03-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "19",
+        "-20",
+        "-2",
+        "-11",
+        "14",
+        "-4",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-04-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1",
+        "-11",
+        "-7",
+        "6",
+        "20",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-04-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "1",
+        "-11",
+        "-7",
+        "6",
+        "20",
+        "14",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-05-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-6",
+        "4",
+        "16",
+        "20",
+        "-11",
+        "18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-05-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-6",
+        "4",
+        "16",
+        "20",
+        "-11",
+        "18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-06-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "8",
+        "-7",
+        "-16",
+        "11",
+        "19",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-06-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "8",
+        "-7",
+        "-16",
+        "11",
+        "19",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-07-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "4",
+        "19",
+        "-6",
+        "10",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-07-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "4",
+        "19",
+        "-6",
+        "10",
+        "6",
+        "-2",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-08-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "7",
+        "12",
+        "-9",
+        "-6",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-08-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "7",
+        "12",
+        "-9",
+        "-6",
+        "8",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-09-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "0",
+        "3",
+        "-1",
+        "-5",
+        "-18",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-09-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "0",
+        "3",
+        "-1",
+        "-5",
+        "-18",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-10-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "6",
+        "4",
+        "-12",
+        "5",
+        "9",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-10-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "6",
+        "4",
+        "-12",
+        "5",
+        "9",
+        "-9",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-11-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-3",
+        "2",
+        "12",
+        "13",
+        "-20",
+        "11",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-11-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-3",
+        "2",
+        "12",
+        "13",
+        "-20",
+        "11",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-12-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7",
+        "-7",
+        "-11",
+        "-5",
+        "-4",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-12-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7",
+        "-7",
+        "-11",
+        "-5",
+        "-4",
+        "-20",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-13-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-16",
+        "-14",
+        "3",
+        "12",
+        "20",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-13-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-16",
+        "-14",
+        "3",
+        "12",
+        "20",
+        "-19",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-14-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-9",
+        "0",
+        "1",
+        "14",
+        "0",
+        "-6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-14-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-9",
+        "0",
+        "1",
+        "14",
+        "0",
+        "-6",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-15-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "5",
+        "-19",
+        "-20",
+        "-20",
+        "-13",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-15-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "5",
+        "-19",
+        "-20",
+        "-20",
+        "-13",
+        "-5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-16-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-19",
+        "-16",
+        "-12",
+        "16",
+        "-4",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-16-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-19",
+        "-16",
+        "-12",
+        "16",
+        "-4",
+        "5",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-17-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "0",
+        "3",
+        "-5",
+        "17",
+        "8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-17-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "0",
+        "3",
+        "-5",
+        "17",
+        "8",
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-18-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "13",
+        "-8",
+        "-20",
+        "-8",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-18-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "13",
+        "-8",
+        "-20",
+        "-8",
+        "15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-19-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "17",
+        "8",
+        "17",
+        "11",
+        "4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-19-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "17",
+        "8",
+        "17",
+        "11",
+        "4",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-20-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "12",
+        "-1",
+        "-8",
+        "12",
+        "-12",
+        "16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-20-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "12",
+        "-1",
+        "-8",
+        "12",
+        "-12",
+        "16",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-21-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-7",
+        "11",
+        "19",
+        "19",
+        "-12",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-21-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-7",
+        "11",
+        "19",
+        "19",
+        "-12",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-22-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-10",
+        "-20",
+        "-20",
+        "-14",
+        "-5",
+        "-15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-22-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-10",
+        "-20",
+        "-20",
+        "-14",
+        "-5",
+        "-15",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-23-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "7",
+        "1",
+        "-19",
+        "3",
+        "20",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "seed-20261018-degree-6-23-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "7",
+        "1",
+        "-19",
+        "3",
+        "20",
+        "-18",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "readme-cubic-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-11",
+        "0",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "readme-cubic-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-11",
+        "0",
+        "0",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "linear-bnf",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "linear-bnf_certify",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-1",
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "proof-norm-limit",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "23",
+        "0",
+        "1"
+      ],
+      "norm_max": 0
+    }
+  },
+  {
+    "id": "proof-index-limit",
+    "request": {
+      "fn": "bnf_certify",
+      "f": [
+        "-2",
+        "0",
+        "1"
+      ],
+      "index_max": 0
+    }
+  },
+  {
+    "id": "nonmonic",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-2",
+        "0",
+        "2"
+      ]
+    }
+  },
+  {
+    "id": "constant",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "1"
+      ]
+    }
+  },
+  {
+    "id": "reducible",
+    "request": {
+      "fn": "bnf",
+      "f": [
+        "-1",
+        "0",
+        "1"
+      ]
+    }
+  }
+]

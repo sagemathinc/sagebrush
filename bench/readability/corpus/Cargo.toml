@@ -1,0 +1,13 @@
+[package]
+name = "readability-corpus"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+sagebrush-web = { path = "../../../engine/web" }
+
+[profile.release]
+opt-level = 3
