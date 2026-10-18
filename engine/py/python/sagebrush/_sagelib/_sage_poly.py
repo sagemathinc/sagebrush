@@ -398,11 +398,11 @@ class RationalField(_Ring):
 
     A decimal literal not yet used in arithmetic converts as in Sage: from
     the interval around its decimal value rounded to one more bit, so
-    QQ(1e-20) differs from QQ(1e-20 + 0).  A literal of more than 15
+    QQ(1e-20) differs from QQ(1e-20 + 0.0).  A literal of more than 15
     significant digits is refused: Sage gives it more than 53 bits, and
     here every literal has 53; QQ('1.2345678901234567') is its exact value.
 
-        sage: QQ(1e-20), QQ(1e-20 + 0)
+        sage: QQ(1e-20), QQ(1e-20 + 0.0)
         (1/99999999999999990439, 1/99999999999999997962)
     """
 
