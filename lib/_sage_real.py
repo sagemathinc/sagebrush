@@ -126,9 +126,14 @@ _EMIN = 1 - (1 << 62)
 # for binary exponents up to this size: beyond, _q() raises
 # NotImplementedError instead of building a multi-megabyte integer.
 _EXACT_BITS = 1 << 20
-# The exponent _underflow gives a zero rounded from a negative number, for
-# RealNumberMP to make it -0 (no number has it: it is below the range)
-_NEGZ_E = -(1 << 64)
+class _NegZeroMark:
+    """The "exponent" _underflow gives a zero rounded from a negative
+    number, for RealNumberMP to make it -0: an object, not a number, so no
+    exponent arithmetic (a shift) can produce it, CORR-2E2-1."""
+    __slots__ = ()
+
+
+_NEGZ_E = _NegZeroMark()
 
 
 def _rational_bits(q):
@@ -1489,6 +1494,9 @@ def _parse(R, s, base=10):
             ip, fp = t, ""
         n = int(ip or "0", base) * base ** len(fp) + (int(fp, base) if fp else 0)
         q = _F(n, base ** len(fp))
+        if not q and neg:
+            # ("-0" in any base: a negative zero, CORR-2E2-2)
+            return RealNumberMP(R, 0, 0, None, True)
         return _to_real(R, -q if neg else q)
     m = _re.match(r"^([+-]?)(\d*)(?:\.(\d*))?[eE]([+-]?)(\d+)$", t)
     if m and (m.group(2) or m.group(3)):
@@ -1551,7 +1559,7 @@ class RealNumberMP:
             m, e, special = _range(R, m, e)
         if not m:
             # (a zero's exponent is 0; _underflow's -0 is marked by its)
-            neg, e = neg or e == _NEGZ_E, 0
+            neg, e = neg or e is _NEGZ_E, 0
         self._R, self._m, self._e, self._special = R, m, e, special
         # the sign of a zero (-0 is MPFR's, as Sage prints it); False for
         # every nonzero or special number
@@ -2196,9 +2204,18 @@ class RealNumberMP:
             sage: RealField(20)(2.75).frac()
             0.75000
         """
-        if not self._special and self._e >= 0:
-            return self._R(0)
-        return self - self._R(int(self.trunc()))
+        if self._special == "nan":
+            return self
+        if self._special in ("+inf", "-inf"):
+            # (an infinity's: a zero with its sign, as MPFR's)
+            return RealNumberMP(self._R, 0, 0, None, self._special == "-inf")
+        if not self._special and (self._e >= 0 or not self._m):
+            return RealNumberMP(self._R, 0, 0, None, self._signbit())
+        r = self - self._R(int(self.trunc()))
+        if not r._special and not r._m:
+            # (an integer's is a zero with its sign: R(-3).frac() is -0)
+            return RealNumberMP(self._R, 0, 0, None, self._signbit())
+        return r
 
     def is_integer(self):
         """Whether an integer.
@@ -2869,11 +2886,31 @@ class RealNumberMP:
     def __round__(self, n=None):
         return round(float(self), n) if n is not None else int(self.round())
 
+    def _shift(self, n, op):
+        """self 2^n (2^-n for >>), as Sage's: n an integer (an integral
+        real or rational too) with |n| < 2^63; a zero keeps its sign, an
+        infinity or NaN is itself."""
+        if isinstance(n, int) or type(n).__name__ == "Integer":
+            k = int(n)
+        else:
+            try:
+                q = _F(n) if not isinstance(n, RealNumberMP) else n._q()
+            except (TypeError, ValueError, NotImplementedError):
+                raise TypeError("unsupported operands for %s" % op) from None
+            if q.denominator != 1:
+                raise TypeError("unsupported operands for %s" % op)
+            k = q.numerator
+        if abs(k) > (1 << 63) - 1:
+            raise OverflowError("n (=%d) must be <= 9223372036854775807" % abs(k))
+        if self._special or not self._m:
+            return self
+        return RealNumberMP(self._R, self._m, self._e + (k if op == "<<" else -k))
+
     def __lshift__(self, n):
-        return RealNumberMP(self._R, self._m, self._e + int(n))
+        return self._shift(n, "<<")
 
     def __rshift__(self, n):
-        return RealNumberMP(self._R, self._m, self._e - int(n))
+        return self._shift(n, ">>")
 
     def real(self):
         """The number itself.
