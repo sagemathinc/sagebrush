@@ -141,6 +141,9 @@ _TEX_ATOMS = {"alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta"
               "lambda", "mu", "nu", "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau", "upsilon", "phi", "varphi",
               "chi", "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
               "infty", "partial", "nabla", "ell", "hbar", "Re", "Im"}
+# (commands that take one argument)
+_TEX_ONE_ARG = {"mathrm", "rm", "text", "textrm", "operatorname", "mathsf", "mathbf", "bf", "textbf", "boldsymbol", "mathit",
+                "textit", "it", "overline", "bar", "widebar", "hat", "widehat", "tilde", "widetilde", "vec", "dot", "ddot", "sqrt"}
 # (what may follow a fraction without grouping it: operators and relations)
 _TEX_AFTER_FRAC = set("+-=<>,;)]}|") | {"\\" + n for n in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv",
                                                          "propto", "to", "rightarrow", "in", "pm", "mp", "times", "cdot", "div",
@@ -229,13 +232,22 @@ def _tex_svg(tex):
     pos = [0]
 
     def group():
-        # the next argument: {...} or one token
+        # the next argument: {...} or one token (spaces before it skipped,
+        # as TeX does: \\hat x is x with a hat)
+        while pos[0] < len(toks) and toks[pos[0]].isspace():
+            pos[0] += 1
         if pos[0] >= len(toks):
             return []
         t = toks[pos[0]]
         pos[0] += 1
         if t != "{":
-            return [t]
+            # (a command with arguments takes them along: x^\\frac12 is x to
+            # the 1/2, not x^\\frac then 12)
+            n = 2 if t == "\\frac" else 1 if t[1:] in _TEX_ONE_ARG and t.startswith("\\") else 0
+            out = [t]
+            for _ in range(n):
+                out += ["{"] + group() + ["}"]
+            return out
         depth, start = 1, pos[0]
         while pos[0] < len(toks) and depth:
             if toks[pos[0]] == "{":
@@ -245,7 +257,12 @@ def _tex_svg(tex):
             pos[0] += 1
         return toks[start:pos[0] - 1]
 
-    def render(ts, style):
+    def render(ts, style, nested=True):
+        # (a group's contents: {...}, a style, a script, an accent.  There a
+        # fraction cannot see its neighbours, so it is always grouped:
+        # 2{\\frac{1}{3}} is 2(1/3), {\\frac{a}{b}}^2 is (a/b)^2, astra's
+        # CORR-578-1; a fraction's own parts are judged by _tex_simple)
+        style = dict(style, nested=nested)
         sub = list(ts)
         save = pos[0]
         nonlocal_toks = toks[:]
@@ -308,7 +325,7 @@ def _tex_svg(tex):
                     # read as another expression (astra's CORR-578-1:
                     # \\frac{x+1}{y+1} was drawn x + 1/y + 1)
                     na, nb = group(), group()
-                    a, b = render(na, style), render(nb, style)
+                    a, b = render(na, style, False), render(nb, style, False)
                     if not _tex_simple(na, False):
                         a = "(" + a + ")"
                     if not _tex_simple(nb, True):
@@ -319,7 +336,7 @@ def _tex_svg(tex):
                     rest = [t for t in toks[pos[0]:] if not t.isspace()]
                     import re
                     before = re.sub(r"<[^>]*>", "", "".join(out)).rstrip("\u200b")
-                    if (rest and rest[0] not in _TEX_AFTER_FRAC) or (before and (before[-1].isalnum() or before[-1] in ")]/.")):
+                    if style.get("nested") or (rest and rest[0] not in _TEX_AFTER_FRAC) or (before and (before[-1].isalnum() or before[-1] in ")]/.")):
                         f = "(" + f + ")"
                     out.append(f)
                 elif name == "sqrt":

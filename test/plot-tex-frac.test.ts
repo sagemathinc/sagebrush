@@ -47,6 +47,18 @@ test("\\frac keeps its grouping inline", async () => {
     ["-\\frac{a+b}{\\pi} + 1", "-(a + b)/π + 1"],
     ["1 + \\frac{1}{2}", "1 + 1/2"],
     ["\\frac{1.5}{2.25}", "1.5/2.25"],
+    // (inside a group a fraction cannot see its neighbours: always grouped)
+    ["2{\\frac{1}{3}}", "2(1/3)"],
+    ["2\\mathrm{\\frac{1}{3}}", "2(1/3)"],
+    ["1/{\\frac{a}{b}}", "1/(a/b)"],
+    ["{\\frac{a}{b}}^2", "(a/b)2"],
+    ["x^{\\frac{1}{2}}", "x(1/2)"],
+    ["\\mathbf{\\frac{x+1}{2}}", "((x + 1)/2)"],
+    ["x^\\frac{1}{2}", "x(1/2)"],
+    ["x^\\frac12 + 1", "x(1/2) + 1"],
+    ["\\sqrt\\frac{a}{b}", "√((a/b))"],
+    ["\\frac 1 2", "1/2"],
+    ["\\hat x", "x\u0302"],
   ];
   const texs = JSON.stringify(JSON.stringify(cases.map((c) => c[0])));
   const code = `import _graphics, json\nraise ValueError(json.dumps([_graphics._tex_text(t) for t in json.loads(${texs})]))`;
