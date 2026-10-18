@@ -312,7 +312,10 @@ def _poly(p, budget):
         if not _NAME.match(n):
             raise _err("a polynomial whose variable is %r can't be exported: name the ring's variables (in Magma, P<x> := PolynomialRing(Rationals()))" % n)
     if hasattr(p, "dict"):
-        terms = sorted(p.dict().items(), key=lambda kv: (-sum(kv[0]), [-e for e in kv[0]]))
+        # (keys: exponent tuples in several variables, an int exponent in
+        # one, as in Sage)
+        items = [(e if isinstance(e, tuple) else (int(e),), c) for e, c in p.dict().items()]
+        terms = sorted(items, key=lambda kv: (-sum(kv[0]), [-e for e in kv[0]]))
         terms = [(_Fraction(c), tuple(zip(names, e))) for e, c in terms]
     else:
         coeffs = list(p.list())
