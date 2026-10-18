@@ -10,7 +10,7 @@
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
 import { answerProblem, ASK_LIMITS } from "./ask";
-import { inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, ITEM_GAP, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -133,6 +133,7 @@ export class Editor {
     board.el.addEventListener("pointermove", (e) => {
       const at = this.on && !this.panel && e.pointerType === "mouse" && this.atHandle(e);
       if (this.on && !this.panel && e.pointerType === "mouse" && this.board.gripAt(e.clientX, e.clientY)) { board.el.style.cursor = "move"; return; }
+      if (this.on && !this.panel && e.pointerType === "mouse" && this.board.addSameAt(e.clientX, e.clientY)) { board.el.style.cursor = "pointer"; return; }
       // (and a slide's card: its edge moves it, its corner resizes it)
       const card = !at && this.on && !this.panel && e.pointerType === "mouse" && !this.drawing.value && !this.erasing.value ? this.cardAt(e) : null;
       board.el.style.cursor = at || card === "corner" ? "nwse-resize" : card === "edge" ? "move" : "";
@@ -265,6 +266,9 @@ export class Editor {
     this.board.handle = this.on && !this.inplace && this.selected.length === 1 && sized(this.board.item(this.selected[0])) ? this.selected[0] : null;
     // (and its grip, at its top left, which drags it: also while it is being written, William's B2)
     this.board.grip = this.on && this.selected.length === 1 && this.board.item(this.selected[0]) ? this.selected[0] : null;
+    // (and the control adding another of its kind below it, William's item 7)
+    const d = this.board.grip ? this.doc() : null, n = d && find(this.pg(d), this.board.grip!)?.node, same = n ? sameKind(n, "") : null;
+    this.board.addSame = same ? { id: this.board.grip!, label: same.label } : null;
     this.board.request();
     if (this.selected.length) this.selectEdge(null);
   }
@@ -284,6 +288,8 @@ export class Editor {
     // (the grip, outside its item: drags it)
     const gripped = this.gripped(e);
     if (gripped) return this.down(gripped, e);
+    // (the control adding another of the selected item's kind: on its release there)
+    if (this.addSamePress(e)) return true;
     const card = this.cardAt(e);
     if (card) return this.moveCard(card, e);
     // (the resize handle reaches past its item's corner)
@@ -377,6 +383,8 @@ export class Editor {
     // (a press on the selected item's grip, over another item: that one is dragged)
     const gripped = this.gripped(e);
     if (gripped && gripped.id !== it.id) return this.down(gripped, e);
+    // (and on its add-another control, over another item: that control's)
+    if (this.addSamePress(e)) return true;
     // (in Edit a press on an item moves or selects it: no text selection, and
     // none left from before, which the browser would start dragging instead)
     e.preventDefault();
@@ -966,6 +974,112 @@ export class Editor {
     return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", ...at }); }).then(() => this.open(id, true));
   }
 
+  // A press on the add-another control: the new item when that pointer is
+  // released there (one released off it, or cancelled, adds nothing; another
+  // pointer's release is not its: daybreak2's INPUT-AS-1).
+  private addSamePress(e: PointerEvent): boolean {
+    const id = this.connecting.value ? null : this.board.addSameAt(e.clientX, e.clientY, e.pointerType === "touch");
+    if (!id) return false;
+    e.preventDefault();
+    const touch = e.pointerType === "touch", pid = e.pointerId;
+    const done = () => { removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); };
+    const up = (u: PointerEvent) => {
+      if (u.pointerId !== pid) return;
+      done();
+      if (this.board.addSameAt(u.clientX, u.clientY, touch) === id) void this.addSame(id);
+    };
+    const cancel = (c: PointerEvent) => { if (c.pointerId === pid) done(); };
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", cancel);
+    return true;
+  }
+  // (an addition under way: no other starts until it is done, daybreak2's INPUT-AS-2)
+  private adding = false;
+
+  /**
+   * Another item of the kind of item `id`, below it (William's item 7): a
+   * code item in the same language, a note with the same color and shape,
+   * a question answered the same way, a sticker with the same emoji, a group
+   * laid out the same way; none of its content, and no edge to it.  It goes
+   * at its x, as wide, the layouts' gap under it; that place taken, the next
+   * free one below what is in the way, else to its right: over no other
+   * item.  In its group, if it is in one.  It is selected and shown, and a
+   * note or code item is being written.  One undo step.
+   */
+  async addSame(id: string) {
+    if (!this.on || this.adding) return;
+    this.adding = true;
+    try { await this.addSameNow(id); } finally { this.adding = false; }
+  }
+  private async addSameNow(id: string) {
+    // (the item being written: what is written in it kept first, as it is then laid out)
+    this.close();
+    await this.inplace?.end();
+    const d0 = this.doc(), f0 = d0 && find(this.pg(d0), id), it = this.board.item(id);
+    if (!f0 || !it) return;
+    let same: ReturnType<typeof sameKind>;
+    do same = sameKind(f0.node, Math.random().toString(36).slice(2, 8), it); while (same && find(this.pg(d0!), same.node.id));
+    if (!same) return;
+    const nid = same.node.id;
+    const at = this.spotBelow(it, it.w, same.h);
+    const parent = f0.parent, o = parent ? this.board.item(parent.id)?.inner : { x: 0, y: 0 };
+    if (!o) return;
+    const kept = await this.commit((d) => {
+      const f = find(this.pg(d), id);
+      if (!f) return;
+      this.freezeUp(d, f);
+      const node = { ...same.node, x: Math.round((at.x - o.x) * 10) / 10, y: Math.round((at.y - o.y) * 10) / 10 } as DocNode;
+      // (after it in its container: a code item runs after it, in reading order)
+      f.siblings.splice(f.siblings.indexOf(f.node) + 1, 0, node);
+      this.contain(f.parent, f.siblings, d);
+    });
+    if (kept === null || !this.board.item(nid)) return;
+    // (its size was a guess until laid out (a question's options, a note's
+    // width): measured now, and if it is over another item there, moved to
+    // the place that size finds, in the same undo step, astra's CORR-2B8-1)
+    const now = this.board.item(nid)!, src = this.board.item(id) ?? it;
+    if (this.inWay(src, now.x, now.y, now.w, now.h, nid).length) {
+      const to = this.spotBelow(src, now.w, now.h, nid);
+      await this.commit((d) => {
+        const f = find(this.pg(d), nid);
+        if (f) { f.node.x = Math.round((to.x - o.x) * 10) / 10; f.node.y = Math.round((to.y - o.y) * 10) / 10; this.contain(f.parent, f.siblings, d); }
+      }, true);
+    }
+    // (written in at once: its field shown as editing starts; else the board brought to it)
+    if (same.write) this.open(nid, true);
+    else { this.select(nid); this.board.bringIntoView(nid); }
+  }
+
+  // What is in the way of an item w by h at (x, y), clear by CLEAR: every
+  // item but strokes, the groups `it` is in, and the item itself (`self`).
+  private inWay(it: Item, x: number, y: number, w: number, h: number, self?: string): Item[] {
+    const mine = new Set<string>(self ? [self] : []);
+    for (let p = it.parent; p; p = this.board.item(p)?.parent) mine.add(p);
+    return this.board.near(x - CLEAR, y - CLEAR, x + w + CLEAR, y + h + CLEAR).filter((o) => o.kind !== "ink" && !mine.has(o.id));
+  }
+  // Where an item w by h goes below `it` (the world): at its x, the
+  // layouts' gap under it; else under what is in the way there, as far as
+  // 12 things down; else to its right, past what is in the way.  Clear of
+  // every item by CLEAR, but strokes and the groups it is in.
+  private spotBelow(it: Item, w: number, h: number, self?: string): { x: number; y: number } {
+    const inWay = (x: number, y: number) => this.inWay(it, x, y, w, h, self);
+    let x = it.x, y = it.y + it.h + ITEM_GAP;
+    for (const passed = new Set<string>(); passed.size <= 12; ) {
+      const hit = inWay(x, y);
+      if (!hit.length) return { x: Math.round(x), y: Math.round(y) };
+      for (const o of hit) passed.add(o.id);
+      y = Math.max(...hit.map((o) => o.y + o.h)) + ITEM_GAP;
+    }
+    x = it.x + it.w + ITEM_GAP;
+    y = it.y;
+    for (let k = 0; k < 50; k++) {
+      const hit = inWay(x, y);
+      if (!hit.length) return { x: Math.round(x), y: Math.round(y) };
+      x = Math.max(...hit.map((o) => o.x + o.w)) + ITEM_GAP;
+    }
+    return this.clearSpot(it.x + w / 2, it.y + it.h + ITEM_GAP + h / 2, w, h);
+  }
+
   /** A question's answer, or its note (the reader's own words), as the
    * reader gave it with its controls (null: removed); one step to undo, in
    * Edit or not: answering is not editing the board's design. */
@@ -1048,6 +1162,7 @@ export class Editor {
       highlight: (id) => this.highlight?.(id) ?? null,
       complete: (mode, before) => this.complete?.(mode, before) ?? Promise.resolve(null),
       docs: this.docs ? (lang) => this.docs!(lang) : null,
+      addSame: (id) => this.addSame(id),
       get images() { return ed.images; },
     };
   }
@@ -1164,6 +1279,9 @@ export class Editor {
     else if (e.key === "Enter" && this.edgeSel !== null) this.openEdge(this.edgeSel);
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
     else if ((e.key === "Delete" || e.key === "Backspace") && this.selected.length) this.deleteSelected();
+    // (another of the selected item's kind below it: Alt+Enter, as the notebook's "run, insert a cell below"; B, as its "insert a cell below")
+    // (a key held down adds one: its repeats are not more, INPUT-AS-2)
+    else if (this.selected.length === 1 && ((e.key === "Enter" && e.altKey && !mod && !e.shiftKey) || (e.key.toLowerCase() === "b" && !mod && !e.altKey && !e.shiftKey))) { if (!e.repeat) void this.addSame(this.selected[0]); }
     else if (e.key === "Enter" && this.selected.length === 1) this.open(this.selected[0]);
     else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
@@ -1176,6 +1294,23 @@ export class Editor {
     e.preventDefault();
     e.stopImmediatePropagation();
   }
+}
+
+// Another of a node's kind, empty (William's item 7): its look, none of
+// its content; with its kind's name for the control, its height until it
+// is laid out (to find it a place), and whether it is written in at once.
+// None for a stroke or a picture on its own (Image adds pictures).
+export function sameKind(n: DocNode, id: string, shown?: { w: number; h: number }): { node: DocNode; label: string; h: number; write: boolean } | null {
+  const pick = <T extends object>(o: T, keys: string[]) => Object.fromEntries(keys.filter((k) => (o as any)[k] !== undefined).map((k) => [k, structuredClone((o as any)[k])]));
+  if (n.kind === "ink") return null;
+  // (a group: as large as it shows, its items' room included, astra's CORR-2B8-2)
+  if (n.kind === "group") { const w = Math.round(shown?.w ?? n.w ?? GROUP_W), h = Math.round(shown?.h ?? n.h ?? GROUP_H); return { node: { id: "g" + id, kind: "group", title: "", children: [], ...pick(n, ["layout", "columns", "direction", "color"]), w, h }, label: "Group", h, write: true }; }
+  if (n.kind === "sticker") return { node: { id: "k" + id, kind: "sticker", ...pick(n, ["emoji", "icon", "color", "w"]) }, label: "Sticker", h: n.w ?? STICKER_SIZE, write: false };
+  if (n.kind === "ask") return { node: { id: "q" + id, kind: "ask", text: "", ...pick(n, ["input", "options", "min", "max", "step", "low", "high", "lines", "color", "w"]) } as DocNode, label: "Question", h: 110, write: false };
+  const note = n as DocNote;
+  if (note.code !== undefined) return { node: { id: "c" + id, code: "", ...pick(note, ["mode", "w", "color"]) }, label: "Code", h: 90, write: true };
+  if (note.image && !note.text && !note.title) return null;
+  return { node: { id: "n" + id, title: "", text: "", ...pick(note, ["color", "shape", "fit", "w"]) }, label: "Note", h: 70, write: true };
 }
 
 // (an item resized by its corner: a note, a sticker, or a group, B3)
