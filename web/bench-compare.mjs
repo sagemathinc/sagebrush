@@ -63,6 +63,10 @@ function check(results, names, reps) {
     }
   for (const w of names) {
     const want = results.Sagebrush[0].speed?.[w]?.out;
+    // (a setup's output, where there is one, the same everywhere too)
+    const wantSetup = results.Sagebrush[0].speed?.[w]?.setup;
+    if (wantSetup !== undefined && (wantSetup === "" || /ERROR|Traceback/.test(wantSetup))) bad.push(`${w}: Sagebrush's setup printed ${JSON.stringify(wantSetup)}`);
+    for (const engine of engines) results[engine].forEach((r, i) => { if (r.speed?.[w]?.setup !== wantSetup) bad.push(`${w}: ${engine} cold start ${i + 1} setup printed ${JSON.stringify(r.speed?.[w]?.setup)}`); });
     if (typeof want !== "string" || want === "" || /ERROR|Traceback/.test(want)) bad.push(`${w}: Sagebrush printed ${JSON.stringify(want)}`);
     for (const engine of engines)
       results[engine].forEach((r, i) => {
@@ -86,6 +90,20 @@ if (!PYODIDE || !existsSync(join(PYODIDE, "pyodide.mjs"))) throw new Error("--py
 const RUNS = Number(opt("--runs") ?? 3);
 const REPS = 5;
 
+// (two operands of about `digits` decimal digits, made from hex strings
+// once before the warm-up run, untimed (in both engines that takes longer
+// than the product: a hex string's conversion is linear, but the strings
+// themselves must be built); then only their product is timed, and its size
+// and a residue printed, both linear)
+const bigMul = (digits) => {
+  const hex = Math.ceil((digits * Math.log2(10)) / 4);
+  return {
+    setup: `h = ('0123456789abcdef' * ${Math.ceil(hex / 16) + 1})[:${hex}]\na = int('1' + h, 16)\nb = int('f' + h[::-1], 16)\nprint(a.bit_length(), b.bit_length())`,
+    code: "c = a * b\nprint(c.bit_length(), c % 1000003)",
+  };
+};
+// (each a program, or { setup, code }: setup run once before the warm-up,
+// untimed, its output checked as the runs' are)
 const WORKLOADS = {
   "loop": "s = 0\nfor i in range(3000000):\n    s += i * i\nprint(s)",
   "recursion": "def fib(n):\n    return n if n < 2 else fib(n - 1) + fib(n - 2)\nprint(fib(25))",
@@ -93,6 +111,8 @@ const WORKLOADS = {
   // (bit_length and a remainder: str() of a number past 4300 digits is a
   // ValueError in CPython 3.11+ and in Sagebrush alike)
   "big integers": "import math\nx = math.factorial(20000)\nprint(x.bit_length(), x % 1000003)",
+  "big multiply, 10^6 digits": bigMul(10 ** 6),
+  "big multiply, 10^7 digits": bigMul(10 ** 7),
   "sieve": "n = 2000000\ns = bytearray([1]) * (n + 1)\ns[0] = s[1] = 0\nfor p in range(2, int(n ** 0.5) + 1):\n    if s[p]:\n        s[p * p::p] = bytes(len(range(p * p, n + 1, p)))\nprint(sum(s))",
   "json": "import json\nx = [{'a': i, 'b': [i, str(i), i / 2], 'c': {'d': None, 'e': True}} for i in range(30000)]\ny = json.loads(json.dumps(x))\nprint(len(y), y[-1]['b'])",
   "numpy matmul": "import numpy as np\nA = np.arange(300 * 300, dtype=float).reshape(300, 300) % 7\nprint(float((A @ A).sum()))",
@@ -191,7 +211,9 @@ async function session(page) {
     const numpy = { ms: Math.round(np?.ms ?? -1), out: np?.out?.trim(), ...take() };
     step("numpy");
     const speed = {};
-    for (const [name, code] of Object.entries(WORKLOADS)) {
+    for (const [name, w] of Object.entries(WORKLOADS)) {
+      const { setup, code } = typeof w === "string" ? { code: w } : w;
+      const prep = setup === undefined ? undefined : (await ev(`run(${JSON.stringify(setup)})`))?.out?.trim();
       const warm = await ev(`run(${JSON.stringify(code)})`);
       // (every timed run's output kept: each must equal the warm-up's)
       const timed = [];
@@ -200,7 +222,7 @@ async function session(page) {
         timed.push({ ms: r?.ms, out: r?.out?.trim() });
       }
       const times = timed.map((t) => t.ms).sort((a, b) => a - b);
-      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out) };
+      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out), ...(prep === undefined ? {} : { setup: prep }) };
       step(`${name}: ${speed[name].ms} ms`);
     }
     ws.close();
