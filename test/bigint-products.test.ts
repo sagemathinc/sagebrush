@@ -31,6 +31,24 @@ test("big-integer products are balanced, not quadratic", () => {
   assert.ok(a < 1.5 && b < 1.5 && c < 1.5, `factorial ${a} s, prod ${b} s, comb ${c} s`);
 });
 
+// (comb and perm with k of 0 or 1 return 1 or n before any size bound,
+// which reads n's digits: with those refused, the trivial cases still
+// answer, and one that is bounded, comb(n, 2), trips the guard;
+// daybreak2's LIMIT-PTREE-1)
+test("comb and perm of k 0 or 1 read nothing of n", () => {
+  const guard = ["--require", __dirname + "/../../test/bigint-products-trivial.cjs"];
+  const trivial = [
+    "import math",
+    "n = 2**200000 + 12345",
+    "r = [math.comb(n, 0), math.comb(n, 1) == n, math.comb(n, n), math.comb(n, n - 1) == n, math.perm(n, 0), math.perm(n, 1) == n]",
+    "print(r, math.comb(n, 1) is not None)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", trivial], { encoding: "utf8" });
+  assert.equal(out.trim(), "[1, True, 1, True, 1, True] True");
+  const bounded = "import math\nmath.comb(2**200000, 2)";
+  assert.throws(() => execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", bounded], { encoding: "utf8", stdio: "pipe" }), /hex digits of a big integer read/);
+});
+
 test("Sage mode's prod is balanced, not quadratic", () => {
   const src = "import time\nt = time.perf_counter(); prod(range(1, 100001)); print(time.perf_counter() - t)";
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", src], { encoding: "utf8" });
