@@ -65,3 +65,19 @@ class H(float):
 for s in ["ZZ(G('2'))", "Integer(G('2'))", "ZZ(G('2.5'))", "ZZ(H('2'))", "Integer(H('-3'))", "ZZ(H('2.5'))"]:
     show(s)
 print(G.calls, H.calls)
+
+# x + n and x * n with an int subclass: its stored value counts, not its
+# comparison hooks
+class Liar(int):
+    def __ne__(self, other):
+        return False
+    def __eq__(self, other):
+        return True
+class Raiser(int):
+    def __ne__(self, other):
+        raise RuntimeError("ne hook")
+    def __eq__(self, other):
+        raise RuntimeError("eq hook")
+a = RealNumber('0.5')
+for c in [Liar, Raiser]:
+    print(c.__name__, a * c(int(2)), c(int(2)) * a, a + c(int(2)), c(int(2)) + a, a * c(int(1)), a + c(int(0)))

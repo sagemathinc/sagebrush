@@ -105,3 +105,14 @@ test("x + 0 and x * 1 with an int keep a literal in Sage only for a Python int; 
   const lit = "import sage_all as S\nx = S.RealNumber('1e-20')\nraise ValueError(str(S.QQ(x + False)) + ' ' + str(S.QQ(x * True)))";
   assert.equal(await run(lit, null), "ValueError: 1/99999999999999990439 1/99999999999999990439");
 });
+
+test("an ambiguous x + 0 keeps its mark through RR, copies and RealNumber, and every conversion that reads a literal's digits refuses it (CORR-28E-3)", async () => {
+  const head = "import sage_all as S, copy\nb = S.RealNumber('1e-20') + 0\n";
+  for (const c of ["S.QQ(S.RR(b))", "S.QQ(copy.copy(b))", "S.QQ(S.RealNumber(b))", "S.QQ(-b)", "S.RealField(100)(b)", "S.Rational(S.RealField(100)(b))", "S.RIF(b)", "S.RealField(30)(b)"]) {
+    const code = head + `try:\n    ${c}\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:20])`;
+    const got = await run(code, null);
+    assert.ok(got === "ValueError: QQ of x + 0 or x *" || got === "ValueError: converting x + 0 or", c + " -> " + got);
+  }
+  // (a plain value converts: float(b), RDF)
+  assert.equal(await run(head + "raise ValueError(str(S.QQ(float(b))))", null), "ValueError: 1/99999999999999997962");
+});
