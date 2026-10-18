@@ -1129,7 +1129,6 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
     let mut frob: Vec<(u64, Vec<(Vec<u64>, u32)>)> = vec![];
     let mut types: HashSet<Vec<usize>> = HashSet::new();
     let t_primes = clock();
-    let mut last_new = 0;
     for p in primes_from(2) {
         if frob.len() >= 120 {
             break;
@@ -1140,9 +1139,7 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
         let fac = sagebrush_poly::factor_mod(&g, p);
         let mut t: Vec<usize> = fac.iter().map(|(h, _)| h.len() - 1).collect();
         t.sort_unstable_by(|a, b| b.cmp(a));
-        if types.insert(t) {
-            last_new = frob.len();
-        }
+        types.insert(t);
         frob.push((p, fac));
     }
     prof(0, t_primes);

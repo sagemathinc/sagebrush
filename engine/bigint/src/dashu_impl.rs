@@ -107,6 +107,7 @@ impl From<BigUint> for BigInt {
 /// Operands with at least this many 64-bit words (on both sides) are
 /// multiplied by the 3-prime NTT (crate::ntt), 1.4-1.9x faster than
 /// dashu's from 256K bits (bench: sagebrush-arith example nttbench).
+#[cfg_attr(not(target_pointer_width = "64"), allow(dead_code))]
 pub const NTT_MUL_WORDS: usize = 4096;
 
 /// a * b, by the NTT for huge operands (64-bit targets).
