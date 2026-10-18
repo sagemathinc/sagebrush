@@ -34,6 +34,27 @@ def _format_exception(e, tb):
     return "".join(lines).rstrip()
 
 
+def _error_info(e, tb):
+    """The error as data: type (stable: "unimplemented" for
+    NotImplementedError, Sagebrush's refusal; "syntax"; "interrupted";
+    "exception" for anything else raised), exception (the class name),
+    message and traceback."""
+    if isinstance(e, KeyboardInterrupt):
+        kind = "interrupted"
+    elif isinstance(e, NotImplementedError):
+        kind = "unimplemented"
+    elif isinstance(e, SyntaxError):
+        kind = "syntax"
+    else:
+        kind = "exception"
+    return {"type": kind, "exception": type(e).__name__, "message": str(e), "traceback": _format_exception(e, tb)}
+
+
+def _failure(kind, message):
+    # an error of the session itself (a time limit, a process that died)
+    return {"type": kind, "exception": None, "message": message, "traceback": ""}
+
+
 def _worker():
     """The child: JSON requests on stdin, JSON replies on the original
     stdout; everything else written to stdout goes to stderr."""
@@ -75,13 +96,14 @@ def _worker():
             return
         req = json.loads(line)
         code, mode, isolated = req["code"], req.get("mode", "sage"), req.get("isolated", False)
+        want_data = req.get("data", False)
         ns = shared
         if isolated:
             ns = {"__name__": "__main__"}
             exec("from sagebrush.sage import *", ns)
         out = io.StringIO()
         del displays[:]
-        result = error = None
+        result = error = info = data = None
         t0 = time.perf_counter()
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
@@ -95,11 +117,18 @@ def _worker():
                         ns["_"] = v
                         if not (hasattr(v, "_repr_svg_") and display(v)):
                             result = repr(v)
-        except KeyboardInterrupt:
-            error = "KeyboardInterrupt: the computation was interrupted (time limit)"
+                if want_data:
+                    data = ns.get("__sagebrush_data__")
+                    json.dumps(data)  # (JSON, or the TypeError says why not)
+        except KeyboardInterrupt as e:
+            error = "KeyboardInterrupt: the computation was interrupted"
+            info = _error_info(e, None)
+            info["message"], info["traceback"] = "the computation was interrupted", error
         except BaseException as e:  # SystemExit too: the session survives
             error = _format_exception(e, e.__traceback__)
-        reply = {"stdout": out.getvalue(), "result": result, "error": error, "displays": list(displays), "seconds": time.perf_counter() - t0}
+            info = _error_info(e, e.__traceback__)
+        reply = {"stdout": out.getvalue(), "result": result, "error": error, "error_info": info, "data": data if info is None else None,
+                 "displays": list(displays), "seconds": time.perf_counter() - t0}
         while True:
             try:
                 proto.write(json.dumps(reply) + "\n")
@@ -174,18 +203,22 @@ class Session:
         except queue.Empty:
             return False
 
-    def run(self, code, mode="sage", timeout=60.0, isolated=False):
+    def run(self, code, mode="sage", timeout=60.0, isolated=False, data=False):
         """Run code ("sage" syntax or plain "python"); a dict with stdout,
         result (repr of the last expression, or None), error (a traceback,
-        or None), displays [(mime, data)], seconds, and restarted (True if
-        the session had to be restarted, losing its variables)."""
+        or None), error_info (the error as a dict: type, exception, message,
+        traceback; see _error_info, plus "timeout" and "session" for a time
+        limit and a process that died), displays [(mime, data)], seconds,
+        restarted (True if the session had to be restarted, losing its
+        variables) and data: with data=True, the JSON value the code left in
+        __sagebrush_data__ (None after an error)."""
         import json
 
         restarted = False
         if not self.alive():
             self._start()
             restarted = True
-        self.proc.stdin.write((json.dumps({"code": code, "mode": mode, "isolated": isolated}) + "\n").encode("utf-8"))
+        self.proc.stdin.write((json.dumps({"code": code, "mode": mode, "isolated": isolated, "data": data}) + "\n").encode("utf-8"))
         self.proc.stdin.flush()
         r = self._get(timeout)
         if r:
@@ -193,19 +226,24 @@ class Session:
             return r
         if r is None:  # the process died (e.g. out of memory)
             self._start()
-            return {"stdout": "", "result": None, "error": "The session process died during the computation and was restarted (its variables were lost).", "displays": [], "seconds": 0.0, "restarted": True}
+            msg = "The session process died during the computation and was restarted (its variables were lost)."
+            return {"stdout": "", "result": None, "error": msg, "error_info": _failure("session", msg), "data": None, "displays": [], "seconds": 0.0, "restarted": True}
         # over time: interrupt, then give it a few seconds to stop cleanly
         self.interrupt()
         r = self._get(5)
         if r:
             r["error"] = "Interrupted: the time limit of %g s was reached (the session and its variables are kept)." % timeout
+            r["error_info"], r["data"] = _failure("timeout", r["error"]), None
             r["restarted"] = restarted
             return r
         self.restart()
+        msg = "The time limit of %g s was reached and the computation did not stop when interrupted; the session was restarted (its variables were lost)." % timeout
         return {
             "stdout": "",
             "result": None,
-            "error": "The time limit of %g s was reached and the computation did not stop when interrupted; the session was restarted (its variables were lost)." % timeout,
+            "error": msg,
+            "error_info": _failure("timeout", msg),
+            "data": None,
             "displays": [],
             "seconds": timeout,
             "restarted": True,
