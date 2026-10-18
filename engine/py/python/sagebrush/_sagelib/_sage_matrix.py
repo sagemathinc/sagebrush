@@ -32,6 +32,20 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _qq_entry(x):
+    """x as an element of QQ when it is an integer: an integral entry of a
+    QQ container is stored as an int (_norm), but Sage hands it out with
+    parent QQ, as the Rational it is."""
+    # (Rational's own constructor: QQ(x) parses its argument, 15 times slower)
+    return _sa().Rational._from_coprime_ints(x, 1) if isinstance(x, int) and not isinstance(x, bool) else x
+
+
+def _raw_entries(v):
+    """A vector's entries as stored, an integral one as an int (for
+    computing: a QQ vector holds elements of QQ)."""
+    return [_norm(x) for x in list.__iter__(v)]
+
+
 class Vector(list):
     """A row of a matrix, printed as Sage prints vectors: (1, 2, 3).
 
@@ -87,7 +101,8 @@ class Vector(list):
             # the vector-matrix product
             if len(self) != other.nrows():
                 raise ArithmeticError("vector and matrix of incompatible sizes")
-            return Vector(_norm(sum((a * b for a, b in zip(self, c)), 0)) for c in other.columns())
+            sv = _raw_entries(self)
+            return Vector(_norm(sum((a * b for a, b in zip(sv, c)), 0)) for c in other._raw_columns())
         if isinstance(other, (list, tuple)):
             # the dot product
             if len(other) != len(self):
@@ -840,7 +855,61 @@ class Matrix:
             sage: matrix(ZZ, [[1, 2], [3, 4]]).rows()
             [(1, 2), (3, 4)]
         """
-        return [Vector(r) for r in self._rows]
+        return [self._vector(r) for r in self._rows]
+
+    def _raw_columns(self):
+        """The columns as tuples of stored entries (for computing: no
+        wrapping)."""
+        return list(zip(*self._rows)) if self._rows else [() for _ in range(self.ncols())]
+
+    def _vector(self, entries):
+        """A row or column as a vector over this matrix's ring (QQ's
+        entries are then handed out with parent QQ)."""
+        v = Vector(entries)
+        sa = _sa()
+        if self._base is sa.QQ or self._base is sa.ZZ:
+            v._ring = self._base
+        return v
+
+    def _out(self, x):
+        """An entry as handed out: over QQ an element of QQ."""
+        return _qq_entry(x) if self._base is _sa().QQ else x
+
+    def row(self, i):
+        """The row i, as a vector.
+
+        EXAMPLES::
+
+            sage: matrix(QQ, [[1, 2], [3, 4]]).row(1)
+            (3, 4)
+        """
+        rs, one = _select(i, self.nrows(), "row index out of range")
+        if not one:
+            raise TypeError("a row index is an integer")
+        return self._vector(self._rows[rs[0]])
+
+    def column(self, j):
+        """The column j, as a vector.
+
+        EXAMPLES::
+
+            sage: matrix(QQ, [[1, 2], [3, 4]]).column(1)
+            (2, 4)
+        """
+        cs, one = _select(j, self.ncols(), "column index out of range")
+        if not one:
+            raise TypeError("a column index is an integer")
+        return self._vector([r[cs[0]] for r in self._rows])
+
+    def dict(self):
+        """The nonzero entries, by (row, column).
+
+        EXAMPLES::
+
+            sage: matrix(QQ, [[1, 0], [0, 4]]).dict()
+            {(0, 0): 1, (1, 1): 4}
+        """
+        return {(i, j): self._out(x) for i, r in enumerate(self._rows) for j, x in enumerate(r) if x != 0}
 
     def columns(self):
         """The columns, as vectors.
@@ -850,7 +919,7 @@ class Matrix:
             sage: matrix(ZZ, [[1, 2], [3, 4]]).columns()
             [(1, 3), (2, 4)]
         """
-        return [Vector(c) for c in zip(*self._rows)] if self._rows else [Vector([]) for _ in range(self.ncols())]
+        return [self._vector(c) for c in self._raw_columns()]
 
     def list(self):
         """The entries, row by row.
@@ -859,7 +928,14 @@ class Matrix:
 
             sage: matrix(ZZ, [[1, 2], [3, 4]]).list()
             [1, 2, 3, 4]
+
+        Over QQ the entries are elements of QQ, as in Sage::
+
+            sage: matrix(QQ, [[1, 2]]).list()[0].parent()
+            Rational Field
         """
+        if self._base is _sa().QQ:
+            return [_qq_entry(x) for r in self._rows for x in r]
         return [x for r in self._rows for x in r]
 
     def is_square(self):
@@ -907,12 +983,12 @@ class Matrix:
             rs, r1 = _select(ij[0], self.nrows())
             cs, c1 = _select(ij[1], self.ncols())
             if r1 and c1:
-                return self._rows[rs[0]][cs[0]]
+                return self._out(self._rows[rs[0]][cs[0]])
             return Matrix(self._base, [[self._rows[i][j] for j in cs] for i in rs], len(cs))
         _shape(_count(ij, self.nrows()), self.ncols())
         rs, r1 = _select(ij, self.nrows())
         if r1:
-            return Vector(self._rows[rs[0]])
+            return self._vector(self._rows[rs[0]])
         return Matrix(self._base, [list(self._rows[i]) for i in rs], self.ncols())
 
     def __setitem__(self, ij, v):
@@ -1175,7 +1251,7 @@ class Matrix:
             [3 6], True
             )
         """
-        return Matrix(self._base, self.columns(), self.nrows())
+        return Matrix(self._base, self._raw_columns(), self.nrows())
 
     T = property(transpose)
 
@@ -1277,12 +1353,14 @@ class Matrix:
             if self._base is _sa().ZZ and other._base is _sa().ZZ and self.nrows() * self.ncols() * other.ncols() > 4096:
                 from sagebrush import linalg
                 return Matrix(_sa().ZZ, linalg.matmul(self._rows, other._rows))
-            cols = other.columns()
+            cols = other._raw_columns()
             return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows], other.ncols())
         if isinstance(other, SeriesVector):
             return other._matvec(self)
         if isinstance(other, Vector):
-            return Vector(_norm(sum((a * b for a, b in zip(r, other)), 0)) for r in self._rows)
+            ov = _raw_entries(other)
+            v = Vector(_norm(sum((a * b for a, b in zip(r, ov)), 0)) for r in self._rows)
+            return _over_qq(v, other) if self._base is not _sa().QQ else self._vector(v)
         if isinstance(other, (list, tuple)):
             return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
         base = self._base if isinstance(other, int) else _sa().QQ
@@ -1356,7 +1434,7 @@ class Matrix:
         if not self.is_square():
             raise ValueError("self must be a square matrix")
         from sagebrush import linalg
-        return _norm(linalg.det(self._rows))
+        return self._out(_norm(linalg.det(self._rows)))
 
     det = determinant
 
@@ -1647,7 +1725,7 @@ class Matrix:
         """
         if self.nrows() != self.ncols():
             raise ValueError("self must be a square matrix")
-        return sum(self._rows[i][i] for i in range(self.nrows()))
+        return self._out(sum(self._rows[i][i] for i in range(self.nrows())))
 
     # ---- eigenvalues and eigenvectors (exact: QQ and QQbar)
     def _eigen_factors(self):
@@ -1859,7 +1937,7 @@ class Matrix:
             sage: matrix(ZZ, [[1, 2], [3, 4]]).diagonal()
             [1, 4]
         """
-        return [self._rows[i][i] for i in range(min(self.nrows(), self.ncols()))]
+        return [self._out(self._rows[i][i]) for i in range(min(self.nrows(), self.ncols()))]
 
     def dense_matrix(self):
         """The matrix itself (matrices are dense).
