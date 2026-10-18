@@ -115,7 +115,9 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'off by $8.7 \\\\times 10^{-603}$, more than the tolerance'",
     "ValueError: close: a tolerance is a finite number, at least 0",
     "True True",
-    "False 'off by about $9.67 \\\\times 10^{-17}$, more than the tolerance'",
+    // (1.4142135623730951 has 17 digits: a 57-bit literal, as in Sage, whose
+    // value is 5.5e-17 from sqrt(2); Sage gives 5.503956971108576e-17)
+    "False 'off by about $5.5 \\\\times 10^{-17}$, more than the tolerance'",
     "False 'off by about $2.65 \\\\times 10^{-6}$, more than the tolerance'",
     "ValueError: close: a tolerance is a finite real number (an int, a fraction, a float or a Sage real), at least 0",
   ]);
