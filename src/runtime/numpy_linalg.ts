@@ -12,6 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
+import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
@@ -382,12 +383,129 @@ function symEig(A: Float64Array, n: number): [Float64Array, Float64Array] {
 
 // ------------------------------------------------------------------ general eigenproblem (orthes + hqr2)
 
-function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float64Array] {
+// Balancing, as LAPACK's dgebal with job 'B' does it: first a permutation P that moves rows
+// and columns isolating an eigenvalue (all other entries in the active block zero) to the
+// bottom and top, then a diagonal similarity D^-1 B D of the remaining block by powers of two
+// (EISPACK balanc's iteration), both exact, making its rows and columns of comparable size.
+// LAPACK's dgeev, so NumPy's eig, and MATLAB's eig balance by default; without it a badly
+// scaled companion matrix loses its small eigenvalues ((x^2 + 1e20 x + 1)(x^2 + 3x + 2) gave 0
+// for -1e-20).  A scaling that would take an entry out of [2^-1000, 2^1000], or a row's
+// cumulative scale D[i] out of [2^-500, 2^500], is skipped, and at most BALANCE_SWEEPS sweeps are
+// made.  (So unscaling the eigenvectors stays exact: hqr2's own overflow control keeps their
+// entries below about 1/sqrt(eps), so times D[i] they stay finite, and they only lose bits below
+// 2^-522 of the largest.)  Interrupts are polled at each row or column searched and scaled.  Returns B = D^-1 P' A P D, the permutation p (B's row k
+// is A's row p[k], scaled) and D.
+const BALANCE_SWEEPS = 100;
+function balance(A: Float64Array, n: number): [Float64Array, Int32Array, Float64Array] {
+  const B = Float64Array.from(A), D = new Float64Array(n).fill(1);
+  const p = new Int32Array(n);
+  for (let i = 0; i < n; i++) p[i] = i;
+  const exchange = (i: number, j: number) => {
+    if (i === j) return;
+    for (let k = 0; k < n; k++) [B[k * n + i], B[k * n + j]] = [B[k * n + j], B[k * n + i]];
+    for (let k = 0; k < n; k++) [B[i * n + k], B[j * n + k]] = [B[j * n + k], B[i * n + k]];
+    [p[i], p[j]] = [p[j], p[i]];
+  };
+  let lo = 0, hi = n - 1;
+  // (rows isolating an eigenvalue, to the bottom)
+  for (let found = true; found && hi > 0;) {
+    found = false;
+    for (let j = hi; j >= 0; j--) {
+      pollInterrupt();
+      let zero = true;
+      for (let k = lo; k <= hi; k++) if (k !== j && B[j * n + k] !== 0) { zero = false; break; }
+      if (zero) {
+        exchange(j, hi);
+        hi--;
+        found = true;
+        break;
+      }
+    }
+  }
+  // (columns isolating one, to the top)
+  for (let found = true; found && lo < hi;) {
+    found = false;
+    for (let j = lo; j <= hi; j++) {
+      pollInterrupt();
+      let zero = true;
+      for (let k = lo; k <= hi; k++) if (k !== j && B[k * n + j] !== 0) { zero = false; break; }
+      if (zero) {
+        exchange(j, lo);
+        lo++;
+        found = true;
+        break;
+      }
+    }
+  }
+  const HI = 2 ** 1000, LO = 2 ** -1000;
+  for (let sweep = 0, again = true; again && sweep < BALANCE_SWEEPS; sweep++) {
+    again = false;
+    for (let i = lo; i <= hi; i++) {
+      pollInterrupt();
+      // (the norms over the active block; the scaling applies to the whole row and column)
+      let c = 0, r = 0;
+      for (let j = lo; j <= hi; j++) {
+        if (j === i) continue;
+        c += Math.abs(B[j * n + i]);
+        r += Math.abs(B[i * n + j]);
+      }
+      if (c === 0 || r === 0) continue;
+      const s = c + r;
+      let f = 1, g = r / 2;
+      while (c < g && f < HI) {
+        f *= 2;
+        c *= 4;
+      }
+      g = r * 2;
+      while (c >= g && f > LO) {
+        f /= 2;
+        c /= 4;
+      }
+      if (f === 1 || (c + r) / f >= 0.95 * s) continue;
+      // (the row's cumulative scale stays in [2^-500, 2^500])
+      const Di = D[i] * f;
+      if (Di > 2 ** 500 || Di < 2 ** -500) continue;
+      // (column i is multiplied by f and row i divided by it: every entry must stay in range)
+      let ok = true;
+      for (let j = 0; j < n && ok; j++) {
+        if (j === i) continue;
+        const cv = Math.abs(B[j * n + i]) * f, rv = Math.abs(B[i * n + j]) / f;
+        if (cv > HI || rv > HI || (cv !== 0 && cv < LO) || (rv !== 0 && rv < LO)) ok = false;
+      }
+      if (!ok) continue;
+      D[i] = Di;
+      again = true;
+      for (let j = 0; j < n; j++) {
+        if (j === i) continue;
+        B[j * n + i] *= f;
+        B[i * n + j] /= f;
+      }
+    }
+  }
+  return [B, p, D];
+}
+
+// Eigenvalues and eigenvectors of the general matrix A, balanced first unless nobalance:
+// [real parts, imaginary parts, the vectors as eigNormalize gives them].
+function genEig(A: Float64Array, n: number, nobalance = false): [Float64Array, Float64Array, Float64Array] {
+  if (nobalance) {
+    const [d, e, V] = genEigCore(A, n);
+    return eigNormalize(n, d, e, V);
+  }
+  const [B, p, D] = balance(A, n);
+  const [d, e, W] = genEigCore(B, n);
+  // (A's eigenvectors are P D times B's: exact, a permutation and powers of two)
+  const V: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) V[p[k]][j] = W[k][j] * D[k];
+  return eigNormalize(n, d, e, V);
+}
+
+function genEigCore(A: Float64Array, n: number): [number[], number[], number[][]] {
   const g = wasmGenEig(A, n);
   if (g === "noconv") linalgError("Eigenvalues did not converge");
   if (g) {
     const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => g.W[j * n + i]));
-    return eigNormalize(n, Array.from(g.d), Array.from(g.e), V);
+    return [Array.from(g.d), Array.from(g.e), V];
   }
   const H: number[][] = [];
   for (let i = 0; i < n; i++) H.push(Array.from(A.subarray(i * n, i * n + n)));
@@ -439,6 +557,8 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
   // hqr2: real Schur form and eigenvectors
   let nn = n, N = nn - 1;
   const eps = 2 ** -52;
+  // (the smallest number safely treated as negligible, as dlahqr's smlnum: safmin n / ulp)
+  const smlnum = 2 ** -1022 * (n / eps);
   let exshift = 0, p = 0, q = 0, r = 0, s = 0, z = 0, t: number, w: number, x: number, y: number;
   let norm = 0;
   for (let i = 0; i < nn; i++) for (let j = Math.max(i - 1, 0); j < nn; j++) norm += Math.abs(H[i][j]);
@@ -462,8 +582,25 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
     let l = N;
     while (l > low) {
       s = Math.abs(H[l - 1][l - 1]) + Math.abs(H[l][l]);
-      if (s === 0) s = norm;
-      if (Math.abs(H[l][l - 1]) < eps * s || H[l][l - 1] === 0) break; // (JAMA misses the zero matrix)
+      // (both diagonal entries 0: the neighbouring subdiagonal entries, as dlahqr does, not the
+      // whole matrix's norm, which split a balanced companion matrix at once and returned its 0
+      // diagonal entry for -1e-12)
+      if (s === 0) {
+        if (l - 2 >= low) s += Math.abs(H[l - 1][l - 2]);
+        if (l + 1 <= N) s += Math.abs(H[l + 1][l]);
+      }
+      if (H[l][l - 1] === 0) break; // (JAMA misses the zero matrix)
+      if (Math.abs(H[l][l - 1]) < eps * s) {
+        // (a small subdiagonal splits the matrix only if the product of the two off-diagonal
+        // entries is negligible too: the Ahues-Tisseur test, LAPACK dlahqr's. Otherwise a
+        // well-separated small eigenvalue is lost: [-1e20 -1; 1 0] gave 0 for -1e-20)
+        const sub = Math.abs(H[l][l - 1]), sup = Math.abs(H[l - 1][l]);
+        const ab = Math.max(sub, sup), ba = Math.min(sub, sup);
+        const dg = Math.abs(H[l][l]), df = Math.abs(H[l - 1][l - 1] - H[l][l]);
+        const aa = Math.max(dg, df), bb = Math.min(dg, df);
+        const s2 = aa + ab;
+        if (ba * (ab / s2) <= Math.max(smlnum, eps * (bb * (aa / s2)))) break;
+      }
       l--;
     }
     if (l === N) {
@@ -714,7 +851,7 @@ function genEig(A: Float64Array, n: number): [Float64Array, Float64Array, Float6
       }
     }
   }
-  return eigNormalize(n, d, e, V);
+  return [d, e, V];
 }
 
 // complex eigenvectors: columns (re, im) pairs; normalize each to unit norm as LAPACK
@@ -1135,11 +1272,11 @@ newBuiltinModule("_nplinalg", (m) => {
     const [w, v] = n ? symEig(S, n) : [new Float64Array(0), new Float64Array(0)];
     return tuple([out(w, [n]), out(v, [n, n])]);
   });
-  fn("eig", (a: NDArray) => {
+  fn("eig", (a: NDArray, nobalance: any) => {
     const [A, n, c] = mat(a);
     if (n !== c) linalgError("Last 2 dimensions of the array must be square");
     for (const v of A) if (!Number.isFinite(v)) linalgError("Array must not contain infs or NaNs");
-    const [wr, wi, vecs] = genEig(A, n);
+    const [wr, wi, vecs] = genEig(A, n, nobalance === true);
     const cplx = wi.some((v) => v !== 0);
     if (!cplx) {
       const vr = new Float64Array(n * n);

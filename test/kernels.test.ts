@@ -19,6 +19,18 @@ th = 0.7
 R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
 mats += [np.zeros((10, 10)), np.eye(12), np.ones((9, 9)), r @ r.T, np.kron(np.eye(6), R),
          np.diag(np.arange(10.0)) + np.diag(np.ones(9), 1), np.triu(np.random.rand(11, 11))]
+# (balanced companion matrices, and a matrix whose balancing permutes rows and columns)
+for s in [1e8, 1e14, 1e20]:
+    c = np.convolve([1.0, s, 1.0], [1.0, 3.0, 2.0])
+    mats.append(np.vstack([-c[1:] / c[0], np.eye(3, 4)]))
+c = np.array([1.0, 1e6, -3e-4, 2e9, 5.0, -1e-7, 7e3])
+mats.append(np.vstack([-c[1:] / c[0], np.eye(5, 6)]))
+b = np.random.rand(7, 7)
+b[3, :3] = 0
+b[3, 4:] = 0
+b[:5, 5] = 0
+b[6:, 5] = 0
+mats.append(b)
 for a in mats:
     rec(*np.linalg.eigh(a + a.T))
     w, v = np.linalg.eig(a)
