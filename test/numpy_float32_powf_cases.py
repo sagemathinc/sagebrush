@@ -33,3 +33,12 @@ with np.errstate(all="ignore"):
     for e in [f32(0.3), np.float64(0.3)]:
         print("numpy scalar", type(e).__name__, digest(x ** e))
     print("elements", [repr(float(v)) for v in np.power(special[:8], f32(1.5))])
+    # exponents that round to a special one in float32 (cast before the loop's
+    # check, as NumPy does): 0.500000001 is 0.5, so sqrt; 2.00000001 is 2
+    for e in [0.500000001, 2.00000001, -1.00000001, 0.99999999, 1e-9]:
+        o = np.empty_like(x)
+        y = x.copy()
+        y **= e
+        print("rounds to a special exponent", repr(e), digest(x ** e), digest(np.power(x, e)), digest(np.power(x, e, out=o)), digest(y),
+              digest(np.power(x, e, where=x > 1, out=np.zeros_like(x))))
+    print("astra's case", np.power(np.array([101284440.0], dtype=np.float32), 0.500000001).tobytes().hex())
