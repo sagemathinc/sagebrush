@@ -59,6 +59,10 @@ export class InPlace {
   private pic: { key: string; info: ImageInfo } | null = null;
   private picEl: HTMLElement | null = null;
   private hasCode = false;
+  // (a new code item, made as one (Code, or another of a code item's kind):
+  // left with no code, it stays a code item, to be written later, astra's
+  // note on William's item 7; code added to a note and left empty goes)
+  private bornCode = false;
   private headHeight = 0; // (an untitled code item's head, as shown)
   private hideCode = false;
   private color: string | undefined;
@@ -93,6 +97,7 @@ export class InPlace {
     const note = n as DocNote;
     this.color = n.color;
     this.hasCode = !this.group && note.code !== undefined;
+    this.bornCode = this.fresh && this.hasCode;
     this.hideCode = !!note.hideCode;
     if (!this.group && note.image && d.images?.[note.image]) this.pic = { key: note.image, info: d.images[note.image] };
     this.build(note);
@@ -789,6 +794,7 @@ export class InPlace {
     if (this.pic) (d.images ??= {})[this.pic.key] ??= { w: this.pic.info.w, h: this.pic.info.h };
     const c = this.codeNow();
     set("code", c || undefined);
+    if (!c && this.bornCode && this.hasCode) n.code = "";
     set("hideCode", !!c && this.hideCode);
     set("detail", v(this.detail));
     set("ref", v(this.ref));
