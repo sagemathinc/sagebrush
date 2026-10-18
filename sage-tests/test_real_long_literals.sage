@@ -199,3 +199,8 @@ x = 20.86509656799792170e-294; print(156, x.prec(), x, show(lambda: QQ(x)), RR(x
 x = 1890.530552282843850028e290; print(157, x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
 x = 6040187598.919665e319; print(158, x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
 x = -894212046691421664885.6e-306; print(159, x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
+
+# abs and powers are plain numbers; +x, real() and conjugate() the literal
+for s in ['1.2345678901234567', '-1.2345678901234567', '-0.12345678901234567890']:
+    a = RealNumber(s)
+    print(s, QQ(abs(a)), QQ(a.abs()), Rational(abs(a)), QQ(abs(-a)), QQ((-a).abs()), QQ(a^1), QQ(a**int(1)), QQ(+a), QQ(a.real()), QQ(a.conjugate()), abs(a), abs(a).parent())

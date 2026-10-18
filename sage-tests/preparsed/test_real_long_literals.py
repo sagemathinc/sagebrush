@@ -200,3 +200,8 @@ x = _sage_const_20p86509656799792170en294 ; print(_sage_const_156 , x.prec(), x,
 x = _sage_const_1890p530552282843850028e290 ; print(_sage_const_157 , x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
 x = _sage_const_6040187598p919665e319 ; print(_sage_const_158 , x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
 x = -_sage_const_894212046691421664885p6en306 ; print(_sage_const_159 , x.prec(), x, show(lambda: QQ(x)), RR(x), float(x))
+
+# abs and powers are plain numbers; +x, real() and conjugate() the literal
+for s in ['1.2345678901234567', '-1.2345678901234567', '-0.12345678901234567890']:
+    a = RealNumber(s)
+    print(s, QQ(abs(a)), QQ(a.abs()), Rational(abs(a)), QQ(abs(-a)), QQ((-a).abs()), QQ(a**_sage_const_1 ), QQ(a**int(_sage_const_1 )), QQ(+a), QQ(a.real()), QQ(a.conjugate()), abs(a), abs(a).parent())
