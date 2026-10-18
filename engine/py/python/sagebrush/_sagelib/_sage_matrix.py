@@ -1547,9 +1547,28 @@ class Matrix:
 
             sage: matrix(ZZ, [[2, 4], [6, 8]]).elementary_divisors()
             [2, 4]
+
+        As Sage: over ZZ one per row (a tall matrix's free zero factors
+        too, when it has a column); over QQ min(rows, columns) of them, 1
+        for each unit of the rank, a 1-by-1 matrix its entry::
+
+            sage: matrix(ZZ, 3, 2, [1, 2, 2, 4, 3, 6]).elementary_divisors()
+            [1, 0, 0]
+            sage: matrix(QQ, [[2, 0], [0, 6]]).elementary_divisors(), matrix(QQ, [[5]]).elementary_divisors()
+            ([1, 1], [5])
         """
+        ZZ, QQ = _sa().ZZ, _sa().QQ
+        if self._base is QQ:
+            r, c = self.nrows(), self.ncols()
+            if r == 1 and c == 1:
+                return [self._rows[0][0]]
+            k = self.rank()
+            return [QQ(1)] * k + [QQ(0)] * (min(r, c) - k)
         from sagebrush import nf
-        return nf.elementary_divisors(self._integer_rows())
+        d = nf.elementary_divisors(self._integer_rows())
+        if self._base is ZZ and self.ncols() > 0:
+            d = list(d) + [0] * (self.nrows() - len(d))
+        return d
 
     def smith_form(self):
         """(D, U, V) with U self V = D diagonal (the elementary divisors).
@@ -1618,8 +1637,17 @@ class Matrix:
 
             sage: matrix(ZZ, [[1, 2], [3, 4]]).trace()
             5
+
+        A nonsquare matrix has none, as in Sage::
+
+            sage: matrix(ZZ, 2, 3, [1, 2, 3, 2, 4, 6]).trace()
+            Traceback (most recent call last):
+            ...
+            ValueError: self must be a square matrix
         """
-        return sum(self._rows[i][i] for i in range(min(self.nrows(), self.ncols())))
+        if self.nrows() != self.ncols():
+            raise ValueError("self must be a square matrix")
+        return sum(self._rows[i][i] for i in range(self.nrows()))
 
     # ---- eigenvalues and eigenvectors (exact: QQ and QQbar)
     def _eigen_factors(self):
