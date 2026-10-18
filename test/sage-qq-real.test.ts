@@ -75,11 +75,11 @@ test("Stop interrupts QQ of a 16384-bit real", async () => {
 test("QQ of a literal of more than 15 digits is refused, naming the workarounds; 15 digits converts", async () => {
   // (Sage gives such a literal more than 53 bits; here literals have 53:
   // the expected values are Sage's, for the double and the 15-digit literal;
-  // astra's CORR-28E-3.  RR('...') is how a Sage literal arrives.)
-  const long = "import sage_all as S\nx = S.RR('1.2345678901234567')\ntry:\n    S.QQ(x)\nexcept NotImplementedError as e:\n    raise ValueError(str(e))";
+  // astra's CORR-28E-3.  RealNumber('...') is how the preparser writes a literal.)
+  const long = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\ntry:\n    S.QQ(x)\nexcept NotImplementedError as e:\n    raise ValueError(str(e))";
   const got = await run(long, null);
   assert.match(got, /^ValueError: QQ of a decimal literal of more than 15 significant digits is not implemented/, got);
   assert.match(got, /QQ\('1\.2345678901234567'\)/, got);
-  const after = "import sage_all as S\nx = S.RR('1.2345678901234567')\nraise ValueError(str(S.QQ(x + 0)) + ' ' + str(S.QQ(S.RR('0.123456789012345'))))";
+  const after = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\nraise ValueError(str(S.QQ(x + 0)) + ' ' + str(S.QQ(S.RealNumber('0.123456789012345'))))";
   assert.equal(await run(after, null), "ValueError: 89163235/72222221 42523979/344444233");
 });
