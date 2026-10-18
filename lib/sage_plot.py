@@ -261,7 +261,7 @@ class Graphics:
             sage: import os, tempfile; d = tempfile.mkdtemp()
             sage: G = plot(sin(x), (x, 0, 1), axes_labels=['$x$', '$\\sin(x)$'])
             sage: G.save(os.path.join(d, 'sin.png')); open(os.path.join(d, 'sin.png'), 'rb').read(4)
-            b'\x89PNG'
+            b'\\x89PNG'
             sage: G.save(os.path.join(d, 'sin.jpg'))
             Traceback (most recent call last):
             ...
