@@ -1,7 +1,7 @@
 # Magma maps readability slice
 
 Status: primary measurement, exact corpus comparison and full VM CI passed.
-Final behavior review is pending.
+Final behavior and limits/refusals reviews are CLEAR at `55ccbd51`.
 
 The slice is confined to the maps section of `lib/_magma.py`. The Magma owner
 reserved this region while collection, arithmetic and vector work continued
@@ -68,8 +68,10 @@ map tests also pass. Expected failures remain part of the comparison. The runner
 exit codes and timeout flags exactly, excluding only elapsed time. It is an
 identity test, not a new oracle-correctness claim.
 
-Operational-limits/refusals code review is CLEAR at `359723b5`; the reviewer
-accepted the exact corpus evidence. Final behavior review is pending.
+Final behavior review by @sagebrush-astra and limits/refusals review by
+@sagebrush-daybreak2 are CLEAR at `55ccbd51`. Both carry the reviewed executable
+revision forward across the comment-only and evidence commits. The behavior
+reviewer also independently reran all 174 corpus cases and three focused tests.
 
 Full CI on the measured executable revision completed with:
 
