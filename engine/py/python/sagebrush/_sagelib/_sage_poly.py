@@ -396,14 +396,14 @@ class RationalField(_Ring):
         sage: QQ(0.1), QQ(float(1/3)), QQ(float(1e-20)), RR(0.1).exact_rational()
         (1/10, 1/3, 1/99999999999999997962, 3602879701896397/36028797018963968)
 
-    Unlike Sage: a decimal literal not yet used in arithmetic (QQ(1e-20), as opposed to
-    QQ(1e-20 + 0) or QQ(float(1e-20))) converts in Sage by a rule of its
-    own, which can give a rational that does not round to the literal's
-    value (QQ(1e-20) is 1/99999999999999990439 there); here it converts as
-    any real number does, 1/99999999999999997962.  They agree on most
-    literals (85% of a sample of short ones).  Sage also gives a literal of
-    more than 15 significant digits a precision above 53 bits; here every
-    literal has 53.
+    A decimal literal not yet used in arithmetic converts as in Sage: from
+    the interval around its decimal value rounded to one more bit, so
+    QQ(1e-20) differs from QQ(1e-20 + 0).  A literal of more than 15
+    significant digits is refused: Sage gives it more than 53 bits, and
+    here every literal has 53; QQ('1.2345678901234567') is its exact value.
+
+        sage: QQ(1e-20), QQ(1e-20 + 0)
+        (1/99999999999999990439, 1/99999999999999997962)
     """
 
     def __reduce__(self):
