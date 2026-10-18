@@ -207,7 +207,7 @@ TOOLS = [
         "name": "factor",
         "description": "Factor an integer (ECM; any size that ECM can split), e.g. n = \"2^128 + 1\". The result is [[p, e], ...]; "
         "prime factors above 3.3e24 are probable primes (Baillie-PSW), not proven, and are then listed in assumes.",
-        "inputSchema": {"type": "object", "properties": {"n": {"type": "string", "description": "an integer or an integer expression"}}, "required": ["n"]},
+        "inputSchema": {"type": "object", "properties": {"n": {"type": "string", "description": "an integer, or integers with + - * ^ and parentheses, e.g. \"2^128 + 1\" (nothing else is evaluated)"}}, "required": ["n"]},
         "annotations": {"readOnlyHint": True},
     },
     {
@@ -217,7 +217,7 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "polynomial": {"type": "string", "description": "an irreducible polynomial in x, e.g. \"x^3 - 11\""},
+                "polynomial": {"type": "string", "description": "an irreducible polynomial in x with rational coefficients (+ - * / ^ and parentheses), e.g. \"x^3 - 11\""},
                 "proof": {"type": "boolean", "default": True, "description": "try to prove the class group and regulator without GRH (the engine's certificate; it refuses beyond its limits, and the GRH result is given then); false skips it"},
             },
             "required": ["polynomial"],
@@ -356,6 +356,115 @@ STRUCTURED_SINCE = "2025-06-18"
 GUIDE_URI = "sagebrush://guide"
 
 
+# ---- the shortcut tools' arguments, parsed here (never run as code)
+
+MAX_INPUT_CHARS = 20000
+MAX_BITS = 1 << 17  # of any number built while parsing (about 39000 digits)
+MAX_DEGREE = 200
+
+
+def _parse_poly(text, var=None):
+    """An integer expression (var None) or a polynomial in `var` with
+    rational coefficients, as {degree: Fraction}: integers, the variable,
+    + - * (and / by a nonzero constant), ^ or ** to a nonnegative integer
+    power, parentheses.  Nothing else (names, calls, attributes, ...) is
+    accepted: _Invalid.  Every number built is at most MAX_BITS bits and
+    every degree at most MAX_DEGREE, checked before it is built."""
+    import ast
+    from fractions import Fraction
+
+    if not isinstance(text, str) or not text.strip():
+        raise _Invalid("an expression is required")
+    if len(text) > MAX_INPUT_CHARS:
+        raise _Invalid("the expression is longer than %d characters" % MAX_INPUT_CHARS)
+    try:
+        tree = ast.parse(text.strip().replace("^", "**"), mode="eval")
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        raise _Invalid("not an expression: %r" % text[:200]) from None
+
+    def bits(q):
+        return q.numerator.bit_length() + q.denominator.bit_length()
+
+    def check(p):
+        if len(p) > MAX_DEGREE + 1 or any(bits(c) > MAX_BITS for c in p.values()):
+            raise _Invalid("a number or degree in the expression is too large (at most %d bits, degree %d)" % (MAX_BITS, MAX_DEGREE))
+        return {d: c for d, c in p.items() if c}
+
+    def const(p):
+        if any(d for d in p):
+            return None
+        return p.get(0, Fraction(0))
+
+    def mul(a, b):
+        if (max(a, default=0) + max(b, default=0)) > MAX_DEGREE:
+            raise _Invalid("the degree is larger than %d" % MAX_DEGREE)
+        if a and b and max(map(bits, a.values())) + max(map(bits, b.values())) > MAX_BITS + 64:
+            raise _Invalid("a number in the expression is larger than %d bits" % MAX_BITS)
+        out = {}
+        for i, x in a.items():
+            for j, y in b.items():
+                out[i + j] = out.get(i + j, 0) + x * y
+        return check(out)
+
+    def ev(node, depth=0):
+        if depth > 200:
+            raise _Invalid("the expression is nested too deeply")
+        if isinstance(node, ast.Constant) and type(node.value) is int:
+            return check({0: Fraction(node.value)})
+        if isinstance(node, ast.Name) and var is not None and node.id == var:
+            return {1: Fraction(1)}
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            v = ev(node.operand, depth + 1)
+            return {d: -c for d, c in v.items()} if isinstance(node.op, ast.USub) else v
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)):
+            a = ev(node.left, depth + 1)
+            b = ev(node.right, depth + 1)
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                out = dict(a)
+                for d, c in b.items():
+                    out[d] = out.get(d, 0) + (c if isinstance(node.op, ast.Add) else -c)
+                return check(out)
+            if isinstance(node.op, ast.Mult):
+                return mul(a, b)
+            k = const(b)
+            if isinstance(node.op, ast.Div):
+                if var is None:
+                    raise _Invalid("/ is not allowed in an integer expression")
+                if k is None or k == 0:
+                    raise _Invalid("division is only by a nonzero number")
+                return check({d: c / k for d, c in a.items()})
+            # a power: a nonnegative integer exponent, the size checked first
+            if k is None or k.denominator != 1 or k < 0:
+                raise _Invalid("an exponent must be a nonnegative integer")
+            e = int(k)
+            if e > 1:
+                # (the result's size bounded before it is built; 0, 1 and -1
+                # to any power are small)
+                size = max(map(bits, a.values()), default=0)
+                trivial = len(a) <= 1 and size <= 2 and not any(d for d in a)
+                if max(a, default=0) * e > MAX_DEGREE or not trivial and (size + len(a).bit_length()) * e > MAX_BITS + 64:
+                    raise _Invalid("the power is too large (at most %d bits, degree %d)" % (MAX_BITS, MAX_DEGREE))
+            base, out = a, {0: Fraction(1)}
+            while e:
+                if e & 1:
+                    out = mul(out, base)
+                e >>= 1
+                if e:
+                    base = mul(base, base)
+            return out
+        raise _Invalid("only integers%s, + - * / and ^ are allowed, not %s" % (", the variable " + var if var else "", type(node).__name__))
+
+    return ev(tree.body)
+
+
+def _parse_integer(text):
+    p = _parse_poly(text)
+    v = p.get(0, 0)
+    if any(d for d in p) or v.denominator != 1:
+        raise _Invalid("not an integer: %r" % text[:200])
+    return int(v)
+
+
 # ---- run in the session (the shortcut tools): the result as data, and
 # what it rests on
 
@@ -377,7 +486,7 @@ def _factor_data(n):
     proven prime (BPSW above 3.3e24) in assumes."""
     from sagebrush.sage import Integer, factor, is_prime
 
-    n = Integer(n)
+    n = Integer(int(n))
     F = factor(n)
     if F.value() != n:
         raise RuntimeError("factor: the factorization's product %s is not %s" % (F.value(), n))
@@ -394,14 +503,15 @@ def _factor_data(n):
     return {"result": result, "text": str(F), "status": _status(assumes), "assumes": assumes}
 
 
-def _number_field_data(f, proof=True):
-    """The invariants of Q[x]/(f), each with what it rests on: the
-    class group and regulator proven without GRH when the engine's
+def _number_field_data(coeffs, proof=True):
+    """The invariants of Q[x]/(f), f given by its coefficients [[num, den]]
+    (constant first, decimal strings), each invariant with what it rests
+    on: the class group and regulator proven without GRH when the engine's
     certificate goes through (and proof is true), else conditional."""
     from sagebrush.sage import QQ, NumberField, PolynomialRing
 
     R = PolynomialRing(QQ, "x")
-    K = NumberField(R(f), "a")
+    K = NumberField(R([QQ(int(a), int(b)) for a, b in coeffs]), "a")
     order = list(K._nfdata().get("assumes", []))  # (probable primes)
 
     def inv(value, assumes):
@@ -478,9 +588,13 @@ class Server:
     def __init__(self, out):
         self.out = out
         self.lock = threading.Lock()
-        self.session = None
-        self.running = {}  # request id -> True while a tool runs
+        self.session = None  # the sage and python tools' (user code)
+        self.tool_session = None  # the shortcut tools' (no user code ever)
+        self.running = {}  # request id -> True from the call until its reply
         self.work = threading.Lock()  # one computation at a time
+        self.state = threading.Lock()  # guards owner and cancelled
+        self.owner = None  # (request id, session) of the computation running
+        self.cancelled = set()  # request ids cancelled before they started
         self.plots = 0
         self.threads = []
         self.protocol = PROTOCOL_VERSIONS[0]
@@ -499,21 +613,46 @@ class Server:
         self.send({"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}})
 
     # ---- the session
-    def sess(self):
-        if self.session is None:
-            from sagebrush.session import Session
+    def sess(self, tools=False):
+        """The session: the user's, or with tools the shortcut tools' own,
+        where no user code runs (so none can have changed the modules their
+        results and statuses rest on)."""
+        from sagebrush.session import Session
 
+        if tools:
+            if self.tool_session is None:
+                self.tool_session = Session()
+            return self.tool_session
+        if self.session is None:
             self.session = Session()
         return self.session
 
-    def run(self, code, mode="sage", timeout=60, isolated=False, data=False):
-        """Run code in the session: (content, structured, is_error).  With
-        data, the code leaves {result, text, status, assumes} in
-        __sagebrush_data__ (the shortcut tools); otherwise the status is
-        "unknown"."""
+    def cancel(self, rid):
+        """notifications/cancelled: interrupt the computation if it is this
+        request's; a request still waiting for the session never starts."""
+        with self.state:
+            if self.owner is not None and self.owner[0] == rid:
+                self.owner[1].interrupt()
+            elif rid in self.running:
+                self.cancelled.add(rid)
+
+    def run(self, code, mode="sage", timeout=60, isolated=False, data=False, rid=None):
+        """Run code in a session: (content, structured, is_error).  With
+        data (the shortcut tools, in their own session), the code leaves
+        {result, text, status, assumes} in __sagebrush_data__; otherwise
+        (the user's session) the status is "unknown"."""
         timeout = max(1.0, min(float(timeout or 60), 3600.0))
         with self.work:
-            r = self.sess().run(code, mode=mode, timeout=timeout, isolated=isolated, data=data)
+            sess = self.sess(tools=data)
+            with self.state:
+                if rid in self.cancelled:
+                    raise _Cancelled("the request was cancelled before it started")
+                self.owner = (rid, sess)
+            try:
+                r = sess.run(code, mode=mode, timeout=timeout, isolated=isolated, data=data)
+            finally:
+                with self.state:
+                    self.owner = None
         content = []
         text = []
         plots = []
@@ -554,15 +693,17 @@ class Server:
         return [_text(text)] + content, structured, error is not None
 
     # ---- tools
-    def call_tool(self, name, args):
-        """(content, structuredContent, is_error) for one tool call."""
+    def call_tool(self, name, args, rid=None):
+        """(content, structuredContent, is_error) for one tool call.  The
+        shortcut tools' arguments are parsed here (_parse_poly) and reach
+        the session as numbers, never as code."""
         def plain(s):
             return [_text(s)], {"result": s, "text": s, "status": "unknown", "assumes": [], "error": None}, False
 
         if name in ("sage", "python"):
             if not isinstance(args.get("code"), str):
                 raise _Invalid("`code` (a string) is required")
-            return self.run(args["code"], mode=name, timeout=args.get("timeout", 60))
+            return self.run(args["code"], mode=name, timeout=args.get("timeout", 60), rid=rid)
         if name == "reset":
             if self.session is not None:
                 with self.work:
@@ -573,20 +714,25 @@ class Server:
         if name == "search_docs":
             return plain(search_docs(str(args.get("query", "")), int(args.get("limit") or 10), bool(args.get("full")), bool(args.get("json"))))
         if name == "factor":
-            n = str(args.get("n", "")).strip()
-            if not n or "\n" in n:
-                raise _Invalid("`n` (an integer expression on one line) is required")
-            code = "from sagebrush.mcp_server import _factor_data\n__sagebrush_data__ = _factor_data(Integer(%s))" % n
-            return self.run(code, isolated=True, timeout=args.get("timeout", 120), data=True)
+            n = args.get("n")
+            if isinstance(n, int) and not isinstance(n, bool):
+                n = str(n)
+            if not isinstance(n, str):
+                raise _Invalid("`n` (an integer expression, a string) is required")
+            n = _parse_integer(n)
+            code = "from sagebrush.mcp_server import _factor_data\n__sagebrush_data__ = _factor_data(%d)" % n
+            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 120), data=True, rid=rid)
         if name == "number_field":
-            f = str(args.get("polynomial", "")).strip()
-            if not f:
-                raise _Invalid("`polynomial` is required")
+            f = args.get("polynomial")
+            if not isinstance(f, str):
+                raise _Invalid("`polynomial` (a polynomial in x, a string) is required")
+            p = _parse_poly(f, "x")
             proof = args.get("proof", True)
             if not isinstance(proof, bool):
                 raise _Invalid("`proof` must be true or false")
-            code = "from sagebrush.mcp_server import _number_field_data\n__sagebrush_data__ = _number_field_data(%s, %s)" % (json.dumps(f), proof)
-            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True)
+            coeffs = [[str(c.numerator), str(c.denominator)] for c in (p.get(d, 0) for d in range(max(p, default=0) + 1))]
+            code = "from sagebrush.mcp_server import _number_field_data\n__sagebrush_data__ = _number_field_data(%s, %s)" % (json.dumps(coeffs), proof)
+            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
         if name == "newforms":
             try:
                 n = int(args.get("level"))
@@ -594,7 +740,7 @@ class Server:
             except (TypeError, ValueError):
                 raise _Invalid("`level` (and `weight`) must be integers")
             code = "from sagebrush.mcp_server import _newforms_data\n__sagebrush_data__ = _newforms_data(%d, %d)" % (n, k)
-            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True)
+            return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
         raise KeyError(name)
 
     def structured(self):
@@ -604,24 +750,31 @@ class Server:
         name = params.get("name")
         args = params.get("arguments") or {}
         try:
-            content, structured, is_error = self.call_tool(name, args)
+            content, structured, is_error = self.call_tool(name, args, rid)
         except KeyError:
             self.error(rid, -32602, "unknown tool: %s" % name)
-            self.running.pop(rid, None)
+            self.done(rid)
             return
         except Exception as e:
-            kind = "invalid_arguments" if isinstance(e, _Invalid) else "unimplemented" if isinstance(e, NotImplementedError) else "exception"
-            message = "%s: %s" % ("Invalid arguments" if kind == "invalid_arguments" else type(e).__name__, e)
+            kind = ("invalid_arguments" if isinstance(e, _Invalid) else "interrupted" if isinstance(e, _Cancelled)
+                    else "unimplemented" if isinstance(e, NotImplementedError) else "exception")
+            ours = isinstance(e, (_Invalid, _Cancelled))
+            message = "%s: %s" % ("Invalid arguments" if kind == "invalid_arguments" else "Cancelled" if kind == "interrupted" else type(e).__name__, e)
             content, is_error = [_text(message)], True
             structured = {"result": None, "text": message, "status": "unknown", "assumes": [],
-                          "error": {"type": kind, "exception": None if kind == "invalid_arguments" else type(e).__name__, "message": str(e), "traceback": ""}}
+                          "error": {"type": kind, "exception": None if ours else type(e).__name__, "message": str(e), "traceback": ""}}
         try:
             out = {"content": content, "isError": is_error}
             if self.structured():
                 out["structuredContent"] = structured
             self.reply(rid, out)
         finally:
+            self.done(rid)
+
+    def done(self, rid):
+        with self.state:
             self.running.pop(rid, None)
+            self.cancelled.discard(rid)
 
     # ---- dispatch
     def handle(self, msg):
@@ -633,8 +786,7 @@ class Server:
         if rid is None:
             # notifications
             if method == "notifications/cancelled":
-                if params.get("requestId") in self.running and self.session is not None:
-                    self.session.interrupt()
+                self.cancel(params.get("requestId"))
             return
         if method == "initialize":
             v = params.get("protocolVersion")
@@ -653,7 +805,8 @@ class Server:
             else:
                 self.reply(rid, {"tools": TOOLS})
         elif method == "tools/call":
-            self.running[rid] = True
+            with self.state:
+                self.running[rid] = True
             t = threading.Thread(target=self.handle_tool_call, args=(rid, params), daemon=True)
             self.threads = [x for x in self.threads if x.is_alive()] + [t]
             t.start()
@@ -690,12 +843,17 @@ class Server:
         # end of input: answer the calls still running, then stop
         for t in self.threads:
             t.join()
-        if self.session is not None:
-            self.session.close()
+        for s in (self.session, self.tool_session):
+            if s is not None:
+                s.close()
 
 
 class _Invalid(ValueError):
     """A tool's arguments are missing or malformed."""
+
+
+class _Cancelled(Exception):
+    """A request cancelled before its computation started."""
 
 
 def _version():
