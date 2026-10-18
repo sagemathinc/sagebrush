@@ -3,7 +3,8 @@
 Four bounded slices now have frozen before/after comprehension measurements and
 exact behavior comparisons. The number-field pilot and Magma maps are merged.
 Builtin iterators are merged as `886e34f5`. MATLAB
-argument validation has passed its fixed corpus and focused tests; both reviews are clear and full CI is still pending.
+argument validation has passed its fixed corpus, focused tests and full CI; both
+code reviews are clear and the final evidence is ready for integration.
 
 ## Measurements
 
@@ -61,10 +62,10 @@ mistake. Raw answers retain additional errors outside the frozen criteria.
 | Number fields | `5cee68f16` | All passed; final comments/evidence merged as `b1859ef4` |
 | Magma maps | `359723b55` | All passed; final comments/evidence merged as `23526b2c` |
 | Builtin iterators | `2fb25571e` | All passed; final evidence merged as `886e34f5` |
-| MATLAB arguments | `0f17e46d` | Pending |
+| MATLAB arguments | `0f17e46d` | All passed; final evidence ready for integration |
 
 Behavior and limits/refusal reviews are clear for all four executable slices.
-MATLAB exact-head corpus evidence is accepted; its full CI remains pending. Existing CI retries resolved concurrent-run
+MATLAB exact-head corpus evidence is accepted and its full CI has passed. Existing CI retries resolved concurrent-run
 failures; the detailed reports preserve their logs and exact RESULT lines.
 
 No all-program invariance claim is made for native internal stack locations:

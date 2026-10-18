@@ -19,14 +19,20 @@
     "failed": 0
   },
   "full_ci": {
-    "status": "running",
     "host": "sagebrush",
     "revision": "0f17e46dece01f9e7293399be2d3d06f2bc74757",
-    "driver_log": "/scratch/sagebrush-reviews/readability-matlab-arguments-ci.log"
+    "result": "RESULT 0f17e46de: all passed (any crowd failures passed alone)",
+    "npm_isolated_passed": 924,
+    "npm_isolated_failed": 0,
+    "npm_skipped": 1,
+    "browser_commands": 84,
+    "logs": "/scratch/sbremote/logs/0f17e46de/",
+    "crowd_failures": "2 npm timing tests; full npm suite passed in isolation. All browser commands passed on their first run.",
+    "sync_precheck_rc": 0
   },
   "reviews": {
-    "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2; full CI pending",
-    "behavior": "CLEAR by @sagebrush-astra on 0f17e46d: 31-function structural comparison, independent 58-case rerun, full 748-case record/source verification; full CI pending."
+    "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2 on 0f17e46d; full CI subsequently passed at the same executable revision and sent for final acknowledgement.",
+    "behavior": "CLEAR by @sagebrush-astra on 0f17e46d: 31-function structural comparison, independent 58-case rerun, full 748-case record/source verification; full CI subsequently passed at the same executable revision."
   },
   "post_validation_production_change": "None.",
   "measurement": {

@@ -2,7 +2,7 @@
 
 Status: implementation `0f17e46d` has 748/748 exact corpus matches, two passing
 focused tests, and the complete cold before/after measurement. Both reviews
-are clear on the code and exact-head evidence; full CI remains pending.
+are clear on the code and exact-head evidence, and full VM CI has passed.
 
 ## Scope
 
@@ -82,12 +82,17 @@ are compared without normalization. This establishes corpus identity to our
 baseline, not agreement of every inherited behavior with external MATLAB.
 
 The two existing focused translation tests for name=value arguments and arguments
-blocks pass. Full sbremote CI is running on `sagebrush` at `0f17e46d`.
+blocks pass. Full sbremote CI on `sagebrush` reports
+`RESULT 0f17e46de: all passed (any crowd failures passed alone)`. The isolated
+npm run has 924 passes, zero failures and one skip. All 84 browser commands
+pass on their first run. Two npm timing failures in the concurrent run passed
+on the full-suite isolated retry. Package sync precheck passed. The committed
+log is `results/full-ci.txt`.
 
 The limits/refusal reviewer checked the class-before-size order, unchanged
 conversion/error boundaries, mismatch-only size work, scalar-before-vector
 adjustment, pair scanning/materialization and validator short-circuit behavior.
-Code and exact corpus evidence are clear, with full CI still pending.
+Code, exact corpus evidence and full CI are complete.
 
 The behavior reviewer independently compared all 31 existing functions after
 removing docstrings, mapping the local renames and inlining the three extracted
