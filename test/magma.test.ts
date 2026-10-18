@@ -1917,3 +1917,33 @@ test("DihedralGroup as Magma's: its printing, generators, order, membership, equ
     assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
   }
 });
+
+test("a dihedral group too wide to print is refused before either generator is rendered (LIMIT-714-1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  // (the refusal is decided by counting, at most about a line's worth of
+  // steps: no permutation is printed for DihedralGroup(10^4); and the count
+  // agrees with the generators' printed lengths where they are printed)
+  const f = join(mkdtempSync(join(tmpdir(), "magma-dihedral-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "calls = [0]",
+    "orig = m._MPerm.__repr__",
+    "def spy(self):",
+    "    calls[0] += 1",
+    "    return orig(self)",
+    "m._MPerm.__repr__ = spy",
+    "try:",
+    "    repr(m.DihedralGroup(10 ** 4))",
+    "    print('printed')",
+    "except m.MagmaError as e:",
+    "    print('refused', calls[0])",
+    "bad = [n for n in range(3, 60) if m._MDihedralGroup(n)._gens_fit(m.WIDTH - 5) != all(len(orig(g)) <= m.WIDTH - 5 for g in m._MDihedralGroup(n)._gens())]",
+    "print('disagree', bad)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
+  assert.equal(r.stdout, "refused 0\ndisagree []\n", r.stdout + r.stderr);
+});
