@@ -127,3 +127,15 @@ class L(list):
 
 
 it = reversed(L([1, 2, 3])); print('list subclass hint', show(lambda: it.__length_hint__()), list(it), show(lambda: it.__length_hint__()))
+
+
+# A reversed subclass's instances take ordinary attribute names, size among
+# them (the runtime's own fields are not Python attributes)
+class R(reversed):
+    pass
+
+
+for src in [(1, 2, 3), 'xyz']:
+    r = R(src)
+    r.size = 'user size'; r.index = 'user index'; r.seq = 'user seq'
+    print('subclass attributes', type(src).__name__, r.size, r.index, r.seq, r.__length_hint__(), list(r), r.__length_hint__())
