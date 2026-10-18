@@ -10,43 +10,43 @@ def show(f):
     except Exception as e:
         return type(e).__name__ + ": " + str(e)
 
-x = _sage_const_1p2345678901234567 
+x = _sage_const_1p2345678901234567
 print(_sage_const_0 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_0 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_0 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_0p12345678901234567890 
+x = _sage_const_0p12345678901234567890
 print(_sage_const_1 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_1 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_1 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_3p14159265358979323846 
+x = _sage_const_3p14159265358979323846
 print(_sage_const_2 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_2 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_2 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_1p0000000000000000 
+x = _sage_const_1p0000000000000000
 print(_sage_const_3 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_3 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_3 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_12345678901234567890p0 
+x = _sage_const_12345678901234567890p0
 print(_sage_const_4 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_4 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_4 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_1p2345678901234567en300 
+x = _sage_const_1p2345678901234567en300
 print(_sage_const_5 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_5 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_5 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_9007199254740993p0 
+x = _sage_const_9007199254740993p0
 print(_sage_const_6 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_6 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_6 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = -_sage_const_2p7182818284590452354 
+x = -_sage_const_2p7182818284590452354
 print(_sage_const_7 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_7 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_7 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_1p2345678901234567en400 
+x = _sage_const_1p2345678901234567en400
 print(_sage_const_8 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_8 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_8 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
-x = _sage_const_6p02214076000000000e23 
+x = _sage_const_6p02214076000000000e23
 print(_sage_const_9 , x, x.parent(), x.n(), float(x), RDF(x), RR(x), RealField(_sage_const_80 )(x), x * RR(_sage_const_3 ), x + _sage_const_1p5 , x == RR(x), x > RR(x), -x, abs(x))
 print(_sage_const_9 , show(lambda: QQ(x)), show(lambda: Rational(x)), show(lambda: QQ(-x)), show(lambda: QQ(RR(x))), show(lambda: QQ(copy.copy(x))), show(lambda: QQ(x.n(x.prec()))), show(lambda: QQ(x.n())), show(lambda: ZZ(x)))
 print(_sage_const_9 , sqrt(abs(x)), (x**_sage_const_2 ).parent(), x.prec())
