@@ -14,8 +14,9 @@
 //     started after about:blank; the browser's other renderers, about the
 //     same for both engines, are recorded but not counted): on about:blank, after
 //     print(1 + 1), after import numpy, and for each workload its peak
-//     (sampled every 50 ms from /proc while the workload's setup, warm-up
-//     and timed runs execute) and its level after a forced garbage
+//     (sampled every 50 ms from /proc while the workload's setup and
+//     warm-up execute; not while it is timed, since reading a process's
+//     memory map slows its allocations) and its level after a forced garbage
 //     collection; with each engine's JavaScript heap (CDP's
 //     Runtime.getHeapUsage, of the page and of Sagebrush's worker) and the
 //     size of Pyodide's WebAssembly memory (which never shrinks); then 30 s
@@ -258,9 +259,10 @@ function detail(pids) {
 // (once page() has named the page's renderer, only it: the browser's other
 // renderers hold about the same memory for either engine)
 function sampler(root) {
-  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0, last = -Infinity;
+  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0, last = -Infinity, paused = false;
   const t0 = Date.now(), timeline = [], marks = []; // [ms, bytes]; { t, what, wasm? }
   const tick = () => {
+    if (paused) return 0;
     if (!pagePid && ++k % 10 === 0) pids = rendererPids(root);
     const v = rss(pagePid ? [pagePid] : pids), t = Date.now() - t0;
     if (v > peak) peak = v;
@@ -281,6 +283,11 @@ function sampler(root) {
     mark: (what, wasm) => marks.push({ t: Date.now() - t0, what, ...(wasm === undefined ? {} : { wasm }) }),
     timeline: () => ({ samples: timeline, marks }),
     stop: () => clearInterval(h),
+    // (reading a process's smaps_rollup walks its page tables under its
+    // memory-map lock, which slows the page's own allocations: so no
+    // sampling while a workload is timed)
+    pause: () => { paused = true; },
+    resume: () => { paused = false; },
   };
 }
 
@@ -363,13 +370,16 @@ async function session(page) {
       mem.reset();
       const prep = setup === undefined ? undefined : (await ev(`run(${JSON.stringify(setup)})`))?.out?.trim();
       const warm = await ev(`run(${JSON.stringify(code)})`);
+      // (the peak: during the setup and the warm-up, which do the same work as each timed run)
+      const peakRss = mem.peak();
+      mem.pause();
       // (every timed run's output kept: each must equal the warm-up's)
       const timed = [];
       for (let i = 0; i < REPS; i++) {
         const r = await ev(`run(${JSON.stringify(code)})`);
         timed.push({ ms: r?.ms, out: r?.out?.trim() });
       }
-      const peakRss = mem.peak();
+      mem.resume();
       await mark(`${name}: end`);
       await gc();
       await mark(`${name}: after GC`);
