@@ -379,7 +379,9 @@ async function session(page) {
       step(`${name}: ${speed[name].ms} ms`);
     }
     // (then idle: does each engine keep its peak? after the last workload,
-    // 10 s later, after a forced GC, and 20 s after that)
+    // 10 s later, after a forced GC, and 20 s after that; then every global
+    // the workloads made deleted and collected (Python's gc and the
+    // browser's), so only what each engine keeps beyond live data remains)
     const idle = { end: mem.now() };
     await sleep(10000);
     idle.after10s = mem.now();
@@ -391,6 +393,11 @@ async function session(page) {
     idle.after30s = mem.now();
     await mark("idle 30 s");
     idle.heap = await heaps();
+    const cleared = await ev(`run(${JSON.stringify("import gc as _gc\nfor _k in [k for k in globals() if not k.startswith('_')]:\n    del globals()[_k]\n_gc.collect()\nprint(len([k for k in globals() if not k.startswith('_')]))")})`);
+    await gc();
+    await sleep(5000);
+    idle.cleared = { out: cleared?.out?.trim(), rss: mem.now(), heap: await heaps() };
+    await mark("globals deleted, collected");
     const timeline = mem.timeline();
     ws.close();
     return { cold, numpy, speed, idle, timeline };
@@ -427,7 +434,7 @@ const row = (engine) => {
     mem: {
       blank: median(rs.map((r) => r.cold.mem.blankRss)), started: median(rs.map((r) => r.cold.mem.rss)), numpy: median(rs.map((r) => r.numpy.mem.rss)),
       wasmStarted: median(rs.map((r) => r.cold.mem.heap.wasm ?? 0)), wasmNumpy: median(rs.map((r) => r.numpy.mem.heap.wasm ?? 0)),
-      idle: { end: median(rs.map((r) => r.idle.end)), after10s: median(rs.map((r) => r.idle.after10s)), afterGc: median(rs.map((r) => r.idle.afterGc)), after30s: median(rs.map((r) => r.idle.after30s)), wasm: median(rs.map((r) => r.idle.heap.wasm ?? 0)) },
+      idle: { cleared: median(rs.map((r) => r.idle.cleared.rss)), clearedWasm: median(rs.map((r) => r.idle.cleared.heap.wasm ?? 0)), end: median(rs.map((r) => r.idle.end)), after10s: median(rs.map((r) => r.idle.after10s)), afterGc: median(rs.map((r) => r.idle.afterGc)), after30s: median(rs.map((r) => r.idle.after30s)), wasm: median(rs.map((r) => r.idle.heap.wasm ?? 0)) },
       rows: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, {
         peak: median(rs.map((r) => r.speed[w].mem.peakRss)), afterGc: median(rs.map((r) => r.speed[w].mem.afterGcRss)), wasm: median(rs.map((r) => r.speed[w].mem.heap.wasm ?? 0)),
       }])),
@@ -455,6 +462,7 @@ console.log(`| (the browser's renderers on about:blank, for scale) | ${mb(S.mem.
 console.log(`| after print(1 + 1) | ${mb(S.mem.started)} | ${mb(P.mem.started)} (${mb(P.mem.wasmStarted)}) |`);
 console.log(`| after import numpy | ${mb(S.mem.numpy)} | ${mb(P.mem.numpy)} (${mb(P.mem.wasmNumpy)}) |`);
 console.log(`| idle after the last workload: at once / 10 s / after GC / 30 s | ${[S.mem.idle.end, S.mem.idle.after10s, S.mem.idle.afterGc, S.mem.idle.after30s].map(mb).join(" / ")} | ${[P.mem.idle.end, P.mem.idle.after10s, P.mem.idle.afterGc, P.mem.idle.after30s].map(mb).join(" / ")} (${mb(P.mem.idle.wasm)}) |`);
+console.log(`| every global deleted and collected | ${mb(S.mem.idle.cleared)} | ${mb(P.mem.idle.cleared)} (${mb(P.mem.idle.clearedWasm)}) |`);
 for (const w of Object.keys(WORKLOADS)) console.log(`| ${w}: peak / after GC | ${mb(S.mem.rows[w].peak)} / ${mb(S.mem.rows[w].afterGc)} | ${mb(P.mem.rows[w].peak)} / ${mb(P.mem.rows[w].afterGc)} (${mb(P.mem.rows[w].wasm)}) |`);
 // both must have printed the same thing (else the comparison is void)
 const bad = check(results, Object.keys(WORKLOADS), REPS);
