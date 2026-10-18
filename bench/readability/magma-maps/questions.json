@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "model": "claude-haiku-4-5-20251001",
+  "repetitions": 3,
+  "baseline": "b1859ef4",
+  "source_paths": [
+    "lib/_magma.py"
+  ],
+  "grading": "One point per criterion fully supported by the answer; omissions or contradictions score zero. Function names may change, behavior must not. No bonus for verbosity.",
+  "questions": [
+    {
+      "id": "M01",
+      "question": "Which forms of map does MMap represent, and which stored attributes distinguish a rule, graph, composition and inverse view?",
+      "criteria": [
+        "A rule uses rule and optionally inv; a graph uses graph as ordered source/target pairs.",
+        "A composition uses parts=(first, second), applied first then second.",
+        "An inverse view uses inverse_of; dom and cod record the exposed domain and codomain."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap.__init__",
+        "lib/_magma.py:MMap.__call__"
+      ]
+    },
+    {
+      "id": "M02",
+      "question": "In what order does applying a rule map validate its input, run the rule, validate the output and coerce the result?",
+      "criteria": [
+        "Input membership in dom is checked before the rule runs.",
+        "The rule runs before output membership in cod is checked; a failed check raises the corresponding domain or codomain error.",
+        "Only after output membership succeeds, _coerce(cod, result) is used when cod has _magma_coerce; otherwise the result is returned unchanged."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap.__call__"
+      ]
+    },
+    {
+      "id": "M03",
+      "question": "What does f * g mean for maps? Explain the compatibility check, application order and order used to compute a preimage.",
+      "criteria": [
+        "The codomain of f must be identical or equal under _eq to the domain of g.",
+        "Application computes g(f(x)); multiplication stores the maps as parts without evaluating either rule.",
+        "Preimages run through g first and then f; the inverse composition likewise has the reversed inverse parts."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap.__mul__",
+        "lib/_magma.py:MMap.__call__",
+        "lib/_magma.py:MMap._preimage",
+        "lib/_magma.py:MMap._inverse"
+      ]
+    },
+    {
+      "id": "M04",
+      "question": "When does Inverse(f) fail at construction, and when can it construct a view whose application later fails? Include graph maps and double inversion.",
+      "criteria": [
+        "Graph maps refuse inversion with Map has no inverse even if their graph is bijective.",
+        "A rule map with no inverse rule can still produce an inverse view; applying it later fails with There is no rule for calculating the preimage.",
+        "Inverting an inverse view returns the original map; compositions invert both parts in reverse order."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap._inverse",
+        "lib/_magma.py:MMap._preimage",
+        "lib/_magma.py:Inverse"
+      ]
+    },
+    {
+      "id": "M05",
+      "question": "How does _map normalize graph input, and which checks run first when a graph has both a duplicate source and an out-of-domain pair?",
+      "criteria": [
+        "The pairs argument takes precedence and becomes tuples; otherwise graph uses MSet.ordered or list and requires every item to be an MTuple of length two.",
+        "All duplicate-source checks using _eq run before any pair membership validation, so the duplicate error wins.",
+        "Pair membership in dom then cod is checked before total-domain coverage; pmap skips only the coverage checks."
+      ],
+      "sources": [
+        "lib/_magma.py:_map"
+      ]
+    },
+    {
+      "id": "M06",
+      "question": "For graph constructors, how do map and pmap differ? Which domains support total coverage checking, and what happens when applying a partial graph at a missing source?",
+      "criteria": [
+        "Total graph maps reject Integers and Rationals for having no cardinality algorithm and support coverage only for MSet, MSeq or MRange.",
+        "A total graph must have an image for every iterated domain element; pmap permits missing sources but still rejects duplicate sources and pairs outside dom/cod.",
+        "Graph application scans stored pairs using _eq and returns the matching target; a missing source raises Application of map failed."
+      ],
+      "sources": [
+        "lib/_magma.py:_map",
+        "lib/_magma.py:MMap.__call__"
+      ]
+    },
+    {
+      "id": "M07",
+      "question": "When is f(S), for an MSet S, treated as the image of a set rather than one scalar argument? What order are the elements evaluated in, and when is the image universe chosen?",
+      "criteria": [
+        "Set lifting happens only when S is an MSet and S itself is not in the domain; a set that is a domain element uses ordinary map application.",
+        "Every element is mapped in S.ordered() order via recursive application, before the image universe is chosen.",
+        "Universe selection uses the codomain and whether the mapped items are empty; an unsupported universe raises a map application error."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap.__call__",
+        "lib/_magma.py:_image_universe"
+      ]
+    },
+    {
+      "id": "M08",
+      "question": "How is the universe of a set image chosen for a structural codomain versus a set codomain, including empty images?",
+      "criteria": [
+        "A supported structural codomain itself is the image universe, even for an empty image.",
+        "A nonempty image into an MSet uses its supported explicit universe, or inferred Integer/Rational universe if none was declared.",
+        "An empty image into an MSet codomain is refused rather than inferred from elements; unsupported codomains also return no universe and are refused."
+      ],
+      "sources": [
+        "lib/_magma.py:_image_universe"
+      ]
+    },
+    {
+      "id": "M09",
+      "question": "How does set-image construction ensure that the actual elements match its declared universe, and how does Image(f) differ from f(S)?",
+      "criteria": [
+        "Each mapped result is converted through _coerce_struct; either None or _NOCOERCE causes a refusal.",
+        "The coerced results form a derived set and its universe is explicitly assigned, so integers mapped into the rationals become rational payloads.",
+        "Image(f) accepts only a stored graph and builds a derived set of graph targets; it does not enumerate rule maps or share the set-lifting universe selection."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap.__call__",
+        "lib/_magma.py:Image"
+      ]
+    },
+    {
+      "id": "M10",
+      "question": "Trace inverse-rule validation and error location: what happens if the input is outside the codomain, or the inverse result is outside the domain? How does the @@ wrapper attach a source position?",
+      "criteria": [
+        "Codomain membership is checked before the inverse rule, then the inverse result is checked against the domain before any domain coercion.",
+        "Both failed memberships report Element is not in the codomain of the map; the where string comes from the caller (map application versus @@).",
+        "The _preimage wrapper catches MagmaError and uses e.pos or pos, preserving an existing truthy source position."
+      ],
+      "sources": [
+        "lib/_magma.py:MMap._preimage",
+        "lib/_magma.py:_preimage"
+      ]
+    }
+  ]
+}
