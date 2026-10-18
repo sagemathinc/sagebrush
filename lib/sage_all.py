@@ -2716,7 +2716,8 @@ def prod(x, z=None, recursion_cutoff=5):
     factors, multiplied one after another; any other iterable read once,
     its factors merged in blocks of like sizes as they come (z, if given,
     first among them); sized means len(x) succeeds, asked before x is
-    iterated. As Sage's.
+    iterated. An x with its own prod() or mul() method gives that instead
+    (an array's prod(), say), z unused. As Sage's.
 
     EXAMPLES::
 
@@ -2734,9 +2735,17 @@ def prod(x, z=None, recursion_cutoff=5):
     # (a Py_ssize_t, as Sage's, before x is looked at: astra's CORR-663-2)
     if not -9223372036854775808 <= cutoff <= 9223372036854775807:
         raise OverflowError("Python int too large to convert to C ssize_t")
-    if cutoff < 1:
-        # (Sage's recursion has no end then)
-        raise ValueError("recursion_cutoff must be positive")
+    # (an x with its own prod(), else its own mul(), gives the product
+    # itself, z unused, as Sage's; an AttributeError, also one raised in
+    # the call, goes on to the next way, any other error is raised)
+    try:
+        return x.prod()
+    except AttributeError:
+        pass
+    try:
+        return x.mul()
+    except AttributeError:
+        pass
     # (sized as Sage tells it: len(x), through the type's length protocol,
     # before x is iterated; a TypeError from it streams, any other error
     # is raised; astra's CORR-663-1)
@@ -2747,6 +2756,9 @@ def prod(x, z=None, recursion_cutoff=5):
     x = list(x)
     if not x:
         return 1 if z is None else z
+    if cutoff < 1:
+        # (only halving uses the cutoff: Sage's recursion has no end then)
+        raise ValueError("recursion_cutoff must be positive")
     r = _prod_halves(x, 0, len(x), cutoff)
     return r if z is None else z * r
 
