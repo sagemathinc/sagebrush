@@ -3008,9 +3008,9 @@ iteratorType("filter", FilterIter, (predicate: any, iterable: any) => new Filter
 // IndexError, which ends the iteration)
 const PAST_END = {};
 export class ReversedIter {
-  // (size: the sequence's current length, for __length_hint__: a list's
+  // ($size: the sequence's current length, for __length_hint__: a list's
   // storage, as list's own reverse iterator, else len())
-  constructor(public a: any, public i: number, public get: (i: number) => any, public size: () => number) {}
+  constructor(public a: any, public i: number, public get: (i: number) => any, public $size: () => number) {}
   // As CPython's reversed_next: the item at the index taken before the read,
   // and then that index less one (a getter that calls next on the same
   // iterator reads the same index again, and the outer read still moves on
@@ -3043,7 +3043,7 @@ export class ReversedIter {
     this.i = -1;
     this.a = null;
     this.get = () => PAST_END;
-    this.size = () => 0;
+    this.$size = () => 0;
   }
 }
 iteratorType("reversed", ReversedIter, (sequence: any) => {
@@ -3069,7 +3069,7 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
 method(T.reversed, "__length_hint__", (it: ReversedIter) => {
   const index = it.i;
   if (index < 0 || it.a === null) return 0;
-  const size = it.size(), position = index + 1;
+  const size = it.$size(), position = index + 1;
   return size < position ? 0 : position;
 });
 
@@ -3622,7 +3622,7 @@ subclassable(T.map, MapIter, ["f", "its", "strict"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
 subclassable(T.enumerate, Enumerate, ["it", "i"]);
-subclassable(T.reversed, ReversedIter, ["a", "i", "get", "size"]);
+subclassable(T.reversed, ReversedIter, ["a", "i", "get"]);
 subclassable(staticmethod, PyStaticMethod, ["f"]);
 subclassable(classmethod, PyClassMethod, ["f"]);
 // property subclasses commonly override __init__ and call super().__init__.
