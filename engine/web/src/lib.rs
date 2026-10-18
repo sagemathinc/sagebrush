@@ -98,9 +98,10 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
 /// WebAssembly, and an unchecked cast changed 2^32 to 0 there.
 fn size(v: &Value, k: &str, default: Option<u64>, max: u64) -> Result<usize, String> {
     let x = match (v.get(k), default) {
+        // (null is an absent argument: the default, or missing without one)
         (None | Some(Value::Null), Some(d)) => d,
-        (Some(x), _) => x.as_u64().ok_or_else(|| format!("'{}' must be a nonnegative integer", k))?,
         (None | Some(Value::Null), None) => return Err(format!("missing integer argument '{}'", k)),
+        (Some(x), _) => x.as_u64().ok_or_else(|| format!("'{}' must be a nonnegative integer", k))?,
     };
     if x > max {
         return Err(format!("'{}' = {} is too large (at most {})", k, x, max));

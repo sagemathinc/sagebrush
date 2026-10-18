@@ -438,7 +438,6 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     // blocks): B' = A^-1 B and the rows' updates separate by columns, so
     // each thread does all of it on its own slice
     let t = threads.max(1).min(nb / 128).max(1);
-    let bounds: Vec<(usize, usize)> = (0..t).map(|k| (k * nb / t, (k + 1) * nb / t)).collect();
     let slice = |lo: usize, hi: usize| -> Vec<Row> {
         let w = hi - lo;
         let mut bp: Vec<Option<Vec<u32>>> = vec![None; ncols];
@@ -517,6 +516,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let bounds: Vec<(usize, usize)> = (0..t).map(|k| (k * nb / t, (k + 1) * nb / t)).collect();
         let parts: Vec<Vec<Row>> = std::thread::scope(|sc| {
             let hs: Vec<_> = bounds.iter().map(|&(lo, hi)| {
                 let f = &slice;
