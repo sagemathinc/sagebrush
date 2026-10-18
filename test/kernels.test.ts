@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-// The WebAssembly kernels (kernels/src: linear algebra, FFT, exp/log, sort, random) must give
+// The WebAssembly kernels (kernels/src: linear algebra, FFT, exp/log, sin/cos, sort, random) must give
 // exactly the bits of the JavaScript code they replace.
 const program = `
 import numpy as np, _nplinalg
@@ -62,6 +62,16 @@ for x in [np.random.randn(3001) * 300, np.random.rand(3001) * 3, 1 + np.random.r
           np.exp(np.random.uniform(-744, 709, 3001)), np.array(edge * 5)]:
     with np.errstate(all="ignore"):
         rec(np.exp(x), np.log(x))
+# sin and cos (kernels/src/crsin.rs, crmath's fast path; the elements it can't round go to crmath):
+# near multiples of pi/2 and of 1/32, past the kernel's 2^20 pi/2, tiny, the specials, a view at an offset
+k = np.random.randint(-10**6, 10**6, 3001)
+trig_edge = [0.0, -0.0, np.inf, -np.inf, np.nan, 5e-324, 7.45e-9, -7.46e-9, 0.7853981633974483, 0.7853981634,
+             1647099.3291652855, 1647099.33, -1647099.3291652855, 1e22, 1.7976931348623157e308, 0.03125, -0.8125]
+for x in [np.random.randn(3001) * 300, np.random.rand(3001) * 3, k * (np.pi / 2), k * (np.pi / 2) + 1e-9,
+          np.random.randint(-26, 27, 3001) / 32 + np.random.randn(3001) * 1e-13, np.random.uniform(-2e6, 2e6, 3001),
+          np.exp(np.random.uniform(-700, 700, 3001)), np.array(trig_edge * 5), (np.random.randn(3010) * 9)[7:]]:
+    with np.errstate(all="ignore"):
+        rec(np.sin(x), np.cos(x))
 f = np.random.randn(3000)
 f[::7] = np.nan; f[::11] = 0.0; f[::13] = -0.0; f[::17] = np.inf; f[::19] = -np.inf; f[::23] = f[5]
 for x in [f, np.random.randint(0, 50, 2000), np.random.randint(-10**12, 10**12, 2000), np.random.randint(-100, 100, 999).astype(np.int8),
