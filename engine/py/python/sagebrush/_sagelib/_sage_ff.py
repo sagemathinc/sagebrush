@@ -251,7 +251,7 @@ class IntegerModRing_:
             raise TypeError("Unable to coerce %r to a rational" % (x,))
         if hasattr(x, "lift") and not isinstance(x, (list, tuple)):
             return self(x.lift())
-        if isinstance(x, float) or type(x).__name__ == "RealNumberMP":
+        if isinstance(x, float) or type(x).__name__ in ("RealNumberMP", "_RealLiteralMP"):
             # (a real converts only when it is an integer, as in Sage:
             # GF(7)(1.25) was 1, and matrix(GF(7), [[1.25]]) [1], astra's
             # CORR-A1D-1)
@@ -263,7 +263,7 @@ class IntegerModRing_:
             # the doubles, and RR("1e400") was taken as non-integral, astra's
             # CORR-ADD-1)
             if not (x == i):
-                if type(x).__name__ in ("RealNumber", "RealNumberMP", "RealLiteral"):
+                if type(x).__name__ in ("RealNumber", "RealNumberMP", "_RealLiteralMP", "RealLiteral"):
                     raise TypeError("Attempt to coerce non-integral RealNumber to Integer")
                 raise TypeError("cannot convert non-integral float to integer")
             return self(i)

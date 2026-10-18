@@ -72,23 +72,18 @@ test("Stop interrupts QQ of a 16384-bit real", async () => {
   assert.ok(Date.now() - t0 < 30000, "Stop took " + (Date.now() - t0) + " ms");
 });
 
-test("QQ of a literal of more than 15 digits is refused, naming the workarounds; 15 digits converts", async () => {
-  // (Sage gives such a literal more than 53 bits; here literals have 53:
-  // the expected values are Sage's, for the double and the 15-digit literal;
-  // astra's CORR-28E-3.  RealNumber('...') is how the preparser writes a literal.)
-  const long = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\ntry:\n    S.QQ(x)\nexcept NotImplementedError as e:\n    raise ValueError(str(e))";
-  const got = await run(long, null);
-  assert.match(got, /^ValueError: QQ of a decimal literal of more than 15 significant digits is not implemented/, got);
-  assert.match(got, /QQ\('1\.2345678901234567'\)/, got);
-  const after = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\nraise ValueError(str(S.QQ(x + 0.0)) + ' ' + str(S.QQ(S.RealNumber('0.123456789012345'))))";
-  assert.equal(await run(after, null), "ValueError: 89163235/72222221 42523979/344444233");
+test("QQ of a literal of more than 15 digits: its own precision (57 bits for 17 digits), as Sage", async () => {
+  // (the expected values are Sage's; RealNumber('...') is how the
+  // preparser writes a literal)
+  const code = "import sage_all as S\nx = S.RealNumber('1.2345678901234567')\nraise ValueError(' '.join(str(v) for v in [x.prec(), S.QQ(x), S.Rational(x), S.QQ(x + 0.0), S.QQ(S.RealNumber('0.123456789012345'))]))";
+  assert.equal(await run(code, null), "ValueError: 57 524005478/424444441 524005478/424444441 89163235/72222221 42523979/344444233");
 });
 
-test("an integral literal of more than 15 digits is refused too, before the integral shortcut (CORR-28E-3a)", async () => {
-  // (Sage: QQ(9007199254740993.0) is 9007199254740993, its 54-bit value)
+test("an integral literal of more than 15 digits is its 54-bit value (CORR-28E-3a)", async () => {
+  // (Sage: QQ(9007199254740993.0) is 9007199254740993, which 53 bits cannot hold)
   for (const f of ["QQ", "Rational"]) {
-    const code = `import sage_all as S\ntry:\n    S.${f}(S.RealNumber('9007199254740993.0'))\nexcept NotImplementedError as e:\n    raise ValueError(str(e)[:40])`;
-    assert.equal(await run(code, null), "ValueError: QQ of a decimal literal of more than 15");
+    const code = `import sage_all as S\nraise ValueError(str(S.${f}(S.RealNumber('9007199254740993.0'))))`;
+    assert.equal(await run(code, null), "ValueError: 9007199254740993");
   }
 });
 

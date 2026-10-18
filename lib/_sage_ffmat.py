@@ -334,7 +334,7 @@ def _pushout(B, o):
         return qb.QQbar
     name = type(o).__name__
     is_c = isinstance(o, complex) or name in ("ComplexDoubleElement", "ComplexNumber", "ComplexNumberMP")
-    is_r = not is_c and (isinstance(o, float) or name == "RealNumberMP")
+    is_r = not is_c and (isinstance(o, float) or name in ("RealNumberMP", "_RealLiteralMP"))
     if not (is_c or is_r):
         return None
     import _sage_rdf
