@@ -103,3 +103,26 @@ cutoff 9223372036854775807 :: 6
 cutoff 9223372036854775807 empty :: 1
 cutoff Big :: OverflowError
 cutoff Big generator :: OverflowError
+  prod called
+own prod :: own prod
+  prod called
+own prod z :: own prod
+  mul called
+own mul :: own mul
+  mul called
+own mul z :: own mul
+  prod called
+prod before mul :: own prod
+prod not callable :: TypeError
+prod raises AttributeError :: (a*b)
+prod needs an argument :: TypeError
+list with prod :: list prod
+lookups in order :: (((a*b)*c), ['prod', 'mul', 'len', 'iter', 'len'])
+  prod called
+cutoff 0, own prod :: own prod
+cutoff 0, generator :: (((x0*x1)*(x2*x3))*x4)
+cutoff 0, empty :: 1
+cutoff 0 before own prod overflow :: OverflowError
+numpy array :: (np.int64(24), np.int64(24), np.float64(3.0))
+vector :: 30
+matrix rows :: 11

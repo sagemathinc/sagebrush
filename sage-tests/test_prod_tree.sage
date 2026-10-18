@@ -160,3 +160,95 @@ for c in [2**63, 2**64, -2**63 - 1, 2**63 - 1]:
     t('cutoff %d empty' % c, lambda: prod([], recursion_cutoff=c))
 t('cutoff Big', lambda: prod([2, 3], recursion_cutoff=Big()))
 t('cutoff Big generator', lambda: prod(LenValueError(), recursion_cutoff=Big()))
+
+
+# an x with its own prod(), else mul(), gives the product itself, z unused;
+# an AttributeError, also one raised in the call, goes on; another error is
+# raised
+class HasProd:
+    def prod(self):
+        print('  prod called')
+        return 'own prod'
+
+    def __iter__(self):
+        return iter([E("a"), E("b")])
+
+
+class HasMul:
+    def mul(self):
+        print('  mul called')
+        return 'own mul'
+
+    def __iter__(self):
+        return iter([E("a"), E("b")])
+
+
+class HasBoth(HasProd):
+    def mul(self):
+        return 'own mul'
+
+
+class ProdNotCallable:
+    prod = 5
+
+    def __iter__(self):
+        return iter([E("a"), E("b")])
+
+
+class ProdRaisesAttributeError:
+    def prod(self):
+        raise AttributeError('inside prod')
+
+    def __iter__(self):
+        return iter([E("a"), E("b")])
+
+
+class ProdNeedsArgument:
+    def prod(self, x):
+        return 'with argument'
+
+    def __iter__(self):
+        return iter([E("a"), E("b")])
+
+
+class ListWithProd(list):
+    def prod(self):
+        return 'list prod'
+
+
+class Lookups:
+    def __init__(self):
+        self.log = []
+
+    def __getattr__(self, name):
+        self.log.append(name)
+        raise AttributeError(name)
+
+    def __len__(self):
+        self.log.append('len')
+        return 3
+
+    def __iter__(self):
+        self.log.append('iter')
+        return iter([E("a"), E("b"), E("c")])
+
+
+t('own prod', lambda: prod(HasProd()))
+t('own prod z', lambda: prod(HasProd(), E("z")))
+t('own mul', lambda: prod(HasMul()))
+t('own mul z', lambda: prod(HasMul(), E("z")))
+t('prod before mul', lambda: prod(HasBoth()))
+t('prod not callable', lambda: prod(ProdNotCallable()))
+t('prod raises AttributeError', lambda: prod(ProdRaisesAttributeError()))
+t('prod needs an argument', lambda: prod(ProdNeedsArgument()))
+t('list with prod', lambda: prod(ListWithProd([E("p"), E("q")])))
+L = Lookups()
+t('lookups in order', lambda: (prod(L), L.log))
+t('cutoff 0, own prod', lambda: prod(HasProd(), recursion_cutoff=0))
+t('cutoff 0, generator', lambda: prod((e for e in xs(5)), recursion_cutoff=0))
+t('cutoff 0, empty', lambda: prod([], recursion_cutoff=0))
+t('cutoff 0 before own prod overflow', lambda: prod(HasProd(), recursion_cutoff=2**63))
+import numpy
+t('numpy array', lambda: (prod(numpy.array([2, 3, 4])), prod(numpy.array([2, 3, 4]), 10), prod(numpy.array([1.5, 2.0]))))
+t('vector', lambda: prod(vector(ZZ, [2, 3, 5])))
+t('matrix rows', lambda: prod(matrix(ZZ, [[1, 2], [3, 4]])))
