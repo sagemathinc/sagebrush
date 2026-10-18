@@ -1249,9 +1249,12 @@ export function toPyExc(e: any): any {
     return markRaised(r);
   }
   // An allocation JS can't make (a string or array past its maximum
-  // length, an ArrayBuffer it can't allocate): MemoryError, as CPython's
-  // when memory runs out, not an internal error (HARD-978-2).
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length/.test(e.message)) {
+  // length, an ArrayBuffer it can't allocate, a BigInt past the engine's
+  // largest, V8's or JavaScriptCore's, 2^20 bits, so Bun's): MemoryError,
+  // as CPython's when memory runs out, not an internal error (HARD-978-2).
+  // (JavaScriptCore sizes a result before it computes or allocates it, so
+  // nothing is spent first)
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) {
     const r = T.MemoryError();
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
