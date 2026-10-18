@@ -1,0 +1,15 @@
+✔ builtin argument checks: CPython 3.14's (astra3 sweep A01-A14) (370.957498ms)
+✔ results longer than a string can be are a MemoryError, counted in UTF-16 units (206.704339ms)
+✔ three-argument pow dispatches as CPython 3.14's (278.483529ms)
+✔ a memoryview or array argument before one converted by Python code is refused (182.028079ms)
+✔ iterators as CPython's: itertools constructors, deque iteration and searches, min and max, map strict (iter_fixes_cases.py) (565.621787ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1100.759655
+__reversed__ SystemError internal error: TypeError: r is not a function
+__getitem__ SystemError internal error: TypeError: gi is not a function

@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "model": "claude-haiku-4-5-20251001",
+  "repetitions": 3,
+  "baseline": "0f9d473635875c280cd5018bed179d0a555c2114",
+  "source_paths": [
+    "src/runtime/types.ts"
+  ],
+  "grading": "One point per explicitly requested criterion fully supported by the answer; omissions or contradictions score zero. Relevant code quotations count. No bonus for verbosity. The fixed key is unchanged between before and after; manual grader identity and limitations are reported.",
+  "questions": [
+    {
+      "id": "I01",
+      "question": "In the builtin iterator adapter, how does Python __next__ call the internal step, prevent stale StopIteration reuse, and translate exhaustion into an exception? Name the sentinel and explain whether an exception saved during this step is preserved.",
+      "criteria": [
+        "__next__ calls the internal $next method and returns its result unless it is DONE.",
+        "O.lastStop.e is set to null before calling $next, preventing an older saved exception from being reused.",
+        "On DONE, the saved O.lastStop.e from this step is thrown when present; otherwise a newly marked T.StopIteration is thrown."
+      ],
+      "sources": [
+        "src/runtime/types.ts:iteratorType"
+      ]
+    },
+    {
+      "id": "I02",
+      "question": "For enumerate construction, what happens when start is omitted versus explicit None, and which happens first: start conversion or obtaining the iterable's iterator? Does the keyword route use the same conversion?",
+      "criteria": [
+        "An omitted/undefined start defaults to zero; an explicit None/null goes through O.index rather than the default.",
+        "O.index(start) runs before O.iter(iterable).",
+        "The keyword adapter binds iterable and start, then calls the same enumNew conversion path."
+      ],
+      "sources": [
+        "src/runtime/types.ts:enumNew",
+        "src/runtime/types.ts:enumerate.$kw"
+      ]
+    },
+    {
+      "id": "I03",
+      "question": "For an enumerate step, explain the order of reading the source, forming the result and incrementing the counter. What happens to the counter on exhaustion? State the exact condition for native-number increment and the fallback operation.",
+      "criteria": [
+        "The source is stepped first; DONE returns immediately without changing the counter.",
+        "The tuple contains the current counter and source value and is formed before the counter is incremented.",
+        "Native increment requires typeof counter === number and counter < 9007199254740990; otherwise O.add(counter, 1) performs the increment."
+      ],
+      "sources": [
+        "src/runtime/types.ts:Enumerate.$next"
+      ]
+    },
+    {
+      "id": "I04",
+      "question": "How does non-strict zip step its inputs, what happens when one input ends after earlier inputs yielded, and what does zero-input zip do? Include whether later inputs are stepped on that exhausted row.",
+      "criteria": [
+        "Inputs are stepped in left-to-right order to form a tuple.",
+        "At the first DONE, zip immediately returns DONE: earlier consumed values are not restored and later inputs are not stepped.",
+        "Zero-input zip returns DONE immediately."
+      ],
+      "sources": [
+        "src/runtime/types.ts:Zip.$next"
+      ]
+    },
+    {
+      "id": "I05",
+      "question": "When strict zip or map sees DONE, contrast a later input ending with the first input ending. Which remaining inputs are probed, which mismatch is reported first, and what happens to the saved StopIteration if all inputs end together?",
+      "criteria": [
+        "If a later input ends first, strictEnd immediately raises ValueError naming it shorter than the preceding inputs; no later input is probed.",
+        "If the first input ends, the others are stepped in order; the first one yielding a value triggers ValueError naming it longer than the preceding inputs.",
+        "If all inputs end together, O.lastStop.e is cleared and DONE is returned."
+      ],
+      "sources": [
+        "src/runtime/types.ts:strictEnd",
+        "src/runtime/types.ts:Zip.$next",
+        "src/runtime/types.ts:MapIter.$next"
+      ]
+    },
+    {
+      "id": "I06",
+      "question": "For zip(strict=...) and map(strict=...), state the order of keyword-count validation, keyword-name validation and strict truth conversion. When is strict converted relative to obtaining source iterators, and what is its default?",
+      "criteria": [
+        "More than one keyword is rejected by count before keyword names or values are processed.",
+        "Every keyword name must be strict before its value is converted with O.truth.",
+        "Strict defaults to false; truth conversion happens before O.iter is applied to source arguments."
+      ],
+      "sources": [
+        "src/runtime/types.ts:zip.$kw",
+        "src/runtime/types.ts:map.$kw"
+      ]
+    },
+    {
+      "id": "I07",
+      "question": "For map, when does keyword validation and strict truth conversion happen relative to the minimum-argument check? During iteration, when is the mapping function called, and how are a JavaScript function and a Python callable dispatched?",
+      "criteria": [
+        "The keyword route validates keywords and converts strict before checking for at least two positional arguments.",
+        "Every source must yield a value before the mapping function runs; source exhaustion returns DONE or invokes strictEnd without calling the function.",
+        "A JavaScript function is called directly with spread arguments; other callables use callObj with the argument array."
+      ],
+      "sources": [
+        "src/runtime/types.ts:map.$kw",
+        "src/runtime/types.ts:MapIter.$next"
+      ]
+    },
+    {
+      "id": "I08",
+      "question": "For filter, explain what is truth-tested when the predicate is None versus callable, whether the returned value is the source item or predicate result, and what happens on source exhaustion.",
+      "criteria": [
+        "With a None/null predicate, O.truth tests the source item; otherwise it tests callObj(predicate, [item]).",
+        "The first item passing the test is returned unchanged, not the predicate result.",
+        "The loop returns DONE immediately when the source is exhausted, without invoking a predicate for DONE."
+      ],
+      "sources": [
+        "src/runtime/types.ts:FilterIter.$next"
+      ]
+    },
+    {
+      "id": "I09",
+      "question": "How does reversed handle a native array versus a string? For each, explain whether the data is copied, how the initial index is chosen, and whether strings are traversed by UTF-16 units or code points.",
+      "criteria": [
+        "A native array is retained without copying; its initial index is its construction-time length minus one and reads use the live array.",
+        "A string is expanded with [...x] into a separate array of Unicode code points.",
+        "The string reverse iterator starts at the code-point array length minus one and reads that array, not individual UTF-16 units."
+      ],
+      "sources": [
+        "src/runtime/types.ts:reversed registration",
+        "src/runtime/types.ts:ReversedIter"
+      ]
+    },
+    {
+      "id": "I10",
+      "question": "For a non-array object passed to reversed, explain the __reversed__ lookup, explicit None and missing-hook cases, the __getitem__/length fallback, and exactly when the fallback index is decremented relative to invoking the getter.",
+      "criteria": [
+        "__reversed__ is looked up on the type: null refuses with TypeError; a defined hook is called with the object and returned directly.",
+        "When __reversed__ is absent, __getitem__ is required and O.len(object) - 1 initializes the fallback index.",
+        "ReversedIter uses get(i--), so it passes the old index but decrements before the getter runs; a negative index returns DONE."
+      ],
+      "sources": [
+        "src/runtime/types.ts:reversed registration",
+        "src/runtime/types.ts:ReversedIter.$next"
+      ]
+    }
+  ]
+}

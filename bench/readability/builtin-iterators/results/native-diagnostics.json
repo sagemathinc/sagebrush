@@ -1,0 +1,17 @@
+{
+  "baseline_revision": "359723b5546005d909fb54e8f8e238abac567c41",
+  "baseline_types_sha256": "07a991886b25f563c8afbaed9591fdd7e1563c70249c1fa99a25bdfa6c158aea",
+  "baseline_note": "Previously built Magma maps tree; types.ts identical to 0f9d4736.",
+  "final_revision": "2fb25571e80d2355e8eedff6114b9c2a02de0634",
+  "source": "for hook in ('__reversed__', '__getitem__'):\n    class S:\n        def __len__(self): return 1\n    setattr(S,hook,3)\n    try:\n        iterator=reversed(S())\n        next(iterator)\n    except BaseException as error:\n        print(hook,type(error).__name__,str(error).splitlines()[0])\n",
+  "before": [
+    "__reversed__ SystemError internal error: TypeError: r is not a function",
+    "__getitem__ SystemError internal error: TypeError: gi is not a function"
+  ],
+  "after": [
+    "__reversed__ SystemError internal error: TypeError: r is not a function",
+    "__getitem__ SystemError internal error: TypeError: gi is not a function"
+  ],
+  "comparison": "Cause first lines only. Native stack source locations are implementation diagnostics and differ after source edits.",
+  "identical": true
+}
