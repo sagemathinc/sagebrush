@@ -1,0 +1,16 @@
+{
+  "source": "import _magma as m\nfor depth in (10, 25, 50, 75, 100, 150, 200):\n    try:\n        value = 1\n        for unused in range(depth):\n            value = m.MSet([value])\n    except Exception as error:\n        print(depth, 'construct', type(error).__name__, str(error))\n        continue\n    mapping = m.MMap(m._ZZ, m._ZZ, lambda value: value)\n    try:\n        mapping(value)\n        print(depth, 'accepted')\n    except Exception as error:\n        print(depth, 'apply', type(error).__name__, str(error))\n",
+  "before": "10 apply MagmaError the image of a set under a map to this codomain is not supported yet\n25 apply MagmaError the image of a set under a map to this codomain is not supported yet\n50 apply MagmaError the image of a set under a map to this codomain is not supported yet\n75 apply MagmaError the image of a set under a map to this codomain is not supported yet\n100 apply MagmaError the image of a set under a map to this codomain is not supported yet\n150 apply MagmaError the image of a set under a map to this codomain is not supported yet\n200 apply MagmaError the image of a set under a map to this codomain is not supported yet\n",
+  "after": "10 apply MagmaError the image of a set under a map to this codomain is not supported yet\n25 apply MagmaError the image of a set under a map to this codomain is not supported yet\n50 apply MagmaError the image of a set under a map to this codomain is not supported yet\n75 apply MagmaError the image of a set under a map to this codomain is not supported yet\n100 apply MagmaError the image of a set under a map to this codomain is not supported yet\n150 apply MagmaError the image of a set under a map to this codomain is not supported yet\n200 apply MagmaError the image of a set under a map to this codomain is not supported yet\n",
+  "identical": true,
+  "depths": [
+    10,
+    25,
+    50,
+    75,
+    100,
+    150,
+    200
+  ],
+  "purpose": "Post-measurement verification of extracted helper recursion; separate from frozen corpus"
+}
