@@ -193,3 +193,33 @@ for t in ['  +2  ', '02', '010', '2_0', '0x10', '0o10', '0b10', '0X1F', '-3', '+
         print(repr(t), '->', r)
     except Exception as e:
         print(repr(t), '!!', type(e).__name__, str(e)[:80])
+
+# shift-count text: Sage's integer text grammar (underscores and ASCII
+# whitespace among the digits ignored; a 0x/0o/0b prefix only after
+# spaces, underscores and a sign; non-ASCII whitespace refused), read in
+# one pass: very long padding is read, a very long count is refused as
+# out of range without forming it (long rows print the result or the
+# error's type: Sage names the whole number)
+R = RealField(30)
+cases = [' 0x2', '0x2 ', '\t0x2', '0x2\t', '\n0x2', '0x 2', '0x_2', '-0x2', '- 0x2', ' -0x2', ' - 0x2', '-\t0x2', ' 0b1', ' 0o7', '\t0o7', ' 010', '\t010', '\n2', ' 2', '2 ', '\t2', '2\t', '\t-2', '\x0b2', '\x0c2', '\r2', '2\r', ' 2', ' 2', '2 ', ' + 2', '+ 0x2', '+\t2', '-\t2', '_0x2', '0_x2', '0x2_', '0X2', ' 0X2', ' 0x2 ', '\t5\n', '\t5', '5\n', '\n5', ' \t5', '\t 5', '0x\t2', ' _2', '_ 2', '2 _', ' 0b_1', '0b1 ', b'\t0x2', b' 0x2', b'\t5', b'0x2 ']
+for s in cases:
+    try:
+        print(repr(s), '->', R(1) << s)
+    except Exception as e:
+        print(repr(s), '!!', type(e).__name__, str(e)[:60])
+
+R = RealField(30)
+cases = ['1 2', '1\t2', '0x1 2', '0x1\t2', ' 0x\t2', '0 x2', '\t+0x2', ' +0x2', '\t 0x2', ' \t0x2', '+ \t0x2', '_\t0x2', '\t_0x2', '-  0x2', '  0x2', '0x2\n', '\t5 6', '5\t\t', '\f0x2', '\v0x2', '\r0x2', ' \n0x2', '0b1 0', '10\n0', '+-2', '--2', '-', '+', ' ', '0x', ' 0x ', '0xg', '٢', 'ⅷ', '0b2', '0o8', '08', '0d10', ' 0b 1', '0 b1', '1_', '_', '__', '+_2', '-_0x2', '0_b1']
+for s in cases:
+    try:
+        print(repr(s), '->', R(1) << s)
+    except Exception as e:
+        print(repr(s), '!!', type(e).__name__, str(e)[:60])
+
+for lab, s in [('0*10^6+2', '0'*10**6 + '2'), ('_*10^6+2', '_'*10**6 + '2'), ('sp*10^6+2', ' '*10**6 + '2'), ('2+sp*10^6', '2' + ' '*10**6),
+               ('1*10^6+_*10^6', '1'*10**6 + '_'*10**6), ('1*5000', '1'*5000), ('1*10^6+x', '1'*10**6 + 'x'), ('0x+0*1000+1', '0x' + '0'*1000 + '1'),
+               ('-+0*1000+3', '-' + '0'*1000 + '3'), ('b0*10^6+2', b'0'*10**6 + b'2'), ('2^63-1', '9223372036854775807'), ('0x8000000000000000', '0x8000000000000000')]:
+    try:
+        print(lab, '->', RealField(30)(1) << s)
+    except Exception as e:
+        print(lab, '!!', type(e).__name__)

@@ -3031,34 +3031,118 @@ def _shift_count(n, op):
             raise TypeError(bad)
         return n.numerator
     if isinstance(n, (str, bytes)):
-        # (the native text, subclasses too: no __int__, __str__ or
-        # __bytes__ hook runs, CORR-603-1)
-        t = str.strip(n) if isinstance(n, str) else bytes.decode(bytes.strip(n), "latin-1")
-        k = _sage_int_text(t)
+        k = _sage_int_text(n)
         if k is None:
             raise TypeError(bad)
         return k
     raise TypeError(bad)
 
 
-def _sage_int_text(t):
-    """The integer Sage reads from the stripped text t, or None: a sign
-    (spaces may follow it), underscores anywhere, a 0x, 0o or 0b prefix
-    (else decimal, a leading 0 too), ASCII digits only."""
+# Whitespace in Sage's integer text (C's isspace: ASCII only)
+_INT_WS = frozenset(" \t\n\r\x0b\x0c")
+# The longest significant-digit string whose value is formed to name an
+# out-of-range count in the error, as Sage does; past it the error says
+# only the bound (forming it is the work a long text must not cause)
+_INT_TEXT_NAMED = 4300
+
+
+def _sage_int_text(n):
+    """The integer Sage reads from the text n (a str or bytes, subclasses by
+    their native characters: no hook runs), or None when Sage refuses it,
+    in one pass with no copy (CORR-D6A-1, daybreak2's limits HOLD):
+    underscores, and ASCII whitespace among the digits, are ignored; before
+    the digits one sign; a 0x, 0o or 0b prefix (either case) counts only
+    when nothing but spaces, underscores and the sign precede it, else the
+    text is decimal (a leading 0 too).  A count past 2^63 - 1 stops being
+    accumulated as soon as it is: OverflowError, naming it as Sage does when
+    it has at most _INT_TEXT_NAMED significant digits."""
+    chars = str.__iter__(n) if isinstance(n, str) else map(chr, bytes.__iter__(n))
+    LIMIT = (1 << 63) - 1
     neg = False
-    if t[:1] in ("+", "-"):
-        neg = t[0] == "-"
-        t = str.lstrip(t[1:])
-    t = t.replace("_", "")
-    base = 10
-    if t[:2].lower() in ("0x", "0o", "0b"):
-        base = {"x": 16, "o": 8, "b": 2}[t[1].lower()]
-        t = t[2:]
-    digits = "0123456789abcdef"[:base]
-    if not t or any(c not in digits for c in t.lower()):
-        return None
-    v = int(t, base)
+    signed = False
+    tabbed = False      # a whitespace other than a space before the digits
+    base = 0            # 0 until the base is known
+    pend0 = False       # a first 0 that may begin a prefix
+    v = 0
+    sig = 0             # significant digits
+    over = False
+    digits = ""
+    for c in chars:
+        if c == "_":
+            continue
+        if base == 0 and not pend0:
+            # before the digits
+            if c in _INT_WS:
+                if c != " ":
+                    tabbed = True
+                continue
+            if c in "+-":
+                if signed:
+                    return None
+                signed, neg = True, c == "-"
+                continue
+            if c == "0":
+                pend0 = True
+                continue
+            base, digits = 10, "0123456789"
+        elif pend0:
+            pend0 = False
+            if c in "xXoObB":
+                if tabbed:
+                    return None
+                base = {"x": 16, "o": 8, "b": 2}[c.lower()]
+                digits = "0123456789abcdef"[:base]
+                sig = -1      # (no digit yet after the prefix)
+                continue
+            base, digits = 10, "0123456789"
+            sig = 0           # (the leading 0 is a digit)
+            if c in _INT_WS:
+                continue
+        if c in _INT_WS:
+            continue
+        d = digits.find(c.lower())
+        if d < 0:
+            return None
+        if sig < 0:
+            sig = 0
+        if sig == 0 and d == 0:
+            continue          # (a leading zero; the number has a digit)
+        sig += 1
+        if not over:
+            v = v * base + d
+            if v > LIMIT:
+                over = True
+    if pend0:
+        return 0
+    if base == 0 or sig < 0:
+        return None           # (no digit, or a prefix without one)
+    if over:
+        if sig <= _INT_TEXT_NAMED:
+            raise OverflowError("n (=%d) must be <= 9223372036854775807" % _sage_int_value(n))
+        raise OverflowError("n must be <= 9223372036854775807 (a count of %d digits)" % sig)
     return -v if neg else v
+
+
+def _sage_int_value(n):
+    """The absolute value of the valid integer text n of at most
+    _INT_TEXT_NAMED significant digits, for the error: a second pass that
+    keeps only the significant digits (leading zeros and padding are not
+    copied)."""
+    base = 10
+    seen0 = False
+    keep = []
+    for c in (str.__iter__(n) if isinstance(n, str) else map(chr, bytes.__iter__(n))):
+        if c in _INT_WS or c in "_+-":
+            continue
+        if not keep:
+            if c in "xXoObB" and seen0 and base == 10:
+                base = {"x": 16, "o": 8, "b": 2}[c.lower()]
+                continue
+            if c == "0":
+                seen0 = True
+                continue
+        keep.append(c)
+    return int("".join(keep), base) if keep else 0
 
 
 def _cparts(v):
