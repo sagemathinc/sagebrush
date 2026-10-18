@@ -17,6 +17,16 @@ def loaded():
     return True
 
 
+MAX_FILE_BYTES = 256 << 20
+
+
 def decode(png):
-    """(width, height, channels, float32 values as little-endian bytes)."""
-    return _raster.raster_decode(bytes(png))
+    """(width, height, channels, float32 values as little-endian bytes).
+    bytes are passed as they are (the extension borrows them); another
+    buffer is measured before it is copied: at most 256 MiB."""
+    if not isinstance(png, bytes):
+        n = memoryview(png).nbytes
+        if n > MAX_FILE_BYTES:
+            raise ValueError("a PNG of %d bytes: Sagebrush reads at most %d" % (n, MAX_FILE_BYTES))
+        png = bytes(png)
+    return _raster.raster_decode(png)

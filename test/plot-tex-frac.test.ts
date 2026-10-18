@@ -55,3 +55,13 @@ test("\\frac keeps its grouping inline", async () => {
   const texts: string[] = JSON.parse(got.slice("ValueError: ".length));
   cases.forEach(([tex, want], i) => assert.equal(texts[i], want, tex));
 });
+
+test("Graphics.save refuses an infinite, NaN, zero or negative dpi or figsize before any arithmetic on it", async () => {
+  // (daybreak2's limits review: int(width * dpi) ran first, an OverflowError
+  // escaped for dpi=inf)
+  const bad = ["dpi=float('inf')", "dpi=float('nan')", "dpi=0", "dpi=-5", "dpi=10**6", "figsize=[float('inf'), 3]", "figsize=[float('nan'), 3]", "figsize=[0, 3]"];
+  for (const b of bad) {
+    const code = `import sage_all as S, tempfile, os\nG = S.plot(S.x, (S.x, 0, 1))\ntry:\n    G.save(os.path.join(tempfile.mkdtemp(), 'a.png'), ${b})\nexcept ValueError as e:\n    raise ValueError('refused' if 'Sagebrush writes at most' in str(e) else str(e))`;
+    assert.equal(await run(code), "ValueError: refused", b);
+  }
+});

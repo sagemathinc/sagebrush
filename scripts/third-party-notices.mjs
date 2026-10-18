@@ -186,7 +186,9 @@ function render(pkg) {
     ...(standard ? ["-".repeat(72), "The Apache License 2.0 (standard text, for the crates above without license files)", "-".repeat(72), "", APACHE_TEXT, ""] : []),
     ...(pkg.web ? webSection() : []),
   ];
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  // (no trailing whitespace on any line: some license texts carry it, and
+  // git diff --check refuses it)
+  return out.join("\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 // The npm packages in the notebook page's bundles, and KaTeX's fonts.
