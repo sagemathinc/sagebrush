@@ -2904,7 +2904,12 @@ class Polynomial_ff:
 
             sage: R.<x> = GF(7)[]; (x^2 + 1).is_squarefree(), ((x + 1)^2).is_squarefree()
             (True, False)
+            sage: R(0).is_squarefree()
+            True
         """
+        if not self:
+            # (the zero polynomial over a field is squarefree, as Sage)
+            return True
         return self.gcd(self.derivative()).degree() == 0
 
     def is_irreducible(self):

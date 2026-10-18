@@ -1807,8 +1807,11 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2], [3, 4]]).trace()
             5
         """
+        if self.nrows() != self._ncols:
+            # (as Sage: no trace for a nonsquare matrix)
+            raise ValueError("self must be a square matrix")
         s = self._base.zero()
-        for i in range(min(self.nrows(), self._ncols)):
+        for i in range(self._ncols):
             s = s + self._rows[i][i]
         return s
 

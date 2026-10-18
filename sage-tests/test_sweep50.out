@@ -1,0 +1,370 @@
+ZZ 3x2 [1, 2, 2, 4, 3, 6] elementary_divisors -> [1, 0, 0]
+ZZ 4x1 [1, 2, 3, 4] elementary_divisors -> [1, 0, 0, 0]
+ZZ 2x3 [1, 2, 3, 2, 4, 6] elementary_divisors -> [1, 0]
+ZZ 1x4 [1, 2, 3, 4] elementary_divisors -> [1]
+ZZ 3x2 [0, 0, 0, 0, 0, 0] elementary_divisors -> [0, 0, 0]
+ZZ 3x2 [1, 0, 0, 1, 0, 0] elementary_divisors -> [1, 1, 0]
+ZZ 3x2 [2, 0, 0, 6, 0, 0] elementary_divisors -> [2, 6, 0]
+ZZ 2x2 [2, 0, 0, 6] elementary_divisors -> [2, 6]
+ZZ 2x2 [0, 0, 0, 0] elementary_divisors -> [0, 0]
+ZZ 0x2 [] elementary_divisors -> []
+ZZ 2x0 [] elementary_divisors -> []
+ZZ 0x0 [] elementary_divisors -> []
+ZZ 3x3 [1, 2, 3, 4, 5, 6, 7, 8, 9] elementary_divisors -> [1, 3, 0]
+ZZ 4x2 [2, 4, 6, 8, 10, 12, 14, 16] elementary_divisors -> [2, 4, 0, 0]
+ZZ 1x1 [0] elementary_divisors -> [0]
+ZZ 1x1 [5] elementary_divisors -> [5]
+ZZ 2x1 [0, 0] elementary_divisors -> [0, 0]
+ZZ 1x2 [0, 0] elementary_divisors -> [0]
+QQ 3x2 [1, 2, 2, 4, 3, 6] elementary_divisors -> [1, 0]
+QQ 4x1 [1, 2, 3, 4] elementary_divisors -> [1]
+QQ 2x3 [1, 2, 3, 2, 4, 6] elementary_divisors -> [1, 0]
+QQ 1x4 [1, 2, 3, 4] elementary_divisors -> [1]
+QQ 3x2 [0, 0, 0, 0, 0, 0] elementary_divisors -> [0, 0]
+QQ 3x2 [1, 0, 0, 1, 0, 0] elementary_divisors -> [1, 1]
+QQ 3x2 [2, 0, 0, 6, 0, 0] elementary_divisors -> [1, 1]
+QQ 2x2 [2, 0, 0, 6] elementary_divisors -> [1, 1]
+QQ 2x2 [0, 0, 0, 0] elementary_divisors -> [0, 0]
+QQ 0x2 [] elementary_divisors -> []
+QQ 2x0 [] elementary_divisors -> []
+QQ 0x0 [] elementary_divisors -> []
+QQ 3x3 [1, 2, 3, 4, 5, 6, 7, 8, 9] elementary_divisors -> [1, 1, 0]
+QQ 4x2 [2, 4, 6, 8, 10, 12, 14, 16] elementary_divisors -> [1, 1]
+QQ 1x1 [0] elementary_divisors -> [0]
+QQ 1x1 [5] elementary_divisors -> [5]
+QQ 2x1 [0, 0] elementary_divisors -> [0]
+QQ 1x2 [0, 0] elementary_divisors -> [0]
+ZZ 3x2 [1, 2, 2, 4, 3, 6] smith_form-D -> [1 0]
+[0 0]
+[0 0] Full MatrixSpace of 3 by 2 dense matrices over Integer Ring
+ZZ 4x1 [1, 2, 3, 4] smith_form-D -> [1]
+[0]
+[0]
+[0] Full MatrixSpace of 4 by 1 dense matrices over Integer Ring
+ZZ 2x3 [1, 2, 3, 2, 4, 6] smith_form-D -> [1 0 0]
+[0 0 0] Full MatrixSpace of 2 by 3 dense matrices over Integer Ring
+ZZ 1x4 [1, 2, 3, 4] smith_form-D -> [1 0 0 0] Full MatrixSpace of 1 by 4 dense matrices over Integer Ring
+ZZ 3x2 [0, 0, 0, 0, 0, 0] smith_form-D -> [0 0]
+[0 0]
+[0 0] Full MatrixSpace of 3 by 2 dense matrices over Integer Ring
+ZZ 3x2 [1, 0, 0, 1, 0, 0] smith_form-D -> [1 0]
+[0 1]
+[0 0] Full MatrixSpace of 3 by 2 dense matrices over Integer Ring
+ZZ 0 is_squarefree -> False
+ZZ 1 is_squarefree -> True
+ZZ x is_squarefree -> True
+ZZ x^2 is_squarefree -> False
+ZZ x^2+1 is_squarefree -> True
+ZZ 2*x is_squarefree -> True
+ZZ 4*x is_squarefree -> False
+ZZ 2 is_squarefree -> True
+ZZ 4 is_squarefree -> False
+ZZ 3*x^2+3 is_squarefree -> True
+ZZ x^5+x is_squarefree -> True
+ZZ (x+1)^2*(x+2) is_squarefree -> False
+QQ 0 is_squarefree -> True
+QQ 1 is_squarefree -> True
+QQ x is_squarefree -> True
+QQ x^2 is_squarefree -> False
+QQ x^2+1 is_squarefree -> True
+QQ 2*x is_squarefree -> True
+QQ 4*x is_squarefree -> True
+QQ 2 is_squarefree -> True
+QQ 4 is_squarefree -> True
+QQ 3*x^2+3 is_squarefree -> True
+QQ x^5+x is_squarefree -> True
+QQ (x+1)^2*(x+2) is_squarefree -> False
+GF2 0 is_squarefree -> True
+GF2 1 is_squarefree -> True
+GF2 x is_squarefree -> True
+GF2 x^2 is_squarefree -> False
+GF2 x^2+1 is_squarefree -> False
+GF2 2*x is_squarefree -> True
+GF2 4*x is_squarefree -> True
+GF2 2 is_squarefree -> True
+GF2 4 is_squarefree -> True
+GF2 3*x^2+3 is_squarefree -> False
+GF2 x^5+x is_squarefree -> False
+GF2 (x+1)^2*(x+2) is_squarefree -> False
+GF5 0 is_squarefree -> True
+GF5 1 is_squarefree -> True
+GF5 x is_squarefree -> True
+GF5 x^2 is_squarefree -> False
+GF5 x^2+1 is_squarefree -> True
+GF5 2*x is_squarefree -> True
+GF5 4*x is_squarefree -> True
+GF5 2 is_squarefree -> True
+GF5 4 is_squarefree -> True
+GF5 3*x^2+3 is_squarefree -> True
+GF5 x^5+x is_squarefree -> True
+GF5 (x+1)^2*(x+2) is_squarefree -> False
+GF4 0 is_squarefree -> True
+GF4 1 is_squarefree -> True
+GF4 x is_squarefree -> True
+GF4 x^2 is_squarefree -> False
+GF4 x^2+1 is_squarefree -> False
+GF4 2*x is_squarefree -> True
+GF4 4*x is_squarefree -> True
+GF4 2 is_squarefree -> True
+GF4 4 is_squarefree -> True
+GF4 3*x^2+3 is_squarefree -> False
+GF4 x^5+x is_squarefree -> False
+GF4 (x+1)^2*(x+2) is_squarefree -> False
+inverse_mod(-10,-11) -> 1
+ZZ(-10).inverse_mod(-11) -> 1
+inverse_mod(-10,-7) -> 2
+ZZ(-10).inverse_mod(-7) -> 2
+inverse_mod(-10,-5) !! ZeroDivisionError inverse of Mod(-10, -5) does not exist
+ZZ(-10).inverse_mod(-5) !! ZeroDivisionError inverse of Mod(-10, -5) does not exist
+inverse_mod(-10,-2) !! ZeroDivisionError inverse of Mod(-10, -2) does not exist
+ZZ(-10).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(-10, -2) does not exist
+inverse_mod(-10,-1) -> 0
+ZZ(-10).inverse_mod(-1) -> 0
+inverse_mod(-10,1) -> 0
+ZZ(-10).inverse_mod(1) -> 0
+inverse_mod(-10,2) !! ZeroDivisionError inverse of Mod(-10, 2) does not exist
+ZZ(-10).inverse_mod(2) !! ZeroDivisionError inverse of Mod(-10, 2) does not exist
+inverse_mod(-10,5) !! ZeroDivisionError inverse of Mod(-10, 5) does not exist
+ZZ(-10).inverse_mod(5) !! ZeroDivisionError inverse of Mod(-10, 5) does not exist
+inverse_mod(-10,7) -> 2
+ZZ(-10).inverse_mod(7) -> 2
+inverse_mod(-10,11) -> 1
+ZZ(-10).inverse_mod(11) -> 1
+inverse_mod(-3,-11) -> 7
+ZZ(-3).inverse_mod(-11) -> 7
+inverse_mod(-3,-7) -> 2
+ZZ(-3).inverse_mod(-7) -> 2
+inverse_mod(-3,-5) -> 3
+ZZ(-3).inverse_mod(-5) -> 3
+inverse_mod(-3,-2) -> 1
+ZZ(-3).inverse_mod(-2) -> 1
+inverse_mod(-3,-1) -> 0
+ZZ(-3).inverse_mod(-1) -> 0
+inverse_mod(-3,1) -> 0
+ZZ(-3).inverse_mod(1) -> 0
+inverse_mod(-3,2) -> 1
+ZZ(-3).inverse_mod(2) -> 1
+inverse_mod(-3,5) -> 3
+ZZ(-3).inverse_mod(5) -> 3
+inverse_mod(-3,7) -> 2
+ZZ(-3).inverse_mod(7) -> 2
+inverse_mod(-3,11) -> 7
+ZZ(-3).inverse_mod(11) -> 7
+inverse_mod(-1,-11) -> 10
+ZZ(-1).inverse_mod(-11) -> 10
+inverse_mod(-1,-7) -> 6
+ZZ(-1).inverse_mod(-7) -> 6
+inverse_mod(-1,-5) -> 4
+ZZ(-1).inverse_mod(-5) -> 4
+inverse_mod(-1,-2) -> 1
+ZZ(-1).inverse_mod(-2) -> 1
+inverse_mod(-1,-1) -> 0
+ZZ(-1).inverse_mod(-1) -> 0
+inverse_mod(-1,1) -> 0
+ZZ(-1).inverse_mod(1) -> 0
+inverse_mod(-1,2) -> 1
+ZZ(-1).inverse_mod(2) -> 1
+inverse_mod(-1,5) -> 4
+ZZ(-1).inverse_mod(5) -> 4
+inverse_mod(-1,7) -> 6
+ZZ(-1).inverse_mod(7) -> 6
+inverse_mod(-1,11) -> 10
+ZZ(-1).inverse_mod(11) -> 10
+inverse_mod(0,-11) !! ZeroDivisionError inverse of Mod(0, -11) does not exist
+ZZ(0).inverse_mod(-11) !! ZeroDivisionError inverse of Mod(0, -11) does not exist
+inverse_mod(0,-7) !! ZeroDivisionError inverse of Mod(0, -7) does not exist
+ZZ(0).inverse_mod(-7) !! ZeroDivisionError inverse of Mod(0, -7) does not exist
+inverse_mod(0,-5) !! ZeroDivisionError inverse of Mod(0, -5) does not exist
+ZZ(0).inverse_mod(-5) !! ZeroDivisionError inverse of Mod(0, -5) does not exist
+inverse_mod(0,-2) !! ZeroDivisionError inverse of Mod(0, -2) does not exist
+ZZ(0).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(0, -2) does not exist
+inverse_mod(0,-1) -> 0
+ZZ(0).inverse_mod(-1) -> 0
+inverse_mod(0,1) -> 0
+ZZ(0).inverse_mod(1) -> 0
+inverse_mod(0,2) !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+ZZ(0).inverse_mod(2) !! ZeroDivisionError inverse of Mod(0, 2) does not exist
+inverse_mod(0,5) !! ZeroDivisionError inverse of Mod(0, 5) does not exist
+ZZ(0).inverse_mod(5) !! ZeroDivisionError inverse of Mod(0, 5) does not exist
+inverse_mod(0,7) !! ZeroDivisionError inverse of Mod(0, 7) does not exist
+ZZ(0).inverse_mod(7) !! ZeroDivisionError inverse of Mod(0, 7) does not exist
+inverse_mod(0,11) !! ZeroDivisionError inverse of Mod(0, 11) does not exist
+ZZ(0).inverse_mod(11) !! ZeroDivisionError inverse of Mod(0, 11) does not exist
+inverse_mod(1,-11) -> 1
+ZZ(1).inverse_mod(-11) -> 1
+inverse_mod(1,-7) -> 1
+ZZ(1).inverse_mod(-7) -> 1
+inverse_mod(1,-5) -> 1
+ZZ(1).inverse_mod(-5) -> 1
+inverse_mod(1,-2) -> 1
+ZZ(1).inverse_mod(-2) -> 1
+inverse_mod(1,-1) -> 0
+ZZ(1).inverse_mod(-1) -> 0
+inverse_mod(1,1) -> 0
+ZZ(1).inverse_mod(1) -> 0
+inverse_mod(1,2) -> 1
+ZZ(1).inverse_mod(2) -> 1
+inverse_mod(1,5) -> 1
+ZZ(1).inverse_mod(5) -> 1
+inverse_mod(1,7) -> 1
+ZZ(1).inverse_mod(7) -> 1
+inverse_mod(1,11) -> 1
+ZZ(1).inverse_mod(11) -> 1
+inverse_mod(2,-11) -> 6
+ZZ(2).inverse_mod(-11) -> 6
+inverse_mod(2,-7) -> 4
+ZZ(2).inverse_mod(-7) -> 4
+inverse_mod(2,-5) -> 3
+ZZ(2).inverse_mod(-5) -> 3
+inverse_mod(2,-2) !! ZeroDivisionError inverse of Mod(2, -2) does not exist
+ZZ(2).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(2, -2) does not exist
+inverse_mod(2,-1) -> 0
+ZZ(2).inverse_mod(-1) -> 0
+inverse_mod(2,1) -> 0
+ZZ(2).inverse_mod(1) -> 0
+inverse_mod(2,2) !! ZeroDivisionError inverse of Mod(2, 2) does not exist
+ZZ(2).inverse_mod(2) !! ZeroDivisionError inverse of Mod(2, 2) does not exist
+inverse_mod(2,5) -> 3
+ZZ(2).inverse_mod(5) -> 3
+inverse_mod(2,7) -> 4
+ZZ(2).inverse_mod(7) -> 4
+inverse_mod(2,11) -> 6
+ZZ(2).inverse_mod(11) -> 6
+inverse_mod(3,-11) -> 4
+ZZ(3).inverse_mod(-11) -> 4
+inverse_mod(3,-7) -> 5
+ZZ(3).inverse_mod(-7) -> 5
+inverse_mod(3,-5) -> 2
+ZZ(3).inverse_mod(-5) -> 2
+inverse_mod(3,-2) -> 1
+ZZ(3).inverse_mod(-2) -> 1
+inverse_mod(3,-1) -> 0
+ZZ(3).inverse_mod(-1) -> 0
+inverse_mod(3,1) -> 0
+ZZ(3).inverse_mod(1) -> 0
+inverse_mod(3,2) -> 1
+ZZ(3).inverse_mod(2) -> 1
+inverse_mod(3,5) -> 2
+ZZ(3).inverse_mod(5) -> 2
+inverse_mod(3,7) -> 5
+ZZ(3).inverse_mod(7) -> 5
+inverse_mod(3,11) -> 4
+ZZ(3).inverse_mod(11) -> 4
+inverse_mod(4,-11) -> 3
+ZZ(4).inverse_mod(-11) -> 3
+inverse_mod(4,-7) -> 2
+ZZ(4).inverse_mod(-7) -> 2
+inverse_mod(4,-5) -> 4
+ZZ(4).inverse_mod(-5) -> 4
+inverse_mod(4,-2) !! ZeroDivisionError inverse of Mod(4, -2) does not exist
+ZZ(4).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(4, -2) does not exist
+inverse_mod(4,-1) -> 0
+ZZ(4).inverse_mod(-1) -> 0
+inverse_mod(4,1) -> 0
+ZZ(4).inverse_mod(1) -> 0
+inverse_mod(4,2) !! ZeroDivisionError inverse of Mod(4, 2) does not exist
+ZZ(4).inverse_mod(2) !! ZeroDivisionError inverse of Mod(4, 2) does not exist
+inverse_mod(4,5) -> 4
+ZZ(4).inverse_mod(5) -> 4
+inverse_mod(4,7) -> 2
+ZZ(4).inverse_mod(7) -> 2
+inverse_mod(4,11) -> 3
+ZZ(4).inverse_mod(11) -> 3
+inverse_mod(10,-11) -> 10
+ZZ(10).inverse_mod(-11) -> 10
+inverse_mod(10,-7) -> 5
+ZZ(10).inverse_mod(-7) -> 5
+inverse_mod(10,-5) !! ZeroDivisionError inverse of Mod(10, -5) does not exist
+ZZ(10).inverse_mod(-5) !! ZeroDivisionError inverse of Mod(10, -5) does not exist
+inverse_mod(10,-2) !! ZeroDivisionError inverse of Mod(10, -2) does not exist
+ZZ(10).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(10, -2) does not exist
+inverse_mod(10,-1) -> 0
+ZZ(10).inverse_mod(-1) -> 0
+inverse_mod(10,1) -> 0
+ZZ(10).inverse_mod(1) -> 0
+inverse_mod(10,2) !! ZeroDivisionError inverse of Mod(10, 2) does not exist
+ZZ(10).inverse_mod(2) !! ZeroDivisionError inverse of Mod(10, 2) does not exist
+inverse_mod(10,5) !! ZeroDivisionError inverse of Mod(10, 5) does not exist
+ZZ(10).inverse_mod(5) !! ZeroDivisionError inverse of Mod(10, 5) does not exist
+inverse_mod(10,7) -> 5
+ZZ(10).inverse_mod(7) -> 5
+inverse_mod(10,11) -> 10
+ZZ(10).inverse_mod(11) -> 10
+inverse_mod(14,-11) -> 4
+ZZ(14).inverse_mod(-11) -> 4
+inverse_mod(14,-7) !! ZeroDivisionError inverse of Mod(14, -7) does not exist
+ZZ(14).inverse_mod(-7) !! ZeroDivisionError inverse of Mod(14, -7) does not exist
+inverse_mod(14,-5) -> 4
+ZZ(14).inverse_mod(-5) -> 4
+inverse_mod(14,-2) !! ZeroDivisionError inverse of Mod(14, -2) does not exist
+ZZ(14).inverse_mod(-2) !! ZeroDivisionError inverse of Mod(14, -2) does not exist
+inverse_mod(14,-1) -> 0
+ZZ(14).inverse_mod(-1) -> 0
+inverse_mod(14,1) -> 0
+ZZ(14).inverse_mod(1) -> 0
+inverse_mod(14,2) !! ZeroDivisionError inverse of Mod(14, 2) does not exist
+ZZ(14).inverse_mod(2) !! ZeroDivisionError inverse of Mod(14, 2) does not exist
+inverse_mod(14,5) -> 4
+ZZ(14).inverse_mod(5) -> 4
+inverse_mod(14,7) !! ZeroDivisionError inverse of Mod(14, 7) does not exist
+ZZ(14).inverse_mod(7) !! ZeroDivisionError inverse of Mod(14, 7) does not exist
+inverse_mod(14,11) -> 4
+ZZ(14).inverse_mod(11) -> 4
+inverse_mod(3,0) !! ZeroDivisionError inverse of Mod(3, 0) does not exist
+inverse_mod(int3,int-7) -> 5
+crt(1,2,3,5) -> 7
+crt(1,2,-3,5) -> 7
+crt(1,2,3,-5) -> 7
+crt(1,2,-3,-5) -> 7
+crt(-1,2,-3,5) -> 2
+crt(4,0,-7,11) -> 11
+crt(0,0,-3,5) -> 0
+crt(1,3,4,6) -> 9
+crt(1,3,-4,6) -> 9
+crt(1,2,4,6) !! ValueError no solution to crt problem since gcd(4,6) does not divide 1-2
+crt(1,2,-4,6) !! ValueError no solution to crt problem since gcd(-4,6) does not divide 1-2
+crt(5,2,3,5) -> 2
+crt(1,2,1,-5) -> 2
+crt(1,2,-1,5) -> 2
+crt(2,3,-6,-4) !! ValueError no solution to crt problem since gcd(-6,-4) does not divide 2-3
+crt(7,1,-1,-1) -> 0
+crt(3,4,0,5) !! ValueError no solution to crt problem since gcd(0,5) does not divide 3-4
+crt(3,4,-3,0) !! ValueError no solution to crt problem since gcd(-3,0) does not divide 3-4
+crt([1,2,3],[-3,5,7]) -> 52
+crt([1,2],[3,-5]) -> 7
+crt([1,2,3],[-3,-5,7]) -> 52
+ZZ 2x3 trace !! ValueError self must be a square matrix
+ZZ 3x2 trace !! ValueError self must be a square matrix
+ZZ 0x2 trace !! ValueError self must be a square matrix
+ZZ 2x0 trace !! ValueError self must be a square matrix
+ZZ 0x0 trace -> '0'
+ZZ 2x2 trace -> '5'
+ZZ 1x3 trace !! ValueError self must be a square matrix
+QQ 2x3 trace !! ValueError self must be a square matrix
+QQ 3x2 trace !! ValueError self must be a square matrix
+QQ 0x2 trace !! ValueError self must be a square matrix
+QQ 2x0 trace !! ValueError self must be a square matrix
+QQ 0x0 trace -> '0'
+QQ 2x2 trace -> '5'
+QQ 1x3 trace !! ValueError self must be a square matrix
+GF5 2x3 trace !! ValueError self must be a square matrix
+GF5 3x2 trace !! ValueError self must be a square matrix
+GF5 0x2 trace !! ValueError self must be a square matrix
+GF5 2x0 trace !! ValueError self must be a square matrix
+GF5 0x0 trace -> '0'
+GF5 2x2 trace -> '0'
+GF5 1x3 trace !! ValueError self must be a square matrix
+RDF 2x3 trace !! ValueError self must be a square matrix
+RDF 3x2 trace !! ValueError self must be a square matrix
+RDF 0x2 trace !! ValueError self must be a square matrix
+RDF 2x0 trace !! ValueError self must be a square matrix
+RDF 0x0 trace -> '0.0'
+RDF 2x2 trace -> '5.0'
+RDF 1x3 trace !! ValueError self must be a square matrix
+GF4 2x3 trace !! ValueError self must be a square matrix
+GF4 3x2 trace !! ValueError self must be a square matrix
+GF4 0x2 trace !! ValueError self must be a square matrix
+GF4 2x0 trace !! ValueError self must be a square matrix
+GF4 0x0 trace -> '0'
+GF4 2x2 trace -> '1'
+GF4 1x3 trace !! ValueError self must be a square matrix
