@@ -189,10 +189,6 @@ export class Board {
    * (Edit: the one selected), and its kind's name ("Code", "Note"...),
    * William's item 7 */
   addSame: { id: string; label: string } | null = null;
-  /** that control's look: a "+" just outside the item's top right corner,
-   * across from the grip (`plus`), or a "+ Code" chip under its bottom
-   * edge (`chip`) */
-  addSameStyle: "plus" | "chip" = "plus";
   // (whether the last frame was drawn far out: no grip nor add-another
   // control drawn then, and so none to press, astra's UI-2B8-1)
   private farNow = false;
@@ -1524,23 +1520,18 @@ export class Board {
       ctx.strokeStyle = "#2a6f2f";
       ctx.lineWidth = 1.5 / c.z;
       ctx.beginPath();
-      ctx.roundRect(b.x, b.y, b.w, b.h, this.addSameStyle === "chip" ? b.h / 2 : r);
+      ctx.roundRect(b.x, b.y, b.w, b.h, r);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#2a6f2f";
       ctx.strokeStyle = "#2a6f2f";
       ctx.lineWidth = 2 / c.z;
-      // (the "+": a cross, 10 px; on the chip, before its kind's name)
-      const px = this.addSameStyle === "chip" ? b.x + 13 / c.z : b.x + b.w / 2, py = b.y + b.h / 2, k = 5 / c.z;
+      // (the "+": a cross, 10 px)
+      const px = b.x + b.w / 2, py = b.y + b.h / 2, k = 5 / c.z;
       ctx.beginPath();
       ctx.moveTo(px - k, py); ctx.lineTo(px + k, py);
       ctx.moveTo(px, py - k); ctx.lineTo(px, py + k);
       ctx.stroke();
-      if (this.addSameStyle === "chip") {
-        ctx.font = `600 ${12 / c.z}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-        ctx.textBaseline = "middle";
-        ctx.fillText(this.addSame!.label, b.x + 23 / c.z, py + 0.5 / c.z);
-      }
     }
     if (this.guides) {
       ctx.strokeStyle = "#d6336c";
@@ -1605,14 +1596,10 @@ export class Board {
     const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
     return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;
   }
-  // (its box, world units: the "+", 22 px square, 4 px right of the top
-  // right corner; the chip, 22 px high, as wide as its name, centred 6 px
-  // under the bottom edge)
+  // (its box, world units: a "+", 22 px square, 4 px right of the top
+  // right corner, across from the grip; William's choice, design A)
   private addSameBox(it: { x: number; y: number; w: number; h: number }, z: number) {
-    if (this.addSameStyle === "plus") return { x: it.x + it.w + 4 / z, y: it.y, w: 22 / z, h: 22 / z };
-    this.ctx.font = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
-    const w = (this.ctx.measureText(this.addSame?.label ?? "").width + 32) / z;
-    return { x: it.x + it.w / 2 - w / 2, y: it.y + it.h + 6 / z, w, h: 22 / z };
+    return { x: it.x + it.w + 4 / z, y: it.y, w: 22 / z, h: 22 / z };
   }
   clientRect(id: string) {
     const it = this.byId.get(id), r = this.el.getBoundingClientRect(), c = this.camera;
