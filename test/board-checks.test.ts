@@ -90,7 +90,9 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'off by $1 \\\\times 10^{400}$, more than the tolerance'",
     "False 'off by $1$ (relative $9.99 \\\\times 10^{-401}$), more than the tolerance'",
     "False 'off by $1$ (relative $8.67 \\\\times 10^{-19}$), more than the tolerance'",
-    "False 'off by about $1.22 \\\\times 10^{-16}$, more than the tolerance'",
+    // (3.141592653589793 has 16 digits: a 54-bit literal, as in Sage, whose
+    // value is 3.45e-16 from pi; Sage gives 3.445092848397666e-16)
+    "False 'off by about $3.45 \\\\times 10^{-16}$, more than the tolerance'",
     "False 'off by about $1 \\\\times 10^{400}$, more than the tolerance'",
     "False 'off by about $1 \\\\times 10^{-20}$, more than the tolerance'",
     "False 'off by $7.88 \\\\times 10^{-31}$ (relative $7.88 \\\\times 10^{-31}$), more than the tolerance'",
