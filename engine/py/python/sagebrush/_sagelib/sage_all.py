@@ -2328,7 +2328,20 @@ def inverse_mod(a, m):
 
         sage: inverse_mod(3, 7), inverse_mod(17, 3120)
         (5, 2753)
+
+    For integers, as Sage: in 0, ..., |m| - 1 for a negative modulus too,
+    0 modulo +-1, ZeroDivisionError when there is none::
+
+        sage: inverse_mod(3, -7), inverse_mod(5, -1)
+        (5, 0)
     """
+    if isinstance(a, int) and isinstance(m, int):
+        if abs(m) == 1:
+            return 0
+        try:
+            return pow(a, -1, abs(m))
+        except ValueError:
+            raise ZeroDivisionError("inverse of Mod(%s, %s) does not exist" % (a, m)) from None
     return pow(a, -1, m)
 
 
@@ -2461,13 +2474,37 @@ def crt(a, b, m=None, n=None):
             raise ValueError("arguments to CRT must be lists of the same length")
     else:
         rs, ms = [a, b], [m, n]
-    x, M = 0, 1
-    for r, mi in zip(rs, ms):
-        g, s, _ = xgcd(M, mi)
+    if not all(isinstance(v, int) for v in rs + ms):
+        x, M = 0, 1
+        for r, mi in zip(rs, ms):
+            g, s, _ = xgcd(M, mi)
+            if (r - x) % g:
+                raise ValueError("no solution to crt problem since gcd(%s,%s) does not divide %s-%s" % (M, mi, x, r))
+            x += M * ((r - x) // g * s % (mi // g))
+            M = M * mi // g
+            x %= M
+        return x
+    # (integers, as Sage: from the first congruence as given, each next one
+    # combined with the moduli by their absolute values, the solution in
+    # 0, ..., lcm - 1 (crt(1, 2, -3, 5) is 7); two zero moduli are a
+    # division by zero, an incompatible pair "no solution" (naming the
+    # moduli and residues so far), then a zero modulus a modulo by zero,
+    # CORR-BCC-1)
+    if not rs:
+        return 0
+    x, M = rs[0], ms[0]
+    for r, mi in zip(rs[1:], ms[1:]):
+        A, B = abs(M), abs(mi)
+        g = _math.gcd(A, B)
+        if g == 0:
+            raise ZeroDivisionError("Integer division by zero")
         if (r - x) % g:
             raise ValueError("no solution to crt problem since gcd(%s,%s) does not divide %s-%s" % (M, mi, x, r))
-        x += M * ((r - x) // g * s % (mi // g))
-        M = M * mi // g
+        if A == 0 or B == 0:
+            raise ZeroDivisionError("Integer modulo by zero")
+        _, s, _ = xgcd(A, B)
+        x += A * ((r - x) // g * s % (B // g))
+        M = A * B // g
         x %= M
     return x
 
