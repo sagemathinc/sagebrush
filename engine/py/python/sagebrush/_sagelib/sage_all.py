@@ -7,6 +7,7 @@ module supplies Rational and a handful of Sage's number theory functions.
 """
 
 import math as _math
+import operator as _operator
 import sys as _sys_limit
 
 # (as Sage: not CPython's 4300-digit limit on an int's decimal conversions;
@@ -2705,17 +2706,89 @@ def srange(start, stop=None, step=1):
     return out
 
 
-def prod(xs, start=1):
-    """The product of the elements.
+def prod(x, z=None, recursion_cutoff=5):
+    """The product of the elements of x, times z on the left if given.
+
+    The factors are multiplied in order (only grouped, so products that
+    don't commute, such as matrices', come out right), as a balanced tree,
+    so that big integers are multiplied in like sizes: a sized x (a list,
+    tuple, range...) halved until a part has at most recursion_cutoff
+    factors, multiplied one after another; any other iterable read once,
+    its factors merged in blocks of like sizes as they come (z, if given,
+    first among them); sized means len(x) succeeds, asked before x is
+    iterated. As Sage's.
 
     EXAMPLES::
 
         sage: prod([1, 2, 3, 4]), prod(range(1, 11)), prod([])
         (24, 3628800, 1)
+        sage: prod([2, 3], 5), prod((k for k in [2, 3]), 5), prod([], 7)
+        (30, 30, 7)
+        sage: A = matrix([[1, 1], [0, 1]]); B = matrix([[1, 0], [1, 1]])
+        sage: prod([A, B, A]) == A * B * A, prod([A, B, A]) == B * A * A
+        (True, False)
+        sage: prod(range(1, 20001)) == factorial(20000)
+        True
     """
-    r = start
-    for x in xs:
-        r = r * x
+    cutoff = _operator.index(recursion_cutoff)
+    # (a Py_ssize_t, as Sage's, before x is looked at: astra's CORR-663-2)
+    if not -9223372036854775808 <= cutoff <= 9223372036854775807:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    if cutoff < 1:
+        # (Sage's recursion has no end then)
+        raise ValueError("recursion_cutoff must be positive")
+    # (sized as Sage tells it: len(x), through the type's length protocol,
+    # before x is iterated; a TypeError from it streams, any other error
+    # is raised; astra's CORR-663-1)
+    try:
+        len(x)
+    except TypeError:
+        return _prod_stream(x, z)
+    x = list(x)
+    if not x:
+        return 1 if z is None else z
+    r = _prod_halves(x, 0, len(x), cutoff)
+    return r if z is None else z * r
+
+
+def _prod_halves(x, a, b, cutoff):
+    # (x[a:b]'s product: at most cutoff factors one after another, else
+    # the product of its halves, the first one the larger; the depth is
+    # that of halving, about log2 of the length)
+    if b - a <= cutoff:
+        r = x[a]
+        for i in range(a + 1, b):
+            r = r * x[i]
+        return r
+    m = a + (b - a + 1) // 2
+    return _prod_halves(x, a, m, cutoff) * _prod_halves(x, m, b, cutoff)
+
+
+def _prod_stream(it, z):
+    # (an iterable's product as its factors come, z first if given: a
+    # stack of products of 1, 2, 4, ... factors, two of a size merged, as
+    # a binary counter; at the end multiplied from the right)
+    values = []
+    sizes = []
+
+    def push(v):
+        size = 1
+        while sizes and sizes[-1] == size:
+            v = values.pop() * v
+            sizes.pop()
+            size *= 2
+        values.append(v)
+        sizes.append(size)
+
+    if z is not None:
+        push(z)
+    for v in it:
+        push(v)
+    if not values:
+        return 1
+    r = values.pop()
+    while values:
+        r = values.pop() * r
     return r
 
 
