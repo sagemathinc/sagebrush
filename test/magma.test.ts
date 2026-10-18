@@ -1947,3 +1947,22 @@ test("a dihedral group too wide to print is refused before either generator is r
   const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
   assert.equal(r.stdout, "refused 0\ndisagree []\n", r.stdout + r.stderr);
 });
+
+test("DihedralGroup(3) is Sym(3) in a set, and groups meet in collections as Magma's (CORR-DG-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's for the same lines: one element for
+  // DihedralGroup(3) and Sym(3), false for groups of two degrees)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.equal(run("D := DihedralGroup(3); S := Sym(3); #{D, S}; #{S, D}; D in {S}; S in {D}; D notin {S}; #{@ S, D @}; #{* D, S *}; S in {@ D @}; D in [S];\n#{DihedralGroup(4), Sym(4)}; #{DihedralGroup(4), Sym(5)}; #{DihedralGroup(4), DihedralGroup(4)}; #{Sym(3), Sym(4)};\nDihedralGroup(4) in {Sym(4)}; DihedralGroup(4) in {Sym(5)}; DihedralGroup(4) in [Sym(4), DihedralGroup(4)]; Index([Sym(4), DihedralGroup(4)], DihedralGroup(4)); Sym(5) in [DihedralGroup(4)];\n#Append([Sym(4)], DihedralGroup(5)); #Include({Sym(3)}, DihedralGroup(3)); #Include({Sym(4)}, DihedralGroup(4)); #Exclude({Sym(3)}, DihedralGroup(3)); Index([Sym(4)], Sym(5)); Position([DihedralGroup(3)], Sym(3));\nD := DihedralGroup(3); S := Sym(3); Index([D], S); Index([S], D); Position([S, D], D);\n#Insert([Sym(4)], 1, Sym(3)); #([Sym(4)] cat [DihedralGroup(6)]);"), "1\n1\ntrue\ntrue\nfalse\n1\n2\ntrue\ntrue\n2\n2\n1\n2\nfalse\nfalse\ntrue\n2\nfalse\n2\n1\n2\n0\n0\n1\n1\n1\n1\n2\n2\nend\n");
+  const errs: [string, string][] = [
+    // (refused: Magma's order of the groups in a set, and its naming of them)
+    ["X:={DihedralGroup(4), Sym(4)}; X;", "printing a set of permutation groups is not supported yet"],
+    ["D:=DihedralGroup(3); S:=Sym(3); X:={D, S}; X;", "printing a set of permutation groups is not supported yet"],
+    ["X:={DihedralGroup(4), Sym(4)}; Y:=[G : G in X];", "the order of a set of permutation groups is not supported yet"],
+  ];
+  for (const [e, m] of errs) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
+  }
+});

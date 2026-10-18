@@ -522,6 +522,9 @@ class MSet:
     def ordered(self):
         if self.kind == "indexed":
             return list(self.items)
+        if len(self.keys) > 1 and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in self.items):
+            # (Magma's order of the groups in a set is its own: not modelled)
+            raise MagmaError("the order of a set of permutation groups is not supported yet")
         try:
             return sorted(self.items, key=_sortkey)
         except TypeError:
@@ -2902,6 +2905,8 @@ def _eq_kind(x):
         return "map"
     if _is_struct(x):
         return "struct"
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        return "grp"  # (permutation groups: one set or sequence holds any)
     if hasattr(x, "parent"):
         return "elt"
     return "other " + type(x).__name__
@@ -4331,6 +4336,10 @@ def _str1(v, indent, col, tail):
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
         return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
+    if isinstance(v, MSet) and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in v.items):
+        # (Magma lists a set of groups in an order of its own, and names
+        # DihedralGroup(3) and Sym(3) as one group: not modelled)
+        raise MagmaError("printing a set of permutation groups is not supported yet")
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
@@ -7051,7 +7060,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
             kx, ke = _eq_kind(x), _eq_kind(e)
             ok = ((kx == ke == "struct" and _struct_cat(x) == _struct_cat(e))
                   or (kx in ("set", "mset") and ke in ("set", "mset") and not (kx == "mset" and ke == "set"))
-                  or (kx == ke == "map")
+                  or (kx == ke == "map") or (kx == ke == "grp")
                   or (kx == ke == "tup" and len(x) == len(e)))
             if ke == "seq" and not len(e) and name == "Index" and not (kx == "seq" and not len(x)):
                 raise MagmaError(cannot, "'%s'" % name)
@@ -9302,6 +9311,9 @@ class _MSymGroup:
         return "Symmetric group %sacting on a set of cardinality %d\n%s" % (name + " " if name else "", self.n, _order_text(_math.factorial(self.n)))
 
     def __eq__(self, other):
+        # (DihedralGroup(3) is Sym(3): one element of a set, as Magma's)
+        if isinstance(other, _MDihedralGroup):
+            return other == self
         return isinstance(other, _MSymGroup) and other.n == self.n
 
     def __hash__(self):
@@ -9512,10 +9524,12 @@ class _MDihedralGroup:
                                                                  "".join("\n    " + t for t in g))
 
     def __eq__(self, other):
+        if isinstance(other, _MSymGroup):
+            return self.n == 3 and other.n == 3
         return isinstance(other, _MDihedralGroup) and other.n == self.n
 
     def __hash__(self):
-        return hash(("Dihedral", self.n))
+        return hash(("Sym", 3) if self.n == 3 else ("Dihedral", self.n))
 
     def _magma_card(self):
         return 2 * self.n
