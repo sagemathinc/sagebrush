@@ -18,7 +18,9 @@
 //     and timed runs execute) and its level after a forced garbage
 //     collection; with each engine's JavaScript heap (CDP's
 //     Runtime.getHeapUsage, of the page and of Sagebrush's worker) and the
-//     size of Pyodide's WebAssembly memory (which never shrinks).  Every
+//     size of Pyodide's WebAssembly memory (which never shrinks); then 30 s
+//     idle (10 s, a forced collection, 20 s), and a timeline of the whole
+//     session, one sample per 250 ms, with its phases marked.  Every
 //     execution of every workload, warm-up and timed, in every cold start
 //     of both engines, must print what Sagebrush's first warm-up printed,
 //     and every timing must be a finite number; else the run fails.
@@ -256,8 +258,16 @@ function detail(pids) {
 // (once page() has named the page's renderer, only it: the browser's other
 // renderers hold about the same memory for either engine)
 function sampler(root) {
-  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0;
-  const tick = () => { if (!pagePid && ++k % 10 === 0) pids = rendererPids(root); const v = rss(pagePid ? [pagePid] : pids); if (v > peak) peak = v; return v; };
+  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0, last = -Infinity;
+  const t0 = Date.now(), timeline = [], marks = []; // [ms, bytes]; { t, what, wasm? }
+  const tick = () => {
+    if (!pagePid && ++k % 10 === 0) pids = rendererPids(root);
+    const v = rss(pagePid ? [pagePid] : pids), t = Date.now() - t0;
+    if (v > peak) peak = v;
+    // (the timeline: one sample per 250 ms, of the page's renderer once known)
+    if (pagePid && t - last >= 250) { timeline.push([t, v]); last = t; }
+    return v;
+  };
   const h = setInterval(tick, 50);
   return {
     now: () => { if (!pagePid) pids = rendererPids(root); return rss(pagePid ? [pagePid] : pids); },
@@ -268,6 +278,8 @@ function sampler(root) {
     peak: () => (tick(), peak),
     processes: () => rendererPids(root).length,
     detail: () => detail(rendererPids(root)),
+    mark: (what, wasm) => marks.push({ t: Date.now() - t0, what, ...(wasm === undefined ? {} : { wasm }) }),
+    timeline: () => ({ samples: timeline, marks }),
     stop: () => clearInterval(h),
   };
 }
@@ -334,16 +346,20 @@ async function session(page) {
     const cold = { readyMs: Math.round(await ev("window.readyMs")), firstResultMs: Date.now() - t0, out: first?.out?.trim(), ...take() };
     await gc();
     const pagePid = mem.page(blankPids);
+    const mark = async (what) => mem.mark(what, await ev("window.wasmBytes ? window.wasmBytes() : null"));
+    await mark("print(1 + 1) done");
     cold.mem = { blankRss, pagePid, rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
     const np = await ev("run('import numpy\\nprint(numpy.arange(10).sum())')");
     const numpy = { ms: Math.round(np?.ms ?? -1), out: np?.out?.trim(), ...take() };
     await gc();
     numpy.mem = { rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
+    await mark("import numpy done");
     step("numpy");
     const speed = {};
     for (const [name, w] of Object.entries(WORKLOADS)) {
       const { setup, code } = typeof w === "string" ? { code: w } : w;
       const before = mem.now();
+      await mark(`${name}: start`);
       mem.reset();
       const prep = setup === undefined ? undefined : (await ev(`run(${JSON.stringify(setup)})`))?.out?.trim();
       const warm = await ev(`run(${JSON.stringify(code)})`);
@@ -354,14 +370,30 @@ async function session(page) {
         timed.push({ ms: r?.ms, out: r?.out?.trim() });
       }
       const peakRss = mem.peak();
+      await mark(`${name}: end`);
       await gc();
+      await mark(`${name}: after GC`);
       const memory = { before, peakRss, afterGcRss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
       const times = timed.map((t) => t.ms).sort((a, b) => a - b);
       speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out), mem: memory, ...(prep === undefined ? {} : { setup: prep }) };
       step(`${name}: ${speed[name].ms} ms`);
     }
+    // (then idle: does each engine keep its peak? after the last workload,
+    // 10 s later, after a forced GC, and 20 s after that)
+    const idle = { end: mem.now() };
+    await sleep(10000);
+    idle.after10s = mem.now();
+    await mark("idle 10 s");
+    await gc();
+    idle.afterGc = mem.now();
+    await mark("idle, after GC");
+    await sleep(20000);
+    idle.after30s = mem.now();
+    await mark("idle 30 s");
+    idle.heap = await heaps();
+    const timeline = mem.timeline();
     ws.close();
-    return { cold, numpy, speed };
+    return { cold, numpy, speed, idle, timeline };
   } finally {
     mem?.stop();
     chrome.kill("SIGKILL");
@@ -395,6 +427,7 @@ const row = (engine) => {
     mem: {
       blank: median(rs.map((r) => r.cold.mem.blankRss)), started: median(rs.map((r) => r.cold.mem.rss)), numpy: median(rs.map((r) => r.numpy.mem.rss)),
       wasmStarted: median(rs.map((r) => r.cold.mem.heap.wasm ?? 0)), wasmNumpy: median(rs.map((r) => r.numpy.mem.heap.wasm ?? 0)),
+      idle: { end: median(rs.map((r) => r.idle.end)), after10s: median(rs.map((r) => r.idle.after10s)), afterGc: median(rs.map((r) => r.idle.afterGc)), after30s: median(rs.map((r) => r.idle.after30s)), wasm: median(rs.map((r) => r.idle.heap.wasm ?? 0)) },
       rows: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, {
         peak: median(rs.map((r) => r.speed[w].mem.peakRss)), afterGc: median(rs.map((r) => r.speed[w].mem.afterGcRss)), wasm: median(rs.map((r) => r.speed[w].mem.heap.wasm ?? 0)),
       }])),
@@ -421,6 +454,7 @@ console.log(`\n| the page's renderer process, private memory (MB) | Sagebrush | 
 console.log(`| (the browser's renderers on about:blank, for scale) | ${mb(S.mem.blank)} | ${mb(P.mem.blank)} |`);
 console.log(`| after print(1 + 1) | ${mb(S.mem.started)} | ${mb(P.mem.started)} (${mb(P.mem.wasmStarted)}) |`);
 console.log(`| after import numpy | ${mb(S.mem.numpy)} | ${mb(P.mem.numpy)} (${mb(P.mem.wasmNumpy)}) |`);
+console.log(`| idle after the last workload: at once / 10 s / after GC / 30 s | ${[S.mem.idle.end, S.mem.idle.after10s, S.mem.idle.afterGc, S.mem.idle.after30s].map(mb).join(" / ")} | ${[P.mem.idle.end, P.mem.idle.after10s, P.mem.idle.afterGc, P.mem.idle.after30s].map(mb).join(" / ")} (${mb(P.mem.idle.wasm)}) |`);
 for (const w of Object.keys(WORKLOADS)) console.log(`| ${w}: peak / after GC | ${mb(S.mem.rows[w].peak)} / ${mb(S.mem.rows[w].afterGc)} | ${mb(P.mem.rows[w].peak)} / ${mb(P.mem.rows[w].afterGc)} (${mb(P.mem.rows[w].wasm)}) |`);
 // both must have printed the same thing (else the comparison is void)
 const bad = check(results, Object.keys(WORKLOADS), REPS);
