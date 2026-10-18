@@ -1,0 +1,37 @@
+single 1x1 0
+single 1x1 Inf
+single 1x1 4.5
+single 1x1 111430.1015625
+single 1x1 -11249997
+single 1x1 -11249997
+single 1x1 -11249997
+single 1x1 1.9999999360571385e+38
+single 1x1 1.9999999360571385e+38
+double 1x1 1e+308
+double 1x2 [1e+308 1e+308]
+double 1x1 Inf
+double 1x1 9.8813129168249314e-24
+double 1x1 2.4000000000000004
+double 1x1 Inf
+single 1x1 Inf
+single 1x1 Inf
+uint8 1x1 255
+int8 1x1 127
+single 1x1 1
+single 3x2 [1 2;1 2;1 2]
+double 3x2 [3 3;4 4;5 5]
+double 1x2 [0 4.5323601418271942]
+logical 1x2 [false false]
+double 1x2 [0 3.1415926535897931]
+logical 1x2 [false false]
+logical 1x2 [false false]
+double 1x2 [0 2]
+double 1x1 -Inf
+single 1x1 -Inf
+double 1x3 [Inf Inf Inf]
+single 1x2 [2 1]
+single 1x2 [2 1]
+cell 1x4 {char 1x6 ['single'], char 1x6 ['double'], char 1x6 ['single'], char 1x6 ['double']}
+cell 1x4 {char 1x6 ['single'], char 1x6 ['single'], char 1x6 ['single'], char 1x6 ['single']}
+double 1x2 [0 1]
+double 1x2 [0 1]
