@@ -11,17 +11,19 @@ test("int.from_bytes and int.to_bytes as CPython's", () => {
   for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `${name} line ${i + 1}`);
 });
 
-// (linear: a byte at a time was quadratic, 23 s for to_bytes of 415 KB;
-// these 4 MB each way take well under a second)
+// (linear: a byte at a time was quadratic, 23 s for to_bytes of 415 KB, so
+// it would take minutes for this 1 MB; linear, it takes well under a
+// second on an idle machine. The bound is wide, 10 s: a shared VM at a load
+// of 100 took over 3 s for 4 MB, so a tight bound was flaky)
 test("int.from_bytes and int.to_bytes are linear", () => {
   const src = [
     "import time",
-    "b = bytes(range(256)) * 16384",
+    "b = bytes(range(256)) * 4096",
     "t = time.perf_counter()",
     "x = int.from_bytes(b, 'little')",
     "c = x.to_bytes(len(b), 'little')",
     "d = time.perf_counter() - t",
-    "print(c == b, d < 3)",
+    "print(c == b, d < 10)",
   ].join("\n");
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8", timeout: 120000 });
   assert.equal(out.trim(), "True True");
