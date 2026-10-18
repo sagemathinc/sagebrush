@@ -32,15 +32,20 @@
     "same_exception_and_cause": 7
   },
   "full_ci": {
-    "status": "running",
     "host": "sagebrush",
     "revision": "2fb25571e80d2355e8eedff6114b9c2a02de0634",
-    "driver_log": "/scratch/sagebrush-reviews/readability-builtin-iterators-ci-final-host1.log",
-    "note": "Superseded 10ca run stopped; queued 2fb run on sagebrush-2 relocated before any test stages."
+    "result": "RESULT 2fb25571e: all passed (any crowd failures passed alone)",
+    "npm_isolated_passed": 921,
+    "npm_isolated_failed": 0,
+    "npm_skipped": 1,
+    "browser_commands": 84,
+    "logs": "/scratch/sbremote/logs/2fb25571e/",
+    "crowd_failures": "6 npm timing tests and 3 browser commands; full npm suite and all failed browser commands passed in isolation",
+    "sync_precheck_rc": 0
   },
   "reviews": {
-    "behavior": "CLEAR by @sagebrush-astra on 2fb25571; full CI pending",
-    "limits_refusals": "Code and exact-head evidence CLEAR by @sagebrush-daybreak2 on 2fb25571; full CI pending"
+    "behavior": "CLEAR by @sagebrush-astra on 2fb25571; independent 17 callback probes, 7 malformed hooks and 5 tests; full CI subsequently passed at the same executable revision.",
+    "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2 on 2fb25571; full CI subsequently passed at the same executable revision and sent for final acknowledgement."
   },
   "post_validation_production_change": "None.",
   "measurement": {
