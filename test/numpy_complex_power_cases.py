@@ -1,4 +1,4 @@
-# complex128 powers as NumPy's npy_cpow (integer exponents below 100 in
+# complex128 powers and division as NumPy's npy_cpow (integer exponents below 100 in
 # magnitude: unrolled 1, 2, 3, else binary powering with cmul, Smith's
 # division for negative ones; 0 ** b) and its reciprocal loop, which z ** -1
 # uses: the bytes of each result, compared with CPython's NumPy
@@ -20,9 +20,12 @@ s = np.array(specials, dtype=complex)
 
 def digest(r):
     r = np.asarray(r)
-    # (NaNs as one NaN: their signs and payloads come from the hardware)
-    r = np.where(np.isnan(r.real), np.nan, r.real) + 1j * np.where(np.isnan(r.imag), np.nan, r.imag)
-    return f"{r.dtype} {r.shape} {int.from_bytes(np.ascontiguousarray(r).tobytes(), 'little') % (2**61 - 1):016x}"
+    # (the real and imaginary parts as float arrays, NaNs as one NaN: their
+    # signs and payloads come from the hardware; not rebuilt as re + 1j * im,
+    # whose 1j * inf would make NaNs of its own)
+    parts = np.concatenate([r.real.ravel(), r.imag.ravel()])
+    parts = np.where(np.isnan(parts), np.nan, parts)
+    return f"{r.dtype} {r.shape} {int.from_bytes(parts.tobytes(), 'little') % (2**61 - 1):016x}"
 
 
 with np.errstate(all="ignore"):
@@ -36,5 +39,8 @@ with np.errstate(all="ignore"):
     zz **= -1
     print("z **= -1", digest(zz))
     print("z ** 3", digest(z ** 3), "z ** -2", digest(z ** -2))
+    # complex division, NumPy's loop (Smith's, multiplying by the reciprocal)
+    w = (rng.standard_normal(n) * 10 ** rng.uniform(-3, 3, n)) + 1j * (rng.standard_normal(n) * 10 ** rng.uniform(-3, 3, n))
+    print("divide", digest(np.divide(z, w)), digest(z / w), digest(np.divide(s[:, None], s[None, :])))
     for k in [2, 3, -1]:
         print("element", k, [repr(complex(v)) for v in np.power(s[:12], k)])

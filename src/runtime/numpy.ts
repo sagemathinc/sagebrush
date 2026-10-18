@@ -1068,15 +1068,19 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   left_shift: { f: (x, y) => x * 2 ** y },
   right_shift: { f: (x, y) => Math.floor(x / 2 ** y) },
 });
+// (a + b i) / (c + d i) as NumPy's complex divide loop (umath/loops.c.src)
+// and npy_cpow's cdiv: Smith's algorithm, multiplying by the reciprocal of
+// the denominator (scl), not dividing by it, which rounds differently (an
+// ulp in about 43% of results); a zero divisor gives a / |c|, b / |d|
 function cdiv(a: number, b: number, c: number, d: number): [number, number] {
-  // Smith's algorithm, as NumPy
-  if (Math.abs(c) >= Math.abs(d)) {
-    if (c === 0 && d === 0) return [a / Math.abs(c), b / Math.abs(c)];
-    const r = d / c, den = c + d * r;
-    return [(a + b * r) / den, (b - a * r) / den];
+  const ac = Math.abs(c), ad = Math.abs(d);
+  if (ac >= ad) {
+    if (ac === 0 && ad === 0) return [a / ac, b / ad];
+    const rat = d / c, scl = 1 / (c + d * rat);
+    return [(a + b * rat) * scl, (b - a * rat) * scl];
   }
-  const r = c / d, den = c * r + d;
-  return [(a * r + b) / den, (b * r - a) / den];
+  const rat = c / d, scl = 1 / (d + c * rat);
+  return [(a * rat + b) * scl, (b * rat - a) * scl];
 }
 // NumPy's cmul: the product as written, no fused multiply-add
 const cmul = (ar: number, ai: number, br: number, bi: number): [number, number] => [ar * br - ai * bi, ar * bi + ai * br];
