@@ -629,7 +629,7 @@ function cliWorker(argv: string[]) {
   parentPort!.postMessage({ interrupt: R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null });
   for (const [stream, fd] of [[process.stdout, 1], [process.stderr, 2]] as [any, number][]) {
     stream.write = (chunk: any, enc?: any, cb?: any) => {
-      const data = typeof chunk === "string" ? Buffer.from(chunk, typeof enc === "string" ? enc : "utf8") : Buffer.from(chunk);
+      const data = typeof chunk === "string" ? Buffer.from(chunk, typeof enc === "string" ? (enc as BufferEncoding) : "utf8") : Buffer.from(chunk);
       for (let off = 0; off < data.length; ) {
         try {
           off += writeSync(fd, data, off);
