@@ -869,22 +869,41 @@ def _still_range(v):
 
 # a comprehension ([ e : x in S ], { ... }, {@ ... @}, {* ... *}), a
 # selection S[I], a set of a range or a sequence made from one builds at
-# most this many elements (HARD-FCC-1, HARD-A57-1): 10^6, or fewer in a
-# small heap, _COLLECT_COST bytes of heap for each.  (Measured in a 96 MiB
-# heap, Node 24: a selection of 10^6 integers took about 90 MB and aborted
-# V8 on GitHub's Node 24; a comprehension of 100000 pairs <x, x> or
-# sequences [x] fits, 200000 aborts; 65536 triples <x, [x, x+1], x/3>
-# fit on Node 24 and 26 but not 22.  So 49152 elements there.)
-_COLLECT_COST = 2048
+# most _COLLECT_MAX elements (HARD-FCC-1, HARD-A57-1): 10^6, or fewer in a
+# small heap.  The heap a script has is the limit less what is already in
+# use when Magma mode has loaded (its compiled modules: about 59 MB of a
+# 96 MiB heap in October 2026), so the bound is the least of
+#   - 10^6;
+#   - limit // 2048, the earlier bound, which this one never exceeds;
+#   - free // _COLLECT_COST, free = limit - used.
+# used is sys._sagebrush_heap_used() (V8's used heap, Node only), rounded
+# up to a whole MiB so that one script gets one bound run after run, and
+# taken once, when this module has finished importing (the end of the
+# file): the bound never changes within a session.  Where the host has no
+# heap statistics (the browser, Bun, Deno; CPython), used is the fixed
+# _COLLECT_RESERVE instead.  (Measured in a 96 MiB heap on Node 24 and 26:
+# 49152 triples <x, [x, x+1], x/3>, the costliest element of the tests,
+# need a heap of 84 to 88 MiB, about 540 bytes each above the loaded
+# 59 MB; at _COLLECT_COST each, the bound there is about 37000, which peaks
+# near 80 MB, under 90% of the heap.)
+_COLLECT_COST = 1024
+_COLLECT_RESERVE = 64 << 20
 
 
 def _collect_max():
     n = getattr(_sys, "_sagebrush_heap_limit", None)
     # (CPython, or a host that cannot say: a nominal 1 GiB)
-    return min(10 ** 6, (int(n) if n else 1 << 30) // _COLLECT_COST)
-
-
-_COLLECT_MAX = _collect_max()
+    limit = int(n) if n else 1 << 30
+    used = None
+    f = getattr(_sys, "_sagebrush_heap_used", None)
+    if callable(f):
+        try:
+            used = f()
+        except Exception:
+            used = None
+    mib = 1 << 20
+    used = _COLLECT_RESERVE if used is None else -(-int(used) // mib) * mib
+    return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST)
 
 
 def _collect_refusal():
@@ -9899,3 +9918,8 @@ for _n, _f in list(globals().items()):
 __all__ = [n for n, v in list(globals().items())
            if not n.startswith("_") and (callable(v) or isinstance(v, type)) and getattr(v, "__module__", None) == __name__]
 __all__ += _CATEGORIES
+
+
+# (the comprehension bound, taken once, now that this module and all it
+# imports are loaded: see _collect_max)
+_COLLECT_MAX = _collect_max()
