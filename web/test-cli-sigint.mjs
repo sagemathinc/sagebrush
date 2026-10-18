@@ -96,6 +96,12 @@ for (const [rt, cmd] of runtimes) {
   // write to a full pipe takes part of it, or none: the rest must follow)
   const big = spawnSync("sh", ["-c", '"$@" | (sleep 1; wc -c)', "sh", ...cmd, "-c", "print('x' * 10_000_000)"], { encoding: "utf8" });
   check(`${rt}: 10 MB through a slow pipe arrives whole`, big.stdout.trim() === "10000001", JSON.stringify([big.stdout, big.stderr.slice(-300)]));
+  // os.chdir, then a module there imported through sys.path's '.' (a worker
+  // cannot chdir: its working directory is virtual, and imports follow it)
+  const sub = mkdtempSync(join(dir, "cwd-"));
+  writeFileSync(join(sub, "here_mod.py"), "VALUE = 42\n");
+  const cd = spawnSync(cmd[0], [...cmd.slice(1), "-c", `import os, sys\nos.chdir(${JSON.stringify(sub)})\nsys.path.insert(0, '.')\nimport here_mod\nprint(here_mod.VALUE, os.getcwd() == ${JSON.stringify(sub)})`], { encoding: "utf8" });
+  check(`${rt}: import from '.' after os.chdir`, cd.stdout === "42 True\n", JSON.stringify([cd.stdout, cd.stderr.slice(-300)]));
   // exit statuses and a program on stdin, as before
   const st = spawnSync(cmd[0], [...cmd.slice(1), "-c", "import sys; sys.exit(3)"]);
   check(`${rt}: sys.exit(3)`, st.status === 3, String(st.status));
