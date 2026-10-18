@@ -21,6 +21,7 @@ interface Exports {
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
   vexp(x: number, y: number, n: number, tab: number): void;
   vlog(x: number, y: number, n: number, tab: number): void;
+  vsincos(x: number, y: number, n: number, tab: number, cos: number, idx: number): number;
   mt_fill(key: number, meta: number, dist: number, out: number, n: number, lo: number, rng: number, logtab: number): void;
   pcg_fill(words: number, meta: number, dist: number, out: number, n: number, lo: number, rng: number, logtab: number): void;
   sort_f64(x: number, n: number, tmp: number, hist: number): void;
@@ -251,6 +252,7 @@ interface Relaxed {
   memory: WebAssembly.Memory;
   vexp(x: number, y: number, n: number, tab: number): void;
   vlog(x: number, y: number, n: number, tab: number): void;
+  vsincos(x: number, y: number, n: number, tab: number, cos: number, idx: number): number;
   mt_fill: Exports["mt_fill"];
   pcg_fill: Exports["pcg_fill"];
   fma_probe(): number;
@@ -308,6 +310,37 @@ export function wasmUnary(op: "vexp" | "vlog", tab: Float64Array, src: Float64Ar
   K![op](x, x, n, t);
   dst.set(view(x, n));
   resident = key;
+  return true;
+}
+
+// sin or cos (correctly rounded, as crmath.ts) of src[off..off+n] into
+// dst[0..n]: the kernel (kernels/src/crsin.rs) computes crmath's fast path
+// and leaves the elements it cannot round, and those not finite or past
+// 2^20 pi/2, to slow (crmath's sin or cos itself).
+export function wasmSinCos(cos: boolean, tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array, slow: (x: number) => number): boolean {
+  if (n < UNARY_MIN || !kernels()) return false;
+  const R = relaxed();
+  let left: number, mem: WebAssembly.Memory, ix: number;
+  if (R) {
+    const [t, x, idx] = rlayout(R, tab.length, n, (n + 1) >> 1);
+    if (R.tab !== "sincos") R.f64.set(tab, t / 8);
+    R.tab = "sincos";
+    R.f64.set(src.subarray(off, off + n), x / 8);
+    left = R.e.vsincos(x, x, n, t, +cos, idx);
+    dst.set(R.f64.subarray(x / 8, x / 8 + n));
+    [mem, ix] = [R.e.memory, idx];
+  } else {
+    const key = "sincos", keep = resident === key;
+    const [t, x, idx] = layout(tab.length, n, (n + 1) >> 1);
+    if (!keep) view(t, tab.length).set(tab);
+    view(x, n).set(src.subarray(off, off + n));
+    left = K!.vsincos(x, x, n, t, +cos, idx);
+    dst.set(view(x, n));
+    resident = key;
+    [mem, ix] = [K!.memory, idx];
+  }
+  const I = new Int32Array(mem.buffer, ix, left);
+  for (let k = 0; k < left; k++) dst[I[k]] = slow(src[off + I[k]]);
   return true;
 }
 
