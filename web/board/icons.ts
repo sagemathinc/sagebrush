@@ -32,7 +32,8 @@ const NS = "http://www.w3.org/2000/svg";
 
 /** The icon for a tool, or null if it has none. */
 export function icon(id: string): SVGSVGElement | null {
-  const shapes = ICONS[id];
+  // (its own entry only, whatever the name: "constructor" is not an icon)
+  const shapes = Object.hasOwn(ICONS, id) ? ICONS[id] : undefined;
   if (!shapes) return null;
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
