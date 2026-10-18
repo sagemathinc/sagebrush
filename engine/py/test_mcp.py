@@ -195,13 +195,13 @@ def structured():
     assert r["class_group"] == {"value": {"order": 2, "invariants": [2]}, "certified": True, "assumes": []} and r["not_certified_because"] is None, r
     assert r["regulator"]["certified"] and r["regulator"]["value"].startswith("5.587206626"), r
     # the certificate's digits, not RR's rounding of them (astra's CORR-479-3)
-    r = call("number_field", {"polynomial": "x^3 - 13*x - 22"})["result"]
-    assert r["regulator"]["certified"] and r["regulator"]["value"].startswith("16.12085474122825"), r
+    r2 = call("number_field", {"polynomial": "x^3 - 13*x - 22"})["result"]
+    assert r2["regulator"]["certified"] and r2["regulator"]["value"].startswith("16.12085474122825"), r2
     # a factorization of an assumed discriminant assumes the same (CORR-479-2)
     for proof in (True, False):
-        sc = call("number_field", {"polynomial": "x^2 - 2*(2^127 - 1)^2", "proof": proof})
-        d, f = sc["result"]["discriminant"], sc["result"]["discriminant_factorization"]
-        assert not d["certified"] and d["assumes"] and set(d["assumes"]) <= set(f["assumes"]) and not f["certified"] and sc["status"] == "heuristic", sc
+        sc2 = call("number_field", {"polynomial": "x^2 - 2*(2^127 - 1)^2", "proof": proof})
+        d, f = sc2["result"]["discriminant"], sc2["result"]["discriminant_factorization"]
+        assert not d["certified"] and d["assumes"] and set(d["assumes"]) <= set(f["assumes"]) and not f["certified"] and sc2["status"] == "heuristic", sc2
     assert sc["status"] == ("proven" if r["torsion_order"]["certified"] else "heuristic"), sc
     assert "discriminant: -3267" in sc["text"] and "class number: 2" in sc["text"], sc["text"]
     sc = call("number_field", {"polynomial": "x^3 - 11", "proof": False})
