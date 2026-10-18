@@ -495,6 +495,19 @@ const askAnswer = (a: unknown): AskAnswer | undefined =>
   typeof a === "string" || typeof a === "boolean" ? a : num(a) ?? (Array.isArray(a) && a.every((x) => typeof x === "string") ? [...a] : undefined);
 // (a picture's name, and where its bytes may be: a raster image's data: URL, or an https: address)
 const IMAGE_NAME = /^[\w-]{1,100}$/;
+// An object's own entry for a key a board names (an id, an image's name),
+// set and read as its own: "__proto__", "constructor" or "toString" are a
+// board's to use as any other name, never the object's prototype or its
+// methods (an assignment `o[k] = v` to "__proto__" sets the prototype, and
+// `o[k]` reads inherited members).
+/** Set `o`'s own entry `k`, whatever `k` is. */
+export function setOwn<T>(o: Record<string, T>, k: string, v: T): void {
+  Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+}
+/** `o`'s own entry `k`, if it has one. */
+export function getOwn<T>(o: Record<string, T> | null | undefined, k: string): T | undefined {
+  return o && Object.hasOwn(o, k) ? o[k] : undefined;
+}
 // (data: URLs as image-size.ts reads them, any case of the type and jpg too: one grammar, CORR-68B-1)
 const IMAGE_SRC = /^https:\/\/[^\s"'<>\\]+$/;
 const imageSrc = (s: string) => IMAGE_SRC.test(s) || dataUrl(s) !== null;
@@ -506,7 +519,7 @@ function cleanImages(m: any): Record<string, ImageInfo> | undefined {
     if (!IMAGE_NAME.test(k) || !w || !h || w <= 0 || h <= 0) continue;
     // (a source that is not a raster image's data: URL or an https: address: the picture is dropped)
     if (v.src !== undefined && !(typeof v.src === "string" && imageSrc(v.src))) continue;
-    out[k] = v.src !== undefined ? { w, h, src: v.src } : { w, h };
+    setOwn(out, k, v.src !== undefined ? { w, h, src: v.src } : { w, h });
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -887,7 +900,7 @@ export function layout(doc: BoardDoc, measure?: Measure, opts: { deferRoutes?: b
   // links: absolute, or paths under the document's refBase
   const refOf = (n: DocNote) => n.ref && doc.refBase && !/^([a-z]+:|#)/i.test(n.ref) ? doc.refBase + n.ref : n.ref;
   // (a note's picture: its name and size, and where its bytes are when not in this browser)
-  const imgOf = (n: DocNote) => { const i = n.image ? doc.images?.[n.image] : undefined; return i ? { key: n.image!, ...i } : undefined; };
+  const imgOf = (n: DocNote) => { const i = n.image ? getOwn(doc.images, n.image) : undefined; return i ? { key: n.image!, ...i } : undefined; };
   const edges = (doc.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
   // the member of `members` that holds node `id` (itself, or a group around it)
   const memberOf = (id: string, members: Set<string>): string | null => {
