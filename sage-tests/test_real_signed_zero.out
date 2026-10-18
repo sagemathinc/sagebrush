@@ -1788,3 +1788,117 @@ b'010' -> 1024.0000
 b'2_0' -> 1.0485760e6
 b' 2 ' -> 4.0000000
 b'\xd9\xa2' !! TypeError unsupported operands for <<
+' 0x2' -> 4.0000000
+'0x2 ' -> 4.0000000
+'\t0x2' !! TypeError unsupported operands for <<
+'0x2\t' -> 4.0000000
+'\n0x2' !! TypeError unsupported operands for <<
+'0x 2' -> 4.0000000
+'0x_2' -> 4.0000000
+'-0x2' -> 0.25000000
+'- 0x2' -> 0.25000000
+' -0x2' -> 0.25000000
+' - 0x2' -> 0.25000000
+'-\t0x2' !! TypeError unsupported operands for <<
+' 0b1' -> 2.0000000
+' 0o7' -> 128.00000
+'\t0o7' !! TypeError unsupported operands for <<
+' 010' -> 1024.0000
+'\t010' -> 1024.0000
+'\n2' -> 4.0000000
+' 2' -> 4.0000000
+'2 ' -> 4.0000000
+'\t2' -> 4.0000000
+'2\t' -> 4.0000000
+'\t-2' -> 0.25000000
+'\x0b2' -> 4.0000000
+'\x0c2' -> 4.0000000
+'\r2' -> 4.0000000
+'2\r' -> 4.0000000
+'\xa02' !! TypeError unsupported operands for <<
+'\u20002' !! TypeError unsupported operands for <<
+'2\xa0' !! TypeError unsupported operands for <<
+' + 2' -> 4.0000000
+'+ 0x2' -> 4.0000000
+'+\t2' -> 4.0000000
+'-\t2' -> 0.25000000
+'_0x2' -> 4.0000000
+'0_x2' -> 4.0000000
+'0x2_' -> 4.0000000
+'0X2' -> 4.0000000
+' 0X2' -> 4.0000000
+' 0x2 ' -> 4.0000000
+'\t5\n' -> 32.000000
+'\t5' -> 32.000000
+'5\n' -> 32.000000
+'\n5' -> 32.000000
+' \t5' -> 32.000000
+'\t 5' -> 32.000000
+'0x\t2' -> 4.0000000
+' _2' -> 4.0000000
+'_ 2' -> 4.0000000
+'2 _' -> 4.0000000
+' 0b_1' -> 2.0000000
+'0b1 ' -> 2.0000000
+b'\t0x2' !! TypeError unsupported operands for <<
+b' 0x2' -> 4.0000000
+b'\t5' -> 32.000000
+b'0x2 ' -> 4.0000000
+'1 2' -> 4096.0000
+'1\t2' -> 4096.0000
+'0x1 2' -> 262144.00
+'0x1\t2' -> 262144.00
+' 0x\t2' -> 4.0000000
+'0 x2' !! TypeError unsupported operands for <<
+'\t+0x2' !! TypeError unsupported operands for <<
+' +0x2' -> 4.0000000
+'\t 0x2' !! TypeError unsupported operands for <<
+' \t0x2' !! TypeError unsupported operands for <<
+'+ \t0x2' !! TypeError unsupported operands for <<
+'_\t0x2' !! TypeError unsupported operands for <<
+'\t_0x2' !! TypeError unsupported operands for <<
+'-  0x2' -> 0.25000000
+'  0x2' -> 4.0000000
+'0x2\n' -> 4.0000000
+'\t5 6' -> 7.2057594e16
+'5\t\t' -> 32.000000
+'\x0c0x2' !! TypeError unsupported operands for <<
+'\x0b0x2' !! TypeError unsupported operands for <<
+'\r0x2' !! TypeError unsupported operands for <<
+' \n0x2' !! TypeError unsupported operands for <<
+'0b1 0' -> 4.0000000
+'10\n0' -> 1.2676506e30
+'+-2' !! TypeError unsupported operands for <<
+'--2' !! TypeError unsupported operands for <<
+'-' !! TypeError unsupported operands for <<
+'+' !! TypeError unsupported operands for <<
+' ' !! TypeError unsupported operands for <<
+'0x' !! TypeError unsupported operands for <<
+' 0x ' !! TypeError unsupported operands for <<
+'0xg' !! TypeError unsupported operands for <<
+'٢' !! TypeError unsupported operands for <<
+'ⅷ' !! TypeError unsupported operands for <<
+'0b2' !! TypeError unsupported operands for <<
+'0o8' !! TypeError unsupported operands for <<
+'08' -> 256.00000
+'0d10' !! TypeError unsupported operands for <<
+' 0b 1' -> 2.0000000
+'0 b1' !! TypeError unsupported operands for <<
+'1_' -> 2.0000000
+'_' !! TypeError unsupported operands for <<
+'__' !! TypeError unsupported operands for <<
+'+_2' -> 4.0000000
+'-_0x2' -> 0.25000000
+'0_b1' -> 2.0000000
+0*10^6+2 -> 4.0000000
+_*10^6+2 -> 4.0000000
+sp*10^6+2 -> 4.0000000
+2+sp*10^6 -> 4.0000000
+1*10^6+_*10^6 !! OverflowError
+1*5000 !! OverflowError
+1*10^6+x !! TypeError
+0x+0*1000+1 -> 2.0000000
+-+0*1000+3 -> 0.12500000
+b0*10^6+2 -> 4.0000000
+2^63-1 -> +infinity
+0x8000000000000000 !! OverflowError
