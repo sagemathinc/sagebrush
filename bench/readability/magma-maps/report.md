@@ -1,7 +1,7 @@
 # Magma maps readability slice
 
-Status: primary measurement and exact corpus comparison complete. Full VM CI
-and final behavior review are pending. This is not a merge-ready report yet.
+Status: primary measurement, exact corpus comparison and full VM CI passed.
+Final behavior review is pending.
 
 The slice is confined to the maps section of `lib/_magma.py`. The Magma owner
 reserved this region while collection, arithmetic and vector work continued
@@ -69,7 +69,23 @@ exit codes and timeout flags exactly, excluding only elapsed time. It is an
 identity test, not a new oracle-correctness claim.
 
 Operational-limits/refusals code review is CLEAR at `359723b5`; the reviewer
-accepted the exact corpus evidence. Behavior review and full CI are pending.
+accepted the exact corpus evidence. Final behavior review is pending.
+
+Full CI on the measured executable revision completed with:
+
+```text
+RESULT 359723b55: all passed (any crowd failures passed alone)
+```
+
+The isolated npm run passed all 921 tests; all 84 browser commands passed,
+including five isolated retries. Two npm timing failures in the crowded run
+passed in isolation. Raw stage results are in `results/full-ci.txt`. The only
+production change since that revision is the two-line comment described below;
+the Python AST is identical ignoring source locations.
+
+An additional nested-set-image probe matched at depths 10, 25, 50, 75, 100,
+150 and 200. It checks the extracted helper's recursive refusal behavior and
+is recorded separately from the frozen corpus in `results/nested-image.json`.
 
 ## Remaining confusion and comment follow-up
 
