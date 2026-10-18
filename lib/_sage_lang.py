@@ -1839,14 +1839,18 @@ class _CallableInt(int):
     __slots__ = ()
 
     def __call__(self):
-        """Sage's numerator() and denominator(): the int called returns itself.
+        """Sage's numerator() and denominator(): the int called returns itself,
+        as an Integer with Sage's methods (under CPython a plain int had none).
 
         EXAMPLES::
 
             sage: (3/4).numerator(), (3/4).denominator()
             (3, 4)
+            sage: (3/1024).denominator().nbits(), (6/35).denominator().factor()
+            (11, 5 * 7)
         """
-        return int(self)
+        import sage_all
+        return sage_all.Integer(int(self))
 
 
 def _int_n(n, prec=None, digits=None):
