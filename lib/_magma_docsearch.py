@@ -23,6 +23,7 @@ TABLE = {
     "Submatrix": (["matrices"], "A block of a matrix, by its top left entry and its size."),
     "Subsets": (["sequences and sets"], "The set of the subsets of a set, or of those of a given size."),
     "Sym": (["structures"], "The symmetric group on 1 .. n, whose elements are permutations."),
+    "DihedralGroup": (["structures"], "The dihedral group of order 2n as permutations of 1 .. n."),
     "Identity": (["structures"], "The identity element of a group."),
     # structures and types
     "Integers": (["structures"], "The ring of integers; Integers(m), the integers modulo m; Integers(K), a number field's maximal order."),
@@ -233,6 +234,10 @@ EXAMPLES = {
     "Sym": """\
 > #Sym(4);
 24""",
+    "DihedralGroup": """\
+> G := DihedralGroup(5);
+> G.1^2;
+(1, 3, 5, 2, 4)""",
     "Identity": """\
 > G := Sym(3);
 > Identity(G);

@@ -28,6 +28,7 @@
   "Denominator": "> Denominator(12/18);\n3",
   "Derivative": "> P<x> := PolynomialRing(Integers());\n> Derivative(x^4 + 3*x);\n4*x^3 + 3",
   "Determinant": "> Determinant(Matrix(Integers(), 3, 3, [2, 0, 1, 1, 3, 0, 0, 1, 4]));\n25",
+  "DihedralGroup": "> G := DihedralGroup(5);\n> G.1^2;\n(1, 3, 5, 2, 4)",
   "Dimension": "> M := ModularSymbols(37, 2, 1);\n> Dimension(M);\n3\n> Dimension(CuspidalSubspace(M));\n2\n> Dimension(CuspForms(23));\n2",
   "DimensionCuspFormsGamma0": "> DimensionCuspFormsGamma0(37, 2);\n2",
   "DimensionNewCuspFormsGamma0": "> DimensionNewCuspFormsGamma0(22, 2);\n0",

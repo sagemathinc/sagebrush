@@ -522,6 +522,9 @@ class MSet:
     def ordered(self):
         if self.kind == "indexed":
             return list(self.items)
+        if len(self.keys) > 1 and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in self.items):
+            # (Magma's order of the groups in a set is its own: not modelled)
+            raise MagmaError("the order of a set of permutation groups is not supported yet")
         try:
             return sorted(self.items, key=_sortkey)
         except TypeError:
@@ -2902,6 +2905,8 @@ def _eq_kind(x):
         return "map"
     if _is_struct(x):
         return "struct"
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        return "grp"  # (permutation groups: one set or sequence holds any)
     if hasattr(x, "parent"):
         return "elt"
     return "other " + type(x).__name__
@@ -3107,6 +3112,13 @@ def _eq(a, b, pos=None, op="eq"):
         _cyc_check(op, a, b, pos)
     if isinstance(a, _MModSpace) or isinstance(b, _MModSpace):
         raise MagmaError("comparison of a module of matrices is not supported yet", "'%s'" % op, True, pos)
+    pg = (_MSymGroup, _MDihedralGroup)
+    if isinstance(a, pg) and isinstance(b, pg):
+        # (permutation groups: of two degrees Magma's error; DihedralGroup(3)
+        # is Sym(3), another dihedral group not Sym(n), as Magma's)
+        if a.n != b.n:
+            raise MagmaError("Could not find a covering group", "'%s'" % op, True, pos)
+        return type(a) is type(b) or a.n == 3
     if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
@@ -4324,6 +4336,10 @@ def _str1(v, indent, col, tail):
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
         return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
+    if isinstance(v, MSet) and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in v.items):
+        # (Magma lists a set of groups in an order of its own, and names
+        # DihedralGroup(3) and Sym(3) as one group: not modelled)
+        raise MagmaError("printing a set of permutation groups is not supported yet")
     if isinstance(v, (MSeq, MSet)):
         o, c = _brackets(v)
         raw = v.ordered() if isinstance(v, MSet) else list(v)
@@ -5029,7 +5045,7 @@ def _type_name(x):
         return "ModTupFldElt"
     if isinstance(x, _MPerm):
         return "GrpPermElt"
-    if isinstance(x, _MSymGroup):
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
         return "GrpPerm"
     if isinstance(x, _MResRing):
         return "RngIntRes"
@@ -6912,6 +6928,8 @@ def Order(x):
         return x._magma_order()
     if isinstance(x, _MPerm):
         return x._order()
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        return x._magma_card()  # (a group's order, #G)
     raise MagmaError("Order of this argument is not supported yet", "'Order'")
 
 
@@ -7042,7 +7060,7 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
             kx, ke = _eq_kind(x), _eq_kind(e)
             ok = ((kx == ke == "struct" and _struct_cat(x) == _struct_cat(e))
                   or (kx in ("set", "mset") and ke in ("set", "mset") and not (kx == "mset" and ke == "set"))
-                  or (kx == ke == "map")
+                  or (kx == ke == "map") or (kx == ke == "grp")
                   or (kx == ke == "tup" and len(x) == len(e)))
             if ke == "seq" and not len(e) and name == "Index" and not (kx == "seq" and not len(x)):
                 raise MagmaError(cannot, "'%s'" % name)
@@ -9293,6 +9311,9 @@ class _MSymGroup:
         return "Symmetric group %sacting on a set of cardinality %d\n%s" % (name + " " if name else "", self.n, _order_text(_math.factorial(self.n)))
 
     def __eq__(self, other):
+        # (DihedralGroup(3) is Sym(3): one element of a set, as Magma's)
+        if isinstance(other, _MDihedralGroup):
+            return other == self
         return isinstance(other, _MSymGroup) and other.n == self.n
 
     def __hash__(self):
@@ -9312,10 +9333,15 @@ class _MSymGroup:
     def _identity(self):
         return _MPerm(self, tuple(range(1, self.n + 1)))
 
+    def _magma_contains(self, x):
+        return isinstance(x, _MPerm) and x.G.n == self.n
+
     def _magma_coerce(self, x):
         if isinstance(x, _MPerm):
             if x.G == self:
                 return x
+            if x.G.n == self.n:
+                return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
             raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
@@ -9364,7 +9390,7 @@ class _MPerm:
         return isinstance(o, _MPerm) and o.images == self.images
 
     def _magma_eq(self, o, op):
-        if not isinstance(o, _MPerm) or o.G != self.G:
+        if not isinstance(o, _MPerm) or (o.G != self.G and o.G.n != self.G.n):
             raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, %s" % _ext_type(o), "'%s'" % op, True)
         return o.images == self.images
 
@@ -9390,10 +9416,15 @@ class _MPerm:
     def __mul__(self, o):
         if not isinstance(o, _MPerm):
             raise _bad_types("*", (self, o))
-        if o.G != self.G:
-            raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, GrpPermElt", "'*'", True)
+        G = self.G
+        if o.G != G:
+            if o.G.n != G.n:
+                raise MagmaError("Arguments are not compatible\nArgument types given: GrpPermElt, GrpPermElt", "'*'", True)
+            # (of two groups on one set, a dihedral group's and Sym(n)'s: in
+            # Sym(n), as Magma's)
+            G = _MSymGroup(G.n)
         # (left to right: i^(p*q) = (i^p)^q)
-        return _MPerm(self.G, tuple(o.images[self.images[i] - 1] for i in range(self.G.n)))
+        return _MPerm(G, tuple(o.images[self.images[i] - 1] for i in range(G.n)))
 
     def _inverse(self):
         inv = [0] * self.G.n
@@ -9444,6 +9475,112 @@ def _sym(n):
 
 # the largest n of Sym(n): its permutations are tuples of n points
 _SYM_MAX = 10 ** 4
+
+
+class _MDihedralGroup:
+    """DihedralGroup(n), n >= 3: the symmetries of an n-gon as permutations
+    of 1 .. n (GrpPerm), generated by the rotation (1, 2, ..., n) and the
+    reflection i -> n + 1 - i ((1, 2) for n = 3, where Magma's is Sym(3)
+    and prints as one). Checked against Magma 2.18."""
+
+    def __init__(self, n):
+        self.n = n
+        # (DihedralGroup(3) is Magma's Sym(3), printed without its
+        # generators until one has been asked for, G.1 or G.2)
+        self._shown = n != 3
+
+    def _gens(self):
+        n = self.n
+        r = tuple(list(range(2, n + 1)) + [1])
+        s = (2, 1, 3) if n == 3 else tuple(n + 1 - i for i in range(1, n + 1))
+        return _MPerm(self, r), _MPerm(self, s)
+
+    def _gens_fit(self, limit):
+        """Whether both generators print in at most `limit` characters,
+        counted without building them, stopping as soon as one is longer:
+        at most about `limit` steps whatever n is (LIMIT-714-1)."""
+        n = self.n
+        w = 1  # (1, 2, ..., n)
+        for i in range(1, n + 1):
+            w += len(str(i)) + (2 if i > 1 else 0)
+            if w + 1 > limit:
+                return False
+        w = 0  # (1, n)(2, n - 1)... ((1, 2) for n = 3)
+        for i in range(1, n // 2 + 1):
+            w += len(str(i)) + len(str(2 if n == 3 else n + 1 - i)) + 4
+            if w > limit:
+                return False
+        return True
+
+    def __repr__(self):
+        name = _global_name(self)
+        if self._shown and not self._gens_fit(WIDTH - 5):
+            # (Magma wraps a long generator, in a layout not modelled;
+            # decided before either is made)
+            raise MagmaError("printing a dihedral group whose generators are longer than a line is not supported yet")
+        g = [repr(x) for x in self._gens()] if self._shown else []
+        kind = "Symmetric group" if self.n == 3 else "Permutation group"
+        return "%s %sacting on a set of cardinality %d\n%s%s" % (kind, name + " " if name else "", self.n, _order_text(2 * self.n),
+                                                                 "".join("\n    " + t for t in g))
+
+    def __eq__(self, other):
+        if isinstance(other, _MSymGroup):
+            return self.n == 3 and other.n == 3
+        return isinstance(other, _MDihedralGroup) and other.n == self.n
+
+    def __hash__(self):
+        return hash(("Sym", 3) if self.n == 3 else ("Dihedral", self.n))
+
+    def _magma_card(self):
+        return 2 * self.n
+
+    def __iter__(self):
+        # (Magma lists its elements in an order of its own)
+        raise MagmaError("iterating over a dihedral group is not supported yet")
+
+    def _identity(self):
+        return _MPerm(self, tuple(range(1, self.n + 1)))
+
+    def _magma_gen(self, i):
+        if isinstance(i, bool) or not isinstance(i, int) or not -2 <= i <= 2:
+            raise MagmaError("Argument 2 (%s) should be in the range [-2 .. 2]" % i, "'.'", True)
+        self._shown = True
+        if i == 0:
+            return self._identity()
+        g = self._gens()[abs(i) - 1]
+        return g if i > 0 else g._inverse()
+
+    def _has(self, images):
+        # (a rotation i -> i + a - 1 or a reflection i -> a + 1 - i, mod n)
+        n = self.n
+        if n == 3:
+            return True
+        a = images[0]
+        rot = all(images[i - 1] == (i + a - 2) % n + 1 for i in range(1, n + 1))
+        ref = all(images[i - 1] == (a - i) % n + 1 for i in range(1, n + 1))
+        return rot or ref
+
+    def _magma_contains(self, x):
+        return isinstance(x, _MPerm) and x.G.n == self.n and self._has(x.images)
+
+    def _magma_coerce(self, x):
+        # (cycles or images made a permutation as Sym(n)'s, then admitted
+        # only if it is the group's: G!(1, 2) is Magma's Illegal coercion)
+        p = x if isinstance(x, _MPerm) else _MSymGroup(self.n)._magma_coerce(x)
+        if p.G.n == self.n and self._has(p.images):
+            return _MPerm(self, p.images)
+        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+
+
+def DihedralGroup(n):
+    """The dihedral group of order 2n as permutations of 1 .. n."""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise _bad_types("DihedralGroup", (n,))
+    if n < 3:
+        raise _arg_error("DihedralGroup", "Argument 1 (%d) should be >= 3" % n)
+    if n > _SYM_MAX:
+        raise MagmaError("DihedralGroup(n) for n above %d is not supported yet" % _SYM_MAX, "'DihedralGroup'")
+    return _MDihedralGroup(n)
 
 
 @_signature("Identity", "GrpPerm", ret="GrpPermElt")
