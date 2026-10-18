@@ -4692,6 +4692,14 @@ def _unary(name, f, complex_if=None, keep_int=False, real_fix=None):
             r = f(A)
             if real_fix is not None:
                 r = _apply_real_fix(real_fix, A0 if A0 is not None else A, r)
+            if A0 is not None:
+                # (a real array made complex for some of its elements: the others, in the real
+                # domain (a NaN, or -0 for log2), keep their real result and a zero imaginary
+                # part, as each would alone; log2([-0 -1]) gave -0 the imaginary part of -1)
+                real = ~np.asarray(complex_if(A0), dtype=bool)
+                if np.any(real):
+                    r = np.array(r, dtype=np.complex128)
+                    r[real] = f(A0[real]).astype(np.complex128)
         if cls in _INTS:
             if keep_int:
                 return _finish(r, cls)
@@ -4858,11 +4866,17 @@ for _n in ("asin", "acos", "atan", "asec", "acsc", "acot"):
 
 
 def _gamma(x):
-    """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the poles"""
-    if x != x or x == -_math.inf:
+    """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the negative integers (as
+    MathWorks' gamma page has it), and at 0 the infinity of the zero's sign (-Inf at -0, as the C
+    library's tgamma and Octave give); gamma(-Inf), which the page does not give, is refused"""
+    if x != x:
         return _math.nan
+    if x == -_math.inf:
+        raise _err("gamma of -Inf is not supported in Sagebrush: it has no limit there.")
     if x == _math.floor(x):
-        if x <= 0:
+        if x == 0:
+            return _math.copysign(_math.inf, x)
+        if x < 0:
             return _math.inf
         return float(_math.factorial(int(x) - 1)) if x <= 171 else _math.inf
     # (the C library's, as Octave's; math.gamma is CPython's own)
@@ -5093,7 +5107,9 @@ def rem_(nargout, a, b):
     return _elementwise(a, b, _rem, "rem")
 
 
-_binary_fn("atan2", lambda A, B: np.arctan2(A, B))
+# (MathWorks' atan2 page, IEEE compliance: atan2(0, -0) and atan2(-0, -0) are 0, where IEEE
+# arithmetic gives pi and -pi)
+_binary_fn("atan2", lambda A, B: np.where((A == 0) & (B == 0) & np.signbit(B), 0.0, np.arctan2(A, B)))
 _binary_fn("hypot", lambda A, B: np.hypot(A, B))
 _binary_fn("power", _pow)
 _binary_fn("plus", _add)
@@ -7301,14 +7317,23 @@ def polyfit_(nargout, x, y, n, *opts):
     V = np.array([[xi ** (n - k) for k in range(n + 1)] for xi in xv]).reshape((xv.size, n + 1))
     Q, R = np.linalg.qr(V)
     p = np.linalg.solve(R, Q.T @ yv)
-    P = _box(_contig(p.reshape((-1, 1))))
+    # (single x or y gives single p and S.normr; S.R, the factor of the Vandermonde matrix of x,
+    # and mu are single when x is: MathWorks' polyfit page takes single data; Sagebrush computes
+    # in double and rounds once, as its eig does)
+    single = "single" in (class_(x), class_(y))
+    xsingle = class_(x) == "single"
+    P = _finish(_contig(p.reshape((-1, 1))), "single" if single else "double")
     if nargout <= 1:
         return P
     r = yv - V @ p
-    S = _struct1({"R": _unmat(np.array(R)), "df": float(max(0, xv.size - (n + 1))), "normr": float(np.sqrt(np.sum(r * r)))})
+    normr = float(np.sqrt(np.sum(r * r)))
+    S = _struct1({"R": _finish(_farr(_unmat(np.array(R))), "single") if xsingle else _unmat(np.array(R)),
+                  "df": float(max(0, xv.size - (n + 1))),
+                  "normr": _finish(np.array([[normr]]), "single") if single else normr})
     out = [P, S]
     if mu is not None:
-        out.append(np.array([[mu[0], mu[1]]]).reshape((1, 2)) if False else _box(np.array([mu[0], mu[1]]).reshape((1, 2))))
+        M = np.array([mu[0], mu[1]]).reshape((1, 2))
+        out.append(_finish(M, "single") if xsingle else _box(M))
     return out[:nargout]
 
 
@@ -7336,7 +7361,8 @@ def roots_(p):
                        "Sagebrush (its coefficients are too widely scaled).")
     r = np.concatenate([r, np.zeros(trailing)])
     if r.size == 0:
-        return np.zeros((0, 1))
+        # (a column with no roots, 0-by-1: MathWorks' roots page returns the roots as a column)
+        return _unmat(np.zeros((0, 1)))
     return _unmat(r.reshape((-1, 1)))
 
 
@@ -7519,6 +7545,11 @@ def deconv_(nargout, y, h, *args):
     cplx = Y.dtype.kind == "c" or H.dtype.kind == "c"
     dt = np.complex128 if cplx else np.float64
     Y, H = Y.astype(dt), H.astype(dt)
+    # (MathWorks' deconv page gives no results for Inf or NaN coefficients, and long division
+    # spreads them in ways no rule fixes: refused, as the solves are)
+    if not (np.all(np.isfinite(Y)) and np.all(np.isfinite(H))):
+        raise _err("deconv of values that include Inf or NaN is not supported in Sagebrush: its result "
+                   "for them is not certified. Divide finite values.")
     col = _dims(y)[1] == 1 and _dims(y)[0] > 1
 
     def orient(v):
@@ -10404,6 +10435,12 @@ def _complex_fallback(name):
             out = np.array([f(complex(z)) for z in A.reshape(-1)], dtype=np.complex128).reshape(A.shape)
             if name in _REAL_FIX:
                 out = _apply_real_fix(_REAL_FIX[name], A0, out)
+            if A0.dtype.kind != "c":
+                # (a real NaN of a real array made complex stays NaN with a zero imaginary part, as
+                # it is alone: asin([NaN 2]) gave NaN + NaNi)
+                nan = np.isnan(A0)
+                if np.any(nan):
+                    out[nan] = complex(_math.nan, 0.0)
             return _finish(out, "single" if class_(x) == "single" else "double")
     _B[name] = Builtin(g, name)
 
@@ -10530,19 +10567,26 @@ def histc_n(nargout, x, edges, *rest):
 
 @_bi("meshgrid")
 def meshgrid_n(nargout, x, y=None, z=None):
+    # (each grid is copies of its own coordinate vector, so of that vector's class, single or
+    # an integer class, as MathWorks' meshgrid page has it: meshgrid(uint8(255)) + 1 saturates)
+    y = y if y is not None else x
+    def kept(v, a):
+        c = class_(v)
+        return _finish(_farr(a), c) if c == "single" or c in _INTS else a
     xv = _farr(x).reshape(-1)
-    yv = _farr(y if y is not None else x).reshape(-1)
+    yv = _farr(y).reshape(-1)
     if nargout <= 2 and z is None:
-        X = np.tile(xv.reshape((1, -1)), (yv.size, 1))
-        Y = np.tile(yv.reshape((-1, 1)), (1, xv.size))
-        return _unmat(X) if nargout <= 1 else [_unmat(X), _unmat(Y)]
-    zv = _farr(z if z is not None else x).reshape(-1)
+        X = kept(x, _unmat(np.tile(xv.reshape((1, -1)), (yv.size, 1))))
+        Y = kept(y, _unmat(np.tile(yv.reshape((-1, 1)), (1, xv.size))))
+        return X if nargout <= 1 else [X, Y]
+    z = z if z is not None else x
+    zv = _farr(z).reshape(-1)
     # MATLAB size: numel(y)-by-numel(x)-by-numel(z); stored with the axes reversed
     shape = (zv.size, xv.size, yv.size)
     X = np.broadcast_to(xv.reshape((1, -1, 1)), shape)
     Y = np.broadcast_to(yv.reshape((1, 1, -1)), shape)
     Z = np.broadcast_to(zv.reshape((-1, 1, 1)), shape)
-    return [_box(np.array(X)), _box(np.array(Y)), _box(np.array(Z))][:max(1, nargout)]
+    return [kept(x, _box(np.array(X))), kept(y, _box(np.array(Y))), kept(z, _box(np.array(Z)))][:max(1, nargout)]
 
 
 def _setop2(nargout, a, b, op, opts):
@@ -10684,19 +10728,61 @@ def trapz_n(*args):
         return _unmat(np.zeros(Y.shape))
     A = Y if dim == 1 else Y.T
     n = A.shape[0]
-    if x is None:
-        dx = np.ones((max(n - 1, 0), 1))
-    elif _numel(x) == 1:
-        dx = np.full((max(n - 1, 0), 1), _scalar(x))
+    if x is not None and _numel(x) != 1 and _numel(x) != n:
+        raise _err("Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.")
+    ys = class_(y) == "single"
+    xs = x is not None and class_(x) == "single"
+    if (ys or xs) and n > 1:
+        # (the single steps run one row of pair sums at a time: their work is admitted first)
+        if (n - 1) * A.shape[1] > _SINGLE_STEPS_WORK:
+            raise _err("trapz of single values with %d points for %d columns is not supported in Sagebrush: "
+                       "too much work." % (n, A.shape[1]))
+        q = _trapz_single(A, x, n, ys, xs)
+    elif n > 1:
+        if x is None or _numel(x) == 1:
+            # (the halved sum of the pair sums, trapz(Y), times X: a scalar X gives X*trapz(Y) on
+            # MathWorks' trapz page, finite where X times a pair sum would overflow, and nonzero
+            # where X / 2 would underflow)
+            q = np.sum(A[1:] + A[:-1], axis=0) / 2
+            if x is not None:
+                q = _scalar(x) * q
+        else:
+            dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
+            q = np.sum(dx * (A[1:] + A[:-1]) / 2, axis=0)
     else:
-        xv = _farr(x).reshape(-1)
-        if xv.size != n:
-            raise _err("Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.")
-        dx = np.diff(xv).reshape((-1, 1))
-    q = np.sum(dx * (A[1:] + A[:-1]) / 2, axis=0) if n > 1 else np.zeros(A.shape[1])
+        q = np.zeros(A.shape[1])
     q = q.reshape((1, -1)) if dim == 1 else q.reshape((-1, 1))
     r = _unmat(q)
-    return r
+    return _finish(_farr(r), "single") if ys or xs else r
+
+
+def _trapz_single(A, x, n, ys, xs):
+    """trapz in single at each step (a step single when an operand is, a double operand at its
+    own value): the pair sums y(k) + y(k+1); for a scalar spacing d, their sum, first to last,
+    halved, times d; for points x, the sum, first to last, of diff(x)(k) times each pair sum,
+    halved. MathWorks' trapz page does not give the order of the steps (only that a scalar X
+    gives X*trapz(Y), which fixes where d multiplies); this one alone matched Octave's
+    results on single inputs chosen so that the orders tried (the spacing factored out or not;
+    summed first to last, last to first or pairwise) all differ"""
+    R = _single_values
+    S = R(A[1:] + A[:-1]) if ys else A[1:] + A[:-1]
+    if x is None or _numel(x) == 1:
+        acc = S[0]
+        for k in range(1, n - 1):
+            acc = R(acc + S[k]) if ys else acc + S[k]
+        half = R(acc / 2) if ys else acc / 2
+        # (d times the halved sum, trapz(Y): MathWorks' trapz page makes trapz(X, Y) X*trapz(Y)
+        # for a scalar X, finite where d times the sum would overflow, and nonzero where d / 2
+        # would underflow)
+        return half if x is None else R(_scalar(x) * half)
+    dx = np.diff(_farr(x).reshape(-1)).reshape((-1, 1))
+    if xs:
+        dx = R(dx)
+    T = R(dx * S)
+    acc = T[0]
+    for k in range(1, n - 1):
+        acc = R(acc + T[k])
+    return R(acc / 2)
 
 
 _CLEAR_ITEMTYPES = ("all", "classes", "functions", "global", "import", "java", "mex", "variables")
