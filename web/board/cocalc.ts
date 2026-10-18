@@ -29,7 +29,7 @@
 // told what was.  Outputs are not
 // kept: a board's code runs when it is opened.
 
-import { ICON_NAME, inkNode, inkSize, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocInk, type DocNote, type DocSticker } from "./doc";
+import { getOwn, setOwn, ICON_NAME, inkNode, inkSize, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocInk, type DocNote, type DocSticker } from "./doc";
 import { simplifyInk } from "./ink";
 import { nest } from "./nest";
 
@@ -70,7 +70,7 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
     try { const e = JSON.parse(l); if (element(e)) els.push(e); } catch { /* (a line that is not an element: CoCalc skips it too) */ }
   }
   const left: Record<string, number> = {};
-  const leave = (t: string) => { left[t] = (left[t] ?? 0) + 1; };
+  const leave = (t: string) => { setOwn(left, t, (getOwn(left, t) ?? 0) + 1); };
 
   // pages: by their pos; or, in the oldest files, by number
   const pageEls = els.filter((e) => e.type === "page").sort((a, b) => num(a.data?.pos) - num(b.data?.pos));

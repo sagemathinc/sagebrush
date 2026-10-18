@@ -22,7 +22,7 @@
 // (the tour, a page's intro, a note's outline) is left out, and counted.
 
 import type { Edge, Item } from "./board";
-import { lookOf, pageCount, pageOf, shownPages, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocNote } from "./doc";
+import { getOwn, setOwn, lookOf, pageCount, pageOf, shownPages, type BoardDoc, type BoardMode, type BoardPage, type DocEdge, type DocNote } from "./doc";
 import { COLORS } from "./colors";
 import { nest } from "./nest";
 
@@ -79,7 +79,7 @@ function noteOf(text: string): Pick<DocNote, "title" | "text" | "code"> & { lang
 export function fromCanvas(text: string): { doc: BoardDoc; left: Record<string, number> } {
   const c = JSON.parse(text) as Canvas;
   const left: Record<string, number> = {};
-  const leave = (k: string) => { left[k] = (left[k] ?? 0) + 1; };
+  const leave = (k: string) => { setOwn(left, k, (getOwn(left, k) ?? 0) + 1); };
   const boxed = (n: CanvasNode, z: number) => ({ id: n.id, x: num(n.x), y: num(n.y), w: Math.max(1, num(n.width)), h: Math.max(1, num(n.height)), z, n });
   // (ids are a canvas's own, and unique, by its spec, but not always: the
   // first keeps its id, the next ones are id-2, id-3, ...; an edge naming one
@@ -143,7 +143,7 @@ function markdownOf(it: Item, mode: string): string {
  * was left out (by kind: how many). */
 export function toCanvas(doc: BoardDoc, laid: (page: number) => { items: Item[]; edges: Edge[] }): { canvas: Canvas; left: Record<string, number> } {
   const nodes: CanvasNode[] = [], edges: CanvasEdge[] = [], left: Record<string, number> = {};
-  const leave = (k: string, n = 1) => { if (n > 0) left[k] = (left[k] ?? 0) + n; };
+  const leave = (k: string, n = 1) => { if (n > 0) setOwn(left, k, (getOwn(left, k) ?? 0) + n); };
   const mode = doc.mode ?? "python";
   const n = pageCount(doc), paged = !!doc.pages?.length && n > 1;
   // (a template's own page left out, said so: its items are on the pages made from it, as `laid` gives them)

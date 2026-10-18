@@ -37,7 +37,7 @@
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
-import { boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
+import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode, Evaluated } from "./code";
 import type { DocEntry } from "../docsearch";
 import { BoardCodes } from "./codes";
@@ -650,8 +650,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const n = pageIx + 1, qs = asksOf(doc).filter((q) => q.page === n);
     const answers: Record<string, AskAnswer> = {}, notes: Record<string, string> = {}, missing: string[] = [];
     for (const { ask: a } of qs) {
-      if (a.answer !== undefined) answers[a.id] = a.answer;
-      if (a.note?.trim()) notes[a.id] = a.note;
+      // (by its id, whatever it is: "__proto__" too, the object's own entry, not its prototype)
+      if (a.answer !== undefined) setOwn(answers, a.id, a.answer);
+      if (a.note?.trim()) setOwn(notes, a.id, a.note);
       if (a.required && !answered(a)) missing.push(plainTitle(a.title || a.text || a.id).slice(0, 60));
     }
     const p = pageOf(doc, pageIx), many = !!doc.pages?.length;
