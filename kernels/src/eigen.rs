@@ -474,6 +474,8 @@ pub unsafe extern "C" fn dgeev(hm: *mut f64, n: usize, w: *mut f64, d: *mut f64,
     let nn = n as isize;
     let mut big_n: isize = nn - 1;
     let eps = f64::EPSILON;
+    // (the smallest number safely treated as negligible, as dlahqr's smlnum: safmin n / ulp)
+    let smlnum = f64::MIN_POSITIVE * (n as f64 / eps);
     let mut exshift = 0.0;
     let (mut p, mut q, mut r, mut s, mut z) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
     let (mut t, mut wv, mut x, mut y): (f64, f64, f64, f64) = (0.0, 0.0, 0.0, 0.0);
@@ -512,11 +514,34 @@ pub unsafe extern "C" fn dgeev(hm: *mut f64, n: usize, w: *mut f64, d: *mut f64,
         let mut l = nb;
         while l > low {
             s = abs(H!(l - 1, l - 1)) + abs(H!(l, l));
+            // (both diagonal entries 0: the neighbouring subdiagonal entries, as genEig does)
             if s == 0.0 {
-                s = norm;
+                if l >= low + 2 {
+                    s += abs(H!(l - 1, l - 2));
+                }
+                if l + 1 <= nb {
+                    s += abs(H!(l + 1, l));
+                }
             }
-            if abs(H!(l, l - 1)) < eps * s || H!(l, l - 1) == 0.0 {
+            if H!(l, l - 1) == 0.0 {
                 break;
+            }
+            if abs(H!(l, l - 1)) < eps * s {
+                // (the Ahues-Tisseur test, as genEig in numpy_linalg.ts: the same flops in the
+                // same order)
+                let sub = abs(H!(l, l - 1));
+                let sup = abs(H!(l - 1, l));
+                let ab = if sub > sup { sub } else { sup };
+                let ba = if sub > sup { sup } else { sub };
+                let dg = abs(H!(l, l));
+                let df = abs(H!(l - 1, l - 1) - H!(l, l));
+                let aa = if dg > df { dg } else { df };
+                let bb = if dg > df { df } else { dg };
+                let s2 = aa + ab;
+                let lim = eps * (bb * (aa / s2));
+                if ba * (ab / s2) <= (if smlnum > lim { smlnum } else { lim }) {
+                    break;
+                }
             }
             l -= 1;
         }

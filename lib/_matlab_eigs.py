@@ -228,7 +228,9 @@ def _ritz(Hm, hermitian):
         T = (Hm + np.conj(Hm.T)) / 2
         theta, Y = np.linalg.eigh(T)
         return theta.astype(complex), Y
-    theta, Y = np.linalg._eig(Hm)
+    # (the projected Hessenberg matrix without balancing, as ARPACK's dneupd solves it, with
+    # dlahqr alone)
+    theta, Y = np.linalg._eig(Hm, False)
     Y = Y / np.linalg.norm(Y, axis=0)
     return theta.astype(complex), Y
 
