@@ -18,10 +18,17 @@ import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 
 // deno compile embeds node_modules when it finds a package.json above the
-// entry point; compile a copy of the bundle from an empty directory.
-function denoCompile(flags, exe) {
+// entry point; compile a copy of the bundle from an empty directory.  With
+// `launcher`, the entry is the launcher (packages/sagebrush/bin/sagebrush.cjs,
+// which runs a program in a worker thread so that Ctrl-C reaches it), and the
+// bundle, beside it as pyjs.cjs, is included.
+function denoCompile(flags, exe, launcher = false) {
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-deno-"));
-  copyFileSync(bundle, join(dir, "sagebrush.cjs"));
+  if (launcher) {
+    copyFileSync(bundle, join(dir, "pyjs.cjs"));
+    copyFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), join(dir, "sagebrush.cjs"));
+    flags = [...flags, "--include", join(dir, "pyjs.cjs")];
+  } else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
   run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
   // Windows targets get ".exe" appended.
   return existsSync(exe) ? exe : exe + ".exe";
@@ -109,9 +116,10 @@ run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--
   "--outfile", join(out, "pyjs.cjs")]);
 const bundle = join(out, "pyjs.cjs");
 writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
-// A launcher that turns on Node's compile cache before loading the bundle
-// (about 20 ms off every start once the cache is warm).
-writeFileSync(join(out, "pyjs"), `#!/usr/bin/env node\ntry { require("node:module").enableCompileCache?.(); } catch {}\nrequire("./pyjs.cjs");\n`, { mode: 0o755 });
+// The launcher (packages/sagebrush/bin/sagebrush.cjs, the npm package's
+// command): Node's compile cache on, and a program run in a worker thread so
+// that Ctrl-C raises KeyboardInterrupt in it.
+writeFileSync(join(out, "pyjs"), readFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), "utf8"), { mode: 0o755 });
 // The npm package `sagebrush` (packages/sagebrush) ships this bundle.
 mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
 writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
@@ -135,11 +143,12 @@ if (process.argv.includes("--bun")) {
 // --target, e.g. aarch64-apple-darwin, x86_64-pc-windows-msvc).
 if (process.argv.includes("--deno")) {
   const target = process.argv.find((a) => a.startsWith("--target="));
-  const exe = denoCompile(["-A", ...(target ? [target] : [])], join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : "")));
+  const exe = denoCompile(["-A", ...(target ? [target] : [])], join(out, "pyjs-deno" + (target ? "-" + target.slice(9) : "")), true);
   console.log(`deno executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)`);
 }
 
-// 3d. The sandbox: a Deno executable granted nothing.  Permissions are fixed
+// 3d. The sandbox: a Deno executable granted nothing (its entry is the
+// bundle itself, not the launcher: a program in it runs on the main thread).  Permissions are fixed
 // at compile time and --no-prompt makes every denial a PermissionError
 // instead of a question on the terminal.  Programs come on stdin or as the
 // interactive prompt; the embedded library still imports.  Add scoped grants
