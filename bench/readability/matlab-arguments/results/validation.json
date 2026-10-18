@@ -1,0 +1,53 @@
+{
+  "implementation_revision": "0f17e46dece01f9e7293399be2d3d06f2bc74757",
+  "baseline_source_revision": "5f82f17add9fb8c041f94b5cb265719e5fc2be99",
+  "baseline_build_revision": "1b618797f98944ab393068df5bd23dcdc7a972dd",
+  "baseline_build_note": "Only frozen benchmark files differ from the source baseline. All 748 baseline outputs committed before production edits.",
+  "corpus": {
+    "host": "sagebrush-3",
+    "cases": 748,
+    "identical": 748,
+    "timeouts": 0,
+    "process_failures": 0,
+    "nonempty_stderr": 0,
+    "comparison": "input source, decoded stdout/stderr, exit status and timeout flag; only seconds excluded",
+    "directory": "/home/user/wt/run-1b618797f"
+  },
+  "targeted_tests": {
+    "command": "node --test --test-name-pattern='arguments blocks|name=value arguments' dist/test/matlab.test.js",
+    "passed": 2,
+    "failed": 0
+  },
+  "full_ci": {
+    "host": "sagebrush",
+    "revision": "0f17e46dece01f9e7293399be2d3d06f2bc74757",
+    "result": "RESULT 0f17e46de: all passed (any crowd failures passed alone)",
+    "npm_isolated_passed": 924,
+    "npm_isolated_failed": 0,
+    "npm_skipped": 1,
+    "browser_commands": 84,
+    "logs": "/scratch/sbremote/logs/0f17e46de/",
+    "crowd_failures": "2 npm timing tests; full npm suite passed in isolation. All browser commands passed on their first run.",
+    "sync_precheck_rc": 0
+  },
+  "reviews": {
+    "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2 on 0f17e46d; full CI subsequently passed at the same executable revision and sent for final acknowledgement.",
+    "behavior": "CLEAR by @sagebrush-astra on 0f17e46d: 31-function structural comparison, independent 58-case rerun, full 748-case record/source verification; full CI subsequently passed at the same executable revision."
+  },
+  "post_validation_production_change": "None.",
+  "measurement": {
+    "model": "claude-haiku-4-5-20251001",
+    "primary_before_runs": 30,
+    "primary_after_runs": 30,
+    "primary_before_coverage": 66,
+    "primary_after_coverage": 73,
+    "possible_criteria": 90,
+    "grading": "Manual by implementing agent, not blind; compound frozen coverage rather than general factual accuracy."
+  },
+  "reviewer_probes": {
+    "structurally_equal_existing_functions": 31,
+    "selected_independent_cases": 58,
+    "identical": 58,
+    "all_recorded_cases_independently_compared": 748
+  }
+}

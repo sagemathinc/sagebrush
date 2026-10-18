@@ -1,0 +1,10 @@
+✔ name=value arguments are "name", value (7.55826ms)
+✔ arguments blocks: defaults, conversions, validators, name-value options (2.641369ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 112.063839
