@@ -185,6 +185,13 @@ export class Board {
   /** the item with a grip just outside its top left corner, which drags it
    * (Edit: the one selected, or the one being written, William's B2) */
   grip: string | null = null;
+  /** the item with the control that adds another of its kind below it
+   * (Edit: the one selected), and its kind's name ("Code", "Note"...),
+   * William's item 7 */
+  addSame: { id: string; label: string } | null = null;
+  // (whether the last frame was drawn far out: no grip nor add-another
+  // control drawn then, and so none to press, astra's UI-2B8-1)
+  private farNow = false;
   guides: { xs: number[]; ys: number[] } | null = null;
   /** a press on the background (no item there): return true to take it (the board does not pan) */
   onBackgroundDown: ((e: PointerEvent) => boolean) | null = null;
@@ -384,6 +391,21 @@ export class Board {
     if (below > 0 && dy > 0) this.flyTo({ ...c, y: c.y + dy / c.z });
   }
 
+  /** Item `id` within the clear part of the view (between the bars over
+   * the board), the board moved as little as that takes; its zoom kept. */
+  bringIntoView(id: string) {
+    const it = this.byId.get(id);
+    if (!it) return;
+    const W = this.canvas.width / this.dpr, H = this.canvas.height / this.dpr, i = this.insets, c = this.camera, m = 24;
+    const l = (it.x - c.x) * c.z, t = (it.y - c.y) * c.z, r = l + it.w * c.z, b = t + it.h * c.z;
+    let dx = 0, dy = 0;
+    if (r > W - i.right - m) dx = r - (W - i.right - m);
+    if (l - dx < i.left + m) dx = l - (i.left + m);
+    if (b > H - i.bottom - m) dy = b - (H - i.bottom - m);
+    if (t - dy < i.top + m) dy = t - (i.top + m);
+    if (dx || dy) this.flyTo({ ...c, x: c.x + dx / c.z, y: c.y + dy / c.z });
+  }
+
   /** The bounds of the items with these ids (all items when none are given). */
   bounds(ids?: string[]) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -465,6 +487,7 @@ export class Board {
   render() {
     this.stats.frames++;
     const c = this.camera, v = this.view(), far = c.z < FAR && (c.z < FEW_FAR || this.boxes.more(v.x0, v.y0, v.x1, v.y1, FEW));
+    this.farNow = far;
     // the camera: one transform
     this.world.style.transform = `translate(${-c.x * c.z}px, ${-c.y * c.z}px) scale(${c.z})`;
     this.world.style.visibility = far ? "hidden" : "visible";
@@ -1489,6 +1512,27 @@ export class Board {
         ctx.fill();
       }
     }
+    // (the control adding another of the selected item's kind: as the grip, at the same size on the screen at any zoom)
+    const as = this.addSame && !far ? this.byId.get(this.addSame.id) : undefined;
+    if (as) {
+      const b = this.addSameBox(as, c.z), r = 4 / c.z;
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#2a6f2f";
+      ctx.lineWidth = 1.5 / c.z;
+      ctx.beginPath();
+      ctx.roundRect(b.x, b.y, b.w, b.h, r);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#2a6f2f";
+      ctx.strokeStyle = "#2a6f2f";
+      ctx.lineWidth = 2 / c.z;
+      // (the "+": a cross, 10 px)
+      const px = b.x + b.w / 2, py = b.y + b.h / 2, k = 5 / c.z;
+      ctx.beginPath();
+      ctx.moveTo(px - k, py); ctx.lineTo(px + k, py);
+      ctx.moveTo(px, py - k); ctx.lineTo(px, py + k);
+      ctx.stroke();
+    }
     if (this.guides) {
       ctx.strokeStyle = "#d6336c";
       ctx.lineWidth = 1 / c.z;
@@ -1539,10 +1583,23 @@ export class Board {
   /** The grip's item, if the point (on the page) is on it (a finger's reach a little more). */
   gripAt(cx: number, cy: number, touch = false): string | null {
     const it = this.grip ? this.byId.get(this.grip) : undefined, c = this.camera;
-    if (!it || c.z < FAR) return null;
+    if (!it || this.farNow) return null;
     const b = gripBox(it, c.z), r = this.el.getBoundingClientRect(), reach = touch ? 10 : 3;
     const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
     return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;
+  }
+  /** The add-another control's item, if the point (on the page) is on it (a finger's reach a little more). */
+  addSameAt(cx: number, cy: number, touch = false): string | null {
+    const it = this.addSame ? this.byId.get(this.addSame.id) : undefined, c = this.camera;
+    if (!it || this.farNow) return null;
+    const b = this.addSameBox(it, c.z), r = this.el.getBoundingClientRect(), reach = touch ? 10 : 3;
+    const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
+    return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;
+  }
+  // (its box, world units: a "+", 22 px square, 4 px right of the top
+  // right corner, across from the grip; William's choice, design A)
+  private addSameBox(it: { x: number; y: number; w: number; h: number }, z: number) {
+    return { x: it.x + it.w + 4 / z, y: it.y, w: 22 / z, h: 22 / z };
   }
   clientRect(id: string) {
     const it = this.byId.get(id), r = this.el.getBoundingClientRect(), c = this.camera;
