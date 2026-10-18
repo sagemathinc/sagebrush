@@ -165,6 +165,22 @@ def structured():
     assert sc["result"]["factors"] == [["3", 1], ["170141183460469231731687303715884105727", 1]], sc
     call("factor", {"n": "0"}, "exception")
     call("factor", {"n": ""}, "invalid_arguments")
+    assert call("factor", {"n": 2026})["result"]["factors"] == [["2", 1], ["1013", 1]]
+    # the arguments are numbers, never code (daybreak2's INPUT-479-1): a
+    # payload is refused before anything runs ...
+    for bad in ["__import__('sagebrush.sage').sage.__setattr__('is_prime', lambda *a, **k: True) or 7",
+                "setattr(__import__('sagebrush.sage', fromlist=['x']), 'is_prime', lambda *a, **k: True) or 7",
+                "Integer(7)", "(y := 7)", "[7][0]", "7 if 1 else 8", "2^(10^9)", "1/2", "7\n8"]:
+        sc = call("factor", {"n": bad}, "invalid_arguments")
+    for bad in ["x^2 + 1 + __import__('os').getpid()*0", "x.__class__", "y^2 + 1", "x^(1/2) + 1", "(x + 1)^1000"]:
+        call("number_field", {"polynomial": bad}, "invalid_arguments")
+    assert call("number_field", {"polynomial": "x^2/4 + 23/4"})["result"]["class_group"]["value"]["order"] == 3
+    # ... and user code cannot reach the shortcut tools' session: a patched
+    # is_prime in the sage tool's session leaves factor's status honest
+    call("sage", {"code": "import sagebrush.sage as S\nS.is_prime = lambda *a, **k: True\nS.is_prime(2^127 - 1, proof=True)"})
+    sc = call("factor", {"n": "3 * (2^127 - 1)"})
+    assert sc["status"] == "heuristic" and sc["assumes"] == ["170141183460469231731687303715884105727 is prime (Baillie-PSW)"], sc
+    call("reset", {})
 
     # number_field: each invariant with certified and assumes
     sc = call("number_field", {"polynomial": "x^3 - 11"})
@@ -210,6 +226,53 @@ def structured():
     print("structured results: ok" + ("" if jsonschema else " (jsonschema not installed: the built-in check only)"))
 
 
+def cancelling():
+    """notifications/cancelled interrupts the computation of that request
+    only; one still waiting for the session never starts (daybreak2's
+    CANCEL-479-1)."""
+    p = start()
+    rpc(p, 1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}})
+    rpc(p, 2, "tools/call", {"name": "sage", "arguments": {"code": "1"}})  # (the session started)
+
+    def send(msg):
+        p.stdin.write(json.dumps(dict(msg, jsonrpc="2.0")) + "\n")
+        p.stdin.flush()
+
+    def replies(ids):
+        got = {}
+        while set(ids) - set(got):
+            m = json.loads(p.stdout.readline())
+            if m.get("id") in ids:
+                got[m["id"]] = m["result"]
+        return got
+
+    # A runs, B waits for the session; cancelling B leaves A alone
+    t0 = time.time()
+    send({"id": 10, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(3)\n'A done'"}}})
+    time.sleep(0.5)
+    send({"id": 11, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "'B ran'"}}})
+    time.sleep(0.2)
+    send({"method": "notifications/cancelled", "params": {"requestId": 11}})
+    got = replies([10, 11])
+    a, b = got[10], got[11]
+    assert not a["isError"] and a["structuredContent"]["result"] == "'A done'", a
+    assert b["isError"] and b["structuredContent"]["error"]["type"] == "interrupted" and "before it started" in b["structuredContent"]["error"]["message"], b
+    assert time.time() - t0 >= 2.5
+    # cancelling the running one interrupts it
+    t0 = time.time()
+    send({"id": 12, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(30)"}}})
+    time.sleep(1)
+    send({"method": "notifications/cancelled", "params": {"requestId": 12}})
+    c = replies([12])[12]
+    assert c["isError"] and c["structuredContent"]["error"]["type"] == "interrupted" and time.time() - t0 < 10, c
+    # a cancel for a finished request changes nothing after it
+    send({"method": "notifications/cancelled", "params": {"requestId": 10}})
+    assert rpc(p, 13, "tools/call", {"name": "sage", "arguments": {"code": "2 + 2"}})["result"]["structuredContent"]["result"] == "4"
+    p.stdin.close()
+    p.wait(10)
+    print("cancellation: ok")
+
+
 def piped():
     # requests piped in, stdin closed at once: every call is still answered
     reqs = [
@@ -251,5 +314,6 @@ def sdk():
 if __name__ == "__main__":
     raw()
     structured()
+    cancelling()
     piped()
     sdk()
