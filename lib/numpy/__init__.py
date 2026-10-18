@@ -2806,7 +2806,10 @@ def _bytes_order(a, order):
         raise TypeError(f"order must be str, not {type(order).__name__}")
     o = order.decode("latin1") if isinstance(order, bytes) and len(order) == 1 else order
     if len(o) != 1 or o.upper() not in "CFAK":
-        raise ValueError(f"order must be one of 'C', 'F', 'A', or 'K' (got {order!r})")
+        # (NumPy's message has the order's repr; a long one is described by
+        # its length rather than copied into the message)
+        got = repr(order) if len(order) <= 100 else f"<{len(order)}-{'byte' if isinstance(order, bytes) else 'character'} order>"
+        raise ValueError(f"order must be one of 'C', 'F', 'A', or 'K' (got {got})")
     o = o.upper()
     if o == "A":
         return "F" if _c_contiguous(a.T) and not _c_contiguous(a) else "C"
