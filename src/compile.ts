@@ -11,6 +11,7 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
+import { cwdPath } from "./runtime/modules";
 import { classCellReport } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
@@ -338,12 +339,14 @@ const safeExists = (p: string) => {
 const fileExists = (p: string) => {
   // (a mounted package's directory holds exactly its checked files)
   if (mountedBases.length && mountedBases.some((b) => p.startsWith(b + "/"))) return mounted.has(p);
-  return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(p);
+  // (a relative path, from a relative sys.path entry, against os.chdir's
+  // directory: a worker thread's is virtual, modules.ts)
+  return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(cwdPath(p));
 };
 const fileRead = (p: string) => {
   const checked = mounted.get(p);
   if (checked !== undefined) return checked;
-  if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) return readFileSync(p, "utf8");
+  if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) return readFileSync(cwdPath(p), "utf8");
   try {
     return embedded[p.slice(LIB_VIRTUAL.length + 1)];
   } catch (e: any) {

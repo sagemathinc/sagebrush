@@ -139,6 +139,9 @@ function setFile(r: string, data: Uint8Array) {
 export function writeSync(fd: number, data: any) {
   hooks.write(fd, typeof data === "string" ? data : new TextDecoder().decode(data));
 }
+// (so that the runtime's writeAll knows this writeSync, which takes all of
+// its data at once and returns no count, from Node's)
+(writeSync as any).webShim = true;
 export function readSync() {
   return 0;
 }

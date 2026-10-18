@@ -4,6 +4,7 @@ import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, se
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
+import { INTR } from "./interrupt";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
@@ -733,7 +734,18 @@ newBuiltinModule("_time", (m) => {
     if (v === undefined) raise(T.TypeError, `'${typeName(s)}' object cannot be interpreted as an integer or float`);
     if (!(Math.abs(v) <= 9223372036)) raise(T.OverflowError, "timestamp out of range for C PyTime_t");
     if (v < 0) raise(T.ValueError, "sleep length must be non-negative");
-    if (v > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, v * 1000);
+    // (waiting on the interrupt flag, when it is shared memory: Ctrl-C, which
+    // sets it and notifies, ends the sleep with KeyboardInterrupt at once, as
+    // in CPython)
+    if (v > 0) {
+      const flag = INTR.buffer instanceof SharedArrayBuffer ? INTR : new Int32Array(new SharedArrayBuffer(8));
+      for (const end = Date.now() + v * 1000; ; ) {
+        O.pollInterrupt();
+        const left = end - Date.now();
+        if (left <= 0) break;
+        Atomics.wait(flag, 0, 0, left);
+      }
+    }
     return null;
   });
 });
@@ -1711,6 +1723,9 @@ newBuiltinModule("gc", (m) => {
 let virtualCwd: string | null = null;
 const cwd = (): string => virtualCwd ?? process.cwd();
 const at = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+// (a path as this working directory resolves it: the importer's too,
+// compile.ts, so that sys.path's relative entries follow os.chdir)
+export const cwdPath = (p: string): string => at(p);
 function chdir(p: string) {
   try {
     process.chdir(at(p));

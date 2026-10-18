@@ -42,6 +42,9 @@ jobs:
         run: SAGEBRUSH_HARDENED=0 node --test dist/test/security.test.js
       - name: single-file bundle
         run: node scripts/build-cli.mjs
+      - name: Ctrl-C in a program the launcher runs (KeyboardInterrupt, finally, exit by SIGINT), on Node, Deno and Bun
+        run: |
+          node web/test-cli-sigint.mjs
       - name: the web page builds, the npm packages in it are those in its notices, and the app's page carries the worker's library chunks
         run: |
           bun web/build.ts

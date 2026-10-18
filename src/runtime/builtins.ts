@@ -30,7 +30,7 @@ export class StdStream {
       const data = this.buf.join("");
       this.buf = [];
       this.size = 0;
-      writeSync(this.fd, data);
+      writeAll(this.fd, data);
     }
   }
 }
@@ -53,6 +53,41 @@ Ty.method(streamType, "__repr__", (s: StdStream) => `<_io.TextIOWrapper name='${
 Ty.method(streamType, "fileno", (s: StdStream) => s.fd);
 Ty.getset(streamType, "encoding", () => "utf-8");
 Ty.getset(streamType, "closed", () => false);
+// All of data to fd, however much each write takes: a descriptor may be a
+// non-blocking pipe (a parent's, or Node's own), whose write takes only what
+// fits and refuses with EAGAIN when full; then a wait of 1 ms doubling to 50
+// ms, not a spin.  (One writeSync dropped the rest of a large print.)  Only
+// with Node's fs (Node, Deno and Bun all report process.versions.node): the
+// web build's fs shim (marked webShim), whose writeSync takes the whole
+// string and returns nothing, and a runtime without SharedArrayBuffer get one
+// write of the string, as before.  A writeSync that returns no count, such as
+// that shim in a page that has Node's process (an embedding), wrote it all.
+let writePause: Int32Array | undefined;
+export function writeAll(fd: number, s: string): void {
+  const g = globalThis as any;
+  if (!(typeof g.process === "object" && g.process.versions?.node) || typeof SharedArrayBuffer !== "function" || (writeSync as any).webShim) {
+    writeSync(fd, s);
+    return;
+  }
+  const pause = (writePause ??= new Int32Array(new SharedArrayBuffer(4)));
+  const data = Buffer.from(s, "utf8");
+  for (let off = 0, wait = 1; off < data.length; ) {
+    let n: unknown = 0;
+    try {
+      n = writeSync(fd, data, off);
+    } catch (e: any) {
+      if (e?.code !== "EAGAIN") throw e;
+    }
+    if (typeof n !== "number") return;
+    if (n > 0) {
+      off += n;
+      wait = 1;
+    } else {
+      Atomics.wait(pause, 0, 0, wait);
+      wait = Math.min(2 * wait, 50);
+    }
+  }
+}
 // stdin: read synchronously from fd 0.
 let stdinBuf = "", stdinEof = false;
 function stdinFill(): boolean {
