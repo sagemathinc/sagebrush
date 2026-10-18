@@ -34,3 +34,19 @@ for s in ["ZZ(float(3.0))", "ZZ(float(2**70))", "ZZ(float(-0.0))", "ZZ(RDF(4.0))
 print(float(0.1) in QQ, RR(0.1) in QQ, float(0.5) in ZZ, float(3.0) in ZZ, float(3.5) in ZZ, float('inf') in QQ, float('nan') in QQ, RR(3.0) in ZZ)
 for R in [ZZ, QQ, SR]:
     print(R, pickle.loads(pickle.dumps(R)) is R, all(pickle.loads(pickle.dumps(R, p)) is R for p in range(6)), copy.copy(R) is R, copy.deepcopy(R) is R, copy.deepcopy([R])[0] is R)
+
+# a float subclass's own __float__ is not what ZZ, Integer and QQ convert
+class F(float):
+    def __float__(self):
+        return 9.0
+for s in ["ZZ(F('2'))", "Integer(F('2'))", "ZZ(F('2.5'))", "QQ(F('0.5'))", "QQ(F('0.1'))", "Rational(F('0.1'))"]:
+    show(s)
+# an integral real as a ZZ matrix entry, exactly at any precision
+m = matrix(ZZ, [[0, 0]])
+m[0, 0] = RealField(16385)(2)
+m[0, 1] = RealField(100)(-7)
+print(m)
+try:
+    m[0, 0] = RealField(16385)(5/2)
+except TypeError as e:
+    print("TypeError")
