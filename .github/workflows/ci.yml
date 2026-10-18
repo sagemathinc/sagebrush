@@ -33,6 +33,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
+        env:
+          # (GitHub's runners are slower than the test VMs: one Magma test took
+          # 33.5 s on 8f8f4009 against its 30 s limit; 2 leaves room without
+          # hiding a real slowdown of more than twice)
+          SAGEBRUSH_TIME_SCALE: "2"
       - name: the security tests with the attribute-read backstop off (SAGEBRUSH_HARDENED=0), so that path never rots
         run: SAGEBRUSH_HARDENED=0 node --test dist/test/security.test.js
       - name: single-file bundle
