@@ -525,6 +525,9 @@ class MSet:
         if len(self.keys) > 1 and any(isinstance(x, (_MSymGroup, _MDihedralGroup)) for x in self.items):
             # (Magma's order of the groups in a set is its own: not modelled)
             raise MagmaError("the order of a set of permutation groups is not supported yet")
+        if len(self.keys) > 1 and any(isinstance(x, _MVector) for x in self.items):
+            # (nor of vectors: {(1 0), (0 1)} prints (0 1) first)
+            raise MagmaError("the order of a set of vectors is not supported yet")
         try:
             return sorted(self.items, key=_sortkey)
         except TypeError:
@@ -660,13 +663,16 @@ def _into_universe(items, universe, kind):
         # (each item coerced as Magma's: [K | w] of another field's w is
         # its error, or w in K where its field is in K; astra2 CORR-E65-1)
         return _nf_items(items, universe, kind)
-    if isinstance(universe, _MFFPolyRing):
-        # (a polynomial ring over a finite field: each item coerced, as R!x)
+    if isinstance(universe, (_MFFPolyRing, _MVectorSpace)):
+        # (a polynomial ring over a finite field, or a full vector space:
+        # each item coerced, as R!x; Sagebrush's refusals stay refusals)
         out = []
         for k, x in enumerate(items):
             try:
                 out.append(x if x is _UNDEF else universe._magma_coerce(x))
-            except MagmaError:
+            except MagmaError as e:
+                if "not supported yet" in str(e):
+                    raise
                 raise MagmaError("Coerce failed for sequence element" if kind == "seq" else "Cannot coerce argument %d into the universe" % (k + 1), _UNIVERSE_FAIL[kind])
         return out
     if isinstance(universe, (_sp.PolynomialRing_, RealField_, _snf.NumberField_absolute, _smat.MatrixSpace_)) and any(_num(x) for x in items):
@@ -1336,10 +1342,12 @@ def _coerce_struct(x, u):
     if isinstance(u, _MFinField):
         y = _ff_into(u, x)
         return _NOCOERCE if y is None else y
-    if isinstance(u, (_MResRing, _MFFPolyRing)):
+    if isinstance(u, (_MResRing, _MFFPolyRing, _MVectorSpace)):
         try:
             return u._magma_coerce(x)
-        except MagmaError:
+        except MagmaError as e:
+            if isinstance(u, _MVectorSpace) and "not supported yet" in str(e):
+                raise  # (a refusal of Sagebrush's, not Magma's error)
             return _NOCOERCE
     if (u is _ZZ or u is _QQ) and _is_ff(x):
         W = _ffwrap(x.parent())
@@ -3119,6 +3127,15 @@ def _eq(a, b, pos=None, op="eq"):
         if a.n != b.n:
             raise MagmaError("Could not find a covering group", "'%s'" % op, True, pos)
         return type(a) is type(b) or a.n == 3
+    if isinstance(a, _MVectorSpace) or isinstance(b, _MVectorSpace):
+        # (full vector spaces: equal of one ring and degree; another is
+        # Magma's error, which names both ModTupRng when the rings differ)
+        if not (isinstance(a, _MVectorSpace) and isinstance(b, _MVectorSpace)):
+            raise _bad_types(op, (a, b), pos)
+        if a.base is b.base and a.n == b.n:
+            return True
+        names = (_ext_type(a), _ext_type(b)) if a.base is b.base else tuple("ModTupRng[%s]" % _ring_cat(x.base) for x in (a, b))
+        raise MagmaError("Arguments are not compatible\nArgument types given: %s, %s" % names, "'%s'" % op, True, pos)
     if isinstance(a, (_MFFPoly, _MFFPolyRing)) or isinstance(b, (_MFFPoly, _MFFPolyRing)):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
@@ -3279,7 +3296,7 @@ def _universe(s, fixed=False):
     first element y, None when empty.  One element is looked at, not the
     whole collection."""
     u = getattr(s, "universe", None)
-    if u is not None and _is_struct(u):
+    if u is not None and (_is_struct(u) or isinstance(u, _MVectorSpace)):
         return ("struct", u)
     # (fixed: for what goes into s, the universe fixed when it was made,
     # the integers or the rationals: what Magma coerces into, not the first
@@ -3371,6 +3388,13 @@ def _in(x, s, pos=None, op="in"):
         return x in s
     if isinstance(s, MTuple):
         raise _bad_types(op, (x, s), pos)
+    if isinstance(s, (MSeq, MRange, MSet)) and isinstance(getattr(s, "universe", None), _MVectorSpace):
+        # (over a declared vector space: x coerced into it first, as V!x,
+        # then compared; one that doesn't go in is Magma's error)
+        y = _coerce_struct(x, s.universe)
+        if y is _NOCOERCE:
+            raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
+        return any(_cmpeq(y, z) for z in (s.items if isinstance(s, MSet) else s))  # (in any order)
     if isinstance(s, (MSeq, MRange, MSet)):
         code = _meets(x, s)
         if code == "N":
@@ -3651,6 +3675,8 @@ def _cat(a, b, pos=None):
         return a + b
     if isinstance(a, (MSeq, MRange)) and isinstance(b, (MSeq, MRange)):
         ua, ub = _universe(a), _universe(b)
+        if any(w and isinstance(w[1], _MVectorSpace) for w in (ua, ub)):
+            raise MagmaError("concatenating sequences over a vector space is not supported yet", "'cat'", True, pos)
         if ua and ub:
             if ua[0] == "elt" and ub[0] == "elt":
                 ok = _compatible(ua[1], ub[1])
@@ -4992,7 +5018,7 @@ class _Cat(str):
 _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum SetIndx SetMulti Tup "
                "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt "
                # (and those of signatures: ISA(AlgMatElt, MtrxS))
-               "GrpPermElt GrpPerm RngIntResElt RngIntRes ModTupRngElt ModTupFldElt AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
+               "GrpPermElt GrpPerm RngIntResElt RngIntRes ModTupRngElt ModTupFldElt ModTupRng ModTupFld AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
                "FldNum FldQuad FldCyc FldCycElt FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
@@ -5033,6 +5059,8 @@ def _type_name(x):
         return "FldQuadElt" if getattr(x.parent(), "_quadratic", False) else "FldNumElt"
     if isinstance(x, _MVector):
         return "ModTupFldElt" if x._base is _sa.QQ else "ModTupRngElt"
+    if isinstance(x, _MVectorSpace):
+        return x._cat()
     if isinstance(x, _MResElt):
         return "RngIntResElt"
     if isinstance(x, _MFFPoly):
@@ -5116,6 +5144,8 @@ def _ext_type(x):
         return "%s[FldFin]" % _type_name(x)
     if isinstance(x, _MVector):
         return "%s[%s]" % (_type_name(x), _ring_cat(x._base))
+    if isinstance(x, _MVectorSpace):
+        return "%s[%s]" % (x._cat(), _ring_cat(x.base))
     if isinstance(x, _MModMat):
         return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
@@ -8134,7 +8164,10 @@ def Basis(K):
             out.append(y)
             y = y * g
         return MSeq(out)
-    if isinstance(K, int) and not isinstance(K, bool):
+    if isinstance(K, _MVectorSpace):
+        # (its unit vectors, in order, as Magma's)
+        return MSeq(_unit_vectors("Basis", K), K)
+    if isinstance(K, (int, _MSymGroup, _MDihedralGroup)) and not isinstance(K, bool):
         raise _bad_types("Basis", (K,))
     raise MagmaError("Basis of a %s is not supported yet" % _type_of(K), "'Basis'")
 
@@ -8343,7 +8376,10 @@ def _mod_result(r, op, a, b=None):
 
 class _MVectorSpace:
     """The parent of a vector: Magma's full vector space (over the
-    rationals) or RSpace (over the integers) of a degree."""
+    rationals) or RSpace (over the integers) of a degree (ModTupFld,
+    ModTupRng), made by VectorSpace, KSpace and RSpace too.  V.i is its
+    i-th unit vector; V!x, x in V, #V and Dimension(V) as Magma's (checked
+    against Magma 2.18)."""
 
     def __init__(self, base, n):
         self.base, self.n = base, n
@@ -8358,6 +8394,78 @@ class _MVectorSpace:
 
     def __hash__(self):
         return hash((self.n, self.base is _sa.QQ))
+
+    def _cat(self):
+        return "ModTupFld" if self.base is _sa.QQ else "ModTupRng"
+
+    def _vector(self, items):
+        # (a vector of degree 0 prints as Magma's empty matrix: not modelled)
+        if not self.n:
+            raise MagmaError("a vector of degree 0 is not supported yet")
+        return _MVector(items, self.base)
+
+    def _magma_dimension(self):
+        return self.n
+
+    def _magma_degree(self):
+        return self.n
+
+    def _magma_card(self):
+        raise MagmaError("Cardinality is infinite or not feasibly computable", "'#'", True)
+
+    def _magma_gen(self, i):
+        if isinstance(i, bool) or not isinstance(i, int):
+            raise _bad_types(".", (self, i))
+        if not 1 <= i <= self.n:
+            raise MagmaError("Argument 2 (%d) should be in the range [1 .. %d]" % (i, self.n), "'.'", True)
+        return self._unit(i - 1)
+
+    def _unit(self, k):
+        return self._vector([1 if j == k else 0 for j in range(self.n)])
+
+    def _magma_contains(self, x):
+        if isinstance(x, _MVector):
+            if x._base is not self.base or len(x) != self.n:
+                raise MagmaError("Arguments are not compatible", "'in'", True)
+            return True
+        if isinstance(x, (_MFFVec, _MFFMat, _smat.Matrix)):
+            raise MagmaError("membership of this in a vector space is not supported yet", "'in'", True)
+        raise MagmaError("Bad argument types", "'in'", True)
+
+    def _magma_coerce(self, x):
+        R = _QQ if self.base is _sa.QQ else _ZZ
+        if isinstance(x, _MVector):
+            if len(x) != self.n:
+                raise MagmaError("Arguments have incompatible degrees\nLHS: %s\nRHS: %s" % (self._cat(), _type_name(x)), "'!'", True)
+            if self.base is _sa.ZZ and any(_Fraction(a).denominator != 1 for a in x):
+                raise MagmaError("Cannot coerce element from source coefficent ring into the destination coefficient ring", "'!'", True)
+            return self._vector([int(a) for a in x] if self.base is _sa.ZZ else list(x))
+        if isinstance(x, (MSeq, MRange)):
+            # V![a, b, ...]: a vector of the sequence's elements, each in
+            # the coefficient ring
+            n = x.size() if isinstance(x, MRange) else len(x)
+            if n != self.n:
+                raise MagmaError("Sequence argument length (%d) should be %d to be coerced into a matrix or vector" % (n, self.n), "'!'", True)
+            out = []
+            for k, a in enumerate(x):
+                if isinstance(a, bool):
+                    y = None
+                elif isinstance(a, (int, _Fraction)):
+                    y = _coerce_struct(a, R)
+                else:
+                    y = _NOCOERCE if isinstance(a, str) else None  # (a string: Magma's words)
+                if y is None:
+                    raise MagmaError("coercion of a sequence of these elements into a vector space is not supported yet", "'!'", True)
+                if y is _NOCOERCE:
+                    raise MagmaError("Cannot coerce sequence element %d into the coefficient ring" % (k + 1), "'!'", True)
+                out.append(y)
+            return self._vector(out)
+        if isinstance(x, int) and not isinstance(x, bool) and x == 0:
+            return self._vector([0] * self.n)
+        if isinstance(x, (int, _Fraction, str)):
+            # (a boolean, a string too: Magma's words)
+            raise MagmaError("Illegal coercion\nLHS: %s\nRHS: %s" % (self._cat(), _type(x)), "'!'", True)
+        raise MagmaError("coercion of a %s into a vector space is not supported yet" % _type_of(x), "'!'", True)
 
 
 class _MVector(list):
@@ -8481,6 +8589,65 @@ def _vector_seq(Q):
     q = getattr(Q, "universe", None) is _QQ or getattr(Q, "_inf", None) is _QQ or \
         any(isinstance(x, _Fraction) and not isinstance(x, int) for x in items)
     return _MVector(items, _sa.QQ if q else _sa.ZZ)
+
+
+def _vector_space(name, args, field):
+    """VectorSpace(K, n), KSpace(K, n) (field) and RSpace(R, n): the full
+    space of degree n over the rationals (or, RSpace, the integers), as
+    Magma's; the degree at most _COLLECT_MAX, since V.i makes n entries."""
+    if len(args) != 2 or isinstance(args[1], bool) or not isinstance(args[1], int) or \
+            not (args[0] is _ZZ or args[0] is _QQ or _is_struct(args[0]) or isinstance(args[0], _MFinField)):
+        raise _bad_types(name, args)
+    R, n = args
+    if field and R is _ZZ:
+        raise _arg_error(name, "Argument 1 is not a field")
+    if R is not _ZZ and R is not _QQ:
+        raise MagmaError("%s over a ring other than the integers or the rationals is not supported yet" % name, "'%s'" % name)
+    if n < 0:
+        raise _arg_error(name, "Argument 2 (%d) should be >= 1" % n)
+    if n > _COLLECT_MAX:
+        raise MagmaError("a vector space of degree more than %d is not supported yet" % _COLLECT_MAX, "'%s'" % name)
+    return _MVectorSpace(_sa.QQ if R is _QQ else _sa.ZZ, n)
+
+
+def VectorSpace(*args):
+    return _vector_space("VectorSpace", args, True)
+
+
+def KSpace(*args):
+    return _vector_space("KSpace", args, True)
+
+
+def RSpace(*args):
+    return _vector_space("RSpace", args, False)
+
+
+def _unit_vectors(name, V):
+    # (n vectors of n entries: admitted by n^2, the entries made)
+    if V.n * V.n > _COLLECT_MAX:
+        raise MagmaError("%s of a vector space of degree more than %d is not supported yet" % (name, _math.isqrt(_COLLECT_MAX)), "'%s'" % name)
+    return [V._unit(k) for k in range(V.n)]
+
+
+def Generators(V):
+    """The unit vectors of a full vector space, as a set (Magma lists them
+    in an order of its own: a set of two or more is not printed)."""
+    if not isinstance(V, _MVectorSpace):
+        raise MagmaError("Generators of a %s is not supported yet" % _type_of(V), "'Generators'")
+    return MSet(_unit_vectors("Generators", V), "set", V)
+
+
+def Zero(R):
+    """The zero of the integers, the rationals or a full vector space."""
+    if R is _ZZ:
+        return 0
+    if R is _QQ:
+        return _qelt(0)
+    if isinstance(R, _MVectorSpace):
+        return R._vector([0] * R.n)
+    if isinstance(R, int) and not isinstance(R, bool):
+        raise _bad_types("Zero", (R,))
+    raise MagmaError("Zero of a %s is not supported yet" % _type_of(R), "'Zero'")
 
 
 @_signature("Vector", "Rng", "SeqEnum", ret="ModTupRngElt")
