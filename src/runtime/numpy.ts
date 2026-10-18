@@ -1051,7 +1051,7 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)) },
   arctan2: { f: CR.atan2, out: "float" },
   hypot: { f: CR.hypot, out: "float" },
-  copysign: { f: (x, y) => (Object.is(Math.sign(y), -0) || y < 0 ? -Math.abs(x) : Math.abs(x)), out: "float" },
+  copysign: { f: (x, y) => withSign(x, signBit(y)), out: "float" },
   logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + glibcLog1p(glibcExp(-Math.abs(x - y))); }, out: "float" },
   equal: { f: (x, y) => +(x === y), out: "bool", c: (a, b, c, d) => [+(a === c && b === d), 0] },
   not_equal: { f: (x, y) => +(x !== y), out: "bool", c: (a, b, c, d) => [+(a !== c || b !== d), 0] },
@@ -1276,6 +1276,19 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   return res;
 }
 
+// The sign bit itself, a NaN's too, as C's signbit and copysign read and
+// set it, and so NumPy's (x < 0 and Object.is(x, -0) say nothing of a NaN)
+const SIGN_F = new Float64Array(1), SIGN_W = new Uint32Array(SIGN_F.buffer);
+function signBit(x: number): number {
+  SIGN_F[0] = x;
+  return SIGN_W[1] >>> 31;
+}
+function withSign(x: number, negative: number): number {
+  SIGN_F[0] = x;
+  SIGN_W[1] = (SIGN_W[1] & 0x7fffffff) | (negative << 31);
+  return SIGN_F[0];
+}
+
 type Un = (x: number) => number;
 type CUn = (re: number, im: number) => [number, number];
 const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; out?: "bool" }> = Obj.table({
@@ -1318,7 +1331,7 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   isnan: { f: (x) => +(x !== x), out: "bool", c: (a, b) => [+(a !== a || b !== b), 0] },
   isinf: { f: (x) => +(x === Infinity || x === -Infinity), out: "bool" },
   isfinite: { f: (x) => +Number.isFinite(x), out: "bool", c: (a, b) => [+(Number.isFinite(a) && Number.isFinite(b)), 0] },
-  signbit: { f: (x) => +(x < 0 || Object.is(x, -0)), out: "bool" },
+  signbit: { f: signBit, out: "bool" },
   logical_not: { f: (x) => +(x === 0), out: "bool", c: (a, b) => [+(a === 0 && b === 0), 0] },
   invert: { f: (x) => -x - 1, keepInt: true },
 });
