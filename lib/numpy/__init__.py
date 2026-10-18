@@ -2785,8 +2785,36 @@ def save(file, arr, allow_pickle=True, fix_imports=True):
         f.write(out)
 
 
+def _c_contiguous(a):
+    """Whether a's elements lie in C order, each stride the product of the
+    later dimensions times the itemsize (dimensions of one aside)."""
+    expect = a.itemsize
+    for n, s in zip(reversed(a.shape), reversed(a.strides)):
+        if n != 1 and s != expect:
+            return False
+        expect *= n
+    return True
+
+
+def _bytes_order(a, order):
+    """tobytes's order as NumPy reads it: None or C, F, A or K in either case
+    (str or bytes); C and K are C order, A is F order for an array that is
+    Fortran-contiguous and not C-contiguous; anything else refused."""
+    if order is None:
+        return "C"
+    if not isinstance(order, (str, bytes)):
+        raise TypeError(f"order must be str, not {type(order).__name__}")
+    o = order.decode("latin1") if isinstance(order, bytes) else order
+    if len(o) != 1 or o.upper() not in "CFAK":
+        raise ValueError(f"order must be one of 'C', 'F', 'A', or 'K' (got {order!r})")
+    o = o.upper()
+    if o == "A":
+        return "F" if _c_contiguous(a.T) and not _c_contiguous(a) else "C"
+    return "F" if o == "F" else "C"
+
+
 def _m_tobytes(self, order="C"):
-    if order == "F":
+    if _bytes_order(self, order) == "F":
         self = self.T
     return _np._tobytes(self)
 
