@@ -227,8 +227,10 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   const cli = join(__dirname, "..", "src", "cli.js");
   // under a 96 MB heap, as in the review
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: WALL(120000) });
-  // (a 96 MiB heap admits 96 MiB / 2048 bytes = 49152 elements, HARD-A57-1)
-  const refusal = /a comprehension of more than 49152 elements is not supported yet/g;
+  // (a 96 MiB heap admits what its free part allows, less after the modules
+  // are loaded: about 37000 elements in October 2026, never more than the
+  // earlier 96 MiB / 2048 = 49152; one bound in all the refusals of a run)
+  const refusal = /a comprehension of more than (\d+) elements is not supported yet/g;
   // above the limit: #S^2 refused at once without a condition (each kind of
   // collection); with one, or several clauses, by the collector at 10^6 + 1
   const t0 = Date.now();
@@ -237,16 +239,62 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
       "T := [ x : x, y in [1..1001] | true ];\nT := [ x : x in [1..1000], y in [1..1001] ];\n1;\n",
   );
   assert.equal(above.signal, null, above.stderr);
-  assert.equal((above.stdout.replace(/\s+/g, " ").match(refusal) ?? []).length, 6, above.stdout);
+  const bounds = [...above.stdout.replace(/\s+/g, " ").matchAll(refusal)].map((m) => Number(m[1]));
+  assert.equal(bounds.length, 6, above.stdout);
+  assert.ok(bounds.every((b) => b === bounds[0]) && bounds[0] >= 16384 && bounds[0] <= 49152, above.stdout);
   assert.match(above.stdout, /\n1\n$/);
   assert.ok(Date.now() - t0 < WALL(60000));
-  // within the limit: 200^2 elements are built in 96 MiB
-  const at = run("#[ x : x, y in [1..200] ];\n#[ y : x in [1..200], y in [1..200] | true ];\n#{ x*y : x, y in [1..200] };\n#[ <x, [x, x+1], x/3> : x in [1..49152] ];\n");
+  // within the limit: 140^2 elements are built in 96 MiB
+  const at = run("#[ x : x, y in [1..140] ];\n#[ y : x in [1..140], y in [1..140] | true ];\n#{ x*y : x, y in [1..140] };\n#[ <x, [x, x+1], x/3> : x in [1..16384] ];\n");
   assert.equal(at.signal, null, at.stderr);
-  assert.match(at.stdout, /^40000\n40000\n\d+\n49152\n$/);
+  assert.match(at.stdout, /^19600\n19600\n\d+\n16384\n$/);
   // and 10^6 in an ordinary heap
   const big = spawnSync(process.execPath, [cli, "--magma"], { input: "#[ x : x, y in [1..1000] ];\n", encoding: "utf8", timeout: WALL(120000) });
   assert.equal(big.stdout, "1000000\n", big.stderr);
+});
+
+test("the comprehension bound leaves a tenth of the heap: at the bound in a heap 10% smaller, a clean refusal, never V8's out of memory (HARD-FCC-1 on GitHub)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (the bound is taken for a 96 MiB heap, NODE_OPTIONS's, which Sagebrush
+  // reads after the command line, while V8 has the command line's 86 MiB,
+  // which Node lets win; the comprehension with a condition builds its
+  // elements, triples <x, [x, x+1], x/3>, the tests' costliest, one by one
+  // up to the bound before it refuses: the most the bound lets a script hold)
+  const r = spawnSync(process.execPath, ["--max-old-space-size=86", cli, "--magma"], {
+    input: '#[ <x, [x, x+1], x/3> : x in [1..10^6] | true ];\n"end";\n', encoding: "utf8", timeout: WALL(120000),
+    env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=96" },
+  });
+  assert.equal(r.signal, null, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /heap out of memory|FATAL ERROR/);
+  const m = /a comprehension of more than (\d+) elements is not supported yet/.exec(r.stdout.replace(/\s+/g, " "));
+  assert.ok(m && Number(m[1]) >= 16384 && Number(m[1]) <= 49152, r.stdout + r.stderr);
+  assert.match(r.stdout, /\nend\n$/);
+});
+
+test("taking the live heap leaves gc exposure as it was: no context made later gets gc, and a host started with --expose-gc keeps it (astra CORR-341-1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (a preload reports gc in the root and in a fresh vm context, before
+  // Magma mode loads and takes the live heap, and at exit)
+  const pre = join(mkdtempSync(join(tmpdir(), "magma-gc-")), "gc-state.cjs");
+  writeFileSync(pre, [
+    "const vm = require('node:vm'), fs = require('node:fs');",
+    "const report = (phase) => fs.writeSync(2, phase + ' root=' + typeof global.gc + ' fresh=' + vm.runInNewContext('typeof gc') + '\\n');",
+    "report('before'); process.on('exit', () => report('after'));",
+    "",
+  ].join("\n"));
+  const run = (flags: string[]) => spawnSync(process.execPath, [...flags, "--require", pre, cli, "--magma"], { input: "1;\n", encoding: "utf8", timeout: WALL(60000) });
+  const plain = run([]);
+  assert.equal(plain.stdout, "1\n", plain.stderr);
+  assert.match(plain.stderr, /before root=undefined fresh=undefined\nafter root=undefined fresh=undefined\n/, plain.stderr);
+  const exposed = run(["--expose-gc"]);
+  assert.equal(exposed.stdout, "1\n", exposed.stderr);
+  assert.match(exposed.stderr, /before root=function fresh=function\nafter root=function fresh=function\n/, exposed.stderr);
 });
 
 test("a long integer is laid out in lines of 79 digits and a backslash, in time linear in its length", () => {
@@ -340,15 +388,16 @@ test("index selections are admitted before they are taken, and a long chain of i
   const cli = join(__dirname, "..", "src", "cli.js");
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: WALL(60000) });
   const t0 = Date.now();
-  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 39999]; #T;\n');
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 19999]; #T;\n');
   assert.equal(sel.signal, null, sel.stderr);
   const flat = sel.stdout.replace(/\s+/g, " ");
-  // (the limit in a 96 MiB heap: 49152 elements, HARD-A57-1; a selection of
-  // 10^6 aborted V8 there on Node 24)
-  assert.equal((flat.match(/a selection of more than 49152 elements is not supported yet/g) ?? []).length, 2, sel.stdout);
+  // (the limit in a 96 MiB heap, from its free part: at most 49152 elements,
+  // HARD-A57-1; a selection of 10^6 aborted V8 there on Node 24)
+  const selBounds = [...flat.matchAll(/a selection of more than (\d+) elements is not supported yet/g)].map((m) => Number(m[1]));
+  assert.ok(selBounds.length === 2 && selBounds[0] === selBounds[1] && selBounds[0] <= 49152, sel.stdout);
   assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
-  assert.match(sel.stdout, /\n40000\n$/);
+  assert.match(sel.stdout, /\n20000\n$/);
   assert.ok(Date.now() - t0 < WALL(30000));
   // 5000 links: refused before running; 64 still work
   const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
@@ -735,7 +784,8 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a real literal with an exponent of more than 10000 is not supported yet/g) ?? []).length, 2, r.stdout);
   assert.match(out, /a range endpoint of more than 100000 digits is not supported yet/);
-  assert.equal((out.match(/a set of more than 49152 elements is not supported yet/g) ?? []).length, 3, r.stdout);
+  const setBounds = [...out.matchAll(/a set of more than (\d+) elements is not supported yet/g)].map((m) => Number(m[1]));
+  assert.ok(setBounds.length === 3 && setBounds.every((b) => b === setBounds[0] && b <= 49152), r.stdout);
   assert.match(out, /Sequence range does not consist of integers/);
   // (a sequence's range stays lazy: its size is known at once)
   assert.match(r.stdout, /\n100000000\nend\n$/);
@@ -963,7 +1013,7 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   const t0 = Date.now();
   const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
     // (many small subsets: their sets are charged with their elements)
-    "U := {1..40000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
+    "U := {1..30000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
     "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
@@ -1193,13 +1243,13 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..40000]; Matrix(F, [r : i in [1..40000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..30000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 40000
-  // rows of 40000, fewer rows than the bound, by their entries)
+  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 30000
+  // rows of 30000, fewer rows than the bound, by their entries)
   assert.equal((out.match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
@@ -1539,10 +1589,10 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^40000 + x, 39999);\n" +
+    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^30000 + x, 29999);\n" +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^40000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+    "Degree(x^30000); #Factorization(x^200 + x + 1);\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
@@ -1553,7 +1603,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n40000\n\d+\nend\n$/);
+  assert.match(r.stdout, /\n30000\n\d+\nend\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 

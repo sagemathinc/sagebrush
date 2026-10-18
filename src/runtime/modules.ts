@@ -394,6 +394,40 @@ newBuiltinModule("sys", (m) => {
   // budgets that must scale with it (a matrix over a field is refused
   // before it is built, not by the heap running out): heapLimit()
   m._sagebrush_heap_limit = heapLimit();
+  // the live heap now, in bytes: V8's used_heap_size after a full
+  // collection (before one it counts garbage too, and varied by 25 MB from
+  // run to run), for a budget taken from what is free rather than from the
+  // whole limit (lib/_magma.py's comprehension limit, which calls it once).
+  // None where the host has no V8 heap statistics or can't collect (the
+  // browser, Bun, Deno)
+  m._sagebrush_heap_used = builtin(() => {
+    try {
+      const p = (globalThis as any).process;
+      // (Node only: Bun and Deno answer node:v8 with other engines' numbers)
+      if (!p?.versions?.v8 || p.versions.bun || p.versions.deno) return null;
+      const v8 = p.getBuiltinModule?.("node:v8");
+      const vm = p.getBuiltinModule("node:vm");
+      // (gc from a fresh context: a host started with --expose-gc already
+      // has it there, and its setting is left alone; otherwise the flag is
+      // set for that one context and cleared again, whatever happens, so no
+      // context made later gets gc: astra CORR-341-1)
+      let gc = (globalThis as any).gc;
+      if (typeof gc !== "function") gc = vm.runInNewContext("typeof gc === 'function' ? gc : undefined");
+      if (typeof gc !== "function") {
+        v8.setFlagsFromString("--expose-gc");
+        try {
+          gc = vm.runInNewContext("gc");
+        } finally {
+          v8.setFlagsFromString("--no-expose-gc");
+        }
+      }
+      gc();
+      const n = v8.getHeapStatistics().used_heap_size;
+      return typeof n === "number" && n > 0 ? Math.floor(n) : null;
+    } catch {
+      return null;
+    }
+  }, "_sagebrush_heap_used");
   // the function catalog the CLI bundle carries (scripts/build-cli.mjs,
   // catalog.gen.js: JSON text), for lib/_catalog.py away from a source tree;
   // None in the browser, whose search reads the built indexes
