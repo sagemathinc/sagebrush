@@ -62,7 +62,7 @@ def cases():
         arguments = ('mapped' + (',' if arguments else '') + arguments) if kind == 'map' else arguments
         add(f'{kind}-{strict}-{counts}', f'''
 def run():
-    iterator = {kind}({arguments}, strict={strict!r})
+    iterator = {kind}({arguments + "," if arguments else ""} strict={strict!r})
     for attempt in range({max(counts, default=0) + 3}):
         capture(lambda: next(iterator))
 capture(run)
