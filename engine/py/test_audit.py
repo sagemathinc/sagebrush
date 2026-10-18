@@ -827,3 +827,27 @@ _r64 = _e64.reduce_trig()
 assert len(_r64.operands()) == 33, len(_r64.operands())
 assert abs(float(_r64.subs(x0=1.3)) - float(_e64.subs(x0=1.3))) < 1e-12
 print("reduce_trig term bound ok")
+
+
+# PNG (daybreak2's limits review of sage-plot-png-mathtext): the native
+# decoder borrows the caller's bytes and refuses more than 256 MiB before
+# reading them; a figure's size and dpi are checked before any arithmetic
+import math
+import os
+import tempfile
+
+from sagebrush._native import raster as _raster
+from sagebrush.sage import plot, x as _x
+
+big = b"\0" * ((256 << 20) + 1)
+assert "at most 268435456" in raises(ValueError, _raster.raster_decode, big)
+del big
+raises(ValueError, _raster.raster_decode, b"not a png")  # (a refusal, not a crash)
+_d = tempfile.mkdtemp()
+_G = plot(_x, (_x, 0, 1))
+for _bad in [dict(dpi=float("inf")), dict(dpi=float("nan")), dict(dpi=0), dict(dpi=-5), dict(dpi=10**6), dict(figsize=[float("inf"), 3]),
+             dict(figsize=[float("nan"), 3]), dict(figsize=[0, 3])]:
+    assert "Sagebrush writes at most" in raises(ValueError, _G.save, os.path.join(_d, "a.png"), **_bad), _bad
+_G.save(os.path.join(_d, "ok.png"), dpi=50)
+assert open(os.path.join(_d, "ok.png"), "rb").read(8) == b"\x89PNG\r\n\x1a\n"
+print("png limits: ok")

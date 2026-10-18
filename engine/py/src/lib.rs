@@ -442,11 +442,20 @@ fn raster_render<'py>(py: Python<'py>, svg: String, scale: f32, width: u32, heig
     }
 }
 
+/// The most a PNG file read may be, in bytes (lib/_png.py MAX_FILE_BYTES).
+const RASTER_MAX_FILE_BYTES: usize = 256 << 20;
+
 /// A PNG file's pixels: (width, height, channels, float32 values as bytes,
-/// little-endian), as the browser's _sbraster.decode.
+/// little-endian), as the browser's _sbraster.decode.  `png` is borrowed
+/// from the caller's bytes (not copied), and refused above 256 MiB here,
+/// before anything is read (daybreak2's limits review).
 #[pyfunction]
-fn raster_decode<'py>(py: Python<'py>, png: Vec<u8>) -> PyResult<(u32, u32, u32, Bound<'py, pyo3::types::PyBytes>)> {
-    let r = py.detach(|| sagebrush_raster::decode_png(&png));
+fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, Bound<'py, pyo3::types::PyBytes>)> {
+    if png.len() > RASTER_MAX_FILE_BYTES {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "a PNG of {} bytes: Sagebrush reads at most {}", png.len(), RASTER_MAX_FILE_BYTES)));
+    }
+    let r = py.detach(|| sagebrush_raster::decode_png(png));
     match r {
         Ok((w, h, ch, v)) => {
             let mut b = Vec::with_capacity(4 * v.len());

@@ -21,6 +21,16 @@ def figure_png(svg, width_in, height_in, dpi, background, text):
     (a CSS color, or None for transparent), with the PNG text chunks in
     `text` [(key, value)]."""
     import _sbraster
+    import math
+    # (the size checked before any arithmetic on it: an infinite or NaN dpi
+    # or size is the same refusal, not an OverflowError from int())
+    try:
+        width_in, height_in, dpi = float(width_in), float(height_in), float(dpi)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("a PNG needs a numeric size and dpi, not %r x %r at %r dpi" % (width_in, height_in, dpi)) from None
+    if not all(math.isfinite(v) and v > 0 for v in (width_in, height_in, dpi)) or width_in * dpi > MAX_AXIS or height_in * dpi > MAX_AXIS:
+        raise ValueError("a PNG of %r x %r inches at %r dpi: Sagebrush writes at most %d pixels on a side and %d in all"
+                         % (width_in, height_in, dpi, MAX_AXIS, MAX_PIXELS))
     w, h = int(width_in * dpi), int(height_in * dpi)
     if w < 1 or h < 1 or w > MAX_AXIS or h > MAX_AXIS or w * h > MAX_PIXELS:
         raise ValueError("a PNG of %d x %d pixels: Sagebrush writes at most %d on a side and %d in all"

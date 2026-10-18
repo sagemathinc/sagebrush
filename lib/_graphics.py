@@ -1596,11 +1596,15 @@ def save_figure(svg, filename, dpi=None, transparent=False):
     if ext == "png":
         import re
         import _png
-        m = re.match(r'<svg [^>]*?width="([0-9.]+)" height="([0-9.]+)"', svg)
+        m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
         if m is None:
             raise ValueError("save: the picture has no size to draw it at")
-        dpi = 100.0 if dpi is None else float(dpi)
-        png = _png.figure_png(svg, float(m.group(1)) / 100, float(m.group(2)) / 100, dpi, None if transparent else "white", [])
+        try:
+            w, h = float(m.group(1)) / 100, float(m.group(2)) / 100
+        except ValueError:
+            w = h = float("nan")
+        # (_png checks the size and dpi, finite and within its limits, first)
+        png = _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
         with open(name, "wb") as f:
             f.write(png)
         return
