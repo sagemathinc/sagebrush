@@ -431,3 +431,134 @@ export function glibcPow(x: number, y: number): number {
   const elo = y * lo + fma(y, hi, -ehi);
   return powExp(ehi, elo, neg);
 }
+
+// glibc's powf (ARM optimized-routines math/powf.c, MIT OR Apache-2.0 WITH
+// LLVM-exception, Copyright (c) 2017-2026 Arm Limited), the path glibc's
+// x86-64 build takes (no TOINT_INTRINSICS: POWF_SCALE 1, exp2's k by the
+// 0x1.8p52 / N shift; WANT_ROUNDING and WANT_ERRNO_UFLOW), ported line by
+// line: log2 x in double from a 16-entry table and a degree-5 polynomial,
+// y log2 x, then 2^(y log2 x) from a 32-entry table and a cubic, rounded to
+// float once.  It is not correctly rounded (0.82 ulp), so it is ported, not
+// replaced: NumPy's float32 power calls it (a port checked on 197,105 pairs,
+// all identical).  The tables: math/powf_log2_data.c, math/exp2f_data.c.
+const POWF_TAB = [
+  [1.398907162146528, -0.48430022186289673],
+  [1.3403141896637998, -0.42257122959194704],
+  [1.286432210124115, -0.3633754347673556],
+  [1.2367150214269895, -0.30651309567405577],
+  [1.1906977166711752, -0.25180720160537634],
+  [1.1479821020556429, -0.19910014943794563],
+  [1.1082251448272158, -0.14825100623281615],
+  [1.0711297413057381, -0.09913323807318392],
+  [1.036437278977283, -0.051632812977629436],
+  [1.0, 0.0],
+  [0.9492859795739057, 0.07508531937943004],
+  [0.8951049428609004, 0.15987125980713107],
+  [0.8476821620351103, 0.2384046664317681],
+  [0.8050314851692001, 0.31288288605863257],
+  [0.7664671008843108, 0.38370422656453185],
+  [0.731428603316328, 0.451211048935815],
+];
+const POWF_A = [0.288457581109214, -0.36092606229713164, 0.480898481472577, -0.7213474675006291, 1.4426950408774342];
+// 2^(i/32) as the words of tab[i] = bits(2^(i/32)) - (i << 47), high then low
+const EXP2F_TAB = new Uint32Array([0x3ff00000, 0x00000000, 0x3fefd9b0, 0xd3158574, 0x3fefb558, 0x6cf9890f, 0x3fef9301, 0xd0125b51, 0x3fef72b8, 0x3c7d517b, 0x3fef5487, 0x3168b9aa, 0x3fef387a, 0x6e756238, 0x3fef1e9d, 0xf51fdee1, 0x3fef06fe, 0x0a31b715, 0x3feef1a7, 0x373aa9cb, 0x3feedea6, 0x4c123422, 0x3feece08, 0x6061892d, 0x3feebfda, 0xd5362a27, 0x3feeb42b, 0x569d4f82, 0x3feeab07, 0xdd485429, 0x3feea47e, 0xb03a5585, 0x3feea09e, 0x667f3bcd, 0x3fee9f75, 0xe8ec5f74, 0x3feea114, 0x73eb0187, 0x3feea589, 0x994cce13, 0x3feeace5, 0x422aa0db, 0x3feeb737, 0xb0cdc5e5, 0x3feec491, 0x82a3f090, 0x3feed503, 0xb23e255d, 0x3feee89f, 0x995ad3ad, 0x3feeff76, 0xf2fb5e47, 0x3fef199b, 0xdd85529c, 0x3fef3720, 0xdcef9069, 0x3fef5818, 0xdcfba487, 0x3fef7c97, 0x337b9b5f, 0x3fefa4af, 0xa2a490da, 0x3fefd076, 0x5b6e4540]);
+const EXP2F_C = [0.05550361559341535, 0.2402284522445722, 0.6931471806916203];
+const EXP2F_SHIFT = 211106232532992.0;
+const ff = new Float32Array(1), fu = new Uint32Array(ff.buffer);
+const f32bits = (x: number): number => ((ff[0] = x), fu[0]);
+const f32of = (u: number): number => ((fu[0] = u), ff[0]);
+const fround = Math.fround;
+const zeroinfnanf = (i: number): boolean => ((((2 * i) >>> 0) - 1) >>> 0) >= 0xfeffffff;
+// 0: y is not an integer, 1: odd, 2: even
+function checkintf(iy: number): number {
+  const e = (iy >>> 23) & 0xff;
+  if (e < 0x7f) return 0;
+  if (e > 0x7f + 23) return 2;
+  if (iy & ((1 << (0x7f + 23 - e)) - 1)) return 0;
+  if (iy & (1 << (0x7f + 23 - e))) return 1;
+  return 2;
+}
+function powfLog2(ix: number): number {
+  const tmp = (ix - 0x3f330000) >>> 0;
+  const i = (tmp >>> 19) % 16;
+  const top = (tmp & 0xff800000) >>> 0;
+  const iz = (ix - top) >>> 0;
+  const k = (top | 0) >> 23; // (arithmetic shift)
+  const [invc, logc] = POWF_TAB[i];
+  const z = f32of(iz);
+  const r = z * invc - 1;
+  const y0 = logc + k;
+  const r2 = r * r;
+  let y = POWF_A[0] * r + POWF_A[1];
+  const p = POWF_A[2] * r + POWF_A[3];
+  const r4 = r2 * r2;
+  let q = POWF_A[4] * r + y0;
+  q = p * r2 + q;
+  y = y * r4 + q;
+  return y;
+}
+function powfExp2(xd: number, signBias: number): number {
+  let kd = xd + EXP2F_SHIFT;
+  const kiLo = plo(kd); // (ki's low word: its low bits are k)
+  kd -= EXP2F_SHIFT;
+  const r = xd - kd;
+  // t = tab[ki % 32] + ((ki + sign_bias) << 47): only the high word changes
+  const j = kiLo & 31;
+  const ski = (kiLo + signBias) >>> 0;
+  const s = bitsToDouble((EXP2F_TAB[2 * j] + ((ski << 15) >>> 0)) >>> 0, EXP2F_TAB[2 * j + 1]);
+  const z = EXP2F_C[0] * r + EXP2F_C[1];
+  const r2 = r * r;
+  let y = EXP2F_C[2] * r + 1;
+  y = z * r2 + y;
+  y = y * s;
+  return fround(y);
+}
+// (glibc's __math_xflowf: (sign ? -y : y) * y, in float)
+const xflowf = (sign: number, y: number): number => fround((sign ? -y : y) * y);
+/** x^y as glibc's powf (x and y float32 values; the float32 result) */
+export function glibcPowf(x: number, y: number): number {
+  let signBias = 0;
+  let ix = f32bits(x);
+  const iy = f32bits(y);
+  if (((ix - 0x00800000) >>> 0) >= 0x7f800000 - 0x00800000 || zeroinfnanf(iy)) {
+    // x < 0x1p-126 or inf or nan, or y is 0 or inf or nan
+    if (zeroinfnanf(iy)) {
+      if (((2 * iy) >>> 0) === 0) return 1;
+      if (ix === 0x3f800000) return 1;
+      if (((2 * ix) >>> 0) > 2 * 0x7f800000 || ((2 * iy) >>> 0) > 2 * 0x7f800000) return x !== x ? x : y; // (x + y of NaNs: the first)
+      if (((2 * ix) >>> 0) === 2 * 0x3f800000) return 1;
+      if ((((2 * ix) >>> 0) < 2 * 0x3f800000) === !(iy & 0x80000000)) return 0; // |x| < 1 && y == inf or |x| > 1 && y == -inf
+      return fround(y * y);
+    }
+    if (zeroinfnanf(ix)) {
+      let x2 = fround(x * x);
+      if (ix & 0x80000000 && checkintf(iy) === 1) x2 = -x2;
+      return iy & 0x80000000 ? fround(1 / x2) : x2;
+    }
+    // x and y are non-zero finite
+    if (ix & 0x80000000) {
+      // finite x < 0
+      const yint = checkintf(iy);
+      if (yint === 0) return (x - x) / (x - x); // (glibc's __math_invalidf: 0 / 0, the hardware's NaN)
+      if (yint === 1) signBias = 1 << (5 + 11);
+      ix = (ix & 0x7fffffff) >>> 0;
+    }
+    if (ix < 0x00800000) {
+      // subnormal x: normalized so its exponent becomes negative
+      ix = (f32bits(fround(f32of(ix) * 8388608)) & 0x7fffffff) >>> 0;
+      ix = (ix - (23 << 23)) >>> 0;
+    }
+  }
+  const ylogx = y * powfLog2(ix);
+  // |y log2 x| >= 126
+  if (((phi(ylogx) >>> 15) & 0xffff) >= (phi(126) >>> 15)) {
+    if (ylogx <= -150) return xflowf(signBias, 2.524354896707238e-29);
+    if (ylogx < -149) return xflowf(signBias, 3.3087224502121107e-23);
+    if (ylogx > 127.99999991400867) {
+      if (ylogx > 127.99999995700433) return xflowf(signBias, 1.5845632502852868e+29);
+      // (round to nearest: 1 + 2^-25 is 1, so the largest float)
+      return signBias ? -3.4028234663852886e38 : 3.4028234663852886e38;
+    }
+  }
+  return powfExp2(ylogx, signBias);
+}

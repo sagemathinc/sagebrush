@@ -19,7 +19,7 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
-import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow } from "./libm";
+import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
 import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
 import * as FD from "./fdlibm";
 import * as CR from "./crmath";
@@ -1146,24 +1146,32 @@ const FAST_EXPR: Record<string, (x: string, y: string) => string> = {
   "power 0.5": (x) => `Math.sqrt(${x})`,
   "power 1": (x) => x,
   "power 2": (x) => `${x} * ${x}`,
+  // (float32: glibc's powf, as NumPy's float32 loop calls it)
+  "power float32": (x, y) => `POW(${x}, ${y})`,
 };
-const POW_ONE: Record<string, (x: number) => number> = {
+const POW_ONE: Record<string, (x: number, y: number) => number> = {
   "power -1": (x) => 1 / x,
   "power 0": () => 1,
   "power 0.5": Math.sqrt,
   "power 1": (x) => x,
   "power 2": (x) => x * x,
+  "power float32": (x, y) => powf32(x, y),
 };
 // NumPy's float power loop, given one exponent for the whole loop (a scalar,
 // or an array of one element), computes 1 / x, 1, sqrt(x), x and x * x for
 // the exponents -1, 0, 0.5, 1 and 2, not pow(x, y), whose last bit differs
 // from those for -1, 0.5 and 2 (about one element in 1,000): the kernel's
-// name for them, else "power"
+// name for them, else "power" (float32: "power float32", glibc's powf, which
+// NumPy's float32 loop calls, not pow rounded to float)
 function powerExponent(ct: DType, b: NDArray): string {
-  if ((ct !== D.float64 && ct !== D.float32) || b.size !== 1) return "power";
+  const general = ct === D.float32 ? "power float32" : "power";
+  if ((ct !== D.float64 && ct !== D.float32) || b.size !== 1) return general;
   const e = Number(b.data[b.offset]);
-  return e === -1 || e === 0 || e === 0.5 || e === 1 || e === 2 ? `power ${e}` : "power";
+  return e === -1 || e === 0 || e === 0.5 || e === 1 || e === 2 ? `power ${e}` : general;
 }
+// x^y of float32 operands (a Python float exponent is cast to float32 first,
+// as NumPy casts it to the loop's type), as glibc's powf
+const powf32 = (x: number, y: number): number => glibcPowf(Math.fround(x), Math.fround(y));
 const kernels = new Map<string, any>();
 function fastKernel(op: string, kind: string): any {
   const key = op + kind;
@@ -1172,7 +1180,7 @@ function fastKernel(op: string, kind: string): any {
     if (!Object.hasOwn(FAST_EXPR, op)) throw new Error(`no fast kernel for ${op}`); // generated code: only the table's own entries
     const e = FAST_EXPR[op];
     const x = kind === "sa" ? "av" : "ad[ao + i]", y = kind === "as" ? "bv" : "bd[bo + i]";
-    k = new Function("POW", "ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`).bind(null, glibcPow);
+    k = new Function("POW", "ad", "ao", "av", "bd", "bo", "bv", "od", "n", `for (let i = 0; i < n; i++) od[i] = ${e(x, y)};`).bind(null, op === "power float32" ? powf32 : glibcPow);
     kernels.set(key, k);
   }
   return k;
@@ -1200,7 +1208,7 @@ function stridedKernel(op: string): any {
           pa -= as[d] * shape[d]; pb -= bs[d] * shape[d]; idx[d] = 0;
         }
         if (d < 0) return;
-      }`).bind(null, glibcPow);
+      }`).bind(null, op === "power float32" ? powf32 : glibcPow);
     strided.set(op, k);
   }
   return k;
