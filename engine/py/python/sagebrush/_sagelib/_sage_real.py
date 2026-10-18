@@ -3237,6 +3237,12 @@ class _RealLiteralMP(RealNumberMP):
         r = RealNumberMP.__pow__(self, n, mod)
         return self._same() if r is self else r
 
+    def _symbolic_(self):
+        # (the symbolic ring's numbers are doubles: rounding the literal to
+        # one would be another number than Sage's, so it is refused)
+        raise NotImplementedError("%s, a real number of %d bits (a decimal literal of more than 15 digits), has no symbolic form "
+                                  "in sagebrush yet: symbolic numbers are doubles; use RR(x) for its double" % (self, self._R._prec))
+
     def __float__(self):
         # (its digits read at 53 bits, then as a double, as Sage converts it:
         # float(1.2345678901234567) is not the 57-bit value's double, and a
