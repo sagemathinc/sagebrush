@@ -120,6 +120,12 @@ Copyright (c) 2001 Python Software Foundation. See
   half-even correction, `m_remainder`, `math_isclose_impl`,
   `math_modf_impl`, `math_fmod_impl`); `src/runtime/ops.ts`, `floatDivmod`:
   `_float_div_mod` (`Objects/floatobject.c`).
+- `src/runtime/modules.ts`, `math.factorial`, `math.comb`, `math.perm` and
+  `math.prod`: ported from CPython 3.14's `Modules/mathmodule.c`
+  (`math_factorial` with `factorial_odd_part`, `factorial_partial_product`
+  and `count_set_bits`; the argument checks of `math_comb_impl` and
+  `math_perm_impl` and `perm_comb`'s recursive split; `math_prod_impl`'s
+  exact-int path, here a balanced product).
 - `src/runtime/complex.ts`, the `cmath` module: ported from CPython 3.14's
   `Modules/cmathmodule.c` (each function's special-value table, its
   large-argument formulas and its errno: `cmath_sqrt_impl`, `c_log`,
