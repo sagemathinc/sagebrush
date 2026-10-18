@@ -193,6 +193,9 @@ export class Board {
    * across from the grip (`plus`), or a "+ Code" chip under its bottom
    * edge (`chip`) */
   addSameStyle: "plus" | "chip" = "plus";
+  // (whether the last frame was drawn far out: no grip nor add-another
+  // control drawn then, and so none to press, astra's UI-2B8-1)
+  private farNow = false;
   guides: { xs: number[]; ys: number[] } | null = null;
   /** a press on the background (no item there): return true to take it (the board does not pan) */
   onBackgroundDown: ((e: PointerEvent) => boolean) | null = null;
@@ -488,6 +491,7 @@ export class Board {
   render() {
     this.stats.frames++;
     const c = this.camera, v = this.view(), far = c.z < FAR && (c.z < FEW_FAR || this.boxes.more(v.x0, v.y0, v.x1, v.y1, FEW));
+    this.farNow = far;
     // the camera: one transform
     this.world.style.transform = `translate(${-c.x * c.z}px, ${-c.y * c.z}px) scale(${c.z})`;
     this.world.style.visibility = far ? "hidden" : "visible";
@@ -1588,7 +1592,7 @@ export class Board {
   /** The grip's item, if the point (on the page) is on it (a finger's reach a little more). */
   gripAt(cx: number, cy: number, touch = false): string | null {
     const it = this.grip ? this.byId.get(this.grip) : undefined, c = this.camera;
-    if (!it || c.z < FAR) return null;
+    if (!it || this.farNow) return null;
     const b = gripBox(it, c.z), r = this.el.getBoundingClientRect(), reach = touch ? 10 : 3;
     const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
     return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;
@@ -1596,7 +1600,7 @@ export class Board {
   /** The add-another control's item, if the point (on the page) is on it (a finger's reach a little more). */
   addSameAt(cx: number, cy: number, touch = false): string | null {
     const it = this.addSame ? this.byId.get(this.addSame.id) : undefined, c = this.camera;
-    if (!it || c.z < FAR) return null;
+    if (!it || this.farNow) return null;
     const b = this.addSameBox(it, c.z), r = this.el.getBoundingClientRect(), reach = touch ? 10 : 3;
     const x0 = r.left + (b.x - c.x) * c.z, y0 = r.top + (b.y - c.y) * c.z;
     return cx >= x0 - reach && cx <= x0 + b.w * c.z + reach && cy >= y0 - reach && cy <= y0 + b.h * c.z + reach ? it.id : null;

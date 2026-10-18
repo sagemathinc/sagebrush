@@ -1018,7 +1018,7 @@ export class Editor {
     const d0 = this.doc(), f0 = d0 && find(this.pg(d0), id), it = this.board.item(id);
     if (!f0 || !it) return;
     let same: ReturnType<typeof sameKind>;
-    do same = sameKind(f0.node, Math.random().toString(36).slice(2, 8)); while (same && find(this.pg(d0!), same.node.id));
+    do same = sameKind(f0.node, Math.random().toString(36).slice(2, 8), it); while (same && find(this.pg(d0!), same.node.id));
     if (!same) return;
     const nid = same.node.id;
     const at = this.spotBelow(it, it.w, same.h);
@@ -1034,19 +1034,35 @@ export class Editor {
       this.contain(f.parent, f.siblings, d);
     });
     if (kept === null || !this.board.item(nid)) return;
+    // (its size was a guess until laid out (a question's options, a note's
+    // width): measured now, and if it is over another item there, moved to
+    // the place that size finds, in the same undo step, astra's CORR-2B8-1)
+    const now = this.board.item(nid)!, src = this.board.item(id) ?? it;
+    if (this.inWay(src, now.x, now.y, now.w, now.h, nid).length) {
+      const to = this.spotBelow(src, now.w, now.h, nid);
+      await this.commit((d) => {
+        const f = find(this.pg(d), nid);
+        if (f) { f.node.x = Math.round((to.x - o.x) * 10) / 10; f.node.y = Math.round((to.y - o.y) * 10) / 10; this.contain(f.parent, f.siblings, d); }
+      }, true);
+    }
     // (written in at once: its field shown as editing starts; else the board brought to it)
     if (same.write) this.open(nid, true);
     else { this.select(nid); this.board.bringIntoView(nid); }
   }
 
+  // What is in the way of an item w by h at (x, y), clear by CLEAR: every
+  // item but strokes, the groups `it` is in, and the item itself (`self`).
+  private inWay(it: Item, x: number, y: number, w: number, h: number, self?: string): Item[] {
+    const mine = new Set<string>(self ? [self] : []);
+    for (let p = it.parent; p; p = this.board.item(p)?.parent) mine.add(p);
+    return this.board.near(x - CLEAR, y - CLEAR, x + w + CLEAR, y + h + CLEAR).filter((o) => o.kind !== "ink" && !mine.has(o.id));
+  }
   // Where an item w by h goes below `it` (the world): at its x, the
   // layouts' gap under it; else under what is in the way there, as far as
   // 12 things down; else to its right, past what is in the way.  Clear of
   // every item by CLEAR, but strokes and the groups it is in.
-  private spotBelow(it: Item, w: number, h: number): { x: number; y: number } {
-    const mine = new Set<string>();
-    for (let p = it.parent; p; p = this.board.item(p)?.parent) mine.add(p);
-    const inWay = (x: number, y: number) => this.board.near(x - CLEAR, y - CLEAR, x + w + CLEAR, y + h + CLEAR).filter((o) => o.kind !== "ink" && !mine.has(o.id));
+  private spotBelow(it: Item, w: number, h: number, self?: string): { x: number; y: number } {
+    const inWay = (x: number, y: number) => this.inWay(it, x, y, w, h, self);
     let x = it.x, y = it.y + it.h + ITEM_GAP;
     for (const passed = new Set<string>(); passed.size <= 12; ) {
       const hit = inWay(x, y);
@@ -1284,12 +1300,13 @@ export class Editor {
 // its content; with its kind's name for the control, its height until it
 // is laid out (to find it a place), and whether it is written in at once.
 // None for a stroke or a picture on its own (Image adds pictures).
-export function sameKind(n: DocNode, id: string): { node: DocNode; label: string; h: number; write: boolean } | null {
+export function sameKind(n: DocNode, id: string, shown?: { w: number; h: number }): { node: DocNode; label: string; h: number; write: boolean } | null {
   const pick = <T extends object>(o: T, keys: string[]) => Object.fromEntries(keys.filter((k) => (o as any)[k] !== undefined).map((k) => [k, structuredClone((o as any)[k])]));
   if (n.kind === "ink") return null;
-  if (n.kind === "group") return { node: { id: "g" + id, kind: "group", title: "", children: [], ...pick(n, ["layout", "columns", "direction", "color"]), w: n.w ?? GROUP_W, h: n.h ?? GROUP_H }, label: "Group", h: n.h ?? GROUP_H, write: true };
+  // (a group: as large as it shows, its items' room included, astra's CORR-2B8-2)
+  if (n.kind === "group") { const w = Math.round(shown?.w ?? n.w ?? GROUP_W), h = Math.round(shown?.h ?? n.h ?? GROUP_H); return { node: { id: "g" + id, kind: "group", title: "", children: [], ...pick(n, ["layout", "columns", "direction", "color"]), w, h }, label: "Group", h, write: true }; }
   if (n.kind === "sticker") return { node: { id: "k" + id, kind: "sticker", ...pick(n, ["emoji", "icon", "color", "w"]) }, label: "Sticker", h: n.w ?? STICKER_SIZE, write: false };
-  if (n.kind === "ask") return { node: { id: "q" + id, kind: "ask", text: "", ...pick(n, ["input", "options", "min", "max", "step", "low", "high", "lines", "color"]) } as DocNode, label: "Question", h: 110, write: false };
+  if (n.kind === "ask") return { node: { id: "q" + id, kind: "ask", text: "", ...pick(n, ["input", "options", "min", "max", "step", "low", "high", "lines", "color", "w"]) } as DocNode, label: "Question", h: 110, write: false };
   const note = n as DocNote;
   if (note.code !== undefined) return { node: { id: "c" + id, code: "", ...pick(note, ["mode", "w", "color"]) }, label: "Code", h: 90, write: true };
   if (note.image && !note.text && !note.title) return null;

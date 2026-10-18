@@ -229,6 +229,56 @@ try {
   await leave(); await undoKey();
   await ev("window.board.addSameStyle = 'plus', 1");
 
+  // the new item's real size, measured once laid out: a tall question, a narrow one, over nothing; a group as large as it shows (astra's CORR-2B8-1, CORR-2B8-2)
+  await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Sizes", nodes: [
+    { id: "tq", kind: "ask", text: "Choose", input: "radio", options: Array.from({ length: 14 }, (_, i) => "Choice " + i), x: 0, y: 0 },
+    { id: "blockA", title: "OBSTACLE A", x: 0, y: 594, w: 320, h: 80 },
+    { id: "nq", kind: "ask", text: "Pick", input: "text", w: 140, x: 1000, y: 0 },
+    { id: "blockB", title: "OBSTACLE B", x: 1200, y: 159, w: 180, h: 100 },
+    { id: "wg", kind: "group", title: "Wide group", x: 0, y: 1400, children: [{ id: "inside", title: "Child", w: 800, h: 100, x: 0, y: 0 }] },
+  ] })}).then(() => 1)`);
+  await until(`window.sagebrush.board.snapshot().doc?.title === "Sizes" && !!window.board.item("tq")`, 20000);
+  await ev("window.sagebrush.board.editing(true), 1");
+  await sleep(500);
+  ids0.clear();
+  for (const n of all(await nodes())) ids0.add(n.id);
+  check(await select("tq"), "(the tall question selected)");
+  await key("b");
+  await until(`window.sagebrush.board.snapshot().doc.nodes.length === 6`, 5000);
+  await sleep(600);
+  made = await fresh();
+  const tq = await box("tq"), ntq = made[0] && await box(made[0].id), ov1 = made[0] ? await overlaps(made[0].id) : ["?"];
+  check(made.length === 1 && ntq && ov1.length === 0 && Math.abs(ntq.x - tq.x) < 1 && Math.abs(ntq.h - tq.h) < 60, "a tall question (14 options): the new one, as tall, over nothing: " + JSON.stringify([tq, ntq, ov1]));
+  await leave(); await undoKey();
+  check(!(await fresh()).length, "...and one undo takes it away (its move too)");
+  check(await select("nq"), "(the narrow question selected)");
+  await key("b");
+  await until(`window.sagebrush.board.snapshot().doc.nodes.length === 6`, 5000);
+  await sleep(600);
+  made = await fresh();
+  const nq = await box("nq"), nnq = made[0] && await box(made[0].id), ov2 = made[0] ? await overlaps(made[0].id) : ["?"];
+  check(made.length === 1 && made[0].w === 140 && nnq && Math.abs(nnq.w - nq.w) < 1 && ov2.length === 0, "a question 140 wide: the new one 140 wide, over nothing: " + JSON.stringify([nq, nnq, ov2]));
+  await leave(); await undoKey();
+  check(await select("wg"), "(the group sized by its item selected)");
+  const wg = await box("wg");
+  await key("b");
+  await until(`window.sagebrush.board.snapshot().doc.nodes.length === 6`, 5000);
+  await sleep(600);
+  made = await fresh();
+  const nwg = made[0] && await box(made[0].id);
+  check(made.length === 1 && made[0].kind === "group" && !made[0].children.length && nwg && Math.abs(nwg.w - wg.w) < 1.5 && Math.abs(nwg.h - wg.h) < 1.5 && (await overlaps(made[0].id)).length === 0, "a group as large as its item makes it: an empty group as large: " + JSON.stringify([wg, nwg]));
+  await leave(); await undoKey();
+  // far out, but with so few items they are drawn: the control drawn, and pressable (astra's UI-2B8-1)
+  check(await select("nq"), "(the narrow question selected again)");
+  await ev("(() => { const it = window.board.item('nq'); window.board.setCamera({ x: it.x - 300, y: it.y - 300, z: 0.4 }); window.board.render(); return 1; })()");
+  await sleep(400);
+  const pz = await ev(`(() => { const r = window.board.clientRect("nq"); return { x: r.left + r.width + 4 + 11, y: r.top + 11 }; })()`);
+  check(await ev(`window.board.addSameAt(${pz.x}, ${pz.y}) === "nq"`), "at zoom 0.4, the items drawn: the control there is pressable");
+  await click(pz.x, pz.y);
+  await until(`window.sagebrush.board.snapshot().doc.nodes.length === 6`, 5000);
+  check((await fresh()).length === 1, "...and a click on it adds one");
+  await leave(); await undoKey();
+
   // out of Edit: no control, B does nothing
   await ev("window.sagebrush.board.editing(false), 1");
   await sleep(300);
