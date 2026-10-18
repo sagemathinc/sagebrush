@@ -233,4 +233,3 @@ fn identify(x: &BigRational, tol: f64) -> Option<BigRational> {
     }
     None
 }
-

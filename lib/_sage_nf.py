@@ -577,6 +577,8 @@ class NumberField_absolute:
         analytic certificate did not hold.  (Roots of unity not proven
         complete concern w only: the certificate needs just the ones
         found.)"""
+        # Public class_group/regulator use this for proof=None or proof=False.
+        # Their proof=True branch calls _proven_bnf for an independent certificate.
         d = self._bnfdata()
         extra = [a for a in d.get("assumes", ["GRH"]) if "estimate" in a]
         if extra and proof is not False:
