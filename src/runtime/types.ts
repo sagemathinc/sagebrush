@@ -3004,17 +3004,51 @@ export class FilterIter {
 }
 iteratorType("filter", FilterIter, (predicate: any, iterable: any) => new FilterIter(predicate, O.iter(iterable)));
 
+// (a list's item past its end, read by reversed's getter: CPython's
+// IndexError, which ends the iteration)
+const PAST_END = {};
 export class ReversedIter {
-  constructor(public a: any, public i: number, public get: (i: number) => any) {}
+  // ($size: the sequence's current length, for __length_hint__: a list's
+  // storage, as list's own reverse iterator, else len())
+  constructor(public a: any, public i: number, public get: (i: number) => any, public $size: () => number) {}
+  // As CPython's reversed_next: the item at the index taken before the read,
+  // and then that index less one (a getter that calls next on the same
+  // iterator reads the same index again, and the outer read still moves on
+  // by one from where it started). An IndexError or StopIteration from
+  // reading it ends the iteration; any other error is raised and ends it
+  // too. Once ended, the sequence is dropped, and the iteration stays ended
+  // however the sequence grows. (Before, a list cleared or shortened under
+  // the iterator gave a SystemError, and a getter's error was skipped over.)
   $next(): any {
-    // The argument uses the old index, but i is decremented BEFORE get runs,
-    // including when get raises. Preserve this order for reentrant getters.
-    return this.i >= 0 ? this.get(this.i--) : DONE;
+    const index = this.i;
+    if (index >= 0) {
+      let item: any;
+      try {
+        item = this.get(index);
+      } catch (e: any) {
+        this.end();
+        const x = toPyExc(e);
+        if (isinstance(x, T.IndexError) || isinstance(x, T.StopIteration)) return DONE;
+        throw e;
+      }
+      if (item !== PAST_END) {
+        this.i = index - 1;
+        return item;
+      }
+    }
+    this.end();
+    return DONE;
+  }
+  end(): void {
+    this.i = -1;
+    this.a = null;
+    this.get = () => PAST_END;
+    this.$size = () => 0;
   }
 }
 iteratorType("reversed", ReversedIter, (sequence: any) => {
   // Retain the live array, with its initial length fixing the starting index.
-  if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => sequence[index]);
+  if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => (index < sequence.length ? sequence[index] : PAST_END), () => sequence.length);
   // r is the reverse hook; gi below is the item getter. These local names
   // also occur in existing native errors for non-callable hooks.
   const r = lookupType(typeOf(sequence), "__reversed__");
@@ -3025,9 +3059,18 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
   if (typeof sequence === "string") {
     // Copy Unicode code points, rather than indexing UTF-16 code units.
     const codePoints = [...sequence];
-    return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index]);
+    return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index], () => codePoints.length);
   }
-  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index));
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index), () => O.len(sequence));
+});
+// (CPython's reversed_len and listreviter_len: the index taken first; 0
+// once ended, without asking the sequence; else the items left, the
+// sequence's current length asked each time, 0 if it is now shorter)
+method(T.reversed, "__length_hint__", (it: ReversedIter) => {
+  const index = it.i;
+  if (index < 0 || it.a === null) return 0;
+  const size = it.$size(), position = index + 1;
+  return size < position ? 0 : position;
 });
 
 // `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
