@@ -306,11 +306,11 @@ class RealDoubleElement(float):
     _GSL = "'sage.rings.real_double_element_gsl.RealDoubleElement_gsl'"
 
     def __mod__(self, o):
-        if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+        if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") and o.parent().precision() < 53:
             return NotImplemented
         if type(o) in (float, bool):
             raise TypeError("unsupported operand type(s) for %%: %s and '%s'" % (self._GSL, type(o).__name__))
-        if type(o).__name__ == "RealNumberMP" or self._num(o) is not None:
+        if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") or self._num(o) is not None:
             raise TypeError(self._NO_MOD)
         return NotImplemented
 
@@ -322,7 +322,7 @@ class RealDoubleElement(float):
         return NotImplemented
 
     def __floordiv__(self, o):
-        if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+        if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") and o.parent().precision() < 53:
             return NotImplemented
         return self / o
 
@@ -330,7 +330,7 @@ class RealDoubleElement(float):
         return o / self if self._num(o) is not None else NotImplemented
 
     def __divmod__(self, o):
-        if type(o).__name__ == "RealNumberMP":
+        if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP"):
             o = RDF(o)
         elif self._num(o) is None:
             return NotImplemented
@@ -373,7 +373,7 @@ class RealDoubleElement(float):
             if e.bit_length() > _IPOW_BITS:
                 raise NotImplementedError("RDF power: an integer exponent of more than %d bits is not available in sagebrush yet" % _IPOW_BITS)
             return RealDoubleElement(_ipow(x, int(e)))
-        if type(e).__name__ == "RealNumberMP" and e.parent().precision() < 53:
+        if type(e).__name__ in ("RealNumberMP", "_RealLiteralMP") and e.parent().precision() < 53:
             # (a coarser field's exponent: the power in that field, as Sage)
             return e.parent()(self) ** e
         y = self._num(e)
