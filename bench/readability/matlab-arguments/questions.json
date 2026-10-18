@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "model": "claude-haiku-4-5-20251001",
+  "repetitions": 3,
+  "baseline": "5f82f17add9fb8c041f94b5cb265719e5fc2be99",
+  "source_paths": [
+    "lib/_matlab.py"
+  ],
+  "grading": "One point per explicitly requested criterion fully supported by the answer. Omissions or contradictions score zero; relevant quotations count. The frozen key is identical before and after. Manual grader identity and limitations are reported.",
+  "questions": [
+    {
+      "id": "M01",
+      "question": "How does split_nv decide where positional arguments stop and name-value pairs begin? Explain the positional limit, recognition of a name before that limit, and case handling in the returned names.",
+      "criteria": [
+        "Positional scanning stops at the earlier of the input length and npos unless a name-value start is recognized first.",
+        "A recognized start must be text whose lowercased value matches a declared name and must have a following value.",
+        "Name matching is case-insensitive, and returned pair names use the spelling from the declared names list."
+      ],
+      "sources": [
+        "lib/_matlab.py:split_nv"
+      ]
+    },
+    {
+      "id": "M02",
+      "question": "For name-value arguments, what happens with an odd remaining argument count, an unknown name, and repeated valid names? Explain what nv_get returns for repeats, including copying.",
+      "criteria": [
+        "An odd remaining count raises the invalid argument list error with identifier MATLAB:TooManyInputs.",
+        "An unknown textual name raises an invalid name-value argument error listing valid names, with an empty identifier.",
+        "split_nv retains repeated pairs in order; nv_get takes the last matching value and returns cp(value)."
+      ],
+      "sources": [
+        "lib/_matlab.py:split_nv",
+        "lib/_matlab.py:nv_get"
+      ]
+    },
+    {
+      "id": "M03",
+      "question": "In arg_check, does class conversion precede dimension checking? Which source classes can convert to a numeric or logical declaration? What happens when conversion raises MatlabError versus a different exception?",
+      "criteria": [
+        "Class conversion is attempted before dimension checking, unless the value already has the declared class.",
+        "Numeric/logical targets accept numeric, logical and char source classes and use _convert; other source classes fail that conversion admission.",
+        "A MatlabError during conversion becomes the prefixed type-or-convertible error through _using; exceptions outside MatlabError are not caught there."
+      ],
+      "sources": [
+        "lib/_matlab.py:arg_check",
+        "lib/_matlab.py:_numeric_class",
+        "lib/_matlab.py:_using"
+      ]
+    },
+    {
+      "id": "M04",
+      "question": "How does arg_check compare actual and declared dimensions? Explain what None means, how ranks of different lengths are aligned, and whether a value with matching dimensions is reshaped.",
+      "criteria": [
+        "None in a declared dimension is a wildcard that accepts any actual size in that position.",
+        "Actual and requested dimension lists are padded with trailing ones to their maximum length for comparison.",
+        "If all padded dimensions match or are wildcards, the value is returned without reshaping or scalar expansion."
+      ],
+      "sources": [
+        "lib/_matlab.py:arg_check"
+      ]
+    },
+    {
+      "id": "M05",
+      "question": "When arg_check finds a size mismatch, in what order does it try scalar expansion and row/column conversion? State the conditions for each and what error is produced if neither applies.",
+      "criteria": [
+        "A single-element value expands first with repmat_ only when every declared dimension is fixed, not None.",
+        "Otherwise a two-dimensional row/column vector may reshape to a two-dimensional row/column request whose non-unit dimension is its element count or None.",
+        "If neither applies, it raises a prefixed Value must be of size error via _using; None dimensions print as colons."
+      ],
+      "sources": [
+        "lib/_matlab.py:arg_check"
+      ]
+    },
+    {
+      "id": "M06",
+      "question": "What does validate do with a successful thunk result, a MatlabError, and an unrelated exception? Explain positional versus name-value prefixes, identifier preservation and the _using marker.",
+      "criteria": [
+        "It calls the thunk once and discards its successful return value.",
+        "A MatlabError is replaced with a new MatlabError retaining the identifier, prefixing Invalid argument at position for a numeric position or Invalid name-value argument for a string, and marking _using=True.",
+        "It catches only MatlabError; other exception types propagate without that wrapping."
+      ],
+      "sources": [
+        "lib/_matlab.py:validate",
+        "lib/_matlab.py:_arg_prefix",
+        "lib/_matlab.py:_using"
+      ]
+    },
+    {
+      "id": "M07",
+      "question": "How are the mustBeFinite/mustBePositive-style predicate validators installed and evaluated? State the default accepted classes, the behavior on empty arrays, and success/failure results.",
+      "criteria": [
+        "_pred_validator installs a Builtin in _B; its default class admission accepts numeric, logical and char values.",
+        "It converts with _farr and invokes/tests the predicate only for nonempty arrays; an admitted empty array succeeds.",
+        "Every element must satisfy the predicate; failure raises MatlabError with a MATLAB:validators: identifier and success returns NOVAL."
+      ],
+      "sources": [
+        "lib/_matlab.py:_pred_validator",
+        "lib/_matlab.py:_vfail"
+      ]
+    },
+    {
+      "id": "M08",
+      "question": "Contrast mustBeNumeric, mustBeNumericOrLogical and mustBeReal. Which accepts logical data, and does mustBeReal reject a complex-typed array whose imaginary components are all zero?",
+      "criteria": [
+        "mustBeNumeric accepts only classes recognized by _numeric_class, excluding logical.",
+        "mustBeNumericOrLogical also accepts the logical class.",
+        "mustBeReal requires _isnumlike and rejects complex arrays only when any imaginary component is nonzero; complex dtype alone does not fail."
+      ],
+      "sources": [
+        "lib/_matlab.py:mustBeNumeric_",
+        "lib/_matlab.py:mustBeNumericOrLogical_",
+        "lib/_matlab.py:mustBeReal_"
+      ]
+    },
+    {
+      "id": "M09",
+      "question": "How does mustBeInRange interpret its bounds and options? State how bounds are converted, which flags make each endpoint exclusive, and what happens to empty values and non-text or unrecognized options.",
+      "criteria": [
+        "The value uses _farr and each bound uses _scalar; endpoints are inclusive by default.",
+        "Lowercased textual exclusive excludes both endpoints; exclude-lower and exclude-upper exclude their respective endpoints.",
+        "Empty value arrays bypass the final failure check; non-text options are filtered out and unrecognized textual options have no effect."
+      ],
+      "sources": [
+        "lib/_matlab.py:mustBeInRange_"
+      ]
+    },
+    {
+      "id": "M10",
+      "question": "Compare the accepted representations in mustBeText, mustBeTextScalar and mustBeNonzeroLengthText. Include character-array shape, string arrays and cell arrays, and identify which validator actually requires nonempty text.",
+      "criteria": [
+        "mustBeText accepts Char, Str, StrArr, or a Cell containing only Char elements; it does not require nonempty text.",
+        "mustBeTextScalar accepts Str or Char with first dimension at most one; StrArr and Cell are not accepted by that check.",
+        "mustBeNonzeroLengthText accepts a nonempty Str, a Char with nonzero array size, or a nonempty Cell of nonempty Char elements; it does not accept StrArr."
+      ],
+      "sources": [
+        "lib/_matlab.py:mustBeText_",
+        "lib/_matlab.py:mustBeTextScalar_",
+        "lib/_matlab.py:mustBeNonzeroLengthText_"
+      ]
+    }
+  ]
+}
