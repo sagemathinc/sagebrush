@@ -170,10 +170,14 @@ def structured():
     # payload is refused before anything runs ...
     for bad in ["__import__('sagebrush.sage').sage.__setattr__('is_prime', lambda *a, **k: True) or 7",
                 "setattr(__import__('sagebrush.sage', fromlist=['x']), 'is_prime', lambda *a, **k: True) or 7",
+                # (astra's: a forged __sagebrush_data__, "proven", with no re-proof)
+                "1)); __sagebrush_data__ = {'result': {'n':'9','unit':1,'factors':[['9',1]]}, 'text':'9','status':'proven','assumes':[]}; #",
                 "Integer(7)", "(y := 7)", "[7][0]", "7 if 1 else 8", "2^(10^9)", "1/2", "7\n8"]:
         sc = call("factor", {"n": bad}, "invalid_arguments")
     for bad in ["x^2 + 1 + __import__('os').getpid()*0", "x.__class__", "y^2 + 1", "x^(1/2) + 1", "(x + 1)^1000"]:
         call("number_field", {"polynomial": bad}, "invalid_arguments")
+    for bad in ["23; __sagebrush_data__ = {}", "23.5", "1e3", None]:
+        call("newforms", {"level": bad}, "invalid_arguments")
     assert call("number_field", {"polynomial": "x^2/4 + 23/4"})["result"]["class_group"]["value"]["order"] == 3
     # ... and user code cannot reach the shortcut tools' session: a patched
     # is_prime in the sage tool's session leaves factor's status honest
