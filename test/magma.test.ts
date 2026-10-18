@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 
+// a wall-clock limit, scaled by SAGEBRUSH_TIME_SCALE where the engine runs
+// slower than the committed one (CI's engine job: a fresh wasm with overflow
+// checks, about twice as slow); the memory caps are not scaled
+const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
+
 // the translation, without the line that records the source text
 const py = (src: string) => magmaToPython(src).split("\n").filter((l) => !l.includes("_m._source(")).join("\n");
 
@@ -79,7 +84,7 @@ test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprim
   // (the message wraps at 80 columns, so whitespace is flattened)
   assert.equal((big.stdout.replace(/\s+/g, " ").match(/QuadraticField of an integer of more than 1024 bits is not supported yet/g) ?? []).length, 3, big.stdout);
   assert.match(big.stdout, /\n1\n$/);
-  assert.ok(Date.now() - t0 < 30000);
+  assert.ok(Date.now() - t0 < WALL(30000));
 });
 
 test("what Sagebrush lacks is refused in words, never a Python exception, class or function", () => {
@@ -207,7 +212,7 @@ test("finite fields by bounded work: GF of more than 1024 bits refused before it
   assert.equal(big.signal, null);
   assert.equal((big.stdout.replace(/\s+/g, " ").match(/GF of a field of more than 1024 bits is not supported yet/g) ?? []).length, 6, big.stdout);
   assert.match(big.stdout, /\n1\n$/);
-  assert.ok(Date.now() - t0 < 30000);
+  assert.ok(Date.now() - t0 < WALL(30000));
   const r = run("F := GF(1000003);\nx := Random(F);\nx in F, Parent(x) eq F;\nexists(t){ y : y in F | y^2 eq 4 }; t;\nRandom([1..10^30]) le 10^30;\nRandom([]);\nRandom({* 7, 7, 7 *});\n");
   assert.equal(r.signal, null, r.stderr);
   const flat = r.stdout.replace(/\s+/g, " ");
@@ -233,7 +238,7 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   assert.equal(above.signal, null, above.stderr);
   assert.equal((above.stdout.replace(/\s+/g, " ").match(refusal) ?? []).length, 6, above.stdout);
   assert.match(above.stdout, /\n1\n$/);
-  assert.ok(Date.now() - t0 < 60000);
+  assert.ok(Date.now() - t0 < WALL(60000));
   // within the limit: 200^2 elements are built in 96 MiB
   const at = run("#[ x : x, y in [1..200] ];\n#[ y : x in [1..200], y in [1..200] | true ];\n#{ x*y : x, y in [1..200] };\n#[ <x, [x, x+1], x/3> : x in [1..49152] ];\n");
   assert.equal(at.signal, null, at.stderr);
@@ -255,7 +260,7 @@ test("a long integer is laid out in lines of 79 digits and a backslash, in time 
   assert.equal(lines.length, 254);
   assert.ok(lines.slice(0, -1).every((l: string) => l.length === 80 && l.endsWith("\\")));
   assert.equal(lines.map((l: string) => l.replace(/\\$/, "")).join(""), "1" + "0".repeat(20000));
-  assert.ok(Date.now() - t0 < 30000);
+  assert.ok(Date.now() - t0 < WALL(30000));
 });
 
 test("printing a value nested deeper than 100 is refused in Magma's form, not a host RecursionError (HARD-133-1)", () => {
@@ -325,7 +330,7 @@ test("records nested deep or sharing their parts are bounded when copied too (HA
   assert.match(flat, /a value nested more than 100 deep is not supported yet/);
   assert.match(flat, /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
   assert.match(r.stdout, /\n1\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("index selections are admitted before they are taken, and a long chain of indexes is refused in words (HARD-A57-1, HARD-A57-2)", () => {
@@ -343,7 +348,7 @@ test("index selections are admitted before they are taken, and a long chain of i
   assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
   assert.match(sel.stdout, /\n40000\n$/);
-  assert.ok(Date.now() - t0 < 30000);
+  assert.ok(Date.now() - t0 < WALL(30000));
   // 5000 links: refused before running; 64 still work
   const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
   assert.doesNotMatch(long.stdout + long.stderr, /RecursionError|Traceback/);
@@ -380,7 +385,7 @@ test("a selection's inferred universe is found once per source, not per selectio
     timeout: 60000,
   });
   assert.equal(r.stdout, "Rational Field\nInteger Ring\nRational Field\nRational Field\nInteger Ring\n", r.stderr);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("Append into a fixed universe refuses what doesn't go in, a range's too (CORR-D689-1)", () => {
@@ -686,7 +691,7 @@ test("writes after a million leading holes don't each scan them (HARD-400-1)", (
   const t0 = Date.now();
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma", "-c", src], { encoding: "utf8", timeout: 15000 });
   assert.equal(r.stdout, "1001000\n", r.stderr);
-  assert.ok(Date.now() - t0 < 15000);
+  assert.ok(Date.now() - t0 < WALL(15000));
 });
 
 test("admitting a value refuses past 100 deep in words, whatever bounds its callers have (HARD-934-1)", () => {
@@ -733,7 +738,7 @@ test("a range with a huge real endpoint, or a set of a huge range, is refused in
   assert.match(out, /Sequence range does not consist of integers/);
   // (a sequence's range stays lazy: its size is known at once)
   assert.match(r.stdout, /\n100000000\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("a rational with huge parts made a real is refused in words, before any decimal conversion (HARD-C68-1)", () => {
@@ -747,7 +752,7 @@ test("a rational with huge parts made a real is refused in words, before any dec
   const said = /a real from a rational with a numerator or denominator of more than 1000000 bits is not supported yet/g;
   assert.equal((r.stdout.replace(/\s+/g, " ").match(said) ?? []).length, 6, r.stdout.slice(0, 2000));
   assert.match(r.stdout, /\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("integer intrinsics refuse arguments as Magma does, in its words, not with a plausible answer or Python's error", () => {
@@ -857,7 +862,7 @@ test("prime enumeration is admitted by the heap before any sieve, and a narrow w
   assert.equal(sage.signal, null, sage.stderr);
   assert.match(sage.stdout, /^\[1000000000039, 1000000000061, 1000000000063, 1000000000091\]\nMemoryError prime_range over \[2, 1000000000000\) is not supported in Sagebrush/);
   assert.match(sage.stdout, /\nMemoryError nth_prime over \[2, \d+\) is not supported in Sagebrush[^\n]*\n104729 \[2, 3, 5, 7, 11\]\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("a real field of a huge precision is refused in words before any of its numbers is made (HARD-762-1)", () => {
@@ -881,7 +886,7 @@ test("a real field of a huge precision is refused in words before any of its num
   assert.ok(bad.includes("Runtime error in 'RealField': Bad argument types\nArgument types given: FldReElt\n"), bad);
   // (precision 1000 itself still works, quickly: its numbers print 1000 digits, with a point)
   assert.match(r.stdout, /\n100[1-9]\n100[1-9]\n100[1-9]\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("a real power too large to make is refused in words, quickly (CORR-C682-2)", () => {
@@ -895,7 +900,7 @@ test("a real power too large to make is refused in words, quickly (CORR-C682-2)"
   assert.equal((r.stdout.replace(/\s+/g, " ").match(/a real with a binary exponent of more than 1000000 is not supported yet/g) ?? []).length, 2, r.stdout);
   // (within the bound: about 10^23316, made in 29 squarings)
   assert.match(r.stdout, /\ntrue\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("intrinsics taking integers refuse a rational, an integral one too (CORR-765-1)", () => {
@@ -968,7 +973,7 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   assert.match(r.stdout, /\n1\n256\n/);
   assert.match(r.stdout, /\n1\n300\n/);
   assert.match(r.stdout, /\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("the intrinsics agents reached for refuse as Magma does, and a missing one names the catalog's alternative", () => {
@@ -1202,7 +1207,7 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
     assert.ok(out.includes(`${what} of matrices over a finite field of more than 2000000 entry products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
   assert.match(r.stdout, /\n150\n1\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("Gcd and Lcm of an empty collection: of the integers 0 and 1, of nothing Magma's error", () => {
@@ -1505,7 +1510,7 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
   const big = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "Matrix(Integers(),10^12,0,[]);\nMatrix(Rationals(),0,10^12,[]);\nMatrix(GF(7),10^12,0,[]);\nMatrix(GF(7),0,10^12,[]);\n\"end\";\n", encoding: "utf8", timeout: 60000 });
   assert.equal(big.signal, null, big.stderr);
   assert.equal((big.stdout.replace(/\s+/g, " ").match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 4, big.stdout);
-  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(20000), `${Date.now() - t0} ms`);
   // (a matrix with no rows or no columns keeps both numbers, and prints
   // as Magma's, astra2 WA-024)
   const zw = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "M:=Matrix(Integers(),0,3,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Integers(),3,0,[]); Nrows(M), Ncols(M); M;\nM:=Matrix(Rationals(),0,0,[]); M;\nNcols(Matrix(GF(7),0,3,[]));\nMatrix(Integers(),1,0,[]);\nMatrix(Rationals(),0,1,[]);\n", encoding: "utf8" }).stdout as string;
@@ -1543,7 +1548,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   assert.ok(out.includes("Gcd of a value too large or too deep for Sagebrush to check"), r.stdout);
   assert.ok(out.includes("IsEmpty: Sagebrush's checks of arguments for polynomials and matrices over finite fields reached their limit for this run"), r.stdout);
   assert.match(r.stdout, /\nend\n$/);
-  assert.ok(Date.now() - t0 < 30000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
