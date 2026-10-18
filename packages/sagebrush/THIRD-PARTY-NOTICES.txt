@@ -327,15 +327,17 @@ Licensee agrees to be bound by the terms and conditions of this License
 Agreement.
 ```
 
-### Arm Optimized Routines (MIT, as glibc's exp, log and pow)
+### Arm Optimized Routines (MIT, as glibc's exp, log, pow and powf)
 
 `src/runtime/libm.ts`, `src/runtime/exp_data.ts`, `src/runtime/log_data.ts`,
 `src/runtime/pow_data.ts` and `kernels/src/libm.rs` port the exp, log and pow
-of Arm's Optimized Routines (as used by glibc), with their tables. Optimized Routines is licensed
+of Arm's Optimized Routines (as used by glibc), with their tables, and
+`src/runtime/libm.ts` its powf (`math/powf.c`, with the tables of
+`math/powf_log2_data.c` and `math/exp2f_data.c`). Optimized Routines is licensed
 "MIT OR Apache-2.0 WITH LLVM-exception"; Sagebrush uses it under MIT.
 
 ```
-Copyright (c) 2018-2026 Arm Limited.
+Copyright (c) 2017-2026 Arm Limited.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
