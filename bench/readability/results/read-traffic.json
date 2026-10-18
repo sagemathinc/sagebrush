@@ -1,0 +1,1302 @@
+{
+  "method": "Aggregate a read-traffic proxy from local Codex transcripts, without contents.\n\nCounts source-path mentions in read-like tool calls, not instrumented file opens.\nMixed shell calls and broad searches make this a ranking signal, not exact reads.\nOnly tracked source paths are emitted; no transcript text or identities are saved.\n",
+  "since": "2026-10-17T00:00:00",
+  "until": "2026-10-18T02:00:00",
+  "earliest": "2026-10-17T00:02:06.834Z",
+  "latest": "2026-10-18T01:59:43.372Z",
+  "transcripts_available": 243,
+  "transcripts_scanned": 7,
+  "session_cwd_filter": "/home/user/sagebrush",
+  "size_revision": "5cee68f1676d0168ad13a6da538b409be74a8020",
+  "matching_calls": 1218,
+  "files": [
+    {
+      "path": "lib/_magma.py",
+      "read_like_calls": 137,
+      "sessions": 3,
+      "lines": 8979,
+      "bytes": 350933
+    },
+    {
+      "path": "src/runtime/types.ts",
+      "read_like_calls": 129,
+      "sessions": 4,
+      "lines": 3873,
+      "bytes": 193081
+    },
+    {
+      "path": "lib/_matlab.py",
+      "read_like_calls": 122,
+      "sessions": 3,
+      "lines": 12241,
+      "bytes": 464396
+    },
+    {
+      "path": "lib/_sage_real.py",
+      "read_like_calls": 95,
+      "sessions": 2,
+      "lines": 4508,
+      "bytes": 153455
+    },
+    {
+      "path": "src/runtime/ops.ts",
+      "read_like_calls": 89,
+      "sessions": 3,
+      "lines": 2379,
+      "bytes": 96950
+    },
+    {
+      "path": "src/runtime/object.ts",
+      "read_like_calls": 81,
+      "sessions": 2,
+      "lines": 1745,
+      "bytes": 73811
+    },
+    {
+      "path": "web/board/mount.ts",
+      "read_like_calls": 51,
+      "sessions": 3,
+      "lines": 2285,
+      "bytes": 139594
+    },
+    {
+      "path": "src/runtime/modules.ts",
+      "read_like_calls": 50,
+      "sessions": 3,
+      "lines": 1644,
+      "bytes": 75681
+    },
+    {
+      "path": "lib/_sage_lang.py",
+      "read_like_calls": 46,
+      "sessions": 2,
+      "lines": 2024,
+      "bytes": 68412
+    },
+    {
+      "path": "src/runtime/index.ts",
+      "read_like_calls": 46,
+      "sessions": 2,
+      "lines": 1291,
+      "bytes": 58706
+    },
+    {
+      "path": "src/runtime/builtins.ts",
+      "read_like_calls": 41,
+      "sessions": 3,
+      "lines": 829,
+      "bytes": 33491
+    },
+    {
+      "path": "src/runtime/numpy.ts",
+      "read_like_calls": 41,
+      "sessions": 2,
+      "lines": 3329,
+      "bytes": 155586
+    },
+    {
+      "path": "src/board-run.ts",
+      "read_like_calls": 33,
+      "sessions": 3,
+      "lines": 664,
+      "bytes": 39811
+    },
+    {
+      "path": "web/board/test-ask.mjs",
+      "read_like_calls": 33,
+      "sessions": 3,
+      "lines": 529,
+      "bytes": 43700
+    },
+    {
+      "path": "web/board/code.ts",
+      "read_like_calls": 27,
+      "sessions": 3,
+      "lines": 666,
+      "bytes": 34642
+    },
+    {
+      "path": "lib/_matlab_sparse.py",
+      "read_like_calls": 26,
+      "sessions": 2,
+      "lines": 2132,
+      "bytes": 83019
+    },
+    {
+      "path": "lib/board_checks.py",
+      "read_like_calls": 26,
+      "sessions": 3,
+      "lines": 933,
+      "bytes": 33503
+    },
+    {
+      "path": "web/board/doc.ts",
+      "read_like_calls": 26,
+      "sessions": 3,
+      "lines": 1302,
+      "bytes": 74204
+    },
+    {
+      "path": "lib/_sage_matrix.py",
+      "read_like_calls": 25,
+      "sessions": 3,
+      "lines": 3536,
+      "bytes": 124154
+    },
+    {
+      "path": "src/notebook-session.ts",
+      "read_like_calls": 25,
+      "sessions": 3,
+      "lines": 459,
+      "bytes": 24371
+    },
+    {
+      "path": "src/board-try.ts",
+      "read_like_calls": 24,
+      "sessions": 3,
+      "lines": 302,
+      "bytes": 19819
+    },
+    {
+      "path": "lib/_sb_check.py",
+      "read_like_calls": 23,
+      "sessions": 3,
+      "lines": 95,
+      "bytes": 4111
+    },
+    {
+      "path": "lib/sage_all.py",
+      "read_like_calls": 23,
+      "sessions": 2,
+      "lines": 3386,
+      "bytes": 115371
+    },
+    {
+      "path": "src/compile.ts",
+      "read_like_calls": 23,
+      "sessions": 4,
+      "lines": 544,
+      "bytes": 26535
+    },
+    {
+      "path": "lib/_pytime.py",
+      "read_like_calls": 22,
+      "sessions": 2,
+      "lines": 842,
+      "bytes": 32978
+    },
+    {
+      "path": "lib/_sage_rdf.py",
+      "read_like_calls": 22,
+      "sessions": 2,
+      "lines": 1261,
+      "bytes": 33396
+    },
+    {
+      "path": "src/runtime/json.ts",
+      "read_like_calls": 22,
+      "sessions": 2,
+      "lines": 788,
+      "bytes": 30308
+    },
+    {
+      "path": "web/board/ask.ts",
+      "read_like_calls": 22,
+      "sessions": 3,
+      "lines": 448,
+      "bytes": 29406
+    },
+    {
+      "path": "web/board/board.ts",
+      "read_like_calls": 21,
+      "sessions": 2,
+      "lines": 2042,
+      "bytes": 103761
+    },
+    {
+      "path": "web/serve.py",
+      "read_like_calls": 21,
+      "sessions": 1,
+      "lines": 46,
+      "bytes": 2172
+    },
+    {
+      "path": "lib/_sbx.py",
+      "read_like_calls": 20,
+      "sessions": 2,
+      "lines": 1092,
+      "bytes": 44585
+    },
+    {
+      "path": "lib/collections/__init__.py",
+      "read_like_calls": 19,
+      "sessions": 2,
+      "lines": 1713,
+      "bytes": 55345
+    },
+    {
+      "path": "web/board/edit.ts",
+      "read_like_calls": 19,
+      "sessions": 2,
+      "lines": 1196,
+      "bytes": 61416
+    },
+    {
+      "path": "lib/_sage_graph.py",
+      "read_like_calls": 18,
+      "sessions": 2,
+      "lines": 1834,
+      "bytes": 62623
+    },
+    {
+      "path": "src/frontend.ts",
+      "read_like_calls": 18,
+      "sessions": 2,
+      "lines": 844,
+      "bytes": 41963
+    },
+    {
+      "path": "web/board/test-submit.mjs",
+      "read_like_calls": 18,
+      "sessions": 2,
+      "lines": 417,
+      "bytes": 35002
+    },
+    {
+      "path": "src/runtime/re.ts",
+      "read_like_calls": 17,
+      "sessions": 3,
+      "lines": 1081,
+      "bytes": 48303
+    },
+    {
+      "path": "web/notebook/worker-kernel.js",
+      "read_like_calls": 17,
+      "sessions": 2,
+      "lines": 321,
+      "bytes": 16155
+    },
+    {
+      "path": "src/cli.ts",
+      "read_like_calls": 16,
+      "sessions": 4,
+      "lines": 626,
+      "bytes": 26904
+    },
+    {
+      "path": "web/build.ts",
+      "read_like_calls": 16,
+      "sessions": 3,
+      "lines": 406,
+      "bytes": 30412
+    },
+    {
+      "path": "web/lib-lazy.ts",
+      "read_like_calls": 16,
+      "sessions": 2,
+      "lines": 200,
+      "bytes": 9574
+    },
+    {
+      "path": "lib/itertools.py",
+      "read_like_calls": 15,
+      "sessions": 2,
+      "lines": 582,
+      "bytes": 17138
+    },
+    {
+      "path": "src/emit.ts",
+      "read_like_calls": 15,
+      "sessions": 2,
+      "lines": 1354,
+      "bytes": 62845
+    },
+    {
+      "path": "src/runtime/numpy_linalg.ts",
+      "read_like_calls": 14,
+      "sessions": 2,
+      "lines": 1208,
+      "bytes": 41884
+    },
+    {
+      "path": "src/runtime/strpos.ts",
+      "read_like_calls": 14,
+      "sessions": 2,
+      "lines": 312,
+      "bytes": 11977
+    },
+    {
+      "path": "src/runtime/re-shape.ts",
+      "read_like_calls": 13,
+      "sessions": 2,
+      "lines": 650,
+      "bytes": 24460
+    },
+    {
+      "path": "web/board/inplace.ts",
+      "read_like_calls": 13,
+      "sessions": 2,
+      "lines": 956,
+      "bytes": 44782
+    },
+    {
+      "path": "lib/_sage_expr.py",
+      "read_like_calls": 12,
+      "sessions": 2,
+      "lines": 5636,
+      "bytes": 201582
+    },
+    {
+      "path": "lib/_pydatetime.py",
+      "read_like_calls": 11,
+      "sessions": 2,
+      "lines": 2844,
+      "bytes": 101933
+    },
+    {
+      "path": "lib/_tzrules.py",
+      "read_like_calls": 11,
+      "sessions": 2,
+      "lines": 552,
+      "bytes": 21229
+    },
+    {
+      "path": "lib/numpy/__init__.py",
+      "read_like_calls": 11,
+      "sessions": 3,
+      "lines": 3208,
+      "bytes": 109442
+    },
+    {
+      "path": "web/board/page.ts",
+      "read_like_calls": 11,
+      "sessions": 2,
+      "lines": 400,
+      "bytes": 22993
+    },
+    {
+      "path": "web/graph/spring.ts",
+      "read_like_calls": 11,
+      "sessions": 2,
+      "lines": 341,
+      "bytes": 15680
+    },
+    {
+      "path": "lib/_graphics.py",
+      "read_like_calls": 10,
+      "sessions": 2,
+      "lines": 1547,
+      "bytes": 68529
+    },
+    {
+      "path": "lib/_matlab_numeric.py",
+      "read_like_calls": 10,
+      "sessions": 2,
+      "lines": 936,
+      "bytes": 35699
+    },
+    {
+      "path": "src/runtime/unicodecs.ts",
+      "read_like_calls": 10,
+      "sessions": 2,
+      "lines": 502,
+      "bytes": 22297
+    },
+    {
+      "path": "web/board/codes.ts",
+      "read_like_calls": 10,
+      "sessions": 3,
+      "lines": 229,
+      "bytes": 11585
+    },
+    {
+      "path": "web/test-engines.mjs",
+      "read_like_calls": 10,
+      "sessions": 1,
+      "lines": 138,
+      "bytes": 11791
+    },
+    {
+      "path": "web/test-port.mjs",
+      "read_like_calls": 10,
+      "sessions": 1,
+      "lines": 32,
+      "bytes": 1446
+    },
+    {
+      "path": "lib/numpy/linalg.py",
+      "read_like_calls": 9,
+      "sessions": 2,
+      "lines": 412,
+      "bytes": 12201
+    },
+    {
+      "path": "src/magma.ts",
+      "read_like_calls": 9,
+      "sessions": 2,
+      "lines": 1776,
+      "bytes": 75694
+    },
+    {
+      "path": "src/runtime/format.ts",
+      "read_like_calls": 8,
+      "sessions": 3,
+      "lines": 827,
+      "bytes": 33253
+    },
+    {
+      "path": "src/scope.ts",
+      "read_like_calls": 8,
+      "sessions": 2,
+      "lines": 494,
+      "bytes": 19438
+    },
+    {
+      "path": "lib/_sage_integer.py",
+      "read_like_calls": 7,
+      "sessions": 2,
+      "lines": 659,
+      "bytes": 14707
+    },
+    {
+      "path": "lib/_sage_nf.py",
+      "read_like_calls": 7,
+      "sessions": 3,
+      "lines": 1987,
+      "bytes": 64839
+    },
+    {
+      "path": "lib/_zoneinfo.py",
+      "read_like_calls": 7,
+      "sessions": 2,
+      "lines": 990,
+      "bytes": 34470
+    },
+    {
+      "path": "lib/sage_plot.py",
+      "read_like_calls": 7,
+      "sessions": 2,
+      "lines": 862,
+      "bytes": 29130
+    },
+    {
+      "path": "web/bench-compare.mjs",
+      "read_like_calls": 7,
+      "sessions": 1,
+      "lines": 258,
+      "bytes": 16940
+    },
+    {
+      "path": "web/graph/test-spring.mjs",
+      "read_like_calls": 7,
+      "sessions": 2,
+      "lines": 264,
+      "bytes": 16448
+    },
+    {
+      "path": "web/notebook/notebook.js",
+      "read_like_calls": 7,
+      "sessions": 2,
+      "lines": 2162,
+      "bytes": 116751
+    },
+    {
+      "path": "lib/sage_permgroup.py",
+      "read_like_calls": 6,
+      "sessions": 2,
+      "lines": 1179,
+      "bytes": 38689
+    },
+    {
+      "path": "web/board/test-inplace.mjs",
+      "read_like_calls": 6,
+      "sessions": 1,
+      "lines": 691,
+      "bytes": 59914
+    },
+    {
+      "path": "web/engines.ts",
+      "read_like_calls": 6,
+      "sessions": 2,
+      "lines": 131,
+      "bytes": 7731
+    },
+    {
+      "path": "web/graph/view.ts",
+      "read_like_calls": 6,
+      "sessions": 2,
+      "lines": 382,
+      "bytes": 16980
+    },
+    {
+      "path": "lib/_graph_spring.py",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 355,
+      "bytes": 11966
+    },
+    {
+      "path": "lib/_matlab_eigs.py",
+      "read_like_calls": 5,
+      "sessions": 1,
+      "lines": 693,
+      "bytes": 31434
+    },
+    {
+      "path": "lib/importlib/__init__.py",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 102,
+      "bytes": 3981
+    },
+    {
+      "path": "lib/zoneinfo/_tzpath.py",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 263,
+      "bytes": 9110
+    },
+    {
+      "path": "src/runtime/complex.ts",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 934,
+      "bytes": 39701
+    },
+    {
+      "path": "web/board/idb-open.ts",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 44,
+      "bytes": 1996
+    },
+    {
+      "path": "web/board/images.ts",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 254,
+      "bytes": 11351
+    },
+    {
+      "path": "web/board/test-format.mjs",
+      "read_like_calls": 5,
+      "sessions": 1,
+      "lines": 101,
+      "bytes": 8642
+    },
+    {
+      "path": "web/docsearch.ts",
+      "read_like_calls": 5,
+      "sessions": 1,
+      "lines": 111,
+      "bytes": 4947
+    },
+    {
+      "path": "web/test-time.mjs",
+      "read_like_calls": 5,
+      "sessions": 1,
+      "lines": 87,
+      "bytes": 6257
+    },
+    {
+      "path": "web/worker.ts",
+      "read_like_calls": 5,
+      "sessions": 2,
+      "lines": 140,
+      "bytes": 7124
+    },
+    {
+      "path": "lib/_magma_names.py",
+      "read_like_calls": 4,
+      "sessions": 1,
+      "lines": 998,
+      "bytes": 90786
+    },
+    {
+      "path": "lib/_string.py",
+      "read_like_calls": 4,
+      "sessions": 1,
+      "lines": 179,
+      "bytes": 5944
+    },
+    {
+      "path": "lib/codecs.py",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 36,
+      "bytes": 1182
+    },
+    {
+      "path": "lib/posixpath.py",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 478,
+      "bytes": 14947
+    },
+    {
+      "path": "web/board/cached.ts",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 644,
+      "bytes": 35976
+    },
+    {
+      "path": "web/board/test-channel.mjs",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 76,
+      "bytes": 4219
+    },
+    {
+      "path": "web/board/toolbar.ts",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 215,
+      "bytes": 9481
+    },
+    {
+      "path": "web/notebook/runner-worker.js",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 189,
+      "bytes": 8774
+    },
+    {
+      "path": "web/sw.js",
+      "read_like_calls": 4,
+      "sessions": 2,
+      "lines": 135,
+      "bytes": 6294
+    },
+    {
+      "path": "web/test-pwa-update.mjs",
+      "read_like_calls": 4,
+      "sessions": 1,
+      "lines": 124,
+      "bytes": 8860
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_sage_real.py",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 4508,
+      "bytes": 153455
+    },
+    {
+      "path": "lib/_matlab_funfun.py",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 1633,
+      "bytes": 76548
+    },
+    {
+      "path": "lib/json/encoder.py",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 462,
+      "bytes": 17091
+    },
+    {
+      "path": "lib/zoneinfo/_common.py",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 292,
+      "bytes": 11086
+    },
+    {
+      "path": "packages/sagebrush-board/build.mjs",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 52,
+      "bytes": 2678
+    },
+    {
+      "path": "src/ast.ts",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 114,
+      "bytes": 5005
+    },
+    {
+      "path": "src/notebook-reactive.ts",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 716,
+      "bytes": 35800
+    },
+    {
+      "path": "src/runtime/argconv.ts",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 75,
+      "bytes": 3466
+    },
+    {
+      "path": "src/unparse.ts",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 194,
+      "bytes": 8848
+    },
+    {
+      "path": "web/board/format-schema.ts",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 1104,
+      "bytes": 30774
+    },
+    {
+      "path": "web/board/outcache.ts",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 242,
+      "bytes": 11725
+    },
+    {
+      "path": "web/board/test-cached-store.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 629,
+      "bytes": 40909
+    },
+    {
+      "path": "web/board/test-cached.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 189,
+      "bytes": 14748
+    },
+    {
+      "path": "web/test-board.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 864,
+      "bytes": 75705
+    },
+    {
+      "path": "web/test-doclang.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 152,
+      "bytes": 10762
+    },
+    {
+      "path": "web/test-graph-view.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 154,
+      "bytes": 12415
+    },
+    {
+      "path": "web/test-lib-chunks.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 55,
+      "bytes": 4487
+    },
+    {
+      "path": "web/test-notebook.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 436,
+      "bytes": 42369
+    },
+    {
+      "path": "web/test-pwa-first-visit.mjs",
+      "read_like_calls": 3,
+      "sessions": 2,
+      "lines": 173,
+      "bytes": 11304
+    },
+    {
+      "path": "web/test-reactive.mjs",
+      "read_like_calls": 3,
+      "sessions": 1,
+      "lines": 618,
+      "bytes": 46436
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_sage_graph.py",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 1834,
+      "bytes": 62623
+    },
+    {
+      "path": "engine/sym/src/api.rs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 688,
+      "bytes": 27727
+    },
+    {
+      "path": "engine/sym/src/expr.rs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 1065,
+      "bytes": 33585
+    },
+    {
+      "path": "engine/sym/src/interval.rs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 228,
+      "bytes": 9390
+    },
+    {
+      "path": "lib/_codecs.py",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 12,
+      "bytes": 457
+    },
+    {
+      "path": "lib/_magma_docsearch.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 1150,
+      "bytes": 42402
+    },
+    {
+      "path": "lib/_matlab_ode.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 579,
+      "bytes": 26719
+    },
+    {
+      "path": "lib/_pyjs_docsearch.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 380,
+      "bytes": 15145
+    },
+    {
+      "path": "lib/_pyjs_doctest.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 384,
+      "bytes": 13261
+    },
+    {
+      "path": "lib/_pyjs_help.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 204,
+      "bytes": 7514
+    },
+    {
+      "path": "lib/_sage_poly.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 1435,
+      "bytes": 50139
+    },
+    {
+      "path": "lib/html/__init__.py",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 133,
+      "bytes": 4877
+    },
+    {
+      "path": "lib/pickle.py",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 1935,
+      "bytes": 70636
+    },
+    {
+      "path": "lib/string/__init__.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 326,
+      "bytes": 12459
+    },
+    {
+      "path": "packages/cremona-small/py/_cremona_small.py",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 5120,
+      "bytes": 132404
+    },
+    {
+      "path": "src/board-check.ts",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 397,
+      "bytes": 23056
+    },
+    {
+      "path": "src/matlab.ts",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 1834,
+      "bytes": 78780
+    },
+    {
+      "path": "web/board/channel.ts",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 109,
+      "bytes": 6166
+    },
+    {
+      "path": "web/board/test-code.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 475,
+      "bytes": 48095
+    },
+    {
+      "path": "web/board/test-complete.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 35,
+      "bytes": 2997
+    },
+    {
+      "path": "web/board/test-frame.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 160,
+      "bytes": 10917
+    },
+    {
+      "path": "web/board/test-idb-stall.mjs",
+      "read_like_calls": 2,
+      "sessions": 2,
+      "lines": 87,
+      "bytes": 5712
+    },
+    {
+      "path": "web/board/test-outcache.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 51,
+      "bytes": 4117
+    },
+    {
+      "path": "web/board/test-syncdb.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 372,
+      "bytes": 21413
+    },
+    {
+      "path": "web/notebook/test-kernel-evaluate.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 30,
+      "bytes": 1626
+    },
+    {
+      "path": "web/site/src/index.ts",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 50,
+      "bytes": 2547
+    },
+    {
+      "path": "web/test-app-frontend.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 66,
+      "bytes": 3685
+    },
+    {
+      "path": "web/test-timetravel.mjs",
+      "read_like_calls": 2,
+      "sessions": 1,
+      "lines": 167,
+      "bytes": 12884
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_cremona_small.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 5120,
+      "bytes": 132404
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_sage_expr.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 5636,
+      "bytes": 201582
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_sage_lang.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 2024,
+      "bytes": 68412
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/_sage_rdf.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 1261,
+      "bytes": 33396
+    },
+    {
+      "path": "engine/py/python/sagebrush/_sagelib/sage_permgroup.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 1179,
+      "bytes": 38689
+    },
+    {
+      "path": "lib/_catalog.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 531,
+      "bytes": 22888
+    },
+    {
+      "path": "lib/_datetime.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 22,
+      "bytes": 798
+    },
+    {
+      "path": "lib/_pickle.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 17,
+      "bytes": 443
+    },
+    {
+      "path": "lib/heapq.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 612,
+      "bytes": 23534
+    },
+    {
+      "path": "lib/importlib/metadata/__init__.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 86,
+      "bytes": 3311
+    },
+    {
+      "path": "lib/json/scanner.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 74,
+      "bytes": 2535
+    },
+    {
+      "path": "lib/scipy/__init__.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 18,
+      "bytes": 597
+    },
+    {
+      "path": "lib/zoneinfo/_zoneinfo.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 797,
+      "bytes": 25881
+    },
+    {
+      "path": "packages/sagebrush-board/test.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 188,
+      "bytes": 17587
+    },
+    {
+      "path": "packages/scipy-io/py/scipy/io/__init__.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 4,
+      "bytes": 156
+    },
+    {
+      "path": "packages/scipy-io/py/scipy/io/matlab.py",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 289,
+      "bytes": 11848
+    },
+    {
+      "path": "src/board-cli.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 105,
+      "bytes": 6438
+    },
+    {
+      "path": "src/kernel.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 600,
+      "bytes": 25912
+    },
+    {
+      "path": "src/notebook.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 264,
+      "bytes": 14482
+    },
+    {
+      "path": "src/output-cost.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 11,
+      "bytes": 551
+    },
+    {
+      "path": "src/parse.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 14,
+      "bytes": 602
+    },
+    {
+      "path": "src/rename.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 1584,
+      "bytes": 92855
+    },
+    {
+      "path": "src/runtime/array.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 294,
+      "bytes": 12268
+    },
+    {
+      "path": "src/runtime/crmath.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 757,
+      "bytes": 27319
+    },
+    {
+      "path": "src/runtime/engine.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 177,
+      "bytes": 6724
+    },
+    {
+      "path": "src/runtime/kernels.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 366,
+      "bytes": 16386
+    },
+    {
+      "path": "src/runtime/memoryview.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 201,
+      "bytes": 9453
+    },
+    {
+      "path": "web/board/export.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 151,
+      "bytes": 9044
+    },
+    {
+      "path": "web/board/index.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 14,
+      "bytes": 1430
+    },
+    {
+      "path": "web/board/route.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 442,
+      "bytes": 21745
+    },
+    {
+      "path": "web/board/test-history.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 190,
+      "bytes": 16553
+    },
+    {
+      "path": "web/board/test-images.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 201,
+      "bytes": 17525
+    },
+    {
+      "path": "web/board/test-modes.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 144,
+      "bytes": 13200
+    },
+    {
+      "path": "web/board/test-outputs.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 379,
+      "bytes": 35322
+    },
+    {
+      "path": "web/board/test-xss.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 186,
+      "bytes": 18970
+    },
+    {
+      "path": "web/build-articles.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 264,
+      "bytes": 16884
+    },
+    {
+      "path": "web/console.ts",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 310,
+      "bytes": 10191
+    },
+    {
+      "path": "web/notebook/index.js",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 9,
+      "bytes": 620
+    },
+    {
+      "path": "web/test-pwa.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 177,
+      "bytes": 15937
+    },
+    {
+      "path": "web/test-runner-files.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 116,
+      "bytes": 8075
+    },
+    {
+      "path": "web/test-runner.mjs",
+      "read_like_calls": 1,
+      "sessions": 1,
+      "lines": 169,
+      "bytes": 13723
+    }
+  ]
+}

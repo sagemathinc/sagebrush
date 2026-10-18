@@ -1,0 +1,64 @@
+{
+  "baseline": "accfd3d73961fd477c6b107a45add9bd62634e56",
+  "measured_refactor": "5cee68f1676d0168ad13a6da538b409be74a8020",
+  "corpus_sha256": "6306a02d5e395ac52ff3d42e884c1b9658d260b0a10d8bc049fa48157d2d5e9f",
+  "requests": 801,
+  "identical_before_repeat": 801,
+  "identical_before_after": 801,
+  "incomplete": 0,
+  "raw_equal_fields": [
+    "request",
+    "stdout",
+    "stderr",
+    "exit_code",
+    "response"
+  ],
+  "ordered_raw_results_sha256": "fc4389a44d2e83935d7954d054238b72d7672772b6c25bdae07c6b217680f256",
+  "source_manifests_match_commits": true,
+  "host": "sagebrush-2",
+  "targeted_tests": {
+    "classgroup_passed": 63,
+    "classgroup_ignored_existing": 2,
+    "python_proof_passed": 6,
+    "comment_lint_passed": 6
+  },
+  "reviewed_revision": "5cee68f1676d0168ad13a6da538b409be74a8020",
+  "reviews": {
+    "behavior": "code clear on 5cee68f1",
+    "numerical_limits_certificate": "code clear on 5cee68f1; carried forward to comment-only 45645849"
+  },
+  "full_ci": {
+    "status": "passed",
+    "tested_revision": "5cee68f1676d0168ad13a6da538b409be74a8020",
+    "result": "RESULT 5cee68f16: all passed (any crowd failures passed alone)",
+    "npm_tests_passed_isolated": 915,
+    "npm_tests_failed_isolated": 0,
+    "browser_commands": 83,
+    "automatic_isolated_retries": true,
+    "stage_log": "full-ci.txt",
+    "vm_log_copy": "/scratch/sbremote/logs/5cee68f16/"
+  },
+  "comment_followup_revision": "45645849f8ffb507f5d14570a5176d65cf76d893",
+  "post_review_source_delta": [
+    {
+      "file": "engine/classgroup/src/api.rs",
+      "equal_after_removing_full_comment_lines_and_blank_lines": true
+    },
+    {
+      "file": "engine/classgroup/src/nf/bnf.rs",
+      "equal_after_removing_full_comment_lines_and_blank_lines": true
+    },
+    {
+      "file": "engine/classgroup/src/nf/bnf/unit_lattice.rs",
+      "equal_after_removing_full_comment_lines_and_blank_lines": true
+    },
+    {
+      "file": "engine/py/python/sagebrush/_sagelib/_sage_nf.py",
+      "equal_after_removing_full_comment_lines_and_blank_lines": true
+    },
+    {
+      "file": "lib/_sage_nf.py",
+      "equal_after_removing_full_comment_lines_and_blank_lines": true
+    }
+  ]
+}
