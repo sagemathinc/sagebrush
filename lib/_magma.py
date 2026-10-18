@@ -9483,15 +9483,33 @@ class _MDihedralGroup:
         s = (2, 1, 3) if n == 3 else tuple(n + 1 - i for i in range(1, n + 1))
         return _MPerm(self, r), _MPerm(self, s)
 
+    def _gens_fit(self, limit):
+        """Whether both generators print in at most `limit` characters,
+        counted without building them, stopping as soon as one is longer:
+        at most about `limit` steps whatever n is (LIMIT-714-1)."""
+        n = self.n
+        w = 1  # (1, 2, ..., n)
+        for i in range(1, n + 1):
+            w += len(str(i)) + (2 if i > 1 else 0)
+            if w + 1 > limit:
+                return False
+        w = 0  # (1, n)(2, n - 1)... ((1, 2) for n = 3)
+        for i in range(1, n // 2 + 1):
+            w += len(str(i)) + len(str(2 if n == 3 else n + 1 - i)) + 4
+            if w > limit:
+                return False
+        return True
+
     def __repr__(self):
         name = _global_name(self)
-        g = [repr(x) for x in self._gens()]
-        if any(len(t) > WIDTH - 5 for t in g):
-            # (Magma wraps a long generator, in a layout not modelled)
+        if self._shown and not self._gens_fit(WIDTH - 5):
+            # (Magma wraps a long generator, in a layout not modelled;
+            # decided before either is made)
             raise MagmaError("printing a dihedral group whose generators are longer than a line is not supported yet")
+        g = [repr(x) for x in self._gens()] if self._shown else []
         kind = "Symmetric group" if self.n == 3 else "Permutation group"
         return "%s %sacting on a set of cardinality %d\n%s%s" % (kind, name + " " if name else "", self.n, _order_text(2 * self.n),
-                                                                 "".join("\n    " + t for t in g) if self._shown else "")
+                                                                 "".join("\n    " + t for t in g))
 
     def __eq__(self, other):
         return isinstance(other, _MDihedralGroup) and other.n == self.n
