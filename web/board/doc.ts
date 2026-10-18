@@ -673,6 +673,8 @@ export function formatError(d: any, o: { reader?: string; remedy?: string } = {}
 export const isBoard = (d: any) => !!d && (Array.isArray(d.nodes) || (Array.isArray(d.pages) && d.pages.every((p: any) => Array.isArray(p?.nodes))));
 
 const GAP = 40, PAD = 24, TITLE = 34;
+/** The gap the layouts keep between items (world units): a new item added below another keeps it too. */
+export const ITEM_GAP = GAP;
 // (the "spring" layout: how far apart linked items' edges are drawn to, spring.ts `length`)
 const SPRING_LENGTH = GAP * 1.5;
 // (a group's size as a person made it: a positive number of units, at most a large board's)
