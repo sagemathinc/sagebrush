@@ -1279,11 +1279,27 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
 // The sign bit itself, a NaN's too, as C's signbit and copysign read and
 // set it, and so NumPy's (x < 0 and Object.is(x, -0) say nothing of a NaN)
 const SIGN_F = new Float64Array(1), SIGN_W = new Uint32Array(SIGN_F.buffer);
+// Whether this engine keeps a NaN's sign in a JavaScript value: V8 (Node,
+// Deno, browsers but Safari) does; JavaScriptCore (Bun, Safari) makes every
+// NaN the positive canonical one, so no NaN read from an array, or computed,
+// has a sign there, and signbit and copysign of a NaN are refused, not
+// answered from a sign that was lost.
+const NAN_SIGN_KEPT = (() => {
+  const f = new Float64Array(2), w = new Uint32Array(f.buffer);
+  w[1] = 0xfff80000;
+  f[1] = f[0];
+  return w[3] === 0xfff80000;
+})();
+function nanSignLost(): never {
+  return raise(T.NotImplementedError, "signbit and copysign of a NaN: this JavaScript engine (JavaScriptCore, as in Bun) does not keep NaN signs") as never;
+}
 function signBit(x: number): number {
+  if (x !== x && !NAN_SIGN_KEPT) nanSignLost();
   SIGN_F[0] = x;
   return SIGN_W[1] >>> 31;
 }
 function withSign(x: number, negative: number): number {
+  if (x !== x && !NAN_SIGN_KEPT) nanSignLost();
   SIGN_F[0] = x;
   SIGN_W[1] = (SIGN_W[1] & 0x7fffffff) | (negative << 31);
   return SIGN_F[0];
