@@ -136,6 +136,69 @@ _TEX_SYMBOLS = {
     "sin": "sin", "cos": "cos", "tan": "tan", "max": "max", "min": "min", "lim": "lim", "det": "det",
 }
 _TEX_FUNCS = {"log", "ln", "exp", "sin", "cos", "tan", "max", "min", "lim", "det"}
+# (single symbols: one factor, as a letter is)
+_TEX_ATOMS = {"alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota", "kappa",
+              "lambda", "mu", "nu", "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau", "upsilon", "phi", "varphi",
+              "chi", "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+              "infty", "partial", "nabla", "ell", "hbar", "Re", "Im"}
+# (what may follow a fraction without grouping it: operators and relations)
+_TEX_AFTER_FRAC = set("+-=<>,;)]}|") | {"\\" + n for n in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv",
+                                                         "propto", "to", "rightarrow", "in", "pm", "mp", "times", "cdot", "div",
+                                                         "quad", "qquad", "right", ",", ";", ":", " ")}
+
+
+def _tex_simple(ts, single):
+    """Whether a part of an inline \\frac reads correctly beside its slash:
+    factors only (letters, numbers, symbols, each perhaps with a sub- or
+    superscript), and for a denominator just one; anything else (a sum, a
+    product of letters in a denominator, a fraction, a function) is put in
+    parentheses, so that the drawing is the same expression."""
+    sig = [t for t in ts if not t.isspace()]
+    atoms, i, digits = 0, 0, False
+    while i < len(sig):
+        t = sig[i]
+        if t in ("^", "_") and atoms:
+            i += 1
+            if i < len(sig) and sig[i] == "{":
+                depth = 0
+                while i < len(sig):
+                    depth += {"{": 1, "}": -1}.get(sig[i], 0)
+                    i += 1
+                    if depth == 0:
+                        break
+            else:
+                i += 1
+            digits = False
+            continue
+        if t.isdigit() or (t == "." and digits):
+            atoms += not digits
+            digits = True
+        elif len(t) == 1 and t.isalpha() or (t.startswith("\\") and t[1:] in _TEX_ATOMS):
+            atoms += 1
+            digits = False
+        else:
+            return False
+        i += 1
+    return atoms == 1 if single else atoms >= 1
+
+
+def _tex_text(tex):
+    """The text _tex_svg draws for a TeX string, without its markup (spaces
+    plain): what a reader sees.
+
+    EXAMPLES::
+
+        sage: from _graphics import _tex_text  # sagebrush only
+        sage: _tex_text(r'\\frac{x+1}{y+1}'), _tex_text(r'\\frac{1}{2}'), _tex_text(r'\\frac{a}{bc}')  # sagebrush only
+        ('(x + 1)/(y + 1)', '1/2', 'a/(bc)')
+        sage: _tex_text(r'\\frac{1}{\\frac{a}{b}}'), _tex_text(r'\\frac{a}{b}c'), _tex_text(r'2\\frac{1}{3}'), _tex_text(r'-\\frac{a+b}{\\pi} + 1')  # sagebrush only
+        ('1/(a/b)', '(a/b)c', '2(1/3)', '-(a + b)/π + 1')
+    """
+    import re
+    s = re.sub(r"<[^>]*>", "", _tex_svg(tex))
+    for a, b in (("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"), ("\u2005", " "), ("\u2004", " "), ("\u200b", ""), ("\u2212", "-")):
+        s = s.replace(a, b)
+    return s
 
 
 def _tex_tokens(s):
@@ -241,8 +304,24 @@ def _tex_svg(tex):
                             "vec": "\u20d7", "dot": "\u0307", "ddot": "\u0308"}[name]
                     out.append(render(group(), style) + mark)
                 elif name == "frac":
-                    a, b = render(group(), style), render(group(), style)
-                    out.append("%s/%s" % (a, b))
+                    # inline, as a/b, grouped wherever a slash alone would
+                    # read as another expression (astra's CORR-578-1:
+                    # \\frac{x+1}{y+1} was drawn x + 1/y + 1)
+                    na, nb = group(), group()
+                    a, b = render(na, style), render(nb, style)
+                    if not _tex_simple(na, False):
+                        a = "(" + a + ")"
+                    if not _tex_simple(nb, True):
+                        b = "(" + b + ")"
+                    f = "%s/%s" % (a, b)
+                    # (and the whole fraction grouped when a factor or a
+                    # script is next to it: 2\\frac{1}{3} is 2(1/3), not 21/3)
+                    rest = [t for t in toks[pos[0]:] if not t.isspace()]
+                    import re
+                    before = re.sub(r"<[^>]*>", "", "".join(out)).rstrip("\u200b")
+                    if (rest and rest[0] not in _TEX_AFTER_FRAC) or (before and (before[-1].isalnum() or before[-1] in ")]/.")):
+                        f = "(" + f + ")"
+                    out.append(f)
                 elif name == "sqrt":
                     out.append("√(" + render(group(), style) + ")")
                 elif name in ("left", "right", "big", "Big", "bigg", "Bigg", "displaystyle", "textstyle", "limits"):
