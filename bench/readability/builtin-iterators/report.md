@@ -2,7 +2,7 @@
 
 Status: final implementation `2fb25571` has completed the comprehension
 measurement, exact 304-case corpus comparison and five focused tests. Both
-code reviews are clear; full VM CI remains pending.
+code reviews are clear, and full VM CI has passed at that executable revision.
 
 ## Scope and preservation
 
@@ -87,12 +87,18 @@ identical, zero timeouts. Five focused tests pass, and both restored native
 diagnostic cause strings match. The comparison record and additional probes
 are retained under `results/`.
 
-Behavior and limits/refusals reviews are CLEAR on `2fb25571`, pending full CI
-evidence. The behavior reviewer independently ran five focused tests and 17
+Behavior and limits/refusals reviews are CLEAR on `2fb25571`. The behavior reviewer independently ran five focused tests and 17
 callback cases; all passed, with the latter byte-identical before and after.
 Seven additional malformed-hook probes preserve exception class and native
-cause text, while internal stack locations reflect the edited source. Full CI
-remains pending.
+cause text, while internal stack locations reflect the edited source.
+
+Full sbremote CI on `sagebrush` reports
+`RESULT 2fb25571e: all passed (any crowd failures passed alone)`. The isolated
+npm run has 921 passing tests, zero failures and one skip. All 84 browser
+commands pass. Six npm timing failures in the concurrent run and three browser
+failures passed on the runner's isolated retries. The committed package sync
+precheck passed. The complete stage log is `results/full-ci.txt`; no executable
+changes follow the validated revision.
 
 ## Remaining comprehension errors
 
