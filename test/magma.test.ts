@@ -1703,3 +1703,13 @@ test("an intrinsic Sagebrush lacks, captured by a function, never acts as a valu
   assert.equal(parts.length / 2 - 1, uses.length + 2);
   assert.deepEqual(bad, []);
 });
+
+test("a multiset printed one element to a line shows each element's multiplicity, as Magma's", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's: {* a^^2, a + 1 *} one to a line;
+  // it printed {* a, a + 1 *}, @sagebrush's finding on e65af60e)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["P<t>:=PolynomialRing(Rationals()); K<a>:=NumberField(t^2-2); {* a, a, a+1 *}; S:={* a, a *}; #S;", "{* [1,2], [1,2], [3] *};", "M:=Matrix(Integers(),2,2,[1,2,3,4]); {* M, M *}; [M, M];", "P<x>:=PolynomialRing(Integers()); {* x, x, x+1 *};", "P<t>:=PolynomialRing(Rationals()); K<a>:=NumberField(t^2-2); [ {* a, a *} ];", "{* <1,2>, <1,2> *}; {* 3, 3, 1 *};"].join("\n"));
+  assert.equal(ok, "{*\n    a^^2,\n    a + 1\n*}\n2\n{*\n    [ 1, 2 ]^^2,\n    [ 3 ]\n*}\n{*\n    [1 2]\n    [3 4]^^2\n*}\n[\n    [1 2]\n    [3 4],\n\n    [1 2]\n    [3 4]\n]\n{*\n    x^^2,\n    x + 1\n*}\n[\n    {*\n        a^^2\n    *}\n]\n{* <1, 2>^^2 *}\n{* 1, 3^^2 *}\nend\n", ok);
+});
