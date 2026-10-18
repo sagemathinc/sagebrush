@@ -22,6 +22,14 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _qq_coeff(a):
+    """a as an element of QQ when it is an integer: an integral coefficient
+    of a QQ polynomial is stored as an int (_norm), but Sage hands it out
+    with parent QQ."""
+    # (Rational's own constructor: QQ(a) parses its argument, 15 times slower)
+    return _sa().Rational._from_coprime_ints(a, 1) if isinstance(a, int) and not isinstance(a, bool) else a
+
+
 def _poly_repr(coeffs, name):
     # Sage's Polynomial._repr for atomic coefficients (_sage_modular has the general one)
     from _sage_modular import _poly_repr as r
@@ -763,8 +771,31 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (x^3 - 2*x + 1).list()
             [1, -2, 0, 1]
+
+        Over QQ the coefficients are elements of QQ, as in Sage::
+
+            sage: (x + 1).list()[0].parent()
+            Rational Field
         """
+        if self._ring._base is QQ:
+            return [_qq_coeff(a) for a in self._c] if self._c else [QQ(0)]
         return list(self._c) if self._c else [0]
+
+    def _out(self, a):
+        """A coefficient as handed out: over QQ an element of QQ (an
+        integral one is stored as an int)."""
+        return _qq_coeff(a) if self._ring._base is QQ else a
+
+    def dict(self):
+        """The nonzero coefficients, by exponent.
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: (3*x^3 - x + 2).dict()
+            {0: 2, 1: -1, 3: 3}
+        """
+        return {i: self._out(a) for i, a in enumerate(self._c) if a != 0}
 
     def coefficients(self, sparse=True):
         """The nonzero coefficients (sparse=False: all of them), constant term first.
@@ -776,7 +807,7 @@ class Polynomial:
             sage: f.coefficients(), f.coefficients(sparse=False)
             ([1, -2, 1], [1, -2, 0, 0, 1])
         """
-        return [a for a in self._c if a != 0] if sparse else self.list()
+        return [self._out(a) for a in self._c if a != 0] if sparse else self.list()
 
     def exponents(self):
         """The exponents of the nonzero terms.
@@ -798,7 +829,7 @@ class Polynomial:
             sage: (3*x^2 + 1).leading_coefficient(), (3*x^2 + 1).lc()
             (3, 3)
         """
-        return self._c[-1] if self._c else 0
+        return self._out(self._c[-1] if self._c else 0)
 
     lc = leading_coefficient
 
@@ -811,10 +842,10 @@ class Polynomial:
             sage: (3*x^2 + 7).constant_coefficient()
             7
         """
-        return self._c[0] if self._c else 0
+        return self._out(self._c[0] if self._c else 0)
 
     def __getitem__(self, i):
-        return self._c[i] if 0 <= i < len(self._c) else 0
+        return self._out(self._c[i] if 0 <= i < len(self._c) else 0)
 
     def __len__(self):
         return len(self._c)
@@ -1081,7 +1112,7 @@ class Polynomial:
         r = 0
         for a in reversed(self._c):
             r = r * v + a
-        return _norm(r) if isinstance(r, (int, _F)) else r
+        return self._out(_norm(r)) if isinstance(r, (int, _F)) else r
 
     subs = __call__
 
