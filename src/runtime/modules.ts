@@ -1167,14 +1167,20 @@ newBuiltinModule("math", (m) => {
     }
     return productOf(factors);
   };
-  // (a lower bound on log2(n), n >= 1)
+  // (a lower bound on log2(n), n >= 1, in bounded space, no digits of n
+  // made: n may be near the largest BigInt, daybreak2's LIMIT-AF5-1. Below
+  // 2**1024, n as a number, less a margin for its rounding. Above, the
+  // largest s, stepping down from V8's 2**30 bits by 1/64 at a time, with
+  // n >> s not 0: a shift past n's bits is 0 at once, and the first that is
+  // not has fewer bits than the step, under 1/64 of 2**30, so log2(n) is
+  // bounded to within 1/64 of itself. A product the bound still admits and
+  // V8 cannot hold, V8 refuses before making it, a RangeError, so a
+  // MemoryError at once.)
   const log2Big = (n: bigint): number => {
-    // (from n's leading 52 bits, not its first hex digit only: that lost
-    // the whole bound for comb(2**61 - 1, 2**60 - 1), astra's finding; less
-    // a margin for Math.log2's rounding)
-    if (n <= 9007199254740991n) return Math.log2(Number(n)) - 1e-9;
-    const s = n.toString(16);
-    return Math.log2(parseInt(s.slice(0, 13), 16)) + 4 * (s.length - 13) - 1e-9;
+    const v = Number(n);
+    if (Number.isFinite(v)) return Math.log2(v) - 1e-9;
+    for (let s = MAX_BITS; s > 1023; s -= Math.max(1, s >> 6)) if (n >> BigInt(s) !== 0n) return s;
+    return 1023;
   };
   // (the sizes of P and C a lower bound: P(n, k) >= max(n - k + 1, k/e)**k,
   // C(n, k) >= max(n/k, 2)**k for k <= n/2; the bounds on k alone first,
