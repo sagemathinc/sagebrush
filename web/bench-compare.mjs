@@ -117,6 +117,26 @@ const WORKLOADS = {
   "json": "import json\nx = [{'a': i, 'b': [i, str(i), i / 2], 'c': {'d': None, 'e': True}} for i in range(30000)]\ny = json.loads(json.dumps(x))\nprint(len(y), y[-1]['b'])",
   "numpy matmul": "import numpy as np\nA = np.arange(300 * 300, dtype=float).reshape(300, 300) % 7\nprint(float((A @ A).sum()))",
   "numpy elementwise": "import numpy as np\nx = np.linspace(0, 1, 1000000)\nprint(round(float(np.sum(np.sin(x) * x + x ** 2)), 6))",
+  // Adversarial rows, where Sagebrush's design should be weakest.
+  // (2,000 distinct small functions, each compiled by exec() and called once:
+  // Sagebrush compiles Python to JavaScript that V8 then compiles, where
+  // CPython's bytecode compiler is cheap; each run's sources differ, by a
+  // comment, so that no run reuses an earlier one's compilation)
+  "exec, 2000 functions": {
+    setup: "run = [0]\nprint('ready')",
+    code: "run[0] += 1\ns = 0\nfor i in range(2000):\n    ns = {}\n    exec(f'def f(x):  # {run[0]}\\n    y = x * {i} + {i % 7}\\n    return y - {i % 3}\\n', ns)\n    s += ns['f'](i)\nprint(s)",
+  },
+  // (one call site and one attribute load seeing 50 classes with different
+  // instance layouts, so that V8's inline caches there are megamorphic; the
+  // monomorphic row is the same loop over instances of one class)
+  "megamorphic, 50 classes": {
+    setup: "src = ''\nfor k in range(50):\n    fields = ''.join(f'        self.p{j}_{k} = {j}\\n' for j in range(k % 8))\n    src += f'class C{k}:\\n    def __init__(self, v):\\n{fields}        self.v = v\\n    def get(self):\\n        return self.v + {k}\\n'\nexec(src)\nobjs = [globals()[f'C{i % 50}'](i) for i in range(200000)]\nprint(len(objs), len({type(o) for o in objs}))",
+    code: "s = 0\nfor o in objs:\n    s += o.get() + o.v\nprint(s)",
+  },
+  "monomorphic, 1 class": {
+    setup: "class C:\n    def __init__(self, v):\n        self.v = v\n    def get(self):\n        return self.v + 7\nobjs1 = [C(i) for i in range(200000)]\nprint(len(objs1))",
+    code: "s = 0\nfor o in objs1:\n    s += o.get() + o.v\nprint(s)",
+  },
 };
 
 // (--only a,b: just the workloads whose names contain one of these)
