@@ -242,7 +242,13 @@ class RealNumber(float):
             return float.__new__(cls, x)
         if isinstance(x, str) and cls is RealNumber:
             # a literal keeps its decimal digits, for exact conversion into
-            # higher precision: RealField(100)(0.1) = 0.1000...0
+            # higher precision: RealField(100)(0.1) = 0.1000...0.  One of
+            # more than 15 significant digits has more than 53 bits, as in
+            # Sage: the bits of 10^digits (1.2345678901234567: 57)
+            d = _literal_digit_count(x)
+            if d > 15:
+                import _sage_real
+                return _sage_real._literal_mp(x, (10 ** d).bit_length())
             f = float(x)
             if not _NORMAL_MIN < abs(f) < _INF:
                 b = _rr_literal_edge(x, f)
@@ -325,7 +331,7 @@ class RealNumber(float):
             # 1e308 * RR('1e-320'), a literal on the left, reaches here)
             if a and isinstance(a[0], _RealBig):
                 return _rr_slow(name, self, a)
-            if a and name == "__pow__" and type(a[0]).__name__ == "RealNumberMP":
+            if a and name == "__pow__" and type(a[0]).__name__ in ("RealNumberMP", "_RealLiteralMP"):
                 p = a[0].parent().precision()
                 b, e = float.__float__(self), float(a[0])
                 if p < 53 and ((b != b and e != 0) or (e != e and b != 1)):
@@ -759,6 +765,16 @@ class RealNumber(float):
         return _sage_real._format(Fraction(float(self)), D, no_sci)
 
 
+def _literal_digit_count(lit):
+    """The significant digits of a decimal literal as Sage counts them for
+    its precision: the digits before any exponent, without the point and
+    the leading zeros (trailing zeros count)."""
+    s = lit.strip().lstrip("+-").replace("_", "")
+    for c in "eE":
+        s = s.split(c)[0]
+    return len(s.replace(".", "").lstrip("0"))
+
+
 def _negated_literal(lit):
     return lit[1:] if lit.startswith("-") else "-" + lit.lstrip("+")
 
@@ -781,6 +797,8 @@ def _literal_identity(x, o, unit):
         return x
     if isinstance(sage_all.Integer, type):
         return None if isinstance(o, sage_all.Integer) else x
+    if hasattr(x, "_ambiguous_copy"):
+        return x._ambiguous_copy()
     r = _RealLiteral(float(x)) if not isinstance(x, _RealBig) else _rr_from_mp(x._mp)
     r._lit = None
     r._lit_ambiguous = lit
@@ -961,7 +979,7 @@ class _RealBig(RealNumber):
 
     def _bin(op, rev=False):
         def g(self, o):
-            if type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+            if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") and o.parent().precision() < 53:
                 # (a coarser field's number: the result in that field, as Sage)
                 return NotImplemented
             m = _rr_operand(o)
@@ -1152,7 +1170,7 @@ def _rr_operand(o):
     number."""
     if isinstance(o, _RealBig):
         return o._mp
-    if isinstance(o, (float, int, _Fraction)) or type(o).__name__ in ("Integer", "Rational", "RealNumberMP"):
+    if isinstance(o, (float, int, _Fraction)) or type(o).__name__ in ("Integer", "Rational", "RealNumberMP", "_RealLiteralMP"):
         return _rr_mp()(o)
     return None
 
@@ -1216,7 +1234,7 @@ def _rr_divlike(x, o, op, rev):
     as Sage: the other operand in RR (an integer, a Python float, an RDF
     or RR element); NotImplemented for a RealField(p) number or a rational
     (their own rules: the coarser field, Rational's remainder)."""
-    if type(o).__name__ == "RealNumberMP" or isinstance(o, _Fraction) and not isinstance(o, int) and o.denominator != 1:
+    if type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") or isinstance(o, _Fraction) and not isinstance(o, int) and o.denominator != 1:
         return NotImplemented
     if not isinstance(o, (int, float, _Fraction)):
         return NotImplemented
@@ -1305,7 +1323,7 @@ def _rr_slow(name, x, a):
     if not a:
         return _rr_from_mp({"__neg__": lambda v: -v, "__pos__": lambda v: v, "__abs__": abs}[name](mx))
     o = a[0]
-    if name in _RR_REFLECT and type(o).__name__ == "RealNumberMP" and o.parent().precision() < 53:
+    if name in _RR_REFLECT and type(o).__name__ in ("RealNumberMP", "_RealLiteralMP") and o.parent().precision() < 53:
         # (a coarser field's number: the result in that field, as Sage)
         return getattr(o, _RR_REFLECT[name])(x)
     if name in ("__pow__", "__rpow__"):

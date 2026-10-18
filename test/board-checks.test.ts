@@ -90,7 +90,9 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'off by $1 \\\\times 10^{400}$, more than the tolerance'",
     "False 'off by $1$ (relative $9.99 \\\\times 10^{-401}$), more than the tolerance'",
     "False 'off by $1$ (relative $8.67 \\\\times 10^{-19}$), more than the tolerance'",
-    "False 'off by about $1.22 \\\\times 10^{-16}$, more than the tolerance'",
+    // (3.141592653589793 has 16 digits: a 54-bit literal, as in Sage, whose
+    // value is 3.45e-16 from pi; Sage gives 3.445092848397666e-16)
+    "False 'off by about $3.45 \\\\times 10^{-16}$, more than the tolerance'",
     "False 'off by about $1 \\\\times 10^{400}$, more than the tolerance'",
     "False 'off by about $1 \\\\times 10^{-20}$, more than the tolerance'",
     "False 'off by $7.88 \\\\times 10^{-31}$ (relative $7.88 \\\\times 10^{-31}$), more than the tolerance'",
@@ -113,7 +115,9 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'off by $8.7 \\\\times 10^{-603}$, more than the tolerance'",
     "ValueError: close: a tolerance is a finite number, at least 0",
     "True True",
-    "False 'off by about $9.67 \\\\times 10^{-17}$, more than the tolerance'",
+    // (1.4142135623730951 has 17 digits: a 57-bit literal, as in Sage, whose
+    // value is 5.5e-17 from sqrt(2); Sage gives 5.503956971108576e-17)
+    "False 'off by about $5.5 \\\\times 10^{-17}$, more than the tolerance'",
     "False 'off by about $2.65 \\\\times 10^{-6}$, more than the tolerance'",
     "ValueError: close: a tolerance is a finite real number (an int, a fraction, a float or a Sage real), at least 0",
   ]);
