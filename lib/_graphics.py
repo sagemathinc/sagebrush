@@ -1504,6 +1504,32 @@ def save_svg(svg, filename):
         f.write(svg)
 
 
+def save_figure(svg, filename, dpi=None, transparent=False):
+    """Sage's Graphics.save: an SVG file, or a PNG (the SVG drawn by
+    Sagebrush's PNG module, lib/_png.py: dpi pixels per inch, 100 SVG units
+    to the inch, default 100, on white unless transparent).  The other
+    formats Sage writes (.eps, .pdf, .pgf, .ps, .sobj) are NotImplementedError;
+    any other extension is Sage's ValueError."""
+    name = filename if hasattr(filename, "write") else str(filename)
+    ext = name.rsplit(".", 1)[-1].lower() if isinstance(name, str) and "." in name else "svg"
+    if ext == "svg":
+        return save_svg(svg, filename)
+    if ext == "png":
+        import re
+        import _png
+        m = re.match(r'<svg [^>]*?width="([0-9.]+)" height="([0-9.]+)"', svg)
+        if m is None:
+            raise ValueError("save: the picture has no size to draw it at")
+        dpi = 100.0 if dpi is None else float(dpi)
+        png = _png.figure_png(svg, float(m.group(1)) / 100, float(m.group(2)) / 100, dpi, None if transparent else "white", [])
+        with open(name, "wb") as f:
+            f.write(png)
+        return
+    if ext in ("eps", "pdf", "pgf", "ps", "sobj"):
+        raise NotImplementedError("saving a picture as .%s is not implemented in Sagebrush: use .svg or .png" % ext)
+    raise ValueError("allowed file extensions for images are '.eps', '.pdf', '.pgf', '.png', '.ps', '.sobj', '.svg'!")
+
+
 # ------------------------------------------------------------------ sampling
 
 def adaptive_sample(f, a, b, plot_points=200, adaptive_tolerance=0.01, adaptive_recursion=5):
