@@ -666,6 +666,8 @@ def _into_universe(items, universe, kind):
     if isinstance(universe, (_MFFPolyRing, _MVectorSpace)):
         # (a polynomial ring over a finite field, or a full vector space:
         # each item coerced, as R!x; Sagebrush's refusals stay refusals)
+        if isinstance(universe, _MVectorSpace):
+            _vspace_admit(universe, len(items), _UNIVERSE_FAIL[kind])
         out = []
         for k, x in enumerate(items):
             try:
@@ -1680,6 +1682,8 @@ def _assign_path(obj, path, val):
         # grows or changes: a refused write leaves the whole path as it
         # was, CORR-BCFD-1)
         if len(path) == 1:
+            if val is not _DELETE and isinstance(obj.universe, _MVectorSpace):
+                _vspace_admit(obj.universe, max(len(obj), i), ":=")  # (its length after the write)
             new = val if val is _DELETE else _own(_admit_element(obj, val, pos))
         else:
             child = obj[i - 1] if i <= len(obj) else _UNDEF
@@ -7062,6 +7066,8 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
     if w is None:
         return x
     if w[0] == "struct":
+        if isinstance(w[1], _MVectorSpace) and name in ("Append", "Insert", "Include"):
+            _vspace_admit(w[1], len(s) + 1, "'%s'" % name)  # (the collection it grows into)
         y = _coerce_struct(x, w[1])
         if y is None:
             y = _into(x, ("?",), w[1])
@@ -8435,6 +8441,8 @@ class _MVectorSpace:
     def _magma_coerce(self, x):
         R = _QQ if self.base is _sa.QQ else _ZZ
         if isinstance(x, _MVector):
+            if x._base is self.base and len(x) == self.n:
+                return x  # (already V's: not copied; vectors are never changed in place)
             if len(x) != self.n:
                 raise MagmaError("Arguments have incompatible degrees\nLHS: %s\nRHS: %s" % (self._cat(), _type_name(x)), "'!'", True)
             if self.base is _sa.ZZ and any(_Fraction(a).denominator != 1 for a in x):
@@ -8627,6 +8635,15 @@ def _unit_vectors(name, V):
     if V.n * V.n > _COLLECT_MAX:
         raise MagmaError("%s of a vector space of degree more than %d is not supported yet" % (name, _math.isqrt(_COLLECT_MAX)), "'%s'" % name)
     return [V._unit(k) for k in range(V.n)]
+
+
+def _vspace_admit(V, count, where):
+    """A collection of count vectors over the declared vector space V,
+    admitted by its total entries, count * n <= _COLLECT_MAX, before any
+    vector is coerced, copied or keyed (daybreak2's limits review: m items
+    and the degree n are each bounded, their product was not)."""
+    if count * V.n > _COLLECT_MAX:
+        raise MagmaError("a collection of vectors with more than %d entries in all is not supported yet" % _COLLECT_MAX, where)
 
 
 def Generators(V):

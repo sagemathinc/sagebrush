@@ -2036,10 +2036,62 @@ test("VectorSpace, KSpace and RSpace as Magma's: unit vectors, coercion, members
     ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := (1/2) in S;", "Runtime error in 'in': No valid universe containing all elements"],
     ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := \"a\" in S;", "Runtime error in 'in': No valid universe containing all elements"],
     ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Vector(Rationals(), [1,0]) in S;", "Runtime error in 'in': No valid universe containing all elements"],
-    ["V := VectorSpace(Rationals(), 3); x := [V| V.1] cat [V| V.2];", "concatenating sequences over a vector space is not supported yet"]
+    ["V := VectorSpace(Rationals(), 3); x := [V| V.1] cat [V| V.2];", "concatenating sequences over a vector space is not supported yet"],
+    ["V := VectorSpace(Rationals(), 10^4); v := V.1; x := [V| v : i in [1..101]];", "a collection of vectors with more than"]
   ];
   for (const [e, m] of errs) {
     const o = run(e).replace(/\s+/g, " ");
     assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|AttributeError/.test(o), e + " => " + o);
   }
+});
+
+test("a collection over a vector space is admitted by its total entries before any vector is coerced or keyed (daybreak2 on 7e2a1348)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  // (degree 10^4 and just enough items to pass the bound on entries: each
+  // refusal comes before the first coercion or set key; one item fewer is
+  // admitted, every item coerced)
+  const f = join(mkdtempSync(join(tmpdir(), "magma-vspace-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "calls = [0]",
+    "coerce, key = m._MVectorSpace._magma_coerce, m._key",
+    "def spy_coerce(self, x):",
+    "    calls[0] += 1",
+    "    return coerce(self, x)",
+    "def spy_key(x):",
+    "    if isinstance(x, m._MVector):",
+    "        calls[0] += 1",
+    "    return key(x)",
+    "m._MVectorSpace._magma_coerce = spy_coerce",
+    "m._key = spy_key",
+    "n = 10 ** 4",
+    "V = m.VectorSpace(m._QQ, n)",
+    "v = V._unit(0)",
+    "k = m._COLLECT_MAX // n + 1",
+    "def attempt(label, f):",
+    "    calls[0] = 0",
+    "    try:",
+    "        f()",
+    "        print(label, 'admitted', calls[0])",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused' if 'entries in all' in str(e) else str(e), calls[0])",
+    "attempt('seq', lambda: m._into_universe([v] * k, V, 'seq'))",
+    "attempt('set', lambda: m._into_universe([v] * k, V, 'set'))",
+    "S = m.MSeq([v] * (k - 1), V)",
+    "attempt('append', lambda: m._lift('Append', S, v))",
+    "attempt('include', lambda: m._lift('Include', S, v))",
+    "attempt('insert', lambda: m._lift('Insert', S, v))",
+    "attempt('index', lambda: m._lift('Index', S, v))",
+    "attempt('assign', lambda: m._assign_path(m.MSeq([v], V), [('idx', k, None)], v))",
+    "attempt('fewer', lambda: m._into_universe([v] * (k - 1), V, 'seq'))",
+    "print('k-1', k - 1)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(60000) });
+  const lines = r.stdout.trim().split("\n");
+  const k1 = Number(lines.pop()!.split(" ")[1]);
+  assert.deepEqual(lines, ["seq refused 0", "set refused 0", "append refused 0", "include refused 0", "insert refused 0", "index admitted 1", "assign refused 0", "fewer admitted " + k1], r.stdout + r.stderr);
 });
