@@ -2782,119 +2782,134 @@ method(bytearray, "pop", (b: PyByteArray) => {
 
 // ------------------------------------------------------------------ iterators
 
-// An iterator type over a runtime class implementing $next().
+// Iterator vocabulary:
+// - $next() is the internal step: a value or DONE (the exhaustion sentinel).
+// - __next__ is the Python boundary: a value or a raised StopIteration.
+// - O.lastStop.e carries a source's StopIteration, including its payload,
+//   across the internal DONE return. Clear it before starting a new step.
+// Stored fields retain their runtime names: it/its = source iterator(s),
+// i = counter/index, f = callable, a/get = reverse sequence/accessor.
+
+// Expose an internal iterator class as a Python type.
 function iteratorType(name: string, jsClass: any, call?: (...a: any[]) => any): PyType {
-  const t = builtinType(name, [object], call ?? (() => raise(T.TypeError, `cannot create '${name}' instances`)));
-  bindClass(jsClass, t);
-  method(t, "__iter__", (it: any) => it);
-  method(t, "__next__", (it: any) => {
+  const iteratorClass = builtinType(name, [object], call ?? (() => raise(T.TypeError, `cannot create '${name}' instances`)));
+  bindClass(jsClass, iteratorClass);
+  method(iteratorClass, "__iter__", (iterator: any) => iterator);
+  method(iteratorClass, "__next__", (iterator: any) => {
     O.lastStop.e = null;
-    const v = it.$next();
-    if (v === DONE) throw O.lastStop.e ?? markRaised(T.StopIteration());
-    return v;
+    const value = iterator.$next();
+    if (value === DONE) throw O.lastStop.e ?? markRaised(T.StopIteration());
+    return value;
   });
-  return t;
+  return iteratorClass;
 }
 iteratorType("list_iterator", O.ListIter);
 iteratorType("range_iterator", O.RangeIter);
-// (a range too long for doubles: CPython's type of its iterator, not object)
+// A range too long for doubles has its own Python iterator type.
 iteratorType("longrange_iterator", BigRangeIter);
 iteratorType("str_ascii_iterator", O.StrIter);
 iteratorType("dict_keyiterator", O.DictIter);
 iteratorType("bytes_iterator", O.BytesIter);
 iteratorType("generator_wrapper", O.GenIter);
-// (CPython's "iterator" is its iterator over __getitem__; a wrapper over a
-// Python iterator is never handed to Python code, iter() giving the object)
+// Python's "iterator" is its __getitem__ adapter. ProtoIter wraps Python
+// iterators internally; iter() exposes the original Python object instead.
 bindClass(O.ProtoIter, iteratorType("iterator", O.GetitemIter));
+
+// One below Number.MAX_SAFE_INTEGER: at this boundary and beyond, use O.add,
+// which handles integer promotion to bigint.
+const ENUMERATE_NATIVE_INCREMENT_LIMIT = 9007199254740990;
 
 export class Enumerate {
   constructor(public it: any, public i: any) {}
   $next(): any {
-    const v = this.it.$next();
-    if (v === DONE) return DONE;
-    const r = tuple([this.i, v]);
-    this.i = typeof this.i === "number" && this.i < 9007199254740990 ? this.i + 1 : O.add(this.i, 1);
-    return r;
+    const value = this.it.$next();
+    if (value === DONE) return DONE;
+    const result = tuple([this.i, value]);
+    this.i = typeof this.i === "number" && this.i < ENUMERATE_NATIVE_INCREMENT_LIMIT ? this.i + 1 : O.add(this.i, 1);
+    return result;
   }
 }
-// (start an integer through __index__, converted before the iterable's
-// iterator is asked for, as CPython's enumerate_new; an explicit None is
-// refused, by keyword too: astra3 A12)
-const enumNew = (x: any, start: any): Enumerate => {
-  const i = start === undefined ? 0 : O.index(start);
-  return new Enumerate(O.iter(x), i);
+// Convert start through __index__ before obtaining the source iterator.
+// Only an omitted start defaults to zero; explicit None must be converted.
+const enumNew = (iterable: any, start: any): Enumerate => {
+  const startIndex = start === undefined ? 0 : O.index(start);
+  return new Enumerate(O.iter(iterable), startIndex);
 };
-const enumerate = iteratorType("enumerate", Enumerate, (x: any, start: any = undefined) => enumNew(x, start));
+const enumerate = iteratorType("enumerate", Enumerate, (iterable: any, start: any = undefined) => enumNew(iterable, start));
 enumerate.$kw = (pos, names, values) => {
-  const [x, start] = bindArgs("enumerate", sig(["iterable", "start"]), pos, names, values);
-  return enumNew(x, start);
+  const [iterable, start] = bindArgs("enumerate", sig(["iterable", "start"]), pos, names, values);
+  return enumNew(iterable, start);
 };
 
-// (zip's and map's strict end, as CPython's zip_next and map_next: the
-// first iterator ended, every other's next taken in turn, the first that
-// gives one named; a later one ended first is shorter than those before)
-function strictEnd(name: string, its: any[], i: number): any {
-  const of = (k: number) => `argument${k === 1 ? " " : "s 1-"}${k}`;
-  if (i > 0) raise(T.ValueError, `${name}() argument ${i + 1} is shorter than ${of(i)}`);
-  for (let j = 1; j < its.length; j++) if (its[j].$next() !== DONE) raise(T.ValueError, `${name}() argument ${j + 1} is longer than ${of(j)}`);
-  // (all ended together: the sources' StopIterations are cleared, as
-  // CPython's check clears them, so the one raised carries no value,
-  // CORR-28A-5)
+// Earlier sources have already yielded on this row. If a later source ends,
+// report it immediately; do not probe any following sources. If the first
+// source ends, probe the others in order and stop at the first extra value.
+function strictEnd(name: string, iterators: any[], endedIndex: number): any {
+  const precedingArguments = (count: number) => `argument${count === 1 ? " " : "s 1-"}${count}`;
+  if (endedIndex > 0) raise(T.ValueError, `${name}() argument ${endedIndex + 1} is shorter than ${precedingArguments(endedIndex)}`);
+  for (let index = 1; index < iterators.length; index++) {
+    if (iterators[index].$next() !== DONE) raise(T.ValueError, `${name}() argument ${index + 1} is longer than ${precedingArguments(index)}`);
+  }
+  // All sources ended together. Python raises a fresh, valueless
+  // StopIteration here, so discard the sources' saved exceptions.
   O.lastStop.e = null;
   return DONE;
+}
+
+// Admission order is observable through strict.__bool__: validate keyword
+// count, then names, then convert truth. Callers obtain source iterators later;
+// map also checks its positional argument count only after this function.
+function strictKeyword(name: "zip" | "map", names: string[], values: any[]): boolean {
+  if (names.length > 1) raise(T.TypeError, `${name}() takes at most 1 keyword argument (${names.length} given)`);
+  for (const keyword of names) if (keyword !== "strict") raise(T.TypeError, `${name}() got an unexpected keyword argument '${keyword}'`);
+  let strict = false;
+  names.forEach((_keyword, index) => (strict = O.truth(values[index])));
+  return strict;
 }
 
 export class Zip {
   constructor(public its: any[], public strict: boolean) {}
   $next(): any {
-    const its = this.its;
-    if (its.length === 0) return DONE;
-    const out = new Array(its.length);
-    for (let i = 0; i < its.length; i++) {
-      const v = its[i].$next();
-      if (v === DONE) return this.strict ? strictEnd("zip", its, i) : DONE;
-      out[i] = v;
+    const iterators = this.its;
+    if (iterators.length === 0) return DONE;
+    const values = new Array(iterators.length);
+    for (let index = 0; index < iterators.length; index++) {
+      const value = iterators[index].$next();
+      // Earlier values stay consumed; later sources are untouched unless
+      // strictEnd must check them after the first source ends.
+      if (value === DONE) return this.strict ? strictEnd("zip", iterators, index) : DONE;
+      values[index] = value;
     }
-    return tuple(out);
+    return tuple(values);
   }
 }
-const zip = iteratorType("zip", Zip, (...xs: any[]) => new Zip(xs.map(O.iter), false));
-// (strict wherever it is given; any other keyword refused, as CPython's)
+const zip = iteratorType("zip", Zip, (...iterables: any[]) => new Zip(iterables.map(O.iter), false));
 zip.$kw = (pos, names, values) => {
-  // (every keyword checked before strict's truth is taken, CORR-71C-2; more
-  // than one is refused by count, as CPython's)
-  if (names.length > 1) raise(T.TypeError, `zip() takes at most 1 keyword argument (${names.length} given)`);
-  for (const n of names) if (n !== "strict") raise(T.TypeError, `zip() got an unexpected keyword argument '${n}'`);
-  let strict = false;
-  names.forEach((_n, i) => (strict = O.truth(values[i])));
+  const strict = strictKeyword("zip", names, values);
   return new Zip(pos.map(O.iter), strict);
 };
-(zip as any).$kwPos = true; // (zip(*rows) of any length: BIG_CALL)
+(zip as any).$kwPos = true; // Route arbitrary-length positional calls through the keyword adapter too.
 
 export class MapIter {
   constructor(public f: any, public its: any[], public strict = false) {}
   $next(): any {
     const args = new Array(this.its.length);
-    for (let i = 0; i < this.its.length; i++) {
-      const v = this.its[i].$next();
-      if (v === DONE) return this.strict ? strictEnd("map", this.its, i) : DONE;
-      args[i] = v;
+    for (let index = 0; index < this.its.length; index++) {
+      const value = this.its[index].$next();
+      if (value === DONE) return this.strict ? strictEnd("map", this.its, index) : DONE;
+      args[index] = value;
     }
-    const f = this.f;
-    return typeof f === "function" ? f(...args) : callObj(f, args);
+    // Call only after every source yielded; exhaustion never invokes f.
+    const mapping = this.f;
+    return typeof mapping === "function" ? mapping(...args) : callObj(mapping, args);
   }
 }
-const map = iteratorType("map", MapIter, (f: any, ...xs: any[]) => {
-  if (xs.length === 0) raise(T.TypeError, "map() must have at least two arguments.");
-  return new MapIter(f, xs.map(O.iter));
+const map = iteratorType("map", MapIter, (mapping: any, ...iterables: any[]) => {
+  if (iterables.length === 0) raise(T.TypeError, "map() must have at least two arguments.");
+  return new MapIter(mapping, iterables.map(O.iter));
 });
-// (3.14's strict, keyword only: the keywords checked and strict's truth
-// taken before the arguments are counted, as CPython's map_new)
 map.$kw = (pos, names, values) => {
-  if (names.length > 1) raise(T.TypeError, `map() takes at most 1 keyword argument (${names.length} given)`);
-  for (const n of names) if (n !== "strict") raise(T.TypeError, `map() got an unexpected keyword argument '${n}'`);
-  let strict = false;
-  names.forEach((_n, i) => (strict = O.truth(values[i])));
+  const strict = strictKeyword("map", names, values);
   if (pos.length < 2) raise(T.TypeError, "map() must have at least two arguments.");
   return new MapIter(pos[0], pos.slice(1).map(O.iter), strict);
 };
@@ -2904,32 +2919,36 @@ export class FilterIter {
   constructor(public f: any, public it: any) {}
   $next(): any {
     for (;;) {
-      const v = this.it.$next();
-      if (v === DONE) return DONE;
-      if (this.f === null ? O.truth(v) : O.truth(callObj(this.f, [v]))) return v;
+      const value = this.it.$next();
+      if (value === DONE) return DONE;
+      if (this.f === null ? O.truth(value) : O.truth(callObj(this.f, [value]))) return value;
     }
   }
 }
-iteratorType("filter", FilterIter, (f: any, x: any) => new FilterIter(f, O.iter(x)));
+iteratorType("filter", FilterIter, (predicate: any, iterable: any) => new FilterIter(predicate, O.iter(iterable)));
 
 export class ReversedIter {
   constructor(public a: any, public i: number, public get: (i: number) => any) {}
   $next(): any {
+    // The argument uses the old index, but i is decremented BEFORE get runs,
+    // including when get raises. Preserve this order for reentrant getters.
     return this.i >= 0 ? this.get(this.i--) : DONE;
   }
 }
-iteratorType("reversed", ReversedIter, (x: any) => {
-  if (Array.isArray(x)) return new ReversedIter(x, x.length - 1, (i) => x[i]);
-  const r = lookupType(typeOf(x), "__reversed__");
-  if (r === null) raise(T.TypeError, `'${typeName(x)}' object is not reversible`);
-  if (r !== undefined) return r(x);
-  const gi = lookupType(typeOf(x), "__getitem__");
-  if (gi === undefined) raise(T.TypeError, `'${typeName(x)}' object is not reversible`);
-  if (typeof x === "string") {
-    const cs = [...x];
-    return new ReversedIter(cs, cs.length - 1, (i) => cs[i]);
+iteratorType("reversed", ReversedIter, (sequence: any) => {
+  // Retain the live array, with its initial length fixing the starting index.
+  if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => sequence[index]);
+  const reversedMethod = lookupType(typeOf(sequence), "__reversed__");
+  if (reversedMethod === null) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
+  if (reversedMethod !== undefined) return reversedMethod(sequence);
+  const getitem = lookupType(typeOf(sequence), "__getitem__");
+  if (getitem === undefined) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
+  if (typeof sequence === "string") {
+    // Copy Unicode code points, rather than indexing UTF-16 code units.
+    const codePoints = [...sequence];
+    return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index]);
   }
-  return new ReversedIter(x, O.len(x) - 1, (i) => gi(x, i));
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => getitem(sequence, index));
 });
 
 // `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
