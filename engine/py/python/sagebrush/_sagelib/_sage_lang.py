@@ -1258,6 +1258,16 @@ _RR_OPS = {"__add__": ("+", False), "__radd__": ("+", True), "__sub__": ("-", Fa
            "__mul__": ("*", False), "__rmul__": ("*", True), "__truediv__": ("/", False), "__rtruediv__": ("/", True)}
 
 
+def _stored_zero(o):
+    """Whether o's stored value is zero, without calling a subclass's
+    comparison hooks (int.__int__, float.__float__)."""
+    if isinstance(o, int):
+        return int.__int__(o) == 0
+    if isinstance(o, float):
+        return float.__float__(o) == 0
+    return o == 0
+
+
 def _rr_edge(name, x, a, r):
     """The result of the RR operation name (x, *a), whose double result r
     (None: it overflowed) is not a normal double: kept where it is exact (a
@@ -1278,10 +1288,12 @@ def _rr_edge(name, x, a, r):
             # so is a remainder)
             return RealNumber(r)
         elif r == 0:
-            if (name in ("__mul__", "__rmul__") and (xf == 0 or o == 0)) or \
+            # (o's zero tested on its stored value: an int subclass's __eq__
+            # is not called, as in Sage, astra's follow-up to CORR-29F-1)
+            if (name in ("__mul__", "__rmul__") and (xf == 0 or _stored_zero(o))) or \
                     (name == "__truediv__" and (xf == 0 or of in (_INF, -_INF))) or \
-                    (name == "__rtruediv__" and (o == 0 or xf in (_INF, -_INF))) or \
-                    (name == "__pow__" and xf == 0) or (name == "__rpow__" and o == 0):
+                    (name == "__rtruediv__" and (_stored_zero(o) or xf in (_INF, -_INF))) or \
+                    (name == "__pow__" and xf == 0) or (name == "__rpow__" and _stored_zero(o)):
                 return RealNumber(r)
     return _rr_slow(name, x, a)
 
