@@ -1203,7 +1203,7 @@ def _real_kind(x):
     a Python float, None otherwise (the classes are float subclasses, so
     the order of the tests matters)."""
     name = type(x).__name__
-    if name in ("RealNumber", "_RealLiteral", "RealNumberMP"):
+    if name in ("RealNumber", "_RealLiteral", "RealNumberMP", "_RealLiteralMP"):
         return "rr"
     if name == "RealDoubleElement":
         return "rdf"
@@ -1363,10 +1363,10 @@ def _simplest_rational(x, what="divmod with a real number", literal=False):
                                       "when 0 or 1 is a Python int and not when it is an Integer, which are one type here; "
                                       "use QQ(x) itself, QQ(float(x)), or QQ('decimal string')")
         lit = getattr(x, "_lit", None)
-        if lit is not None and _literal_digits(lit) > 15:
-            raise NotImplementedError("QQ of a decimal literal of more than 15 significant digits is not implemented "
-                                      "(Sage gives it more than 53 bits): use QQ('%s') for its exact value, "
-                                      "or QQ(float(x)) for its double" % lit.lstrip("+"))
+        if lit is not None and _literal_digits(lit) > 15 and p != (10 ** _literal_digits(lit)).bit_length():
+            raise NotImplementedError("QQ of a decimal literal of %d significant digits held at %d bits is not implemented "
+                                      "(Sage gives it %d): use QQ('%s') for its exact value, or QQ(float(x)) for its double"
+                                      % (_literal_digits(lit), p, (10 ** _literal_digits(lit)).bit_length(), lit.lstrip("+")))
     X = _real_qq(x)
     if X.denominator == 1:
         # an integral value is itself, as in Sage (1e300 is that integer)
@@ -1392,8 +1392,9 @@ def _simplest_rational(x, what="divmod with a real number", literal=False):
         # interval is centred on the literal's decimal value rounded to
         # p + 1 bits, rather than on its p-bit value: QQ(1e-20) is
         # 1/99999999999999990439 (QQ(float(1e-20)), 1/99999999999999997962).
-        # (a literal of more than 15 digits was refused above: Sage gives
-        # it more than 53 bits, and here every literal has 53)
+        # (p is the literal's own precision: more than 53 bits for one of
+        # more than 15 digits, as in Sage; a literal held at another
+        # precision was refused above)
         try:
             D = abs(_Fraction(lit.replace("_", "")))
         except (ValueError, ZeroDivisionError):

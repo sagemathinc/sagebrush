@@ -1415,8 +1415,14 @@ def _lit_of(x):
 
 def _to_real(R, x, base=10):
     prec, rnd = R._prec, R._rnd
-    # (at 53 bits to nearest a literal's digits and its value are the same
-    # number: neither is read differently, ambiguous or not)
+    if isinstance(x, _RealLiteralMP):
+        # (a literal of more than 15 digits: itself in its field, else its
+        # digits, as Sage converts it)
+        if x._R is R:
+            return x
+        return _parse(R, _lit_of(x))
+    # (at 53 bits to nearest a 53-bit literal's digits and its value are the
+    # same number: neither is read differently, ambiguous or not)
     same = prec == 53 and rnd == "RNDN"
     # (an element of RR past the doubles is its 53-bit value, not its float;
     # a decimal literal's, its digits: RealField(100)(1e400) is 1e400)
@@ -3158,6 +3164,109 @@ def _type_lookup(t, name):
         if name in d:
             return d[name]
     return None
+
+
+def _plain_mp(prec, rnd, m, e, special):
+    """A RealNumberMP from its parts (a literal's pickle is a plain number,
+    as in Sage)."""
+    return RealNumberMP(RealField_(prec, rnd), m, e, special)
+
+
+class _RealLiteralMP(RealNumberMP):
+    """A decimal literal of more than 15 significant digits: as in Sage, an
+    element of RealField(p) with p the bits of 10^digits (54 for 16 digits,
+    57 for 17), keeping its digits.  Every conversion to another precision
+    (RR(x), x.n(), float(x), RDF(x), arithmetic or comparison with a coarser
+    number) reads the digits again, not the p-bit value (found by running
+    Sage).  -x, +x, copies and x + 0 / x * 1 with a Python int keep the
+    literal, as for 53-bit literals (lib/_sage_lang.py _literal_identity).
+
+    EXAMPLES::
+
+        sage: x = 1.2345678901234567; x, x.parent()
+        (1.234567890123457, Real Field with 57 bits of precision)
+        sage: x.n(), float(x), x * RR(3)
+        (1.23456789012346, 1.2345678901234567, 3.70370367037037)
+    """
+
+    __slots__ = ("_lit", "_lit_ambiguous")
+
+    def __init__(self, R, m, e, special=None, lit=None):
+        RealNumberMP.__init__(self, R, m, e, special)
+        self._lit = lit
+        self._lit_ambiguous = None
+
+    def _same(self):
+        return RealNumberMP(self._R, self._m, self._e, self._special)
+
+    def _ambiguous_copy(self):
+        r = _RealLiteralMP(self._R, self._m, self._e, self._special)
+        r._lit_ambiguous = self._lit if self._lit is not None else self._lit_ambiguous
+        return r
+
+    def __reduce__(self):
+        return (_plain_mp, (self._R._prec, self._R._rnd, self._m, self._e, self._special))
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __neg__(self):
+        from _sage_lang import _negated_literal
+        r = _RealLiteralMP(self._R, -self._m, self._e, {"+inf": "-inf", "-inf": "+inf"}.get(self._special, self._special))
+        if self._lit is not None:
+            r._lit = _negated_literal(self._lit)
+        elif self._lit_ambiguous is not None:
+            r._lit_ambiguous = _negated_literal(self._lit_ambiguous)
+        return r
+
+    def __pos__(self):
+        return self
+
+    def __float__(self):
+        # (its digits read at 53 bits, then as a double, as Sage converts it:
+        # float(1.2345678901234567) is not the 57-bit value's double, and a
+        # subnormal is rounded twice, 53 bits first)
+        return float(_parse(RealField_(53, "RNDN"), _lit_of(self)))
+
+    def numerical_approx(self, prec=None, digits=None):
+        if digits is None and (prec is None or prec == 53):
+            return _sa().RR(_parse(RealField_(53, "RNDN"), _lit_of(self)))
+        r = RealNumberMP.numerical_approx(self, prec, digits)
+        # (in its own precision: the plain number, as Sage's x.n(p))
+        return self._same() if r is self else r
+
+    n = N = numerical_approx
+
+    def _with(self, o, op, rev=False):
+        from _sage_lang import _literal_identity
+        r = _literal_identity(self, o, 0 if op == "+" else 1)
+        if r is not None:
+            return r
+        return RealNumberMP._binop(self, o, op, rev)
+
+    def __add__(self, o): return self._with(o, "+")
+    def __radd__(self, o): return self._with(o, "+", True)
+    def __mul__(self, o): return self._with(o, "*")
+    def __rmul__(self, o): return self._with(o, "*", True)
+
+    def _cmpq(self, o):
+        # (against a coarser real, in its precision, from the digits: Sage
+        # compares after converting the literal there)
+        mp = _rr_big_mp(o)
+        if mp is not None or (isinstance(o, float) and o == o and o not in (float("inf"), float("-inf"))):
+            return RealNumberMP._cmpq(_to_real(RealField_(53, "RNDN"), self), o)
+        if isinstance(o, RealNumberMP) and o._R._prec < self._R._prec:
+            return RealNumberMP._cmpq(_to_real(o._R, self), o)
+        return RealNumberMP._cmpq(self, o)
+
+
+def _literal_mp(s, prec):
+    """RealNumber(s) for a literal of more than 15 digits: in RealField(prec)."""
+    r = _parse(RealField(prec), s)
+    return _RealLiteralMP(r._R, r._m, r._e, r._special, s)
 
 
 class _Bits(int):

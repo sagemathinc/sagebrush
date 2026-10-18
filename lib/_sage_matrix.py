@@ -3328,7 +3328,7 @@ class ComplexNumber(complex):
     def __pow__(self, e, mod=None):
         # (pow(z, e, m): Sage's CC ignores the modulus)
         _cc(e)
-        if type(e).__name__ == "RealNumberMP" and e._R._prec != 53:
+        if type(e).__name__ in ("RealNumberMP", "_RealLiteralMP") and e._R._prec != 53:
             # (Sage's power is in the coarser complex field: not available,
             # refused as before rather than rounded into CC, CORR-C9B-1)
             raise TypeError("unable to convert %r to a real number" % complex(self))
