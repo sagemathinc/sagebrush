@@ -7,7 +7,7 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, readSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
+import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
@@ -18,7 +18,7 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, 
 import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
-import { isMainThread, workerData } from "worker_threads";
+import { isMainThread, workerData, parentPort } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
 
@@ -124,6 +124,9 @@ function exitCode(c: any): number {
 }
 
 // Run fn, reporting an uncaught exception as CPython does; returns the exit code.
+// (an uncaught KeyboardInterrupt: after its traceback the process ends by
+// SIGINT, as CPython's does, so a shell sees 130: endByInterrupt)
+let keyboardInterrupt = false;
 function guarded(fn: () => void): number | null {
   try {
     fn();
@@ -133,8 +136,23 @@ function guarded(fn: () => void): number | null {
     if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return exitCode(exc.code);
     R.stdout.flush();
     R.stderr.write(R.formatException(exc));
+    if (R.typeOf(exc).$mro.includes(R.T.KeyboardInterrupt)) {
+      keyboardInterrupt = true;
+      return 130;
+    }
     return 1;
   }
+}
+function endByInterrupt() {
+  R.stdout.flush();
+  R.stderr.flush();
+  // (in the launcher's worker: the launcher ends the process so)
+  if (!isMainThread) {
+    parentPort?.postMessage({ keyboardInterrupt: true });
+    return;
+  }
+  process.removeAllListeners("SIGINT");
+  process.kill(process.pid, "SIGINT");
 }
 
 // Rich display on a terminal: a picture (SVG) is written to a file whose
@@ -146,8 +164,10 @@ function guarded(fn: () => void): number | null {
 // removed by the next sagebrush that makes one, but only a directory it can
 // tell is one of ours, whose process is gone (sweepFigures, HARD-B98-1); the
 // prompt, which waits for input, removes its own on SIGINT, SIGTERM and
-// SIGHUP too (removeFiguresOnSignal).  A script's signals keep their default
-// action: a handler would wait for the script's computation to end.
+// SIGHUP too (removeFiguresOnSignal).  A program run by the launcher runs in
+// a worker thread and gets Ctrl-C as KeyboardInterrupt (cliWorker); its
+// other signals, and all of a program run here on the main thread, keep their
+// default action: a handler here would wait for the computation to end.
 let plotCount = 0, figuresDir: string | null = null, figuresKept = false, figuresHinted = false;
 const removeFigures = () => { if (figuresDir !== null && !figuresKept) try { rmSync(figuresDir, { recursive: true, force: true }); } catch {} };
 const FIGURES_MARK = ".sagebrush-figures", FIGURES_STALE_MS = 3600e3;
@@ -413,8 +433,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
 
 // ------------------------------------------------------------------ main
 
-async function main() {
-  const argv = process.argv.slice(2);
+async function main(argv = process.argv.slice(2)) {
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
   // `board` with a command it doesn't have is said so there, R0-3, unless
   // there is a script named board here, to run as before)
@@ -598,6 +617,31 @@ async function main() {
   R.stdout.flush();
   R.stderr.flush();
   process.exitCode = code ?? 0;
+  if (keyboardInterrupt && code === 130) endByInterrupt();
+}
+
+// A program run by the launcher (packages/sagebrush/bin/sagebrush.cjs) in a
+// worker thread, so that Ctrl-C reaches it: the interrupt flag goes to the
+// launcher, whose SIGINT handler sets it, and this thread's process.stdout
+// and process.stderr write straight to the descriptors, as the runtime's
+// own streams do, so that everything comes out in the order written.
+function cliWorker(argv: string[]) {
+  parentPort!.postMessage({ interrupt: R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null });
+  for (const [stream, fd] of [[process.stdout, 1], [process.stderr, 2]] as [any, number][]) {
+    stream.write = (chunk: any, enc?: any, cb?: any) => {
+      const data = typeof chunk === "string" ? Buffer.from(chunk, typeof enc === "string" ? enc : "utf8") : Buffer.from(chunk);
+      for (let off = 0; off < data.length; ) {
+        try {
+          off += writeSync(fd, data, off);
+        } catch (e: any) {
+          if (e?.code !== "EAGAIN") throw e;
+        }
+      }
+      (typeof enc === "function" ? enc : cb)?.();
+      return true;
+    };
+  }
+  return main(argv);
 }
 
 // Files written but never closed (no reference counting): write them, as
@@ -620,6 +664,7 @@ function execModuleAsMain(name: string): any {
 }
 
 if (isMainThread) main();
+else if (workerData?.sagebrushCli) cliWorker(workerData.sagebrushCli.argv);
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
 // (`board run`'s interpreter, src/board-run.ts)
