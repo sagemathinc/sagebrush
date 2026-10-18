@@ -398,20 +398,24 @@ export function glibcPow(x: number, y: number): number {
     if (y === 0 || !Number.isFinite(y)) {
       if (y === 0) return 1.0;
       if (x === 1) return 1.0;
-      if (x !== x || y !== y) return x + y;
+      // (x + y of NaNs: x86's and ARM's addition returns the first NaN; V8
+      // may commute it, so the operand is chosen here)
+      if (x !== x || y !== y) return x !== x ? x : y;
       if (Math.abs(x) === 1) return 1.0;
       if ((Math.abs(x) < 1) === (y > 0)) return 0.0; // |x|<1 && y==inf or |x|>1 && y==-inf
       return y * y;
     }
     if (x === 0 || !Number.isFinite(x)) {
       let x2 = x * x;
-      if ((x < 0 || Object.is(x, -0)) && checkint(y) === 1) x2 = -x2;
+      if (phi(x) >>> 31 && checkint(y) === 1) x2 = -x2; // (the sign bit: a NaN's too)
       return y < 0 ? 1 / x2 : x2;
     }
     // x and y are non-zero finite
     if (x < 0) {
       const yint = checkint(y);
-      if (yint === 0) return NaN;
+      // (glibc's __math_invalid: the NaN of 0 / 0, whose sign is the
+      // hardware's, negative on x86, as NumPy's)
+      if (yint === 0) return (x - x) / (x - x);
       if (yint === 1) neg = true;
       x = -x;
     }
