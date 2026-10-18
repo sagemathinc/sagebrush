@@ -37,6 +37,8 @@ export interface InPlaceHost {
   complete(mode: string, before: string): Promise<{ matches: string[]; prefix: string } | null>;
   /** the function search's index of a language; none: no search box */
   docs: ((lang: string) => Promise<DocEntry[] | null>) | null;
+  /** another item of this one's kind below it, being written (Alt+Enter, William's item 7) */
+  addSame(id: string): Promise<void>;
   images: ImageStore | null;
 }
 
@@ -693,6 +695,11 @@ export class InPlace {
       e.stopPropagation();
       if (e.key === "Escape") { e.preventDefault(); this.end(); }
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.end(); }
+      // (Alt+Enter: a code item run, then another item of its kind below it, written in; as the notebook's "run, insert a cell below")
+      else if (e.key === "Enter" && e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        void (async () => { if (this.hasCode) await this.run(); await this.host.addSame(this.id); })();
+      }
       else if (e.key === "Enter" && e.target === this.title && !e.shiftKey) {
         e.preventDefault();
         this.text.el.hidden = false;
