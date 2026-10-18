@@ -3008,19 +3008,23 @@ iteratorType("filter", FilterIter, (predicate: any, iterable: any) => new Filter
 // IndexError, which ends the iteration)
 const PAST_END = {};
 export class ReversedIter {
-  constructor(public a: any, public i: number, public get: (i: number) => any) {}
-  // As CPython's reversed_next: the item at the index, which is lowered only
-  // once the item is read (a getter that calls next on the same iterator
-  // reads the same index again). An IndexError or StopIteration from
+  // (size: the sequence's current length, for __length_hint__: a list's
+  // storage, as list's own reverse iterator, else len())
+  constructor(public a: any, public i: number, public get: (i: number) => any, public size: () => number) {}
+  // As CPython's reversed_next: the item at the index taken before the read,
+  // and then that index less one (a getter that calls next on the same
+  // iterator reads the same index again, and the outer read still moves on
+  // by one from where it started). An IndexError or StopIteration from
   // reading it ends the iteration; any other error is raised and ends it
   // too. Once ended, the sequence is dropped, and the iteration stays ended
   // however the sequence grows. (Before, a list cleared or shortened under
   // the iterator gave a SystemError, and a getter's error was skipped over.)
   $next(): any {
-    if (this.i >= 0) {
+    const index = this.i;
+    if (index >= 0) {
       let item: any;
       try {
-        item = this.get(this.i);
+        item = this.get(index);
       } catch (e: any) {
         this.end();
         const x = toPyExc(e);
@@ -3028,7 +3032,7 @@ export class ReversedIter {
         throw e;
       }
       if (item !== PAST_END) {
-        this.i--;
+        this.i = index - 1;
         return item;
       }
     }
@@ -3039,11 +3043,12 @@ export class ReversedIter {
     this.i = -1;
     this.a = null;
     this.get = () => PAST_END;
+    this.size = () => 0;
   }
 }
 iteratorType("reversed", ReversedIter, (sequence: any) => {
   // Retain the live array, with its initial length fixing the starting index.
-  if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => (index < sequence.length ? sequence[index] : PAST_END));
+  if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => (index < sequence.length ? sequence[index] : PAST_END), () => sequence.length);
   // r is the reverse hook; gi below is the item getter. These local names
   // also occur in existing native errors for non-callable hooks.
   const r = lookupType(typeOf(sequence), "__reversed__");
@@ -3054,15 +3059,17 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
   if (typeof sequence === "string") {
     // Copy Unicode code points, rather than indexing UTF-16 code units.
     const codePoints = [...sequence];
-    return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index]);
+    return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index], () => codePoints.length);
   }
-  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index));
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index), () => O.len(sequence));
 });
-// (CPython's reversed_len: 0 once ended, else the items left, the
+// (CPython's reversed_len and listreviter_len: the index taken first; 0
+// once ended, without asking the sequence; else the items left, the
 // sequence's current length asked each time, 0 if it is now shorter)
 method(T.reversed, "__length_hint__", (it: ReversedIter) => {
-  if (it.a === null) return 0;
-  const size = O.len(it.a), position = it.i + 1;
+  const index = it.i;
+  if (index < 0 || it.a === null) return 0;
+  const size = it.size(), position = index + 1;
   return size < position ? 0 : position;
 });
 
@@ -3615,7 +3622,7 @@ subclassable(T.map, MapIter, ["f", "its", "strict"]);
 subclassable(T.filter, FilterIter, ["f", "it"]);
 subclassable(T.zip, Zip, ["its", "strict"]);
 subclassable(T.enumerate, Enumerate, ["it", "i"]);
-subclassable(T.reversed, ReversedIter, ["a", "i", "get"]);
+subclassable(T.reversed, ReversedIter, ["a", "i", "get", "size"]);
 subclassable(staticmethod, PyStaticMethod, ["f"]);
 subclassable(classmethod, PyClassMethod, ["f"]);
 // property subclasses commonly override __init__ and call super().__init__.
