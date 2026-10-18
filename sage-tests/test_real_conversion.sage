@@ -50,3 +50,18 @@ try:
     m[0, 0] = RealField(16385)(5/2)
 except TypeError as e:
     print("TypeError")
+
+# __int__ is called once, and its answer checked against the double
+class G(float):
+    calls = 0
+    def __int__(self):
+        G.calls += 1
+        return int(9)
+class H(float):
+    calls = 0
+    def __int__(self):
+        H.calls += 1
+        return int(float.__float__(self))
+for s in ["ZZ(G('2'))", "Integer(G('2'))", "ZZ(G('2.5'))", "ZZ(H('2'))", "Integer(H('-3'))", "ZZ(H('2.5'))"]:
+    show(s)
+print(G.calls, H.calls)
