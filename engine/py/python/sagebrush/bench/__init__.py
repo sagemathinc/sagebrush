@@ -33,6 +33,7 @@ An answer recorded in results/ (where no competitor runs) is checked too."""
 
 import argparse
 import json
+import math
 import signal
 import sys
 
@@ -41,6 +42,8 @@ from ._timing import host
 from .suite import TIERS, EngineTimeout
 
 SCHEMA = "sagebrush-bench/1"
+MAX_REPEAT = 100  # samples per case (flint_harness.c's MAX_REPS too)
+MAX_TIMEOUT = 86400.0  # seconds a competitor may take on one case
 
 
 def suites():
@@ -71,7 +74,21 @@ def _cell(r):
 
 
 def run_suite(suite, tiers, repeat, timeout, competitors, out=sys.stdout):
+    if not (isinstance(repeat, int) and 1 <= repeat <= MAX_REPEAT):
+        raise ValueError(f"repeat must be an int from 1 to {MAX_REPEAT}")
+    if not (isinstance(timeout, (int, float)) and math.isfinite(timeout) and 0 < timeout <= MAX_TIMEOUT):
+        raise ValueError(f"timeout must be more than 0 and at most {MAX_TIMEOUT:g} seconds")
     engines = suite.engines()
+    try:
+        # (startup too: gp and Sage start inside version(), so an
+        # interruption there must still close them)
+        return _start_and_run(suite, tiers, repeat, timeout, competitors, out, engines)
+    finally:
+        for e in engines:
+            e.close()
+
+
+def _start_and_run(suite, tiers, repeat, timeout, competitors, out, engines):
     names = [e.name for e in engines]
     ours = [e for e in engines if e.ours]
     theirs = [e for e in engines if not e.ours]
@@ -93,11 +110,7 @@ def run_suite(suite, tiers, repeat, timeout, competitors, out=sys.stdout):
                 usable.append(e)
             except Exception as x:
                 m.update(status="error", error=str(x)[:500])
-    try:
-        return _run_cases(suite, tiers, repeat, timeout, out, engines, usable, meta, pairs, ours)
-    finally:
-        for e in engines:
-            e.close()
+    return _run_cases(suite, tiers, repeat, timeout, out, engines, usable, meta, pairs, ours)
 
 
 def _run_cases(suite, tiers, repeat, timeout, out, engines, usable, meta, pairs, ours):
@@ -202,9 +215,11 @@ def main(argv=None):
     g.add_argument("--large", action="store_true", help="also the largest cases (hours)")
     g.add_argument("--tiers", help="exactly these tiers, comma-separated (quick,standard,large)")
     p.add_argument("--json", metavar="OUT", help="also write the results as JSON to OUT")
-    p.add_argument("--repeat", type=int, default=3, help="samples per case (default 3)")
+    p.add_argument("--repeat", type=int, default=3,
+                   help=f"samples per case, 1 to {MAX_REPEAT} (default 3)")
     p.add_argument("--timeout", type=float, default=900,
-                   help="seconds a competitor may take on one case (default 900)")
+                   help=f"seconds a competitor may take on one case, more than 0 and at most "
+                        f"{MAX_TIMEOUT:g} (default 900)")
     p.add_argument("--no-competitors", action="store_true", help="time Sagebrush only")
     p.add_argument("--list", action="store_true", help="list the suites and their claims")
     p.add_argument("--markdown", metavar="RUN", help="print a saved run (--json) as Markdown tables")
@@ -224,8 +239,10 @@ def main(argv=None):
     unknown = [n for n in a.suite if n not in by_name]
     if unknown:
         p.error(f"unknown suite {', '.join(unknown)} (suites: {', '.join(by_name)})")
-    if a.repeat < 1:
-        p.error("--repeat must be at least 1")
+    if not 1 <= a.repeat <= MAX_REPEAT:
+        p.error(f"--repeat must be from 1 to {MAX_REPEAT}")
+    if not (math.isfinite(a.timeout) and 0 < a.timeout <= MAX_TIMEOUT):
+        p.error(f"--timeout must be more than 0 and at most {MAX_TIMEOUT:g} seconds")
     chosen = [by_name[n] for n in a.suite] if a.suite else all_suites
     if a.tiers:
         tiers = tuple(t for t in TIERS if t in a.tiers.split(","))

@@ -38,10 +38,12 @@ class Flint:
     ours = False
     label = "FLINT fmpz_mat / fmpz_poly (separate process)"
 
-    def __init__(self):
+    def __init__(self, cflags=()):
+        # cflags: extra compiler flags (test_bench.py's SB_FP_DELAY_US hook)
         self.proc = None
         self.binary = self._version = None
         self.why = None
+        self.extra = list(cflags)
 
     def _env(self):
         env = dict(os.environ)
@@ -67,7 +69,7 @@ class Flint:
             self.why = "no flint.pc found by pkg-config"
             return None
         with open(SOURCE, "rb") as f:
-            key = hashlib.sha256(f.read() + repr((cc, cflags, ldirs, self._version)).encode()).hexdigest()[:16]
+            key = hashlib.sha256(f.read() + repr((cc, cflags, ldirs, self._version, self.extra)).encode()).hexdigest()[:16]
         cache = os.path.join(os.path.expanduser("~"), ".cache", "sagebrush", "bench")
         os.makedirs(cache, exist_ok=True)
         binary = os.path.join(cache, f"flint-harness-{key}")
@@ -81,7 +83,7 @@ class Flint:
             err = ""
             for flags in attempts:
                 tmp = binary + f".tmp{os.getpid()}"
-                r = subprocess.run([cc, "-O2", "-o", tmp, SOURCE, *flags], capture_output=True,
+                r = subprocess.run([cc, "-O2", *self.extra, "-o", tmp, SOURCE, *flags], capture_output=True,
                                    text=True, timeout=300)
                 if r.returncode == 0:
                     os.replace(tmp, binary)

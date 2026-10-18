@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from fractions import Fraction
 
 from sagebrush import bench
@@ -136,7 +137,9 @@ try:
             assert bench.main(["fake", "--quick", "--json", out, "--repeat", "2"]) == 0
             with open(out) as f:
                 report = json.load(f)
-        for bad_args in (["nosuch"], ["--repeat", "0"], ["--tiers", "huge"], ["--quick", "--large"]):
+        for bad_args in (["nosuch"], ["--repeat", "0"], ["--repeat", "101"], ["--repeat", "10000000000"],
+                         ["--timeout", "0"], ["--timeout", "-1"], ["--timeout", "nan"], ["--timeout", "inf"],
+                         ["--timeout", "86401"], ["--tiers", "huge"], ["--quick", "--large"]):
             try:
                 bench.main(bad_args)
             except SystemExit as e:
@@ -174,6 +177,112 @@ except EngineTimeout:
     assert p.proc is None
 else:
     raise AssertionError("no timeout")
+
+# run_suite itself refuses what the command refuses
+for repeat, timeout in ((0, 5), (101, 5), (2.0, 5), (2, 0), (2, float("nan")), (2, float("inf")), (2, 10**6)):
+    try:
+        bench.run_suite(FakeSuite([Fake("sb", True, ident)]), ("quick",), repeat, timeout, True, out=io.StringIO())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"run_suite accepted repeat={repeat!r} timeout={timeout!r}")
+
+# a competitor that floods a reply without its end marker is killed at the
+# byte cap, long before the deadline
+from sagebrush.bench._proc import ProcError
+
+p = LineProcess([sys.executable, "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"], "END",
+                max_reply=1 << 20)
+t0 = time.time()
+try:
+    p.request("x\n", 60)
+except ProcError as e:
+    assert "a reply of more than 1048576 bytes" in str(e) and p.proc is None, e
+else:
+    raise AssertionError("no byte cap")
+assert time.time() - t0 < 30
+
+# the FLINT harness refuses sample counts and sizes out of range, before
+# allocating (where a FLINT is installed: CI has none)
+from sagebrush.bench._flint import Flint
+
+f = Flint()
+if f.available():
+    f.proc = LineProcess([f.binary], "END")
+    for req in ("det 0 1 5", "det 101 1 5", "det 1x 1 5", "det 99999999999999999999 1 5", "det 1 2001 5",
+                "rref 1 0 3", "mul 1 -1", "gcd 1 10000001 1"):
+        out = f.proc.request(req + "\n", 60)
+        assert out == ["E bad request " + req.split()[0]], (req, out)
+    assert f.proc.request("det 1 1 5\n", 60)[-1] == "A 1:5"
+    f.close()
+    print("flint harness refusals: ok")
+
+# an interruption while competitors start (gp and Sage start inside
+# version()) still closes every engine: KeyboardInterrupt, and SIGTERM as
+# the command handles it
+class Starting(Fake):
+    def __init__(self, name, exc):
+        super().__init__(name, False, ident)
+        self.exc = exc
+
+    def version(self):
+        raise self.exc
+
+
+for exc in (KeyboardInterrupt(), SystemExit(143)):
+    engines = [Fake("sb", True, ident), Starting("slow-start", exc), Fake("later", False, ident)]
+    try:
+        run(engines)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    else:
+        raise AssertionError("the interruption was swallowed")
+    assert all(e.closed for e in engines), exc
+
+import signal
+
+
+class Spawning(Fake):
+    """version() starts a real child, then the run is sent SIGTERM."""
+
+    def __init__(self):
+        super().__init__("spawning", False, ident)
+        self.proc = LineProcess([sys.executable, "-c", "import sys, time\nfor l in sys.stdin: print('END', flush=True); time.sleep(60)"], "END")
+
+    def version(self):
+        self.proc.request("hello\n", 30)
+        self.child = self.proc.proc
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(5)
+        return "never"
+
+    def close(self):
+        self.proc.close()
+        self.closed = True
+
+
+old = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+try:
+    sp = Spawning()
+    try:
+        run([Fake("sb", True, ident), sp])
+    except SystemExit as e:
+        assert e.code == 143
+    else:
+        raise AssertionError("SIGTERM was swallowed")
+finally:
+    signal.signal(signal.SIGTERM, old)
+assert sp.closed and sp.child.poll() is not None, "the child outlived the run"
+
+# the FLINT harness times no verification: with fingerprinting slowed to
+# 0.2 s per entry (a compile-time test hook), every time stays tiny
+if f.available():
+    slow = Flint(["-DSB_FP_DELAY_US=200000"])
+    assert slow.available(), slow.why
+    t = slow.time("det 1 7", 3, 60)
+    assert t.answer == "1:7" and len(t.times) == 3 and max(t.times) < 0.01, (t.times, t.calls)
+    slow.close()
+    print("flint harness timing excludes verification: ok")
 
 # the fingerprints (the FLINT harness computes the same; checked there by
 # hand: det [[1,2],[3,4]], x^2 + 1, (1/5, 3/5))

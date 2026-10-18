@@ -1,5 +1,7 @@
 //! Exact matrices over Z: Sagebrush (sagebrush-arith) against FLINT 3,
 //! checking that the answers agree.  Usage: matbench [n ...]
+//! Only FLINT's call is timed: its results are converted to BigInt (through
+//! decimal strings) after the timing, as Sagebrush's are BigInt already.
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
 use sagebrush_flint::FMat;
@@ -43,21 +45,23 @@ fn main() {
                 println!("{:<10} {:>5} {:>6} {:>10.3}ms {:>10.3}ms {:>7.2}", op, n, bits, ts * 1e3, tf * 1e3, ts / tf)
             };
             let (ts, x) = time(|| zmat::det(&a));
-            let (tf, y) = time(|| fa.det());
-            assert_eq!(x, y, "det");
+            let (tf, y) = time(|| fa.det_raw());
+            assert_eq!(x, y.big(), "det");
             row("det", ts, tf);
             let (ts, x) = time(|| zmat::solve(&a, &b).unwrap());
-            let (tf, y) = time(|| fb_solve(&fa, &fb));
+            let (tf, y) = time(|| fa.solve_raw(&fb).unwrap());
+            let y = (y.0.entries(), y.1.big());
             assert_eq!(x.0.d.iter().map(|v| v * &y.1).collect::<Vec<_>>(), y.0.iter().map(|v| v * &x.1).collect::<Vec<_>>(), "solve");
             row("solve", ts, tf);
             if n <= 100 {
                 let (ts, x) = time(|| zmat::inverse(&a).unwrap());
-                let (tf, y) = time(|| { let (m, den) = fa.inv().unwrap(); (m.entries(), den) });
+                let (tf, y) = time(|| fa.inv_raw().unwrap());
+                let y = (y.0.entries(), y.1.big());
                 assert_eq!(x.0.d.iter().map(|v| v * &y.1).collect::<Vec<_>>(), y.0.iter().map(|v| v * &x.1).collect::<Vec<_>>(), "inverse");
                 row("inverse", ts, tf);
                 let (ts, x) = time(|| zmat::charpoly(&a));
-                let (tf, y) = time(|| fa.charpoly());
-                assert_eq!(x, y, "charpoly");
+                let (tf, y) = time(|| fa.charpoly_poly());
+                assert_eq!(x, y.coeffs(), "charpoly");
                 row("charpoly", ts, tf);
             }
             // rank-deficient n x (n+5): rows n/2.. are combinations
@@ -67,7 +71,8 @@ fn main() {
             let c = left.mul(&right);
             let fc = FMat::new(c.rows, c.cols, &c.d);
             let (ts, x) = time(|| zmat::rref(&c));
-            let (tf, y) = time(|| fc.rref());
+            let (tf, y) = time(|| fc.rref_raw());
+            let y = (y.0, y.1.big(), y.2);
             assert_eq!(x.2.len(), y.2, "rank");
             let fe = y.0.entries();
             for i in 0..x.2.len() {
@@ -78,9 +83,4 @@ fn main() {
             row("rref", ts, tf);
         }
     }
-}
-
-fn fb_solve(a: &FMat, b: &FMat) -> (Vec<BigInt>, BigInt) {
-    let (m, den) = a.solve(b).unwrap();
-    (m.entries(), den)
 }
