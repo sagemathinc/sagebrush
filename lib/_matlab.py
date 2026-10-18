@@ -6927,8 +6927,8 @@ def eig_(nargout, x, *args):
     for A*V = B*V*D (and W'*A = D*W'*B), the balanceOption, the algorithm
     "chol" and the outputForm "vector" or "matrix".  Real matrices: the
     symmetric eigenproblem (tred2 and tql2) or the general one (orthes and
-    hqr2), from JAMA, in Sagebrush's numpy; neither balances, so
-    "balance" and "nobalance" give the same result.  eig(A, B) with a
+    hqr2), from JAMA, in Sagebrush's numpy; the general one balances A first,
+    as the page's default "balance" does, and "nobalance" turns it off.  eig(A, B) with a
     symmetric A and a symmetric positive definite B is the page's "chol"
     algorithm: the symmetric problem of L^-1 A L^-T, B = L L', V B-normalized
     as the page says.  Otherwise, for lack of QZ, it is the eigenproblem of
@@ -6983,7 +6983,7 @@ def eig_(nargout, x, *args):
             w, V = np.linalg.eigh(A)
             W = V
         else:
-            w, V = np.linalg._eig(A)
+            w, V = np.linalg._eig(A, algo != "nobalance")
     else:
         B = B.astype(float)
         if algo == "qz":
@@ -7016,7 +7016,7 @@ def eig_(nargout, x, *args):
         w = np.real(w)
         V = np.real(V)
     if nargout == 3 and W is None:
-        W = _left_vectors(A, B, w)
+        W = _left_vectors(A, B, w, algo != "nobalance")
     def out1(a):
         r = _unmat(np.asarray(a))
         return _B["single"].f(1, r) if single else r
@@ -7033,13 +7033,13 @@ def eig_(nargout, x, *args):
 _EPS_D = 2.220446049250313e-16
 
 
-def _left_vectors(A, B, w):
+def _left_vectors(A, B, w, balance=True):
     """left eigenvectors: for each eigenvalue w(k), a vector u with
     u' A = w(k) u' B (B the identity when None), from the eigenvectors of
     the transposed problem A.' z = mu B.' z (u = conj(z)), each matched to
     the nearest unused mu, of 2-norm 1"""
     At = A.T if B is None else np.linalg.solve(B.T, A.T)
-    mu, Z = np.linalg._eig(At)
+    mu, Z = np.linalg._eig(At, balance)
     mu, Z = np.asarray(mu), np.asarray(Z)
     used = [False] * len(mu)
     cols = []
@@ -7329,6 +7329,11 @@ def roots_(p):
         for k in range(1, n):
             C[k, k - 1] = 1
         r = np.linalg._eigvals(C)
+        # (the trailing zeros are removed, so the constant term is not 0 and 0 is not a root:
+        # an eigenvalue of exactly 0 is one the eigensolver lost)
+        if np.any(np.asarray(r) == 0):
+            raise _err("roots: a root of this polynomial could not be computed accurately in "
+                       "Sagebrush (its coefficients are too widely scaled).")
     r = np.concatenate([r, np.zeros(trailing)])
     if r.size == 0:
         return np.zeros((0, 1))
