@@ -9984,40 +9984,58 @@ def magic_(n):
 
 # ------------------------------------------------------------------ arguments blocks (function argument validation)
 
+# Vocabulary used by the generated function prologue:
+#   pos: one-based positional index, or a canonical name-value option name.
+#   cls: declared MATLAB class, not the Python storage type. Numeric classes
+#        include complex-valued arrays; realness is a separate validator.
+#   dims: requested MATLAB dimensions (storage axes are reversed); None in a
+#         dimension is a wildcard, while dims=None disables the size check.
+#   NOVAL: successful validator with no MATLAB output, not a truth value.
+# Binding keeps name-value pairs in order. Class conversion precedes size
+# conversion; validate() then wraps only MatlabError from a validator call.
+
 
 def split_nv(a, npos, names):
-    """a function's arguments as (positional, name-value pairs): the pairs
-    follow the positional arguments; names match case-insensitively"""
-    low = [n.lower() for n in names]
-    k = 0
-    while k < len(a) and k < npos and not (_istext(a[k]) and _text(a[k]).lower() in low and k + 1 < len(a)):
-        k += 1
-    pos = tuple(a[:k])
-    rest = a[k:]
-    if len(rest) % 2:
+    """Split positional arguments and canonical, ordered name-value pairs.
+
+    A known textual name starts the pairs only if a following value exists.
+    Otherwise positional scanning continues up to len(a) or npos. Matching is
+    case-insensitive; duplicate names remain here and nv_get uses the last.
+    """
+    lower_names = [name.lower() for name in names]
+    positional_count = 0
+    while (positional_count < len(a) and positional_count < npos and not (
+            _istext(a[positional_count]) and
+            _text(a[positional_count]).lower() in lower_names and
+            positional_count + 1 < len(a))):
+        positional_count += 1
+    positional = tuple(a[:positional_count])
+    remaining = a[positional_count:]
+    if len(remaining) % 2:
         raise _err("Invalid argument list. Check for wrong number of positional arguments or placement of positional arguments after name-value arguments.", "MATLAB:TooManyInputs")
     pairs = []
-    for i in range(0, len(rest), 2):
-        n = rest[i]
-        if not _istext(n):
+    for index in range(0, len(remaining), 2):
+        name = remaining[index]
+        if not _istext(name):
             raise _err("Invalid argument list. Check for wrong number of positional arguments or placement of positional arguments after name-value arguments.")
-        t = _text(n)
-        if t.lower() not in low:
-            raise _err("Invalid name-value argument '%s'. Valid names are: %s." % (t, ", ".join("'%s'" % x for x in names)), "")
-        pairs.append((names[low.index(t.lower())], rest[i + 1]))
-    return pos, pairs
+        text = _text(name)
+        if text.lower() not in lower_names:
+            raise _err("Invalid name-value argument '%s'. Valid names are: %s." % (text, ", ".join("'%s'" % name for name in names)), "")
+        pairs.append((names[lower_names.index(text.lower())], remaining[index + 1]))
+    return positional, pairs
 
 
 def nv_has(pairs, name):
-    return any(n == name for n, _ in pairs)
+    return any(pair_name == name for pair_name, _ in pairs)
 
 
 def nv_get(pairs, name):
-    v = None
-    for n, x in pairs:
-        if n == name:
-            v = x  # (the last one given wins)
-    return cp(v)
+    """Copy the last matching option value; split_nv already canonicalized names."""
+    value = None
+    for pair_name, pair_value in pairs:
+        if pair_name == name:
+            value = pair_value
+    return cp(value)
 
 
 def _arg_prefix(pos):
@@ -10031,56 +10049,87 @@ def _numeric_class(c):
 
 
 def arg_check(v, dims, cls, pos):
-    """an argument converted to its declared class and size (or the error MATLAB gives)"""
+    """Convert class first, then size; matching classes/sizes need no conversion."""
     if cls:
-        c = class_(v)
-        if c != cls:
-            ok = True
-            try:
-                if cls in ("double", "single", "logical") or cls in _INTS:
-                    if not (_numeric_class(c) or c in ("logical", "char")):
-                        ok = False
-                    else:
-                        v = _convert(v, cls)
-                elif cls == "char":
-                    if c == "string":
-                        v = Char(_text(v)) if type(v) is Str else char_(v)
-                    elif _numeric_class(c):
-                        v = char_(v)
-                    else:
-                        ok = False
-                elif cls == "string":
-                    if c in ("char", "cell") or _numeric_class(c) or c == "logical":
-                        v = string_(v)
-                    else:
-                        ok = False
-                elif cls in ("cell", "struct", "function_handle"):
-                    ok = False
-                # (other classes: enumerations and objects are not checked here)
-            except MatlabError:
-                ok = False
-            if not ok:
-                raise _using(_arg_prefix(pos) + "Value must be of type %s or be convertible to %s." % (cls, cls))
+        v = _convert_argument_class(v, cls, pos)
     if dims is not None:
-        d = list(_dims(v))
-        want = list(dims)
-        nd = max(len(d), len(want))
-        d2 = d + [1] * (nd - len(d))
-        w2 = want + [1] * (nd - len(want))
-        if not all(w is None or w == x for w, x in zip(w2, d2)):
-            fixed = [w for w in want]
-            n = _numel(v)
-            if n == 1 and all(w is not None for w in fixed):
-                # scalar expansion
-                v = repmat_(v, *[float(w) for w in fixed])
-            elif len(d) == 2 and (d[0] == 1 or d[1] == 1) and len(want) == 2 and (want[0] in (1, None) or want[1] in (1, None)) and \
-                    ((want[0] == 1 and want[1] in (None, n)) or (want[1] == 1 and want[0] in (None, n))):
-                # a row for a column, or a column for a row
-                v = reshape_(v, float(want[0] if want[0] is not None else n), float(want[1] if want[1] is not None else n))
-            else:
-                spec = "×".join(":" if w is None else str(w) for w in want)
-                raise _using(_arg_prefix(pos) + "Value must be of size %s." % spec)
+        v = _convert_argument_size(v, dims, pos)
     return v
+
+
+def _convert_argument_class(value, declared_class, position):
+    """Apply the argument declaration's admission rule before general conversion.
+
+    In particular, numeric/logical declarations accept numeric, logical and char
+    sources, not string sources, even where _convert itself could parse strings.
+    A matching class skips conversion. Only MatlabError is replaced with the
+    prefixed type error; unrelated exceptions keep propagating.
+    """
+    source_class = class_(value)
+    if source_class != declared_class:
+        convertible = True
+        try:
+            if declared_class in ("double", "single", "logical") or declared_class in _INTS:
+                if not (_numeric_class(source_class) or source_class in ("logical", "char")):
+                    convertible = False
+                else:
+                    value = _convert(value, declared_class)
+            elif declared_class == "char":
+                if source_class == "string":
+                    value = Char(_text(value)) if type(value) is Str else char_(value)
+                elif _numeric_class(source_class):
+                    value = char_(value)
+                else:
+                    convertible = False
+            elif declared_class == "string":
+                if source_class in ("char", "cell") or _numeric_class(source_class) or source_class == "logical":
+                    value = string_(value)
+                else:
+                    convertible = False
+            elif declared_class in ("cell", "struct", "function_handle"):
+                convertible = False
+            # Other declarations (enumerations/objects) are not checked here.
+        except MatlabError:
+            convertible = False
+        if not convertible:
+            raise _using(_arg_prefix(position) + "Value must be of type %s or be convertible to %s." % (declared_class, declared_class))
+    return value
+
+
+def _convert_argument_size(value, declared_dims, position):
+    """Keep matching shapes; otherwise try scalar expansion, then vector reshape.
+
+    Compare trailing-one-padded MATLAB dimensions, treating None as a wildcard.
+    Expansion and reshape are reached only on mismatch. Their errors remain
+    outside the class-conversion error handler.
+    """
+    actual_dims = list(_dims(value))
+    requested_dims = list(declared_dims)
+    rank = max(len(actual_dims), len(requested_dims))
+    actual_padded = actual_dims + [1] * (rank - len(actual_dims))
+    requested_padded = requested_dims + [1] * (rank - len(requested_dims))
+    if not all(requested is None or requested == actual
+               for requested, actual in zip(requested_padded, actual_padded)):
+        fixed_dims = [dim for dim in requested_dims]
+        element_count = _numel(value)
+        if element_count == 1 and all(dim is not None for dim in fixed_dims):
+            value = repmat_(value, *[float(dim) for dim in fixed_dims])
+        elif _argument_vector_reshape_allowed(actual_dims, requested_dims, element_count):
+            value = reshape_(value,
+                             float(requested_dims[0] if requested_dims[0] is not None else element_count),
+                             float(requested_dims[1] if requested_dims[1] is not None else element_count))
+        else:
+            size_spec = "×".join(":" if dim is None else str(dim) for dim in requested_dims)
+            raise _using(_arg_prefix(position) + "Value must be of size %s." % size_spec)
+    return value
+
+
+def _argument_vector_reshape_allowed(actual, requested, element_count):
+    """A 2-D row/column request with one unit axis and the existing element count."""
+    return (len(actual) == 2 and (actual[0] == 1 or actual[1] == 1) and
+            len(requested) == 2 and (requested[0] in (1, None) or requested[1] in (1, None)) and
+            ((requested[0] == 1 and requested[1] in (None, element_count)) or
+             (requested[1] == 1 and requested[0] in (None, element_count))))
 
 
 def _using(e):
@@ -10090,7 +10139,11 @@ def _using(e):
 
 
 def validate(thunk, pos):
-    """an arguments block's validation function, its error with MATLAB's prefix"""
+    """Discard a successful validator result; prefix only MatlabError failures.
+
+    Keep the identifier and mark _using so the caller formats the argument
+    error as an 'Error using' message. Other exception types pass through.
+    """
     try:
         thunk()
     except MatlabError as e:
@@ -10106,8 +10159,8 @@ def _vnum(v):
 
 
 def _velems(v):
-    A = _farr(v)
-    return A
+    values = _farr(v)
+    return values
 
 
 @_bi("mustBeNumeric")
@@ -10126,17 +10179,25 @@ def mustBeNumericOrLogical_(nargout, v):
 
 @_bi("mustBeReal")
 def mustBeReal_(nargout, v):
+    # _isnumlike includes logical/char values. Complex storage is allowed when
+    # all imaginary components are zero; dtype alone does not decide realness.
     if not _isnumlike(v) or (_arr(v).dtype.kind == "c" and np.any(_arr(v).imag)):
         _vfail("Value must be real.", "mustBeReal")
     return NOVAL
 
 
 def _pred_validator(name, msg, pred, numeric=True):
+    """Register an elementwise validator; admitted empty arrays skip pred.
+
+    The default class check includes numeric, logical and char. Conversion to
+    _farr still happens on empty input; only the predicate call is conditional.
+    Successful validators return NOVAL, while _vfail supplies the identifier.
+    """
     def g(nargout, v):
         if numeric and not (_numeric_class(class_(v)) or class_(v) in ("logical", "char")):
             _vfail(msg, name[0].lower() + name[1:])
-        A = _farr(v)
-        if A.size and not bool(np.all(pred(A))):
+        values = _farr(v)
+        if values.size and not bool(np.all(pred(values))):
             _vfail(msg, name)
         return NOVAL
     _B[name] = Builtin(g, name)
@@ -10168,16 +10229,19 @@ def mustBeScalarOrEmpty_(nargout, v):
 
 @_bi("mustBeVector")
 def mustBeVector_(nargout, v, *opt):
+    # This check uses only whether an option was supplied; it does not parse
+    # an option spelling. An empty value must still have a vector shape.
     if not _isvec(v) or (_numel(v) == 0 and not opt):
         _vfail("Value must be a 1-by-n vector or an n-by-1 vector.", "mustBeVector")
     return NOVAL
 
 
 def _cmp_validator(name, text, f):
+    """Register a comparison with broadcast bounds, requiring every result true."""
     def g(nargout, v, c):
-        A = _farr(v)
-        C = _farr(c)
-        if A.size and not bool(np.all(_broadcast(f, A, C))):
+        values = _farr(v)
+        bounds = _farr(c)
+        if values.size and not bool(np.all(_broadcast(f, values, bounds))):
             _vfail("Value must be %s %s." % (text, _num2str_g(_scalar(c))), name)
         return NOVAL
     _B[name] = Builtin(g, name)
@@ -10191,29 +10255,35 @@ _cmp_validator("mustBeLessThanOrEqual", "less than or equal to", lambda a, c: a 
 
 @_bi("mustBeInRange")
 def mustBeInRange_(nargout, v, lo, hi, *opt):
-    A = _farr(v)
-    a = _scalar(lo)
-    b = _scalar(hi)
-    flags = [_text(o).lower() for o in opt if _istext(o)]
-    lo_ok = A > a if ("exclusive" in flags or "exclude-lower" in flags) else A >= a
-    hi_ok = A < b if ("exclusive" in flags or "exclude-upper" in flags) else A <= b
-    if A.size and not bool(np.all(lo_ok & hi_ok)):
-        _vfail("Value must be within the range specified by %s and %s." % (_num2str_g(a), _num2str_g(b)), "mustBeInRange")
+    """Inclusive scalar bounds unless textual flags exclude an endpoint.
+
+    Non-text/unknown options have no effect. Empty values skip the final
+    failure check, but value/bound conversions and comparisons still execute.
+    """
+    values = _farr(v)
+    lower_bound = _scalar(lo)
+    upper_bound = _scalar(hi)
+    flags = [_text(option).lower() for option in opt if _istext(option)]
+    lower_allowed = values > lower_bound if ("exclusive" in flags or "exclude-lower" in flags) else values >= lower_bound
+    upper_allowed = values < upper_bound if ("exclusive" in flags or "exclude-upper" in flags) else values <= upper_bound
+    if values.size and not bool(np.all(lower_allowed & upper_allowed)):
+        _vfail("Value must be within the range specified by %s and %s." % (_num2str_g(lower_bound), _num2str_g(upper_bound)), "mustBeInRange")
     return NOVAL
 
 
 @_bi("mustBeMember")
 def mustBeMember_(nargout, v, s):
-    tf = ismember_(1, v, s)
-    if not cond(tf if _numel(tf) else True):
-        items = [_text(e) for e in s.a] if type(s) is Cell else ([str(x) for x in s.a] if type(s) is StrArr else [_num2str_g(float(x)) for x in _farr(s).reshape(-1)])
-        quote = type(s) is Cell or type(s) is StrArr
-        _vfail("Value must be a member of this set:\n" + "\n".join("    " + ("'%s'" % x if quote else x) for x in items), "mustBeMember")
+    membership = ismember_(1, v, s)
+    if not cond(membership if _numel(membership) else True):
+        items = [_text(element) for element in s.a] if type(s) is Cell else ([str(element) for element in s.a] if type(s) is StrArr else [_num2str_g(float(element)) for element in _farr(s).reshape(-1)])
+        quote_items = type(s) is Cell or type(s) is StrArr
+        _vfail("Value must be a member of this set:\n" + "\n".join("    " + ("'%s'" % item if quote_items else item) for item in items), "mustBeMember")
     return NOVAL
 
 
 @_bi("mustBeText")
 def mustBeText_(nargout, v):
+    # Text representations are checked here, not their length or Char shape.
     if not (type(v) is Char or type(v) is Str or type(v) is StrArr or (type(v) is Cell and all(type(e) is Char for e in v.a))):
         _vfail("Value must be a character vector, string array, or cell array of character vectors.", "mustBeText")
     return NOVAL
@@ -10221,6 +10291,7 @@ def mustBeText_(nargout, v):
 
 @_bi("mustBeTextScalar")
 def mustBeTextScalar_(nargout, v):
+    # A Char with at most one row or a Str scalar; not StrArr or Cell storage.
     if not (type(v) is Str or (type(v) is Char and _dims(v)[0] <= 1)):
         _vfail("Value must be a character vector or string scalar.", "mustBeTextScalar")
     return NOVAL
@@ -10228,6 +10299,7 @@ def mustBeTextScalar_(nargout, v):
 
 @_bi("mustBeNonzeroLengthText")
 def mustBeNonzeroLengthText_(nargout, v):
+    # Nonempty Str/Char or a nonempty Cell of nonempty Char. No StrArr branch.
     if not ((type(v) is Str and v.s) or (type(v) is Char and v.a.size) or (type(v) is Cell and v.a and all(type(e) is Char and e.a.size for e in v.a))):
         _vfail("Value must be text with one or more characters.", "mustBeNonzeroLengthText")
     return NOVAL

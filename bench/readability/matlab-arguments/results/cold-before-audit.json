@@ -1,0 +1,20 @@
+{
+  "phase": "before",
+  "records": 30,
+  "model_ids": [
+    "claude-haiku-4-5-20251001"
+  ],
+  "source_manifests": [
+    {
+      "lib/_matlab.py": "a526dd3ca5fba53b5e59144c4442350c932f32f142851440dc48e467810df342"
+    }
+  ],
+  "tool_calls": 345,
+  "allowed_tools": [
+    "Read",
+    "Glob",
+    "Grep"
+  ],
+  "unexpected_tools_paths_or_run_errors": [],
+  "note": "Fresh-process source projection and allowed read-tool record audit. Raw records retain tool inputs and model usage for inspection."
+}
