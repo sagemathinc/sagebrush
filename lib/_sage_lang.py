@@ -1888,6 +1888,12 @@ def _integer_class(sa, methods):
     class Integer(int):
         __slots__ = ()
 
+        def __new__(cls, x=0, *base):
+            # (a real number must be integral: int() truncated 3.5 to 3)
+            if not base and not isinstance(x, int) and sa._real_kind(x) is not None:
+                x = sa._integral_real(x)
+            return int.__new__(cls, x, *base)
+
         def __repr__(self):
             return int.__repr__(self)
 
