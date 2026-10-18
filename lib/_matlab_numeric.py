@@ -570,16 +570,62 @@ def _xy_data(x, y):
 
 
 # (the most data sites times rows of values spline and pchip set up slopes for, one site at a
-# time, and the most n^3 times solves, for n sites, of the spline's dense systems)
+# time, and the most n^3 times solves, for n sites, of the spline's dense systems: made only
+# when an entry of its tridiagonal system is not finite, or a clamped spline's values are
+# complex; otherwise it is solved in its band, _tridiag_solve)
 _CUBIC_SETUP_MAX = 1_000_000
+# (and for a spline, whose setup and banded solve are slower: 1,000,000 sites took about 40 s
+# and 0.9 GB, 200,000 about 7 s)
+_SPLINE_SETUP_MAX = 200_000
 _SPLINE_SOLVE_WORK = 1_000_000_000
+
+
+def _tridiag_solve(sub, diag, sup, r):
+    """the solution, as a list, of the tridiagonal system whose row k has sub[k], diag[k] and
+    sup[k] at columns k - 1, k and k + 1 (sub[0] and sup[-1] unused), right-hand side r: the
+    elimination numpy.linalg.solve does on the dense matrix (partial pivoting, the first
+    largest pivot, a zero multiplier skipping its row, then the two substitutions), with
+    the same operations in the same order on the entries that are not zero, so the same
+    values, in time and memory linear in n"""
+    n = len(diag)
+    # (the rows of U, at columns k, k + 1 and k + 2: a row swapped up brings one more)
+    U0, U1, U2 = [0.0] * n, [0.0] * n, [0.0] * n
+    z = [0.0] * n
+    # (row k as reduced so far, and its right-hand side)
+    c0, c1, c2, rk = diag[0], sup[0] if n > 1 else 0.0, 0.0, r[0]
+    singular = False
+    for k in range(n):
+        if k + 1 < n:
+            l, d, u, rn = sub[k + 1], diag[k + 1], sup[k + 1] if k + 2 < n else 0.0, r[k + 1]
+            if abs(l) > abs(c0):
+                c0, c1, c2, rk, l, d, u, rn = l, d, u, rn, c0, c1, c2, rk
+        U0[k], U1[k], U2[k], z[k] = c0, c1, c2, rk
+        if c0 == 0:
+            singular = True
+        elif k + 1 < n:
+            f = l / c0
+            if f != 0:
+                d -= f * c1
+                u -= f * c2
+                rn -= f * rk
+        if k + 1 < n:
+            c0, c1, c2, rk = d, u, 0.0, rn
+    if singular:
+        raise np.linalg.LinAlgError("Singular matrix")
+    for k in range(n - 1, -1, -1):
+        z[k] /= U0[k]
+        if k >= 2 and U2[k - 2] != 0:
+            z[k - 2] -= U2[k - 2] * z[k]
+        if k >= 1 and U1[k - 1] != 0:
+            z[k - 1] -= U1[k - 1] * z[k]
+    return z
 
 
 def _cubic_admit(name, n, dim, setups, solves):
     """refuse, before any slopes are set up, a spline or pchip whose setup (setups rows of n
     sites) or dense solves (solves systems of n unknowns) would be too much work"""
     rows = "%d row%s of values" % (dim, "s" * (dim != 1))
-    if n * setups > _CUBIC_SETUP_MAX:
+    if n * setups > (_SPLINE_SETUP_MAX if name == "spline" else _CUBIC_SETUP_MAX):
         raise _err("%s with %d data sites for %s is not supported in Sagebrush: too much work." % (name, n, rows))
     if solves and n ** 3 * solves > _SPLINE_SOLVE_WORK:
         raise _err("%s with %d data sites for %s is not supported in Sagebrush: its dense solve would be "
@@ -600,14 +646,16 @@ def _spline_pp(x, y):
     # (a clamped spline solves once per row, complex or not; a not-a-knot one of more than three
     # sites once per real row, a complex row being two)
     parts = dim * (2 if np.iscomplexobj(Y) else 1)
-    _cubic_admit("spline", n, dim, parts, dim if clamped else (parts if n > 3 else 0))
+    _cubic_admit("spline", n, dim, parts, 0)
+    # (the dense solve only when the banded one can't be used: its work, admitted then)
+    dense = lambda: _cubic_admit("spline", n, dim, 0, dim if clamped else parts)
     rows = []
     order = 4
     for di in range(dim):
         yv = Y[di]
         if clamped:
             s0, s1, yv = yv[0], yv[-1], yv[1:-1]
-            d = _clamped_slopes(X, yv, s0, s1)
+            d = _clamped_slopes(X, yv, s0, s1, dense)
             rows.append(_cubic_coefs(X, yv, d))
         elif n == 2:
             order = 2
@@ -621,8 +669,8 @@ def _spline_pp(x, y):
             f123 = (f23 - f12) / (X[2] - X[0])
             rows.append(np.array([[f123, f12 - f123 * (X[1] - X[0]), yv[0]]]))
         else:
-            d = _m._spline_slopes(list(X), [float(t) for t in yv]) if not np.iscomplexobj(yv) else \
-                [complex(a, b) for a, b in zip(_m._spline_slopes(list(X), [float(t) for t in yv.real]), _m._spline_slopes(list(X), [float(t) for t in yv.imag]))]
+            d = _m._spline_slopes(list(X), [float(t) for t in yv], dense) if not np.iscomplexobj(yv) else \
+                [complex(a, b) for a, b in zip(_m._spline_slopes(list(X), [float(t) for t in yv.real], dense), _m._spline_slopes(list(X), [float(t) for t in yv.imag], dense))]
             rows.append(_cubic_coefs(X, yv, np.array(d)))
     pieces = rows[0].shape[0]
     C = np.zeros((pieces * dim, rows[0].shape[1]), dtype=np.result_type(*[r.dtype for r in rows]))
@@ -633,21 +681,30 @@ def _spline_pp(x, y):
     return X, C, dim, vec
 
 
-def _clamped_slopes(X, y, s0, s1):
+def _clamped_slopes(X, y, s0, s1, dense=None):
     n = X.size
     h = np.diff(X)
     delta = np.diff(y) / h
-    A = np.zeros((n, n))
     r = np.zeros(n, dtype=np.result_type(y.dtype, np.float64))
-    A[0, 0] = 1.0
     r[0] = s0
-    A[n - 1, n - 1] = 1.0
     r[n - 1] = s1
+    sub, diag, sup = [0.0] * n, [1.0] * n, [0.0] * n
     for k in range(1, n - 1):
-        A[k, k - 1] = h[k]
-        A[k, k] = 2 * (h[k - 1] + h[k])
-        A[k, k + 1] = h[k - 1]
+        sub[k] = float(h[k])
+        diag[k] = float(2 * (h[k - 1] + h[k]))
+        sup[k] = float(h[k - 1])
         r[k] = 3 * (h[k] * delta[k - 1] + h[k - 1] * delta[k])
+    # (the banded solve, unless an entry is not finite or r is complex: then the dense one,
+    # whose results for those are kept)
+    if r.dtype.kind != "c" and all(_math.isfinite(v) for band in (sub, diag, sup) for v in band):
+        return np.array(_tridiag_solve(sub, diag, sup, [float(v) for v in r]))
+    if dense is not None:
+        dense()
+    A = np.zeros((n, n))
+    A[0, 0] = 1.0
+    A[n - 1, n - 1] = 1.0
+    for k in range(1, n - 1):
+        A[k, k - 1], A[k, k], A[k, k + 1] = sub[k], diag[k], sup[k]
     return np.linalg.solve(A, r)
 
 
