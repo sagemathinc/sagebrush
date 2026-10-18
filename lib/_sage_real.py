@@ -3117,28 +3117,36 @@ def _real_double(x):
     """x as a double, as Sage reads a real argument (CPython's
     PyFloat_AsDouble): a float's own value (a subclass's __float__ is not
     called), else __float__, else __index__; a string or bytes raises
-    TypeError."""
+    TypeError.  Each special method is bound once, and one present in the
+    type is called even when it is None (TypeError, as Python's slots)."""
     if isinstance(x, float):
         return float.__float__(x)
     f = _special(x, "__float__")
-    if f is not None:
+    if f is not _ABSENT:
         r = f()
         if not isinstance(r, float):
             raise TypeError("%s.__float__ returned non-float (type %s)" % (type(x).__name__, type(r).__name__))
         return float.__float__(r)
-    if _special(x, "__index__") is not None:
-        import operator
-        return float(operator.index(x))
+    f = _special(x, "__index__")
+    if f is not _ABSENT:
+        r = f()
+        if not isinstance(r, int):
+            raise TypeError("__index__ returned non-int (type %s)" % type(r).__name__)
+        return float(int.__index__(r))
     raise TypeError("must be real number, not %s" % type(x).__name__)
+
+
+# (a special method the type does not have, as against one set to None)
+_ABSENT = object()
 
 
 def _special(x, name):
     """The special method name of x bound as Python binds one: looked up on
     its type, then the descriptor's __get__ (a staticmethod or classmethod
-    too); None if the type has none."""
-    f = _type_lookup(type(x), name)
-    if f is None:
-        return None
+    too), once; _ABSENT if the type has none (None if it is None)."""
+    f = _type_lookup(type(x), name, _ABSENT)
+    if f is _ABSENT or f is None:
+        return f
     get = _type_lookup(type(f), "__get__")
     return get(f, x, type(x)) if get is not None else f
 
@@ -3147,7 +3155,7 @@ _TYPE_MRO = type.__dict__["__mro__"]
 _TYPE_DICT = type.__dict__["__dict__"]
 
 
-def _type_lookup(t, name):
+def _type_lookup(t, name, default=None):
     """name in the dicts of t's MRO, as the interpreter's slot lookup reads
     it: type's own __mro__ and __dict__, so no metaclass __getattribute__ is
     called (CORR-8C8-1)."""
@@ -3157,7 +3165,7 @@ def _type_lookup(t, name):
         d = _TYPE_DICT.__get__(k, type)
         if name in d:
             return d[name]
-    return None
+    return default
 
 
 class _Bits(int):
