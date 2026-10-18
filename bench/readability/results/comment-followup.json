@@ -1,0 +1,494 @@
+{
+  "status": "Exploratory selected-question follow-up after inspecting the primary before/after answers. Does not replace the frozen comparison.",
+  "grading": "Manual, binary coverage of all claims in each frozen compound criterion; no partial credit. Omissions and contradictions are documented separately in per-answer notes. This is stricter than correctness of the main point alone.",
+  "records": [
+    {
+      "id": "Q04",
+      "repetition": 1,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 49.212,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 121,
+        "cache_creation_input_tokens": 88639,
+        "cache_read_input_tokens": 463764,
+        "output_tokens": 4085,
+        "output_tokens_details": {
+          "thinking_tokens": 1340
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 88639,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1144,
+            "cache_read_input_tokens": 93005,
+            "cache_creation_input_tokens": 1054,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1054
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 121,
+          "outputTokens": 4085,
+          "cacheReadInputTokens": 463764,
+          "cacheCreationInputTokens": 88639,
+          "webSearchRequests": 0,
+          "costUSD": 0.24420039999999998,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1340,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 15,
+      "is_error": false,
+      "answer": "Based on my analysis of the source code, here's what happens when the general algorithm reaches its heuristic stopping threshold but the analytic certificate fails or is unavailable:\n\n## Low-Level Return (Rust)\n\n**File: `source/engine/classgroup/src/nf/bnf.rs:840-873`**\n\nWhen the heuristic stopping condition is met (`h* R* / est <= sqrt(2)`), the code path depends on whether a lower bound for the certificate is available:\n\n1. **No certificate lower bound** \u2192 Returns `Found` with `certified: false` (line 872):\n   ```rust\n   Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 })\n   ```\n\n2. **Certificate lower bound present** \u2192 Attempts certification (lines 851-862):\n   - Success: Returns with `certified: true` (line 862)\n   - Failure (imprecise): Retries with doubled precision, up to `MAX_CERTIFICATE_RETRIES` (lines 864-868)\n   - Failure (not imprecise or retries exhausted): Returns with `certified: false` (line 872)\n\n## Python Class_Group Calls\n\n**File: `source/lib/_sage_nf.py:574-586, 588-625, 656-697`**\n\nThe `certified` flag combined with the `assumes` dict field flow to Python as:\n\n### `proof=None` (Default)\n**Flow: `class_group()` \u2192 `_bnf_checked(None)` \u2192 raises if uncertified**\n\n- Gets result with `certified: false` and `assumes: [\"GRH\", \"stopping estimate\"]`\n- `_bnf_checked()` checks for extra assumptions beyond GRH (line 583):\n  ```python\n  extra = [a for a in d.get(\"assumes\", [\"GRH\"]) if \"estimate\" in a]\n  if extra and proof is not False:  # proof=None satisfies this condition\n      raise NotImplementedError(...)\n  ```\n- **Result**: Raises `NotImplementedError` rather than returning uncertified result\n\n### `proof=False` (Explicit GRH acceptance)\n**Flow: `class_group(proof=False)` \u2192 `_bnf_checked(False)` \u2192 returns uncertified**\n\n- Gets result with `certified: false` and `assumes: [\"GRH\", \"stopping estimate\"]`\n- `_bnf_checked()` condition (line 584): `proof is not False` evaluates to `False`\n- **Result**: Returns the uncertified GRH-conditional result (lines 696-697)\n\n### `proof=True` (Request independent certificate)\n**Flow: `class_group(proof=True)` \u2192 `_proven_bnf(\"class_group\")` \u2192 calls `bnf_certify()`**\n\n- Ignores the heuristic result entirely (line 694)\n- Calls `_unconditional_bnf_data()` which invokes `_nf().bnf_certify()` (lines 611-625)\n- This calls the Rust `bnf_certify()` function (**`source/engine/classgroup/src/api.rs:337-350`**)\n- **Result**:\n  - If certificate succeeds: Returns proven class group\n  - If certificate refuses (bound exceeded): Raises `NotImplementedError` with \"beyond the limits...\" message\n  - If certificate fails: Raises `NotImplementedError` with failure reason\n\n## Key Files & Locations\n\n| Case | File | Function | Lines |\n|------|------|----------|-------|\n| Heuristic completion, no cert bound | `source/engine/classgroup/src/nf/bnf.rs` | `try_units` | 870-872 |\n| Certificate attempt & failure handling | `source/engine/classgroup/src/nf/bnf.rs` | `try_units` | 849-875 |\n| Python proof=None/False routing | `source/lib/_sage_nf.py` | `_bnf_checked` | 574-586 |\n| Python proof=True independent cert | `source/lib/_sage_nf.py` | `_proven_bnf` | 588-625 |\n| Python class_group dispatcher | `source/lib/_sage_nf.py` | `class_group` | 656-697 |\n| Rust certificate entry | `source/engine/classgroup/src/api.rs` | `bnf_certify` | 337-350 |",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Correct low-level fallback and separate proof routes; names MAX_CERTIFICATE_RETRIES without stating its value of two."
+    },
+    {
+      "id": "Q04",
+      "repetition": 2,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 68.447,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 129,
+        "cache_creation_input_tokens": 101392,
+        "cache_read_input_tokens": 770941,
+        "output_tokens": 5622,
+        "output_tokens_details": {
+          "thinking_tokens": 2897
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 101392,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1958,
+            "cache_read_input_tokens": 101483,
+            "cache_creation_input_tokens": 5329,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 5329
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 129,
+          "outputTokens": 5622,
+          "cacheReadInputTokens": 770941,
+          "cacheCreationInputTokens": 101392,
+          "webSearchRequests": 0,
+          "costUSD": 0.30811710000000003,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2897,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 20,
+      "is_error": false,
+      "answer": "Perfect! Now I have all the information needed. Let me trace this through completely:\n\n## Summary\n\nWhen the general algorithm reaches its heuristic stopping threshold but the analytic certificate fails or is unavailable, here's what happens at each layer:\n\n### **Low-level Rust return** (source/engine/classgroup/src/nf/bnf.rs:746-885)\n\nIn `try_units()`, when h*R* / estimate \u2264 \u221a2 (heuristic stopping test passes) at line 840:\n\n1. **If no analytic certificate available** (line 843 - `log_hr_lower_bound.as_ref()` is None):\n   - Returns immediately with `certified: false` (line 845)\n   \n2. **If analytic certificate available** (line 851):\n   - Attempts to verify the certificate\n   - **Certificate succeeds**: Returns `certified: true` (line 862)\n   - **Certificate fails** (line 870):\n     - If already retried twice: Returns `certified: false` (line 872)\n     - If imprecise and retries remain: Doubles precision and retries (lines 864-868)\n\n### **API conversion** (source/engine/web/src/lib.rs:120-142)\n\nThe `assumes_with()` function adds to the \"assumes\" field:\n- When `certified: false`, it adds: **\"h R is near its estimate (uncertified stopping rule)\"**\n- This string contains \"estimate\" for Python-layer detection\n\n### **Python class_group calls** (source/lib/_sage_nf.py:656-697 and 724-746)\n\nThe `_bnf_checked(proof)` function (lines 574-586) checks for \"estimate\" in assumes:\n\n**proof=None**: \n- Raises `NotImplementedError` if \"estimate\" in assumes (line 585)\n- \"refuses an uncertified stopping estimate\"\n\n**proof=False**:\n- Accepts the result unchanged (line 586)\n- \"explicitly accepts\" the stopping estimate assumption\n\n**proof=True**:\n- Bypasses `_bnf_checked()` entirely\n- Calls `_proven_bnf()` (line 694) which invokes `bnf_certify()` for unconditional certificate\n- Raises `NotImplementedError` if certificate unavailable or bounds exceeded\n\n**Files and functions:**\n- Rust low-level: `source/engine/classgroup/src/nf/bnf.rs:746-885` (`try_units()`)\n- API layer: `source/engine/web/src/lib.rs:130-142` (`assumes_with()`)\n- Python policy: `source/lib/_sage_nf.py:574-586` (`_bnf_checked()`), `656-697` (`class_group()`), `724-746` (`regulator()`)",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Covers two precision retries, fallback and each Python proof route."
+    },
+    {
+      "id": "Q04",
+      "repetition": 3,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 93.3,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 273,
+        "cache_creation_input_tokens": 78426,
+        "cache_read_input_tokens": 1658157,
+        "output_tokens": 7844,
+        "output_tokens_details": {
+          "thinking_tokens": 2857
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 78426,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1485,
+            "cache_read_input_tokens": 64698,
+            "cache_creation_input_tokens": 19148,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 19148
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 273,
+          "outputTokens": 7844,
+          "cacheReadInputTokens": 1658157,
+          "cacheCreationInputTokens": 78426,
+          "webSearchRequests": 0,
+          "costUSD": 0.36216069999999995,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 2857,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 38,
+      "is_error": false,
+      "answer": "Perfect! I found the complete trace. Here's what happens:\n\n## Low-Level Return (Rust): source/engine/classgroup/src/nf/bnf.rs:840-874\n\nWhen the **heuristic stopping threshold** `h* R* / estimate <= sqrt(2)` is reached in `try_units`:\n\n1. **No certificate available** (log_hr_lower_bound is None): Returns immediately with `certified: false` **(line 845)**\n   ```rust\n   return Some(Found { group: ClassGroup { h, cyc }, reg, reg_fixed, prec, certified: false, reg_digits: 20 });\n   ```\n\n2. **Certificate available** (attempts to verify):\n   - Calls `certify_candidate()` **(line 851-852)**\n   - **Certificate succeeds**: Returns `certified: true` **(line 862)**\n   - **Certificate fails, imprecise, retries left**: Doubles precision, retries **(line 867)**\n   - **Certificate fails, no retries left**: Returns `certified: false` **(line 872)**\n\n## Python Class_Group Calls: source/lib/_sage_nf.py\n\nThe key decision point is `_bnf_checked()` **(lines 574-586)**:\n\n```python\nd = self._bnfdata()\nextra = [a for a in d.get(\"assumes\", [\"GRH\"]) if \"estimate\" in a]\nif extra and proof is not False:\n    raise NotImplementedError(\"this class group assumes, besides GRH: %s\" % \"; \".join(extra))\nreturn d\n```\n\n### behavior by proof parameter:\n\n| proof parameter | What happens when certificate fails |\n|---|---|\n| `proof=None` | Raises `NotImplementedError` (\"assumes stopping estimate\") |\n| `proof=False` | Returns result with uncertified stopping estimate assumption |\n| `proof=True` | Calls `_proven_bnf()` \u2192 `bnf_certify()` \u2192 separate unconditional certificate algorithm |\n\n## The \"Stopping Estimate\" Assumption\n\nWhen `certified=false` is returned from Rust, the web/API layer (source/engine/web/src/lib.rs:136) adds the string:\n```rust\n\"h R is near its estimate (uncertified stopping rule)\"\n```\n\nThis gets passed through to Python as part of the `assumes` field, where it's detected by looking for \"estimate\" in the assumption strings. This allows the Python layer to distinguish between GRH-conditional but uncertified results (from the heuristic stopping rule) and proven results.",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Correct fallback and separation of proof routes, but omits the two-retry cap and does not state the unconditional certificate refusal exception."
+    },
+    {
+      "id": "Q06",
+      "repetition": 1,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 43.251,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 113,
+        "cache_creation_input_tokens": 28278,
+        "cache_read_input_tokens": 221509,
+        "output_tokens": 3337,
+        "output_tokens_details": {
+          "thinking_tokens": 1250
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 28278,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 742,
+            "cache_read_input_tokens": 33050,
+            "cache_creation_input_tokens": 648,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 648
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 113,
+          "outputTokens": 3337,
+          "cacheReadInputTokens": 221509,
+          "cacheCreationInputTokens": 28278,
+          "webSearchRequests": 0,
+          "costUSD": 0.0955049,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1250,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 13,
+      "is_error": false,
+      "answer": "## How a Computed Regulator Becomes a Public Decimal String\n\nThe regulator becomes a public decimal string through this pipeline:\n\n**1. Fixed-Point Representation**: The regulator is computed and stored as a fixed-point integer `reg_fixed` scaled by 2^`prec` binary bits. The actual value is `reg_fixed / 2^prec`. (source/engine/classgroup/src/nf/bnf.rs:89-93)\n\n**2. String Conversion**: The public decimal string is created by:\n   - `class_group_data()` \u2192 calls `regulator_decimal()` \u2192 calls `fixed_to_decimal()`\n   \n   This pipeline (source/engine/classgroup/src/api.rs:287-298) converts the fixed-point integer to a decimal string with a specified number of significant digits.\n\n**3. Fixed-Point Precision Role**: The `fixed_to_decimal()` function (source/engine/classgroup/src/api.rs:232-283) performs the key conversion:\n   - Takes `x / 2^prec` and produces a decimal string with `digits` significant digits\n   - For values \u2265 1: uses fixed notation with decimal point\n   - For small values: uses scientific notation below 10^-4\n   - The `half = 2^(prec-1)` enables proper rounding during the conversion (line 243-246)\n\n**4. Certificate-Controlled Digits**: When a certificate is obtained, the number of proven significant digits is calculated from the relative error bound `rel`:\n   ```rust\n   let reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n   ```\n   (source/engine/classgroup/src/nf/bnf.rs:859)\n   \n   This computes how many decimal digits the error bound actually fixes. When uncertified, defaults to 20 digits. (source/engine/classgroup/src/nf/bnf.rs:845)\n\n**5. Unit-Rank-Zero Case**: When unit rank is 0, `rank_zero_result()` returns (source/engine/classgroup/src/nf/bnf.rs:691):\n   - `prec = 0` (special sentinel value)\n   - `reg_fixed = BigInt::one()`\n   - `regulator_decimal()` recognizes `precision == 0` and returns the string `\"1\"` exactly (source/engine/classgroup/src/api.rs:297)\n\n**6. NOT from the Diagnostic f64**: The public string comes from the **fixed-point integer** `reg_fixed`, not from the diagnostic f64 `regulator` field. The comment at source/engine/classgroup/src/api.rs:285-286 explicitly states:\n> \"Preserve the public representation at one boundary: exact integer fields, and a regulator string made from the fixed-point value, not its f64 estimate.\"\n\nThe f64 value is diagnostics-only.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Covers fixed-point scaling, digit formula/fallback, rank zero and notation threshold."
+    },
+    {
+      "id": "Q06",
+      "repetition": 2,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 40.043,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 40795,
+        "cache_read_input_tokens": 169166,
+        "output_tokens": 3517,
+        "output_tokens_details": {
+          "thinking_tokens": 1833
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 40795,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 681,
+            "cache_read_input_tokens": 45767,
+            "cache_creation_input_tokens": 448,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 448
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 3517,
+          "cacheReadInputTokens": 169166,
+          "cacheCreationInputTokens": 40795,
+          "webSearchRequests": 0,
+          "costUSD": 0.1161646,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1833,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 12,
+      "is_error": false,
+      "answer": "Based on my examination of the source code, here's how a computed regulator becomes a public decimal string:\n\n## The Conversion Path\n\n**Source files:**\n- `source/engine/classgroup/src/api.rs:296-298` (`regulator_decimal`)\n- `source/engine/classgroup/src/api.rs:231-283` (`fixed_to_decimal`)\n- `source/engine/classgroup/src/api.rs:287-292` (`class_group_data`)\n- `source/engine/classgroup/src/nf/bnf.rs:80-106` (Bnf struct)\n\n## The Answer\n\n**The public string does NOT come from the diagnostic f64 value.** The comment at `api.rs:285-286` explicitly states:\n> \"Preserve the public representation at one boundary: exact integer fields, and a regulator string made from the fixed-point value, not its f64 estimate.\"\n\n### Three Key Parameters\n\n1. **Fixed-point value (`reg_fixed: BigInt`)**: The computed regulator stored as a large integer\n2. **Binary precision (`prec: u32`)**: The number of fractional bits, i.e., regulator = `reg_fixed / 2^prec`\n3. **Certificate-controlled digits (`reg_digits: usize`)**: The number of significant decimal digits guaranteed correct\n\n### The Unit-Rank-Zero Case\n\nWhen unit rank `r == 0` (no independent units), `regulator_decimal` at line 296-298 has special handling:\n```rust\nif precision == 0 { \"1\".to_string() } else { fixed_to_decimal(...) }\n```\n\nThe rank-zero case sets `prec = 0`, causing the function to return the string `\"1\"` directly\u2014the exact value for the regulator in that case.\n\n### Certificate-Controlled Digits\n\nWhen certification succeeds (`bnf.rs:859`), `reg_digits` is computed from the relative error bound from the certificate:\n```rust\nlet reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n```\n\nThis converts the certificate's relative error `rel` into the number of guaranteed significant digits. Without certification, `reg_digits` defaults to 20.\n\n### Conversion to Decimal\n\n`fixed_to_decimal` (lines 231-283) then converts the fixed-point representation to a decimal string with the specified number of significant digits, using fixed notation above 10^-4 and scientific notation below.",
+      "criteria": [
+        1,
+        1,
+        1
+      ],
+      "grading_note": "Covers fixed-point scaling, digit formula/fallback, rank zero and notation threshold."
+    },
+    {
+      "id": "Q06",
+      "repetition": 3,
+      "sha": "45645849f8ffb507f5d14570a5176d65cf76d893",
+      "key_sha256": "cd77f64e2ec2f9894f88bc63f2bdabbb7845ad943f20695dc8c284e81bc7e4d6",
+      "seconds": 52.266,
+      "timed_out": false,
+      "exit_code": 0,
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "usage": {
+        "input_tokens": 121,
+        "cache_creation_input_tokens": 29700,
+        "cache_read_input_tokens": 288740,
+        "output_tokens": 4342,
+        "output_tokens_details": {
+          "thinking_tokens": 1923
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 29700,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 1422,
+            "cache_read_input_tokens": 33382,
+            "cache_creation_input_tokens": 1738,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 1738
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 121,
+          "outputTokens": 4342,
+          "cacheReadInputTokens": 288740,
+          "cacheCreationInputTokens": 29700,
+          "webSearchRequests": 0,
+          "costUSD": 0.110105,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 1923,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "tool_count": 14,
+      "is_error": false,
+      "answer": "Perfect! Now I have the complete picture. Let me provide a comprehensive answer.\n\n## How a Computed Regulator Becomes a Public Decimal String\n\nThe public decimal regulator string is generated through three coordinated components:\n\n### 1. **Fixed-Point Precision (not f64 diagnostic)**\n\nFrom api.rs:285-298, the comment explicitly states: \"Preserve the public representation at one boundary: exact integer fields, and a regulator string made from the fixed-point value, not its f64 estimate.\"\n\n- The regulator is stored as a **BigInt** (`reg_fixed`) representing a fixed-point value: `R = reg_fixed / 2^prec`\n- `prec` (u32) specifies the binary fractional bits\n- The diagnostic f64 value is computed separately but **never used** for the public string\n\nThe conversion function is `regulator_decimal` (api.rs:296):\n```rust\nfn regulator_decimal(value: &BigInt, precision: u32, digits: usize) -> String {\n    if precision == 0 { \"1\".to_string() } else { fixed_to_decimal(value, precision, digits) }\n}\n```\n\n### 2. **Certificate-Controlled Digits**\n\nFrom bnf.rs:859, when a certificate is obtained:\n```rust\nlet reg_digits = ((-rel.log10()).floor() as i64 - 1).clamp(1, 20) as usize;\n```\n\nThe `reg_digits` count is derived from the relative error `rel` computed in certify.rs:243:\n```rust\nlet rel = hi.sub(&lo, 64).div(&lo.add(&hi, 64), 64).map_or(1.0, ...) + 2f64.powf(-(prec as f64) * 0.9);\n```\n\nWhere `rel = pert / d` (perturbation over determinant) represents the error bound from the unit lattice certification. This controls how many significant digits the `fixed_to_decimal` function displays as \"proven\" (uncertified results default to `reg_digits = 20`).\n\n### 3. **Unit-Rank-Zero Case**\n\nFrom bnf.rs:691, when the unit rank is zero (trivial unit group):\n```rust\nreturn Some(Found { group, reg: 1.0, reg_fixed: BigInt::one(), prec: 0, \n                    certified, reg_digits: 20 });\n```\n\nWhen `prec == 0`, the regulator is **exactly 1** (not an approximation). The `regulator_decimal` function immediately returns the string `\"1\"` without calling `fixed_to_decimal`.\n\n### Summary\n\n**No**, the public string does **not** come from the diagnostic f64 value. It comes exclusively from:\n- **BigInt fixed-point value**: `reg_fixed / 2^prec` \n- **Decimal formatting**: via `fixed_to_decimal` (api.rs:232) which uses fixed notation (0.001 range) or scientific notation (below) \n- **Precision control**: certificate-determined `reg_digits` for proven digits, or default 20 for unproven results",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Correct fixed-point scaling, digit formula/fallback and rank zero, but gives an imprecise 0.001-range description instead of the 10^-4 notation threshold."
+    }
+  ],
+  "summary": {
+    "Q04": {
+      "runs": 3,
+      "covered_criteria": 6,
+      "possible_criteria": 9,
+      "fully_covered_answers": 1,
+      "seconds": {
+        "median": 68.447,
+        "min": 49.212,
+        "max": 93.3,
+        "total": 210.959
+      },
+      "tool_calls": {
+        "median": 20,
+        "min": 15,
+        "max": 38,
+        "total": 73
+      },
+      "input_tokens": {
+        "median": 872462,
+        "min": 552524,
+        "max": 1736856,
+        "total": 3161842
+      },
+      "output_tokens": {
+        "median": 5622,
+        "min": 4085,
+        "max": 7844,
+        "total": 17551
+      }
+    },
+    "Q06": {
+      "runs": 3,
+      "covered_criteria": 8,
+      "possible_criteria": 9,
+      "fully_covered_answers": 2,
+      "seconds": {
+        "median": 43.251,
+        "min": 40.043,
+        "max": 52.266,
+        "total": 135.56
+      },
+      "tool_calls": {
+        "median": 13,
+        "min": 12,
+        "max": 14,
+        "total": 39
+      },
+      "input_tokens": {
+        "median": 249900,
+        "min": 210034,
+        "max": 318561,
+        "total": 778495
+      },
+      "output_tokens": {
+        "median": 3517,
+        "min": 3337,
+        "max": 4342,
+        "total": 11196
+      }
+    }
+  }
+}
