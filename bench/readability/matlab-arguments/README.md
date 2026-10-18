@@ -29,3 +29,22 @@ Each primary run is retained, including any errors; do not substitute a better
 answer. Score all three explicit criteria against the committed key, with
 omissions and contradictions scoring zero. Report grader identity and the
 limits of three runs. Corpus execution, builds and tests belong on a VM.
+
+The fixed corpus contains 748 cases, including translated MATLAB arguments
+blocks, direct helpers, all validators in the reserved region, error identifiers
+and prefixes, callback order, dimensions and value representations. The six-case
+smoke run preceded the recorded baseline. Run the full corpus on a VM:
+
+```sh
+python3 bench/readability/matlab-arguments/corpus.py --repo . \
+  --out /home/user/astra3-matlab-arguments-before.json --jobs 4
+# After checking out/building the new revision in the same directory:
+python3 bench/readability/matlab-arguments/corpus.py --repo . \
+  --baseline /home/user/astra3-matlab-arguments-before.json \
+  --out /home/user/astra3-matlab-arguments-after.json --jobs 4
+```
+
+The same directory preserves path-bearing error diagnostics; outputs are not
+normalized. Only elapsed seconds are excluded from the identity comparison.
+For the comprehension after phase, use the final implementation revision and
+a fresh `after` output directory with the same key and shared harness.
