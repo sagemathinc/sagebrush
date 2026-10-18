@@ -234,6 +234,10 @@ jobs:
       - name: each package's third-party notices are up to date, and nothing (L)GPL is linked
         run: node scripts/third-party-notices.mjs --check
       - name: the TypeScript tests and the Sage, calculus, Magma and MATLAB suites on it
+        env:
+          # (this engine, with overflow checks, runs about twice as slow as the
+          # committed one: the tests' wall-clock limits are scaled by this)
+          SAGEBRUSH_TIME_SCALE: "3"
         run: |
           python3 -m pip install scipy==1.18.1
           pnpm run build
