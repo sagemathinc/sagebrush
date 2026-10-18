@@ -108,6 +108,9 @@ try {
   check(nb && Math.abs(nb.x - c1.x) < 1 && Math.abs(nb.y - (c1.y + c1.h + GAP)) < 1.5 && Math.abs(nb.w - c1.w) < 1, "...below it: at its x, as wide, the layouts' gap under it: " + JSON.stringify([c1, nb]));
   check(made[0] && (await editing()) === made[0].id && await until("document.activeElement?.classList.contains('be-code')", 3000), "...being written, the caret in its code");
   check(made[0] && (await overlaps(made[0].id)).length === 0, "...over no other item");
+  // (left with nothing written: still a code item, to be written later)
+  if (made[0]) { await key("Escape"); await sleep(400); }
+  check(made[0] && (await fresh())[0]?.code === "" && await ev(`!!document.querySelector('[data-code=${JSON.stringify(made[0].id)}]') || window.board.item(${JSON.stringify(made[0].id)})?.code !== undefined`), "...left with nothing written, it stays a code item: " + JSON.stringify(await fresh()));
   check((await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.edges)")) === edges0, "...and no edge added");
   // one undo takes it away (the visit and its adding: one step)
   await leave();
