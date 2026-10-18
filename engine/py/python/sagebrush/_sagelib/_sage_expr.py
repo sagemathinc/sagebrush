@@ -1823,6 +1823,10 @@ class _SymbolicRing:
     def __repr__(self):
         return "Symbolic Ring"
 
+    def __reduce__(self):
+        # (one SR: a pickle or a copy of it is SR itself, as in Sage)
+        return "SR_parent"
+
     def __call__(self, v):
         """Convert v into a symbolic expression.
 

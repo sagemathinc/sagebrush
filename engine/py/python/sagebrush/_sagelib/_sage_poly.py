@@ -95,6 +95,9 @@ class _Ring:
             return _sa()._QQ(x, d)
         if d is not None:
             raise TypeError("ZZ takes one argument")
+        if _sa()._real_kind(x) is not None:
+            # (integral, or TypeError: int() truncated ZZ(3.5) to 3)
+            return _sa().Integer(_sa()._integral_real(x))
         if hasattr(x, "_integer_") and not isinstance(x, (int, _F)):
             return x._integer_()
         if isinstance(x, _F) and x.denominator != 1:
@@ -231,9 +234,10 @@ class _Ring:
 class IntegerRing_class(_Ring):
     """The ring of integers, ZZ: exact integers of any size.
 
-    ZZ(x) makes an integer from an int, a string or an integral rational;
-    ZZ['t'] (or R.<t> = ZZ[]) is the polynomial ring over the integers.
-    Dividing two integers gives a rational number, in QQ.
+    ZZ(x) makes an integer from an int, a string, or an integral rational
+    or real number (ZZ(2.5) is a TypeError); ZZ['t'] (or R.<t> = ZZ[]) is
+    the polynomial ring over the integers.  Dividing two integers gives a
+    rational number, in QQ.
 
     EXAMPLES::
 
@@ -247,7 +251,13 @@ class IntegerRing_class(_Ring):
         t^2 + 2*t + 1
         sage: ZZ(2)^100
         1267650600228229401496703205376
+        sage: ZZ(4.0)
+        4
     """
+
+    def __reduce__(self):
+        # (one ZZ: a pickle or a copy of it is ZZ itself, as in Sage)
+        return "ZZ"
 
 
 ZZ = IntegerRing_class("Integer Ring", False)
@@ -367,8 +377,11 @@ class RationalField(_Ring):
     """The field of rational numbers, QQ: exact fractions, always in lowest terms.
 
     QQ(x) makes a rational from an integer, a fraction, a string such as
-    '2/3' or a real number (exactly the value it holds); QQ['t'] is the
-    polynomial ring over the rationals.
+    '2/3' or a real number: the simplest rational that rounds to it (the
+    smallest denominator), as Sage converts it, so QQ(0.1) is 1/10; an
+    integral real number is that integer.  x.exact_rational() is a real
+    number's exact binary value.  QQ['t'] is the polynomial ring over the
+    rationals.
 
     EXAMPLES::
 
@@ -380,7 +393,22 @@ class RationalField(_Ring):
         (True, True, 0)
         sage: R.<t> = QQ[]; (t^2 - 1/4).factor()
         (t - 1/2) * (t + 1/2)
+        sage: QQ(0.1), QQ(float(1/3)), QQ(float(1e-20)), RR(0.1).exact_rational()
+        (1/10, 1/3, 1/99999999999999997962, 3602879701896397/36028797018963968)
+
+    Unlike Sage: a decimal literal not yet used in arithmetic (QQ(1e-20), as opposed to
+    QQ(1e-20 + 0) or QQ(float(1e-20))) converts in Sage by a rule of its
+    own, which can give a rational that does not round to the literal's
+    value (QQ(1e-20) is 1/99999999999999990439 there); here it converts as
+    any real number does, 1/99999999999999997962.  They agree on most
+    literals (85% of a sample of short ones).  Sage also gives a literal of
+    more than 15 significant digits a precision above 53 bits; here every
+    literal has 53.
     """
+
+    def __reduce__(self):
+        # (one QQ: a pickle or a copy of it is QQ itself, as in Sage)
+        return "QQ"
 
 
 QQ = RationalField("Rational Field", True)
