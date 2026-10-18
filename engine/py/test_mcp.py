@@ -208,6 +208,13 @@ def structured():
     r = sc["result"]
     assert not r["class_group"]["certified"] and "GRH" in r["class_group"]["assumes"] and r["regulator"]["assumes"] == r["class_group"]["assumes"], r
     assert r["discriminant"]["certified"] and sc["status"] in ("conditional", "heuristic") and "GRH" in sc["assumes"], sc
+    # proof=false on a quadratic field: the quadratic algorithms without their
+    # certificate, labelled by the same data (the estimate in assumes)
+    sc = call("number_field", {"polynomial": "x^2 + 67128026883063", "proof": False})
+    r = sc["result"]
+    assert r["class_group"]["value"] == {"order": 327924 * 16, "invariants": [327924, 2, 2, 2, 2]}, r
+    assert not r["class_group"]["certified"] and any("estimate" in a for a in r["class_group"]["assumes"]), r
+    assert sc["status"] == "heuristic", sc
     sc = call("number_field", {"polynomial": "x^2 + 3*10^12 + 1"})
     r = sc["result"]
     assert r["not_certified_because"].startswith("class_group with proof=True: beyond the limits"), r
