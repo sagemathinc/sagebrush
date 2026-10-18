@@ -20,6 +20,11 @@ import sys as _sys
 TABLE = {
     "Vector": (["matrices"], "A row vector over the integers or the rationals, which a matrix multiplies on the right."),
     "Solution": (["matrices"], "The vector v with v * A = w, for a matrix A and a vector w."),
+    "VectorSpace": (["matrices"], "The full vector space of degree n over the rationals; V.i is its i-th unit vector, V![...] a vector."),
+    "KSpace": (["matrices"], "The full vector space of degree n over the rationals (the same as VectorSpace)."),
+    "RSpace": (["matrices"], "The full space of row vectors of degree n over the integers (or over the rationals)."),
+    "Generators": (["matrices"], "The set of the unit vectors of a full vector space."),
+    "Zero": (["structures"], "The zero of the integers, the rationals or a full vector space."),
     "Submatrix": (["matrices"], "A block of a matrix, by its top left entry and its size."),
     "Subsets": (["sequences and sets"], "The set of the subsets of a set, or of those of a given size."),
     "Sym": (["structures"], "The symmetric group on 1 .. n, whose elements are permutations."),
@@ -238,6 +243,25 @@ EXAMPLES = {
 > G := DihedralGroup(5);
 > G.1^2;
 (1, 3, 5, 2, 4)""",
+    "VectorSpace": """\
+> V := VectorSpace(Rationals(), 3);
+> V![1, 2, 3] + V.2;
+(1 3 3)""",
+    "KSpace": """\
+> K := KSpace(Rationals(), 2);
+> K;
+Full Vector space of degree 2 over Rational Field""",
+    "RSpace": """\
+> W := RSpace(Integers(), 2);
+> W.1 - 3*W.2;
+( 1 -3)""",
+    "Generators": """\
+> V := VectorSpace(Rationals(), 3);
+> #Generators(V);
+3""",
+    "Zero": """\
+> Zero(RSpace(Integers(), 3));
+(0 0 0)""",
     "Identity": """\
 > G := Sym(3);
 > Identity(G);
