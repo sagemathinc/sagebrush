@@ -286,3 +286,647 @@ RNDD -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
 RNDD 0-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
 RNDD -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
 RNDD R(-1e-300)/2^(2^62) -> -8.5096914e-1388255822130839284 Real Field with 30 bits of precision and rounding RNDD
+R30(0)<<0 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>0 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<0) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>0) -> +infinity Real Field with 30 bits of precision
+R30(0)<<1 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>1 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<-2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>-2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<-2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>-2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<4611686018427387904 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>4611686018427387904 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(0)<<2.00000000000000 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2.00000000000000 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2.00000000000000) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2.00000000000000) -> +infinity Real Field with 30 bits of precision
+R30(0)<<2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<1/2 !! TypeError unsupported operands for <<
+R30(0)>>1/2 !! TypeError unsupported operands for >>
+R30(-0)<<0 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>0 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<0) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>0) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<1 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>1 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<-2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>-2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<-2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>-2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<4611686018427387904 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>4611686018427387904 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-0)<<2.00000000000000 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2.00000000000000 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2.00000000000000) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2.00000000000000) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<1/2 !! TypeError unsupported operands for <<
+R30(-0)>>1/2 !! TypeError unsupported operands for >>
+R30(3)<<0 -> 3.0000000 Real Field with 30 bits of precision
+R30(3)>>0 -> 3.0000000 Real Field with 30 bits of precision
+R30(3)<<1 -> 6.0000000 Real Field with 30 bits of precision
+R30(3)>>1 -> 1.5000000 Real Field with 30 bits of precision
+R30(3)<<2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<-2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)>>-2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)<<4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(3)>>4611686018427387904 -> 2.5529074e-1388255822130839283 Real Field with 30 bits of precision
+R30(3)<<9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(3)>>9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(3)<<2.00000000000000 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2.00000000000000 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<1/2 !! TypeError unsupported operands for <<
+R30(3)>>1/2 !! TypeError unsupported operands for >>
+R30(-3)<<0 -> -3.0000000 Real Field with 30 bits of precision
+R30(-3)>>0 -> -3.0000000 Real Field with 30 bits of precision
+R30(-3)<<1 -> -6.0000000 Real Field with 30 bits of precision
+R30(-3)>>1 -> -1.5000000 Real Field with 30 bits of precision
+R30(-3)<<2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<-2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)>>-2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)<<4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-3)>>4611686018427387904 -> -2.5529074e-1388255822130839283 Real Field with 30 bits of precision
+R30(-3)<<9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-3)>>9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-3)<<2.00000000000000 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2.00000000000000 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<1/2 !! TypeError unsupported operands for <<
+R30(-3)>>1/2 !! TypeError unsupported operands for >>
+R30(inf)<<0 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>0 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<1 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>1 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<-2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>-2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(inf)<<2.00000000000000 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2.00000000000000 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<1/2 !! TypeError unsupported operands for <<
+R30(inf)>>1/2 !! TypeError unsupported operands for >>
+R30(-inf)<<0 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>0 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<1 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>1 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<-2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>-2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-inf)<<2.00000000000000 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2.00000000000000 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<1/2 !! TypeError unsupported operands for <<
+R30(-inf)>>1/2 !! TypeError unsupported operands for >>
+R30(nan)<<0 -> NaN Real Field with 30 bits of precision
+R30(nan)>>0 -> NaN Real Field with 30 bits of precision
+R30(nan)<<1 -> NaN Real Field with 30 bits of precision
+R30(nan)>>1 -> NaN Real Field with 30 bits of precision
+R30(nan)<<2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<-2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>-2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<4611686018427387904 -> NaN Real Field with 30 bits of precision
+R30(nan)>>4611686018427387904 -> NaN Real Field with 30 bits of precision
+R30(nan)<<9223372036854775807 -> NaN Real Field with 30 bits of precision
+R30(nan)>>9223372036854775807 -> NaN Real Field with 30 bits of precision
+R30(nan)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(nan)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(nan)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(nan)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(nan)<<2.00000000000000 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2.00000000000000 -> NaN Real Field with 30 bits of precision
+R30(nan)<<2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<1/2 !! TypeError unsupported operands for <<
+R30(nan)>>1/2 !! TypeError unsupported operands for >>
+R30(0).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(0).frac() -> +infinity Real Field with 30 bits of precision
+R30(-0).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-0).frac() -> -infinity Real Field with 30 bits of precision
+R30(-3).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-3).frac() -> -infinity Real Field with 30 bits of precision
+R30(3).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(3).frac() -> +infinity Real Field with 30 bits of precision
+R30(-0.5).frac() -> -0.50000000 Real Field with 30 bits of precision
+1/R30(-0.5).frac() -> -2.0000000 Real Field with 30 bits of precision
+R30(0.5).frac() -> 0.50000000 Real Field with 30 bits of precision
+1/R30(0.5).frac() -> 2.0000000 Real Field with 30 bits of precision
+R30(-2.75).frac() -> -0.75000000 Real Field with 30 bits of precision
+1/R30(-2.75).frac() -> -1.3333333 Real Field with 30 bits of precision
+R30(inf).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(inf).frac() -> +infinity Real Field with 30 bits of precision
+R30(-inf).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-inf).frac() -> -infinity Real Field with 30 bits of precision
+R30(nan).frac() -> NaN Real Field with 30 bits of precision
+1/R30(nan).frac() -> NaN Real Field with 30 bits of precision
+R30(-1e-300).frac() -> -1.0000000e-300 Real Field with 30 bits of precision
+1/R30(-1e-300).frac() -> -1.0000000e300 Real Field with 30 bits of precision
+R30('-0',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=2) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=2) -> -infinity Real Field with 30 bits of precision
+R30('0',base=2) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=2) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=2) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=2) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=2) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=2) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=2) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=2) -> -0.50000000 Real Field with 30 bits of precision
+1/R30('-0.1',base=2) -> -2.0000000 Real Field with 30 bits of precision
+R30('-0',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=3) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=3) -> -infinity Real Field with 30 bits of precision
+R30('0',base=3) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=3) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=3) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=3) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=3) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=3) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=3) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=3) -> -0.33333333 Real Field with 30 bits of precision
+1/R30('-0.1',base=3) -> -3.0000000 Real Field with 30 bits of precision
+R30('-0',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=8) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=8) -> -infinity Real Field with 30 bits of precision
+R30('0',base=8) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=8) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=8) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=8) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=8) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=8) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=8) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=8) -> -0.12500000 Real Field with 30 bits of precision
+1/R30('-0.1',base=8) -> -8.0000000 Real Field with 30 bits of precision
+R30('-0',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=16) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=16) -> -infinity Real Field with 30 bits of precision
+R30('0',base=16) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=16) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=16) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=16) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=16) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=16) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=16) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=16) -> -0.062500000 Real Field with 30 bits of precision
+1/R30('-0.1',base=16) -> -16.000000 Real Field with 30 bits of precision
+R30('-0',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=36) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=36) -> -infinity Real Field with 30 bits of precision
+R30('0',base=36) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=36) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=36) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=36) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=36) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=36) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=36) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=36) -> -0.027777778 Real Field with 30 bits of precision
+1/R30('-0.1',base=36) -> -36.000000 Real Field with 30 bits of precision
+R100(0)<<0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<0) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>0) -> +infinity Real Field with 100 bits of precision
+R100(0)<<1 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>1 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<-2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>-2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<4611686018427387904 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>4611686018427387904 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(0)<<2.00000000000000 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2.00000000000000 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2.00000000000000) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2.00000000000000) -> +infinity Real Field with 100 bits of precision
+R100(0)<<2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<1/2 !! TypeError unsupported operands for <<
+R100(0)>>1/2 !! TypeError unsupported operands for >>
+R100(-0)<<0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<0) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>0) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<-2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>-2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<-2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>-2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<4611686018427387904 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>4611686018427387904 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-0)<<2.00000000000000 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2.00000000000000 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2.00000000000000) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2.00000000000000) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<1/2 !! TypeError unsupported operands for <<
+R100(-0)>>1/2 !! TypeError unsupported operands for >>
+R100(3)<<0 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>0 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<1 -> 6.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>1 -> 1.5000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<-2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>-2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(3)>>4611686018427387904 -> 2.5529073935222508417389363729e-1388255822130839283 Real Field with 100 bits of precision
+R100(3)<<9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(3)>>9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(3)<<2.00000000000000 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2.00000000000000 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<1/2 !! TypeError unsupported operands for <<
+R100(3)>>1/2 !! TypeError unsupported operands for >>
+R100(-3)<<0 -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>0 -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<1 -> -6.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>1 -> -1.5000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<-2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>-2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-3)>>4611686018427387904 -> -2.5529073935222508417389363729e-1388255822130839283 Real Field with 100 bits of precision
+R100(-3)<<9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-3)>>9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-3)<<2.00000000000000 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2.00000000000000 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<1/2 !! TypeError unsupported operands for <<
+R100(-3)>>1/2 !! TypeError unsupported operands for >>
+R100(inf)<<0 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>0 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<1 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>1 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<-2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>-2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(inf)<<2.00000000000000 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2.00000000000000 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<1/2 !! TypeError unsupported operands for <<
+R100(inf)>>1/2 !! TypeError unsupported operands for >>
+R100(-inf)<<0 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>0 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<1 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>1 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<-2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>-2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-inf)<<2.00000000000000 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2.00000000000000 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<1/2 !! TypeError unsupported operands for <<
+R100(-inf)>>1/2 !! TypeError unsupported operands for >>
+R100(nan)<<0 -> NaN Real Field with 100 bits of precision
+R100(nan)>>0 -> NaN Real Field with 100 bits of precision
+R100(nan)<<1 -> NaN Real Field with 100 bits of precision
+R100(nan)>>1 -> NaN Real Field with 100 bits of precision
+R100(nan)<<2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<-2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>-2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<4611686018427387904 -> NaN Real Field with 100 bits of precision
+R100(nan)>>4611686018427387904 -> NaN Real Field with 100 bits of precision
+R100(nan)<<9223372036854775807 -> NaN Real Field with 100 bits of precision
+R100(nan)>>9223372036854775807 -> NaN Real Field with 100 bits of precision
+R100(nan)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(nan)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(nan)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(nan)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(nan)<<2.00000000000000 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2.00000000000000 -> NaN Real Field with 100 bits of precision
+R100(nan)<<2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<1/2 !! TypeError unsupported operands for <<
+R100(nan)>>1/2 !! TypeError unsupported operands for >>
+R100(0).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(0).frac() -> +infinity Real Field with 100 bits of precision
+R100(-0).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-0).frac() -> -infinity Real Field with 100 bits of precision
+R100(-3).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-3).frac() -> -infinity Real Field with 100 bits of precision
+R100(3).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(3).frac() -> +infinity Real Field with 100 bits of precision
+R100(-0.5).frac() -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-0.5).frac() -> -2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(0.5).frac() -> 0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(0.5).frac() -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-2.75).frac() -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-2.75).frac() -> -1.3333333333333333333333333333 Real Field with 100 bits of precision
+R100(inf).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(inf).frac() -> +infinity Real Field with 100 bits of precision
+R100(-inf).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-inf).frac() -> -infinity Real Field with 100 bits of precision
+R100(nan).frac() -> NaN Real Field with 100 bits of precision
+1/R100(nan).frac() -> NaN Real Field with 100 bits of precision
+R100(-1e-300).frac() -> -1.0000000000000000000000000000e-300 Real Field with 100 bits of precision
+1/R100(-1e-300).frac() -> -1.0000000000000000000000000000e300 Real Field with 100 bits of precision
+R100('-0',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=2) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=2) -> -infinity Real Field with 100 bits of precision
+R100('0',base=2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=2) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=2) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=2) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=2) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=2) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=2) -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=2) -> -2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=3) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=3) -> -infinity Real Field with 100 bits of precision
+R100('0',base=3) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=3) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=3) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=3) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=3) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=3) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=3) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=3) -> -0.33333333333333333333333333333 Real Field with 100 bits of precision
+1/R100('-0.1',base=3) -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=8) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=8) -> -infinity Real Field with 100 bits of precision
+R100('0',base=8) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=8) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=8) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=8) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=8) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=8) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=8) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=8) -> -0.12500000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=8) -> -8.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=16) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=16) -> -infinity Real Field with 100 bits of precision
+R100('0',base=16) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=16) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=16) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=16) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=16) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=16) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=16) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=16) -> -0.062500000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=16) -> -16.000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=36) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=36) -> -infinity Real Field with 100 bits of precision
+R100('0',base=36) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=36) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=36) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=36) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=36) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=36) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=36) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=36) -> -0.027777777777777777777777777778 Real Field with 100 bits of precision
+1/R100('-0.1',base=36) -> -36.000000000000000000000000000 Real Field with 100 bits of precision

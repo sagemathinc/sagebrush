@@ -54,3 +54,23 @@ for rnd in ["RNDN", "RNDZ", "RNDU", "RNDD"]:
                    ("-0-(-0)", lambda: z - z), ("-0+-0", lambda: z + z), ("0-0", lambda: n - n), ("-0*1", lambda: z * R(1)),
                    ("R(-1e-300)/2^(2^62)", lambda: R(-1e-300) / R(2) ^ (2 ^ 62))]:
         show("%s %s" % (rnd, lab), f)
+# shifts as Sage's: an integral count with |n| <= 2^63 - 1 (else
+# OverflowError; a fractional count TypeError), a zero keeping its sign;
+# frac() of an integer, a zero or an infinity a signed zero; "-0" in other
+# bases (reciprocals show the zero's sign)
+for nm, R in [("R30", RealField(30)), ("R100", RealField(100))]:
+    for v in ["0", "-0", "3", "-3", "inf", "-inf", "nan"]:
+        x = R(v)
+        for n in [0, 1, 2, -2, 2^62, 2^63 - 1, 2^63, 2^64, -2^63, -2^63 - 1, -2^64, 1.5, RR(2), QQ(2), 1/2]:
+            show("%s(%s)<<%s" % (nm, v, n), lambda: x << n)
+            show("%s(%s)>>%s" % (nm, v, n), lambda: x >> n)
+            if v in ("0", "-0") and n in (0, 2, -2):
+                show("1/(%s(%s)<<%s)" % (nm, v, n), lambda: 1 / (x << n))
+                show("1/(%s(%s)>>%s)" % (nm, v, n), lambda: 1 / (x >> n))
+    for v in ["0", "-0", "-3", "3", "-0.5", "0.5", "-2.75", "inf", "-inf", "nan", "-1e-300"]:
+        show("%s(%s).frac()" % (nm, v), lambda: R(v).frac())
+        show("1/%s(%s).frac()" % (nm, v), lambda: 1 / R(v).frac())
+    for b in [2, 3, 8, 16, 36]:
+        for s in ["-0", "-0.00", "0", "+0", "-0.0", "-1", "-0.1"]:
+            show("%s(%r,base=%d)" % (nm, s, b), lambda: R(s, base=b))
+            show("1/%s(%r,base=%d)" % (nm, s, b), lambda: 1 / R(s, base=b))
