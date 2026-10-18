@@ -1,0 +1,1144 @@
+{
+ "schema": "sagebrush-bench/1",
+ "host": {
+  "cpu": "AMD EPYC 7B13",
+  "cores": 48,
+  "usable_cores": 48,
+  "memory": "188.7 GiB",
+  "os": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+  "python": "CPython 3.14.8",
+  "sagebrush": {
+   "version": "0.7.2",
+   "git": null
+  },
+  "date": "2026-10-18T19:00:57Z",
+  "load_start": [
+   0.96,
+   1.02,
+   2.45
+  ],
+  "load_end": [
+   1.0,
+   1.0,
+   1.17
+  ]
+ },
+ "tiers": [
+  "large"
+ ],
+ "repeat": 3,
+ "timeout_s": 1800.0,
+ "suites": [
+  {
+   "name": "imagquad",
+   "title": "class groups of imaginary quadratic fields, D = -p (one core)",
+   "claim": "README.md (Imaginary quadratic fields: up to 44x faster than PARI's quadclassunit); engine/classgroup/README.md, Timing against PARI",
+   "reproduce": "sagebrush bench imagquad",
+   "engines": {
+    "sagebrush": {
+     "label": "certified (default)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sagebrush-uncert": {
+     "label": "uncertified, conditional on GRH (like PARI)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "pari": {
+     "label": "PARI quadclassunit (not certified)",
+     "ours": false,
+     "status": "ok",
+     "version": "PARI/GP 2.17.1"
+    }
+   },
+   "results": [
+    {
+     "case": "10^37 #1",
+     "params": {
+      "k": 37,
+      "D": -10000000000000000000000000000000000043
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 0.9946649969988357,
+       "min_s": 0.9895801479997317,
+       "max_s": 1.0002711779998208,
+       "times_s": [
+        0.9895801479997317,
+        1.0002711779998208,
+        0.9946649969988357
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 682636227212814227,
+        "cyc": [
+         682636227212814227
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 0.4739148690005095,
+       "min_s": 0.46979201899921463,
+       "max_s": 0.48410440899897367,
+       "times_s": [
+        0.48410440899897367,
+        0.46979201899921463,
+        0.4739148690005095
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 682636227212814227,
+        "cyc": [
+         682636227212814227
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 14.396,
+       "min_s": 14.396,
+       "max_s": 14.396,
+       "times_s": [
+        14.396
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 682636227212814227,
+        "cyc": [
+         682636227212814227
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.06909315066677102,
+      "sagebrush-uncert/pari": 0.03291989920814876
+     },
+     "check": "agree"
+    },
+    {
+     "case": "10^39 #1",
+     "params": {
+      "k": 39,
+      "D": -1000000000000000000000000000000000000003
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 1.3080103769989364,
+       "min_s": 1.3014048670011107,
+       "max_s": 1.3090144369998598,
+       "times_s": [
+        1.3014048670011107,
+        1.3080103769989364,
+        1.3090144369998598
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 5044956409536984867,
+        "cyc": [
+         5044956409536984867
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 0.6305213289997482,
+       "min_s": 0.6274763389992586,
+       "max_s": 0.6306149489992094,
+       "times_s": [
+        0.6274763389992586,
+        0.6305213289997482,
+        0.6306149489992094
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 5044956409536984867,
+        "cyc": [
+         5044956409536984867
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 17.924,
+       "min_s": 17.924,
+       "max_s": 17.924,
+       "times_s": [
+        17.924
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 5044956409536984867,
+        "cyc": [
+         5044956409536984867
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.0729753613590123,
+      "sagebrush-uncert/pari": 0.035177489901793584
+     },
+     "check": "agree"
+    },
+    {
+     "case": "10^41 #1",
+     "params": {
+      "k": 41,
+      "D": -100000000000000000000000000000000000000279
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 1.9702963350009668,
+       "min_s": 1.9699068259997148,
+       "max_s": 1.9740664059991104,
+       "times_s": [
+        1.9740664059991104,
+        1.9702963350009668,
+        1.9699068259997148
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 130170955880879200203,
+        "cyc": [
+         130170955880879200203
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 1.0545353070010606,
+       "min_s": 1.0512791680012015,
+       "max_s": 1.0641599580012553,
+       "times_s": [
+        1.0641599580012553,
+        1.0545353070010606,
+        1.0512791680012015
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 130170955880879200203,
+        "cyc": [
+         130170955880879200203
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 60.997,
+       "min_s": 60.997,
+       "max_s": 60.997,
+       "times_s": [
+        60.997
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 130170955880879200203,
+        "cyc": [
+         130170955880879200203
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.03230152851781181,
+      "sagebrush-uncert/pari": 0.017288314294163002
+     },
+     "check": "agree"
+    },
+    {
+     "case": "10^43 #1",
+     "params": {
+      "k": 43,
+      "D": -10000000000000000000000000000000000000000079
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 2.1488098290010385,
+       "min_s": 2.1398472099990613,
+       "max_s": 2.1494333749997168,
+       "times_s": [
+        2.1494333749997168,
+        2.1488098290010385,
+        2.1398472099990613
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 4091462752252939051437,
+        "cyc": [
+         4091462752252939051437
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 1.0416533240004355,
+       "min_s": 1.0411127750012383,
+       "max_s": 1.0436831239985622,
+       "times_s": [
+        1.0416533240004355,
+        1.0411127750012383,
+        1.0436831239985622
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 4091462752252939051437,
+        "cyc": [
+         4091462752252939051437
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 39.605,
+       "min_s": 39.605,
+       "max_s": 39.605,
+       "times_s": [
+        39.605
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 4091462752252939051437,
+        "cyc": [
+         4091462752252939051437
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.054256023961647235,
+      "sagebrush-uncert/pari": 0.026301056028290255
+     },
+     "check": "agree"
+    },
+    {
+     "case": "10^45 #1",
+     "params": {
+      "k": 45,
+      "D": -1000000000000000000000000000000000000000000439
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 4.237259778999942,
+       "min_s": 4.235413689000779,
+       "max_s": 4.251642639999773,
+       "times_s": [
+        4.251642639999773,
+        4.235413689000779,
+        4.237259778999942
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 29918644286126760375979,
+        "cyc": [
+         29918644286126760375979
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 2.7801636989988765,
+       "min_s": 2.7785576290007157,
+       "max_s": 2.7825811890015757,
+       "times_s": [
+        2.7801636989988765,
+        2.7825811890015757,
+        2.7785576290007157
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 29918644286126760375979,
+        "cyc": [
+         29918644286126760375979
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 123.206,
+       "min_s": 123.206,
+       "max_s": 123.206,
+       "times_s": [
+        123.206
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 29918644286126760375979,
+        "cyc": [
+         29918644286126760375979
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.03439166744314353,
+      "sagebrush-uncert/pari": 0.022565164837742287
+     },
+     "check": "agree"
+    },
+    {
+     "case": "10^47 #1",
+     "params": {
+      "k": 47,
+      "D": -100000000000000000000000000000000000000000000267
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 8.84782926400112,
+       "min_s": 8.84651381399999,
+       "max_s": 8.872727284000575,
+       "times_s": [
+        8.872727284000575,
+        8.84782926400112,
+        8.84651381399999
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 50792857275512778286043,
+        "cyc": [
+         50792857275512778286043
+        ],
+        "certified": true
+       }
+      },
+      "sagebrush-uncert": {
+       "status": "ok",
+       "median_s": 5.220784283001194,
+       "min_s": 5.2068268330003775,
+       "max_s": 5.222107262999998,
+       "times_s": [
+        5.222107262999998,
+        5.2068268330003775,
+        5.220784283001194
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 50792857275512778286043,
+        "cyc": [
+         50792857275512778286043
+        ],
+        "certified": false
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 283.92,
+       "min_s": 283.92,
+       "max_s": 283.92,
+       "times_s": [
+        283.92
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "h": 50792857275512778286043,
+        "cyc": [
+         50792857275512778286043
+        ]
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.031163106734295294,
+      "sagebrush-uncert/pari": 0.018388223031139735
+     },
+     "check": "agree"
+    }
+   ]
+  },
+  {
+   "name": "realquad",
+   "title": "class groups and regulators of real quadratic fields, D = p (one core)",
+   "claim": "README.md (Real quadratic fields: faster than PARI from about 10^29); engine/classgroup/README.md, the real quadratic table",
+   "reproduce": "sagebrush bench realquad",
+   "engines": {
+    "sagebrush": {
+     "label": "certified (default)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sagebrush-uncert": {
+     "label": "uncertified, conditional on GRH (like PARI)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "pari": {
+     "label": "PARI quadclassunit (not certified)",
+     "ours": false,
+     "status": "ok",
+     "version": "PARI/GP 2.17.1"
+    }
+   },
+   "results": []
+  },
+  {
+   "name": "nf",
+   "title": "class groups and regulators of random fields of degree 3-6 (one core)",
+   "claim": "README.md (General number fields: agrees with PARI; about 10x slower at small d, close to even at 10^35); engine/classgroup/README.md, General number fields",
+   "reproduce": "sagebrush bench nf",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.nf.bnf (default; GRH)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "pari": {
+     "label": "PARI bnfinit(f, 1) (GRH, not certified)",
+     "ours": false,
+     "status": "ok",
+     "version": "PARI/GP 2.17.1"
+    }
+   },
+   "results": [
+    {
+     "case": "quartic 10^36 #16",
+     "params": {
+      "degree": 4,
+      "e": 36,
+      "f": [
+       825994,
+       -500754,
+       935839,
+       -640086,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 3.815046436000557,
+       "min_s": 3.8073183050000807,
+       "max_s": 3.828196955999374,
+       "times_s": [
+        3.815046436000557,
+        3.8073183050000807,
+        3.828196955999374
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -2416194159248197003278851229975759216,
+        "cyc": [
+         2
+        ],
+        "reg": "221795813135823730.11",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 11.244,
+       "min_s": 11.244,
+       "max_s": 11.244,
+       "times_s": [
+        11.244
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -2416194159248197003278851229975759216,
+        "cyc": [
+         2
+        ],
+        "reg": "221795813135823730.10512538421282847907"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.3392961967271929
+     },
+     "check": "agree"
+    },
+    {
+     "case": "quartic 10^41 #17",
+     "params": {
+      "degree": 4,
+      "e": 41,
+      "f": [
+       5918893,
+       -3789494,
+       -6674563,
+       5635047,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 33.54533260900098,
+       "min_s": 33.54533260900098,
+       "max_s": 33.54533260900098,
+       "times_s": [
+        33.54533260900098
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -188762738464938451426735416038311478325455,
+        "cyc": [],
+        "reg": "35014723416688579040.3",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 120.441,
+       "min_s": 120.441,
+       "max_s": 120.441,
+       "times_s": [
+        120.441
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -188762738464938451426735416038311478325455,
+        "cyc": [],
+        "reg": "35014723416688579040.260347744028889241"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.2785208741956724
+     },
+     "check": "agree"
+    },
+    {
+     "case": "quintic 10^27 #22",
+     "params": {
+      "degree": 5,
+      "e": 27,
+      "f": [
+       -1517,
+       1834,
+       431,
+       -1265,
+       -1214,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 4.287185037999734,
+       "min_s": 4.277559676998862,
+       "max_s": 4.287495417998798,
+       "times_s": [
+        4.287185037999734,
+        4.287495417998798,
+        4.277559676998862
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": 2741608070752295490182155780,
+        "cyc": [],
+        "reg": "1821750175005.4646521",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 0.905,
+       "min_s": 0.903,
+       "max_s": 0.909,
+       "times_s": [
+        0.909,
+        0.905,
+        0.903
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": 2741608070752295490182155780,
+        "cyc": [],
+        "reg": "1821750175005.4646520661564111921786957"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 4.7372210364637946
+     },
+     "check": "agree"
+    },
+    {
+     "case": "sextic 10^26 #27",
+     "params": {
+      "degree": 6,
+      "e": 26,
+      "f": [
+       -268,
+       -309,
+       258,
+       190,
+       96,
+       214,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 6.351220546999684,
+       "min_s": 6.333833166001568,
+       "max_s": 6.383897065999918,
+       "times_s": [
+        6.333833166001568,
+        6.383897065999918,
+        6.351220546999684
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -511555108588440553566513571,
+        "cyc": [],
+        "reg": "535611654947.68177074",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 0.561,
+       "min_s": 0.557,
+       "max_s": 0.572,
+       "times_s": [
+        0.557,
+        0.561,
+        0.572
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -511555108588440553566513571,
+        "cyc": [],
+        "reg": "535611654947.68177073582331143687377581"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 11.321248746880007
+     },
+     "check": "agree"
+    },
+    {
+     "case": "sextic 10^30 #28",
+     "params": {
+      "degree": 6,
+      "e": 30,
+      "f": [
+       288,
+       441,
+       -336,
+       -110,
+       565,
+       609,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 40.51672708799924,
+       "min_s": 40.51672708799924,
+       "max_s": 40.51672708799924,
+       "times_s": [
+        40.51672708799924
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": 140436366737310136701270516492,
+        "cyc": [
+         2
+        ],
+        "reg": "5546660721591.4400346",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 1.826,
+       "min_s": 1.813,
+       "max_s": 1.853,
+       "times_s": [
+        1.853,
+        1.826,
+        1.813
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": 140436366737310136701270516492,
+        "cyc": [
+         2
+        ],
+        "reg": "5546660721591.4400346159959700981966105"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 22.18878810952861
+     },
+     "check": "agree"
+    },
+    {
+     "case": "cubic 10^36 #29",
+     "params": {
+      "degree": 3,
+      "e": 36,
+      "f": [
+       -924770600,
+       481899264,
+       -689057705,
+       1
+      ]
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 1.4114245960008702,
+       "min_s": 1.4102201959995,
+       "max_s": 1.4214710460000788,
+       "times_s": [
+        1.4102201959995,
+        1.4114245960008702,
+        1.4214710460000788
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -274987169163647861329999940169349144,
+        "cyc": [],
+        "reg": "473491462993080241.86",
+        "certified": true
+       }
+      },
+      "pari": {
+       "status": "ok",
+       "median_s": 8.354,
+       "min_s": 8.338,
+       "max_s": 8.363,
+       "times_s": [
+        8.363,
+        8.338,
+        8.354
+       ],
+       "calls_per_sample": 1,
+       "answer": {
+        "disc": -274987169163647861329999940169349144,
+        "cyc": [],
+        "reg": "473491462993080241.85955717601968314980"
+       }
+      }
+     },
+     "ratios": {
+      "sagebrush/pari": 0.16895195068241206
+     },
+     "check": "agree"
+    }
+   ]
+  },
+  {
+   "name": "linalg",
+   "title": "exact matrices over Z and polynomials in Z[x] (one core)",
+   "claim": "README.md (Speed against FLINT: inverses 4-6x faster for n = 30 and 100, ...); bench/linalg/README.md",
+   "reproduce": "sagebrush bench linalg",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.linalg / sagebrush.poly (public call, Python numbers)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sagebrush-engine": {
+     "label": "the engine through sagebrush._engine.call (no conversion of the answer)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "flint": {
+     "label": "FLINT fmpz_mat / fmpz_poly (separate process)",
+     "ours": false,
+     "status": "ok",
+     "version": "FLINT 3.6.0"
+    }
+   },
+   "results": []
+  },
+  {
+   "name": "sagelayer",
+   "title": "exact linear algebra and Z[x] through the Sage layer, against Sage (one core)",
+   "claim": "README.md (In the Sage layer: det, rref and inverse ... close to Sage itself); bench/linalg/README.md, The Sage layer",
+   "reproduce": "sagebrush bench sagelayer",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.sage (the Sage layer, under this Python)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sage": {
+     "label": "Sage (its default algorithms)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    }
+   },
+   "results": []
+  },
+  {
+   "name": "charpoly",
+   "title": "exact charpolys of T_q on modular symbols for Gamma0(N) (one thread)",
+   "claim": "README.md (Performance: proven exact charpolys 3.9-7.8x faster than Sage's default path, 1.1-4.7x faster than LinBox); results/engine-exact.md",
+   "reproduce": "sagebrush bench charpoly",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.modsym.charpoly_exact (one thread; everything, proven)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "sage": {
+     "label": "Sage, T.charpoly() (default; Hecke matrix built before timing)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    },
+    "sage-linbox": {
+     "label": "Sage, LinBox: (d T over ZZ).charpoly(algorithm='linbox') (heuristic)",
+     "ours": false,
+     "status": "ok",
+     "version": "SageMath 10.9"
+    }
+   },
+   "results": [
+    {
+     "case": "N=2310 T_13",
+     "params": {
+      "N": 2310,
+      "q": 13
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 5.172738391000166,
+       "min_s": 5.17212973200003,
+       "max_s": 5.182612420998339,
+       "times_s": [
+        5.17212973200003,
+        5.172738391000166,
+        5.182612420998339
+       ],
+       "calls_per_sample": 1,
+       "answer": "593:846085813506729066"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 30.715811472000496,
+       "min_s": 30.715811472000496,
+       "max_s": 30.715811472000496,
+       "times_s": [
+        30.715811472000496
+       ],
+       "calls_per_sample": 1,
+       "answer": "593:846085813506729066"
+      },
+      "sage-linbox": {
+       "status": "ok",
+       "median_s": 25.720820687000014,
+       "min_s": 25.720820687000014,
+       "max_s": 25.720820687000014,
+       "times_s": [
+        25.720820687000014
+       ],
+       "calls_per_sample": 1,
+       "answer": "593:846085813506729066"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.16840637258486435,
+      "sagebrush/sage-linbox": 0.20111093864180646
+     },
+     "check": "agree"
+    },
+    {
+     "case": "N=5000 T_3",
+     "params": {
+      "N": 5000,
+      "q": 3
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 8.666293375999885,
+       "min_s": 8.64871005599889,
+       "max_s": 8.678443065000465,
+       "times_s": [
+        8.666293375999885,
+        8.678443065000465,
+        8.64871005599889
+       ],
+       "calls_per_sample": 1,
+       "answer": "755:1966542420348598858"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 69.53825112900086,
+       "min_s": 69.53825112900086,
+       "max_s": 69.53825112900086,
+       "times_s": [
+        69.53825112900086
+       ],
+       "calls_per_sample": 1,
+       "answer": "755:1966542420348598858"
+      },
+      "sage-linbox": {
+       "status": "ok",
+       "median_s": 103.08965044499928,
+       "min_s": 103.08965044499928,
+       "max_s": 103.08965044499928,
+       "times_s": [
+        103.08965044499928
+       ],
+       "calls_per_sample": 1,
+       "answer": "755:1966542420348598858"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.12462627741274351,
+      "sagebrush/sage-linbox": 0.08406560055825928
+     },
+     "check": "agree"
+    },
+    {
+     "case": "N=10007 T_2",
+     "params": {
+      "N": 10007,
+      "q": 2
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 10.719217821999337,
+       "min_s": 10.719217821999337,
+       "max_s": 10.719217821999337,
+       "times_s": [
+        10.719217821999337
+       ],
+       "calls_per_sample": 1,
+       "answer": "836:1703426183595873621"
+      },
+      "sage": {
+       "status": "ok",
+       "median_s": 136.6616422370007,
+       "min_s": 136.6616422370007,
+       "max_s": 136.6616422370007,
+       "times_s": [
+        136.6616422370007
+       ],
+       "calls_per_sample": 1,
+       "answer": "836:1703426183595873621"
+      },
+      "sage-linbox": {
+       "status": "ok",
+       "median_s": 355.0642186019995,
+       "min_s": 355.0642186019995,
+       "max_s": 355.0642186019995,
+       "times_s": [
+        355.0642186019995
+       ],
+       "calls_per_sample": 1,
+       "answer": "836:1703426183595873621"
+      }
+     },
+     "ratios": {
+      "sagebrush/sage": 0.07843618477385121,
+      "sagebrush/sage-linbox": 0.03018951857273678
+     },
+     "check": "agree"
+    }
+   ]
+  },
+  {
+   "name": "ap",
+   "title": "a_p of 11a at all primes up to N (one thread)",
+   "claim": "README.md (ap: on one core 1.2-1.6x slower than smalljac); results/ap.md",
+   "reproduce": "sagebrush bench ap",
+   "engines": {
+    "sagebrush": {
+     "label": "sagebrush.ap.aplist (one thread; the Python list included)",
+     "ours": true,
+     "status": "ok",
+     "version": null
+    },
+    "smalljac": {
+     "label": "smalljac (not driven by sagebrush bench; see results/ap.md)",
+     "ours": false,
+     "status": "not installed",
+     "error": "measured once in results/ap.md; not reproducible with sagebrush bench"
+    }
+   },
+   "results": [
+    {
+     "case": "11a N=10^8",
+     "params": {
+      "N": 100000000
+     },
+     "tier": "large",
+     "engines": {
+      "sagebrush": {
+       "status": "ok",
+       "median_s": 65.08644377899873,
+       "min_s": 65.08644377899873,
+       "max_s": 65.08644377899873,
+       "times_s": [
+        65.08644377899873
+       ],
+       "calls_per_sample": 1,
+       "answer": [
+        5761454,
+        5982199
+       ]
+      },
+      "smalljac": {
+       "status": "not installed"
+      }
+     },
+     "ratios": {
+      "sagebrush/smalljac": null
+     },
+     "expected": [
+      5761454,
+      5982199
+     ],
+     "check": "agree"
+    }
+   ]
+  }
+ ]
+}

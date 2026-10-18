@@ -59,7 +59,10 @@ to a bound. It is a from-scratch Rust port of the genus-1 strategy of Drew
 Sutherland's smalljac. Its output matches smalljac exactly (every prime to
 10^6, checksums to 10^8) and matches Sage below 20000. On 16 threads it
 beats smalljac's own 16-process mode at 10^7; on one core it is
-1.2-1.6x slower. See [results/ap.md](results/ap.md).
+1.2-1.6x slower. See [results/ap.md](results/ap.md): measured once there;
+`sagebrush bench ap` reruns Sagebrush's side (11a to 10^8 in 65 s on one
+core, from Python) and checks it against the count recorded from smalljac,
+but it cannot rerun smalljac itself, which is rarely installed.
 
 **Rational newforms** (in `modsym`): every rational newform of level N and
 its a_p, found by splitting with integer Hecke eigenvalues in the Hasse
@@ -69,19 +72,35 @@ by prime with point counts from `ap`. See
 [results/newforms.md](results/newforms.md).
 
 **Class groups and units** (`engine/classgroup`, MIT/Apache, clean-room;
-see [its README](engine/classgroup/README.md)):
+see [its README](engine/classgroup/README.md) for the tables). Against
+PARI 2.17 on one core of an AMD EPYC 7B13. *Certified* is the default call:
+under GRH, with an analytic certificate. *Uncertified* is
+`certify=False`, conditional on GRH and a heuristic stopping rule like
+PARI's `quadclassunit`, which does not certify:
 
-- **Imaginary quadratic fields:** Jacobson's sieve. Up to 44x faster than
-  PARI's `quadclassunit` (10^47: 5.4 s against 219 s).
-- **Real quadratic fields:** class group and regulator. Faster than PARI
-  from about 10^29 in the benchmark table (slower below; equal near 10^27).
+- **Imaginary quadratic fields:** Jacobson's sieve.
+  - Certified: faster than PARI from about 10^27, and 18-32x faster at
+    10^41-10^47 (10^47: 8.8 s against 284 s). Below 10^15 it is 23-142x
+    slower, because the certificate costs about 0.1 s.
+  - Uncertified: faster from about 10^15, and 38-58x faster at
+    10^41-10^47.
+  - Rerun: `sagebrush bench imagquad --large`.
+- **Real quadratic fields:** class group and regulator.
+  - Certified: faster than PARI from about 10^35 (2.3x at 10^41), and
+    1.8-74x slower below.
+  - Uncertified: faster from about 10^25 (4.9x at 10^41).
+  - Rerun: `sagebrush bench realquad`.
 - **General number fields** (`bnfinit`):
   - the maximal order by Round 2;
   - prime decomposition, including common index divisors;
   - the class group, regulator and roots of unity, by Buchmann's method with
     units kept in compact form.
-  - Agrees with PARI on every field tested (up to |d| ~ 10^35); about 10x
-    slower at small d and close to even at 10^35.
+  - Agrees with PARI on all 30 fields of a fixed random list of degree 3-6
+    (|d| from 10^8 to 10^41). The default call is certified as above, and
+    all 30 came out certified. Cubics are faster than PARI from about
+    |d| = 10^20 (6x at 10^32-10^36), quartics from about 10^33 (3.6x at
+    10^41). Quintics and sextics are 5-122x slower at every size tested.
+    Rerun: `sagebrush bench nf --large`.
 - **Integer algorithms:** factoring (Pollard rho and ECM), the Hermite and
   Smith normal forms, exact LLL, and complex roots to any precision.
 
@@ -98,18 +117,32 @@ MIT/Apache, clean-room; the layer FLINT provides for Sage; see
   - over Z/n: NTT products, Newton division, half-gcd;
   - over Z: products, and heuristic and modular gcds.
 - **Certified:** every answer is checked exactly or rests on a proven bound.
-- **Speed against FLINT** ([bench/linalg](bench/linalg/README.md); random
+- **Speed against FLINT 3.6** ([bench/linalg](bench/linalg/README.md); random
   dense matrices with 7- and 41-bit entries, n = 10, 30, 100; one core;
-  minimum times, and sub-millisecond ones are imprecise):
-  - inverses 4–6x faster for n = 30 and 100 (1.2–1.5x at n = 10);
-  - rref 1.3–3x faster for n = 30 and 100, but 2–5x slower at n = 10;
-  - charpoly, det and solve within 1.1–2.3x for n = 30 and 100, up to 5.5x
+  sub-millisecond times are imprecise). These are for the Rust engine
+  called directly (`cargo run -p sagebrush-oracle --example matbench`,
+  `--example polybench`):
+  - inverses 3.8–5.9x faster for n = 30 and 100 (1.1–1.4x at n = 10);
+  - rref 1.25–3.1x faster for n = 30 and 100, but 2–6x slower at n = 10;
+  - charpoly, det and solve within 1.1–2.3x for n = 30 and 100, up to 6x
     slower at n = 10;
-  - polynomial products and gcds within 1–5x for lengths 100 to 100,000
-    (up to 8x slower at length 10, where both take about a microsecond).
-- **In the Sage layer:** `det`, `rref` and `inverse` got 15–66x faster and
-  are close to Sage itself; a polynomial gcd that took 10 s takes under a
-  millisecond.
+  - polynomial products and gcds within 1–5.3x for lengths 100 to 100,000
+    (up to 7.4x slower at length 10, where both take about a microsecond).
+  - Called from Python (`sagebrush bench linalg`), each call also passes its
+    matrix as text, so the lead shrinks. For n = 30 and 100: inverses are
+    2.1–3.4x faster, rref at n = 100 is 1.2–2.4x faster, and det, solve and
+    charpoly are 1.3–2.5x slower. Polynomials of length 100 and more are
+    2–12x slower.
+- **In the Sage layer**, against Sage 10.9 (`sagebrush bench sagelayer`):
+  - `charpoly` is 2–2.5x faster;
+  - `rref` and `inverse` are within 1.3x of Sage;
+  - `det` is 2–10x slower;
+  - polynomial gcds and products are 2–23x slower, mostly from passing
+    coefficients between Python and Rust.
+
+  The Rust engine made `det`, `rref` and `inverse` 9–77x faster than the
+  previous pure-Python code, and a polynomial gcd that took 10 s now takes
+  under a millisecond (measured once; see bench/linalg).
 
 All of it runs in Sage mode (`NumberField`, `QuadraticField`,
 `class_group()`, `regulator()`, `matrix(ZZ, ...).LLL()`, ...), in Magma mode
@@ -496,12 +529,23 @@ T_2 and T_3 at about 100 levels up to 2003.
 
 ## Performance
 
-On one thread, on the same machine, the engine computes proven exact
-charpolys 3.9-7.8x faster than Sage's default path and 1.1-4.7x faster than
-Sage's fastest (LinBox, heuristic) path, for dimensions 592-835. It also
-parallelizes: exact T_2 for all 1495 odd levels below 3000 takes 18 seconds
-on 8 cores. Details, including what did not work and the benchmarking
-caveats: [results/engine-exact.md](results/engine-exact.md) and
+Each speed comparison in this README says how to rerun it. Most name a
+`sagebrush bench` suite (`pip install sagebrush`, then `sagebrush bench
+--list`), which runs PARI, FLINT and Sage as competitors where they are
+installed; the runs behind those numbers, with every sample, are in
+[results/bench](results/bench/README.md). The Rust-level, parallel and
+smalljac figures point to the command or the results file they come from.
+
+On one thread of an AMD EPYC 7B13, the engine computes proven exact
+charpolys of Hecke operators for dimensions 592-835 (N = 2310, 5000, 10007)
+5.9-12.8x faster than Sage 10.9's default path, and 5-33x faster than its
+LinBox path, which is heuristic. Sagebrush's time includes building the
+modular symbols; Sage's starts from a Hecke matrix built before timing.
+Rerun with `sagebrush bench charpoly --large`.
+
+It also parallelizes: exact T_2 for all 1495 odd levels below 3000 takes
+18 seconds on 8 cores. Details, including what did not work and the
+benchmarking caveats: [results/engine-exact.md](results/engine-exact.md) and
 [results/engine.md](results/engine.md).
 
 ## Repository layout
