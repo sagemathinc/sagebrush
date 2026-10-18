@@ -33,9 +33,16 @@ self-contained `sagebrush` executable
 (`curl -fsSL https://get.sagebrush.space/install.sh | sh`) installs the same
 kernel.
 
-- The whole thing is one JavaScript file (about 5 MB) with its Python
-  library and the WebAssembly engines embedded. It runs on Node 22+, Deno (`deno run -A`) and Bun, and
-  starts in roughly 80 ms.
+- The whole thing is one JavaScript file, with its Python library, the
+  notebook page and the WebAssembly engines embedded. It runs on Node 22+,
+  Deno (`deno run -A`) and Bun.
+- Measured for version 0.5.0 on Oct 18, 2026 (Node 26.12, an idle Linux VM
+  with an AMD EPYC 7B13, the file cache warm):
+  - the installed package is 25.7 MB, its script 25.5 MB;
+  - `sagebrush -c 'print(1 + 1)'` takes 400 ms from start to exit (the
+    median of 15 runs), with a peak resident memory of 166 MB; most of that
+    time is V8 reading and compiling the script;
+  - with `import numpy` it takes about 480 ms and 185 MB.
 - The language is CPython 3.14's own grammar (the parser is generated from
   `Grammar/python.gram`); syntax errors match CPython's.
 - Big integers, `fractions`, `complex`/`cmath`, `re`, `json`, `struct`,
