@@ -131,7 +131,10 @@ Copyright (c) 2001 Python Software Foundation. See
   large-argument formulas and its errno: `cmath_sqrt_impl`, `c_log`,
   `cmath_exp_impl`, the trigonometric, hyperbolic and inverse functions,
   `cmath_rect_impl`, `cmath_polar_impl`), with `_Py_c_quot` and `_Py_c_abs`
-  (`Objects/complexobject.c`).
+  (`Objects/complexobject.c`). The `**` of complex numbers is ported from
+  `complex_pow`, `c_powi`, `c_powu` and `_Py_c_pow` there, with
+  `_Py_c_prod`'s Annex G recovery and `_Py_ADJUST_ERANGE2`'s errno rules
+  (`Include/internal/pycore_pymath.h`).
 - `src/unparse.ts`: an expression as text, ported from CPython 3.14's
   `Python/ast_unparse.c` (its precedence levels and the spelling of each
   node), for the annotations of `from __future__ import annotations`.
