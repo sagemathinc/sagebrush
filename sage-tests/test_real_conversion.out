@@ -340,3 +340,11 @@ True True False True False False False True
 Integer Ring True True True True True
 Rational Field True True True True True
 Symbolic Ring True True True True True
+ZZ(F('2')) -> 2
+Integer(F('2')) -> 2
+ZZ(F('2.5')) -> TypeError: cannot convert non-integral float to integer
+QQ(F('0.5')) -> 1/2
+QQ(F('0.1')) -> 1/10
+Rational(F('0.1')) -> 1/10
+[ 2 -7]
+TypeError
