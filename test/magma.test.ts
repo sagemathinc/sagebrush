@@ -1891,3 +1891,29 @@ test("a negative power of an integer matrix needs a unit determinant and stays i
     assert.ok(o.includes(m) && o.endsWith("end "), e + o);
   }
 });
+
+test("DihedralGroup as Magma's: its printing, generators, order, membership, equality and errors", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's for the same lines: DihedralGroup(3)
+  // is Sym(3), printed without its generators until one is asked for)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  const ok = run(["G:=DihedralGroup(4); G; #G; Order(G); Type(G);", "G:=DihedralGroup(3); G; #G; G.1; G.2; G;", "G:=DihedralGroup(5); G.1; G.2; G.1*G.2; Order(G.1); Order(G.2);", "G:=DihedralGroup(4); G eq DihedralGroup(4); G eq Sym(4); G ne DihedralGroup(4); DihedralGroup(3) eq Sym(3); Sym(3) eq DihedralGroup(3);", "G:=DihedralGroup(4); G.0; G.1^-1; G.2^-1;", "G:=DihedralGroup(4); x:=G.1*Sym(4)!(1,2); x; Parent(x);", "G:=DihedralGroup(4); G.1 eq Sym(4)!(1,2,3,4); G.1 in Sym(4); Sym(4)!G.1; Sym(4)!(1,2) in G; Sym(4)!(1,3) in G;", "G:=DihedralGroup(4); Order(G.1); Identity(G); G.1^G.2; G.2^2; Parent(G.1) eq G;", "G:=DihedralGroup(4); G!(1,2,3,4); 1^G.1; 2^G.2; Identity(G);", "G:=DihedralGroup(6); G; #G; Type(G.1); G.1*G.2;", "DihedralGroup(4);", "G:=DihedralGroup(4); x:=G.1; y:=DihedralGroup(4).1; x*y;", "G:=DihedralGroup(12); G;"].join("\n"));
+  assert.equal(ok, "Permutation group G acting on a set of cardinality 4\nOrder = 8 = 2^3\n    (1, 2, 3, 4)\n    (1, 4)(2, 3)\n8\n8\nGrpPerm\nSymmetric group G acting on a set of cardinality 3\nOrder = 6 = 2 * 3\n6\n(1, 2, 3)\n(1, 2)\nSymmetric group G acting on a set of cardinality 3\nOrder = 6 = 2 * 3\n    (1, 2, 3)\n    (1, 2)\n(1, 2, 3, 4, 5)\n(1, 5)(2, 4)\n(1, 4)(2, 3)\n5\n2\ntrue\nfalse\nfalse\ntrue\ntrue\nId(G)\n(1, 4, 3, 2)\n(1, 4)(2, 3)\n(2, 3, 4)\nSymmetric group acting on a set of cardinality 4\nOrder = 24 = 2^3 * 3\ntrue\ntrue\n(1, 2, 3, 4)\nfalse\ntrue\n4\nId(G)\n(1, 4, 3, 2)\nId(G)\ntrue\n(1, 2, 3, 4)\n2\n3\nId(G)\nPermutation group G acting on a set of cardinality 6\nOrder = 12 = 2^2 * 3\n    (1, 2, 3, 4, 5, 6)\n    (1, 6)(2, 5)(3, 4)\n12\nGrpPermElt\n(1, 5)(2, 4)\nPermutation group acting on a set of cardinality 4\nOrder = 8 = 2^3\n    (1, 2, 3, 4)\n    (1, 4)(2, 3)\n(1, 3)(2, 4)\nPermutation group G acting on a set of cardinality 12\nOrder = 24 = 2^3 * 3\n    (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)\n    (1, 12)(2, 11)(3, 10)(4, 9)(5, 8)(6, 7)\nend\n", ok);
+  const errs: [string, string][] = [
+    ["X:=DihedralGroup(1);", "Runtime error in 'DihedralGroup': Argument 1 (1) should be >= 3"],
+    ["X:=DihedralGroup(2);", "Runtime error in 'DihedralGroup': Argument 1 (2) should be >= 3"],
+    ["X:=DihedralGroup(-1);", "Runtime error in 'DihedralGroup': Argument 1 (-1) should be >= 3"],
+    ["X:=DihedralGroup(1/2);", "Runtime error in 'DihedralGroup': Bad argument types Argument types given: FldRatElt"],
+    ["G:=DihedralGroup(4); x:=G.3;", "Runtime error in '.': Argument 2 (3) should be in the range [-2 .. 2]"],
+    ["G:=DihedralGroup(4); x:=G!(1,2);", "Runtime error in '!': Illegal coercion LHS: GrpPerm RHS: GrpPermElt"],
+    ["x:=DihedralGroup(4) eq DihedralGroup(5);", "Runtime error in 'eq': Could not find a covering group"],
+    // (refused: Magma's element order, and its wrapping of a long generator)
+    ["G:=DihedralGroup(4); x:=[g : g in G];", "iterating over a dihedral group is not supported yet"],
+    ["G:=DihedralGroup(30); G;", "printing a dihedral group whose generators are longer than a line is not supported yet"],
+  ];
+  for (const [e, m] of errs) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
+  }
+});
