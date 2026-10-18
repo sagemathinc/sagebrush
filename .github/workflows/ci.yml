@@ -28,8 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      # (and NumPy, pinned: the version the bit-exact tests compare with; a
+      # bare scipy install took the latest, 2.5.4 on Oct 18)
       - name: SciPy (the reference for scipy.io's MATLAB files in test/data.test.ts)
-        run: python3 -m pip install scipy==1.18.1
+        run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
@@ -38,6 +40,11 @@ jobs:
           # 33.5 s on 8f8f4009 against its 30 s limit; 2 leaves room without
           # hiding a real slowdown of more than twice)
           SAGEBRUSH_TIME_SCALE: "2"
+          # (the tests that compare with NumPy itself: its loops without
+          # AVX-512, glibc's, as below and test/numpy-oracle.ts; with AVX-512,
+          # GitHub's runners give other last bits for exp, log and pow, and so
+          # for the cases' inputs built with np.exp)
+          NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
       - name: the security tests with the attribute-read backstop off (SAGEBRUSH_HARDENED=0), so that path never rots
         run: SAGEBRUSH_HARDENED=0 node --test dist/test/security.test.js
       - name: single-file bundle
@@ -246,8 +253,10 @@ jobs:
           # (this engine, with overflow checks, runs about twice as slow as the
           # committed one: the tests' wall-clock limits are scaled by this)
           SAGEBRUSH_TIME_SCALE: "3"
+          # (NumPy without AVX-512, as in the test job: test/numpy-oracle.ts)
+          NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          python3 -m pip install scipy==1.18.1
+          python3 -m pip install scipy==1.18.1 numpy==2.5.1
           pnpm run build
           node scripts/build-cli.mjs
           node --test 'dist/test/*.test.js'
