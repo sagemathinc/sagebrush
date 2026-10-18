@@ -1,0 +1,50 @@
+{
+  "before": {
+    "runs": 30,
+    "tool_names": [
+      "Glob",
+      "Grep",
+      "Read"
+    ],
+    "reads_outside_fresh_source_directory": [],
+    "source_files": [
+      "lib/_magma.py"
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "source_hashes": [
+      "8bf9f272563d1512d4de99ab79e433a09b8b268ba877f77ac779be0fdfed8715"
+    ]
+  },
+  "after": {
+    "runs": 30,
+    "tool_names": [
+      "Glob",
+      "Grep",
+      "Read"
+    ],
+    "reads_outside_fresh_source_directory": [],
+    "source_files": [
+      "lib/_magma.py"
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "source_hashes": [
+      "2b8c91e712c6680a4d869487251ed62cec22f042e05d4cedf3313189066c4cef"
+    ]
+  },
+  "comment-followup": {
+    "runs": 3,
+    "tool_names": [
+      "Glob",
+      "Grep",
+      "Read"
+    ],
+    "reads_outside_fresh_source_directory": [],
+    "source_files": [
+      "lib/_magma.py"
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "source_hashes": [
+      "4927dfd7e287550b5cc43ca57c24b79ada6de887b3e8f3717f19b8023a14ba47"
+    ]
+  }
+}

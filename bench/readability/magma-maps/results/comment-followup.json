@@ -1,0 +1,400 @@
+{
+  "purpose": "Exploratory comment-only follow-up; not part of the primary before/after score. Same frozen M08 rubric and three new cold runs.",
+  "records": [
+    {
+      "id": "M08",
+      "repetition": 1,
+      "sha": "e19ba2a47ac5c9b8219e62ed9dddf922d39cd80a",
+      "key_sha256": "325f6e74877889305640c19fd1063430ce22c4d28de4345af0b9b50e1e8f2e02",
+      "seconds": 17.249,
+      "timed_out": false,
+      "exit_code": 0,
+      "manifest": {
+        "lib/_magma.py": "4927dfd7e287550b5cc43ca57c24b79ada6de887b3e8f3717f19b8023a14ba47"
+      },
+      "answer": "Based on the source code, here's how the universe of a set image is chosen:\n\n**Function:** `_image_universe` at `source/lib/_magma.py:1967-1989`\n\n**For structural codomains:**\n- The structural codomain **itself is the universe**, even for empty images (line 1970)\n- Supported structural codomains include those satisfying `_is_struct()` or being `_MFinField`, `_MResRing`, or `_MFFPolyRing` (line 1977)\n\n**For set codomains:**\n- **Nonempty images:** Uses the set's declared universe if one is supplied; if unsupported, returns None. If no declared universe, inference is attempted (integer/rational only) (lines 1980-1988)\n- **Empty images:** The source code states (lines 1973-1975) that \"An empty image into a set would have that set itself as its universe in Magma. Sagebrush cannot represent this and refuses it.\" Empty images into structural codomains are still allowed\n\nThe logic is implemented in `_image_universe` (returning the universe or None) and enforced in `_map_set_image` at line 2001, which calls `_image_universe(mapping.cod, not images)` where the second parameter indicates whether the image is empty.",
+      "usage": {
+        "input_tokens": 65,
+        "cache_creation_input_tokens": 3669,
+        "cache_read_input_tokens": 54659,
+        "output_tokens": 1505,
+        "output_tokens_details": {
+          "thinking_tokens": 474
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 3669,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 528,
+            "cache_read_input_tokens": 8329,
+            "cache_creation_input_tokens": 760,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 760
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 65,
+          "outputTokens": 1505,
+          "cacheReadInputTokens": 54659,
+          "cacheCreationInputTokens": 3669,
+          "webSearchRequests": 0,
+          "costUSD": 0.0203939,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 474,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "tool_calls": [
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "./source/**/*.py"
+          }
+        },
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "./source/*"
+          }
+        },
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "**/*"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-1-_md5eil3/source/lib/_magma.py"
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "set image|universe.*codomain|structural codomain",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-1-_md5eil3/source/lib/_magma.py",
+            "output_mode": "content"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-1-_md5eil3/source/lib/_magma.py",
+            "offset": 1950,
+            "limit": 50
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-1-_md5eil3/source/lib/_magma.py",
+            "offset": 1992,
+            "limit": 30
+          }
+        }
+      ],
+      "tool_count": 7,
+      "is_error": false,
+      "result_subtype": "success",
+      "criteria": [
+        1,
+        1,
+        0
+      ],
+      "grading_note": "Correctly distinguishes an unsupported declared universe from absence. Omits the general unsupported-codomain refusal."
+    },
+    {
+      "id": "M08",
+      "repetition": 2,
+      "sha": "e19ba2a47ac5c9b8219e62ed9dddf922d39cd80a",
+      "key_sha256": "325f6e74877889305640c19fd1063430ce22c4d28de4345af0b9b50e1e8f2e02",
+      "seconds": 22.51,
+      "timed_out": false,
+      "exit_code": 0,
+      "manifest": {
+        "lib/_magma.py": "4927dfd7e287550b5cc43ca57c24b79ada6de887b3e8f3717f19b8023a14ba47"
+      },
+      "answer": "Based on the source code, here's how the universe of a set image is chosen for different codomain types:\n\n## Function: `_image_universe` (lines 1967-1989 in `_magma.py`)\n\nThe function explicitly handles this distinction:\n\n**For structural codomains:**\n- The codomain itself is the universe for the image, **including for empty images** (line 1970)\n- Supported structural types include rings, fields, polynomial rings, matrix spaces, and specific types like `MFinField`, `MResRing`, `MFFPolyRing` (lines 1977, 2803-2804)\n- Line 1978-1979: `if supported(cod): return cod`\n\n**For set codomains:**\n- **Nonempty images** (line 1980): \n  - If the set has a declared universe that's supported, use it (lines 1983-1984)\n  - Otherwise, try to infer from the set's items (only accepting `_ZZ` or `_QQ`) (lines 1985-1988)\n- **Empty images**: Cannot be represented - Sagebrush refuses such images (lines 1973-1975: \"An empty image into a set would have that set itself as its universe in Magma. Sagebrush cannot represent this and refuses it.\")\n\nThis function is invoked by `_map_set_image` (line 2001) when applying a map to a set, and returns `None` if no valid universe can be determined (line 1989), triggering an error (line 2003).",
+      "usage": {
+        "input_tokens": 73,
+        "cache_creation_input_tokens": 5236,
+        "cache_read_input_tokens": 64062,
+        "output_tokens": 2194,
+        "output_tokens_details": {
+          "thinking_tokens": 942
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 5236,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 682,
+            "cache_read_input_tokens": 9861,
+            "cache_creation_input_tokens": 795,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 795
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 73,
+          "outputTokens": 2194,
+          "cacheReadInputTokens": 64062,
+          "cacheCreationInputTokens": 5236,
+          "webSearchRequests": 0,
+          "costUSD": 0.0279212,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 942,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "tool_calls": [
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "./source/**/*"
+          }
+        },
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "./source/*"
+          }
+        },
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "*"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-2-6rk2wj8f/source/lib/_magma.py"
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "set image.*universe|universe.*set image",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-2-6rk2wj8f/source/lib/_magma.py",
+            "output_mode": "content"
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "codomain",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-2-6rk2wj8f/source/lib/_magma.py",
+            "output_mode": "content",
+            "head_limit": 50
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-2-6rk2wj8f/source/lib/_magma.py",
+            "offset": 1950,
+            "limit": 100
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "def _is_struct",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-2-6rk2wj8f/source/lib/_magma.py",
+            "output_mode": "content",
+            "context": 5
+          }
+        }
+      ],
+      "tool_count": 8,
+      "is_error": false,
+      "result_subtype": "success",
+      "criteria": [
+        1,
+        0,
+        1
+      ],
+      "grading_note": "Still suggests an unsupported declared universe can fall back to inference. Does describe the general no-valid-universe error."
+    },
+    {
+      "id": "M08",
+      "repetition": 3,
+      "sha": "e19ba2a47ac5c9b8219e62ed9dddf922d39cd80a",
+      "key_sha256": "325f6e74877889305640c19fd1063430ce22c4d28de4345af0b9b50e1e8f2e02",
+      "seconds": 20.907,
+      "timed_out": false,
+      "exit_code": 0,
+      "manifest": {
+        "lib/_magma.py": "4927dfd7e287550b5cc43ca57c24b79ada6de887b3e8f3717f19b8023a14ba47"
+      },
+      "answer": "Based on the source code, here's how the universe of a set image is chosen:\n\n**Function: `_image_universe` (source/lib/_magma.py:1967-1989)**\n\nThe logic differs significantly between structural and set codomains:\n\n1. **Structural codomain**: The codomain itself is the universe, **even for empty images** (line 1979: `return cod`)\n\n2. **Set codomain with nonempty image** (line 1980):\n   - If a declared universe exists and is supported, use it (line 1984)\n   - Otherwise, infer from set items using only integer/rational inference (lines 1985-1988)\n   - Returns the inferred ZZ or QQ, or None if no valid inference\n\n3. **Set codomain with empty image**: Returns `None` (line 1989) \u2014 **cannot be represented**\n\nThe key distinction stated in the docstring (lines 1973-1975): \"An empty image into a set would have that set itself as its universe in Magma. Sagebrush cannot represent this and refuses it. This does not prevent empty images into structural codomains.\"\n\n**Supported structural types** are defined by the `supported` lambda (line 1977): rings, fields, polynomial rings, number fields, and matrix spaces (per `_is_struct` at line 2801-2804, plus `_MFinField`, `_MResRing`, `_MFFPolyRing`).",
+      "usage": {
+        "input_tokens": 65,
+        "cache_creation_input_tokens": 4860,
+        "cache_read_input_tokens": 58264,
+        "output_tokens": 2044,
+        "output_tokens_details": {
+          "thinking_tokens": 837
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 4860,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [
+          {
+            "input_tokens": 8,
+            "output_tokens": 662,
+            "cache_read_input_tokens": 9812,
+            "cache_creation_input_tokens": 468,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 468
+            },
+            "type": "message"
+          }
+        ],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 65,
+          "outputTokens": 2044,
+          "cacheReadInputTokens": 58264,
+          "cacheCreationInputTokens": 4860,
+          "webSearchRequests": 0,
+          "costUSD": 0.025831400000000004,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 837,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "models": [
+        "claude-haiku-4-5-20251001"
+      ],
+      "tool_calls": [
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "./source/**/*"
+          }
+        },
+        {
+          "name": "Glob",
+          "input": {
+            "pattern": "*"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-3-9secy6x4/source/lib/_magma.py"
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "universe.*codomain|set.*image|structural.*codomain",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-3-9secy6x4/source/lib/_magma.py",
+            "output_mode": "content",
+            "head_limit": 50
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-3-9secy6x4/source/lib/_magma.py",
+            "offset": 1950,
+            "limit": 100
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "def _is_struct|def supported",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-3-9secy6x4/source/lib/_magma.py",
+            "output_mode": "content",
+            "context": 3
+          }
+        },
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "empty.*image|image.*empty",
+            "path": "/scratch/sagebrush-reviews/readability-magma-maps/cold/readability-M08-3-9secy6x4/source/lib/_magma.py",
+            "output_mode": "content",
+            "context": 2,
+            "head_limit": 30
+          }
+        }
+      ],
+      "tool_count": 7,
+      "is_error": false,
+      "result_subtype": "success",
+      "criteria": [
+        1,
+        0,
+        0
+      ],
+      "grading_note": "Still suggests an unsupported declared universe can fall back to inference; omits general unsupported-codomain refusal."
+    }
+  ],
+  "covered_criteria": 5,
+  "possible_criteria": 9,
+  "correct_declared_universe_distinction": 1,
+  "runs": 3
+}
