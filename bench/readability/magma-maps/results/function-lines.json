@@ -1,0 +1,29 @@
+{
+  "before": {
+    "revision": "b1859ef4ffb55b5110ab14d9bf01544f81aae36f",
+    "function_lines": {
+      "MMap.__init__": 5,
+      "MMap.__repr__": 10,
+      "MMap.__call__": 39,
+      "MMap._preimage": 20,
+      "MMap.__mul__": 6,
+      "MMap._inverse": 9,
+      "_map": 32
+    }
+  },
+  "after": {
+    "revision": "359723b5546005d909fb54e8f8e238abac567c41",
+    "function_lines": {
+      "_map_set_image": 21,
+      "MMap.__init__": 5,
+      "MMap.__repr__": 10,
+      "MMap.__call__": 22,
+      "MMap._preimage": 20,
+      "MMap.__mul__": 7,
+      "MMap._inverse": 15,
+      "_normalize_map_graph": 10,
+      "_validate_map_graph": 20,
+      "_map": 14
+    }
+  }
+}

@@ -1,0 +1,678 @@
+{
+  "key_sha256": "325f6e74877889305640c19fd1063430ce22c4d28de4345af0b9b50e1e8f2e02",
+  "model": "claude-haiku-4-5-20251001",
+  "phases": {
+    "before": {
+      "sha": "b1859ef4ffb55b5110ab14d9bf01544f81aae36f",
+      "grading": "Manual frozen-key coverage by the implementing agent. Each compound criterion needs all its behavioral claims; code quotations count. Omissions and contradictions score zero. This is not blind or an independent fact-check.",
+      "all": {
+        "runs": 30,
+        "covered_criteria": 53,
+        "possible_criteria": 90,
+        "fully_covered_answers": 2,
+        "seconds": {
+          "median": 28.122,
+          "min": 17.947,
+          "max": 57.534,
+          "total": 926.377
+        },
+        "tool_calls": {
+          "median": 11.5,
+          "min": 7,
+          "max": 20,
+          "total": 374
+        },
+        "input_tokens": {
+          "median": 108422.5,
+          "min": 52765,
+          "max": 245064,
+          "total": 3610821
+        },
+        "output_tokens": {
+          "median": 2635.0,
+          "min": 1769,
+          "max": 5175,
+          "total": 87129
+        }
+      },
+      "questions": {
+        "M01": {
+          "runs": 3,
+          "covered_criteria": 6,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 21.057,
+            "min": 17.998,
+            "max": 24.011,
+            "total": 63.066
+          },
+          "tool_calls": {
+            "median": 7,
+            "min": 7,
+            "max": 10,
+            "total": 24
+          },
+          "input_tokens": {
+            "median": 56317,
+            "min": 52765,
+            "max": 80154,
+            "total": 189236
+          },
+          "output_tokens": {
+            "median": 2015,
+            "min": 1818,
+            "max": 2451,
+            "total": 6284
+          }
+        },
+        "M02": {
+          "runs": 3,
+          "covered_criteria": 5,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 20.054,
+            "min": 17.947,
+            "max": 24.313,
+            "total": 62.31399999999999
+          },
+          "tool_calls": {
+            "median": 10,
+            "min": 9,
+            "max": 12,
+            "total": 31
+          },
+          "input_tokens": {
+            "median": 89029,
+            "min": 85241,
+            "max": 122501,
+            "total": 296771
+          },
+          "output_tokens": {
+            "median": 1951,
+            "min": 1769,
+            "max": 2153,
+            "total": 5873
+          }
+        },
+        "M03": {
+          "runs": 3,
+          "covered_criteria": 6,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 23.965,
+            "min": 22.309,
+            "max": 24.562,
+            "total": 70.836
+          },
+          "tool_calls": {
+            "median": 9,
+            "min": 9,
+            "max": 9,
+            "total": 27
+          },
+          "input_tokens": {
+            "median": 85942,
+            "min": 80032,
+            "max": 92517,
+            "total": 258491
+          },
+          "output_tokens": {
+            "median": 2204,
+            "min": 1909,
+            "max": 2303,
+            "total": 6416
+          }
+        },
+        "M04": {
+          "runs": 3,
+          "covered_criteria": 7,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 43.502,
+            "min": 38.893,
+            "max": 50.619,
+            "total": 133.014
+          },
+          "tool_calls": {
+            "median": 16,
+            "min": 14,
+            "max": 20,
+            "total": 50
+          },
+          "input_tokens": {
+            "median": 141043,
+            "min": 125147,
+            "max": 185678,
+            "total": 451868
+          },
+          "output_tokens": {
+            "median": 4260,
+            "min": 3678,
+            "max": 4894,
+            "total": 12832
+          }
+        },
+        "M05": {
+          "runs": 3,
+          "covered_criteria": 6,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 22.461,
+            "min": 19.053,
+            "max": 36.489,
+            "total": 78.003
+          },
+          "tool_calls": {
+            "median": 10,
+            "min": 7,
+            "max": 13,
+            "total": 30
+          },
+          "input_tokens": {
+            "median": 83394,
+            "min": 59544,
+            "max": 142519,
+            "total": 285457
+          },
+          "output_tokens": {
+            "median": 2021,
+            "min": 1886,
+            "max": 3441,
+            "total": 7348
+          }
+        },
+        "M06": {
+          "runs": 3,
+          "covered_criteria": 5,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 32.928,
+            "min": 31.128,
+            "max": 36.236,
+            "total": 100.292
+          },
+          "tool_calls": {
+            "median": 13,
+            "min": 11,
+            "max": 18,
+            "total": 42
+          },
+          "input_tokens": {
+            "median": 116772,
+            "min": 93135,
+            "max": 119261,
+            "total": 329168
+          },
+          "output_tokens": {
+            "median": 2972,
+            "min": 2819,
+            "max": 3496,
+            "total": 9287
+          }
+        },
+        "M07": {
+          "runs": 3,
+          "covered_criteria": 6,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 38.287,
+            "min": 21.808,
+            "max": 40.295,
+            "total": 100.39
+          },
+          "tool_calls": {
+            "median": 16,
+            "min": 11,
+            "max": 18,
+            "total": 45
+          },
+          "input_tokens": {
+            "median": 185389,
+            "min": 87340,
+            "max": 192061,
+            "total": 464790
+          },
+          "output_tokens": {
+            "median": 3064,
+            "min": 1918,
+            "max": 3921,
+            "total": 8903
+          }
+        },
+        "M08": {
+          "runs": 3,
+          "covered_criteria": 4,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 21.304,
+            "min": 20.752,
+            "max": 25.116,
+            "total": 67.172
+          },
+          "tool_calls": {
+            "median": 9,
+            "min": 9,
+            "max": 11,
+            "total": 29
+          },
+          "input_tokens": {
+            "median": 79127,
+            "min": 78284,
+            "max": 100073,
+            "total": 257484
+          },
+          "output_tokens": {
+            "median": 2210,
+            "min": 2059,
+            "max": 2381,
+            "total": 6650
+          }
+        },
+        "M09": {
+          "runs": 3,
+          "covered_criteria": 4,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 38.39,
+            "min": 36.736,
+            "max": 57.534,
+            "total": 132.66
+          },
+          "tool_calls": {
+            "median": 15,
+            "min": 13,
+            "max": 17,
+            "total": 45
+          },
+          "input_tokens": {
+            "median": 173035,
+            "min": 160709,
+            "max": 245064,
+            "total": 578808
+          },
+          "output_tokens": {
+            "median": 3550,
+            "min": 3264,
+            "max": 5175,
+            "total": 11989
+          }
+        },
+        "M10": {
+          "runs": 3,
+          "covered_criteria": 4,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 38.04,
+            "min": 35.384,
+            "max": 45.206,
+            "total": 118.63
+          },
+          "tool_calls": {
+            "median": 18,
+            "min": 14,
+            "max": 19,
+            "total": 51
+          },
+          "input_tokens": {
+            "median": 161881,
+            "min": 130162,
+            "max": 206705,
+            "total": 498748
+          },
+          "output_tokens": {
+            "median": 3954,
+            "min": 3519,
+            "max": 4074,
+            "total": 11547
+          }
+        }
+      }
+    },
+    "after": {
+      "sha": "359723b5546005d909fb54e8f8e238abac567c41",
+      "grading": "Manual frozen-key coverage by the implementing agent. Each compound criterion needs all its behavioral claims; code quotations count. Omissions and contradictions score zero. This is not blind or an independent fact-check.",
+      "all": {
+        "runs": 30,
+        "covered_criteria": 57,
+        "possible_criteria": 90,
+        "fully_covered_answers": 7,
+        "seconds": {
+          "median": 27.5455,
+          "min": 11.838,
+          "max": 57.179,
+          "total": 880.733
+        },
+        "tool_calls": {
+          "median": 12.0,
+          "min": 5,
+          "max": 22,
+          "total": 370
+        },
+        "input_tokens": {
+          "median": 99205.0,
+          "min": 42291,
+          "max": 303525,
+          "total": 3678927
+        },
+        "output_tokens": {
+          "median": 2456.5,
+          "min": 1196,
+          "max": 5138,
+          "total": 81796
+        }
+      },
+      "questions": {
+        "M01": {
+          "runs": 3,
+          "covered_criteria": 7,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 18.4,
+            "min": 17.847,
+            "max": 29.376,
+            "total": 65.623
+          },
+          "tool_calls": {
+            "median": 8,
+            "min": 7,
+            "max": 9,
+            "total": 24
+          },
+          "input_tokens": {
+            "median": 61966,
+            "min": 60095,
+            "max": 91520,
+            "total": 213581
+          },
+          "output_tokens": {
+            "median": 1822,
+            "min": 1505,
+            "max": 2713,
+            "total": 6040
+          }
+        },
+        "M02": {
+          "runs": 3,
+          "covered_criteria": 4,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 20.754,
+            "min": 20.754,
+            "max": 30.528,
+            "total": 72.036
+          },
+          "tool_calls": {
+            "median": 9,
+            "min": 8,
+            "max": 13,
+            "total": 30
+          },
+          "input_tokens": {
+            "median": 77851,
+            "min": 72182,
+            "max": 129713,
+            "total": 279746
+          },
+          "output_tokens": {
+            "median": 1752,
+            "min": 1672,
+            "max": 2273,
+            "total": 5697
+          }
+        },
+        "M03": {
+          "runs": 3,
+          "covered_criteria": 6,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 20.507,
+            "min": 18.051,
+            "max": 22.108,
+            "total": 60.666
+          },
+          "tool_calls": {
+            "median": 7,
+            "min": 7,
+            "max": 10,
+            "total": 24
+          },
+          "input_tokens": {
+            "median": 59811,
+            "min": 57481,
+            "max": 85308,
+            "total": 202600
+          },
+          "output_tokens": {
+            "median": 2146,
+            "min": 1764,
+            "max": 2200,
+            "total": 6110
+          }
+        },
+        "M04": {
+          "runs": 3,
+          "covered_criteria": 7,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 42.549,
+            "min": 39.943,
+            "max": 51.619,
+            "total": 134.111
+          },
+          "tool_calls": {
+            "median": 16,
+            "min": 16,
+            "max": 22,
+            "total": 54
+          },
+          "input_tokens": {
+            "median": 172691,
+            "min": 165749,
+            "max": 245065,
+            "total": 583505
+          },
+          "output_tokens": {
+            "median": 3700,
+            "min": 3451,
+            "max": 5138,
+            "total": 12289
+          }
+        },
+        "M05": {
+          "runs": 3,
+          "covered_criteria": 8,
+          "possible_criteria": 9,
+          "fully_covered_answers": 2,
+          "seconds": {
+            "median": 21.106,
+            "min": 19.954,
+            "max": 25.514,
+            "total": 66.574
+          },
+          "tool_calls": {
+            "median": 9,
+            "min": 9,
+            "max": 10,
+            "total": 28
+          },
+          "input_tokens": {
+            "median": 94438,
+            "min": 79217,
+            "max": 103972,
+            "total": 277627
+          },
+          "output_tokens": {
+            "median": 2033,
+            "min": 2023,
+            "max": 2397,
+            "total": 6453
+          }
+        },
+        "M06": {
+          "runs": 3,
+          "covered_criteria": 7,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 30.775,
+            "min": 30.274,
+            "max": 32.378,
+            "total": 93.42699999999999
+          },
+          "tool_calls": {
+            "median": 15,
+            "min": 14,
+            "max": 16,
+            "total": 45
+          },
+          "input_tokens": {
+            "median": 121944,
+            "min": 108427,
+            "max": 149254,
+            "total": 379625
+          },
+          "output_tokens": {
+            "median": 3154,
+            "min": 2791,
+            "max": 3313,
+            "total": 9258
+          }
+        },
+        "M07": {
+          "runs": 3,
+          "covered_criteria": 7,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 33.933,
+            "min": 25.715,
+            "max": 39.741,
+            "total": 99.389
+          },
+          "tool_calls": {
+            "median": 13,
+            "min": 12,
+            "max": 19,
+            "total": 44
+          },
+          "input_tokens": {
+            "median": 144297,
+            "min": 65615,
+            "max": 282323,
+            "total": 492235
+          },
+          "output_tokens": {
+            "median": 2703,
+            "min": 2516,
+            "max": 3702,
+            "total": 8921
+          }
+        },
+        "M08": {
+          "runs": 3,
+          "covered_criteria": 3,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 17.148,
+            "min": 11.838,
+            "max": 20.606,
+            "total": 49.592
+          },
+          "tool_calls": {
+            "median": 6,
+            "min": 5,
+            "max": 12,
+            "total": 23
+          },
+          "input_tokens": {
+            "median": 53850,
+            "min": 42291,
+            "max": 69236,
+            "total": 165377
+          },
+          "output_tokens": {
+            "median": 1610,
+            "min": 1196,
+            "max": 2149,
+            "total": 4955
+          }
+        },
+        "M09": {
+          "runs": 3,
+          "covered_criteria": 5,
+          "possible_criteria": 9,
+          "fully_covered_answers": 1,
+          "seconds": {
+            "median": 45.958,
+            "min": 31.025,
+            "max": 57.179,
+            "total": 134.162
+          },
+          "tool_calls": {
+            "median": 19,
+            "min": 14,
+            "max": 22,
+            "total": 55
+          },
+          "input_tokens": {
+            "median": 249570,
+            "min": 128804,
+            "max": 303525,
+            "total": 681899
+          },
+          "output_tokens": {
+            "median": 4011,
+            "min": 3088,
+            "max": 4919,
+            "total": 12018
+          }
+        },
+        "M10": {
+          "runs": 3,
+          "covered_criteria": 3,
+          "possible_criteria": 9,
+          "fully_covered_answers": 0,
+          "seconds": {
+            "median": 34.384,
+            "min": 24.564,
+            "max": 46.205,
+            "total": 105.15299999999999
+          },
+          "tool_calls": {
+            "median": 14,
+            "min": 9,
+            "max": 20,
+            "total": 43
+          },
+          "input_tokens": {
+            "median": 115135,
+            "min": 81813,
+            "max": 205784,
+            "total": 402732
+          },
+          "output_tokens": {
+            "median": 3390,
+            "min": 2049,
+            "max": 4616,
+            "total": 10055
+          }
+        }
+      }
+    }
+  }
+}
