@@ -26,7 +26,7 @@
   },
   "reviews": {
     "limits_refusals": "Code and exact-head corpus/focused evidence CLEAR by @sagebrush-daybreak2; full CI pending",
-    "behavior": "pending"
+    "behavior": "CLEAR by @sagebrush-astra on 0f17e46d: 31-function structural comparison, independent 58-case rerun, full 748-case record/source verification; full CI pending."
   },
   "post_validation_production_change": "None.",
   "measurement": {
@@ -37,5 +37,11 @@
     "primary_after_coverage": 73,
     "possible_criteria": 90,
     "grading": "Manual by implementing agent, not blind; compound frozen coverage rather than general factual accuracy."
+  },
+  "reviewer_probes": {
+    "structurally_equal_existing_functions": 31,
+    "selected_independent_cases": 58,
+    "identical": 58,
+    "all_recorded_cases_independently_compared": 748
   }
 }
