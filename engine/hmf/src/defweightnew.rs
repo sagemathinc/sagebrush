@@ -78,6 +78,7 @@ impl WorkBudget {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn spent(&self) -> u128 {
         self.spent
     }
