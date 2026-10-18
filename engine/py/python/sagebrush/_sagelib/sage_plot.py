@@ -8,7 +8,7 @@ notebook and save to .svg files.
 
 import math
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, render_svg, render_frame,
-                       render_animation, adaptive_sample, show as _show, save_svg, TAB10, describe_svg)
+                       render_animation, adaptive_sample, show as _show, save_svg, save_figure, TAB10, describe_svg)
 
 __all__ = ["Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d",
            "point", "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk",
@@ -26,9 +26,11 @@ def _split(options):
     return g, p
 
 
-def _tex(s):
-    s = str(s)
-    return s[1:-1] if len(s) > 1 and s[0] == "$" and s[-1] == "$" else s
+def _label(s):
+    # (a label, title or text as given: its $...$ parts are typeset when it
+    # is drawn, the rest stays as written, as Sage shows them through
+    # matplotlib; '\\pi(x)' without dollars is those six characters there too)
+    return str(s)
 
 
 class Graphics:
@@ -193,11 +195,11 @@ class Graphics:
         p = {}
         if o.get("axes_labels"):
             al = list(o["axes_labels"]) + [None, None]
-            p["xlabel"] = _tex(al[0]) if al[0] else None
-            p["ylabel"] = _tex(al[1]) if al[1] else None
+            p["xlabel"] = _label(al[0]) if al[0] else None
+            p["ylabel"] = _label(al[1]) if al[1] else None
         for k in ("title", "xmin", "xmax", "ymin", "ymax", "aspect_ratio", "frame", "axes", "legend_loc", "fit_aspect"):
             if o.get(k) is not None:
-                p[k] = _tex(o[k]) if k == "title" else o[k]
+                p[k] = _label(o[k]) if k == "title" else o[k]
         if o.get("gridlines"):
             p["grid"] = True
         if o.get("show_legend") is False:
@@ -249,13 +251,25 @@ class Graphics:
         _show(g, "plot")
 
     def save(self, filename, **options):
-        """Save the graphics as SVG (or the extension's format) to a file.
+        """Save the graphics to a file: SVG for a .svg name, PNG for .png
+        (figsize inches at dpi pixels per inch: 640 x 480 by default; Sage
+        crops its PNG to the drawing, so its sizes are a little smaller).
+        transparent=True leaves a PNG's background transparent.
 
         EXAMPLES::
 
-            sage: plot(sin(x), (x, 0, 1)).save('/tmp/sin.svg')  # not tested
+            sage: import os, tempfile; d = tempfile.mkdtemp()
+            sage: G = plot(sin(x), (x, 0, 1), axes_labels=['$x$', '$\\sin(x)$'])
+            sage: G.save(os.path.join(d, 'sin.png')); open(os.path.join(d, 'sin.png'), 'rb').read(4)
+            b'\\x89PNG'
+            sage: G.save(os.path.join(d, 'sin.jpg'))
+            Traceback (most recent call last):
+            ...
+            ValueError: allowed file extensions for images are '.eps', '.pdf', '.pgf', '.png', '.ps', '.sobj', '.svg'!
         """
-        save_svg(self._svg(**options), filename)
+        dpi = options.pop("dpi", self._options.get("dpi"))
+        transparent = options.pop("transparent", self._options.get("transparent", False))
+        save_figure(self._svg(**options), filename, dpi, transparent)
 
     def plot(self):
         """The graphics itself (so that plot(G) works).
@@ -549,7 +563,7 @@ def text(string, xy, **options):
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
          "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0),
          "background_color": p.pop("background_color", None)}
-    return Graphics([Text(_tex(string), xy[0], xy[1], **o)], **gopts)
+    return Graphics([Text(_label(string), xy[0], xy[1], **o)], **gopts)
 
 
 def polygon(points, **options):
@@ -689,14 +703,15 @@ class GraphicsArray:
         """
         _show(self, "plots")
 
-    def save(self, filename):
-        """Save the grid as SVG.
+    def save(self, filename, dpi=None, transparent=False):
+        """Save the grid: SVG for a .svg name, PNG for .png (see
+        Graphics.save).
 
         EXAMPLES::
 
             sage: graphics_array([point((0, 0))]).save('/tmp/a.svg')  # not tested
         """
-        save_svg(self._svg(), filename)
+        save_figure(self._svg(), filename, dpi, transparent)
 
 
 def graphics_array(array, nrows=None, ncols=None, figsize=None):
