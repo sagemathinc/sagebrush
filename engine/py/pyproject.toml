@@ -22,6 +22,7 @@ license = "(MIT OR Apache-2.0) AND Artistic-2.0"
 license-files = ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-Artistic-2.0.txt", "THIRD-PARTY-NOTICES.txt"]
 
 [project.scripts]
+sagebrush = "sagebrush.cli:main"
 sagebrush-mcp = "sagebrush.mcp_server:main"
 
 [project.urls]
