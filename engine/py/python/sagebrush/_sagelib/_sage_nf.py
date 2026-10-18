@@ -5,7 +5,17 @@ MIT/Apache).  Printed as Sage prints them.  Class groups and regulators
 assume GRH (as PARI's do, and Sage's with proof=False).  proof=True asks
 for a proven result: the engine's unconditional certificate within its
 limits (see class_group), otherwise NotImplementedError rather than the
-GRH value."""
+GRH value.
+
+Vocabulary: h is the class number, cyc the cyclic invariants (largest first),
+w the roots-of-unity count, and regulator a decimal string from the engine.
+The low-level wrappers live in sagebrush.nf; this module selects proof policy,
+caches results, and presents Sage-style field objects."""
+
+# Algorithm crossover for the existing quadratic shortcut; not a proof bound.
+_QUADRATIC_SHORTCUT_DISCRIMINANT = 1000
+# Keep independent reduced-form enumeration within its existing work limit.
+_QUADRATIC_FORMS_CHECK_LIMIT = 10**5
 
 from fractions import Fraction as _F
 import functools as _ft
@@ -22,8 +32,8 @@ def _nf():
 
 
 # proof=True asks for a proven result (the engine's certificate), else
-# NotImplementedError, never the GRH-conditional value.  (proof=None and
-# proof=False give the engine's result, which assumes GRH.)
+# NotImplementedError, never the GRH-conditional value. proof=None also
+# refuses an uncertified stopping estimate; proof=False explicitly accepts it.
 
 
 def _count_reduced_forms(D):
@@ -127,8 +137,7 @@ def _int_coeffs(f):
 
 
 def _exact_int(x, what):
-    """x as an int, refusing a non-integer (QQ(7)/2 became 3, a^(3/2) became
-    a: the systematic review's NFD-F3)."""
+    """Convert exactly: refuse fractional coefficients and exponents."""
     q = _F(x)
     if q.denominator != 1:
         raise TypeError("%s must be an integer, not %s" % (what, x))
@@ -544,10 +553,9 @@ class NumberField_absolute:
     def _bnfdata(self):
         if self._bnf is None:
             self._bnf = None
-            if self._n == 2 and abs(self.discriminant()) >= 1000:
-                # the quadratic algorithms are much faster (their
-                # certificate status kept: the systematic review's ASR-F2);
-                # should they fail, the general algorithm
+            if self._n == 2 and abs(self.discriminant()) >= _QUADRATIC_SHORTCUT_DISCRIMINANT:
+                # Prefer the faster quadratic algorithms, retaining their
+                # certificate status. Fall back to the general algorithm on error.
                 try:
                     self._bnf = self._quadratic_bnfdata()
                 except (ValueError, RuntimeError):
@@ -558,8 +566,7 @@ class NumberField_absolute:
 
     def _quadratic_bnfdata(self):
         d = _nf().quadratic_class_group_data(self.discriminant())
-        # (and what the discriminant itself assumes: probable primes in
-        # the maximal order, the systematic review's R2-NFD-F1)
+        # Include the maximal order's probable-prime assumptions as well.
         return {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
                 "certified": d.get("certified", False),
                 "assumes": list(d.get("assumes", ["GRH"])) + list(self._nfdata().get("assumes", []))}
@@ -595,6 +602,12 @@ class NumberField_absolute:
         ran.  The regulator is not cross-checked.  (Tests of this routing,
         the refusals and the cross-checks: test/sage-proof.test.ts.)
         """
+        result = self._unconditional_bnf_data(what)
+        self._check_quadratic_bnf(result)
+        return result
+
+    def _unconditional_bnf_data(self, what):
+        """Cache the unconditional result or its refusal message, not a GRH result."""
         if self._nfdata().get("assumes"):
             # the discriminant (the maximal order) rests on probable primes
             raise NotImplementedError("%s with proof=True: the maximal order assumes %s" % (what, "; ".join(self._nfdata()["assumes"])))
@@ -607,12 +620,16 @@ class NumberField_absolute:
             self._bnf_proof = p
         if isinstance(p, str):
             raise NotImplementedError("%s with proof=True: %s" % (what, p))
+        return p
+
+    def _check_quadratic_bnf(self, p):
+        """Record independent class-number checks once; the regulator is not checked."""
         if getattr(self, "_bnf_proof_check", None) is None:
             done = []
             if self._n == 2:
                 D = self.discriminant()
                 g = None
-                if abs(D) >= 1000:
+                if abs(D) >= _QUADRATIC_SHORTCUT_DISCRIMINANT:
                     try:
                         g = self._quadratic_bnfdata()
                     except (ValueError, RuntimeError):
@@ -624,16 +641,15 @@ class NumberField_absolute:
                     if int(g["h"]) != p["h"] or cyc != p["cyc"]:
                         raise RuntimeError("the proven class group %s disagrees with the quadratic algorithms' %s" % (p["cyc"], cyc))
                     done.append("quadratic")
-                elif 0 < D <= 10**5:
+                elif 0 < D <= _QUADRATIC_FORMS_CHECK_LIMIT:
                     if _count_real_classes(D) != p["h"]:
                         raise RuntimeError("the proven class number %d is not the number of classes of reduced forms" % p["h"])
                     done.append("real forms")
-                if D < 0 and -D <= 10**5:
+                if D < 0 and -D <= _QUADRATIC_FORMS_CHECK_LIMIT:
                     if _count_reduced_forms(D) != p["h"]:
                         raise RuntimeError("the proven class number %d is not the number of reduced forms" % p["h"])
                     done.append("reduced forms")
             self._bnf_proof_check = tuple(done)
-        return p
 
     def class_group(self, proof=None, names="c"):
         """The class group, assuming GRH.
@@ -978,9 +994,8 @@ class NumberFieldElement:
         if getattr(other, "_is_ffmatrix", False):
             return NotImplemented  # (the matrix compares: a == A as A == a)
         # elements of equal fields compare by coordinates; a nonconstant
-        # polynomial is not a field element (x^2 == K(2) was True through the
-        # conversion K(x^2), with different hashes: the second review's
-        # R2-NFD-F3; K(x^2) converts explicitly)
+        # polynomial is not implicitly a field element. Explicit K(x^2)
+        # conversion is allowed, but equality must preserve matching hashes.
         if isinstance(other, NumberFieldElement):
             if other._K is self._K or other._K == self._K:
                 return other._c == self._c
@@ -1560,9 +1575,8 @@ class PrimeIdeal:
         return self.gens_two() if self._f != self._K.degree() else (self._K(self._p),)
 
     def __eq__(self, other):
-        # (in the same field: P == L.ideal(3) for another field L was True;
-        # an inert prime hashes as the integer ideal it equals: the
-        # systematic review's NFD-F2)
+        # Ideals compare only in the same field. An inert prime hashes
+        # as the integer ideal it equals.
         if isinstance(other, NumberFieldIdeal):
             return other._K is self._K and self._f == self._K.degree() and self._e == 1 and other._n == self._p
         return isinstance(other, PrimeIdeal) and other._K is self._K and (other._p, other._e, other._f, other._pi) == (self._p, self._e, self._f, self._pi)

@@ -17,8 +17,7 @@ from ._engine import call
 
 
 def _ints(f):
-    # integers exactly (a coefficient -5/2 became -2: the systematic
-    # review's NFD-F3)
+    # Reject fractional coefficients before encoding; int() would truncate them.
     from fractions import Fraction
     out = []
     for c in f:
@@ -72,11 +71,13 @@ def primes_above(f, p):
 
 def bnf(f):
     """Class group and regulator of Q[x]/(f), assuming GRH: dict with h,
-    cyc (invariants, largest first), regulator (a decimal string, its
-    digits correct), w, r1, r2, disc, certified and assumes (what the
-    result depends on: ["GRH"] when certified, i.e. h* R* is below twice a
-    proven lower bound for h R (Belabas and Friedman); otherwise also the
-    uncertified estimate)."""
+    cyc (invariants, largest first), regulator (a decimal string with
+    proven digits when certified), w, r1, r2, disc, certified and assumes (what the
+    result depends on). The analytic certificate proves h and R under GRH
+    by placing h* R* below twice a proven lower bound for h R (Belabas and
+    Friedman). An uncertified result also assumes the stopping estimate.
+    Even when certified, assumes can additionally record incomplete roots
+    of unity and probable-prime assumptions in the maximal order."""
     r = call("bnf", f=_ints(f))
     r["h"] = int(r["h"])
     r["disc"] = int(r["disc"])
