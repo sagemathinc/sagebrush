@@ -178,7 +178,8 @@ def structured():
         call("number_field", {"polynomial": bad}, "invalid_arguments")
     for bad in ["23; __sagebrush_data__ = {}", "23.5", "1e3", None]:
         call("newforms", {"level": bad}, "invalid_arguments")
-    assert call("number_field", {"polynomial": "x^2/4 + 23/4"})["result"]["class_group"]["value"]["order"] == 3
+    # (rational coefficients parse, and the engine refuses them: integral only)
+    assert "integer coefficients" in call("number_field", {"polynomial": "x^2/4 + 23/4"}, "unimplemented")["error"]["message"]
     # ... and user code cannot reach the shortcut tools' session: a patched
     # is_prime in the sage tool's session leaves factor's status honest
     call("sage", {"code": "import sagebrush.sage as S\nS.is_prime = lambda *a, **k: True\nS.is_prime(2^127 - 1, proof=True)"})
