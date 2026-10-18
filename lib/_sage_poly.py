@@ -1342,7 +1342,10 @@ class Polynomial:
             (False, False, True, True)
         """
         if self == 0:
-            return False
+            # (as Sage: over a field the zero polynomial is squarefree, over
+            # ZZ it is not)
+            base = self._ring._base
+            return base is not ZZ and bool(getattr(base, "is_field", lambda: False)())
         if self._ring._base is ZZ:
             # over ZZ the content counts: 4x = 2^2 x is not squarefree (the
             # second review's R2-POL-F3); over a field it is a unit

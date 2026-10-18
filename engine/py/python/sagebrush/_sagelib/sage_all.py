@@ -2327,7 +2327,20 @@ def inverse_mod(a, m):
 
         sage: inverse_mod(3, 7), inverse_mod(17, 3120)
         (5, 2753)
+
+    For integers, as Sage: in 0, ..., |m| - 1 for a negative modulus too,
+    0 modulo +-1, ZeroDivisionError when there is none::
+
+        sage: inverse_mod(3, -7), inverse_mod(5, -1)
+        (5, 0)
     """
+    if isinstance(a, int) and isinstance(m, int):
+        if abs(m) == 1:
+            return 0
+        try:
+            return pow(a, -1, abs(m))
+        except ValueError:
+            raise ZeroDivisionError("inverse of Mod(%s, %s) does not exist" % (a, m)) from None
     return pow(a, -1, m)
 
 
@@ -2460,14 +2473,34 @@ def crt(a, b, m=None, n=None):
             raise ValueError("arguments to CRT must be lists of the same length")
     else:
         rs, ms = [a, b], [m, n]
+    if not all(isinstance(v, int) for v in rs + ms):
+        x, M = 0, 1
+        for r, mi in zip(rs, ms):
+            g, s, _ = xgcd(M, mi)
+            if (r - x) % g:
+                raise ValueError("no solution to crt problem since gcd(%s,%s) does not divide %s-%s" % (M, mi, x, r))
+            x += M * ((r - x) // g * s % (mi // g))
+            M = M * mi // g
+            x %= M
+        return x
+    # (integers, as Sage: the moduli by their absolute values, the solution
+    # in 0, ..., lcm - 1: crt(1, 2, -3, 5) is 7; a zero modulus is an exact
+    # congruence; the error names the given moduli and residues)
     x, M = 0, 1
     for r, mi in zip(rs, ms):
-        g, s, _ = xgcd(M, mi)
-        if (r - x) % g:
+        A = abs(mi)
+        g = _math.gcd(M, A)
+        if (r - x) % g if g else r != x:
+            if m is not None:
+                raise ValueError("no solution to crt problem since gcd(%s,%s) does not divide %s-%s" % (m, n, a, b))
             raise ValueError("no solution to crt problem since gcd(%s,%s) does not divide %s-%s" % (M, mi, x, r))
-        x += M * ((r - x) // g * s % (mi // g))
-        M = M * mi // g
-        x %= M
+        if A == 0:
+            x, M = r, 0
+        elif M:
+            _, s, _ = xgcd(M, A)
+            x += M * ((r - x) // g * s % (A // g))
+            M = M * A // g
+            x %= M
     return x
 
 
