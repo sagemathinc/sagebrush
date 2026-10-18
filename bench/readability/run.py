@@ -34,7 +34,7 @@ def snapshot(repo, sha, paths, destination):
         text=True).splitlines()
     manifest = {}
     for name in names:
-        if not name.endswith((".rs", ".py")):
+        if not name.endswith((".rs", ".py", ".ts", ".tsx")):
             continue
         data = subprocess.check_output(["git", "show", f"{sha}:{name}"], cwd=repo)
         target = destination / name
