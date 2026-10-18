@@ -1,0 +1,50 @@
+{
+  "before": {
+    "runs": 30,
+    "revisions": [
+      "0f9d473635875c280cd5018bed179d0a555c2114"
+    ],
+    "tools": {
+      "Glob": 117,
+      "Read": 98,
+      "Grep": 109
+    },
+    "problems": [],
+    "models": [
+      "claude-haiku-4-5-20251001"
+    ],
+    "label": "primary"
+  },
+  "after": {
+    "runs": 30,
+    "revisions": [
+      "10ca2d8bd41f6888313e6d2d998b0421b7f7bc70"
+    ],
+    "tools": {
+      "Glob": 112,
+      "Read": 82,
+      "Grep": 94
+    },
+    "problems": [],
+    "models": [
+      "claude-haiku-4-5-20251001"
+    ],
+    "label": "superseded, not in primary comparison"
+  },
+  "after-final": {
+    "runs": 30,
+    "revisions": [
+      "2fb25571e80d2355e8eedff6114b9c2a02de0634"
+    ],
+    "tools": {
+      "Glob": 110,
+      "Read": 88,
+      "Grep": 103
+    },
+    "problems": [],
+    "models": [
+      "claude-haiku-4-5-20251001"
+    ],
+    "label": "primary"
+  }
+}
