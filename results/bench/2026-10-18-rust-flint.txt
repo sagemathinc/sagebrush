@@ -1,51 +1,53 @@
 # cargo run --release -p sagebrush-oracle --example matbench -- 10 30 100
 # cargo run --release -p sagebrush-oracle --example polybench
-# at 7658b274 on sagebrush-2 (one core of an AMD EPYC 7B13, 48 cores, load below 1),
-# FLINT 3.6.0 linked statically (SAGEBRUSH_FLINT_PREFIX), OPENBLAS_NUM_THREADS=1
-BEFORE:  19:33:00 up  3:05,  2 users,  load average: 0.88, 0.99, 1.16
+# at c7eea749 on sagebrush-2 (one core of an AMD EPYC 7B13, 48 cores, otherwise idle),
+# FLINT 3.6.0 linked statically (SAGEBRUSH_FLINT_PREFIX), OPENBLAS_NUM_THREADS=1.
+# Only FLINT's call is timed: its results are converted to BigInt after the timing
+# (this replaces the 7658b274 run, which timed FLINT together with that conversion).
+BEFORE:  19:55:33 up  3:27,  2 users,  load average: 0.99, 1.66, 2.17
 op             n   bits    sagebrush        flint   ratio
-det           10      7      0.011ms      0.003ms    3.73
-solve         10      7      0.031ms      0.008ms    3.93
-inverse       10      7      0.036ms      0.039ms    0.93
-charpoly      10      7      0.021ms      0.017ms    1.23
-rref          10      7      0.030ms      0.005ms    6.01
-det           10     41      0.027ms      0.017ms    1.58
-solve         10     41      0.179ms      0.031ms    5.83
-inverse       10     41      0.089ms      0.120ms    0.74
-charpoly      10     41      0.052ms      0.048ms    1.09
-rref          10     41      0.061ms      0.029ms    2.14
-det           30      7      0.162ms      0.105ms    1.54
-solve         30      7      0.252ms      0.194ms    1.30
-inverse       30      7      0.687ms      3.062ms    0.22
-charpoly      30      7      0.436ms      0.292ms    1.49
-rref          30      7      0.356ms      0.446ms    0.80
-det           30     41      0.573ms      0.521ms    1.10
-solve         30     41      1.367ms      0.890ms    1.54
-inverse       30     41      2.834ms     15.408ms    0.18
-charpoly      30     41      1.760ms      1.528ms    1.15
-rref          30     41      0.938ms      1.261ms    0.74
-det          100      7      6.106ms      3.662ms    1.67
-solve        100      7      4.202ms      3.691ms    1.14
-inverse      100      7     43.367ms    167.683ms    0.26
-charpoly     100      7     37.671ms     25.120ms    1.50
-rref         100      7     16.169ms     23.568ms    0.69
-det          100     41     22.765ms      9.798ms    2.32
-solve        100     41     19.223ms     14.215ms    1.35
-inverse      100     41    232.697ms   1407.773ms    0.17
-charpoly     100     41    167.687ms    112.721ms    1.49
-rref         100     41     54.581ms    169.110ms    0.32
+det           10      7      0.010ms      0.003ms    3.96
+solve         10      7      0.030ms      0.005ms    5.52
+inverse       10      7      0.035ms      0.026ms    1.38
+charpoly      10      7      0.020ms      0.014ms    1.42
+rref          10      7      0.030ms      0.005ms    6.24
+det           10     41      0.026ms      0.016ms    1.60
+solve         10     41      0.180ms      0.024ms    7.59
+inverse       10     41      0.088ms      0.069ms    1.27
+charpoly      10     41      0.052ms      0.041ms    1.25
+rref          10     41      0.058ms      0.027ms    2.15
+det           30      7      0.156ms      0.103ms    1.51
+solve         30      7      0.248ms      0.176ms    1.41
+inverse       30      7      0.673ms      2.743ms    0.25
+charpoly      30      7      0.435ms      0.273ms    1.59
+rref          30      7      0.352ms      0.446ms    0.79
+det           30     41      0.555ms      0.508ms    1.09
+solve         30     41      1.346ms      0.800ms    1.68
+inverse       30     41      2.920ms     14.114ms    0.21
+charpoly      30     41      1.725ms      1.448ms    1.19
+rref          30     41      0.949ms      1.246ms    0.76
+det          100      7      6.112ms      3.601ms    1.70
+solve        100      7      4.265ms      3.414ms    1.25
+inverse      100      7     44.166ms    156.554ms    0.28
+charpoly     100      7     36.403ms     24.615ms    1.48
+rref         100      7     16.607ms     23.479ms    0.71
+det          100     41     22.587ms      9.952ms    2.27
+solve        100     41     18.563ms     13.000ms    1.43
+inverse      100     41    247.773ms   1340.066ms    0.18
+charpoly     100     41    168.196ms    111.790ms    1.50
+rref         100     41     54.943ms    165.584ms    0.33
 op        len   bits    sagebrush        flint   ratio
-mul        10     10      0.001ms      0.000ms    7.42
-gcd        10     10      0.004ms      0.002ms    2.64
-mul       100     10      0.011ms      0.004ms    2.73
-gcd       100     10      0.074ms      0.014ms    5.25
-mul      1000     10      0.104ms      0.064ms    1.62
-gcd      1000     10      1.885ms      0.421ms    4.48
-mul     10000     10      2.184ms      1.326ms    1.65
-gcd     10000     10    141.982ms     31.761ms    4.47
-mul       100   1000      0.951ms      0.197ms    4.82
-gcd       100   1000      5.567ms      1.494ms    3.73
-mul      1000   1000      9.146ms      2.507ms    3.65
-gcd      1000   1000     99.804ms     33.914ms    2.94
-mul    100000     20     22.371ms     23.442ms    0.95
-AFTER:  19:33:28 up  3:05,  2 users,  load average: 0.92, 0.99, 1.15
+mul        10     10      0.001ms      0.000ms    7.55
+gcd        10     10      0.004ms      0.002ms    2.67
+mul       100     10      0.010ms      0.004ms    2.74
+gcd       100     10      0.072ms      0.014ms    5.17
+mul      1000     10      0.104ms      0.063ms    1.64
+gcd      1000     10      1.871ms      0.410ms    4.56
+mul     10000     10      2.181ms      1.334ms    1.64
+gcd     10000     10    136.660ms     30.948ms    4.42
+mul       100   1000      0.968ms      0.190ms    5.09
+gcd       100   1000      5.595ms      1.494ms    3.74
+mul      1000   1000      8.940ms      2.474ms    3.61
+gcd      1000   1000     98.621ms     32.740ms    3.01
+mul    100000     20     22.168ms     23.597ms    0.94
+AFTER:  19:56:01 up  3:28,  2 users,  load average: 0.99, 1.59, 2.13
