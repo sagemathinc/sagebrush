@@ -7,7 +7,21 @@
 //     the time until the interpreter is ready and print(1 + 1) has run.
 //   - numpy: what importing it adds, and how long that takes.
 //   - Speed: a few workloads, each run 5 times after a warm-up run in the
-//     same session (the median, in ms, timed inside the page).  Every
+//     same session (the median, in ms, timed inside the page).
+//   - Memory (Linux): the private memory (USS) of the page's renderer
+//     process, where the page, Sagebrush's Web Worker, their JavaScript
+//     heaps and Pyodide's WebAssembly memory all live (the largest renderer
+//     started after about:blank; the browser's other renderers, about the
+//     same for both engines, are recorded but not counted): on about:blank, after
+//     print(1 + 1), after import numpy, and for each workload its peak
+//     (sampled every 50 ms from /proc while the workload's setup and
+//     warm-up execute; not while it is timed, since reading a process's
+//     memory map slows its allocations) and its level after a forced garbage
+//     collection; with each engine's JavaScript heap (CDP's
+//     Runtime.getHeapUsage, of the page and of Sagebrush's worker) and the
+//     size of Pyodide's WebAssembly memory (which never shrinks); then 30 s
+//     idle (10 s, a forced collection, 20 s), and a timeline of the whole
+//     session, one sample per 250 ms, with its phases marked.  Every
 //     execution of every workload, warm-up and timed, in every cold start
 //     of both engines, must print what Sagebrush's first warm-up printed,
 //     and every timing must be a finite number; else the run fails.
@@ -33,7 +47,7 @@
 // ones both run the same way, which says nothing about code that only
 // CPython runs.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
@@ -63,6 +77,10 @@ function check(results, names, reps) {
     }
   for (const w of names) {
     const want = results.Sagebrush[0].speed?.[w]?.out;
+    // (a setup's output, where there is one, the same everywhere too)
+    const wantSetup = results.Sagebrush[0].speed?.[w]?.setup;
+    if (wantSetup !== undefined && (wantSetup === "" || /ERROR|Traceback/.test(wantSetup))) bad.push(`${w}: Sagebrush's setup printed ${JSON.stringify(wantSetup)}`);
+    for (const engine of engines) results[engine].forEach((r, i) => { if (r.speed?.[w]?.setup !== wantSetup) bad.push(`${w}: ${engine} cold start ${i + 1} setup printed ${JSON.stringify(r.speed?.[w]?.setup)}`); });
     if (typeof want !== "string" || want === "" || /ERROR|Traceback/.test(want)) bad.push(`${w}: Sagebrush printed ${JSON.stringify(want)}`);
     for (const engine of engines)
       results[engine].forEach((r, i) => {
@@ -86,6 +104,20 @@ if (!PYODIDE || !existsSync(join(PYODIDE, "pyodide.mjs"))) throw new Error("--py
 const RUNS = Number(opt("--runs") ?? 3);
 const REPS = 5;
 
+// (two operands of about `digits` decimal digits, made from hex strings
+// once before the warm-up run, untimed (in both engines that takes longer
+// than the product: a hex string's conversion is linear, but the strings
+// themselves must be built); then only their product is timed, and its size
+// and a residue printed, both linear)
+const bigMul = (digits) => {
+  const hex = Math.ceil((digits * Math.log2(10)) / 4);
+  return {
+    setup: `h = ('0123456789abcdef' * ${Math.ceil(hex / 16) + 1})[:${hex}]\na = int('1' + h, 16)\nb = int('f' + h[::-1], 16)\nprint(a.bit_length(), b.bit_length())`,
+    code: "c = a * b\nprint(c.bit_length(), c % 1000003)",
+  };
+};
+// (each a program, or { setup, code }: setup run once before the warm-up,
+// untimed, its output checked as the runs' are)
 const WORKLOADS = {
   "loop": "s = 0\nfor i in range(3000000):\n    s += i * i\nprint(s)",
   "recursion": "def fib(n):\n    return n if n < 2 else fib(n - 1) + fib(n - 2)\nprint(fib(25))",
@@ -93,10 +125,32 @@ const WORKLOADS = {
   // (bit_length and a remainder: str() of a number past 4300 digits is a
   // ValueError in CPython 3.11+ and in Sagebrush alike)
   "big integers": "import math\nx = math.factorial(20000)\nprint(x.bit_length(), x % 1000003)",
+  "big multiply, 10^6 digits": bigMul(10 ** 6),
+  "big multiply, 10^7 digits": bigMul(10 ** 7),
   "sieve": "n = 2000000\ns = bytearray([1]) * (n + 1)\ns[0] = s[1] = 0\nfor p in range(2, int(n ** 0.5) + 1):\n    if s[p]:\n        s[p * p::p] = bytes(len(range(p * p, n + 1, p)))\nprint(sum(s))",
   "json": "import json\nx = [{'a': i, 'b': [i, str(i), i / 2], 'c': {'d': None, 'e': True}} for i in range(30000)]\ny = json.loads(json.dumps(x))\nprint(len(y), y[-1]['b'])",
   "numpy matmul": "import numpy as np\nA = np.arange(300 * 300, dtype=float).reshape(300, 300) % 7\nprint(float((A @ A).sum()))",
   "numpy elementwise": "import numpy as np\nx = np.linspace(0, 1, 1000000)\nprint(round(float(np.sum(np.sin(x) * x + x ** 2)), 6))",
+  // Adversarial rows, where Sagebrush's design should be weakest.
+  // (2,000 distinct small functions, each compiled by exec() and called once:
+  // Sagebrush compiles Python to JavaScript that V8 then compiles, where
+  // CPython's bytecode compiler is cheap; each run's sources differ, by a
+  // comment, so that no run reuses an earlier one's compilation)
+  "exec, 2000 functions": {
+    setup: "run = [0]\nprint('ready')",
+    code: "run[0] += 1\ns = 0\nfor i in range(2000):\n    ns = {}\n    exec(f'def f(x):  # {run[0]}\\n    y = x * {i} + {i % 7}\\n    return y - {i % 3}\\n', ns)\n    s += ns['f'](i)\nprint(s)",
+  },
+  // (one call site and one attribute load seeing 50 classes with different
+  // instance layouts, so that V8's inline caches there are megamorphic; the
+  // monomorphic row is the same loop over instances of one class)
+  "megamorphic, 50 classes": {
+    setup: "src = ''\nfor k in range(50):\n    fields = ''.join(f'        self.p{j}_{k} = {j}\\n' for j in range(k % 8))\n    src += f'class C{k}:\\n    def __init__(self, v):\\n{fields}        self.v = v\\n    def get(self):\\n        return self.v + {k}\\n'\nexec(src)\nobjs = [globals()[f'C{i % 50}'](i) for i in range(200000)]\nprint(len(objs), len({type(o) for o in objs}))",
+    code: "s = 0\nfor o in objs:\n    s += o.get() + o.v\nprint(s)",
+  },
+  "monomorphic, 1 class": {
+    setup: "class C:\n    def __init__(self, v):\n        self.v = v\n    def get(self):\n        return self.v + 7\nobjs1 = [C(i) for i in range(200000)]\nprint(len(objs1))",
+    code: "s = 0\nfor o in objs1:\n    s += o.get() + o.v\nprint(s)",
+  },
 };
 
 // (--only a,b: just the workloads whose names contain one of these)
@@ -120,6 +174,7 @@ const { loadPyodide } = await import("/py/pyodide.mjs");
 const py = await loadPyodide({ indexURL: "/py/" });
 let out = "";
 py.setStdout({ batched: (s) => { out += s + "\\n"; } });
+window.wasmBytes = () => py._module.HEAP8.buffer.byteLength;
 window.run = async (code) => { const t = performance.now(); out = ""; try { await py.loadPackagesFromImports(code, { messageCallback: () => {} }); py.runPython(code); } catch (e) { out += "ERROR " + e; } return { out, ms: performance.now() - t }; };
 window.readyMs = performance.now() - t0;
 </script>`,
@@ -155,9 +210,92 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
+// The browser's renderer processes (its descendants whose command line has
+// --type=renderer), and their private memory in bytes, from /proc
+function rendererPids(root) {
+  const kids = new Map();
+  for (const d of readdirSync("/proc")) {
+    if (!/^\d+$/.test(d)) continue;
+    try {
+      const stat = readFileSync(`/proc/${d}/stat`, "utf8");
+      const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+      if (!kids.has(ppid)) kids.set(ppid, []);
+      kids.get(ppid).push(Number(d));
+    } catch {}
+  }
+  const out = [], todo = [root];
+  while (todo.length) {
+    const p = todo.pop();
+    for (const c of kids.get(p) ?? []) {
+      todo.push(c);
+      try { if (readFileSync(`/proc/${c}/cmdline`, "utf8").includes("--type=renderer")) out.push(c); } catch {}
+    }
+  }
+  return out;
+}
+// (private memory, USS: pages no other process maps, which is what a
+// process adds; RSS would count the browser's shared code in every
+// renderer again)
+function uss(pid) {
+  try {
+    const t = readFileSync(`/proc/${pid}/smaps_rollup`, "utf8");
+    return 1024 * (Number(/Private_Clean:\s+(\d+)/.exec(t)?.[1] ?? 0) + Number(/Private_Dirty:\s+(\d+)/.exec(t)?.[1] ?? 0));
+  } catch { return 0; }
+}
+function rss(pids) {
+  let b = 0;
+  for (const p of pids) b += uss(p);
+  return b;
+}
+// each renderer: its pid, private and resident memory, and its renderer client id
+function detail(pids) {
+  return pids.map((p) => {
+    let rssKb = 0, id = "";
+    try { rssKb = Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${p}/status`, "utf8"))?.[1] ?? 0); id = /--renderer-client-id=(\d+)/.exec(readFileSync(`/proc/${p}/cmdline`, "utf8"))?.[1] ?? ""; } catch {}
+    return { pid: p, uss: uss(p), rss: rssKb * 1024, client: id };
+  });
+}
+// the renderers' private memory every 50 ms (their list refreshed every 500 ms): the peak since reset()
+// (once page() has named the page's renderer, only it: the browser's other
+// renderers hold about the same memory for either engine)
+function sampler(root) {
+  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0, last = -Infinity, paused = false;
+  const t0 = Date.now(), timeline = [], marks = []; // [ms, bytes]; { t, what, wasm? }
+  const tick = () => {
+    if (paused) return 0;
+    if (!pagePid && ++k % 10 === 0) pids = rendererPids(root);
+    const v = rss(pagePid ? [pagePid] : pids), t = Date.now() - t0;
+    if (v > peak) peak = v;
+    // (the timeline: one sample per 250 ms, of the page's renderer once known)
+    if (pagePid && t - last >= 250) { timeline.push([t, v]); last = t; }
+    return v;
+  };
+  const h = setInterval(tick, 50);
+  return {
+    now: () => { if (!pagePid) pids = rendererPids(root); return rss(pagePid ? [pagePid] : pids); },
+    all: () => rss(rendererPids(root)),
+    // the page's renderer: the largest of those started after about:blank
+    page: (before) => { const d = detail(rendererPids(root)).filter((x) => !before.includes(x.pid)).sort((a, b) => b.uss - a.uss); pagePid = d[0]?.pid ?? 0; return pagePid; },
+    reset: () => { if (!pagePid) pids = rendererPids(root); peak = 0; tick(); },
+    peak: () => (tick(), peak),
+    processes: () => rendererPids(root).length,
+    detail: () => detail(rendererPids(root)),
+    mark: (what, wasm) => marks.push({ t: Date.now() - t0, what, ...(wasm === undefined ? {} : { wasm }) }),
+    timeline: () => ({ samples: timeline, marks }),
+    stop: () => clearInterval(h),
+    // (reading a process's smaps_rollup walks its page tables under its
+    // memory-map lock, which slows the page's own allocations: so no
+    // sampling while a workload is timed)
+    pause: () => { paused = true; },
+    resume: () => { paused = false; },
+  };
+}
+
 async function session(page) {
   const profile = mkdtempSync(join(tmpdir(), "sb-bench-"));
-  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  // (no spare renderer kept ready: only the page's own renderer counted)
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--disable-features=SpareRendererForSitePerProcess", "about:blank"], { stdio: "ignore" });
+  let mem;
   try {
     const port = await devtoolsPort(profile);
     let targets;
@@ -166,8 +304,34 @@ async function session(page) {
     await new Promise((r) => (ws.onopen = r));
     let n = 0;
     const waiting = new Map();
-    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-    const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+    // (Sagebrush's worker attached too, for its heap: its CDP session)
+    let worker;
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") worker = m.params.sessionId;
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    };
+    const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+    await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    mem = sampler(chrome.pid);
+    // the JavaScript heaps (page, worker: used, total and ArrayBuffer backing
+    // stores where CDP reports them) and Pyodide's WebAssembly memory
+    const heaps = async () => {
+      const h = {};
+      for (const [k, sid] of [["page", undefined], ["worker", worker]]) {
+        if (k === "worker" && !sid) continue;
+        const r = await send("Runtime.getHeapUsage", {}, sid);
+        h[k] = { used: r?.usedSize, total: r?.totalSize, backing: r?.backingStorageSize ?? null };
+      }
+      h.wasm = await ev("window.wasmBytes ? window.wasmBytes() : null");
+      return h;
+    };
+    const gc = async () => {
+      await send("HeapProfiler.collectGarbage");
+      if (worker) await send("HeapProfiler.collectGarbage", {}, worker);
+      await sleep(500);
+    };
+    const blankRss = mem.now(), blankPids = rendererPids(chrome.pid);
     // (each step bounded: a run that never ends is reported, not waited for)
     const ev = async (expression, ms = 180000) => {
       const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), sleep(ms).then(() => ({ timedOut: true }))]);
@@ -187,25 +351,68 @@ async function session(page) {
     const first = await ev("run('print(1 + 1)')");
     step("first result");
     const cold = { readyMs: Math.round(await ev("window.readyMs")), firstResultMs: Date.now() - t0, out: first?.out?.trim(), ...take() };
+    await gc();
+    const pagePid = mem.page(blankPids);
+    const mark = async (what) => mem.mark(what, await ev("window.wasmBytes ? window.wasmBytes() : null"));
+    await mark("print(1 + 1) done");
+    cold.mem = { blankRss, pagePid, rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
     const np = await ev("run('import numpy\\nprint(numpy.arange(10).sum())')");
     const numpy = { ms: Math.round(np?.ms ?? -1), out: np?.out?.trim(), ...take() };
+    await gc();
+    numpy.mem = { rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
+    await mark("import numpy done");
     step("numpy");
     const speed = {};
-    for (const [name, code] of Object.entries(WORKLOADS)) {
+    for (const [name, w] of Object.entries(WORKLOADS)) {
+      const { setup, code } = typeof w === "string" ? { code: w } : w;
+      const before = mem.now();
+      await mark(`${name}: start`);
+      mem.reset();
+      const prep = setup === undefined ? undefined : (await ev(`run(${JSON.stringify(setup)})`))?.out?.trim();
       const warm = await ev(`run(${JSON.stringify(code)})`);
+      // (the peak: during the setup and the warm-up, which do the same work as each timed run)
+      const peakRss = mem.peak();
+      mem.pause();
       // (every timed run's output kept: each must equal the warm-up's)
       const timed = [];
       for (let i = 0; i < REPS; i++) {
         const r = await ev(`run(${JSON.stringify(code)})`);
         timed.push({ ms: r?.ms, out: r?.out?.trim() });
       }
+      mem.resume();
+      await mark(`${name}: end`);
+      await gc();
+      await mark(`${name}: after GC`);
+      const memory = { before, peakRss, afterGcRss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
       const times = timed.map((t) => t.ms).sort((a, b) => a - b);
-      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out) };
+      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out), mem: memory, ...(prep === undefined ? {} : { setup: prep }) };
       step(`${name}: ${speed[name].ms} ms`);
     }
+    // (then idle: does each engine keep its peak? after the last workload,
+    // 10 s later, after a forced GC, and 20 s after that; then every global
+    // the workloads made deleted and collected (Python's gc and the
+    // browser's), so only what each engine keeps beyond live data remains)
+    const idle = { end: mem.now() };
+    await sleep(10000);
+    idle.after10s = mem.now();
+    await mark("idle 10 s");
+    await gc();
+    idle.afterGc = mem.now();
+    await mark("idle, after GC");
+    await sleep(20000);
+    idle.after30s = mem.now();
+    await mark("idle 30 s");
+    idle.heap = await heaps();
+    const cleared = await ev(`run(${JSON.stringify("import gc as _gc\nfor _k in [k for k in globals() if not k.startswith('_')]:\n    del globals()[_k]\n_gc.collect()\nprint(len([k for k in globals() if not k.startswith('_')]))")})`);
+    await gc();
+    await sleep(5000);
+    idle.cleared = { out: cleared?.out?.trim(), rss: mem.now(), heap: await heaps() };
+    await mark("globals deleted, collected");
+    const timeline = mem.timeline();
     ws.close();
-    return { cold, numpy, speed };
+    return { cold, numpy, speed, idle, timeline };
   } finally {
+    mem?.stop();
     chrome.kill("SIGKILL");
     await sleep(300);
     rmSync(profile, { recursive: true, force: true });
@@ -234,6 +441,14 @@ const row = (engine) => {
     readyMs: median(rs.map((r) => r.cold.readyMs)), firstResultMs: median(rs.map((r) => r.cold.firstResultMs)),
     numpyWire: median(rs.map((r) => r.numpy.wire)), numpyDecoded: median(rs.map((r) => r.numpy.decoded)), numpyMs: median(rs.map((r) => r.numpy.ms)),
     speed: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, median(rs.map((r) => r.speed[w].ms))])),
+    mem: {
+      blank: median(rs.map((r) => r.cold.mem.blankRss)), started: median(rs.map((r) => r.cold.mem.rss)), numpy: median(rs.map((r) => r.numpy.mem.rss)),
+      wasmStarted: median(rs.map((r) => r.cold.mem.heap.wasm ?? 0)), wasmNumpy: median(rs.map((r) => r.numpy.mem.heap.wasm ?? 0)),
+      idle: { cleared: median(rs.map((r) => r.idle.cleared.rss)), clearedWasm: median(rs.map((r) => r.idle.cleared.heap.wasm ?? 0)), end: median(rs.map((r) => r.idle.end)), after10s: median(rs.map((r) => r.idle.after10s)), afterGc: median(rs.map((r) => r.idle.afterGc)), after30s: median(rs.map((r) => r.idle.after30s)), wasm: median(rs.map((r) => r.idle.heap.wasm ?? 0)) },
+      rows: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, {
+        peak: median(rs.map((r) => r.speed[w].mem.peakRss)), afterGc: median(rs.map((r) => r.speed[w].mem.afterGcRss)), wasm: median(rs.map((r) => r.speed[w].mem.heap.wasm ?? 0)),
+      }])),
+    },
   };
 };
 const S = row("Sagebrush"), P = row("Pyodide");
@@ -251,6 +466,14 @@ console.log(`| first print(1 + 1) result, from navigation | ${S.firstResultMs} m
 console.log(`| import numpy: transferred / decoded | ${mb(S.numpyWire)} / ${mb(S.numpyDecoded)} MB | ${mb(P.numpyWire)} / ${mb(P.numpyDecoded)} MB |`);
 console.log(`| import numpy: time | ${S.numpyMs} ms (${RS.numpy}) | ${P.numpyMs} ms (${RP.numpy}) |`);
 for (const w of Object.keys(WORKLOADS)) console.log(`| ${w} | ${S.speed[w]} ms (${RS.speed[w]}) | ${P.speed[w]} ms (${RP.speed[w]}) |`);
+// memory: renderer RSS (MB), medians over the cold starts; Pyodide's WebAssembly memory in brackets
+console.log(`\n| the page's renderer process, private memory (MB) | Sagebrush | Pyodide (its WebAssembly memory) |\n|---|---|---|`);
+console.log(`| (the browser's renderers on about:blank, for scale) | ${mb(S.mem.blank)} | ${mb(P.mem.blank)} |`);
+console.log(`| after print(1 + 1) | ${mb(S.mem.started)} | ${mb(P.mem.started)} (${mb(P.mem.wasmStarted)}) |`);
+console.log(`| after import numpy | ${mb(S.mem.numpy)} | ${mb(P.mem.numpy)} (${mb(P.mem.wasmNumpy)}) |`);
+console.log(`| idle after the last workload: at once / 10 s / after GC / 30 s | ${[S.mem.idle.end, S.mem.idle.after10s, S.mem.idle.afterGc, S.mem.idle.after30s].map(mb).join(" / ")} | ${[P.mem.idle.end, P.mem.idle.after10s, P.mem.idle.afterGc, P.mem.idle.after30s].map(mb).join(" / ")} (${mb(P.mem.idle.wasm)}) |`);
+console.log(`| every global deleted and collected | ${mb(S.mem.idle.cleared)} | ${mb(P.mem.idle.cleared)} (${mb(P.mem.idle.clearedWasm)}) |`);
+for (const w of Object.keys(WORKLOADS)) console.log(`| ${w}: peak / after GC | ${mb(S.mem.rows[w].peak)} / ${mb(S.mem.rows[w].afterGc)} | ${mb(P.mem.rows[w].peak)} / ${mb(P.mem.rows[w].afterGc)} (${mb(P.mem.rows[w].wasm)}) |`);
 // both must have printed the same thing (else the comparison is void)
 const bad = check(results, Object.keys(WORKLOADS), REPS);
 if (bad.length) console.log("DIFFERENT OUTPUTS:\n  " + bad.join("\n  "));
