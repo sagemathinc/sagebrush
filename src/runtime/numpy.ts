@@ -20,7 +20,7 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
-import { gemmBuffers, wasmUnary, wasmSort, wasmArgsort } from "./kernels";
+import { gemmBuffers, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 
@@ -1600,6 +1600,8 @@ function unaryRaw(op: string, x: any): any {
   }
   if ((op === "exp" || op === "log") && a.dt === D.float64 && rt === D.float64 && a.isC()
       && wasmUnary(op === "exp" ? "vexp" : "vlog", op === "exp" ? EXP_TABLES : LOG_TABLES, ad as Float64Array, a.offset, a.size, od as Float64Array)) return out;
+  if ((op === "sin" || op === "cos") && a.dt === D.float64 && rt === D.float64 && a.isC()
+      && wasmSinCos(op === "cos", CR.SINCOS_TABLE, ad as Float64Array, a.offset, a.size, od as Float64Array, op === "cos" ? CR.cos : CR.sin)) return out;
   if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
     unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
     return out;

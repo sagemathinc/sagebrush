@@ -1,6 +1,7 @@
 //! WebAssembly SIMD kernels for sagebrush's numpy (src/runtime/numpy*.ts):
 //! matmul and LU here, QR, eigenproblems and the SVD in eigen.rs, the FFT
-//! in fft.rs, glibc's exp and log over arrays in libm.rs, radix sorts in
+//! in fft.rs, glibc's exp and log over arrays in libm.rs, correctly rounded
+//! sin and cos in crsin.rs, radix sorts in
 //! sort.rs, numpy.random's generators in random.rs.
 //!
 //! Plain exported functions on row-major f64 matrices in this module's
@@ -13,6 +14,7 @@
 
 use core::arch::wasm32::*;
 
+mod crsin;
 mod eigen;
 mod fft;
 mod libm;

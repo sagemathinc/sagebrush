@@ -239,6 +239,11 @@ for (let j = -40; j <= 56; j++) {
   IA[(j + 40) * 2 + 1] = r[1];
 }
 const THIRD = div(ONE, dd(3)), I3H = INVFACT[3][0], I3L = INVFACT[3][1];
+// The tables of sin and cos's fast path, for its WebAssembly kernel
+// (kernels/src/crsin.rs): SC32, 1/3!, and the series' 1/120, -1/5040, 1/24, -1/720
+export const SINCOS_TABLE = new Float64Array(218);
+SINCOS_TABLE.set(SC32);
+SINCOS_TABLE.set([I3H, I3L, 1 / 120, -1 / 5040, 1 / 24, -1 / 720], 212);
 // x - n pi/2 with three or five parts of pi/2 (below 2^20 pi/2): RQ = n mod 4, H + L
 let RQ = 0;
 function gReduce(x: number): void {
