@@ -63,3 +63,67 @@ it = reversed([1, 2, 3]); print(it.__length_hint__(), next(it), it.__length_hint
 xs = [1, 2, 3]; it = reversed(xs); next(it); xs.clear(); print(show(lambda: it.__length_hint__()), show(lambda: next(it)), show(lambda: it.__length_hint__()))
 it = reversed(range(3)); print(list(it))
 it = reversed('ab\U0001f600'); print(list(it))
+
+
+# A getter that succeeds after a nested next(): the outer read moves on one
+# from the index it started at (CPython: [3, 2, 1, 0], each index read twice)
+class Nested:
+    busy = False
+    def __init__(self):
+        self.reads = []
+    def __len__(self):
+        return 4
+    def __getitem__(self, i):
+        self.reads.append(i)
+        if not self.busy:
+            self.busy = True
+            next(self.it)
+            self.busy = False
+        return i
+
+
+r = Nested(); r.it = reversed(r); print('nested getter', list(r.it), r.reads)
+
+
+# __length_hint__: 0 once at the end, without asking the sequence's length;
+# the index taken before the length hook (which may advance the iterator)
+class Len:
+    bad = False
+    def __init__(self, n):
+        self.n = n
+        self.lens = 0
+    def __len__(self):
+        self.lens += 1
+        if self.bad:
+            raise ValueError('length after end')
+        return self.n
+    def __getitem__(self, i):
+        return i
+
+
+s = Len(1); it = reversed(s); next(it); s.bad = True; print('hint after last read', show(lambda: it.__length_hint__()))
+s = Len(0); it = reversed(s); s.bad = True; print('hint of empty', show(lambda: it.__length_hint__()))
+s = Len(3); it = reversed(s); s.bad = True; print('hint, length error', show(lambda: it.__length_hint__()), show(lambda: next(it)))
+
+
+class Advancing(Len):
+    def __len__(self):
+        self.lens += 1
+        if self.lens == 2:
+            next(self.it)
+        return self.n
+
+
+s = Advancing(4); s.it = reversed(s)
+# (a comprehension, which asks no length hint: list() asks one, and Sagebrush's
+# list() does not yet; a separate fix)
+print('reentrant length', s.it.__length_hint__(), s.it.__length_hint__(), [x for x in s.it], s.it.__length_hint__(), s.lens)
+
+
+# A list subclass's reverse iterator measures the list's storage, not __len__
+class L(list):
+    def __len__(self):
+        raise ValueError('subclass length hook')
+
+
+it = reversed(L([1, 2, 3])); print('list subclass hint', show(lambda: it.__length_hint__()), list(it), show(lambda: it.__length_hint__()))
