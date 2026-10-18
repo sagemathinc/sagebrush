@@ -1175,6 +1175,10 @@ newBuiltinModule("math", (m) => {
   // (the sizes of P and C a lower bound: P(n, k) >= max(n - k + 1, k/e)**k,
   // C(n, k) >= (n/k)**k for k <= n/2)
   const permCombBig = (n: bigint, k: bigint, comb: boolean): any => {
+    // (k of 0 or 1: 1 or n itself, before any size bound, which reads n's
+    // digits: n may be near the largest BigInt; daybreak2's LIMIT-PTREE-1)
+    if (k === 0n) return 1;
+    if (k === 1n) return O.normBig(n);
     const kf = Number(k);
     if (comb) tooBig(kf * (log2Big(n) - Math.log2(kf)) - 1);
     else tooBig(kf * Math.max(log2Big(n - k + 1n), Math.log2(kf / Math.E)) - 1);
