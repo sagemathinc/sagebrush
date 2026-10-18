@@ -621,14 +621,14 @@ def _cpow_int(A, B, r):
     gives it: binary powering from 1 (and 1 / that for a negative power), not numpy's
     power, whose square a a has the imaginary part a b + b a (-0 for -3+0i, where
     Octave has 9+0i); other elements keep r. (An exponent with a zero imaginary part
-    counts as real)"""
+    counts as real.) Returns the result and the mask of the elements it computed"""
     real = np.ones(np.shape(B), bool)
     if B.dtype.kind == "c":
         real, B = B.imag == 0, B.real
     B = B.astype(np.float64)
     m = real & (B == np.floor(B)) & (np.abs(B) < 100) & (B != 0) & (A != 0)
     if not np.any(m):
-        return r
+        return r, m
     A, B, m, r = np.broadcast_arrays(A, B, m, r)
     n = np.where(m, np.abs(B), 0).astype(np.int64)
     acc, p = np.ones(A.shape, np.complex128), A.astype(np.complex128)
@@ -650,7 +650,7 @@ def _cpow_int(A, B, r):
         inv = np.empty(acc.shape, np.complex128)
         inv.real, inv.imag = re, im  # (re + 1j * im would lose a -0 imaginary part)
         acc = np.where(B < 0, inv, acc)
-    return np.where(m, acc, r)
+    return np.where(m, acc, r), m
 
 
 def _pow(A, B):
@@ -661,7 +661,13 @@ def _pow(A, B):
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         r = A ** B
         if A.dtype.kind == "c" or B.dtype.kind == "c":
-            r = _cpow_int(A, B, r)
+            r, ints = _cpow_int(A, B, r)
+            if np.any((A == 0) | ~np.isfinite(r) | (np.abs(r) >= 2.0 ** 1000)):
+                # (a zero base to a power MATLAB leaves undefined, or a result past the
+                # floating-point range: _matlab_cpow refuses or recomputes those elements)
+                import _matlab_cpow
+                _matlab_cpow.zero_base(A, B, True)
+                r = _matlab_cpow.rescue(A, B, r, ints)
     # (1.^NaN and NaN.^0 are NaN in MATLAB, as power's IEEE table says, not IEEE's 1)
     odd = ((A == 1) & np.isnan(B)) | (np.isnan(A) & (B == 0))
     if np.any(odd):

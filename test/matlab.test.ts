@@ -2608,3 +2608,65 @@ test("trapz in single admits its steps' work before making them: refused in word
     "single [1 20] 1000",
     "Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension."]);
 });
+
+test("complex .^ past the floating-point range gives each part's true value (Octave's are not), and a complex zero to a negative or imaginary power is refused in words", () => {
+  const { execFileSync } = require("node:child_process");
+  // (each part printed with + 0, so that a zero's sign, which nothing documents, is not compared)
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "p = @(w) disp(sprintf('%g %g', real(w) + 0, imag(w) + 0));",
+    "p((3e5-2e-4i) .^ 98), p((3e5+2e-4i) .^ 98), p((3e5-2e-4i) .^ 99), p((-3e5-2e-4i) .^ 98)",
+    "p((3e5-2e-4i) .^ 120), p((3e5-2e-4i) .^ 98.5), p((1e200+1e200i) .^ 2), p((1e300i) .^ 3)",
+    "p(complex(1e300, 0) .^ 3), p((2+3i) .^ 1000), p((1e-200+1e-200i) .^ -2)",
+    "p((1e-200+1e-200i) .^ -7), p((1e-200+1e-200i) .^ -3)",
+    "p((1+2i) .^ 3), p(complex(0, 0) .^ 2), p(complex(0, 0) .^ (1+1i)), p((0+0i) .^ -3), disp(isreal((0+0i) .^ -3))",
+    "try, p(complex(0, 0) .^ -3), catch e, disp(e.message), end",
+    "try, p(complex(0, 0) .^ -0.5), catch e, disp(e.message), end",
+    "try, p(complex(0, 0) .^ (-1+1i)), catch e, disp(e.message), end",
+    "try, p(complex(0, 0) .^ 1i), catch e, disp(e.message), end",
+    "try, p(0 .^ complex(-1, 1)), catch e, disp(e.message), end",
+    "try, p([0, 1i] .^ -3), catch e, disp(e.message), end",
+    "C = sparse([1 2 4], [1 3 4], [1+2i, -3, 2i], 4, 4);",
+    "try, w = C .^ -3; p(full(w(2, 1))), catch e, disp(e.message), end",
+    "try, p((1e300+1e-10i) .^ 2), catch e, disp(e.message), end",
+    // (astra's probes: a part that the scaling would turn into 0, a log-modulus that rounds to 0
+    // under a huge imaginary exponent, an angle that underflows to 0 under a large power)
+    "try, p(complex(1e300, 5e-324) .^ 2), catch e, disp(e.message), end",
+    "try, p(complex(-1e300, 5e-324) .^ 2), catch e, disp(e.message), end",
+    "try, p(complex(1, 1e-8) .^ complex(0, -1e12)), catch e, disp(e.message), end",
+    "try, p(complex(1e300, 5e-324) .^ 100), catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  const zero = "power: a complex zero to a power with a negative real part, or to an imaginary power, is not supported in Sagebrush: MATLAB does not document its value (its modulus is infinite or undefined and its direction undefined).";
+  const sign = "power: a complex power past the floating-point range with a part that cannot be computed accurately (its sign or its digits) is not supported in Sagebrush.";
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
+    "Inf -Inf", "Inf Inf", "Inf -Inf", "Inf Inf",
+    "Inf -Inf", "Inf -Inf", "0 Inf", "0 -Inf",
+    "Inf 0", "-Inf Inf", "0 -Inf",
+    "Inf Inf", "-Inf -Inf",
+    "-11 -2", "0 0", "0 0", "Inf 0", "1",
+    zero, zero, zero, zero, zero, zero, zero, sign, sign, sign, sign, sign]);
+});
+
+test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted before their indices are made: past it refused in words", () => {
+  const { execFileSync } = require("node:child_process");
+  // (the cap lowered to 3, and the per-element helpers made to fail, so that a refusal shows
+  // they were never entered; then a 3-element array, under the cap, with the real helpers)
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "-c", [
+    "import numpy as np, _matlab as m, _matlab_cpow as c",
+    "print(c._RESCUE_MAX)",
+    "c._RESCUE_MAX = 3",
+    "real_int, real_polar = c._int_power, c._polar_power",
+    "def entered(*a):",
+    "    raise AssertionError('entered')",
+    "c._int_power = c._polar_power = entered",
+    "try:",
+    "    m.power(m._unmat(np.full((1, 4), 3e5 - 2e-4j)), 98.0)",
+    "except m.MatlabError as e:",
+    "    print(e)",
+    "c._int_power, c._polar_power = real_int, real_polar",
+    "r = m._farr(m.power(m._unmat(np.full((1, 3), 3e5 - 2e-4j)), 98.0)).reshape(-1)",
+    "print([(float(z.real), float(z.imag)) for z in r])",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), ["100000",
+    "power with 4 complex results past the floating-point range is not supported in Sagebrush (at most 3 are recomputed): too much work.",
+    "[(inf, -inf), (inf, -inf), (inf, -inf)]"]);
+});
