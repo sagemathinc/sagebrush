@@ -1140,7 +1140,30 @@ const FAST_EXPR: Record<string, (x: string, y: string) => string> = {
   maximum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} > ${y} ? ${x} : ${y})`,
   minimum: (x, y) => `(${x} !== ${x} || ${y} !== ${y} ? NaN : ${x} < ${y} ? ${x} : ${y})`,
   power: (x, y) => `POW(${x}, ${y})`,
+  // (the power of one exponent for the whole loop, as NumPy's: powerExponent)
+  "power -1": (x) => `1 / ${x}`,
+  "power 0": () => "1",
+  "power 0.5": (x) => `Math.sqrt(${x})`,
+  "power 1": (x) => x,
+  "power 2": (x) => `${x} * ${x}`,
 };
+const POW_ONE: Record<string, (x: number) => number> = {
+  "power -1": (x) => 1 / x,
+  "power 0": () => 1,
+  "power 0.5": Math.sqrt,
+  "power 1": (x) => x,
+  "power 2": (x) => x * x,
+};
+// NumPy's float power loop, given one exponent for the whole loop (a scalar,
+// or an array of one element), computes 1 / x, 1, sqrt(x), x and x * x for
+// the exponents -1, 0, 0.5, 1 and 2, not pow(x, y), whose last bit differs
+// from those for -1, 0.5 and 2 (about one element in 1,000): the kernel's
+// name for them, else "power"
+function powerExponent(ct: DType, b: NDArray): string {
+  if ((ct !== D.float64 && ct !== D.float32) || b.size !== 1) return "power";
+  const e = Number(b.data[b.offset]);
+  return e === -1 || e === 0 || e === 0.5 || e === 1 || e === 2 ? `power ${e}` : "power";
+}
 const kernels = new Map<string, any>();
 function fastKernel(op: string, kind: string): any {
   const key = op + kind;
@@ -1218,6 +1241,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   if (op === "power" && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
+  const kop = op === "power" ? powerExponent(ct, b) : op; // the kernel
   const shape = broadcastShapes(a.shape, b.shape);
   if (tryOut && (rt !== out!.dt || out!.offset !== 0 || !out!.isC() || shape.length !== out!.ndim || shape.some((v, i) => v !== out!.shape[i]))) return undefined;
   // fast paths: real dtypes whose arithmetic needs no wrapping or truncation
@@ -1226,7 +1250,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   // kernel's result is checked after, and redone there if it left the safe
   // range, which needs the operands intact)
   const wide = isWide(rt) && spec.out === undefined;
-  if ((!out || tryOut) && !(wide && (out || rt.kind !== "i" || (op !== "add" && op !== "subtract"))) && !ct.cplx && FAST_EXPR[op] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
+  if ((!out || tryOut) && !(wide && (out || rt.kind !== "i" || (op !== "add" && op !== "subtract"))) && !ct.cplx && FAST_EXPR[kop] && plain(ct) && plain(rt) && !(op === "power" && ct.isInt) && !(ct === D.int64 && op === "multiply")
       && (rt.kind !== "b" || spec.out === "bool") && !(rt.kind === "b" && spec.out !== "bool")) {
     const n = prod(shape);
     const aScalar = a.ndim === 0, bScalar = b.ndim === 0;
@@ -1236,11 +1260,11 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
       const kind = aScalar && !bScalar ? "sa" : bScalar && !aScalar ? "as" : "aa";
       const av = aScalar ? a.data[a.offset] : 0, bv = bScalar ? b.data[b.offset] : 0;
       // operands of different storage types (int8 + float64 ...) read fine as numbers
-      fastKernel(op, kind)(a.data, a.offset, av, b.data, b.offset, bv, res.data, n);
+      fastKernel(kop, kind)(a.data, a.offset, av, b.data, b.offset, bv, res.data, n);
       if (!wide || (allSafe(res) && allSafe(a) && allSafe(b))) return res;
     } else if (shape.length >= 1 && n > 0) {
       const res = out ?? empty(shape, rt);
-      stridedKernel(op)(a.data, a.offset, bstrides(a, shape), b.data, b.offset, bstrides(b, shape), res.data, shape);
+      stridedKernel(kop)(a.data, a.offset, bstrides(a, shape), b.data, b.offset, bstrides(b, shape), res.data, shape);
       if (!wide || (allSafe(res) && allSafe(a) && allSafe(b))) return res;
     }
   }
@@ -1261,7 +1285,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
     });
     return res;
   }
-  const f0 = ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
+  const f0 = kop !== op ? POW_ONE[kop] : ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
   const f = wide ? (x: number, y: number) => wideExact(rt, op, f0(x, y), x, y) : f0;
   const store = rt.kind === "f" || (rt.isInt && rt.ctor !== Float64Array) ? null : rt;
   if (contigOut) {
