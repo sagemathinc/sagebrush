@@ -2804,7 +2804,7 @@ def _bytes_order(a, order):
         return "C"
     if not isinstance(order, (str, bytes)):
         raise TypeError(f"order must be str, not {type(order).__name__}")
-    o = order.decode("latin1") if isinstance(order, bytes) else order
+    o = order.decode("latin1") if isinstance(order, bytes) and len(order) == 1 else order
     if len(o) != 1 or o.upper() not in "CFAK":
         raise ValueError(f"order must be one of 'C', 'F', 'A', or 'K' (got {order!r})")
     o = o.upper()
