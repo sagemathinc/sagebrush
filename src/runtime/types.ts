@@ -1402,12 +1402,15 @@ method(int, "to_bytes", (x: any, length: any = 1, byteorder: any = "big", signed
   const little = littleEndian("to_bytes", byteorder);
   const n = Number(k);
   if (n < 0) raise(T.ValueError, "length argument must be non-negative");
-  let v = BigInt(x);
+  const v = BigInt(x);
   const isSigned = O.truth(signed);
   if (v < 0n && !isSigned) raise(T.OverflowError, "can't convert negative int to unsigned");
-  // (the bits the value needs: a negative one's two's complement in 8n bits
-  // needs -v - 1 to fit in 8n - 1 of them)
-  const bits = hexBits((v < 0n ? -v - 1n : v).toString(16));
+  // (the digits of the value's magnitude only, never of the padding: a
+  // negative value's two's complement in 8n bits is ~(-v - 1), which must
+  // fit in 8n - 1 bits; daybreak2's limits finding on 6ce60e6b)
+  const neg = v < 0n;
+  const hex = (neg ? -v - 1n : v).toString(16);
+  const bits = hexBits(hex);
   if (bits > 8 * n - (isSigned ? 1 : 0) && !(n === 0 && v === 0n)) raise(T.OverflowError, "int too big to convert");
   let a: Uint8Array;
   try {
@@ -1416,13 +1419,15 @@ method(int, "to_bytes", (x: any, length: any = 1, byteorder: any = "big", signed
     if (e instanceof RangeError) raise(T.MemoryError);
     throw e;
   }
-  if (v < 0n) v += 1n << BigInt(8 * n);
-  const hex = v.toString(16);
-  // (the value's bytes at the end, big-endian; the rest zero)
-  const nb = (hex.length + 1) >> 1, odd = hex.length & 1;
+  // (the value's bytes at the end, big-endian, the rest padding: 0, or
+  // 0xff for a negative value, whose bytes are those of -v - 1 inverted)
+  if (neg) a.fill(255);
+  const nb = hex === "0" ? 0 : (hex.length + 1) >> 1, odd = hex.length & 1;
   for (let i = 0; i < nb; i++) {
+    if ((i & 65535) === 65535) O.pollInterrupt();
     const j = 2 * i - odd;
-    a[n - nb + i] = j < 0 ? parseInt(hex[0], 16) : parseInt(hex.slice(j, j + 2), 16);
+    const d = j < 0 ? parseInt(hex[0], 16) : parseInt(hex.slice(j, j + 2), 16);
+    a[n - nb + i] = neg ? 255 - d : d;
   }
   if (little) a.reverse();
   return new PyBytes(a);
@@ -3312,6 +3317,7 @@ getset(object, "__dict__", (o) => {
     let hex = "";
     const parts: string[] = [];
     for (let i = 0; i < n; i++) {
+      if ((i & 65535) === 65535) O.pollInterrupt();
       const d = a[little ? n - 1 - i : i];
       hex += d < 16 ? "0" + d.toString(16) : d.toString(16);
       if (hex.length >= 65536) parts.push(hex), (hex = "");
