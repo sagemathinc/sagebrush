@@ -235,8 +235,9 @@ class RealNumber(float):
             return float.__new__(cls, x)
         if isinstance(x, float):
             # an element of RR: itself when past the doubles (its float
-            # would lose its value)
-            if isinstance(x, _RealBig) and cls is RealNumber:
+            # would lose its value), or when a literal (it stays one, as in
+            # Sage; an ambiguous x + 0 keeps its mark)
+            if (isinstance(x, _RealBig) or type(x) is _RealLiteral) and cls is RealNumber:
                 return x
             return float.__new__(cls, x)
         if isinstance(x, str) and cls is RealNumber:
@@ -771,7 +772,9 @@ def _literal_identity(x, o, unit):
     rule Sage would follow).  None: not such a case."""
     lit = getattr(x, "_lit", None)
     amb = getattr(x, "_lit_ambiguous", None)
-    if (lit is None and amb is None) or not isinstance(o, int) or o != unit:
+    # (the stored value, int.__int__: no comparison or conversion hook of an
+    # int subclass is called, astra's CORR-29F-1)
+    if (lit is None and amb is None) or not isinstance(o, int) or int.__int__(o) != unit:
         return None
     import sage_all
     if isinstance(o, bool) or amb is not None:
