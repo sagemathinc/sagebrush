@@ -228,7 +228,29 @@ class _Ring:
         return _sa().Integer(_r.randrange(int(x), int(y)))
 
 
-ZZ = _Ring("Integer Ring", False)
+class IntegerRing_class(_Ring):
+    """The ring of integers, ZZ: exact integers of any size.
+
+    ZZ(x) makes an integer from an int, a string or an integral rational;
+    ZZ['t'] (or R.<t> = ZZ[]) is the polynomial ring over the integers.
+    Dividing two integers gives a rational number, in QQ.
+
+    EXAMPLES::
+
+        sage: ZZ
+        Integer Ring
+        sage: ZZ(7) + ZZ('5'), ZZ(4/2), ZZ(10) / ZZ(4)
+        (12, 2, 5/2)
+        sage: 5 in ZZ, 1/2 in ZZ, ZZ.is_field(), ZZ.characteristic()
+        (True, False, False, 0)
+        sage: R.<t> = ZZ[]; (t + 1)^2
+        t^2 + 2*t + 1
+        sage: ZZ(2)^100
+        1267650600228229401496703205376
+    """
+
+
+ZZ = IntegerRing_class("Integer Ring", False)
 # The largest degree QQ[a] builds: the number field and every qqbar step on
 # the way (daybreak2's HARD-EC1-1; degree 16 takes 0.2 s, 32 took 8 s).
 _QQ_ALGEBRAIC_MAX_DEGREE = 16
@@ -341,7 +363,27 @@ def _algebraic_extension(R, gens):
         raise NotImplementedError("QQ[%s]: the number field of %s is not available in sagebrush yet (%s)" % (cs[0], f, e)) from None
 
 
-QQ = _Ring("Rational Field", True)
+class RationalField(_Ring):
+    """The field of rational numbers, QQ: exact fractions, always in lowest terms.
+
+    QQ(x) makes a rational from an integer, a fraction, a string such as
+    '2/3' or a real number (exactly the value it holds); QQ['t'] is the
+    polynomial ring over the rationals.
+
+    EXAMPLES::
+
+        sage: QQ
+        Rational Field
+        sage: QQ(3/6), QQ('2/3') + 1, QQ(0.75)
+        (1/2, 5/3, 3/4)
+        sage: 1/2 in QQ, QQ.is_field(), QQ.characteristic()
+        (True, True, 0)
+        sage: R.<t> = QQ[]; (t^2 - 1/4).factor()
+        (t - 1/2) * (t + 1/2)
+    """
+
+
+QQ = RationalField("Rational Field", True)
 
 
 def _derivative_count(args, gen, name):
