@@ -6,6 +6,8 @@ also checks that the answers agree. One core of an AMD EPYC 7B13;
 `OPENBLAS_NUM_THREADS=1` for FLINT. The two Rust-level tables below are
 from Oct 18 2026, FLINT 3.6.0, on an otherwise idle machine
 ([results/bench/2026-10-18-rust-flint.txt](../../results/bench/2026-10-18-rust-flint.txt)).
+Only FLINT's call is timed: its results are converted to BigInt (which
+Sagebrush's already are) after the timing.
 `sagebrush bench linalg` and `sagebrush bench sagelayer` time the same
 kinds of operations from Python (last sections).
 
@@ -19,44 +21,44 @@ is faster.
 
 | op | n | entry bits | Sagebrush | FLINT 3.6 | ratio |
 |---|---:|---:|---:|---:|---:|
-| det | 10 | 7 | 0.011 ms | 0.003 ms | 3.73 |
-| solve | 10 | 7 | 0.031 ms | 0.008 ms | 3.93 |
-| inverse | 10 | 7 | 0.036 ms | 0.039 ms | 0.93 |
-| charpoly | 10 | 7 | 0.021 ms | 0.017 ms | 1.23 |
-| rref | 10 | 7 | 0.030 ms | 0.005 ms | 6.01 |
-| det | 10 | 41 | 0.027 ms | 0.017 ms | 1.58 |
-| solve | 10 | 41 | 0.179 ms | 0.031 ms | 5.83 |
-| inverse | 10 | 41 | 0.089 ms | 0.120 ms | 0.74 |
-| charpoly | 10 | 41 | 0.052 ms | 0.048 ms | 1.09 |
-| rref | 10 | 41 | 0.061 ms | 0.029 ms | 2.14 |
-| det | 30 | 7 | 0.162 ms | 0.105 ms | 1.54 |
-| solve | 30 | 7 | 0.252 ms | 0.194 ms | 1.30 |
-| inverse | 30 | 7 | 0.687 ms | 3.062 ms | 0.22 |
-| charpoly | 30 | 7 | 0.436 ms | 0.292 ms | 1.49 |
-| rref | 30 | 7 | 0.356 ms | 0.446 ms | 0.80 |
-| det | 30 | 41 | 0.573 ms | 0.521 ms | 1.10 |
-| solve | 30 | 41 | 1.367 ms | 0.890 ms | 1.54 |
-| inverse | 30 | 41 | 2.834 ms | 15.408 ms | 0.18 |
-| charpoly | 30 | 41 | 1.760 ms | 1.528 ms | 1.15 |
-| rref | 30 | 41 | 0.938 ms | 1.261 ms | 0.74 |
-| det | 100 | 7 | 6.106 ms | 3.662 ms | 1.67 |
-| solve | 100 | 7 | 4.202 ms | 3.691 ms | 1.14 |
-| inverse | 100 | 7 | 43.367 ms | 167.683 ms | 0.26 |
-| charpoly | 100 | 7 | 37.671 ms | 25.120 ms | 1.50 |
-| rref | 100 | 7 | 16.169 ms | 23.568 ms | 0.69 |
-| det | 100 | 41 | 22.765 ms | 9.798 ms | 2.32 |
-| solve | 100 | 41 | 19.223 ms | 14.215 ms | 1.35 |
-| inverse | 100 | 41 | 232.697 ms | 1407.773 ms | 0.17 |
-| charpoly | 100 | 41 | 167.687 ms | 112.721 ms | 1.49 |
-| rref | 100 | 41 | 54.581 ms | 169.110 ms | 0.32 |
+| det | 10 | 7 | 0.010 ms | 0.003 ms | 3.96 |
+| solve | 10 | 7 | 0.030 ms | 0.005 ms | 5.52 |
+| inverse | 10 | 7 | 0.035 ms | 0.026 ms | 1.38 |
+| charpoly | 10 | 7 | 0.020 ms | 0.014 ms | 1.42 |
+| rref | 10 | 7 | 0.030 ms | 0.005 ms | 6.24 |
+| det | 10 | 41 | 0.026 ms | 0.016 ms | 1.60 |
+| solve | 10 | 41 | 0.180 ms | 0.024 ms | 7.59 |
+| inverse | 10 | 41 | 0.088 ms | 0.069 ms | 1.27 |
+| charpoly | 10 | 41 | 0.052 ms | 0.041 ms | 1.25 |
+| rref | 10 | 41 | 0.058 ms | 0.027 ms | 2.15 |
+| det | 30 | 7 | 0.156 ms | 0.103 ms | 1.51 |
+| solve | 30 | 7 | 0.248 ms | 0.176 ms | 1.41 |
+| inverse | 30 | 7 | 0.673 ms | 2.743 ms | 0.25 |
+| charpoly | 30 | 7 | 0.435 ms | 0.273 ms | 1.59 |
+| rref | 30 | 7 | 0.352 ms | 0.446 ms | 0.79 |
+| det | 30 | 41 | 0.555 ms | 0.508 ms | 1.09 |
+| solve | 30 | 41 | 1.346 ms | 0.800 ms | 1.68 |
+| inverse | 30 | 41 | 2.920 ms | 14.114 ms | 0.21 |
+| charpoly | 30 | 41 | 1.725 ms | 1.448 ms | 1.19 |
+| rref | 30 | 41 | 0.949 ms | 1.246 ms | 0.76 |
+| det | 100 | 7 | 6.112 ms | 3.601 ms | 1.70 |
+| solve | 100 | 7 | 4.265 ms | 3.414 ms | 1.25 |
+| inverse | 100 | 7 | 44.166 ms | 156.554 ms | 0.28 |
+| charpoly | 100 | 7 | 36.403 ms | 24.615 ms | 1.48 |
+| rref | 100 | 7 | 16.607 ms | 23.479 ms | 0.71 |
+| det | 100 | 41 | 22.587 ms | 9.952 ms | 2.27 |
+| solve | 100 | 41 | 18.563 ms | 13.000 ms | 1.43 |
+| inverse | 100 | 41 | 247.773 ms | 1340.066 ms | 0.18 |
+| charpoly | 100 | 41 | 168.196 ms | 111.790 ms | 1.50 |
+| rref | 100 | 41 | 54.943 ms | 165.584 ms | 0.33 |
 
-- **Inverses:** 3.8–5.9x faster than FLINT from n = 30 (multimodular, with
+- **Inverses:** 3.6–5.6x faster than FLINT from n = 30 (multimodular, with
   the number of primes fixed by the Hadamard bound).
-- **rref:** 1.25–3.1x faster from n = 30.
-- **charpoly:** within 1.1–1.5x. Modulo each prime it is a Krylov sequence
+- **rref:** 1.3–3x faster from n = 30.
+- **charpoly:** within 1.2–1.6x. Modulo each prime it is a Krylov sequence
   plus one elimination.
 - **det and solve:** 1.1–2.3x behind (Dixon lifting).
-- **Small matrices (n = 10):** up to 6x behind, under 0.2 ms either way.
+- **Small matrices (n = 10):** up to 7.6x behind, under 0.2 ms either way.
 
 Modulo p, elimination keeps up to 16 pivots pending. It brings the rows
 below up to date one column at a time to find the next pivot, then applies
@@ -71,26 +73,26 @@ The gcd inputs are g·a and g·b, with g of half the length. Rerun with
 
 | op | length | coefficient bits | Sagebrush | FLINT 3.6 | ratio |
 |---|---:|---:|---:|---:|---:|
-| mul | 10 | 10 | 0.001 ms | 0.000 ms | 7.42 |
-| gcd | 10 | 10 | 0.004 ms | 0.002 ms | 2.64 |
-| mul | 100 | 10 | 0.011 ms | 0.004 ms | 2.73 |
-| gcd | 100 | 10 | 0.074 ms | 0.014 ms | 5.25 |
-| mul | 1000 | 10 | 0.104 ms | 0.064 ms | 1.62 |
-| gcd | 1000 | 10 | 1.885 ms | 0.421 ms | 4.48 |
-| mul | 10000 | 10 | 2.184 ms | 1.326 ms | 1.65 |
-| gcd | 10000 | 10 | 141.982 ms | 31.761 ms | 4.47 |
-| mul | 100 | 1000 | 0.951 ms | 0.197 ms | 4.82 |
-| gcd | 100 | 1000 | 5.567 ms | 1.494 ms | 3.73 |
-| mul | 1000 | 1000 | 9.146 ms | 2.507 ms | 3.65 |
-| gcd | 1000 | 1000 | 99.804 ms | 33.914 ms | 2.94 |
-| mul | 100000 | 20 | 22.371 ms | 23.442 ms | 0.95 |
+| mul | 10 | 10 | 0.001 ms | 0.000 ms | 7.55 |
+| gcd | 10 | 10 | 0.004 ms | 0.002 ms | 2.67 |
+| mul | 100 | 10 | 0.010 ms | 0.004 ms | 2.74 |
+| gcd | 100 | 10 | 0.072 ms | 0.014 ms | 5.17 |
+| mul | 1000 | 10 | 0.104 ms | 0.063 ms | 1.64 |
+| gcd | 1000 | 10 | 1.871 ms | 0.410 ms | 4.56 |
+| mul | 10000 | 10 | 2.181 ms | 1.334 ms | 1.64 |
+| gcd | 10000 | 10 | 136.660 ms | 30.948 ms | 4.42 |
+| mul | 100 | 1000 | 0.968 ms | 0.190 ms | 5.09 |
+| gcd | 100 | 1000 | 5.595 ms | 1.494 ms | 3.74 |
+| mul | 1000 | 1000 | 8.940 ms | 2.474 ms | 3.61 |
+| gcd | 1000 | 1000 | 98.621 ms | 32.740 ms | 3.01 |
+| mul | 100000 | 20 | 22.168 ms | 23.597 ms | 0.94 |
 
 - **Products, small coefficients:** the NTT directly, 1.6–2.7x behind
   FLINT from length 100, and level at length 100,000.
 - **Products, large coefficients:** multimodular over primes p ≡ 1 mod
-  2^32, one transform each, with a word-level CRT. 3.6–4.8x behind FLINT,
+  2^32, one transform each, with a word-level CRT. 3.6–5.1x behind FLINT,
   whose large products use a SIMD floating-point FFT.
-- **Gcds:** 2.6–5.3x behind.
+- **Gcds:** 2.7–5.2x behind.
 
 ## Huge integers: our NTT against dashu's multiplication
 
@@ -120,56 +122,56 @@ ints and Fractions), and the engine through its wire interface
 (`sagebrush._engine.call`, the answer left as text). FLINT is timed inside
 its own process on inputs it has already parsed. Every answer is compared
 (as a fingerprint of its exact entries). One core of an AMD EPYC 7B13,
-Oct 18 2026 ([results/bench](../../results/bench/README.md)).
+Oct 18 2026, at c7eea749 ([results/bench](../../results/bench/README.md)).
 
 | case | sagebrush.linalg / poly | engine (wire) | FLINT 3.6 | public / FLINT | engine / FLINT |
 |---|---:|---:|---:|---:|---:|
-| det n=10 7-bit | 0.038 ms | 0.021 ms | 0.003 ms | 15.27 | 8.48 |
-| solve n=10 7-bit | 0.113 ms | 0.048 ms | 0.005 ms | 20.85 | 8.93 |
-| inverse n=10 7-bit | 0.187 ms | 0.065 ms | 0.024 ms | 7.69 | 2.65 |
-| charpoly n=10 7-bit | 0.066 ms | 0.033 ms | 0.014 ms | 4.63 | 2.31 |
-| rref n=10 7-bit | 0.124 ms | 0.054 ms | 0.005 ms | 25.71 | 11.18 |
-| det n=10 41-bit | 0.061 ms | 0.042 ms | 0.017 ms | 3.61 | 2.49 |
-| solve n=10 41-bit | 0.288 ms | 0.195 ms | 0.025 ms | 11.55 | 7.83 |
-| inverse n=10 41-bit | 0.499 ms | 0.188 ms | 0.070 ms | 7.13 | 2.68 |
-| charpoly n=10 41-bit | 0.112 ms | 0.074 ms | 0.042 ms | 2.66 | 1.75 |
-| rref n=10 41-bit | 0.229 ms | 0.107 ms | 0.027 ms | 8.33 | 3.90 |
-| det n=30 7-bit | 0.319 ms | 0.207 ms | 0.107 ms | 2.99 | 1.94 |
-| solve n=30 7-bit | 0.751 ms | 0.345 ms | 0.193 ms | 3.89 | 1.79 |
-| inverse n=30 7-bit | 3.05 ms | 1.25 ms | 2.68 ms | 1.14 | 0.47 |
-| charpoly n=30 7-bit | 0.733 ms | 0.496 ms | 0.276 ms | 2.65 | 1.80 |
-| rref n=30 7-bit | 1.09 ms | 0.537 ms | 0.413 ms | 2.65 | 1.30 |
-| det n=30 41-bit | 0.788 ms | 0.649 ms | 0.508 ms | 1.55 | 1.28 |
-| solve n=30 41-bit | 2.27 ms | 1.59 ms | 0.757 ms | 2.99 | 2.11 |
-| inverse n=30 41-bit | 13.6 ms | 5.53 ms | 13.8 ms | 0.98 | 0.40 |
-| charpoly n=30 41-bit | 2.13 ms | 1.87 ms | 1.46 ms | 1.46 | 1.28 |
-| rref n=30 41-bit | 3.03 ms | 1.52 ms | 1.26 ms | 2.41 | 1.21 |
-| det n=100 7-bit | 7.78 ms | 6.56 ms | 3.84 ms | 2.03 | 1.71 |
-| solve n=100 7-bit | 9.20 ms | 5.00 ms | 3.63 ms | 2.54 | 1.38 |
-| inverse n=100 7-bit | 125 ms | 61.9 ms | 153 ms | 0.82 | 0.40 |
-| charpoly n=100 7-bit | 39.6 ms | 37.1 ms | 24.7 ms | 1.61 | 1.50 |
-| rref n=100 7-bit | 29.3 ms | 19.7 ms | 22.9 ms | 1.28 | 0.86 |
-| det n=100 41-bit | 24.5 ms | 23.6 ms | 9.51 ms | 2.57 | 2.48 |
-| solve n=100 41-bit | 30.7 ms | 22.8 ms | 13.3 ms | 2.32 | 1.72 |
-| inverse n=100 41-bit | 872 ms | 393 ms | 1339 ms | 0.65 | 0.29 |
-| charpoly n=100 41-bit | 173 ms | 168 ms | 112 ms | 1.54 | 1.50 |
-| rref n=100 41-bit | 121 ms | 71.1 ms | 174 ms | 0.70 | 0.41 |
-| poly mul len=10 10-bit | 0.013 ms | 0.010 ms | 0.000 ms | 93.03 | 65.90 |
-| poly gcd len=10 10-bit | 0.015 ms | 0.012 ms | 0.002 ms | 9.55 | 7.74 |
-| poly mul len=100 10-bit | 0.076 ms | 0.043 ms | 0.004 ms | 20.75 | 11.83 |
-| poly gcd len=100 10-bit | 0.116 ms | 0.095 ms | 0.013 ms | 8.90 | 7.31 |
-| poly mul len=1000 10-bit | 0.756 ms | 0.407 ms | 0.062 ms | 12.22 | 6.58 |
-| poly gcd len=1000 10-bit | 2.33 ms | 2.13 ms | 0.410 ms | 5.69 | 5.19 |
-| poly mul len=10000 10-bit | 8.50 ms | 5.05 ms | 1.55 ms | 5.50 | 3.27 |
-| poly gcd len=10000 10-bit | 143 ms | 141 ms | 31.3 ms | 4.56 | 4.50 |
-| poly mul len=100 1000-bit | 3.05 ms | 2.27 ms | 0.194 ms | 15.73 | 11.74 |
-| poly gcd len=100 1000-bit | 7.46 ms | 6.62 ms | 1.52 ms | 4.90 | 4.34 |
-| poly mul len=1000 1000-bit | 29.6 ms | 22.3 ms | 3.11 ms | 9.53 | 7.17 |
-| poly gcd len=1000 1000-bit | 118 ms | 109 ms | 34.8 ms | 3.39 | 3.14 |
-| poly mul len=100000 20-bit | 97.9 ms | 56.6 ms | 27.8 ms | 3.52 | 2.04 |
+| det n=10 7-bit | 0.038 ms | 0.021 ms | 0.003 ms | 15.21 | 8.36 |
+| solve n=10 7-bit | 0.111 ms | 0.047 ms | 0.005 ms | 20.31 | 8.65 |
+| inverse n=10 7-bit | 0.184 ms | 0.064 ms | 0.024 ms | 7.65 | 2.66 |
+| charpoly n=10 7-bit | 0.064 ms | 0.033 ms | 0.014 ms | 4.58 | 2.33 |
+| rref n=10 7-bit | 0.122 ms | 0.053 ms | 0.005 ms | 25.60 | 11.06 |
+| det n=10 41-bit | 0.060 ms | 0.042 ms | 0.017 ms | 3.56 | 2.49 |
+| solve n=10 41-bit | 0.288 ms | 0.193 ms | 0.025 ms | 11.60 | 7.79 |
+| inverse n=10 41-bit | 0.494 ms | 0.185 ms | 0.070 ms | 7.10 | 2.66 |
+| charpoly n=10 41-bit | 0.111 ms | 0.073 ms | 0.041 ms | 2.70 | 1.78 |
+| rref n=10 41-bit | 0.225 ms | 0.107 ms | 0.027 ms | 8.28 | 3.96 |
+| det n=30 7-bit | 0.315 ms | 0.199 ms | 0.102 ms | 3.09 | 1.94 |
+| solve n=30 7-bit | 0.742 ms | 0.336 ms | 0.189 ms | 3.91 | 1.78 |
+| inverse n=30 7-bit | 3.04 ms | 1.23 ms | 2.63 ms | 1.15 | 0.47 |
+| charpoly n=30 7-bit | 0.733 ms | 0.507 ms | 0.279 ms | 2.63 | 1.82 |
+| rref n=30 7-bit | 1.09 ms | 0.534 ms | 0.413 ms | 2.64 | 1.29 |
+| det n=30 41-bit | 0.770 ms | 0.649 ms | 0.512 ms | 1.50 | 1.27 |
+| solve n=30 41-bit | 2.24 ms | 1.61 ms | 0.749 ms | 2.99 | 2.15 |
+| inverse n=30 41-bit | 14.0 ms | 5.66 ms | 13.9 ms | 1.01 | 0.41 |
+| charpoly n=30 41-bit | 2.13 ms | 1.86 ms | 1.45 ms | 1.47 | 1.28 |
+| rref n=30 41-bit | 3.02 ms | 1.52 ms | 1.26 ms | 2.39 | 1.20 |
+| det n=100 7-bit | 7.66 ms | 6.46 ms | 3.81 ms | 2.01 | 1.70 |
+| solve n=100 7-bit | 8.76 ms | 4.83 ms | 3.65 ms | 2.40 | 1.32 |
+| inverse n=100 7-bit | 125 ms | 62.0 ms | 150 ms | 0.83 | 0.41 |
+| charpoly n=100 7-bit | 39.3 ms | 37.2 ms | 24.7 ms | 1.59 | 1.51 |
+| rref n=100 7-bit | 29.2 ms | 19.6 ms | 23.0 ms | 1.27 | 0.85 |
+| det n=100 41-bit | 25.0 ms | 23.7 ms | 9.64 ms | 2.59 | 2.46 |
+| solve n=100 41-bit | 30.7 ms | 23.2 ms | 13.2 ms | 2.32 | 1.76 |
+| inverse n=100 41-bit | 861 ms | 383 ms | 1350 ms | 0.64 | 0.28 |
+| charpoly n=100 41-bit | 171 ms | 168 ms | 111 ms | 1.54 | 1.51 |
+| rref n=100 41-bit | 121 ms | 71.0 ms | 171 ms | 0.71 | 0.42 |
+| poly mul len=10 10-bit | 0.013 ms | 0.010 ms | 0.000 ms | 92.44 | 67.30 |
+| poly gcd len=10 10-bit | 0.015 ms | 0.012 ms | 0.002 ms | 9.46 | 7.77 |
+| poly mul len=100 10-bit | 0.076 ms | 0.043 ms | 0.004 ms | 20.74 | 11.87 |
+| poly gcd len=100 10-bit | 0.115 ms | 0.094 ms | 0.013 ms | 8.78 | 7.20 |
+| poly mul len=1000 10-bit | 0.749 ms | 0.400 ms | 0.062 ms | 12.07 | 6.45 |
+| poly gcd len=1000 10-bit | 2.35 ms | 2.16 ms | 0.411 ms | 5.71 | 5.27 |
+| poly mul len=10000 10-bit | 8.29 ms | 5.00 ms | 1.55 ms | 5.34 | 3.22 |
+| poly gcd len=10000 10-bit | 143 ms | 142 ms | 31.3 ms | 4.57 | 4.52 |
+| poly mul len=100 1000-bit | 3.05 ms | 2.30 ms | 0.191 ms | 15.94 | 11.99 |
+| poly gcd len=100 1000-bit | 7.36 ms | 6.52 ms | 1.51 ms | 4.87 | 4.32 |
+| poly mul len=1000 1000-bit | 29.7 ms | 22.0 ms | 3.13 ms | 9.50 | 7.03 |
+| poly gcd len=1000 1000-bit | 116 ms | 108 ms | 34.7 ms | 3.35 | 3.11 |
+| poly mul len=100000 20-bit | 97.6 ms | 56.7 ms | 25.9 ms | 3.76 | 2.19 |
 
 Passing a matrix as text costs about as much as a small computation, so from
-Python the inverse lead is 2.1–3.4x (n = 30 and 100) instead of 3.8–5.9x, and
+Python the inverse lead is 2.1–3.6x (n = 30 and 100) instead of 3.6–5.6x, and
 small cases fall further behind.
 
 ## The Sage layer, before and after

@@ -122,15 +122,15 @@ MIT/Apache, clean-room; the layer FLINT provides for Sage; see
   sub-millisecond times are imprecise). These are for the Rust engine
   called directly (`cargo run -p sagebrush-oracle --example matbench`,
   `--example polybench`):
-  - inverses 3.8–5.9x faster for n = 30 and 100 (1.1–1.4x at n = 10);
-  - rref 1.25–3.1x faster for n = 30 and 100, but 2–6x slower at n = 10;
-  - charpoly, det and solve within 1.1–2.3x for n = 30 and 100, up to 6x
+  - inverses 3.6–5.6x faster for n = 30 and 100 (1.3–1.4x slower at n = 10);
+  - rref 1.3–3x faster for n = 30 and 100, but 2–6x slower at n = 10;
+  - charpoly, det and solve within 1.1–2.3x for n = 30 and 100, up to 7.6x
     slower at n = 10;
-  - polynomial products and gcds within 1–5.3x for lengths 100 to 100,000
-    (up to 7.4x slower at length 10, where both take about a microsecond).
+  - polynomial products and gcds within 1–5.2x for lengths 100 to 100,000
+    (up to 7.6x slower at length 10, where both take about a microsecond).
   - Called from Python (`sagebrush bench linalg`), each call also passes its
     matrix as text, so the lead shrinks. For n = 30 and 100: inverses are
-    2.1–3.4x faster, rref at n = 100 is 1.2–2.4x faster, and det, solve and
+    2.1–3.6x faster, rref at n = 100 is 1.2–2.4x faster, and det, solve and
     charpoly are 1.3–2.5x slower. Polynomials of length 100 and more are
     2–12x slower.
 - **In the Sage layer**, against Sage 10.9 (`sagebrush bench sagelayer`):
