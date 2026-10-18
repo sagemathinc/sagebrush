@@ -38,4 +38,31 @@ K = QuadraticField(-67128026883063)
 assert K.class_group().invariants() == (327924, 2, 2, 2, 2)
 assert K._bnfdata()["certified"] is True
 
+# Sage mode's proof=False: the quadratic algorithms without the certificate,
+# cached apart from the default data (sage-proof-false-quadratic). Fields
+# are unique (QuadraticField(D) is the same object each time, as in Sage),
+# so each order uses a discriminant not used above.
+K = QuadraticField(-718243867543907291096)
+assert K._bnf is None and K._bnf_uncertified is None
+assert K.class_group(proof=False).invariants() == (2378498846, 2, 2, 2)
+u = K._bnf_uncertified
+assert K._bnf is None and u["certified"] is False and any("estimate" in a for a in u["assumes"]), u
+# a default call after it still certifies; proof=False then reuses that
+assert K.class_group().invariants() == (2378498846, 2, 2, 2) and K._bnf["certified"] is True
+assert K._bnf_checked(False) is K._bnf
+# the other order: certified first, proof=False reuses it, nothing uncertified computed
+K = QuadraticField(-1016021983508)
+assert K._bnf is None and K._bnf_uncertified is None
+assert K.class_number() == 48592 * 8 and K._bnf["certified"] is True
+assert K.class_number(proof=False) == 48592 * 8 and K._bnf_checked(False) is K._bnf and K._bnf_uncertified is None
+# a real field's regulator, both ways
+K = QuadraticField(1000000009)
+r0 = K.regulator(proof=False)
+assert K._bnf is None and K._bnf_uncertified["certified"] is False
+r1 = K.regulator()
+assert K._bnf["certified"] is True and abs(r0 / r1 - 1) < 1e-14, (r0, r1)
+# below the quadratic shortcut (|d| < 1000) proof=False is the default path
+K = QuadraticField(-23)
+assert K.class_number(proof=False) == 3 and K._bnf_uncertified is None and K._bnf is not None
+
 print("test_certify: ok")

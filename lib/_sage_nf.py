@@ -33,7 +33,9 @@ def _nf():
 
 # proof=True asks for a proven result (the engine's certificate), else
 # NotImplementedError, never the GRH-conditional value. proof=None also
-# refuses an uncertified stopping estimate; proof=False explicitly accepts it.
+# refuses an uncertified stopping estimate; proof=False explicitly accepts it,
+# and for quadratic fields skips the analytic certificate
+# (NumberField._bnf_conditional).
 
 
 def _count_reduced_forms(D):
@@ -172,6 +174,7 @@ class NumberField_absolute:
         self._emb = embedding_repr
         self._data = None
         self._bnf = None
+        self._bnf_uncertified = None
 
     # ---- naming and printing
     def __repr__(self):
@@ -566,12 +569,35 @@ class NumberField_absolute:
                 self._bnf = _nf().bnf(self._f)
         return self._bnf
 
-    def _quadratic_bnfdata(self):
-        d = _nf().quadratic_class_group_data(self.discriminant())
+    def _quadratic_bnfdata(self, certify=True):
+        d = _nf().quadratic_class_group_data(self.discriminant(), certify=certify)
         # Include the maximal order's probable-prime assumptions as well.
         return {"h": d["h"], "cyc": d["cyc"], "regulator": d["regulator"] if d["regulator"] is not None else "1",
                 "certified": d.get("certified", False),
                 "assumes": list(d.get("assumes", ["GRH"])) + list(self._nfdata().get("assumes", []))}
+
+    def _bnf_conditional(self):
+        """The class group data for proof=False, which accepts results
+        conditional on GRH and on the stopping rule's estimate (like PARI's
+        quadclassunit, and Sage with proof=False). The default data if it is
+        already there (certified or not, it serves any call). Otherwise, for
+        a quadratic field with |d| >= 1000, the quadratic algorithms without
+        their analytic certificate (sagebrush.nf.quadratic_class_group_data
+        with certify=False, much faster for small |d|), cached apart: that
+        result never answers a call without proof=False. It says what it
+        is: certified False, the estimate among its assumptions (unless h
+        is proven without the certificate)."""
+        if self._bnf is not None:
+            return self._bnf
+        if self._n == 2 and abs(self.discriminant()) >= _QUADRATIC_SHORTCUT_DISCRIMINANT:
+            if getattr(self, "_bnf_uncertified", None) is None:
+                try:
+                    self._bnf_uncertified = self._quadratic_bnfdata(certify=False)
+                except (ValueError, RuntimeError):
+                    pass
+            if getattr(self, "_bnf_uncertified", None) is not None:
+                return self._bnf_uncertified
+        return self._bnfdata()
 
     def _bnf_checked(self, proof):
         """_bnfdata, refusing (unless proof=False) a class group or regulator
@@ -581,7 +607,7 @@ class NumberField_absolute:
         found.)"""
         # Public class_group/regulator use this for proof=None or proof=False.
         # Their proof=True branch calls _proven_bnf for an independent certificate.
-        d = self._bnfdata()
+        d = self._bnf_conditional() if proof is False else self._bnfdata()
         extra = [a for a in d.get("assumes", ["GRH"]) if "estimate" in a]
         if extra and proof is not False:
             raise NotImplementedError("this class group assumes, besides GRH: %s (call with proof=False to accept it)" % "; ".join(extra))
