@@ -530,8 +530,11 @@ def _number_field_data(coeffs, proof=True):
     else:
         why = "not asked (proof=false)"
     if why is not None:
-        G, reg = K.class_group(proof=False), K._bnf_checked(False)["regulator"]
-        bnf = _union(K._bnfdata().get("assumes", ["GRH"]), order)
+        # (one data set for all three: proof=False may be the quadratic
+        # algorithms without their certificate, whose assumes say so)
+        data = K._bnf_checked(False)
+        G, reg = K.class_group(proof=False), data["regulator"]
+        bnf = _union(data.get("assumes", ["GRH"]), order)
     # (with no fundamental units the regulator is 1, by definition)
     reg_assumes = [] if r1 + r2 == 1 else bnf
     # (the engine's decimal string, its digits correct: RR's rounding of it

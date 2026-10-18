@@ -53,3 +53,15 @@ test("real quadratic fields that used to fail (no convergence; a panic at 2077)"
   assert.equal(sage("for D in [1004, 1013, 1021, 2077, 5945]:\n    K = QuadraticField(D); print(D, K.class_number(), K.class_group().invariants(), K.class_number(proof=True))\n"),
     "1004 1 () 1\n1013 1 () 1\n1021 1 () 1\n2077 1 () 1\n5945 4 (2, 2) 4\n");
 });
+
+test("proof=False: quadratic fields skip the analytic certificate, cached apart from the default data", () => {
+  // proof=False first: uncertified and labelled; a default call after it still certifies, and proof=False then reuses that
+  assert.equal(sage("K = NumberField(x^2 + 67128026883063, 'a')\nprint(K.class_group(proof=False).invariants(), K._bnf, K._bnf_uncertified['certified'], any('estimate' in a for a in K._bnf_uncertified['assumes']))\n" +
+    "print(K.class_group().invariants(), K._bnf['certified'], K._bnf_checked(False) is K._bnf)\n"),
+    "(327924, 2, 2, 2, 2) None False True\n(327924, 2, 2, 2, 2) True True\n");
+  // certified first: proof=False reuses it and computes nothing uncertified
+  assert.equal(sage("K = NumberField(x^2 + 67128026883063, 'a')\nprint(K.class_number(), K.class_number(proof=False), K._bnf_checked(False) is K._bnf, K._bnf_uncertified)\n"),
+    "5246784 5246784 True None\n");
+  // |d| < 1000: the default path
+  assert.equal(sage("K = NumberField(x^2 + 23, 'a')\nprint(K.class_number(proof=False), K._bnf_uncertified, K._bnf is not None)\n"), "3 None True\n");
+});
