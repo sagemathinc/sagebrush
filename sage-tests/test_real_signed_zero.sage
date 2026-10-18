@@ -128,3 +128,68 @@ for p in [30,100]:
      out=repr(x)
     except Exception as e:out=type(e).__name__+': '+str(e)
     print(p,s,label,op,out,calls)
+
+# shift counts given as text: str and bytes subclasses by their native
+# text (no __int__/__str__/__bytes__ hook), Sage's integer text rules
+# (whitespace, sign, underscores, 0x/0o/0b, ASCII digits); float counts
+# compared with == (astra's probes and a text grid)
+log=[]
+class S(str): pass
+class B(bytes): pass
+class HS(str):
+    def __int__(self): log.append('int'); return int(7)
+    def __str__(self): log.append('str'); return '9'
+class HB(bytes):
+    def __int__(self): log.append('int'); return int(7)
+    def __bytes__(self): log.append('bytes'); return b'9'
+for prec in [30,100]:
+    R=RealField(prec)
+    for name,v in [('str',S('2')),('bytes',B(b'2')),('strhooks',HS('2')),('byteshooks',HB(b'2')),('strbad',HS('x')),('bytesbad',HB(b'x'))]:
+        for op in ['<<','>>']:
+            log[:]=[]
+            try: r=R(1)<<v if op=='<<' else R(1)>>v; out=str(r)
+            except Exception as e: out=type(e).__name__+': '+str(e)
+            print(prec,name,op,out,log)
+
+log=[]
+class EQ(float):
+    def __eq__(self,o): log.append('eq'); return False
+    def __ne__(self,o): log.append('ne'); return False
+class FI(float):
+    def __int__(self): log.append('int'); return int(2)
+    def __float__(self): log.append('float'); return float(5)
+    def __eq__(self,o): log.append('eq'); raise RuntimeError('eq called')
+    def __ne__(self,o): log.append('ne'); raise RuntimeError('ne called')
+class FM(float):
+    def __int__(self): log.append('int'); return int(2)**100
+class S(str): pass
+class B(bytes): pass
+class SI(str):
+    def __int__(self): log.append('str-int'); return int(2)
+class BI(bytes):
+    def __int__(self): log.append('bytes-int'); return int(2)
+class II(int):
+    def __int__(self): log.append('int-int'); raise RuntimeError('int called')
+    def __index__(self): log.append('int-index'); raise RuntimeError('index called')
+    def __abs__(self): log.append('int-abs'); return int(0)
+def show(label,f):
+    log[:]=[]
+    try: v=f(); result=str(v)
+    except Exception as e: result=type(e).__name__+': '+str(e)
+    print(label,'=>',result,log)
+counts=[('eq2',EQ(2)),('eq2.5',EQ(2.5)),('fi2',FI(2)),('fi2.5',FI(2.5)),('fm2',FM(2)),('strsub',S('2')),('bytessub',B(b'2')),('si',SI('x')),('bi',BI(b'x')),('ii',II(2)),('iiwide',II(int(2)**63)),('floatmax',float(int(2)**63)),('floatin',float(int(2)**63-int(1024))),('rational',QQ(2)),('real',RealField(100)(2))]
+for prec in [30,100]:
+    R=RealField(prec)
+    for name,n in counts:
+        show('%s %s left'%(prec,name),lambda:R(1)<<n)
+        show('%s %s right'%(prec,name),lambda:R(1)>>n)
+    for text in ['  +2  ','02','2_0','\u0662','0x2','-0']:
+        show('%s text %r'%(prec,text),lambda:R('-0')>>text)
+
+R = RealField(30)
+for t in ['  +2  ', '02', '010', '2_0', '0x10', '0o10', '0b10', '0X1F', '-3', '+ 2', '1e2', '٢', '', ' ', '0x', '2__0', '_2', '2_', 'ff', '00', '-0x3', '0_8', '\t5\n', '0b', '12345678901234567890', b'0x10', b'010', b'2_0', b' 2 ', b'\xd9\xa2']:
+    try:
+        r = R(1) << t
+        print(repr(t), '->', r)
+    except Exception as e:
+        print(repr(t), '!!', type(e).__name__, str(e)[:80])

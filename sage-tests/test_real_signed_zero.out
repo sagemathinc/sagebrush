@@ -1662,3 +1662,129 @@ R100('-0.1',base=36) -> -0.027777777777777777777777777778 Real Field with 100 bi
 100 NaN ff >> TypeError: unsupported operands for >> ['float-int']
 100 NaN ii << NaN []
 100 NaN ii >> NaN []
+30 str << 4.0000000 []
+30 str >> 0.25000000 []
+30 bytes << 4.0000000 []
+30 bytes >> 0.25000000 []
+30 strhooks << 4.0000000 []
+30 strhooks >> 0.25000000 []
+30 byteshooks << 4.0000000 []
+30 byteshooks >> 0.25000000 []
+30 strbad << TypeError: unsupported operands for << []
+30 strbad >> TypeError: unsupported operands for >> []
+30 bytesbad << TypeError: unsupported operands for << []
+30 bytesbad >> TypeError: unsupported operands for >> []
+100 str << 4.0000000000000000000000000000 []
+100 str >> 0.25000000000000000000000000000 []
+100 bytes << 4.0000000000000000000000000000 []
+100 bytes >> 0.25000000000000000000000000000 []
+100 strhooks << 4.0000000000000000000000000000 []
+100 strhooks >> 0.25000000000000000000000000000 []
+100 byteshooks << 4.0000000000000000000000000000 []
+100 byteshooks >> 0.25000000000000000000000000000 []
+100 strbad << TypeError: unsupported operands for << []
+100 strbad >> TypeError: unsupported operands for >> []
+100 bytesbad << TypeError: unsupported operands for << []
+100 bytesbad >> TypeError: unsupported operands for >> []
+30 eq2 left => TypeError: unsupported operands for << ['eq']
+30 eq2 right => TypeError: unsupported operands for >> ['eq']
+30 eq2.5 left => TypeError: unsupported operands for << ['eq']
+30 eq2.5 right => TypeError: unsupported operands for >> ['eq']
+30 fi2 left => RuntimeError: eq called ['int', 'eq']
+30 fi2 right => RuntimeError: eq called ['int', 'eq']
+30 fi2.5 left => RuntimeError: eq called ['int', 'eq']
+30 fi2.5 right => RuntimeError: eq called ['int', 'eq']
+30 fm2 left => TypeError: unsupported operands for << ['int']
+30 fm2 right => TypeError: unsupported operands for >> ['int']
+30 strsub left => 4.0000000 []
+30 strsub right => 0.25000000 []
+30 bytessub left => 4.0000000 []
+30 bytessub right => 0.25000000 []
+30 si left => TypeError: unsupported operands for << []
+30 si right => TypeError: unsupported operands for >> []
+30 bi left => TypeError: unsupported operands for << []
+30 bi right => TypeError: unsupported operands for >> []
+30 ii left => 4.0000000 []
+30 ii right => 0.25000000 []
+30 iiwide left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 iiwide right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatmax left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatmax right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatin left => +infinity []
+30 floatin right => 0.00000000 []
+30 rational left => 4.0000000 []
+30 rational right => 0.25000000 []
+30 real left => 4.0000000 []
+30 real right => 0.25000000 []
+30 text '  +2  ' => -0.00000000 []
+30 text '02' => -0.00000000 []
+30 text '2_0' => -0.00000000 []
+30 text '٢' => TypeError: unsupported operands for >> []
+30 text '0x2' => -0.00000000 []
+30 text '-0' => -0.00000000 []
+100 eq2 left => TypeError: unsupported operands for << ['eq']
+100 eq2 right => TypeError: unsupported operands for >> ['eq']
+100 eq2.5 left => TypeError: unsupported operands for << ['eq']
+100 eq2.5 right => TypeError: unsupported operands for >> ['eq']
+100 fi2 left => RuntimeError: eq called ['int', 'eq']
+100 fi2 right => RuntimeError: eq called ['int', 'eq']
+100 fi2.5 left => RuntimeError: eq called ['int', 'eq']
+100 fi2.5 right => RuntimeError: eq called ['int', 'eq']
+100 fm2 left => TypeError: unsupported operands for << ['int']
+100 fm2 right => TypeError: unsupported operands for >> ['int']
+100 strsub left => 4.0000000000000000000000000000 []
+100 strsub right => 0.25000000000000000000000000000 []
+100 bytessub left => 4.0000000000000000000000000000 []
+100 bytessub right => 0.25000000000000000000000000000 []
+100 si left => TypeError: unsupported operands for << []
+100 si right => TypeError: unsupported operands for >> []
+100 bi left => TypeError: unsupported operands for << []
+100 bi right => TypeError: unsupported operands for >> []
+100 ii left => 4.0000000000000000000000000000 []
+100 ii right => 0.25000000000000000000000000000 []
+100 iiwide left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 iiwide right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatmax left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatmax right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatin left => +infinity []
+100 floatin right => 0.00000000000000000000000000000 []
+100 rational left => 4.0000000000000000000000000000 []
+100 rational right => 0.25000000000000000000000000000 []
+100 real left => 4.0000000000000000000000000000 []
+100 real right => 0.25000000000000000000000000000 []
+100 text '  +2  ' => -0.00000000000000000000000000000 []
+100 text '02' => -0.00000000000000000000000000000 []
+100 text '2_0' => -0.00000000000000000000000000000 []
+100 text '٢' => TypeError: unsupported operands for >> []
+100 text '0x2' => -0.00000000000000000000000000000 []
+100 text '-0' => -0.00000000000000000000000000000 []
+'  +2  ' -> 4.0000000
+'02' -> 4.0000000
+'010' -> 1024.0000
+'2_0' -> 1.0485760e6
+'0x10' -> 65536.000
+'0o10' -> 256.00000
+'0b10' -> 4.0000000
+'0X1F' -> 2.1474836e9
+'-3' -> 0.12500000
+'+ 2' -> 4.0000000
+'1e2' !! TypeError unsupported operands for <<
+'٢' !! TypeError unsupported operands for <<
+'' !! TypeError unsupported operands for <<
+' ' !! TypeError unsupported operands for <<
+'0x' !! TypeError unsupported operands for <<
+'2__0' -> 1.0485760e6
+'_2' -> 4.0000000
+'2_' -> 4.0000000
+'ff' !! TypeError unsupported operands for <<
+'00' -> 1.0000000
+'-0x3' -> 0.12500000
+'0_8' -> 256.00000
+'\t5\n' -> 32.000000
+'0b' !! TypeError unsupported operands for <<
+'12345678901234567890' !! OverflowError n (=12345678901234567890) must be <= 9223372036854775807
+b'0x10' -> 65536.000
+b'010' -> 1024.0000
+b'2_0' -> 1.0485760e6
+b' 2 ' -> 4.0000000
+b'\xd9\xa2' !! TypeError unsupported operands for <<
