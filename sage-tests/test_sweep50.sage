@@ -46,3 +46,10 @@ show("crt([1,2,3],[-3,-5,7])", lambda: crt([ZZ(1), ZZ(2), ZZ(3)], [ZZ(-3), ZZ(-5
 for ring_name, Rg in [("ZZ", ZZ), ("QQ", QQ), ("GF5", GF(5)), ("RDF", RDF), ("GF4", GF(4, 'a'))]:
     for r, c in [(2, 3), (3, 2), (0, 2), (2, 0), (0, 0), (2, 2), (1, 3)]:
         show("%s %dx%d trace" % (ring_name, r, c), lambda: repr(matrix(Rg, r, c, list(range(1, r * c + 1))).trace()))
+# crt with zero moduli, as Sage: two zero moduli divide by zero, an
+# incompatible pair is "no solution", then a zero modulus is a modulo by
+# zero; the list form starts from its first congruence as given
+for a, b, m, n in [(4,4,0,5), (3,8,0,5), (3,4,0,5), (4,4,5,0), (8,3,5,0), (4,4,0,0), (4,5,0,0), (0,0,0,0), (1,1,0,1), (0,0,0,5), (0,0,5,0), (4,4,0,-5), (4,4,-5,0), (2,7,0,5), (7,2,5,0), (4,4,0,1), (4,4,1,0)]:
+    show("crt(%d,%d,%d,%d)" % (a, b, m, n), lambda: crt(ZZ(a), ZZ(b), ZZ(m), ZZ(n)))
+for rs, ms in [([4,4],[0,5]), ([4,4,4],[0,5,7]), ([1,2,3],[3,0,5]), ([4],[0]), ([3,3],[5,5]), ([],[]), ([7],[3]), ([7],[-3]), ([-1],[3]), ([-7],[0]), ([7,1],[3,1]), ([7,1],[-3,1]), ([1,2],[0,0]), ([4,4],[5,0]), ([0,0,0],[0,0,0]), ([2,3],[4,6]), ([1,2,3],[3,5,0]), ([5],[1])]:
+    show("crt(%s,%s)" % (rs, ms), lambda: crt([ZZ(t) for t in rs], [ZZ(t) for t in ms]))

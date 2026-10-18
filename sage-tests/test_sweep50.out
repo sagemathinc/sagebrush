@@ -368,3 +368,38 @@ GF4 2x0 trace !! ValueError self must be a square matrix
 GF4 0x0 trace -> '0'
 GF4 2x2 trace -> '1'
 GF4 1x3 trace !! ValueError self must be a square matrix
+crt(4,4,0,5) !! ZeroDivisionError Integer modulo by zero
+crt(3,8,0,5) !! ZeroDivisionError Integer modulo by zero
+crt(3,4,0,5) !! ValueError no solution to crt problem since gcd(0,5) does not divide 3-4
+crt(4,4,5,0) !! ZeroDivisionError Integer modulo by zero
+crt(8,3,5,0) !! ZeroDivisionError Integer modulo by zero
+crt(4,4,0,0) !! ZeroDivisionError Integer division by zero
+crt(4,5,0,0) !! ZeroDivisionError Integer division by zero
+crt(0,0,0,0) !! ZeroDivisionError Integer division by zero
+crt(1,1,0,1) !! ZeroDivisionError Integer modulo by zero
+crt(0,0,0,5) !! ZeroDivisionError Integer modulo by zero
+crt(0,0,5,0) !! ZeroDivisionError Integer modulo by zero
+crt(4,4,0,-5) !! ZeroDivisionError Integer modulo by zero
+crt(4,4,-5,0) !! ZeroDivisionError Integer modulo by zero
+crt(2,7,0,5) !! ZeroDivisionError Integer modulo by zero
+crt(7,2,5,0) !! ZeroDivisionError Integer modulo by zero
+crt(4,4,0,1) !! ZeroDivisionError Integer modulo by zero
+crt(4,4,1,0) !! ZeroDivisionError Integer modulo by zero
+crt([4, 4],[0, 5]) !! ZeroDivisionError Integer modulo by zero
+crt([4, 4, 4],[0, 5, 7]) !! ZeroDivisionError Integer modulo by zero
+crt([1, 2, 3],[3, 0, 5]) !! ValueError no solution to crt problem since gcd(3,0) does not divide 1-2
+crt([4],[0]) -> 4
+crt([3, 3],[5, 5]) -> 3
+crt([],[]) -> 0
+crt([7],[3]) -> 7
+crt([7],[-3]) -> 7
+crt([-1],[3]) -> -1
+crt([-7],[0]) -> -7
+crt([7, 1],[3, 1]) -> 1
+crt([7, 1],[-3, 1]) -> 1
+crt([1, 2],[0, 0]) !! ZeroDivisionError Integer division by zero
+crt([4, 4],[5, 0]) !! ZeroDivisionError Integer modulo by zero
+crt([0, 0, 0],[0, 0, 0]) !! ZeroDivisionError Integer division by zero
+crt([2, 3],[4, 6]) !! ValueError no solution to crt problem since gcd(4,6) does not divide 2-3
+crt([1, 2, 3],[3, 5, 0]) !! ValueError no solution to crt problem since gcd(15,0) does not divide 7-3
+crt([5],[1]) -> 5
