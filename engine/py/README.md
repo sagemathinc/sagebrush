@@ -95,6 +95,26 @@ and the session keeps its variables. The session also works on its own
 (`sagebrush.session.Session`), and `sagebrush.preparse.preparse` turns Sage
 syntax into Python.
 
+## Benchmarks: `sagebrush bench`
+
+This package also installs `sagebrush`, whose `bench` command reruns the
+benchmarks behind Sagebrush's performance claims, against the other systems
+installed on the machine:
+
+    sagebrush bench --list               # the suites and the claims they back
+    sagebrush bench --quick              # every suite, small cases (a minute or two)
+    sagebrush bench imagquad realquad    # some suites, standard cases
+    sagebrush bench nf --large --json run.json
+    sagebrush bench --markdown run.json  # a saved run as tables
+
+The competitors (PARI/GP's `gp`, FLINT, Sage) run only if they are
+installed, each in its own process; a missing one shows "not installed".
+FLINT is reached through a small C program compiled against it
+(`pkg-config flint`). Every answer is compared across the engines, and a
+disagreement makes the run fail. The output includes the machine, the
+versions, the load average, and the median and range of each case;
+`--json` keeps every sample.
+
 ## Engines
 
 - `sagebrush.nf`: number fields: maximal orders, prime ideals, class groups,
