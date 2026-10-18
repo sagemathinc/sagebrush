@@ -1068,31 +1068,76 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   left_shift: { f: (x, y) => x * 2 ** y },
   right_shift: { f: (x, y) => Math.floor(x / 2 ** y) },
 });
+// (a + b i) / (c + d i) as NumPy's complex divide loop (umath/loops.c.src)
+// and npy_cpow's cdiv: Smith's algorithm, multiplying by the reciprocal of
+// the denominator (scl), not dividing by it, which rounds differently (an
+// ulp in about 43% of results); a zero divisor gives a / |c|, b / |d|
 function cdiv(a: number, b: number, c: number, d: number): [number, number] {
-  // Smith's algorithm, as NumPy
-  if (Math.abs(c) >= Math.abs(d)) {
-    if (c === 0 && d === 0) return [a / Math.abs(c), b / Math.abs(c)];
-    const r = d / c, den = c + d * r;
-    return [(a + b * r) / den, (b - a * r) / den];
+  const ac = Math.abs(c), ad = Math.abs(d);
+  if (ac >= ad) {
+    if (ac === 0 && ad === 0) return [a / ac, b / ad];
+    const rat = d / c, scl = 1 / (c + d * rat);
+    return [(a + b * rat) * scl, (b - a * rat) * scl];
   }
-  const r = c / d, den = c * r + d;
-  return [(a * r + b) / den, (b * r - a) / den];
+  const rat = c / d, scl = 1 / (d + c * rat);
+  return [(a * rat + b) * scl, (b * rat - a) * scl];
 }
+// NumPy's cmul: the product as written, no fused multiply-add
+const cmul = (ar: number, ai: number, br: number, bi: number): [number, number] => [ar * br - ai * bi, ar * bi + ai * br];
+// a ** b as NumPy's npy_cpow (npymath/npy_math_complex.c.src): 0 ** b is 0
+// for b with a positive real part, else NaN; an integer exponent below 100
+// in magnitude by its unrolled 1, 2 and 3 (which keep infinities and signed
+// zeros: no product with 1 + 0j), else binary powering from 1 with cmul,
+// and Smith's cdiv for a negative one
 function cpow(a: number, b: number, c: number, d: number): [number, number] {
   if (c === 0 && d === 0) return [1, 0];
-  if (a === 0 && b === 0) return c > 0 && d === 0 ? [0, 0] : [NaN, NaN];
-  if (d === 0 && Number.isInteger(c) && Math.abs(c) < 100) {
-    let rr = 1, ri = 0, br = a, bi = b, n = Math.abs(c);
-    while (n) {
-      if (n & 1) [rr, ri] = [rr * br - ri * bi, rr * bi + ri * br];
-      [br, bi] = [br * br - bi * bi, 2 * br * bi];
-      n >>= 1;
+  if (a === 0 && b === 0) return c > 0 ? [0, 0] : [NaN, NaN];
+  if (d === 0 && Number.isInteger(c) && c > -100 && c < 100) {
+    if (c === 1) return [a, b];
+    if (c === 2) return cmul(a, b, a, b);
+    if (c === 3) {
+      const [sr, si] = cmul(a, b, a, b);
+      return cmul(a, b, sr, si);
+    }
+    let n = Math.abs(c), mask = 1, rr = 1, ri = 0, pr = a, pi = b;
+    for (;;) {
+      if (n & mask) [rr, ri] = cmul(rr, ri, pr, pi);
+      mask <<= 1;
+      if (n < mask) break;
+      [pr, pi] = cmul(pr, pi, pr, pi);
     }
     return c < 0 ? cdiv(1, 0, rr, ri) : [rr, ri];
   }
+  // (other exponents: NumPy calls the C library's cpow, glibc's on Linux,
+  // which is not ported here; this agrees with it but for the last bit or
+  // so of some results)
   const logr = glibcLog(FD.v8hypot(a, b)), th = FD.atan2(b, a);
   const mr = glibcExp(c * logr - d * th), ang = d * logr + c * th;
   return [mr * FD.cos(ang), mr * FD.sin(ang)];
+}
+// 1 / z as NumPy's complex reciprocal loop (umath/loops.c.src), which is
+// not cdiv(1, z): the larger part's ratio, and 1 / d and -r / d
+// a ** o and a **= o as NumPy's array_power (multiarray/number.c,
+// fast_scalar_power): an exact Python int 2 is the square ufunc (an array of
+// any dtype), an exact int -1 reciprocal and an exact float 0.5 sqrt (float
+// and complex arrays), not power; their complex results differ from
+// power's in the last bits, and their warnings name them
+function fastScalarPower(a: NDArray, o: any): string | null {
+  const t = Obj.typeOf(o);
+  if (t === T.int) {
+    const v = Obj.unbox(o);
+    if (v == 2) return "square";
+    if (v == -1 && (a.dt.kind === "f" || a.dt.cplx)) return "reciprocal";
+  } else if (t === T.float && Obj.unbox(o) === 0.5 && (a.dt.kind === "f" || a.dt.cplx)) return "sqrt";
+  return null;
+}
+function crecip(a: number, b: number): [number, number] {
+  if (Math.abs(b) <= Math.abs(a)) {
+    const r = b / a, d = a + b * r;
+    return [1 / d, -r / d];
+  }
+  const r = a / b, d = a * r + b;
+  return [r / d, -1 / d];
 }
 function ipow(x: number, y: number): number {
   if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
@@ -1283,7 +1328,9 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   positive: { f: (x) => x, c: (a, b) => [a, b], keepInt: true },
   absolute: { f: Math.abs, keepInt: true },
   sign: { f: (x) => (x !== x ? NaN : x > 0 ? 1 : x < 0 ? -1 : 0), keepInt: true },
-  square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, 2 * a * b], keepInt: true },
+  // (complex: NumPy's loop as written, a a - b b and a b + b a; on hardware
+  // with fused multiply-add NumPy's SIMD loop fuses them, in the last bit)
+  square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, a * b + b * a], keepInt: true },
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
   cbrt: { f: FD.cbrt, float: true },
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
@@ -1314,7 +1361,7 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   trunc: { f: Math.trunc, keepInt: true },
   rint: { f: roundHalfEven, float: true }, // (of ints: float16, float32 or float64, as NumPy's)
   fabs: { f: Math.abs, float: true },
-  reciprocal: { f: (x) => 1 / x, c: (a, b) => cdiv(1, 0, a, b), keepInt: true },
+  reciprocal: { f: (x) => 1 / x, c: crecip, keepInt: true },
   isnan: { f: (x) => +(x !== x), out: "bool", c: (a, b) => [+(a !== a || b !== b), 0] },
   isinf: { f: (x) => +(x === Infinity || x === -Infinity), out: "bool" },
   isfinite: { f: (x) => +Number.isFinite(x), out: "bool", c: (a, b) => [+(Number.isFinite(a) && Number.isFinite(b)), 0] },
@@ -2894,10 +2941,21 @@ newBuiltinModule("_numpy", (m) => {
       const both = operand(a).arr.dt.kind === "b" && operand(b).arr.dt.kind === "b";
       return both ? boolOp(op) : op;
     };
-    M(`__${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(a, o), a, o)) : NotImplemented)).$fresh = true;
+    M(`__${py}__`, (a: NDArray, o: any) => {
+      if (!isOperand(o)) return NotImplemented;
+      const f = py === "pow" ? fastScalarPower(a, o) : null;
+      return (O.FRESH.v = f !== null ? unary(f, a) : binary(pick(a, o), a, o));
+    }).$fresh = true;
     M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(o, a), o, a)) : NotImplemented)).$fresh = true;
     M(`__i${py}__`, (a: NDArray, o: any) => {
       if (!isOperand(o)) return NotImplemented;
+      const f = py === "pow" ? fastScalarPower(a, o) : null;
+      if (f !== null) {
+        const r = unary(f, a);
+        if (r.dt !== a.dt && !(promote(r.dt, a.dt) === a.dt)) raise(T.UFuncTypeError ?? T.TypeError, `Cannot cast ufunc '${f}' output from dtype('${r.dt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
+        assign(a, r);
+        return a;
+      }
       // in place when the result has a's dtype and shape and o is a itself or
       // shares no memory with it
       if ((o === a || !(o instanceof NDArray && o.data.buffer === a.data.buffer)) && binary(pick(a, o), a, o, a, true) !== undefined) return a;
