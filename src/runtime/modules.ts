@@ -987,13 +987,84 @@ newBuiltinModule("math", (m) => {
     if (!O.isPyInt(x)) x = O.index(x);
     return BigInt(typeof x === "boolean" ? +x : x);
   };
-  fn(m, "factorial", (x: any) => {
+  // ---- products of many integers, as CPython's math_factorial,
+  // perm_comb and math_prod (Modules/mathmodule.c, ported: NOTICE.md):
+  // balanced, so its multiplications are of like sizes, not one big
+  // integer times a small one n times (factorial(100000) took 4 s)
+  const LLONG_MAX = 9223372036854775807n;
+  // (V8's largest BigInt has 2**30 bits: a result known to be past it is a
+  // MemoryError before anything is computed, from a lower bound on its
+  // size, so a value that fits is never refused; one found past it on the
+  // way, V8's RangeError, a MemoryError too)
+  const MAX_BITS = 2 ** 30;
+  const tooBig = (bitsAtLeast: number) => {
+    if (bitsAtLeast > MAX_BITS) raise(T.MemoryError);
+  };
+  const bigMul = (a: bigint, b: bigint): bigint => {
+    // (Stop is seen between multiplications)
+    O.pollInterrupt();
+    try {
+      return a * b;
+    } catch (e) {
+      if (e instanceof RangeError) raise(T.MemoryError);
+      throw e;
+    }
+  };
+  // (n below 2**32 here: factorial's n is below 2**26 by then)
+  const bitLength = (n: number) => (n <= 0 ? 0 : 32 - Math.clz32(n));
+  // (start * (start + 2) * ... * (stop - 2), odd start < stop, each below
+  // 2**max_bits: CPython's factorial_partial_product; a product that fits
+  // 64 bits multiplied at once, else the two halves; the depth is that of
+  // halving, at most 64)
+  const partialProduct = (start: number, stop: number, maxBits: number): bigint => {
+    const numOperands = Math.floor((stop - start) / 2);
+    if (numOperands <= 64 && numOperands * maxBits <= 64) {
+      let total = BigInt(start);
+      for (let j = start + 2; j < stop; j += 2) total *= BigInt(j);
+      return total;
+    }
+    const midpoint = (start + numOperands) | 1;
+    const left = partialProduct(start, midpoint, bitLength(midpoint - 2));
+    const right = partialProduct(midpoint, stop, maxBits);
+    return bigMul(left, right);
+  };
+  // (n!'s odd part, CPython's factorial_odd_part: the product over i of
+  // the odd numbers in (n >> (i+1), n >> i], each to the power i + 1, as
+  // the running products inner and outer)
+  const factorialOddPart = (n: number): bigint => {
+    let inner = 1n, outer = 1n;
+    let upper = 3;
+    for (let i = bitLength(n) - 2; i >= 0; i--) {
+      const v = Math.floor(n / 2 ** i);
+      if (v <= 2) continue;
+      const lower = upper;
+      upper = (v + 1) | 1;
+      inner = bigMul(inner, partialProduct(lower, upper, bitLength(upper - 2)));
+      outer = bigMul(outer, inner);
+    }
+    return outer;
+  };
+  const SMALL_FACTORIALS: number[] = [1];
+  for (let i = 1; i <= 18; i++) SMALL_FACTORIALS.push(SMALL_FACTORIALS[i - 1] * i);
+  const factorial = (x: any): any => {
     const n = bigOf(x);
+    if (n > LLONG_MAX) raise(T.OverflowError, `factorial() argument should not exceed ${LLONG_MAX}`);
     if (n < 0n) raise(T.ValueError, "factorial() not defined for negative values");
-    let r = 1n;
-    for (let i = 2n; i <= n; i++) r *= i;
-    return O.normBig(r);
-  });
+    if (n < BigInt(SMALL_FACTORIALS.length)) return SMALL_FACTORIALS[Number(n)];
+    // (n! > (n/e)**n)
+    const k = Number(n);
+    tooBig(k * Math.log2(k / Math.E));
+    let pop = 0;
+    for (let v = k; v > 0; v = Math.floor(v / 2)) pop += v % 2;
+    // (n! is its odd part times 2**(n - popcount(n)))
+    try {
+      return O.normBig(factorialOddPart(k) << BigInt(k - pop));
+    } catch (e) {
+      if (e instanceof RangeError) raise(T.MemoryError);
+      throw e;
+    }
+  };
+  fn(m, "factorial", factorial);
   const gcd2 = (a: bigint, b: bigint): bigint => {
     a = a < 0n ? -a : a;
     b = b < 0n ? -b : b;
@@ -1040,29 +1111,121 @@ newBuiltinModule("math", (m) => {
     }
     return O.normBig(g);
   });
+  // (P(n, k), or C(n, k) for comb, as CPython's perm_comb: P(n, k) =
+  // P(n, j) * P(n - j, k - j) and C(n, k) = C(n, j) * C(n - j, k - j) //
+  // C(k, j) for j = k // 2, so like sizes are multiplied; a few factors
+  // one after another; the depth is that of halving k)
+  const permComb = (n: bigint, k: number, comb: boolean): bigint => {
+    if (k === 0) return 1n;
+    if (k === 1) return n;
+    if (k <= 16) {
+      let r = n;
+      for (let i = 1; i < k; i++) r = comb ? (r * (n - BigInt(i))) / BigInt(i + 1) : r * (n - BigInt(i));
+      return r;
+    }
+    const j = Math.floor(k / 2);
+    const a = bigMul(permComb(n, j, comb), permComb(n - BigInt(j), k - j, comb));
+    return comb ? a / permComb(BigInt(k), j, true) : a;
+  };
+  // (a lower bound on log2(n), n >= 1)
+  // (the product of xs, a balanced tree of pairs, level by level: no
+  // recursion; small factors first multiplied as numbers while exact)
+  const productOf = (xs: bigint[]): bigint => {
+    let level: bigint[] = [];
+    let acc = 1;
+    for (const x of xs) {
+      if (x < 67108864n && acc * Number(x) <= Number.MAX_SAFE_INTEGER) acc *= Number(x);
+      else if (x < 67108864n) {
+        level.push(BigInt(acc));
+        acc = Number(x);
+      } else level.push(x);
+    }
+    level.push(BigInt(acc));
+    while (level.length > 1) {
+      const next: bigint[] = [];
+      for (let i = 0; i + 1 < level.length; i += 2) next.push(bigMul(level[i], level[i + 1]));
+      if (level.length % 2) next.push(level[level.length - 1]);
+      level = next;
+    }
+    return level[0];
+  };
+  // (C(n, k) for n up to 2**25 from its primes, no division: each prime
+  // p's exponent the number of carries adding k and n - k in base p, as
+  // Kummer's theorem, Legendre's sums; the same value as CPython's
+  // perm_comb, whose divisions of big integers V8 does slowly)
+  const COMB_SIEVE_MAX = 2 ** 25;
+  const combByPrimes = (n: number, k: number): bigint => {
+    const composite = new Uint8Array(n + 1);
+    const factors: bigint[] = [];
+    for (let p = 2; p <= n; p++) {
+      if ((p & 65535) === 0) O.pollInterrupt();
+      if (composite[p]) continue;
+      if (p <= n / p) for (let q = p * p; q <= n; q += p) composite[q] = 1;
+      let e = 0;
+      for (let pp = p; pp <= n; pp *= p) e += Math.floor(n / pp) - Math.floor(k / pp) - Math.floor((n - k) / pp);
+      if (e === 1) factors.push(BigInt(p));
+      else if (e > 1) factors.push(BigInt(p) ** BigInt(e));
+    }
+    return productOf(factors);
+  };
+  const log2Big = (n: bigint) => {
+    const s = n.toString(16);
+    return (s.length - 1) * 4 + Math.log2(parseInt(s[0], 16));
+  };
+  // (the sizes of P and C a lower bound: P(n, k) >= max(n - k + 1, k/e)**k,
+  // C(n, k) >= (n/k)**k for k <= n/2)
+  const permCombBig = (n: bigint, k: bigint, comb: boolean): any => {
+    const kf = Number(k);
+    if (comb) tooBig(kf * (log2Big(n) - Math.log2(kf)) - 1);
+    else tooBig(kf * Math.max(log2Big(n - k + 1n), Math.log2(kf / Math.E)) - 1);
+    try {
+      if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf));
+      return O.normBig(permComb(n, kf, comb));
+    } catch (e) {
+      if (e instanceof RangeError) raise(T.MemoryError);
+      throw e;
+    }
+  };
+  // (CPython 3.14's math_comb_impl and math_perm_impl: n and k converted,
+  // their signs checked, then an n or k past a C long long told apart)
   fn(m, "comb", (nn: any, kk: any) => {
     const n = bigOf(nn);
     let k = bigOf(kk);
     if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
     if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
-    if (k > n) return 0;
-    if (k > n - k) k = n - k;
-    let r = 1n;
-    for (let i = 1n; i <= k; i++) r = (r * (n - k + i)) / i;
-    return O.normBig(r);
+    if (n <= LLONG_MAX) {
+      if (k > n) return 0;
+      if (n - k < k) k = n - k;
+    } else {
+      const t = n - k;
+      if (t < 0n) return 0;
+      if (t < k) k = t;
+      if (k > LLONG_MAX) raise(T.OverflowError, `min(n - k, k) must not exceed ${LLONG_MAX}`);
+    }
+    return permCombBig(n, k, true);
   });
   fn(m, "perm", (nn: any, kk: any = null) => {
+    // (perm(n) is factorial(n), its checks and messages)
+    if (kk === null) return factorial(nn);
     const n = bigOf(nn);
-    // (a negative k was 1; CPython 3.14's checks and messages)
-    if (kk === null && n < 0n) raise(T.ValueError, "factorial() not defined for negative values");
-    const k = kk === null ? n : bigOf(kk);
+    const k = bigOf(kk);
     if (n < 0n) raise(T.ValueError, "n must be a non-negative integer");
     if (k < 0n) raise(T.ValueError, "k must be a non-negative integer");
-    if (k > n) return 0;
-    let r = 1n;
-    for (let i = n - k + 1n; i <= n; i++) r *= i;
-    return O.normBig(r);
+    if (n <= LLONG_MAX) {
+      if (k > n) return 0;
+    } else if (k > LLONG_MAX) {
+      if (k > n) return 0;
+      raise(T.OverflowError, `k must not exceed ${LLONG_MAX}`);
+    }
+    return permCombBig(n, k, false);
   });
+  // (positional only, CPython's messages)
+  for (const name of ["comb", "perm"]) {
+    m[name].$kw = (pos: any[], names: string[]) => {
+      if (names.length) raise(T.TypeError, `math.${name}() takes no keyword arguments`);
+      return m[name](...pos);
+    };
+  }
   // CPython's math_fsum_impl (Modules/mathmodule.c, ported: NOTICE.md):
   // Shewchuk's exact partials, infinities and nans summed apart, an
   // intermediate overflow an error, and the partials added from the top with
@@ -1116,11 +1279,79 @@ newBuiltinModule("math", (m) => {
     }
     return O.mkfloat(hi);
   });
-  fn(m, "prod", (it: any) => {
-    let r: any = 1;
-    O.forEach(it, (v) => (r = O.mul(r, v)));
-    return r;
-  });
+  // math.prod(iterable, /, *, start=1) as CPython's math_prod_impl: left
+  // to right, each item's __mul__ called in turn; while the product and
+  // the items are exact ints (bools among the items), CPython's int fast
+  // path, here a balanced product of them, the same value: the items
+  // multiplied as they come in blocks of like sizes, merged as a binary
+  // counter (memory for log2 of their number of blocks); at the first other
+  // item, that product, then on one at a time
+  const prod = (it: any, start: any) => {
+    let r: any = start;
+    if (!(typeof r !== "boolean" && O.isPyInt(r))) {
+      O.forEach(it, (v) => (r = O.mul(r, v)));
+      return r;
+    }
+    const stack: bigint[] = [], sizes: number[] = [];
+    const push = (v: bigint) => {
+      let size = 1;
+      while (sizes.length && sizes[sizes.length - 1] === size) {
+        v = bigMul(stack.pop()!, v);
+        sizes.pop();
+        size *= 2;
+      }
+      stack.push(v);
+      sizes.push(size);
+    };
+    // (small items multiplied as numbers while the product is exact)
+    let acc = 1, ints = true, count = 0;
+    const flush = (): any => {
+      push(BigInt(acc));
+      acc = 1;
+      let p = BigInt(r);
+      while (stack.length) {
+        sizes.pop();
+        p = bigMul(stack.pop()!, p);
+      }
+      return O.normBig(p);
+    };
+    O.forEach(it, (v) => {
+      if (ints && O.isPyInt(v)) {
+        if ((++count & 1023) === 0) O.pollInterrupt();
+        const x = typeof v === "boolean" ? +v : v;
+        if (typeof x === "number" && Math.abs(acc * x) <= Number.MAX_SAFE_INTEGER) acc *= x;
+        else {
+          push(BigInt(acc));
+          acc = 1;
+          if (typeof x === "number" && Math.abs(x) <= 2 ** 26) acc = x;
+          else push(BigInt(x));
+        }
+        return;
+      }
+      if (ints) {
+        ints = false;
+        r = flush();
+      }
+      r = O.mul(r, v);
+    });
+    return ints ? flush() : r;
+  };
+  const prodArity = (n: number) => {
+    if (n !== 1) raise(T.TypeError, `prod() takes exactly 1 positional argument (${n} given)`);
+  };
+  fn(m, "prod", (...pos: any[]) => (prodArity(pos.length), prod(pos[0], 1)));
+  // (its count checked by itself, with CPython's message: the module's
+  // arity wrapper skips it, and reads its range here)
+  m.prod.$argRange = [1, 1];
+  m.prod.$kw = (pos: any[], names: string[], values: any[]) => {
+    prodArity(pos.length);
+    let start: any = 1;
+    names.forEach((k, i) => {
+      if (k !== "start") raise(T.TypeError, `prod() got an unexpected keyword argument '${k}'`);
+      start = values[i];
+    });
+    return prod(pos[0], start);
+  };
   // erf, erfc and exp2 (fdlibm.ts, libm.ts), and gamma and lgamma as
   // CPython computes them (pygamma.ts), raising as CPython's do
   unary("erf", FD.erf);
