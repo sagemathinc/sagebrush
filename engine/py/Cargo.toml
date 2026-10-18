@@ -16,6 +16,7 @@ sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-web = { path = "../web" }
 sagebrush-mpoly = { path = "../mpoly" }
+sagebrush-raster = { path = "../raster" }
 rayon = "1.10"
 pyo3 = { version = "0.27", features = ["extension-module", "num-bigint"] }
 num-bigint = "0.4"
