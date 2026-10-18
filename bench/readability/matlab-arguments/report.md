@@ -1,9 +1,8 @@
 # MATLAB argument-validation readability slice
 
 Status: implementation `0f17e46d` has 748/748 exact corpus matches, two passing
-focused tests, and the complete cold before/after measurement. Limits/refusal
-review is clear on the code and focused evidence; behavior review and full CI
-remain pending.
+focused tests, and the complete cold before/after measurement. Both reviews
+are clear on the code and exact-head evidence; full CI remains pending.
 
 ## Scope
 
@@ -88,5 +87,14 @@ blocks pass. Full sbremote CI is running on `sagebrush` at `0f17e46d`.
 The limits/refusal reviewer checked the class-before-size order, unchanged
 conversion/error boundaries, mismatch-only size work, scalar-before-vector
 adjustment, pair scanning/materialization and validator short-circuit behavior.
-Code and exact corpus evidence are clear, with full CI still pending. Behavior
-review is also pending. No executable edits follow `0f17e46d`.
+Code and exact corpus evidence are clear, with full CI still pending.
+
+The behavior reviewer independently compared all 31 existing functions after
+removing docstrings, mapping the local renames and inlining the three extracted
+helpers. Their ASTs match, including operator/condition/statement order and
+exception-handler scope. Code outside the reserved slice, signatures and
+registrations also match. A separate VM rerun of 58 selected cases is exactly
+identical; the reviewer verified every field in all 748 recorded cases and the
+source hashes. Behavior review is CLEAR. No executable edits follow `0f17e46d`.
+Raw debugging traceback positions and private helper frames naturally reflect
+the source refactor; they are not claimed byte-identical.
