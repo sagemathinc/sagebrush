@@ -205,7 +205,9 @@ function sum(it: any, start: any = 0): any {
     return O.normBig(acc);
   }
   const acc = new SumAcc(s);
-  if (Array.isArray(it)) for (let i = 0; i < it.length; i++) acc.push(it[i]);
+  // (a list's items directly only for a list or a subclass that keeps
+  // list's iteration: an overridden __iter__ is called, as CPython's sum)
+  if (Array.isArray(it) && ((it as any).$cls === undefined || O.layoutPlain((it as any).$cls))) for (let i = 0; i < it.length; i++) acc.push(it[i]);
   else {
     const iter = O.iter(it);
     for (let v = iter.$next(); v !== DONE; v = iter.$next()) acc.push(v);

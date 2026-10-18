@@ -74,3 +74,20 @@ for (const [name, lines] of Object.entries(fromlistSnippets))
     const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
   });
+
+// sum() of a list subclass with its own __iter__ reads the items it yields,
+// as CPython's (the engine summed the stored items: a QQ vector's integral
+// entries summed in ZZ)
+test("sum() calls a list subclass's __iter__, as CPython", () => {
+  const code = [
+    "class L(list):",
+    "    def __iter__(self):",
+    "        for x in list.__iter__(self):",
+    "            yield x * 10",
+    "class P(list):",
+    "    pass",
+    "print(sum(L([1, 2, 3])), sum(L([1, 2, 3]), 100), sum(P([1, 2, 3])), sum([1, 2, 3]))",
+  ].join("\n");
+  const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
+});
