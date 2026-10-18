@@ -1,0 +1,1904 @@
+RR R(-0.0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R('-0') -> -0.000000000000000 Real Field with 53 bits of precision
+RR -R(0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(0)*-1 -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(-0)*5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(0)*-5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0*-5 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0*0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR 0+-0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR 0-0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0--0 -> 0.000000000000000 Real Field with 53 bits of precision
+RR x-x -> 0.000000000000000 Real Field with 53 bits of precision
+RR -x+x -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0+3 -> 3.00000000000000 Real Field with 53 bits of precision
+RR 0/-5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/5 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/-5 -> 0.000000000000000 Real Field with 53 bits of precision
+RR 1/-0 -> -infinity Real Field with 53 bits of precision
+RR -1/-0 -> +infinity Real Field with 53 bits of precision
+RR 1/-inf -> -0.000000000000000 Real Field with 53 bits of precision
+RR -5/inf -> -0.000000000000000 Real Field with 53 bits of precision
+RR 1/R(-0) -> -infinity Real Field with 53 bits of precision
+RR -0^2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0^-2 -> +infinity Real Field with 53 bits of precision
+RR -0^-3 -> -infinity Real Field with 53 bits of precision
+RR -0^0 -> 1.00000000000000 Real Field with 53 bits of precision
+RR -inf^-3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -inf^-2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(2) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(-3) -> -infinity Real Field with 53 bits of precision
+RR -0^R(0.5) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0^R(-0.5) -> +infinity Real Field with 53 bits of precision
+RR -inf^R(-3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R(-2)^(-2^70) -> 0.000000000000000 Real Field with 53 bits of precision
+RR R(-2)^(-2^70-1) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0%3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -3%3 -> -0.000000000000000 Real Field with 53 bits of precision
+RR 3%-3 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -6%4 -> 2.00000000000000 Real Field with 53 bits of precision
+RR sqrt(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR abs(-0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR sin(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR tan(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR atan(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR asin(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR sinh(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR tanh(-0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR exp(-0) -> 1.00000000000000 Real Field with 53 bits of precision
+RR cos(-0) -> 1.00000000000000 Real Field with 53 bits of precision
+RR log(-0) -> -infinity Real Field with 53 bits of precision
+RR float(-0) -> -0.0 float
+RR str(-0) -> '-0.000000000000000' str
+RR sign(-0) -> 0
+RR is_zero -> True
+RR ==0 -> True
+RR hash -> True
+RR RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+RR R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+RR R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+RR QQ(-0) -> 0 Rational Field
+RR ZZ(-0) -> 0
+RR int(-0) -> 0
+RR -0<0 -> False
+RR -0.floor -> 0
+RR R(-0.5).round -> 0
+RR -0*inf -> NaN Real Field with 53 bits of precision
+RR -0+R(-1e-300) -> -1.00000000000000e-300 Real Field with 53 bits of precision
+RR R(-1e-300)*1e-300 -> -1.00000000000000e-600 Real Field with 53 bits of precision
+RR sqrt(-0)^2 -> 0.000000000000000 Real Field with 53 bits of precision
+RR -(-0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0*QQ(3) -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0*2 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0+QQ(0) -> 0.000000000000000 Real Field with 53 bits of precision
+RR -0-QQ(0) -> -0.000000000000000 Real Field with 53 bits of precision
+RR 2*-0 -> -0.000000000000000 Real Field with 53 bits of precision
+RR -0/QQ(2) -> -0.000000000000000 Real Field with 53 bits of precision
+RR QQ(1)/-0 -> -infinity Real Field with 53 bits of precision
+R30 R(-0.0) -> -0.00000000 Real Field with 30 bits of precision
+R30 R('-0') -> -0.00000000 Real Field with 30 bits of precision
+R30 -R(0) -> -0.00000000 Real Field with 30 bits of precision
+R30 R(0)*-1 -> -0.00000000 Real Field with 30 bits of precision
+R30 R(-0)*5 -> -0.00000000 Real Field with 30 bits of precision
+R30 R(0)*-5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0*-5 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0*0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+0 -> 0.00000000 Real Field with 30 bits of precision
+R30 0+-0 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 0-0 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0--0 -> 0.00000000 Real Field with 30 bits of precision
+R30 x-x -> 0.00000000 Real Field with 30 bits of precision
+R30 -x+x -> 0.00000000 Real Field with 30 bits of precision
+R30 -0+3 -> 3.0000000 Real Field with 30 bits of precision
+R30 0/-5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/5 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/-5 -> 0.00000000 Real Field with 30 bits of precision
+R30 1/-0 -> -infinity Real Field with 30 bits of precision
+R30 -1/-0 -> +infinity Real Field with 30 bits of precision
+R30 1/-inf -> -0.00000000 Real Field with 30 bits of precision
+R30 -5/inf -> -0.00000000 Real Field with 30 bits of precision
+R30 1/R(-0) -> -infinity Real Field with 30 bits of precision
+R30 -0^2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0^-2 -> +infinity Real Field with 30 bits of precision
+R30 -0^-3 -> -infinity Real Field with 30 bits of precision
+R30 -0^0 -> 1.0000000 Real Field with 30 bits of precision
+R30 -inf^-3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -inf^-2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(3) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0^R(2) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(-3) -> -infinity Real Field with 30 bits of precision
+R30 -0^R(0.5) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0^R(-0.5) -> +infinity Real Field with 30 bits of precision
+R30 -inf^R(-3) -> -0.00000000 Real Field with 30 bits of precision
+R30 R(-2)^(-2^70) -> 0.00000000 Real Field with 30 bits of precision
+R30 R(-2)^(-2^70-1) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0%3 -> -0.00000000 Real Field with 30 bits of precision
+R30 -3%3 -> -0.00000000 Real Field with 30 bits of precision
+R30 3%-3 -> 0.00000000 Real Field with 30 bits of precision
+R30 -6%4 -> 2.0000000 Real Field with 30 bits of precision
+R30 sqrt(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 abs(-0) -> 0.00000000 Real Field with 30 bits of precision
+R30 sin(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 tan(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 atan(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 asin(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 sinh(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 tanh(-0) -> -0.00000000 Real Field with 30 bits of precision
+R30 exp(-0) -> 1.0000000 Real Field with 30 bits of precision
+R30 cos(-0) -> 1.0000000 Real Field with 30 bits of precision
+R30 log(-0) -> -infinity Real Field with 30 bits of precision
+R30 float(-0) -> -0.0 float
+R30 str(-0) -> '-0.00000000' str
+R30 sign(-0) -> 0
+R30 is_zero -> True
+R30 ==0 -> True
+R30 hash -> True
+R30 sme -> (-1, 0, 0) tuple
+R30 RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+R30 R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R30 R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+R30 QQ(-0) -> 0 Rational Field
+R30 ZZ(-0) -> 0
+R30 int(-0) -> 0
+R30 -0<0 -> False
+R30 -0.floor -> 0
+R30 R(-0.5).round -> 0
+R30 R(-0.4).trunc -> 0
+R30 -0*inf -> NaN Real Field with 30 bits of precision
+R30 -0+R(-1e-300) -> -1.0000000e-300 Real Field with 30 bits of precision
+R30 R(-1e-300)*1e-300 -> -1.0000000e-600 Real Field with 30 bits of precision
+R30 -0.nan -> False
+R30 sqrt(-0)^2 -> 0.00000000 Real Field with 30 bits of precision
+R30 -(-0) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0*QQ(3) -> -0.00000000 Real Field with 30 bits of precision
+R30 -0*2 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0+QQ(0) -> 0.00000000 Real Field with 30 bits of precision
+R30 -0-QQ(0) -> -0.00000000 Real Field with 30 bits of precision
+R30 2*-0 -> -0.00000000 Real Field with 30 bits of precision
+R30 -0/QQ(2) -> -0.00000000 Real Field with 30 bits of precision
+R30 QQ(1)/-0 -> -infinity Real Field with 30 bits of precision
+R100 R(-0.0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R('-0') -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -R(0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(0)*-1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-0)*5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(0)*-5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*-5 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 0+-0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 0-0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0--0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 x-x -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -x+x -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+3 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 0/-5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/5 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/-5 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 1/-0 -> -infinity Real Field with 100 bits of precision
+R100 -1/-0 -> +infinity Real Field with 100 bits of precision
+R100 1/-inf -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -5/inf -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 1/R(-0) -> -infinity Real Field with 100 bits of precision
+R100 -0^2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^-2 -> +infinity Real Field with 100 bits of precision
+R100 -0^-3 -> -infinity Real Field with 100 bits of precision
+R100 -0^0 -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 -inf^-3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -inf^-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(-3) -> -infinity Real Field with 100 bits of precision
+R100 -0^R(0.5) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0^R(-0.5) -> +infinity Real Field with 100 bits of precision
+R100 -inf^R(-3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-2)^(-2^70) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R(-2)^(-2^70-1) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0%3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -3%3 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 3%-3 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -6%4 -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 sqrt(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 abs(-0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 sin(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 tan(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 atan(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 asin(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 sinh(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 tanh(-0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 exp(-0) -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 cos(-0) -> 1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100 log(-0) -> -infinity Real Field with 100 bits of precision
+R100 float(-0) -> -0.0 float
+R100 str(-0) -> '-0.00000000000000000000000000000' str
+R100 sign(-0) -> 0
+R100 is_zero -> True
+R100 ==0 -> True
+R100 hash -> True
+R100 sme -> (-1, 0, 0) tuple
+R100 RR(R(-0)) -> -0.000000000000000 Real Field with 53 bits of precision
+R100 R100(R(-0)) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 R30(R(-0)) -> -0.00000000 Real Field with 30 bits of precision
+R100 QQ(-0) -> 0 Rational Field
+R100 ZZ(-0) -> 0
+R100 int(-0) -> 0
+R100 -0<0 -> False
+R100 -0.floor -> 0
+R100 R(-0.5).round -> 0
+R100 R(-0.4).trunc -> 0
+R100 -0*inf -> NaN Real Field with 100 bits of precision
+R100 -0+R(-1e-300) -> -1.0000000000000000000000000000e-300 Real Field with 100 bits of precision
+R100 R(-1e-300)*1e-300 -> -1.0000000000000000000000000000e-600 Real Field with 100 bits of precision
+R100 -0.nan -> False
+R100 sqrt(-0)^2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -(-0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*QQ(3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0*2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0+QQ(0) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0-QQ(0) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 2*-0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 -0/QQ(2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100 QQ(1)/-0 -> -infinity Real Field with 100 bits of precision
+RNDN 3-3 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -3+3 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0+0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN 0+-0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0-(-0) -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0+-0 -> -0.00000000 Real Field with 30 bits of precision
+RNDN 0-0 -> 0.00000000 Real Field with 30 bits of precision
+RNDN -0*1 -> -0.00000000 Real Field with 30 bits of precision
+RNDN R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision
+RNDZ 3-3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -3+3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0+0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ 0+-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0-(-0) -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ 0-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDZ R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDZ
+RNDU 3-3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -3+3 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0+0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU 0+-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0-(-0) -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU 0-0 -> 0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDU R(-1e-300)/2^(2^62) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDU
+RNDD 3-3 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -3+3 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0+0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD 0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0-(-0) -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0+-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD 0-0 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD -0*1 -> -0.00000000 Real Field with 30 bits of precision and rounding RNDD
+RNDD R(-1e-300)/2^(2^62) -> -8.5096914e-1388255822130839284 Real Field with 30 bits of precision and rounding RNDD
+R30(0)<<0 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>0 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<0) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>0) -> +infinity Real Field with 30 bits of precision
+R30(0)<<1 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>1 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<-2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>-2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<-2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>-2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<4611686018427387904 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>4611686018427387904 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(0)<<2.00000000000000 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2.00000000000000 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2.00000000000000) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2.00000000000000) -> +infinity Real Field with 30 bits of precision
+R30(0)<<2 -> 0.00000000 Real Field with 30 bits of precision
+R30(0)>>2 -> 0.00000000 Real Field with 30 bits of precision
+1/(R30(0)<<2) -> +infinity Real Field with 30 bits of precision
+1/(R30(0)>>2) -> +infinity Real Field with 30 bits of precision
+R30(0)<<1/2 !! TypeError unsupported operands for <<
+R30(0)>>1/2 !! TypeError unsupported operands for >>
+R30(-0)<<0 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>0 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<0) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>0) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<1 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>1 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<-2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>-2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<-2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>-2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<4611686018427387904 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>4611686018427387904 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-0)<<2.00000000000000 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2.00000000000000 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2.00000000000000) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2.00000000000000) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<2 -> -0.00000000 Real Field with 30 bits of precision
+R30(-0)>>2 -> -0.00000000 Real Field with 30 bits of precision
+1/(R30(-0)<<2) -> -infinity Real Field with 30 bits of precision
+1/(R30(-0)>>2) -> -infinity Real Field with 30 bits of precision
+R30(-0)<<1/2 !! TypeError unsupported operands for <<
+R30(-0)>>1/2 !! TypeError unsupported operands for >>
+R30(3)<<0 -> 3.0000000 Real Field with 30 bits of precision
+R30(3)>>0 -> 3.0000000 Real Field with 30 bits of precision
+R30(3)<<1 -> 6.0000000 Real Field with 30 bits of precision
+R30(3)>>1 -> 1.5000000 Real Field with 30 bits of precision
+R30(3)<<2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<-2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)>>-2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)<<4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(3)>>4611686018427387904 -> 2.5529074e-1388255822130839283 Real Field with 30 bits of precision
+R30(3)<<9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(3)>>9223372036854775807 -> 0.00000000 Real Field with 30 bits of precision
+R30(3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(3)<<2.00000000000000 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2.00000000000000 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<2 -> 12.000000 Real Field with 30 bits of precision
+R30(3)>>2 -> 0.75000000 Real Field with 30 bits of precision
+R30(3)<<1/2 !! TypeError unsupported operands for <<
+R30(3)>>1/2 !! TypeError unsupported operands for >>
+R30(-3)<<0 -> -3.0000000 Real Field with 30 bits of precision
+R30(-3)>>0 -> -3.0000000 Real Field with 30 bits of precision
+R30(-3)<<1 -> -6.0000000 Real Field with 30 bits of precision
+R30(-3)>>1 -> -1.5000000 Real Field with 30 bits of precision
+R30(-3)<<2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<-2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)>>-2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)<<4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-3)>>4611686018427387904 -> -2.5529074e-1388255822130839283 Real Field with 30 bits of precision
+R30(-3)<<9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-3)>>9223372036854775807 -> -0.00000000 Real Field with 30 bits of precision
+R30(-3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-3)<<2.00000000000000 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2.00000000000000 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<2 -> -12.000000 Real Field with 30 bits of precision
+R30(-3)>>2 -> -0.75000000 Real Field with 30 bits of precision
+R30(-3)<<1/2 !! TypeError unsupported operands for <<
+R30(-3)>>1/2 !! TypeError unsupported operands for >>
+R30(inf)<<0 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>0 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<1 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>1 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<-2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>-2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>4611686018427387904 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>9223372036854775807 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(inf)<<2.00000000000000 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2.00000000000000 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<2 -> +infinity Real Field with 30 bits of precision
+R30(inf)>>2 -> +infinity Real Field with 30 bits of precision
+R30(inf)<<1/2 !! TypeError unsupported operands for <<
+R30(inf)>>1/2 !! TypeError unsupported operands for >>
+R30(-inf)<<0 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>0 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<1 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>1 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<-2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>-2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>4611686018427387904 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>9223372036854775807 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(-inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(-inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(-inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(-inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(-inf)<<2.00000000000000 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2.00000000000000 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)>>2 -> -infinity Real Field with 30 bits of precision
+R30(-inf)<<1/2 !! TypeError unsupported operands for <<
+R30(-inf)>>1/2 !! TypeError unsupported operands for >>
+R30(nan)<<0 -> NaN Real Field with 30 bits of precision
+R30(nan)>>0 -> NaN Real Field with 30 bits of precision
+R30(nan)<<1 -> NaN Real Field with 30 bits of precision
+R30(nan)>>1 -> NaN Real Field with 30 bits of precision
+R30(nan)<<2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<-2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>-2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<4611686018427387904 -> NaN Real Field with 30 bits of precision
+R30(nan)>>4611686018427387904 -> NaN Real Field with 30 bits of precision
+R30(nan)<<9223372036854775807 -> NaN Real Field with 30 bits of precision
+R30(nan)>>9223372036854775807 -> NaN Real Field with 30 bits of precision
+R30(nan)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R30(nan)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(nan)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R30(nan)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R30(nan)<<1.50000000000000 !! TypeError unsupported operands for <<
+R30(nan)>>1.50000000000000 !! TypeError unsupported operands for >>
+R30(nan)<<2.00000000000000 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2.00000000000000 -> NaN Real Field with 30 bits of precision
+R30(nan)<<2 -> NaN Real Field with 30 bits of precision
+R30(nan)>>2 -> NaN Real Field with 30 bits of precision
+R30(nan)<<1/2 !! TypeError unsupported operands for <<
+R30(nan)>>1/2 !! TypeError unsupported operands for >>
+R30(0).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(0).frac() -> +infinity Real Field with 30 bits of precision
+R30(-0).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-0).frac() -> -infinity Real Field with 30 bits of precision
+R30(-3).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-3).frac() -> -infinity Real Field with 30 bits of precision
+R30(3).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(3).frac() -> +infinity Real Field with 30 bits of precision
+R30(-0.5).frac() -> -0.50000000 Real Field with 30 bits of precision
+1/R30(-0.5).frac() -> -2.0000000 Real Field with 30 bits of precision
+R30(0.5).frac() -> 0.50000000 Real Field with 30 bits of precision
+1/R30(0.5).frac() -> 2.0000000 Real Field with 30 bits of precision
+R30(-2.75).frac() -> -0.75000000 Real Field with 30 bits of precision
+1/R30(-2.75).frac() -> -1.3333333 Real Field with 30 bits of precision
+R30(inf).frac() -> 0.00000000 Real Field with 30 bits of precision
+1/R30(inf).frac() -> +infinity Real Field with 30 bits of precision
+R30(-inf).frac() -> -0.00000000 Real Field with 30 bits of precision
+1/R30(-inf).frac() -> -infinity Real Field with 30 bits of precision
+R30(nan).frac() -> NaN Real Field with 30 bits of precision
+1/R30(nan).frac() -> NaN Real Field with 30 bits of precision
+R30(-1e-300).frac() -> -1.0000000e-300 Real Field with 30 bits of precision
+1/R30(-1e-300).frac() -> -1.0000000e300 Real Field with 30 bits of precision
+R30('-0',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=2) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=2) -> -infinity Real Field with 30 bits of precision
+R30('0',base=2) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=2) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=2) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=2) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=2) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=2) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=2) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=2) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=2) -> -0.50000000 Real Field with 30 bits of precision
+1/R30('-0.1',base=2) -> -2.0000000 Real Field with 30 bits of precision
+R30('-0',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=3) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=3) -> -infinity Real Field with 30 bits of precision
+R30('0',base=3) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=3) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=3) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=3) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=3) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=3) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=3) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=3) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=3) -> -0.33333333 Real Field with 30 bits of precision
+1/R30('-0.1',base=3) -> -3.0000000 Real Field with 30 bits of precision
+R30('-0',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=8) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=8) -> -infinity Real Field with 30 bits of precision
+R30('0',base=8) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=8) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=8) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=8) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=8) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=8) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=8) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=8) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=8) -> -0.12500000 Real Field with 30 bits of precision
+1/R30('-0.1',base=8) -> -8.0000000 Real Field with 30 bits of precision
+R30('-0',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=16) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=16) -> -infinity Real Field with 30 bits of precision
+R30('0',base=16) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=16) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=16) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=16) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=16) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=16) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=16) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=16) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=16) -> -0.062500000 Real Field with 30 bits of precision
+1/R30('-0.1',base=16) -> -16.000000 Real Field with 30 bits of precision
+R30('-0',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0',base=36) -> -infinity Real Field with 30 bits of precision
+R30('-0.00',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.00',base=36) -> -infinity Real Field with 30 bits of precision
+R30('0',base=36) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('0',base=36) -> +infinity Real Field with 30 bits of precision
+R30('+0',base=36) -> 0.00000000 Real Field with 30 bits of precision
+1/R30('+0',base=36) -> +infinity Real Field with 30 bits of precision
+R30('-0.0',base=36) -> -0.00000000 Real Field with 30 bits of precision
+1/R30('-0.0',base=36) -> -infinity Real Field with 30 bits of precision
+R30('-1',base=36) -> -1.0000000 Real Field with 30 bits of precision
+1/R30('-1',base=36) -> -1.0000000 Real Field with 30 bits of precision
+R30('-0.1',base=36) -> -0.027777778 Real Field with 30 bits of precision
+1/R30('-0.1',base=36) -> -36.000000 Real Field with 30 bits of precision
+R100(0)<<0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>0 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<0) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>0) -> +infinity Real Field with 100 bits of precision
+R100(0)<<1 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>1 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>-2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<-2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>-2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<4611686018427387904 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>4611686018427387904 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(0)<<2.00000000000000 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2.00000000000000 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2.00000000000000) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2.00000000000000) -> +infinity Real Field with 100 bits of precision
+R100(0)<<2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(0)>>2 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(0)<<2) -> +infinity Real Field with 100 bits of precision
+1/(R100(0)>>2) -> +infinity Real Field with 100 bits of precision
+R100(0)<<1/2 !! TypeError unsupported operands for <<
+R100(0)>>1/2 !! TypeError unsupported operands for >>
+R100(-0)<<0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>0 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<0) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>0) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>1 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<-2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>-2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<-2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>-2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<4611686018427387904 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>4611686018427387904 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-0)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-0)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-0)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-0)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-0)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-0)<<2.00000000000000 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2.00000000000000 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2.00000000000000) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2.00000000000000) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-0)>>2 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/(R100(-0)<<2) -> -infinity Real Field with 100 bits of precision
+1/(R100(-0)>>2) -> -infinity Real Field with 100 bits of precision
+R100(-0)<<1/2 !! TypeError unsupported operands for <<
+R100(-0)>>1/2 !! TypeError unsupported operands for >>
+R100(3)<<0 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>0 -> 3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<1 -> 6.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>1 -> 1.5000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<-2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>-2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(3)>>4611686018427387904 -> 2.5529073935222508417389363729e-1388255822130839283 Real Field with 100 bits of precision
+R100(3)<<9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(3)>>9223372036854775807 -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(3)<<2.00000000000000 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2.00000000000000 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<2 -> 12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)>>2 -> 0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(3)<<1/2 !! TypeError unsupported operands for <<
+R100(3)>>1/2 !! TypeError unsupported operands for >>
+R100(-3)<<0 -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>0 -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<1 -> -6.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>1 -> -1.5000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<-2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>-2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-3)>>4611686018427387904 -> -2.5529073935222508417389363729e-1388255822130839283 Real Field with 100 bits of precision
+R100(-3)<<9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-3)>>9223372036854775807 -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-3)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-3)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-3)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-3)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-3)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-3)<<2.00000000000000 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2.00000000000000 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<2 -> -12.000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)>>2 -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+R100(-3)<<1/2 !! TypeError unsupported operands for <<
+R100(-3)>>1/2 !! TypeError unsupported operands for >>
+R100(inf)<<0 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>0 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<1 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>1 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<-2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>-2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>4611686018427387904 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>9223372036854775807 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(inf)<<2.00000000000000 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2.00000000000000 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<2 -> +infinity Real Field with 100 bits of precision
+R100(inf)>>2 -> +infinity Real Field with 100 bits of precision
+R100(inf)<<1/2 !! TypeError unsupported operands for <<
+R100(inf)>>1/2 !! TypeError unsupported operands for >>
+R100(-inf)<<0 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>0 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<1 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>1 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<-2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>-2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>4611686018427387904 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>9223372036854775807 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(-inf)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-inf)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(-inf)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(-inf)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(-inf)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(-inf)<<2.00000000000000 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2.00000000000000 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)>>2 -> -infinity Real Field with 100 bits of precision
+R100(-inf)<<1/2 !! TypeError unsupported operands for <<
+R100(-inf)>>1/2 !! TypeError unsupported operands for >>
+R100(nan)<<0 -> NaN Real Field with 100 bits of precision
+R100(nan)>>0 -> NaN Real Field with 100 bits of precision
+R100(nan)<<1 -> NaN Real Field with 100 bits of precision
+R100(nan)>>1 -> NaN Real Field with 100 bits of precision
+R100(nan)<<2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<-2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>-2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<4611686018427387904 -> NaN Real Field with 100 bits of precision
+R100(nan)>>4611686018427387904 -> NaN Real Field with 100 bits of precision
+R100(nan)<<9223372036854775807 -> NaN Real Field with 100 bits of precision
+R100(nan)>>9223372036854775807 -> NaN Real Field with 100 bits of precision
+R100(nan)<<9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)>>9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)<<18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)>>18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)<<-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)>>-9223372036854775808 !! OverflowError n (=9223372036854775808) must be <= 9223372036854775807
+R100(nan)<<-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(nan)>>-9223372036854775809 !! OverflowError n (=9223372036854775809) must be <= 9223372036854775807
+R100(nan)<<-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)>>-18446744073709551616 !! OverflowError n (=18446744073709551616) must be <= 9223372036854775807
+R100(nan)<<1.50000000000000 !! TypeError unsupported operands for <<
+R100(nan)>>1.50000000000000 !! TypeError unsupported operands for >>
+R100(nan)<<2.00000000000000 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2.00000000000000 -> NaN Real Field with 100 bits of precision
+R100(nan)<<2 -> NaN Real Field with 100 bits of precision
+R100(nan)>>2 -> NaN Real Field with 100 bits of precision
+R100(nan)<<1/2 !! TypeError unsupported operands for <<
+R100(nan)>>1/2 !! TypeError unsupported operands for >>
+R100(0).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(0).frac() -> +infinity Real Field with 100 bits of precision
+R100(-0).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-0).frac() -> -infinity Real Field with 100 bits of precision
+R100(-3).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-3).frac() -> -infinity Real Field with 100 bits of precision
+R100(3).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(3).frac() -> +infinity Real Field with 100 bits of precision
+R100(-0.5).frac() -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-0.5).frac() -> -2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(0.5).frac() -> 0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(0.5).frac() -> 2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100(-2.75).frac() -> -0.75000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-2.75).frac() -> -1.3333333333333333333333333333 Real Field with 100 bits of precision
+R100(inf).frac() -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(inf).frac() -> +infinity Real Field with 100 bits of precision
+R100(-inf).frac() -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100(-inf).frac() -> -infinity Real Field with 100 bits of precision
+R100(nan).frac() -> NaN Real Field with 100 bits of precision
+1/R100(nan).frac() -> NaN Real Field with 100 bits of precision
+R100(-1e-300).frac() -> -1.0000000000000000000000000000e-300 Real Field with 100 bits of precision
+1/R100(-1e-300).frac() -> -1.0000000000000000000000000000e300 Real Field with 100 bits of precision
+R100('-0',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=2) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=2) -> -infinity Real Field with 100 bits of precision
+R100('0',base=2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=2) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=2) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=2) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=2) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=2) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=2) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=2) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=2) -> -0.50000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=2) -> -2.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=3) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=3) -> -infinity Real Field with 100 bits of precision
+R100('0',base=3) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=3) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=3) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=3) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=3) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=3) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=3) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=3) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=3) -> -0.33333333333333333333333333333 Real Field with 100 bits of precision
+1/R100('-0.1',base=3) -> -3.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=8) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=8) -> -infinity Real Field with 100 bits of precision
+R100('0',base=8) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=8) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=8) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=8) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=8) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=8) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=8) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=8) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=8) -> -0.12500000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=8) -> -8.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=16) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=16) -> -infinity Real Field with 100 bits of precision
+R100('0',base=16) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=16) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=16) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=16) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=16) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=16) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=16) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=16) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=16) -> -0.062500000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.1',base=16) -> -16.000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0',base=36) -> -infinity Real Field with 100 bits of precision
+R100('-0.00',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.00',base=36) -> -infinity Real Field with 100 bits of precision
+R100('0',base=36) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('0',base=36) -> +infinity Real Field with 100 bits of precision
+R100('+0',base=36) -> 0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('+0',base=36) -> +infinity Real Field with 100 bits of precision
+R100('-0.0',base=36) -> -0.00000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-0.0',base=36) -> -infinity Real Field with 100 bits of precision
+R100('-1',base=36) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+1/R100('-1',base=36) -> -1.0000000000000000000000000000 Real Field with 100 bits of precision
+R100('-0.1',base=36) -> -0.027777777777777777777777777778 Real Field with 100 bits of precision
+1/R100('-0.1',base=36) -> -36.000000000000000000000000000 Real Field with 100 bits of precision
+(30, 'str-decimal', 'left') !! TypeError unsupported operands for << []
+(30, 'str-decimal', 'right') !! TypeError unsupported operands for >> []
+(30, 'str-exponent', 'left') !! TypeError unsupported operands for << []
+(30, 'str-exponent', 'right') !! TypeError unsupported operands for >> []
+(30, 'str-rational', 'left') !! TypeError unsupported operands for << []
+(30, 'str-rational', 'right') !! TypeError unsupported operands for >> []
+(30, 'ratio-object', 'left') !! TypeError unsupported operands for << []
+(30, 'ratio-object', 'right') !! TypeError unsupported operands for >> []
+(30, 'float-ratio', 'left') => 4.0000000 []
+(30, 'float-ratio', 'right') => 0.25000000 []
+(30, 'bytes', 'left') => 4.0000000 []
+(30, 'bytes', 'right') => 0.25000000 []
+(30, 'str-integer', 'left') => 4.0000000 []
+(30, 'str-integer', 'right') => 0.25000000 []
+(30, 'float-nan', 'left') !! ValueError cannot convert float NaN to integer []
+(30, 'float-nan', 'right') !! ValueError cannot convert float NaN to integer []
+(100, 'str-decimal', 'left') !! TypeError unsupported operands for << []
+(100, 'str-decimal', 'right') !! TypeError unsupported operands for >> []
+(100, 'str-exponent', 'left') !! TypeError unsupported operands for << []
+(100, 'str-exponent', 'right') !! TypeError unsupported operands for >> []
+(100, 'str-rational', 'left') !! TypeError unsupported operands for << []
+(100, 'str-rational', 'right') !! TypeError unsupported operands for >> []
+(100, 'ratio-object', 'left') !! TypeError unsupported operands for << []
+(100, 'ratio-object', 'right') !! TypeError unsupported operands for >> []
+(100, 'float-ratio', 'left') => 4.0000000000000000000000000000 []
+(100, 'float-ratio', 'right') => 0.25000000000000000000000000000 []
+(100, 'bytes', 'left') => 4.0000000000000000000000000000 []
+(100, 'bytes', 'right') => 0.25000000000000000000000000000 []
+(100, 'str-integer', 'left') => 4.0000000000000000000000000000 []
+(100, 'str-integer', 'right') => 0.25000000000000000000000000000 []
+(100, 'float-nan', 'left') !! ValueError cannot convert float NaN to integer []
+(100, 'float-nan', 'right') !! ValueError cannot convert float NaN to integer []
+30 0 int << 0.00000000 []
+30 0 int >> 0.00000000 []
+30 0 bool << 0.00000000 []
+30 0 bool >> 0.00000000 []
+30 0 float << 0.00000000 []
+30 0 float >> 0.00000000 []
+30 0 fractionfloat << TypeError: unsupported operands for << []
+30 0 fractionfloat >> TypeError: unsupported operands for >> []
+30 0 floatinf << OverflowError: cannot convert float infinity to integer []
+30 0 floatinf >> OverflowError: cannot convert float infinity to integer []
+30 0 floatnan << ValueError: cannot convert float NaN to integer []
+30 0 floatnan >> ValueError: cannot convert float NaN to integer []
+30 0 rr << 0.00000000 []
+30 0 rr >> 0.00000000 []
+30 0 rrfrac << TypeError: unsupported operands for << []
+30 0 rrfrac >> TypeError: unsupported operands for >> []
+30 0 r30 << 0.00000000 []
+30 0 r30 >> 0.00000000 []
+30 0 r100 << 0.00000000 []
+30 0 r100 >> 0.00000000 []
+30 0 qq << 0.00000000 []
+30 0 qq >> 0.00000000 []
+30 0 qqfrac << TypeError: unsupported operands for << []
+30 0 qqfrac >> TypeError: unsupported operands for >> []
+30 0 str << 0.00000000 []
+30 0 str >> 0.00000000 []
+30 0 strdec << TypeError: unsupported operands for << []
+30 0 strdec >> TypeError: unsupported operands for >> []
+30 0 strexp << TypeError: unsupported operands for << []
+30 0 strexp >> TypeError: unsupported operands for >> []
+30 0 strfrac << TypeError: unsupported operands for << []
+30 0 strfrac >> TypeError: unsupported operands for >> []
+30 0 bytes << 0.00000000 []
+30 0 bytes >> 0.00000000 []
+30 0 bytearray << TypeError: unsupported operands for << []
+30 0 bytearray >> TypeError: unsupported operands for >> []
+30 0 complex << TypeError: unsupported operands for << []
+30 0 complex >> TypeError: unsupported operands for >> []
+30 0 CC << TypeError: unsupported operands for << []
+30 0 CC >> TypeError: unsupported operands for >> []
+30 0 ix << TypeError: unsupported operands for << []
+30 0 ix >> TypeError: unsupported operands for >> []
+30 0 it << TypeError: unsupported operands for << []
+30 0 it >> TypeError: unsupported operands for >> []
+30 0 ratio << TypeError: unsupported operands for << []
+30 0 ratio >> TypeError: unsupported operands for >> []
+30 0 ff << TypeError: unsupported operands for << ['float-int']
+30 0 ff >> TypeError: unsupported operands for >> ['float-int']
+30 0 ii << 0.00000000 []
+30 0 ii >> 0.00000000 []
+30 -0 int << -0.00000000 []
+30 -0 int >> -0.00000000 []
+30 -0 bool << -0.00000000 []
+30 -0 bool >> -0.00000000 []
+30 -0 float << -0.00000000 []
+30 -0 float >> -0.00000000 []
+30 -0 fractionfloat << TypeError: unsupported operands for << []
+30 -0 fractionfloat >> TypeError: unsupported operands for >> []
+30 -0 floatinf << OverflowError: cannot convert float infinity to integer []
+30 -0 floatinf >> OverflowError: cannot convert float infinity to integer []
+30 -0 floatnan << ValueError: cannot convert float NaN to integer []
+30 -0 floatnan >> ValueError: cannot convert float NaN to integer []
+30 -0 rr << -0.00000000 []
+30 -0 rr >> -0.00000000 []
+30 -0 rrfrac << TypeError: unsupported operands for << []
+30 -0 rrfrac >> TypeError: unsupported operands for >> []
+30 -0 r30 << -0.00000000 []
+30 -0 r30 >> -0.00000000 []
+30 -0 r100 << -0.00000000 []
+30 -0 r100 >> -0.00000000 []
+30 -0 qq << -0.00000000 []
+30 -0 qq >> -0.00000000 []
+30 -0 qqfrac << TypeError: unsupported operands for << []
+30 -0 qqfrac >> TypeError: unsupported operands for >> []
+30 -0 str << -0.00000000 []
+30 -0 str >> -0.00000000 []
+30 -0 strdec << TypeError: unsupported operands for << []
+30 -0 strdec >> TypeError: unsupported operands for >> []
+30 -0 strexp << TypeError: unsupported operands for << []
+30 -0 strexp >> TypeError: unsupported operands for >> []
+30 -0 strfrac << TypeError: unsupported operands for << []
+30 -0 strfrac >> TypeError: unsupported operands for >> []
+30 -0 bytes << -0.00000000 []
+30 -0 bytes >> -0.00000000 []
+30 -0 bytearray << TypeError: unsupported operands for << []
+30 -0 bytearray >> TypeError: unsupported operands for >> []
+30 -0 complex << TypeError: unsupported operands for << []
+30 -0 complex >> TypeError: unsupported operands for >> []
+30 -0 CC << TypeError: unsupported operands for << []
+30 -0 CC >> TypeError: unsupported operands for >> []
+30 -0 ix << TypeError: unsupported operands for << []
+30 -0 ix >> TypeError: unsupported operands for >> []
+30 -0 it << TypeError: unsupported operands for << []
+30 -0 it >> TypeError: unsupported operands for >> []
+30 -0 ratio << TypeError: unsupported operands for << []
+30 -0 ratio >> TypeError: unsupported operands for >> []
+30 -0 ff << TypeError: unsupported operands for << ['float-int']
+30 -0 ff >> TypeError: unsupported operands for >> ['float-int']
+30 -0 ii << -0.00000000 []
+30 -0 ii >> -0.00000000 []
+30 1 int << 4.0000000 []
+30 1 int >> 0.25000000 []
+30 1 bool << 2.0000000 []
+30 1 bool >> 0.50000000 []
+30 1 float << 4.0000000 []
+30 1 float >> 0.25000000 []
+30 1 fractionfloat << TypeError: unsupported operands for << []
+30 1 fractionfloat >> TypeError: unsupported operands for >> []
+30 1 floatinf << OverflowError: cannot convert float infinity to integer []
+30 1 floatinf >> OverflowError: cannot convert float infinity to integer []
+30 1 floatnan << ValueError: cannot convert float NaN to integer []
+30 1 floatnan >> ValueError: cannot convert float NaN to integer []
+30 1 rr << 4.0000000 []
+30 1 rr >> 0.25000000 []
+30 1 rrfrac << TypeError: unsupported operands for << []
+30 1 rrfrac >> TypeError: unsupported operands for >> []
+30 1 r30 << 4.0000000 []
+30 1 r30 >> 0.25000000 []
+30 1 r100 << 4.0000000 []
+30 1 r100 >> 0.25000000 []
+30 1 qq << 4.0000000 []
+30 1 qq >> 0.25000000 []
+30 1 qqfrac << TypeError: unsupported operands for << []
+30 1 qqfrac >> TypeError: unsupported operands for >> []
+30 1 str << 4.0000000 []
+30 1 str >> 0.25000000 []
+30 1 strdec << TypeError: unsupported operands for << []
+30 1 strdec >> TypeError: unsupported operands for >> []
+30 1 strexp << TypeError: unsupported operands for << []
+30 1 strexp >> TypeError: unsupported operands for >> []
+30 1 strfrac << TypeError: unsupported operands for << []
+30 1 strfrac >> TypeError: unsupported operands for >> []
+30 1 bytes << 4.0000000 []
+30 1 bytes >> 0.25000000 []
+30 1 bytearray << TypeError: unsupported operands for << []
+30 1 bytearray >> TypeError: unsupported operands for >> []
+30 1 complex << TypeError: unsupported operands for << []
+30 1 complex >> TypeError: unsupported operands for >> []
+30 1 CC << TypeError: unsupported operands for << []
+30 1 CC >> TypeError: unsupported operands for >> []
+30 1 ix << TypeError: unsupported operands for << []
+30 1 ix >> TypeError: unsupported operands for >> []
+30 1 it << TypeError: unsupported operands for << []
+30 1 it >> TypeError: unsupported operands for >> []
+30 1 ratio << TypeError: unsupported operands for << []
+30 1 ratio >> TypeError: unsupported operands for >> []
+30 1 ff << TypeError: unsupported operands for << ['float-int']
+30 1 ff >> TypeError: unsupported operands for >> ['float-int']
+30 1 ii << 4.0000000 []
+30 1 ii >> 0.25000000 []
+30 -3 int << -12.000000 []
+30 -3 int >> -0.75000000 []
+30 -3 bool << -6.0000000 []
+30 -3 bool >> -1.5000000 []
+30 -3 float << -12.000000 []
+30 -3 float >> -0.75000000 []
+30 -3 fractionfloat << TypeError: unsupported operands for << []
+30 -3 fractionfloat >> TypeError: unsupported operands for >> []
+30 -3 floatinf << OverflowError: cannot convert float infinity to integer []
+30 -3 floatinf >> OverflowError: cannot convert float infinity to integer []
+30 -3 floatnan << ValueError: cannot convert float NaN to integer []
+30 -3 floatnan >> ValueError: cannot convert float NaN to integer []
+30 -3 rr << -12.000000 []
+30 -3 rr >> -0.75000000 []
+30 -3 rrfrac << TypeError: unsupported operands for << []
+30 -3 rrfrac >> TypeError: unsupported operands for >> []
+30 -3 r30 << -12.000000 []
+30 -3 r30 >> -0.75000000 []
+30 -3 r100 << -12.000000 []
+30 -3 r100 >> -0.75000000 []
+30 -3 qq << -12.000000 []
+30 -3 qq >> -0.75000000 []
+30 -3 qqfrac << TypeError: unsupported operands for << []
+30 -3 qqfrac >> TypeError: unsupported operands for >> []
+30 -3 str << -12.000000 []
+30 -3 str >> -0.75000000 []
+30 -3 strdec << TypeError: unsupported operands for << []
+30 -3 strdec >> TypeError: unsupported operands for >> []
+30 -3 strexp << TypeError: unsupported operands for << []
+30 -3 strexp >> TypeError: unsupported operands for >> []
+30 -3 strfrac << TypeError: unsupported operands for << []
+30 -3 strfrac >> TypeError: unsupported operands for >> []
+30 -3 bytes << -12.000000 []
+30 -3 bytes >> -0.75000000 []
+30 -3 bytearray << TypeError: unsupported operands for << []
+30 -3 bytearray >> TypeError: unsupported operands for >> []
+30 -3 complex << TypeError: unsupported operands for << []
+30 -3 complex >> TypeError: unsupported operands for >> []
+30 -3 CC << TypeError: unsupported operands for << []
+30 -3 CC >> TypeError: unsupported operands for >> []
+30 -3 ix << TypeError: unsupported operands for << []
+30 -3 ix >> TypeError: unsupported operands for >> []
+30 -3 it << TypeError: unsupported operands for << []
+30 -3 it >> TypeError: unsupported operands for >> []
+30 -3 ratio << TypeError: unsupported operands for << []
+30 -3 ratio >> TypeError: unsupported operands for >> []
+30 -3 ff << TypeError: unsupported operands for << ['float-int']
+30 -3 ff >> TypeError: unsupported operands for >> ['float-int']
+30 -3 ii << -12.000000 []
+30 -3 ii >> -0.75000000 []
+30 +inf int << +infinity []
+30 +inf int >> +infinity []
+30 +inf bool << +infinity []
+30 +inf bool >> +infinity []
+30 +inf float << +infinity []
+30 +inf float >> +infinity []
+30 +inf fractionfloat << TypeError: unsupported operands for << []
+30 +inf fractionfloat >> TypeError: unsupported operands for >> []
+30 +inf floatinf << OverflowError: cannot convert float infinity to integer []
+30 +inf floatinf >> OverflowError: cannot convert float infinity to integer []
+30 +inf floatnan << ValueError: cannot convert float NaN to integer []
+30 +inf floatnan >> ValueError: cannot convert float NaN to integer []
+30 +inf rr << +infinity []
+30 +inf rr >> +infinity []
+30 +inf rrfrac << TypeError: unsupported operands for << []
+30 +inf rrfrac >> TypeError: unsupported operands for >> []
+30 +inf r30 << +infinity []
+30 +inf r30 >> +infinity []
+30 +inf r100 << +infinity []
+30 +inf r100 >> +infinity []
+30 +inf qq << +infinity []
+30 +inf qq >> +infinity []
+30 +inf qqfrac << TypeError: unsupported operands for << []
+30 +inf qqfrac >> TypeError: unsupported operands for >> []
+30 +inf str << +infinity []
+30 +inf str >> +infinity []
+30 +inf strdec << TypeError: unsupported operands for << []
+30 +inf strdec >> TypeError: unsupported operands for >> []
+30 +inf strexp << TypeError: unsupported operands for << []
+30 +inf strexp >> TypeError: unsupported operands for >> []
+30 +inf strfrac << TypeError: unsupported operands for << []
+30 +inf strfrac >> TypeError: unsupported operands for >> []
+30 +inf bytes << +infinity []
+30 +inf bytes >> +infinity []
+30 +inf bytearray << TypeError: unsupported operands for << []
+30 +inf bytearray >> TypeError: unsupported operands for >> []
+30 +inf complex << TypeError: unsupported operands for << []
+30 +inf complex >> TypeError: unsupported operands for >> []
+30 +inf CC << TypeError: unsupported operands for << []
+30 +inf CC >> TypeError: unsupported operands for >> []
+30 +inf ix << TypeError: unsupported operands for << []
+30 +inf ix >> TypeError: unsupported operands for >> []
+30 +inf it << TypeError: unsupported operands for << []
+30 +inf it >> TypeError: unsupported operands for >> []
+30 +inf ratio << TypeError: unsupported operands for << []
+30 +inf ratio >> TypeError: unsupported operands for >> []
+30 +inf ff << TypeError: unsupported operands for << ['float-int']
+30 +inf ff >> TypeError: unsupported operands for >> ['float-int']
+30 +inf ii << +infinity []
+30 +inf ii >> +infinity []
+30 -inf int << -infinity []
+30 -inf int >> -infinity []
+30 -inf bool << -infinity []
+30 -inf bool >> -infinity []
+30 -inf float << -infinity []
+30 -inf float >> -infinity []
+30 -inf fractionfloat << TypeError: unsupported operands for << []
+30 -inf fractionfloat >> TypeError: unsupported operands for >> []
+30 -inf floatinf << OverflowError: cannot convert float infinity to integer []
+30 -inf floatinf >> OverflowError: cannot convert float infinity to integer []
+30 -inf floatnan << ValueError: cannot convert float NaN to integer []
+30 -inf floatnan >> ValueError: cannot convert float NaN to integer []
+30 -inf rr << -infinity []
+30 -inf rr >> -infinity []
+30 -inf rrfrac << TypeError: unsupported operands for << []
+30 -inf rrfrac >> TypeError: unsupported operands for >> []
+30 -inf r30 << -infinity []
+30 -inf r30 >> -infinity []
+30 -inf r100 << -infinity []
+30 -inf r100 >> -infinity []
+30 -inf qq << -infinity []
+30 -inf qq >> -infinity []
+30 -inf qqfrac << TypeError: unsupported operands for << []
+30 -inf qqfrac >> TypeError: unsupported operands for >> []
+30 -inf str << -infinity []
+30 -inf str >> -infinity []
+30 -inf strdec << TypeError: unsupported operands for << []
+30 -inf strdec >> TypeError: unsupported operands for >> []
+30 -inf strexp << TypeError: unsupported operands for << []
+30 -inf strexp >> TypeError: unsupported operands for >> []
+30 -inf strfrac << TypeError: unsupported operands for << []
+30 -inf strfrac >> TypeError: unsupported operands for >> []
+30 -inf bytes << -infinity []
+30 -inf bytes >> -infinity []
+30 -inf bytearray << TypeError: unsupported operands for << []
+30 -inf bytearray >> TypeError: unsupported operands for >> []
+30 -inf complex << TypeError: unsupported operands for << []
+30 -inf complex >> TypeError: unsupported operands for >> []
+30 -inf CC << TypeError: unsupported operands for << []
+30 -inf CC >> TypeError: unsupported operands for >> []
+30 -inf ix << TypeError: unsupported operands for << []
+30 -inf ix >> TypeError: unsupported operands for >> []
+30 -inf it << TypeError: unsupported operands for << []
+30 -inf it >> TypeError: unsupported operands for >> []
+30 -inf ratio << TypeError: unsupported operands for << []
+30 -inf ratio >> TypeError: unsupported operands for >> []
+30 -inf ff << TypeError: unsupported operands for << ['float-int']
+30 -inf ff >> TypeError: unsupported operands for >> ['float-int']
+30 -inf ii << -infinity []
+30 -inf ii >> -infinity []
+30 NaN int << NaN []
+30 NaN int >> NaN []
+30 NaN bool << NaN []
+30 NaN bool >> NaN []
+30 NaN float << NaN []
+30 NaN float >> NaN []
+30 NaN fractionfloat << TypeError: unsupported operands for << []
+30 NaN fractionfloat >> TypeError: unsupported operands for >> []
+30 NaN floatinf << OverflowError: cannot convert float infinity to integer []
+30 NaN floatinf >> OverflowError: cannot convert float infinity to integer []
+30 NaN floatnan << ValueError: cannot convert float NaN to integer []
+30 NaN floatnan >> ValueError: cannot convert float NaN to integer []
+30 NaN rr << NaN []
+30 NaN rr >> NaN []
+30 NaN rrfrac << TypeError: unsupported operands for << []
+30 NaN rrfrac >> TypeError: unsupported operands for >> []
+30 NaN r30 << NaN []
+30 NaN r30 >> NaN []
+30 NaN r100 << NaN []
+30 NaN r100 >> NaN []
+30 NaN qq << NaN []
+30 NaN qq >> NaN []
+30 NaN qqfrac << TypeError: unsupported operands for << []
+30 NaN qqfrac >> TypeError: unsupported operands for >> []
+30 NaN str << NaN []
+30 NaN str >> NaN []
+30 NaN strdec << TypeError: unsupported operands for << []
+30 NaN strdec >> TypeError: unsupported operands for >> []
+30 NaN strexp << TypeError: unsupported operands for << []
+30 NaN strexp >> TypeError: unsupported operands for >> []
+30 NaN strfrac << TypeError: unsupported operands for << []
+30 NaN strfrac >> TypeError: unsupported operands for >> []
+30 NaN bytes << NaN []
+30 NaN bytes >> NaN []
+30 NaN bytearray << TypeError: unsupported operands for << []
+30 NaN bytearray >> TypeError: unsupported operands for >> []
+30 NaN complex << TypeError: unsupported operands for << []
+30 NaN complex >> TypeError: unsupported operands for >> []
+30 NaN CC << TypeError: unsupported operands for << []
+30 NaN CC >> TypeError: unsupported operands for >> []
+30 NaN ix << TypeError: unsupported operands for << []
+30 NaN ix >> TypeError: unsupported operands for >> []
+30 NaN it << TypeError: unsupported operands for << []
+30 NaN it >> TypeError: unsupported operands for >> []
+30 NaN ratio << TypeError: unsupported operands for << []
+30 NaN ratio >> TypeError: unsupported operands for >> []
+30 NaN ff << TypeError: unsupported operands for << ['float-int']
+30 NaN ff >> TypeError: unsupported operands for >> ['float-int']
+30 NaN ii << NaN []
+30 NaN ii >> NaN []
+100 0 int << 0.00000000000000000000000000000 []
+100 0 int >> 0.00000000000000000000000000000 []
+100 0 bool << 0.00000000000000000000000000000 []
+100 0 bool >> 0.00000000000000000000000000000 []
+100 0 float << 0.00000000000000000000000000000 []
+100 0 float >> 0.00000000000000000000000000000 []
+100 0 fractionfloat << TypeError: unsupported operands for << []
+100 0 fractionfloat >> TypeError: unsupported operands for >> []
+100 0 floatinf << OverflowError: cannot convert float infinity to integer []
+100 0 floatinf >> OverflowError: cannot convert float infinity to integer []
+100 0 floatnan << ValueError: cannot convert float NaN to integer []
+100 0 floatnan >> ValueError: cannot convert float NaN to integer []
+100 0 rr << 0.00000000000000000000000000000 []
+100 0 rr >> 0.00000000000000000000000000000 []
+100 0 rrfrac << TypeError: unsupported operands for << []
+100 0 rrfrac >> TypeError: unsupported operands for >> []
+100 0 r30 << 0.00000000000000000000000000000 []
+100 0 r30 >> 0.00000000000000000000000000000 []
+100 0 r100 << 0.00000000000000000000000000000 []
+100 0 r100 >> 0.00000000000000000000000000000 []
+100 0 qq << 0.00000000000000000000000000000 []
+100 0 qq >> 0.00000000000000000000000000000 []
+100 0 qqfrac << TypeError: unsupported operands for << []
+100 0 qqfrac >> TypeError: unsupported operands for >> []
+100 0 str << 0.00000000000000000000000000000 []
+100 0 str >> 0.00000000000000000000000000000 []
+100 0 strdec << TypeError: unsupported operands for << []
+100 0 strdec >> TypeError: unsupported operands for >> []
+100 0 strexp << TypeError: unsupported operands for << []
+100 0 strexp >> TypeError: unsupported operands for >> []
+100 0 strfrac << TypeError: unsupported operands for << []
+100 0 strfrac >> TypeError: unsupported operands for >> []
+100 0 bytes << 0.00000000000000000000000000000 []
+100 0 bytes >> 0.00000000000000000000000000000 []
+100 0 bytearray << TypeError: unsupported operands for << []
+100 0 bytearray >> TypeError: unsupported operands for >> []
+100 0 complex << TypeError: unsupported operands for << []
+100 0 complex >> TypeError: unsupported operands for >> []
+100 0 CC << TypeError: unsupported operands for << []
+100 0 CC >> TypeError: unsupported operands for >> []
+100 0 ix << TypeError: unsupported operands for << []
+100 0 ix >> TypeError: unsupported operands for >> []
+100 0 it << TypeError: unsupported operands for << []
+100 0 it >> TypeError: unsupported operands for >> []
+100 0 ratio << TypeError: unsupported operands for << []
+100 0 ratio >> TypeError: unsupported operands for >> []
+100 0 ff << TypeError: unsupported operands for << ['float-int']
+100 0 ff >> TypeError: unsupported operands for >> ['float-int']
+100 0 ii << 0.00000000000000000000000000000 []
+100 0 ii >> 0.00000000000000000000000000000 []
+100 -0 int << -0.00000000000000000000000000000 []
+100 -0 int >> -0.00000000000000000000000000000 []
+100 -0 bool << -0.00000000000000000000000000000 []
+100 -0 bool >> -0.00000000000000000000000000000 []
+100 -0 float << -0.00000000000000000000000000000 []
+100 -0 float >> -0.00000000000000000000000000000 []
+100 -0 fractionfloat << TypeError: unsupported operands for << []
+100 -0 fractionfloat >> TypeError: unsupported operands for >> []
+100 -0 floatinf << OverflowError: cannot convert float infinity to integer []
+100 -0 floatinf >> OverflowError: cannot convert float infinity to integer []
+100 -0 floatnan << ValueError: cannot convert float NaN to integer []
+100 -0 floatnan >> ValueError: cannot convert float NaN to integer []
+100 -0 rr << -0.00000000000000000000000000000 []
+100 -0 rr >> -0.00000000000000000000000000000 []
+100 -0 rrfrac << TypeError: unsupported operands for << []
+100 -0 rrfrac >> TypeError: unsupported operands for >> []
+100 -0 r30 << -0.00000000000000000000000000000 []
+100 -0 r30 >> -0.00000000000000000000000000000 []
+100 -0 r100 << -0.00000000000000000000000000000 []
+100 -0 r100 >> -0.00000000000000000000000000000 []
+100 -0 qq << -0.00000000000000000000000000000 []
+100 -0 qq >> -0.00000000000000000000000000000 []
+100 -0 qqfrac << TypeError: unsupported operands for << []
+100 -0 qqfrac >> TypeError: unsupported operands for >> []
+100 -0 str << -0.00000000000000000000000000000 []
+100 -0 str >> -0.00000000000000000000000000000 []
+100 -0 strdec << TypeError: unsupported operands for << []
+100 -0 strdec >> TypeError: unsupported operands for >> []
+100 -0 strexp << TypeError: unsupported operands for << []
+100 -0 strexp >> TypeError: unsupported operands for >> []
+100 -0 strfrac << TypeError: unsupported operands for << []
+100 -0 strfrac >> TypeError: unsupported operands for >> []
+100 -0 bytes << -0.00000000000000000000000000000 []
+100 -0 bytes >> -0.00000000000000000000000000000 []
+100 -0 bytearray << TypeError: unsupported operands for << []
+100 -0 bytearray >> TypeError: unsupported operands for >> []
+100 -0 complex << TypeError: unsupported operands for << []
+100 -0 complex >> TypeError: unsupported operands for >> []
+100 -0 CC << TypeError: unsupported operands for << []
+100 -0 CC >> TypeError: unsupported operands for >> []
+100 -0 ix << TypeError: unsupported operands for << []
+100 -0 ix >> TypeError: unsupported operands for >> []
+100 -0 it << TypeError: unsupported operands for << []
+100 -0 it >> TypeError: unsupported operands for >> []
+100 -0 ratio << TypeError: unsupported operands for << []
+100 -0 ratio >> TypeError: unsupported operands for >> []
+100 -0 ff << TypeError: unsupported operands for << ['float-int']
+100 -0 ff >> TypeError: unsupported operands for >> ['float-int']
+100 -0 ii << -0.00000000000000000000000000000 []
+100 -0 ii >> -0.00000000000000000000000000000 []
+100 1 int << 4.0000000000000000000000000000 []
+100 1 int >> 0.25000000000000000000000000000 []
+100 1 bool << 2.0000000000000000000000000000 []
+100 1 bool >> 0.50000000000000000000000000000 []
+100 1 float << 4.0000000000000000000000000000 []
+100 1 float >> 0.25000000000000000000000000000 []
+100 1 fractionfloat << TypeError: unsupported operands for << []
+100 1 fractionfloat >> TypeError: unsupported operands for >> []
+100 1 floatinf << OverflowError: cannot convert float infinity to integer []
+100 1 floatinf >> OverflowError: cannot convert float infinity to integer []
+100 1 floatnan << ValueError: cannot convert float NaN to integer []
+100 1 floatnan >> ValueError: cannot convert float NaN to integer []
+100 1 rr << 4.0000000000000000000000000000 []
+100 1 rr >> 0.25000000000000000000000000000 []
+100 1 rrfrac << TypeError: unsupported operands for << []
+100 1 rrfrac >> TypeError: unsupported operands for >> []
+100 1 r30 << 4.0000000000000000000000000000 []
+100 1 r30 >> 0.25000000000000000000000000000 []
+100 1 r100 << 4.0000000000000000000000000000 []
+100 1 r100 >> 0.25000000000000000000000000000 []
+100 1 qq << 4.0000000000000000000000000000 []
+100 1 qq >> 0.25000000000000000000000000000 []
+100 1 qqfrac << TypeError: unsupported operands for << []
+100 1 qqfrac >> TypeError: unsupported operands for >> []
+100 1 str << 4.0000000000000000000000000000 []
+100 1 str >> 0.25000000000000000000000000000 []
+100 1 strdec << TypeError: unsupported operands for << []
+100 1 strdec >> TypeError: unsupported operands for >> []
+100 1 strexp << TypeError: unsupported operands for << []
+100 1 strexp >> TypeError: unsupported operands for >> []
+100 1 strfrac << TypeError: unsupported operands for << []
+100 1 strfrac >> TypeError: unsupported operands for >> []
+100 1 bytes << 4.0000000000000000000000000000 []
+100 1 bytes >> 0.25000000000000000000000000000 []
+100 1 bytearray << TypeError: unsupported operands for << []
+100 1 bytearray >> TypeError: unsupported operands for >> []
+100 1 complex << TypeError: unsupported operands for << []
+100 1 complex >> TypeError: unsupported operands for >> []
+100 1 CC << TypeError: unsupported operands for << []
+100 1 CC >> TypeError: unsupported operands for >> []
+100 1 ix << TypeError: unsupported operands for << []
+100 1 ix >> TypeError: unsupported operands for >> []
+100 1 it << TypeError: unsupported operands for << []
+100 1 it >> TypeError: unsupported operands for >> []
+100 1 ratio << TypeError: unsupported operands for << []
+100 1 ratio >> TypeError: unsupported operands for >> []
+100 1 ff << TypeError: unsupported operands for << ['float-int']
+100 1 ff >> TypeError: unsupported operands for >> ['float-int']
+100 1 ii << 4.0000000000000000000000000000 []
+100 1 ii >> 0.25000000000000000000000000000 []
+100 -3 int << -12.000000000000000000000000000 []
+100 -3 int >> -0.75000000000000000000000000000 []
+100 -3 bool << -6.0000000000000000000000000000 []
+100 -3 bool >> -1.5000000000000000000000000000 []
+100 -3 float << -12.000000000000000000000000000 []
+100 -3 float >> -0.75000000000000000000000000000 []
+100 -3 fractionfloat << TypeError: unsupported operands for << []
+100 -3 fractionfloat >> TypeError: unsupported operands for >> []
+100 -3 floatinf << OverflowError: cannot convert float infinity to integer []
+100 -3 floatinf >> OverflowError: cannot convert float infinity to integer []
+100 -3 floatnan << ValueError: cannot convert float NaN to integer []
+100 -3 floatnan >> ValueError: cannot convert float NaN to integer []
+100 -3 rr << -12.000000000000000000000000000 []
+100 -3 rr >> -0.75000000000000000000000000000 []
+100 -3 rrfrac << TypeError: unsupported operands for << []
+100 -3 rrfrac >> TypeError: unsupported operands for >> []
+100 -3 r30 << -12.000000000000000000000000000 []
+100 -3 r30 >> -0.75000000000000000000000000000 []
+100 -3 r100 << -12.000000000000000000000000000 []
+100 -3 r100 >> -0.75000000000000000000000000000 []
+100 -3 qq << -12.000000000000000000000000000 []
+100 -3 qq >> -0.75000000000000000000000000000 []
+100 -3 qqfrac << TypeError: unsupported operands for << []
+100 -3 qqfrac >> TypeError: unsupported operands for >> []
+100 -3 str << -12.000000000000000000000000000 []
+100 -3 str >> -0.75000000000000000000000000000 []
+100 -3 strdec << TypeError: unsupported operands for << []
+100 -3 strdec >> TypeError: unsupported operands for >> []
+100 -3 strexp << TypeError: unsupported operands for << []
+100 -3 strexp >> TypeError: unsupported operands for >> []
+100 -3 strfrac << TypeError: unsupported operands for << []
+100 -3 strfrac >> TypeError: unsupported operands for >> []
+100 -3 bytes << -12.000000000000000000000000000 []
+100 -3 bytes >> -0.75000000000000000000000000000 []
+100 -3 bytearray << TypeError: unsupported operands for << []
+100 -3 bytearray >> TypeError: unsupported operands for >> []
+100 -3 complex << TypeError: unsupported operands for << []
+100 -3 complex >> TypeError: unsupported operands for >> []
+100 -3 CC << TypeError: unsupported operands for << []
+100 -3 CC >> TypeError: unsupported operands for >> []
+100 -3 ix << TypeError: unsupported operands for << []
+100 -3 ix >> TypeError: unsupported operands for >> []
+100 -3 it << TypeError: unsupported operands for << []
+100 -3 it >> TypeError: unsupported operands for >> []
+100 -3 ratio << TypeError: unsupported operands for << []
+100 -3 ratio >> TypeError: unsupported operands for >> []
+100 -3 ff << TypeError: unsupported operands for << ['float-int']
+100 -3 ff >> TypeError: unsupported operands for >> ['float-int']
+100 -3 ii << -12.000000000000000000000000000 []
+100 -3 ii >> -0.75000000000000000000000000000 []
+100 +inf int << +infinity []
+100 +inf int >> +infinity []
+100 +inf bool << +infinity []
+100 +inf bool >> +infinity []
+100 +inf float << +infinity []
+100 +inf float >> +infinity []
+100 +inf fractionfloat << TypeError: unsupported operands for << []
+100 +inf fractionfloat >> TypeError: unsupported operands for >> []
+100 +inf floatinf << OverflowError: cannot convert float infinity to integer []
+100 +inf floatinf >> OverflowError: cannot convert float infinity to integer []
+100 +inf floatnan << ValueError: cannot convert float NaN to integer []
+100 +inf floatnan >> ValueError: cannot convert float NaN to integer []
+100 +inf rr << +infinity []
+100 +inf rr >> +infinity []
+100 +inf rrfrac << TypeError: unsupported operands for << []
+100 +inf rrfrac >> TypeError: unsupported operands for >> []
+100 +inf r30 << +infinity []
+100 +inf r30 >> +infinity []
+100 +inf r100 << +infinity []
+100 +inf r100 >> +infinity []
+100 +inf qq << +infinity []
+100 +inf qq >> +infinity []
+100 +inf qqfrac << TypeError: unsupported operands for << []
+100 +inf qqfrac >> TypeError: unsupported operands for >> []
+100 +inf str << +infinity []
+100 +inf str >> +infinity []
+100 +inf strdec << TypeError: unsupported operands for << []
+100 +inf strdec >> TypeError: unsupported operands for >> []
+100 +inf strexp << TypeError: unsupported operands for << []
+100 +inf strexp >> TypeError: unsupported operands for >> []
+100 +inf strfrac << TypeError: unsupported operands for << []
+100 +inf strfrac >> TypeError: unsupported operands for >> []
+100 +inf bytes << +infinity []
+100 +inf bytes >> +infinity []
+100 +inf bytearray << TypeError: unsupported operands for << []
+100 +inf bytearray >> TypeError: unsupported operands for >> []
+100 +inf complex << TypeError: unsupported operands for << []
+100 +inf complex >> TypeError: unsupported operands for >> []
+100 +inf CC << TypeError: unsupported operands for << []
+100 +inf CC >> TypeError: unsupported operands for >> []
+100 +inf ix << TypeError: unsupported operands for << []
+100 +inf ix >> TypeError: unsupported operands for >> []
+100 +inf it << TypeError: unsupported operands for << []
+100 +inf it >> TypeError: unsupported operands for >> []
+100 +inf ratio << TypeError: unsupported operands for << []
+100 +inf ratio >> TypeError: unsupported operands for >> []
+100 +inf ff << TypeError: unsupported operands for << ['float-int']
+100 +inf ff >> TypeError: unsupported operands for >> ['float-int']
+100 +inf ii << +infinity []
+100 +inf ii >> +infinity []
+100 -inf int << -infinity []
+100 -inf int >> -infinity []
+100 -inf bool << -infinity []
+100 -inf bool >> -infinity []
+100 -inf float << -infinity []
+100 -inf float >> -infinity []
+100 -inf fractionfloat << TypeError: unsupported operands for << []
+100 -inf fractionfloat >> TypeError: unsupported operands for >> []
+100 -inf floatinf << OverflowError: cannot convert float infinity to integer []
+100 -inf floatinf >> OverflowError: cannot convert float infinity to integer []
+100 -inf floatnan << ValueError: cannot convert float NaN to integer []
+100 -inf floatnan >> ValueError: cannot convert float NaN to integer []
+100 -inf rr << -infinity []
+100 -inf rr >> -infinity []
+100 -inf rrfrac << TypeError: unsupported operands for << []
+100 -inf rrfrac >> TypeError: unsupported operands for >> []
+100 -inf r30 << -infinity []
+100 -inf r30 >> -infinity []
+100 -inf r100 << -infinity []
+100 -inf r100 >> -infinity []
+100 -inf qq << -infinity []
+100 -inf qq >> -infinity []
+100 -inf qqfrac << TypeError: unsupported operands for << []
+100 -inf qqfrac >> TypeError: unsupported operands for >> []
+100 -inf str << -infinity []
+100 -inf str >> -infinity []
+100 -inf strdec << TypeError: unsupported operands for << []
+100 -inf strdec >> TypeError: unsupported operands for >> []
+100 -inf strexp << TypeError: unsupported operands for << []
+100 -inf strexp >> TypeError: unsupported operands for >> []
+100 -inf strfrac << TypeError: unsupported operands for << []
+100 -inf strfrac >> TypeError: unsupported operands for >> []
+100 -inf bytes << -infinity []
+100 -inf bytes >> -infinity []
+100 -inf bytearray << TypeError: unsupported operands for << []
+100 -inf bytearray >> TypeError: unsupported operands for >> []
+100 -inf complex << TypeError: unsupported operands for << []
+100 -inf complex >> TypeError: unsupported operands for >> []
+100 -inf CC << TypeError: unsupported operands for << []
+100 -inf CC >> TypeError: unsupported operands for >> []
+100 -inf ix << TypeError: unsupported operands for << []
+100 -inf ix >> TypeError: unsupported operands for >> []
+100 -inf it << TypeError: unsupported operands for << []
+100 -inf it >> TypeError: unsupported operands for >> []
+100 -inf ratio << TypeError: unsupported operands for << []
+100 -inf ratio >> TypeError: unsupported operands for >> []
+100 -inf ff << TypeError: unsupported operands for << ['float-int']
+100 -inf ff >> TypeError: unsupported operands for >> ['float-int']
+100 -inf ii << -infinity []
+100 -inf ii >> -infinity []
+100 NaN int << NaN []
+100 NaN int >> NaN []
+100 NaN bool << NaN []
+100 NaN bool >> NaN []
+100 NaN float << NaN []
+100 NaN float >> NaN []
+100 NaN fractionfloat << TypeError: unsupported operands for << []
+100 NaN fractionfloat >> TypeError: unsupported operands for >> []
+100 NaN floatinf << OverflowError: cannot convert float infinity to integer []
+100 NaN floatinf >> OverflowError: cannot convert float infinity to integer []
+100 NaN floatnan << ValueError: cannot convert float NaN to integer []
+100 NaN floatnan >> ValueError: cannot convert float NaN to integer []
+100 NaN rr << NaN []
+100 NaN rr >> NaN []
+100 NaN rrfrac << TypeError: unsupported operands for << []
+100 NaN rrfrac >> TypeError: unsupported operands for >> []
+100 NaN r30 << NaN []
+100 NaN r30 >> NaN []
+100 NaN r100 << NaN []
+100 NaN r100 >> NaN []
+100 NaN qq << NaN []
+100 NaN qq >> NaN []
+100 NaN qqfrac << TypeError: unsupported operands for << []
+100 NaN qqfrac >> TypeError: unsupported operands for >> []
+100 NaN str << NaN []
+100 NaN str >> NaN []
+100 NaN strdec << TypeError: unsupported operands for << []
+100 NaN strdec >> TypeError: unsupported operands for >> []
+100 NaN strexp << TypeError: unsupported operands for << []
+100 NaN strexp >> TypeError: unsupported operands for >> []
+100 NaN strfrac << TypeError: unsupported operands for << []
+100 NaN strfrac >> TypeError: unsupported operands for >> []
+100 NaN bytes << NaN []
+100 NaN bytes >> NaN []
+100 NaN bytearray << TypeError: unsupported operands for << []
+100 NaN bytearray >> TypeError: unsupported operands for >> []
+100 NaN complex << TypeError: unsupported operands for << []
+100 NaN complex >> TypeError: unsupported operands for >> []
+100 NaN CC << TypeError: unsupported operands for << []
+100 NaN CC >> TypeError: unsupported operands for >> []
+100 NaN ix << TypeError: unsupported operands for << []
+100 NaN ix >> TypeError: unsupported operands for >> []
+100 NaN it << TypeError: unsupported operands for << []
+100 NaN it >> TypeError: unsupported operands for >> []
+100 NaN ratio << TypeError: unsupported operands for << []
+100 NaN ratio >> TypeError: unsupported operands for >> []
+100 NaN ff << TypeError: unsupported operands for << ['float-int']
+100 NaN ff >> TypeError: unsupported operands for >> ['float-int']
+100 NaN ii << NaN []
+100 NaN ii >> NaN []
+30 str << 4.0000000 []
+30 str >> 0.25000000 []
+30 bytes << 4.0000000 []
+30 bytes >> 0.25000000 []
+30 strhooks << 4.0000000 []
+30 strhooks >> 0.25000000 []
+30 byteshooks << 4.0000000 []
+30 byteshooks >> 0.25000000 []
+30 strbad << TypeError: unsupported operands for << []
+30 strbad >> TypeError: unsupported operands for >> []
+30 bytesbad << TypeError: unsupported operands for << []
+30 bytesbad >> TypeError: unsupported operands for >> []
+100 str << 4.0000000000000000000000000000 []
+100 str >> 0.25000000000000000000000000000 []
+100 bytes << 4.0000000000000000000000000000 []
+100 bytes >> 0.25000000000000000000000000000 []
+100 strhooks << 4.0000000000000000000000000000 []
+100 strhooks >> 0.25000000000000000000000000000 []
+100 byteshooks << 4.0000000000000000000000000000 []
+100 byteshooks >> 0.25000000000000000000000000000 []
+100 strbad << TypeError: unsupported operands for << []
+100 strbad >> TypeError: unsupported operands for >> []
+100 bytesbad << TypeError: unsupported operands for << []
+100 bytesbad >> TypeError: unsupported operands for >> []
+30 eq2 left => TypeError: unsupported operands for << ['eq']
+30 eq2 right => TypeError: unsupported operands for >> ['eq']
+30 eq2.5 left => TypeError: unsupported operands for << ['eq']
+30 eq2.5 right => TypeError: unsupported operands for >> ['eq']
+30 fi2 left => RuntimeError: eq called ['int', 'eq']
+30 fi2 right => RuntimeError: eq called ['int', 'eq']
+30 fi2.5 left => RuntimeError: eq called ['int', 'eq']
+30 fi2.5 right => RuntimeError: eq called ['int', 'eq']
+30 fm2 left => TypeError: unsupported operands for << ['int']
+30 fm2 right => TypeError: unsupported operands for >> ['int']
+30 strsub left => 4.0000000 []
+30 strsub right => 0.25000000 []
+30 bytessub left => 4.0000000 []
+30 bytessub right => 0.25000000 []
+30 si left => TypeError: unsupported operands for << []
+30 si right => TypeError: unsupported operands for >> []
+30 bi left => TypeError: unsupported operands for << []
+30 bi right => TypeError: unsupported operands for >> []
+30 ii left => 4.0000000 []
+30 ii right => 0.25000000 []
+30 iiwide left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 iiwide right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatmax left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatmax right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+30 floatin left => +infinity []
+30 floatin right => 0.00000000 []
+30 rational left => 4.0000000 []
+30 rational right => 0.25000000 []
+30 real left => 4.0000000 []
+30 real right => 0.25000000 []
+30 text '  +2  ' => -0.00000000 []
+30 text '02' => -0.00000000 []
+30 text '2_0' => -0.00000000 []
+30 text '٢' => TypeError: unsupported operands for >> []
+30 text '0x2' => -0.00000000 []
+30 text '-0' => -0.00000000 []
+100 eq2 left => TypeError: unsupported operands for << ['eq']
+100 eq2 right => TypeError: unsupported operands for >> ['eq']
+100 eq2.5 left => TypeError: unsupported operands for << ['eq']
+100 eq2.5 right => TypeError: unsupported operands for >> ['eq']
+100 fi2 left => RuntimeError: eq called ['int', 'eq']
+100 fi2 right => RuntimeError: eq called ['int', 'eq']
+100 fi2.5 left => RuntimeError: eq called ['int', 'eq']
+100 fi2.5 right => RuntimeError: eq called ['int', 'eq']
+100 fm2 left => TypeError: unsupported operands for << ['int']
+100 fm2 right => TypeError: unsupported operands for >> ['int']
+100 strsub left => 4.0000000000000000000000000000 []
+100 strsub right => 0.25000000000000000000000000000 []
+100 bytessub left => 4.0000000000000000000000000000 []
+100 bytessub right => 0.25000000000000000000000000000 []
+100 si left => TypeError: unsupported operands for << []
+100 si right => TypeError: unsupported operands for >> []
+100 bi left => TypeError: unsupported operands for << []
+100 bi right => TypeError: unsupported operands for >> []
+100 ii left => 4.0000000000000000000000000000 []
+100 ii right => 0.25000000000000000000000000000 []
+100 iiwide left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 iiwide right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatmax left => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatmax right => OverflowError: n (=9223372036854775808) must be <= 9223372036854775807 []
+100 floatin left => +infinity []
+100 floatin right => 0.00000000000000000000000000000 []
+100 rational left => 4.0000000000000000000000000000 []
+100 rational right => 0.25000000000000000000000000000 []
+100 real left => 4.0000000000000000000000000000 []
+100 real right => 0.25000000000000000000000000000 []
+100 text '  +2  ' => -0.00000000000000000000000000000 []
+100 text '02' => -0.00000000000000000000000000000 []
+100 text '2_0' => -0.00000000000000000000000000000 []
+100 text '٢' => TypeError: unsupported operands for >> []
+100 text '0x2' => -0.00000000000000000000000000000 []
+100 text '-0' => -0.00000000000000000000000000000 []
+'  +2  ' -> 4.0000000
+'02' -> 4.0000000
+'010' -> 1024.0000
+'2_0' -> 1.0485760e6
+'0x10' -> 65536.000
+'0o10' -> 256.00000
+'0b10' -> 4.0000000
+'0X1F' -> 2.1474836e9
+'-3' -> 0.12500000
+'+ 2' -> 4.0000000
+'1e2' !! TypeError unsupported operands for <<
+'٢' !! TypeError unsupported operands for <<
+'' !! TypeError unsupported operands for <<
+' ' !! TypeError unsupported operands for <<
+'0x' !! TypeError unsupported operands for <<
+'2__0' -> 1.0485760e6
+'_2' -> 4.0000000
+'2_' -> 4.0000000
+'ff' !! TypeError unsupported operands for <<
+'00' -> 1.0000000
+'-0x3' -> 0.12500000
+'0_8' -> 256.00000
+'\t5\n' -> 32.000000
+'0b' !! TypeError unsupported operands for <<
+'12345678901234567890' !! OverflowError n (=12345678901234567890) must be <= 9223372036854775807
+b'0x10' -> 65536.000
+b'010' -> 1024.0000
+b'2_0' -> 1.0485760e6
+b' 2 ' -> 4.0000000
+b'\xd9\xa2' !! TypeError unsupported operands for <<
+' 0x2' -> 4.0000000
+'0x2 ' -> 4.0000000
+'\t0x2' !! TypeError unsupported operands for <<
+'0x2\t' -> 4.0000000
+'\n0x2' !! TypeError unsupported operands for <<
+'0x 2' -> 4.0000000
+'0x_2' -> 4.0000000
+'-0x2' -> 0.25000000
+'- 0x2' -> 0.25000000
+' -0x2' -> 0.25000000
+' - 0x2' -> 0.25000000
+'-\t0x2' !! TypeError unsupported operands for <<
+' 0b1' -> 2.0000000
+' 0o7' -> 128.00000
+'\t0o7' !! TypeError unsupported operands for <<
+' 010' -> 1024.0000
+'\t010' -> 1024.0000
+'\n2' -> 4.0000000
+' 2' -> 4.0000000
+'2 ' -> 4.0000000
+'\t2' -> 4.0000000
+'2\t' -> 4.0000000
+'\t-2' -> 0.25000000
+'\x0b2' -> 4.0000000
+'\x0c2' -> 4.0000000
+'\r2' -> 4.0000000
+'2\r' -> 4.0000000
+'\xa02' !! TypeError unsupported operands for <<
+'\u20002' !! TypeError unsupported operands for <<
+'2\xa0' !! TypeError unsupported operands for <<
+' + 2' -> 4.0000000
+'+ 0x2' -> 4.0000000
+'+\t2' -> 4.0000000
+'-\t2' -> 0.25000000
+'_0x2' -> 4.0000000
+'0_x2' -> 4.0000000
+'0x2_' -> 4.0000000
+'0X2' -> 4.0000000
+' 0X2' -> 4.0000000
+' 0x2 ' -> 4.0000000
+'\t5\n' -> 32.000000
+'\t5' -> 32.000000
+'5\n' -> 32.000000
+'\n5' -> 32.000000
+' \t5' -> 32.000000
+'\t 5' -> 32.000000
+'0x\t2' -> 4.0000000
+' _2' -> 4.0000000
+'_ 2' -> 4.0000000
+'2 _' -> 4.0000000
+' 0b_1' -> 2.0000000
+'0b1 ' -> 2.0000000
+b'\t0x2' !! TypeError unsupported operands for <<
+b' 0x2' -> 4.0000000
+b'\t5' -> 32.000000
+b'0x2 ' -> 4.0000000
+'1 2' -> 4096.0000
+'1\t2' -> 4096.0000
+'0x1 2' -> 262144.00
+'0x1\t2' -> 262144.00
+' 0x\t2' -> 4.0000000
+'0 x2' !! TypeError unsupported operands for <<
+'\t+0x2' !! TypeError unsupported operands for <<
+' +0x2' -> 4.0000000
+'\t 0x2' !! TypeError unsupported operands for <<
+' \t0x2' !! TypeError unsupported operands for <<
+'+ \t0x2' !! TypeError unsupported operands for <<
+'_\t0x2' !! TypeError unsupported operands for <<
+'\t_0x2' !! TypeError unsupported operands for <<
+'-  0x2' -> 0.25000000
+'  0x2' -> 4.0000000
+'0x2\n' -> 4.0000000
+'\t5 6' -> 7.2057594e16
+'5\t\t' -> 32.000000
+'\x0c0x2' !! TypeError unsupported operands for <<
+'\x0b0x2' !! TypeError unsupported operands for <<
+'\r0x2' !! TypeError unsupported operands for <<
+' \n0x2' !! TypeError unsupported operands for <<
+'0b1 0' -> 4.0000000
+'10\n0' -> 1.2676506e30
+'+-2' !! TypeError unsupported operands for <<
+'--2' !! TypeError unsupported operands for <<
+'-' !! TypeError unsupported operands for <<
+'+' !! TypeError unsupported operands for <<
+' ' !! TypeError unsupported operands for <<
+'0x' !! TypeError unsupported operands for <<
+' 0x ' !! TypeError unsupported operands for <<
+'0xg' !! TypeError unsupported operands for <<
+'٢' !! TypeError unsupported operands for <<
+'ⅷ' !! TypeError unsupported operands for <<
+'0b2' !! TypeError unsupported operands for <<
+'0o8' !! TypeError unsupported operands for <<
+'08' -> 256.00000
+'0d10' !! TypeError unsupported operands for <<
+' 0b 1' -> 2.0000000
+'0 b1' !! TypeError unsupported operands for <<
+'1_' -> 2.0000000
+'_' !! TypeError unsupported operands for <<
+'__' !! TypeError unsupported operands for <<
+'+_2' -> 4.0000000
+'-_0x2' -> 0.25000000
+'0_b1' -> 2.0000000
+0*10^6+2 -> 4.0000000
+_*10^6+2 -> 4.0000000
+sp*10^6+2 -> 4.0000000
+2+sp*10^6 -> 4.0000000
+1*10^6+_*10^6 !! OverflowError
+1*5000 !! OverflowError
+1*10^6+x !! TypeError
+0x+0*1000+1 -> 2.0000000
+-+0*1000+3 -> 0.12500000
+b0*10^6+2 -> 4.0000000
+2^63-1 -> +infinity
+0x8000000000000000 !! OverflowError
