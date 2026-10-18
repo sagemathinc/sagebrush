@@ -29,6 +29,7 @@ TABLE = {
     "Subsets": (["sequences and sets"], "The set of the subsets of a set, or of those of a given size."),
     "Sym": (["structures"], "The symmetric group on 1 .. n, whose elements are permutations."),
     "DihedralGroup": (["structures"], "The dihedral group of order 2n as permutations of 1 .. n."),
+    "IsIsomorphic": (["structures"], "Whether two quadratic fields, or the symmetric and dihedral groups, are isomorphic (the isomorphism itself is not given)."),
     "Identity": (["structures"], "The identity element of a group."),
     # structures and types
     "Integers": (["structures"], "The ring of integers; Integers(m), the integers modulo m; Integers(K), a number field's maximal order."),
@@ -243,6 +244,10 @@ EXAMPLES = {
 > G := DihedralGroup(5);
 > G.1^2;
 (1, 3, 5, 2, 4)""",
+    "IsIsomorphic": """\
+> b := IsIsomorphic(QuadraticField(5), QuadraticField(45));
+> b;
+true""",
     "VectorSpace": """\
 > V := VectorSpace(Rationals(), 3);
 > V![1, 2, 3] + V.2;

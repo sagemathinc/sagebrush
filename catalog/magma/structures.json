@@ -98,6 +98,32 @@
     ]
   },
   {
+    "name": "IsIsomorphic",
+    "kind": "function",
+    "signature": "(<Str> A, <Str> B) -> BoolElt",
+    "summary": "Whether two quadratic fields, or the symmetric and dihedral groups, are isomorphic; fields of two degrees are not.",
+    "examples": [
+      {
+        "code": "b := IsIsomorphic(QuadraticField(-1), QuadraticField(-4)); b; IsIsomorphic(Sym(4), DihedralGroup(12)); IsIsomorphic(QuadraticField(2), QuadraticField(3));",
+        "expected": "true\nfalse\nfalse\n"
+      }
+    ],
+    "differs": [
+      "Only number fields of degree 2 (or of two degrees), and Sym(n) and DihedralGroup(n); other structures and number fields of a higher degree are refused.",
+      "The second value, the isomorphism, is not given: printing a true result and b, f := ... with true are refused (with false Magma gives none either)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "QuadraticField",
+      "DihedralGroup",
+      "Sym"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
     "name": "Identity",
     "kind": "function",
     "signature": "(<GrpPerm> G) -> GrpPermElt",
