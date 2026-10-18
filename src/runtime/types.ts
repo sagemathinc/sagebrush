@@ -1380,24 +1380,51 @@ method(int, "__hash__", (x: any) => O.hashExact(unbox(x)));
 method(int, "__format__", (x: any, spec: string) => format(x, spec));
 method(int, "is_integer", () => true);
 method(int, "as_integer_ratio", (x: any) => tuple([x, 1]));
-method(int, "to_bytes", (x: any, length: any = 1, byteorder: string = "big", signed: any = false) => {
-  let v = BigInt(x);
-  const n = Number(length);
+// (to_bytes and from_bytes: byteorder a str, "little" or "big", as
+// CPython's argument clinic and int_to_bytes_impl check it)
+const littleEndian = (fn: string, byteorder: any): boolean => {
+  if (typeof byteorder !== "string" && !isinstance(byteorder, T.str)) raise(T.TypeError, `${fn}() argument 'byteorder' must be str, not ${typeName(byteorder)}`);
+  const b = unbox(byteorder);
+  if (b === "little") return true;
+  if (b !== "big") raise(T.ValueError, "byteorder must be either 'little' or 'big'");
+  return false;
+};
+// (n's bit length, n >= 0, from its hex digits)
+const hexBits = (hex: string) => (hex === "0" ? 0 : 4 * (hex.length - 1) + (32 - Math.clz32(parseInt(hex[0], 16))));
+// int.to_bytes(length=1, byteorder="big", *, signed=False) as CPython's
+// int_to_bytes_impl: length an index-sized count, the byte order checked,
+// then the length's sign, then the value against the length; linear, the
+// bytes read from the value's hex digits (a byte at a time took 23 s for
+// 415 KB)
+method(int, "to_bytes", (x: any, length: any = 1, byteorder: any = "big", signed: any = false) => {
+  const k = O.index(length);
+  if (typeof k === "bigint" && (k > 9223372036854775807n || k < -9223372036854775808n)) raise(T.OverflowError, "Python int too large to convert to C ssize_t");
+  const little = littleEndian("to_bytes", byteorder);
+  const n = Number(k);
   if (n < 0) raise(T.ValueError, "length argument must be non-negative");
-  if (O.truth(signed) && n > 0 && v >= 1n << BigInt(8 * n - 1)) raise(T.OverflowError, "int too big to convert");
-  if (O.truth(signed) && n === 0 && v !== 0n) raise(T.OverflowError, "int too big to convert");
-  if (v < 0n) {
-    if (!O.truth(signed)) raise(T.OverflowError, "can't convert negative int to unsigned");
-    if (n === 0 || v < -(1n << BigInt(8 * n - 1))) raise(T.OverflowError, "int too big to convert");
-    v += 1n << BigInt(8 * n);
+  let v = BigInt(x);
+  const isSigned = O.truth(signed);
+  if (v < 0n && !isSigned) raise(T.OverflowError, "can't convert negative int to unsigned");
+  // (the bits the value needs: a negative one's two's complement in 8n bits
+  // needs -v - 1 to fit in 8n - 1 of them)
+  const bits = hexBits((v < 0n ? -v - 1n : v).toString(16));
+  if (bits > 8 * n - (isSigned ? 1 : 0) && !(n === 0 && v === 0n)) raise(T.OverflowError, "int too big to convert");
+  let a: Uint8Array;
+  try {
+    a = new Uint8Array(n);
+  } catch (e) {
+    if (e instanceof RangeError) raise(T.MemoryError);
+    throw e;
   }
-  const a = new Uint8Array(n);
-  for (let i = n - 1; i >= 0; i--) {
-    a[i] = Number(v & 255n);
-    v >>= 8n;
+  if (v < 0n) v += 1n << BigInt(8 * n);
+  const hex = v.toString(16);
+  // (the value's bytes at the end, big-endian; the rest zero)
+  const nb = (hex.length + 1) >> 1, odd = hex.length & 1;
+  for (let i = 0; i < nb; i++) {
+    const j = 2 * i - odd;
+    a[n - nb + i] = j < 0 ? parseInt(hex[0], 16) : parseInt(hex.slice(j, j + 2), 16);
   }
-  if (v !== 0n) raise(T.OverflowError, "int too big to convert");
-  if (byteorder === "little") a.reverse();
+  if (little) a.reverse();
   return new PyBytes(a);
 }, sig(["self", "length", "byteorder"], { kwonly: ["signed"] }));
 // (the int itself, a plain one: a bool's 0 or 1, a subclass's value; a
@@ -2649,6 +2676,40 @@ function codecArgs(array: boolean, encoding: any, errors: any): [any, any] {
 // (`reserve`, if given, is told each length the result grows to before it
 // is allocated or extended: bytearray.__init__ under an export refuses there,
 // after one item of an iterable, as CPython's, never materializing it all)
+// CPython's PyObject_Bytes, as int.from_bytes reads its argument: bytes as
+// they are; an object's __bytes__, which must give bytes; a str refused;
+// a buffer's bytes; each item of a list, tuple or other iterable through
+// __index__, in range(0, 256); anything else "cannot convert"
+function objectBytes(x: any): Uint8Array {
+  if (x instanceof PyBytes && !(x instanceof PyByteArray) && typeOf(x) === T.bytes) return x.a.subarray(0, x.n);
+  if (typeof x === "object" && x !== null && Ty_lookup(x, "__bytes__") !== undefined) {
+    const r = Ty_lookup(x, "__bytes__")(x);
+    if (!(r instanceof PyBytes) || r instanceof PyByteArray) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
+    return r.a.subarray(0, r.n);
+  }
+  const cannot = () => raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
+  if (typeof x === "string" || isinstance(x, T.str)) cannot();
+  const buf = O.bufferOf(x);
+  if (buf !== undefined) return buf;
+  let it: any;
+  try {
+    it = O.iter(x);
+  } catch (e: any) {
+    if (isinstance(toPyExc(e), T.TypeError)) cannot();
+    throw e;
+  }
+  const out: number[] = [];
+  const END = {};
+  for (let i = 0; ; i++) {
+    if ((i & 65535) === 65535) O.pollInterrupt();
+    const v = O.next(it, END);
+    if (v === END) break;
+    const d = O.index(v);
+    if (!(d >= 0 && d < 256)) raise(T.ValueError, "bytes must be in range(0, 256)");
+    out.push(Number(d));
+  }
+  return Uint8Array.from(out);
+}
 function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false, reserve?: (n: number) => void): Uint8Array {
   [encoding, errors] = codecArgs(array, encoding, errors);
   if (x !== undefined && typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
@@ -3239,13 +3300,27 @@ getset(object, "__dict__", (o) => {
   };
   T.bytes.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
   T.bytearray.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
-  T.int.$dict.set("from_bytes", new PyClassMethod(pyfn((_c: any, b: any, byteorder: any = "big", signed: any = false) => {
-    const a = O.toArray(b).map(Number);
-    if (byteorder === "little") a.reverse();
-    let v = 0n;
-    for (const d of a) v = (v << 8n) | BigInt(d);
-    if (O.truth(signed) && a.length && a[0] >= 128) v -= 1n << BigInt(8 * a.length);
-    return O.normBig(v);
+  // int.from_bytes(bytes, byteorder="big", *, signed=False) as CPython's
+  // int_from_bytes_impl: the byte order checked, then the bytes as
+  // PyObject_Bytes gives them, then the value, linear, from their hex
+  // digits (a shift per byte was quadratic: 136 ms for 42 KB), made the
+  // class's (a subclass called with it, bool's a bool)
+  T.int.$dict.set("from_bytes", new PyClassMethod(pyfn((cls: any, b: any, byteorder: any = "big", signed: any = false) => {
+    const little = littleEndian("from_bytes", byteorder);
+    const a = objectBytes(b);
+    const n = a.length;
+    let hex = "";
+    const parts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const d = a[little ? n - 1 - i : i];
+      hex += d < 16 ? "0" + d.toString(16) : d.toString(16);
+      if (hex.length >= 65536) parts.push(hex), (hex = "");
+    }
+    parts.push(hex);
+    let v = n ? BigInt("0x" + parts.join("")) : 0n;
+    if (O.truth(signed) && n && a[little ? n - 1 : 0] >= 128) v -= 1n << BigInt(8 * n);
+    const r = O.normBig(v);
+    return cls === T.int ? r : callObj(cls, [r]);
   }, "from_bytes", sig(["cls", "bytes", "byteorder"], { kwonly: ["signed"] }))));
   // (as CPython's oserror_init: with 2 to 5 arguments, errno, strerror,
   // filename, winerror and filename2, the args then only the first two
