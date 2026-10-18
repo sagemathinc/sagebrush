@@ -273,6 +273,30 @@ test("the comprehension bound leaves a tenth of the heap: at the bound in a heap
   assert.match(r.stdout, /\nend\n$/);
 });
 
+test("taking the live heap leaves gc exposure as it was: no context made later gets gc, and a host started with --expose-gc keeps it (astra CORR-341-1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (a preload reports gc in the root and in a fresh vm context, before
+  // Magma mode loads and takes the live heap, and at exit)
+  const pre = join(mkdtempSync(join(tmpdir(), "magma-gc-")), "gc-state.cjs");
+  writeFileSync(pre, [
+    "const vm = require('node:vm'), fs = require('node:fs');",
+    "const report = (phase) => fs.writeSync(2, phase + ' root=' + typeof global.gc + ' fresh=' + vm.runInNewContext('typeof gc') + '\\n');",
+    "report('before'); process.on('exit', () => report('after'));",
+    "",
+  ].join("\n"));
+  const run = (flags: string[]) => spawnSync(process.execPath, [...flags, "--require", pre, cli, "--magma"], { input: "1;\n", encoding: "utf8", timeout: WALL(60000) });
+  const plain = run([]);
+  assert.equal(plain.stdout, "1\n", plain.stderr);
+  assert.match(plain.stderr, /before root=undefined fresh=undefined\nafter root=undefined fresh=undefined\n/, plain.stderr);
+  const exposed = run(["--expose-gc"]);
+  assert.equal(exposed.stdout, "1\n", exposed.stderr);
+  assert.match(exposed.stderr, /before root=function fresh=function\nafter root=function fresh=function\n/, exposed.stderr);
+});
+
 test("a long integer is laid out in lines of 79 digits and a backslash, in time linear in its length", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
