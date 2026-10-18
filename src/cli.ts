@@ -627,14 +627,25 @@ async function main(argv = process.argv.slice(2)) {
 // own streams do, so that everything comes out in the order written.
 function cliWorker(argv: string[]) {
   parentPort!.postMessage({ interrupt: R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null });
+  // (a full non-blocking pipe: EAGAIN or nothing written; waited on with a
+  // backoff of 1 ms doubling to 50 ms, as readStdin waits, not spun on)
+  const pause = new Int32Array(new SharedArrayBuffer(4));
   for (const [stream, fd] of [[process.stdout, 1], [process.stderr, 2]] as [any, number][]) {
     stream.write = (chunk: any, enc?: any, cb?: any) => {
       const data = typeof chunk === "string" ? Buffer.from(chunk, typeof enc === "string" ? (enc as BufferEncoding) : "utf8") : Buffer.from(chunk);
-      for (let off = 0; off < data.length; ) {
+      for (let off = 0, wait = 1; off < data.length; ) {
+        let n = 0;
         try {
-          off += writeSync(fd, data, off);
+          n = writeSync(fd, data, off);
         } catch (e: any) {
           if (e?.code !== "EAGAIN") throw e;
+        }
+        if (n > 0) {
+          off += n;
+          wait = 1;
+        } else {
+          Atomics.wait(pause, 0, 0, wait);
+          wait = Math.min(2 * wait, 50);
         }
       }
       (typeof enc === "function" ? enc : cb)?.();
