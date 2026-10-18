@@ -1166,7 +1166,9 @@ const POW_ONE: Record<string, (x: number, y: number) => number> = {
 function powerExponent(ct: DType, b: NDArray): string {
   const general = ct === D.float32 ? "power float32" : "power";
   if ((ct !== D.float64 && ct !== D.float32) || b.size !== 1) return general;
-  const e = Number(b.data[b.offset]);
+  // (the exponent as the loop's type holds it: a float32 loop's is the
+  // float32 nearest, so 0.500000001 is 0.5 there, as NumPy casts it first)
+  const e = ct === D.float32 ? Math.fround(Number(b.data[b.offset])) : Number(b.data[b.offset]);
   return e === -1 || e === 0 || e === 0.5 || e === 1 || e === 2 ? `power ${e}` : general;
 }
 // x^y of float32 operands (a Python float exponent is cast to float32 first,
