@@ -30,7 +30,7 @@ export class StdStream {
       const data = this.buf.join("");
       this.buf = [];
       this.size = 0;
-      writeSync(this.fd, data);
+      writeAll(this.fd, data);
     }
   }
 }
@@ -53,6 +53,29 @@ Ty.method(streamType, "__repr__", (s: StdStream) => `<_io.TextIOWrapper name='${
 Ty.method(streamType, "fileno", (s: StdStream) => s.fd);
 Ty.getset(streamType, "encoding", () => "utf-8");
 Ty.getset(streamType, "closed", () => false);
+// All of data to fd, however much each write takes: a descriptor may be a
+// non-blocking pipe (a parent's, or Node's own), whose write takes only what
+// fits and refuses with EAGAIN when full; then a wait of 1 ms doubling to 50
+// ms, not a spin.  (One writeSync dropped the rest of a large print.)
+const writePause = new Int32Array(new SharedArrayBuffer(4));
+export function writeAll(fd: number, s: string): void {
+  const data = Buffer.from(s, "utf8");
+  for (let off = 0, wait = 1; off < data.length; ) {
+    let n = 0;
+    try {
+      n = writeSync(fd, data, off);
+    } catch (e: any) {
+      if (e?.code !== "EAGAIN") throw e;
+    }
+    if (n > 0) {
+      off += n;
+      wait = 1;
+    } else {
+      Atomics.wait(writePause, 0, 0, wait);
+      wait = Math.min(2 * wait, 50);
+    }
+  }
+}
 // stdin: read synchronously from fd 0.
 let stdinBuf = "", stdinEof = false;
 function stdinFill(): boolean {

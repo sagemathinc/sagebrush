@@ -64,7 +64,10 @@ else {
   // this thread does: a Worker started on the file itself compiles it anew
   // every time, about 160 ms)
   const boot = `try { require("node:module").enableCompileCache?.(); } catch {}\nrequire(${JSON.stringify(bundle)});`;
-  const worker = new Worker(boot, { eval: true, workerData: { sagebrushCli: { argv } } });
+  // (stdout and stderr: true, so that this thread never opens its own
+  // process.stdout, which would make the shared descriptor non-blocking: the
+  // worker writes to fds 1 and 2 itself, cliWorker in src/cli.ts)
+  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv } } });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

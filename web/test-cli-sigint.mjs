@@ -3,8 +3,8 @@
 // KeyboardInterrupt` and `finally` run; an uncaught one prints CPython's
 // traceback and ends the process by SIGINT (a shell's 130); time.sleep ends
 // at once; a call that does not poll (a read of stdin) gives way to a
-// second Ctrl-C; and stdout and stderr come out in the order written, as on
-// the main thread.  Under Node, Deno and Bun, and the Deno executable when
+// second Ctrl-C; stdout and stderr come out in the order written, as on the
+// main thread; and a large print through a slow pipe arrives whole.  Under Node, Deno and Bun, and the Deno executable when
 // it is built.
 //   node web/test-cli-sigint.mjs [launcher]
 //   (default packages/sagebrush/bin/sagebrush.cjs, the npm package's
@@ -92,6 +92,10 @@ for (const [rt, cmd] of runtimes) {
   const both = (env) => spawnSync("sh", ["-c", '"$@" 2>&1', "sh", ...cmd, order], { encoding: "utf8", env: { ...process.env, ...env } });
   const w = both({}), m = both({ SAGEBRUSH_NO_WORKER: "1" });
   check(`${rt}: stdout and stderr in order, as on the main thread`, w.stdout === m.stdout && w.status === 1 && m.status === 1 && /^out 0\nerr 0\nout 1\nerr 1\nout 2\nerr 2\nlast out\nTraceback/.test(w.stdout), JSON.stringify([w.stdout, m.stdout, w.status, m.status]));
+  // a large print into a pipe whose reader starts late arrives whole (a
+  // write to a full pipe takes part of it, or none: the rest must follow)
+  const big = spawnSync("sh", ["-c", '"$@" | (sleep 1; wc -c)', "sh", ...cmd, "-c", "print('x' * 10_000_000)"], { encoding: "utf8" });
+  check(`${rt}: 10 MB through a slow pipe arrives whole`, big.stdout.trim() === "10000001", JSON.stringify([big.stdout, big.stderr.slice(-300)]));
   // exit statuses and a program on stdin, as before
   const st = spawnSync(cmd[0], [...cmd.slice(1), "-c", "import sys; sys.exit(3)"]);
   check(`${rt}: sys.exit(3)`, st.status === 3, String(st.status));
