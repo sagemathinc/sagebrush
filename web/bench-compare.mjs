@@ -7,7 +7,18 @@
 //     the time until the interpreter is ready and print(1 + 1) has run.
 //   - numpy: what importing it adds, and how long that takes.
 //   - Speed: a few workloads, each run 5 times after a warm-up run in the
-//     same session (the median, in ms, timed inside the page).  Every
+//     same session (the median, in ms, timed inside the page).
+//   - Memory (Linux): the private memory (USS) of the page's renderer
+//     process, where the page, Sagebrush's Web Worker, their JavaScript
+//     heaps and Pyodide's WebAssembly memory all live (the largest renderer
+//     started after about:blank; the browser's other renderers, about the
+//     same for both engines, are recorded but not counted): on about:blank, after
+//     print(1 + 1), after import numpy, and for each workload its peak
+//     (sampled every 50 ms from /proc while the workload's setup, warm-up
+//     and timed runs execute) and its level after a forced garbage
+//     collection; with each engine's JavaScript heap (CDP's
+//     Runtime.getHeapUsage, of the page and of Sagebrush's worker) and the
+//     size of Pyodide's WebAssembly memory (which never shrinks).  Every
 //     execution of every workload, warm-up and timed, in every cold start
 //     of both engines, must print what Sagebrush's first warm-up printed,
 //     and every timing must be a finite number; else the run fails.
@@ -33,7 +44,7 @@
 // ones both run the same way, which says nothing about code that only
 // CPython runs.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
@@ -160,6 +171,7 @@ const { loadPyodide } = await import("/py/pyodide.mjs");
 const py = await loadPyodide({ indexURL: "/py/" });
 let out = "";
 py.setStdout({ batched: (s) => { out += s + "\\n"; } });
+window.wasmBytes = () => py._module.HEAP8.buffer.byteLength;
 window.run = async (code) => { const t = performance.now(); out = ""; try { await py.loadPackagesFromImports(code, { messageCallback: () => {} }); py.runPython(code); } catch (e) { out += "ERROR " + e; } return { out, ms: performance.now() - t }; };
 window.readyMs = performance.now() - t0;
 </script>`,
@@ -195,9 +207,76 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
+// The browser's renderer processes (its descendants whose command line has
+// --type=renderer), and their private memory in bytes, from /proc
+function rendererPids(root) {
+  const kids = new Map();
+  for (const d of readdirSync("/proc")) {
+    if (!/^\d+$/.test(d)) continue;
+    try {
+      const stat = readFileSync(`/proc/${d}/stat`, "utf8");
+      const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+      if (!kids.has(ppid)) kids.set(ppid, []);
+      kids.get(ppid).push(Number(d));
+    } catch {}
+  }
+  const out = [], todo = [root];
+  while (todo.length) {
+    const p = todo.pop();
+    for (const c of kids.get(p) ?? []) {
+      todo.push(c);
+      try { if (readFileSync(`/proc/${c}/cmdline`, "utf8").includes("--type=renderer")) out.push(c); } catch {}
+    }
+  }
+  return out;
+}
+// (private memory, USS: pages no other process maps, which is what a
+// process adds; RSS would count the browser's shared code in every
+// renderer again)
+function uss(pid) {
+  try {
+    const t = readFileSync(`/proc/${pid}/smaps_rollup`, "utf8");
+    return 1024 * (Number(/Private_Clean:\s+(\d+)/.exec(t)?.[1] ?? 0) + Number(/Private_Dirty:\s+(\d+)/.exec(t)?.[1] ?? 0));
+  } catch { return 0; }
+}
+function rss(pids) {
+  let b = 0;
+  for (const p of pids) b += uss(p);
+  return b;
+}
+// each renderer: its pid, private and resident memory, and its renderer client id
+function detail(pids) {
+  return pids.map((p) => {
+    let rssKb = 0, id = "";
+    try { rssKb = Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${p}/status`, "utf8"))?.[1] ?? 0); id = /--renderer-client-id=(\d+)/.exec(readFileSync(`/proc/${p}/cmdline`, "utf8"))?.[1] ?? ""; } catch {}
+    return { pid: p, uss: uss(p), rss: rssKb * 1024, client: id };
+  });
+}
+// the renderers' private memory every 50 ms (their list refreshed every 500 ms): the peak since reset()
+// (once page() has named the page's renderer, only it: the browser's other
+// renderers hold about the same memory for either engine)
+function sampler(root) {
+  let pids = rendererPids(root), peak = 0, k = 0, pagePid = 0;
+  const tick = () => { if (!pagePid && ++k % 10 === 0) pids = rendererPids(root); const v = rss(pagePid ? [pagePid] : pids); if (v > peak) peak = v; return v; };
+  const h = setInterval(tick, 50);
+  return {
+    now: () => { if (!pagePid) pids = rendererPids(root); return rss(pagePid ? [pagePid] : pids); },
+    all: () => rss(rendererPids(root)),
+    // the page's renderer: the largest of those started after about:blank
+    page: (before) => { const d = detail(rendererPids(root)).filter((x) => !before.includes(x.pid)).sort((a, b) => b.uss - a.uss); pagePid = d[0]?.pid ?? 0; return pagePid; },
+    reset: () => { if (!pagePid) pids = rendererPids(root); peak = 0; tick(); },
+    peak: () => (tick(), peak),
+    processes: () => rendererPids(root).length,
+    detail: () => detail(rendererPids(root)),
+    stop: () => clearInterval(h),
+  };
+}
+
 async function session(page) {
   const profile = mkdtempSync(join(tmpdir(), "sb-bench-"));
-  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  // (no spare renderer kept ready: only the page's own renderer counted)
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--disable-features=SpareRendererForSitePerProcess", "about:blank"], { stdio: "ignore" });
+  let mem;
   try {
     const port = await devtoolsPort(profile);
     let targets;
@@ -206,8 +285,34 @@ async function session(page) {
     await new Promise((r) => (ws.onopen = r));
     let n = 0;
     const waiting = new Map();
-    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-    const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+    // (Sagebrush's worker attached too, for its heap: its CDP session)
+    let worker;
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") worker = m.params.sessionId;
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    };
+    const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+    await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    mem = sampler(chrome.pid);
+    // the JavaScript heaps (page, worker: used, total and ArrayBuffer backing
+    // stores where CDP reports them) and Pyodide's WebAssembly memory
+    const heaps = async () => {
+      const h = {};
+      for (const [k, sid] of [["page", undefined], ["worker", worker]]) {
+        if (k === "worker" && !sid) continue;
+        const r = await send("Runtime.getHeapUsage", {}, sid);
+        h[k] = { used: r?.usedSize, total: r?.totalSize, backing: r?.backingStorageSize ?? null };
+      }
+      h.wasm = await ev("window.wasmBytes ? window.wasmBytes() : null");
+      return h;
+    };
+    const gc = async () => {
+      await send("HeapProfiler.collectGarbage");
+      if (worker) await send("HeapProfiler.collectGarbage", {}, worker);
+      await sleep(500);
+    };
+    const blankRss = mem.now(), blankPids = rendererPids(chrome.pid);
     // (each step bounded: a run that never ends is reported, not waited for)
     const ev = async (expression, ms = 180000) => {
       const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), sleep(ms).then(() => ({ timedOut: true }))]);
@@ -227,12 +332,19 @@ async function session(page) {
     const first = await ev("run('print(1 + 1)')");
     step("first result");
     const cold = { readyMs: Math.round(await ev("window.readyMs")), firstResultMs: Date.now() - t0, out: first?.out?.trim(), ...take() };
+    await gc();
+    const pagePid = mem.page(blankPids);
+    cold.mem = { blankRss, pagePid, rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
     const np = await ev("run('import numpy\\nprint(numpy.arange(10).sum())')");
     const numpy = { ms: Math.round(np?.ms ?? -1), out: np?.out?.trim(), ...take() };
+    await gc();
+    numpy.mem = { rss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
     step("numpy");
     const speed = {};
     for (const [name, w] of Object.entries(WORKLOADS)) {
       const { setup, code } = typeof w === "string" ? { code: w } : w;
+      const before = mem.now();
+      mem.reset();
       const prep = setup === undefined ? undefined : (await ev(`run(${JSON.stringify(setup)})`))?.out?.trim();
       const warm = await ev(`run(${JSON.stringify(code)})`);
       // (every timed run's output kept: each must equal the warm-up's)
@@ -241,13 +353,17 @@ async function session(page) {
         const r = await ev(`run(${JSON.stringify(code)})`);
         timed.push({ ms: r?.ms, out: r?.out?.trim() });
       }
+      const peakRss = mem.peak();
+      await gc();
+      const memory = { before, peakRss, afterGcRss: mem.now(), all: mem.all(), renderers: mem.detail(), heap: await heaps() };
       const times = timed.map((t) => t.ms).sort((a, b) => a - b);
-      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out), ...(prep === undefined ? {} : { setup: prep }) };
+      speed[name] = { ms: Math.round(times[REPS >> 1]), out: warm?.out?.trim(), times: timed.map((t) => t.ms), outs: timed.map((t) => t.out), mem: memory, ...(prep === undefined ? {} : { setup: prep }) };
       step(`${name}: ${speed[name].ms} ms`);
     }
     ws.close();
     return { cold, numpy, speed };
   } finally {
+    mem?.stop();
     chrome.kill("SIGKILL");
     await sleep(300);
     rmSync(profile, { recursive: true, force: true });
@@ -276,6 +392,13 @@ const row = (engine) => {
     readyMs: median(rs.map((r) => r.cold.readyMs)), firstResultMs: median(rs.map((r) => r.cold.firstResultMs)),
     numpyWire: median(rs.map((r) => r.numpy.wire)), numpyDecoded: median(rs.map((r) => r.numpy.decoded)), numpyMs: median(rs.map((r) => r.numpy.ms)),
     speed: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, median(rs.map((r) => r.speed[w].ms))])),
+    mem: {
+      blank: median(rs.map((r) => r.cold.mem.blankRss)), started: median(rs.map((r) => r.cold.mem.rss)), numpy: median(rs.map((r) => r.numpy.mem.rss)),
+      wasmStarted: median(rs.map((r) => r.cold.mem.heap.wasm ?? 0)), wasmNumpy: median(rs.map((r) => r.numpy.mem.heap.wasm ?? 0)),
+      rows: Object.fromEntries(Object.keys(WORKLOADS).map((w) => [w, {
+        peak: median(rs.map((r) => r.speed[w].mem.peakRss)), afterGc: median(rs.map((r) => r.speed[w].mem.afterGcRss)), wasm: median(rs.map((r) => r.speed[w].mem.heap.wasm ?? 0)),
+      }])),
+    },
   };
 };
 const S = row("Sagebrush"), P = row("Pyodide");
@@ -293,6 +416,12 @@ console.log(`| first print(1 + 1) result, from navigation | ${S.firstResultMs} m
 console.log(`| import numpy: transferred / decoded | ${mb(S.numpyWire)} / ${mb(S.numpyDecoded)} MB | ${mb(P.numpyWire)} / ${mb(P.numpyDecoded)} MB |`);
 console.log(`| import numpy: time | ${S.numpyMs} ms (${RS.numpy}) | ${P.numpyMs} ms (${RP.numpy}) |`);
 for (const w of Object.keys(WORKLOADS)) console.log(`| ${w} | ${S.speed[w]} ms (${RS.speed[w]}) | ${P.speed[w]} ms (${RP.speed[w]}) |`);
+// memory: renderer RSS (MB), medians over the cold starts; Pyodide's WebAssembly memory in brackets
+console.log(`\n| the page's renderer process, private memory (MB) | Sagebrush | Pyodide (its WebAssembly memory) |\n|---|---|---|`);
+console.log(`| (the browser's renderers on about:blank, for scale) | ${mb(S.mem.blank)} | ${mb(P.mem.blank)} |`);
+console.log(`| after print(1 + 1) | ${mb(S.mem.started)} | ${mb(P.mem.started)} (${mb(P.mem.wasmStarted)}) |`);
+console.log(`| after import numpy | ${mb(S.mem.numpy)} | ${mb(P.mem.numpy)} (${mb(P.mem.wasmNumpy)}) |`);
+for (const w of Object.keys(WORKLOADS)) console.log(`| ${w}: peak / after GC | ${mb(S.mem.rows[w].peak)} / ${mb(S.mem.rows[w].afterGc)} | ${mb(P.mem.rows[w].peak)} / ${mb(P.mem.rows[w].afterGc)} (${mb(P.mem.rows[w].wasm)}) |`);
 // both must have printed the same thing (else the comparison is void)
 const bad = check(results, Object.keys(WORKLOADS), REPS);
 if (bad.length) console.log("DIFFERENT OUTPUTS:\n  " + bad.join("\n  "));
