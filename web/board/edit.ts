@@ -974,16 +974,27 @@ export class Editor {
     return this.commit((d) => { const p = this.pg(d); p.nodes ??= []; this.freeze(d, null, p.nodes); p.nodes.push({ id, code: "", ...at }); }).then(() => this.open(id, true));
   }
 
-  // A press on the add-another control: the new item when it is released
-  // there (a press that moves off it adds nothing).
+  // A press on the add-another control: the new item when that pointer is
+  // released there (one released off it, or cancelled, adds nothing; another
+  // pointer's release is not its: daybreak2's INPUT-AS-1).
   private addSamePress(e: PointerEvent): boolean {
     const id = this.connecting.value ? null : this.board.addSameAt(e.clientX, e.clientY, e.pointerType === "touch");
     if (!id) return false;
     e.preventDefault();
-    const touch = e.pointerType === "touch";
-    addEventListener("pointerup", (u) => { if (this.board.addSameAt(u.clientX, u.clientY, touch) === id) void this.addSame(id); }, { once: true });
+    const touch = e.pointerType === "touch", pid = e.pointerId;
+    const done = () => { removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); };
+    const up = (u: PointerEvent) => {
+      if (u.pointerId !== pid) return;
+      done();
+      if (this.board.addSameAt(u.clientX, u.clientY, touch) === id) void this.addSame(id);
+    };
+    const cancel = (c: PointerEvent) => { if (c.pointerId === pid) done(); };
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", cancel);
     return true;
   }
+  // (an addition under way: no other starts until it is done, daybreak2's INPUT-AS-2)
+  private adding = false;
 
   /**
    * Another item of the kind of item `id`, below it (William's item 7): a
@@ -996,7 +1007,11 @@ export class Editor {
    * note or code item is being written.  One undo step.
    */
   async addSame(id: string) {
-    if (!this.on) return;
+    if (!this.on || this.adding) return;
+    this.adding = true;
+    try { await this.addSameNow(id); } finally { this.adding = false; }
+  }
+  private async addSameNow(id: string) {
     // (the item being written: what is written in it kept first, as it is then laid out)
     this.close();
     await this.inplace?.end();
@@ -1249,7 +1264,8 @@ export class Editor {
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
     else if ((e.key === "Delete" || e.key === "Backspace") && this.selected.length) this.deleteSelected();
     // (another of the selected item's kind below it: Alt+Enter, as the notebook's "run, insert a cell below"; B, as its "insert a cell below")
-    else if (this.selected.length === 1 && ((e.key === "Enter" && e.altKey && !mod && !e.shiftKey) || (e.key.toLowerCase() === "b" && !mod && !e.altKey && !e.shiftKey))) void this.addSame(this.selected[0]);
+    // (a key held down adds one: its repeats are not more, INPUT-AS-2)
+    else if (this.selected.length === 1 && ((e.key === "Enter" && e.altKey && !mod && !e.shiftKey) || (e.key.toLowerCase() === "b" && !mod && !e.altKey && !e.shiftKey))) { if (!e.repeat) void this.addSame(this.selected[0]); }
     else if (e.key === "Enter" && this.selected.length === 1) this.open(this.selected[0]);
     else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
