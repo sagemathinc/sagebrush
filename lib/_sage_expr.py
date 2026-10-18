@@ -3611,7 +3611,7 @@ def gen_legendre_P(n, m, x):
         -15*(-x^2 + 1)^(3/2)
         sage: gen_legendre_P(4, 2, 0.3)
         -2.52525000000000
-        sage: gen_legendre_P(0, -101, -0.9999999999999999)  # beyond the double range  # sagebrush only
+        sage: gen_legendre_P(0, -101, RR(-0.9999999999999999))  # beyond the double range  # sagebrush only
         Traceback (most recent call last):
         ...
         NotImplementedError: gen_legendre_P(0, -101, -0.9999999999999999) is outside the double range
