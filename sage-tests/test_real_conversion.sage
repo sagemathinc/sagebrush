@@ -81,3 +81,14 @@ class Raiser(int):
 a = RealNumber('0.5')
 for c in [Liar, Raiser]:
     print(c.__name__, a * c(int(2)), c(int(2)) * a, a + c(int(2)), c(int(2)) + a, a * c(int(1)), a + c(int(0)))
+
+# a product or quotient with an int subclass's zero: its stored value, not
+# its __eq__ (which would raise here)
+class Zero(int):
+    def __eq__(self, other):
+        raise RuntimeError("eq hook")
+    def __ne__(self, other):
+        raise RuntimeError("ne hook")
+    __hash__ = int.__hash__
+b = RealNumber('0.5')
+print(b * Zero(int(0)), Zero(int(0)) * b, Zero(int(0)) / b, RR(1e-200) * Zero(int(0)), Zero(int(0)) * RR(-1e-300), RR(2)^Zero(int(0)))
