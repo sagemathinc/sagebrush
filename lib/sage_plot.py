@@ -269,6 +269,13 @@ class Graphics:
         """
         dpi = options.pop("dpi", self._options.get("dpi"))
         transparent = options.pop("transparent", self._options.get("transparent", False))
+        if str(filename).lower().endswith(".png"):
+            # (the size and dpi checked before the picture is drawn at them)
+            import _png
+            fs = options.get("figsize", self._options.get("figsize", (6.4, 4.8)))
+            if isinstance(fs, (int, float)):
+                fs = (fs, fs * 0.75)
+            _png.check_size(fs[0], fs[1], 100 if dpi is None else dpi)
         save_figure(self._svg(**options), filename, dpi, transparent)
 
     def plot(self):
