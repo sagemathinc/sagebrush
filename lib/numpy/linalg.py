@@ -180,16 +180,19 @@ class QRResult(_Result):
     _fields = ("Q", "R")
 
 
-def _eig(a):
+def _eig(a, balance=True):
     """eig with real results where they are real (Sagebrush's own callers:
-    MATLAB's eig, Sage's matrices, np.roots)"""
+    MATLAB's eig, Sage's matrices, np.roots); balanced first, as LAPACK's
+    dgeev (so NumPy's eig) is, unless balance is False (MATLAB's
+    eig(A, "nobalance"))"""
     a = _float(a)
     _square(a)
-    return _stacked(_L.eig, a)
+    nobalance = not balance
+    return _stacked(lambda m: _L.eig(m, nobalance), a)
 
 
-def _eigvals(a):
-    return _eig(a)[0]
+def _eigvals(a, balance=True):
+    return _eig(a, balance)[0]
 
 
 def eig(a):
