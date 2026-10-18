@@ -28,3 +28,29 @@ three-run comparison reports observed coverage, not statistical certainty. The
 implementing agent grades manually, so the report must disclose that grading
 is neither blind nor independent. Follow-up comments, if any, get separately
 labelled runs rather than replacing primary answers.
+
+The fixed behavior corpus has 304 cases. It records values, exception payloads,
+iterator and callback order, admission order, exact large enumerate counters,
+filter predicates, and reversed sequence/error/mutation paths. It compares all
+recorded fields except elapsed time, including decoded stdout/stderr and source.
+
+```sh
+python3 bench/readability/builtin-iterators/corpus.py --repo . \
+  --out /home/user/astra3-iterators-before.json
+python3 bench/readability/builtin-iterators/corpus.py --repo . \
+  --out /home/user/astra3-iterators-after.json \
+  --baseline /home/user/astra3-iterators-before.json
+```
+
+The first generator draft emitted an invalid zero-argument `zip` expression.
+This harness typo was corrected before recording the baseline below; the
+superseded draft output is excluded from the experiment. All 304 corrected
+programs parse, and all completed without timeouts on the VM.
+
+Baseline production source: `0f9d473635875c280cd5018bed179d0a555c2114`.
+Baseline corpus build: `b1edde78a91d04b4fcfbfe23eda87c841d08eeae` (only the
+benchmark files differ). The 30 cold baseline runs completed before production
+edits. Their frozen-rubric coverage is 72/90, with 16/30 complete answers. All
+three reverse-index timing answers incorrectly put the decrement after the
+getter call. Source files remained unchanged when the branch rebased onto
+`23526b2c`, which merges the preceding Magma maps slice.
