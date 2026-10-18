@@ -189,3 +189,23 @@ fn designated_invalid_requests_are_errors() {
         assert!(r.starts_with("{\"ok\""), "{} -> {}", line, r);
     }
 }
+
+/// A size argument given as null is an absent one: its default, or without
+/// one "missing integer argument" (null once fell through to "must be a
+/// nonnegative integer", the arm for it unreachable).
+#[test]
+fn null_size_arguments_are_absent() {
+    let err = |req: Value| -> String {
+        let r: Value = serde_json::from_str(&sagebrush_web::call(&req.to_string())).unwrap();
+        r["error"].as_str().unwrap_or_else(|| panic!("{} -> {}", req, r)).to_string()
+    };
+    for f in ["perm_group_named", "transitive_group"] {
+        assert_eq!(err(json!({"fn": f, "n": null, "name": "symmetric", "k": 1})), "missing integer argument 'n'", "{}", f);
+        assert_eq!(err(json!({"fn": f, "name": "symmetric", "k": 1})), "missing integer argument 'n'", "{}", f);
+        assert_eq!(err(json!({"fn": f, "n": "4", "name": "symmetric", "k": 1})), "'n' must be a nonnegative integer", "{}", f);
+    }
+    // with a default, null is the default
+    let a = sagebrush_web::call(&json!({"fn": "complex_roots", "f": [2, 0, 1], "digits": null}).to_string());
+    let b = sagebrush_web::call(&json!({"fn": "complex_roots", "f": [2, 0, 1]}).to_string());
+    assert!(a.starts_with("{\"ok\"") && a == b, "{} vs {}", a, b);
+}
