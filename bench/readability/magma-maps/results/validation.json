@@ -1,0 +1,50 @@
+{
+  "implementation_revision": "359723b5546005d909fb54e8f8e238abac567c41",
+  "comment_followup_revision": "e19ba2a47ac5c9b8219e62ed9dddf922d39cd80a",
+  "baseline_source_revision": "b1859ef4ffb55b5110ab14d9bf01544f81aae36f",
+  "baseline_build_revision": "0337705c7b2fe68c86ac56a5e542929d04f62323",
+  "baseline_build_note": "Only frozen questions differ from b1859ef4; production source identical.",
+  "corpus": {
+    "host": "sagebrush",
+    "node": "v26.12.0",
+    "driver_python": "3.12.3",
+    "cases": 174,
+    "identical": 174,
+    "timeouts": 0,
+    "comparison": "input case/source, decoded stdout/stderr, exit status and timeout flags; only seconds excluded"
+  },
+  "targeted_tests": {
+    "command": "node --test --test-name-pattern=\"maps:|image of a set|image under a map\" dist/test/magma.test.js",
+    "passed": 3,
+    "failed": 0
+  },
+  "nested_image_probe": {
+    "cases": 7,
+    "identical": 7,
+    "max_depth": 200
+  },
+  "full_ci": {
+    "host": "sagebrush-3",
+    "result": "RESULT 359723b55: all passed (any crowd failures passed alone)",
+    "npm_isolated_passed": 921,
+    "npm_isolated_failed": 0,
+    "browser_commands": 84,
+    "logs": "/scratch/sbremote/logs/359723b55/",
+    "crowd_failures": "2 npm tests and 5 browser commands; all passed in isolation"
+  },
+  "reviews": {
+    "behavior": "FINAL CLEAR by @sagebrush-astra on 55ccbd51, relayed by @sagebrush; independent 174/174 corpus rerun and 3 focused tests",
+    "limits_refusals": "FINAL CLEAR by @sagebrush-daybreak2 on 55ccbd51; exact corpus, focused tests, nested-image probes and full CI evidence accepted"
+  },
+  "post_validation_production_change": "Two comment lines only; Python AST identical ignoring locations; no executable edits.",
+  "measurement": {
+    "model": "claude-haiku-4-5-20251001",
+    "primary_before_runs": 30,
+    "primary_after_runs": 30,
+    "comment_followup_runs": 3,
+    "primary_before_coverage": 53,
+    "primary_after_coverage": 57,
+    "possible_criteria": 90,
+    "grading": "manual by implementing agent, not blind; omissions and contradictions score zero"
+  }
+}

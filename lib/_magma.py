@@ -1949,33 +1949,67 @@ def Format(r):
 
 
 # ------------------------------------------------------------------ maps
+# Map vocabulary (stored attributes retain their existing names):
+# dom/cod: domain/codomain; rule/inv: forward/inverse callables.
+# graph: ordered (source, target) pairs, with at most one target per source.
+# parts=(first, second): composition applies first, then second.
+# inverse_of: a view delegating to the original map's preimage operation.
+# universe: the structure holding a set's elements, including an empty set.
+# partial: a graph need not cover its domain; application still needs a pair.
 
 def _struct_name(S):
     """A map's domain or codomain as Magma prints it in the map: "RngInt: x"
     when a global variable x holds it, else the structure itself."""
-    n = _global_name(S)
-    return "%s: %s" % (_type_of(S), n) if n is not None else _inline(S)
+    global_name = _global_name(S)
+    return "%s: %s" % (_type_of(S), global_name) if global_name is not None else _inline(S)
 
 
 def _image_universe(cod, empty):
-    """The universe of the image of a set under a map to cod, as Magma's
-    (checked against Magma 2.18): a structure Sagebrush knows as a universe
-    (the integers, rationals, a finite field, Integers(m), a polynomial
-    ring) itself; a set of such elements, for a nonempty image, the set's
-    universe (map<Integers() -> {Rationals() | 1, 2, 3} | ...> gives the
-    rationals', into {1, 2, 3} the integers'), but for an empty one the set
-    itself, which Sagebrush has no universe for; else None (refused)."""
-    known = lambda u: _is_struct(u) or isinstance(u, (_MFinField, _MResRing, _MFFPolyRing))
-    if known(cod):
+    """Choose the universe for f(S), or None if it cannot be represented.
+
+    A supported structural codomain is itself the universe, even for an
+    empty image. A set codomain supplies its declared universe for a
+    nonempty image; without one, only integer/rational inference is used.
+    An empty image into a set would have that set itself as its universe
+    in Magma. Sagebrush cannot represent this and refuses it. This does
+    not prevent empty images into structural codomains.
+    """
+    supported = lambda universe: _is_struct(universe) or isinstance(universe, (_MFinField, _MResRing, _MFFPolyRing))
+    if supported(cod):
         return cod
     if isinstance(cod, MSet) and not empty:
+        # A declared universe is authoritative: refuse unsupported ones
+        # here. Inference below runs only when no universe was declared.
         if cod.universe is not None:
-            return cod.universe if known(cod.universe) else None
-        w = getattr(cod, "_inf", None)
-        w = _infer_from(cod.items) if w is None else w
-        if w is _ZZ or w is _QQ:
-            return w
+            return cod.universe if supported(cod.universe) else None
+        inferred = getattr(cod, "_inf", None)
+        inferred = _infer_from(cod.items) if inferred is None else inferred
+        if inferred is _ZZ or inferred is _QQ:
+            return inferred
     return None
+
+
+def _map_set_image(mapping, source_set):
+    """Apply first, then choose and enforce the codomain's image universe.
+
+    Keep the stages in this order: every recursive application, in the
+    set's ordered traversal, precedes universe selection and conversion.
+    The payloads must match the universe: an integer image into rationals
+    becomes a rational element, not an integer with a rational label.
+    """
+    images = [mapping(element) for element in source_set.ordered()]
+    universe = _image_universe(mapping.cod, not images)
+    if universe is None:
+        raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
+    converted_images = []
+    for image in images:
+        converted = _coerce_struct(image, universe)
+        if converted is None or converted is _NOCOERCE:
+            raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
+        converted_images.append(converted)
+    image_set = _set(converted_images, derived=True)
+    image_set.universe = universe
+    return image_set
 
 
 class MMap:
@@ -1993,8 +2027,8 @@ class MMap:
     def __repr__(self):
         head = "Mapping from: %s to %s" % (_struct_name(self.dom), _struct_name(self.cod))
         if self.parts is not None:
-            f, g = self.parts
-            return head + "\n" + _wrap("Composition of %r and" % f, 0, 0) + "\n" + repr(g)
+            first, second = self.parts
+            return head + "\n" + _wrap("Composition of %r and" % first, 0, 0) + "\n" + repr(second)
         if self.graph is not None:
             return head + "".join("\n    " + _inline(MTuple([x, y])) for x, y in self.graph)
         if self.rule is not None:
@@ -2002,44 +2036,27 @@ class MMap:
         return head
 
     def __call__(self, x):
+        # A set that is itself in dom is one scalar argument. Otherwise
+        # lift the map over its elements, including for an empty set.
         if isinstance(x, MSet) and not _in(x, self.dom):
-            # the image of a set of elements: over the codomain, as Magma's,
-            # empty or not (f({Integers() | }) for f into the rationals is
-            # the rationals', never the integers' its elements would infer,
-            # astra2 on e0db098b); a universe Sagebrush can't give it is
-            # refused, never left to be inferred (CORR-3FA-1)
-            items = [self(y) for y in x.ordered()]
-            u = _image_universe(self.cod, not items)
-            if u is None:
-                raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
-            # (its elements as the universe's: an integer image into the
-            # rationals is a rational, Type FldRatElt, never an integer
-            # labelled with the rationals, CORR-CBA-1; one Sagebrush can't
-            # coerce is refused)
-            ys = []
-            for y in items:
-                z = _coerce_struct(y, u)
-                if z is None or z is _NOCOERCE:
-                    raise MagmaError("the image of a set under a map to this codomain is not supported yet", "map application")
-                ys.append(z)
-            t = _set(ys, derived=True)
-            t.universe = u
-            return t
+            return _map_set_image(self, x)
         if self.parts is not None:
             return self.parts[1](self.parts[0](x))
         if self.inverse_of is not None:
             return self.inverse_of._preimage(x, "map application")
         if self.graph is not None:
-            for a, b in self.graph:
-                if _eq(a, x):
-                    return b
+            for source, target in self.graph:
+                if _eq(source, x):
+                    return target
             raise MagmaError("Application of map failed", "map application")
+        # Rule application: domain admission, rule, codomain admission,
+        # then coercion. Neither failed admission runs the next stage.
         if not _in(x, self.dom):
             raise MagmaError("Element is not in the domain of the map", "map application")
-        y = self.rule(x)
-        if not _in(y, self.cod):
+        image = self.rule(x)
+        if not _in(image, self.cod):
             raise MagmaError("Element is not in the codomain of the map", "map application")
-        return _coerce(self.cod, y) if hasattr(self.cod, "_magma_coerce") else y
+        return _coerce(self.cod, image) if hasattr(self.cod, "_magma_coerce") else image
 
     def _preimage(self, y, where):
         """The preimage of y, as Magma computes it: through the inverses of
@@ -2047,8 +2064,8 @@ class MMap:
         rule, checking that y is in the codomain and the result in the
         domain (Magma's message is the same for both), and coercing it."""
         if self.parts is not None:
-            f, g = self.parts
-            return f._preimage(g._preimage(y, where), where)
+            first, second = self.parts
+            return first._preimage(second._preimage(y, where), where)
         if self.inverse_of is not None:
             return self.inverse_of(y)
         if self.graph is not None:
@@ -2057,12 +2074,13 @@ class MMap:
             raise MagmaError("There is no rule for calculating the preimage", where)
         if not _in(y, self.cod):
             raise MagmaError("Element is not in the codomain of the map", where)
-        x = self.inv(y)
-        if not _in(x, self.dom):
+        preimage = self.inv(y)
+        if not _in(preimage, self.dom):
             raise MagmaError("Element is not in the codomain of the map", where)
-        return _coerce(self.dom, x) if hasattr(self.dom, "_magma_coerce") else x
+        return _coerce(self.dom, preimage) if hasattr(self.dom, "_magma_coerce") else preimage
 
     def __mul__(self, g):
+        """Store f * g as g(f(x)); constructing it does not run either rule."""
         if not isinstance(g, MMap):
             return NotImplemented
         if not (g.dom is self.cod or _eq(g.dom, self.cod)):
@@ -2070,14 +2088,54 @@ class MMap:
         return MMap(self.dom, g.cod, parts=(self, g))
 
     def _inverse(self, where):
+        """Build an inverse view, without requiring an inverse rule yet.
+
+        A missing rule fails on application. A graph, even a bijective
+        one, fails here; compositions recursively build both inverses.
+        Inverting a view returns the original map, with no extra layer.
+        """
         if self.parts is not None:
-            f, g = self.parts
-            return MMap(self.cod, self.dom, parts=(g._inverse(where), f._inverse(where)))
+            first, second = self.parts
+            return MMap(self.cod, self.dom, parts=(second._inverse(where), first._inverse(where)))
         if self.inverse_of is not None:
             return self.inverse_of
         if self.graph is not None:
             raise MagmaError("Map has no inverse", where)
         return MMap(self.cod, self.dom, inverse_of=self)
+
+
+def _normalize_map_graph(graph, pairs, where):
+    """Normalize the two syntax forms; explicit arrow pairs take precedence."""
+    if pairs is not None:
+        graph = [tuple(pair) for pair in pairs]
+    elif graph is not None:
+        items = graph.ordered() if isinstance(graph, MSet) else list(graph)
+        if not all(isinstance(pair, MTuple) and len(pair) == 2 for pair in items):
+            raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+        graph = [tuple(pair) for pair in items]
+    return graph
+
+
+def _validate_map_graph(graph, kind, domain, codomain, where):
+    """Check duplicates, membership, then coverage, in that error order.
+
+    Even identical repeated pairs are duplicates. Partial graphs skip
+    only coverage, retaining uniqueness and domain/codomain admission.
+    Use the existing equality and traversal order for each check.
+    """
+    for index, (source, target) in enumerate(graph):
+        if any(_eq(source, earlier) for earlier, _ in graph[:index]):
+            raise MagmaError("More than one image is given for a single element of the domain", where)
+    for source, target in graph:
+        if not _in(source, domain) or not _in(target, codomain):
+            raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
+    if kind != "pmap":
+        if domain is _ZZ or domain is _QQ:
+            raise MagmaError("Domain of map has no cardinality algorithm", where)
+        if not isinstance(domain, (MSet, MSeq, MRange)):
+            raise MagmaError("a map given by a graph on this domain is not supported yet", where)
+        if not all(any(_eq(source, element) for source, _ in graph) for element in _iter(domain)):
+            raise MagmaError("Not enough images given to constructor", where)
 
 
 def _map(kind, dom, cod, rule=None, inv=None, graph=None, pairs=None, pos=None):
@@ -2087,27 +2145,9 @@ def _map(kind, dom, cod, rule=None, inv=None, graph=None, pairs=None, pos=None):
     errors, checked against Magma)."""
     where = "%s< ... >" % kind
     try:
-        if pairs is not None:
-            graph = [tuple(p) for p in pairs]
-        elif graph is not None:
-            items = graph.ordered() if isinstance(graph, MSet) else list(graph)
-            if not all(isinstance(t, MTuple) and len(t) == 2 for t in items):
-                raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
-            graph = [tuple(t) for t in items]
+        graph = _normalize_map_graph(graph, pairs, where)
         if graph is not None:
-            for k, (a, b) in enumerate(graph):
-                if any(_eq(a, a2) for a2, _ in graph[:k]):
-                    raise MagmaError("More than one image is given for a single element of the domain", where)
-            for a, b in graph:
-                if not _in(a, dom) or not _in(b, cod):
-                    raise MagmaError("argument 1 does not yield a pair or a set or sequence of pairs in the map's graph", where)
-            if kind != "pmap":
-                if dom is _ZZ or dom is _QQ:
-                    raise MagmaError("Domain of map has no cardinality algorithm", where)
-                if not isinstance(dom, (MSet, MSeq, MRange)):
-                    raise MagmaError("a map given by a graph on this domain is not supported yet", where)
-                if not all(any(_eq(a, x) for a, _ in graph) for x in _iter(dom)):
-                    raise MagmaError("Not enough images given to constructor", where)
+            _validate_map_graph(graph, kind, dom, cod, where)
         return MMap(dom, cod, rule, inv, graph, kind == "pmap")
     except MagmaError as e:
         e.pos = e.pos or pos
@@ -2143,7 +2183,11 @@ def Inverse(f):
 
 
 def Image(f):
-    """The image of a map given by its graph."""
+    """The stored graph targets as a derived set; other map forms refuse.
+
+    Unlike f(S), this does not apply a rule or select/coerce through the
+    codomain's universe. The derived set infers from the stored targets.
+    """
     if isinstance(f, MMap) and f.graph is not None:
         return _set([b for _, b in f.graph], derived=True)
     raise MagmaError("Image of this map is not supported yet", "'Image'")

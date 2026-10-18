@@ -1,0 +1,1749 @@
+{
+  "revision": "359723b5546005d909fb54e8f8e238abac567c41",
+  "source_sha256": "2b8c91e712c6680a4d869487251ed62cec22f042e05d4cedf3313189066c4cef",
+  "records": [
+    {
+      "id": "existing-session-fixture",
+      "mode": "magma",
+      "source": "// Maps: map< A -> B | ... >, pmap< ... >, hom< ... > with a rule.\n// Read on stdin (a session), so that the errors don't stop it.\nsq := map< Integers() -> Integers() | n :-> n^2 - n >;\nsq;\nsq(6), 7 @ sq, Type(sq);\nDomain(sq);\nCodomain(sq);\nhalf := map< Integers() -> Rationals() | n :-> n / 4 >;\nhalf(10);\nboth := sq * half;\nboth;\nboth(5);\n[ sq(i) : i in [0..5] ];\nsq({ 1, 2, 3 });\n// with an inverse rule\nshift := map< Integers() -> Integers() | a :-> a + 10, b :-> b - 10 >;\nshift;\nshift(1), 21 @@ shift, Inverse(shift)(30);\nInverse(shift);\nInverse(Inverse(shift));\nInverse(shift * shift);\n(shift * shift)(0);\nhom< Integers() -> Integers() | t :-> 7*t >(3);\n// given by a graph: pairs or arrows\nDom := { 1, 2, 3 };\nCod := { 5, 6 };\ng := map< Dom -> Cod | [ <1, 5>, <3, 6>, <2, 5> ] >;\ng;\ng(3), 2 @ g;\nImage(g);\na := map< Dom -> Cod | [ 2 -> 6, 1 -> 6, 3 -> 5 ] >;\na;\na(1);\np := pmap< Dom -> Cod | [ <2, 6> ] >;\np;\np(2);\n// structures named by the variables that hold them\nZ := Integers();\nmap< Z -> Z | z :-> -z >;\nmap< { 4, 5 } -> Z | [ <4, 0>, <5, 1> ] >;\n// graphs that don't fit\nmap< Dom -> Cod | [ <1, 5>, <2, 6> ] >;\nmap< Dom -> Cod | [ <1, 5>, <2, 9>, <3, 5> ] >;\n// graphs: at most one image per element; a map's covers a finite domain\nmap< Dom -> Cod | [ <1, 5>, <1, 6>, <2, 5>, <3, 6> ] >;\npmap< Dom -> Cod | [ <2, 5>, <2, 6> ] >;\nmap< [1..4] -> Z | [ <1, 0>, <2, 0>, <3, 0> ] >;\nmap< [1..3] -> Z | [ <1, 0>, <2, 0>, <3, 1> ] >(3);\nmap< Z -> Z | [ <1, 2> ] >;\n// a rule takes the values its variables have when the map is made\nc := 2;\nplus := map< Z -> Z | n :-> n + c, m :-> m - c >;\nL := [1, 2];\nlen := map< Z -> Z | n :-> n + #L >;\nc := 100; L := [1, 2, 3, 4, 5];\nplus(1), 9 @@ plus, len(0);\nlst := map< Z -> Z | n :-> &+[ j : j in [1..n] | IsOdd(j) ] + c >;\nlst(5);\nex := map< Z -> Z | n :-> #[ e : e in L | e gt n ] >;\nex(2);\n// preimages: in the codomain, back in the domain, through compositions\ndbl := map< Z -> Z | n :-> 2*n, m :-> m div 2 >;\n10 @@ dbl;\n(1/2) @@ dbl;\nhlf := map< Z -> Z | n :-> n, m :-> m / 2 >;\n4 @@ hlf;\n3 @@ hlf;\ninc := map< Z -> Z | n :-> n + 1, m :-> m - 1 >;\n7 @@ (inc * inc), Inverse(inc * inc)(7);\n3 @@ g;\n// free variables are found by scope: a comprehension's or a func's own\n// variables shadow, the outer ones are still captured\njj := 10;\nsh := map< Z -> Z | n :-> jj + &+[ jj : jj in [1..n] ] >;\njj := 20;\nsh(2);\nfu := map< Z -> Z | n :-> (func<jj | jj + 1>)(n) >;\nfu(3);\nkk := 5;\nsc := map< Z -> Z | n :-> #[ kk : kk in [1..n] | kk gt 1 ] + kk, m :-> m - kk >;\nkk := 50;\nsc(4), 9 @@ sc;\nmm := 3;\nns := map< Z -> Z | n :-> map< Z -> Z | t :-> t + mm >(n) * mm >;\nmm := 30;\nns(2);\nfn := func< q | q * mm >;\nvf := map< Z -> Z | n :-> fn(n) >;\nfn := func< q | q >;\nvf(2);\n// assigned: the snapshot says whether a variable was assigned when the map was made\nas1 := map< Z -> Z | n :-> assigned va select 1 else 0 >;\nva := 9;\nas1(1);\nas2 := map< Z -> Z | n :-> assigned vb select vb else n >;\nas2(5);\nvb := 100;\nas2(5);\nRF := recformat< a, b >;\nvr := rec< RF | a := 1 >;\nas3 := map< Z -> Z | n :-> assigned vr`b select 1 else 2 >;\nvr := rec< RF | a := 1, b := 2 >;\nas3(0);\nas4 := map< Z -> Z | n :-> n, m :-> assigned vd select m + vd else m >;\nvd := 4;\n3 @@ as4;\n// a rule inside a rule: an outer snapshot that was unassigned stays so\nnz1 := map< Z -> Z | x :-> map< Z -> Z | y :-> assigned vq select 1 else 0 >(x) >;\nnz2 := map< Z -> Z | x :-> map< Z -> Z | y :-> assigned vq select vq + y else y >(x) >;\nnz3 := map< Z -> Z | x :-> map< Z -> Z | y :-> map< Z -> Z | w :-> assigned vq select 7 else w >(y) >(x) >;\nvq := 9;\nnz1(0), nz2(3), nz3(4);\nvs := 2;\nnz4 := map< Z -> Z | x :-> map< Z -> Z | y :-> vs * y + x >(x + 1) >;\nvs := 50;\nnz4(3);\n// assigned of a free name: the rule's own local, so false even with a value\nva := 3;\nfa := map< Z -> Z | y :-> assigned va select va + y else -y >;\nfa(2);\nfb := map< Z -> Z | b :-> map< Z -> Z | y :-> assigned b select 1 else 2 >(b) >;\nfb(1);\nfp := map< Z -> Z | y :-> (assigned y select 10 else 0) + #[ c : c in [1..y] | assigned c ] >;\nfp(4);\n// read first, then assigned: rejected before it runs\nfc := map< Z -> Z | y :-> va + (assigned va select 1 else 0) >;\nfc(1);\n// the inverse rule is a scope of its own\nfd := map< Z -> Z | y :-> va + y, x :-> assigned va select 1 else 0 >;\n3 @@ fd;\nfd(1);\nvk := 1;\nfe := map< Z -> Z | y :-> assigned vk select 1 else 0 >;\ndelete vk;\nfe(0);\n// assigned r``e: the record is read first, so an `assigned r` inside the\n// computed field name comes after the import and is rejected\nGF2 := recformat< p, q >;\nrg := rec< GF2 | p := 5 >;\nfg := map< Z -> Z | y :-> assigned rg``(assigned rg select \"p\" else \"q\") >;\nfh := map< Z -> Z | y :-> assigned rg``(y gt 0 select \"p\" else \"q\") select 1 else 2 >;\nfh(1), fh(-1);\n\n",
+      "stdout": "Mapping from: Integer Ring to Integer Ring given by a rule [no inverse]\n30 42 Map\nInteger Ring\nInteger Ring\n5/2\nMapping from: Integer Ring to Rational Field\nComposition of Mapping from: Integer Ring to Integer Ring given by a rule [no \ninverse] and\nMapping from: Integer Ring to Rational Field given by a rule [no inverse]\n5\n[ 0, 0, 2, 6, 12, 20 ]\n{ 0, 2, 6 }\nMapping from: Integer Ring to Integer Ring given by a rule\n11 11 20\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nComposition of Mapping from: Integer Ring to Integer Ring and\nMapping from: Integer Ring to Integer Ring\n20\n21\nMapping from: SetEnum: Dom to SetEnum: Cod\n    <1, 5>\n    <3, 6>\n    <2, 5>\n6 5\n{ 5, 6 }\nMapping from: SetEnum: Dom to SetEnum: Cod\n    <2, 6>\n    <1, 6>\n    <3, 5>\n6\nMapping from: SetEnum: Dom to SetEnum: Cod\n    <2, 6>\n6\nMapping from: RngInt: Z to RngInt: Z given by a rule [no inverse]\nMapping from: { 4, 5 } to RngInt: Z\n    <4, 0>\n    <5, 1>\n\n>> map< Dom -> Cod | [ <1, 5>, <2, 6> ] >;\n      ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> map< Dom -> Cod | [ <1, 5>, <2, 9>, <3, 5> ] >;\n      ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> map< Dom -> Cod | [ <1, 5>, <1, 6>, <2, 5>, <3, 6> ] >;\n      ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> pmap< Dom -> Cod | [ <2, 5>, <2, 6> ] >;\n       ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> map< [1..4] -> Z | [ <1, 0>, <2, 0>, <3, 0> ] >;\n      ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n1\n\n>> map< Z -> Z | [ <1, 2> ] >;\n      ^\nRuntime error in map< ... >: Domain of map has no cardinality algorithm\n\n3 7 2\n109\n3\n5\n\n>> (1/2) @@ dbl;\n         ^\nRuntime error in '@@': Element is not in the codomain of the map\n\n2\n\n>> 3 @@ hlf;\n     ^\nRuntime error in '@@': Element is not in the codomain of the map\n\n5 5\n\n>> 3 @@ g;\n     ^\nRuntime error in '@@': Map has no inverse\n\n13\n4\n8 4\n15\n60\n0\n5\n5\n2\n3\n0 3 4\n11\n-2\n2\n14\n\n>> fc := map< Z -> Z | y :-> va + (assigned va select 1 else 0) >;\n                                   ^\nUser error: Imported environment value 'va' cannot be used as a local\n\n>> fc(1);\n   ^\nUser error: Identifier 'fc' has not been declared or assigned\n0\n4\n0\n\n>> fg := map< Z -> Z | y :-> assigned rg``(assigned rg select \"p\" else \"q\") >;\n                                           ^\nUser error: Imported environment value 'rg' cannot be used as a local\n1 2\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 3.079
+    },
+    {
+      "id": "rule--5--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-5),y:->y-(-5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-8 2 2\n-24 4 4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.708
+    },
+    {
+      "id": "rule--5-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-5),y:->y-(-5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-5 -5 5\n-15 5 5\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.79
+    },
+    {
+      "id": "rule--5-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-5),y:->y-(-5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-1 -1 9\n-3 6 6\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.78
+    },
+    {
+      "id": "rule--4--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-4),y:->y-(-4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-7 1 1\n-21 3 3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.754
+    },
+    {
+      "id": "rule--4-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-4),y:->y-(-4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-4 -4 4\n-12 4 4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.737
+    },
+    {
+      "id": "rule--4-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-4),y:->y-(-4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "0 0 8\n0 5 5\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.822
+    },
+    {
+      "id": "rule--3--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-3),y:->y-(-3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-6 0 0\n-18 2 2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.781
+    },
+    {
+      "id": "rule--3-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-3),y:->y-(-3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-3 -3 3\n-9 3 3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.827
+    },
+    {
+      "id": "rule--3-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-3),y:->y-(-3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "1 1 7\n3 4 4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.746
+    },
+    {
+      "id": "rule--2--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-2),y:->y-(-2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-5 -1 -1\n-15 1 1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.74
+    },
+    {
+      "id": "rule--2-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-2),y:->y-(-2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-2 -2 2\n-6 2 2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.799
+    },
+    {
+      "id": "rule--2-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-2),y:->y-(-2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "2 2 6\n6 3 3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.84
+    },
+    {
+      "id": "rule--1--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-1),y:->y-(-1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-4 -2 -2\n-12 0 0\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.77
+    },
+    {
+      "id": "rule--1-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-1),y:->y-(-1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-1 -1 1\n-3 1 1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.821
+    },
+    {
+      "id": "rule--1-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(-1),y:->y-(-1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "3 3 5\n9 2 2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.827
+    },
+    {
+      "id": "rule-0--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(0),y:->y-(0)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-3 -3 -3\n-9 -1 -1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.891
+    },
+    {
+      "id": "rule-0-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(0),y:->y-(0)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "0 0 0\n0 0 0\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.785
+    },
+    {
+      "id": "rule-0-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(0),y:->y-(0)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "4 4 4\n12 1 1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.717
+    },
+    {
+      "id": "rule-1--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(1),y:->y-(1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-2 -4 -4\n-6 -2 -2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.814
+    },
+    {
+      "id": "rule-1-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(1),y:->y-(1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "1 1 -1\n3 -1 -1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.746
+    },
+    {
+      "id": "rule-1-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(1),y:->y-(1)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "5 5 3\n15 0 0\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.811
+    },
+    {
+      "id": "rule-2--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(2),y:->y-(2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "-1 -5 -5\n-3 -3 -3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.812
+    },
+    {
+      "id": "rule-2-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(2),y:->y-(2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "2 2 -2\n6 -2 -2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.829
+    },
+    {
+      "id": "rule-2-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(2),y:->y-(2)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "6 6 2\n18 -1 -1\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.675
+    },
+    {
+      "id": "rule-3--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(3),y:->y-(3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "0 -6 -6\n0 -4 -4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.802
+    },
+    {
+      "id": "rule-3-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(3),y:->y-(3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "3 3 -3\n9 -3 -3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.747
+    },
+    {
+      "id": "rule-3-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(3),y:->y-(3)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "7 7 1\n21 -2 -2\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.683
+    },
+    {
+      "id": "rule-4--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(4),y:->y-(4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "1 -7 -7\n3 -5 -5\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.756
+    },
+    {
+      "id": "rule-4-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(4),y:->y-(4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "4 4 -4\n12 -4 -4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.75
+    },
+    {
+      "id": "rule-4-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(4),y:->y-(4)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "8 8 0\n24 -3 -3\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.848
+    },
+    {
+      "id": "rule-5--3",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(5),y:->y-(5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(-3), -3 @ f, (-3) @@ f;\n(f*g)(-3), (-3) @@ (f*g), Inverse(f*g)(-3);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "2 -8 -8\n6 -6 -6\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.75
+    },
+    {
+      "id": "rule-5-0",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(5),y:->y-(5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(0), 0 @ f, (0) @@ f;\n(f*g)(0), (0) @@ (f*g), Inverse(f*g)(0);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "5 5 -5\n15 -5 -5\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.848
+    },
+    {
+      "id": "rule-5-4",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x+(5),y:->y-(5)>;\ng:=map<Integers()->Integers()|x:->3*x,y:->y div 3>;\nf(4), 4 @ f, (4) @@ f;\n(f*g)(4), (4) @@ (f*g), Inverse(f*g)(4);\nf, Inverse(f), Inverse(Inverse(f)), Domain(f*g), Codomain(f*g);\n\n",
+      "stdout": "9 9 -1\n27 -4 -4\nMapping from: Integer Ring to Integer Ring given by a rule\nMapping from: Integer Ring to Integer Ring\nMapping from: Integer Ring to Integer Ring given by a rule\nInteger Ring\nInteger Ring\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.803
+    },
+    {
+      "id": "graph-map-{1,2,3}-valid",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.71
+    },
+    {
+      "id": "graph-map-{1,2,3}-permuted",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.773
+    },
+    {
+      "id": "graph-map-{1,2,3}-missing",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<1,4>,<3,4>]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.735
+    },
+    {
+      "id": "graph-map-{1,2,3}-empty",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.682
+    },
+    {
+      "id": "graph-map-{1,2,3}-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.727
+    },
+    {
+      "id": "graph-map-{1,2,3}-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.834
+    },
+    {
+      "id": "graph-map-{1,2,3}-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.74
+    },
+    {
+      "id": "graph-map-{1,2,3}-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.721
+    },
+    {
+      "id": "graph-map-{1,2,3}-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<0,9>,<0,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.829
+    },
+    {
+      "id": "graph-map-{1,2,3}-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=map<{1,2,3}->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<{1,2,3}->{4,5}|[<1,4,5>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.701
+    },
+    {
+      "id": "graph-map-[1,2,3]-valid",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.731
+    },
+    {
+      "id": "graph-map-[1,2,3]-permuted",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.728
+    },
+    {
+      "id": "graph-map-[1,2,3]-missing",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<1,4>,<3,4>]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.775
+    },
+    {
+      "id": "graph-map-[1,2,3]-empty",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.786
+    },
+    {
+      "id": "graph-map-[1,2,3]-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.775
+    },
+    {
+      "id": "graph-map-[1,2,3]-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.771
+    },
+    {
+      "id": "graph-map-[1,2,3]-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.751
+    },
+    {
+      "id": "graph-map-[1,2,3]-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.705
+    },
+    {
+      "id": "graph-map-[1,2,3]-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<0,9>,<0,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.791
+    },
+    {
+      "id": "graph-map-[1,2,3]-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=map<[1,2,3]->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1,2,3]->{4,5}|[<1,4,5>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.843
+    },
+    {
+      "id": "graph-map-[1..3]-valid",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.781
+    },
+    {
+      "id": "graph-map-[1..3]-permuted",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.721
+    },
+    {
+      "id": "graph-map-[1..3]-missing",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<1,4>,<3,4>]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.799
+    },
+    {
+      "id": "graph-map-[1..3]-empty",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[]>;\n         ^\nRuntime error in map< ... >: Not enough images given to constructor\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.734
+    },
+    {
+      "id": "graph-map-[1..3]-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.758
+    },
+    {
+      "id": "graph-map-[1..3]-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.798
+    },
+    {
+      "id": "graph-map-[1..3]-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.772
+    },
+    {
+      "id": "graph-map-[1..3]-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.805
+    },
+    {
+      "id": "graph-map-[1..3]-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<0,9>,<0,4>]>;\n         ^\nRuntime error in map< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.722
+    },
+    {
+      "id": "graph-map-[1..3]-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=map<[1..3]->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=map<[1..3]->{4,5}|[<1,4,5>]>;\n         ^\nRuntime error in map< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.735
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-valid",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.789
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-permuted",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.775
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-missing",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <1, 4>\n    <3, 4>\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.794
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-empty",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{}\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.819
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.809
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.777
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.757
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.842
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<0,9>,<0,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.797
+    },
+    {
+      "id": "graph-pmap-{1,2,3}-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=pmap<{1,2,3}->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<{1,2,3}->{4,5}|[<1,4,5>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.837
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-valid",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.797
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-permuted",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.76
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-missing",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n    <1, 4>\n    <3, 4>\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.825
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-empty",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1, 2, 3 ] to { 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{}\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.797
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.849
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.828
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.841
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.796
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<0,9>,<0,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.827
+    },
+    {
+      "id": "graph-pmap-[1,2,3]-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1,2,3]->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1,2,3]->{4,5}|[<1,4,5>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.807
+    },
+    {
+      "id": "graph-pmap-[1..3]-valid",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n    <1, 4>\n    <2, 5>\n    <3, 4>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.707
+    },
+    {
+      "id": "graph-pmap-[1..3]-permuted",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<3,4>,<1,4>,<2,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n    <3, 4>\n    <1, 4>\n    <2, 5>\n4\n5\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.742
+    },
+    {
+      "id": "graph-pmap-[1..3]-missing",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,4>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n    <1, 4>\n    <3, 4>\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n4\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{ 4 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.821
+    },
+    {
+      "id": "graph-pmap-[1..3]-empty",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "Mapping from: [ 1 .. 3 ] to { 4, 5 }\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nRuntime error in map application: Application of map failed\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nRuntime error in map application: Application of map failed\n\n{}\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                      ^\nRuntime error in '@@': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.803
+    },
+    {
+      "id": "graph-pmap-[1..3]-duplicate-same",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<1,4>,<1,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.756
+    },
+    {
+      "id": "graph-pmap-[1..3]-duplicate-other",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<1,4>,<1,5>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.776
+    },
+    {
+      "id": "graph-pmap-[1..3]-bad-domain",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<0,4>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.762
+    },
+    {
+      "id": "graph-pmap-[1..3]-bad-codomain",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<1,9>,<2,5>,<3,4>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.805
+    },
+    {
+      "id": "graph-pmap-[1..3]-duplicate-and-bad",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<0,9>,<0,4>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<0,9>,<0,4>]>;\n          ^\nRuntime error in pmap< ... >: More than one image is given for a single element \nof the domain\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.713
+    },
+    {
+      "id": "graph-pmap-[1..3]-bad-shape",
+      "mode": "magma",
+      "source": "\nf:=pmap<[1..3]->{4,5}|[<1,4,5>]>;\nf; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n\n",
+      "stdout": "\n>> f:=pmap<[1..3]->{4,5}|[<1,4,5>]>;\n          ^\nRuntime error in pmap< ... >: argument 1 does not yield a pair or a set or \nsequence of pairs in the map's graph\n\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n   ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n      ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n            ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                  ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                        ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                    ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                ^\nUser error: Identifier 'f' has not been declared or assigned\n\n>> f; f(1); f(2); f(3); f(7); Image(f); Inverse(f); 4 @@ f;\n                                                         ^\nUser error: Identifier 'f' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.85
+    },
+    {
+      "id": "image-0-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nInteger Ring\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.731
+    },
+    {
+      "id": "image-0-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nInteger Ring\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.763
+    },
+    {
+      "id": "image-0-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nInteger Ring\n1\nRngIntElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.774
+    },
+    {
+      "id": "image-0-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nInteger Ring\n3\nRngIntElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.653
+    },
+    {
+      "id": "image-0-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers()|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 8 }\nInteger Ring\n2\nRngIntElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.857
+    },
+    {
+      "id": "image-1-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Rationals()|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nRational Field\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.774
+    },
+    {
+      "id": "image-1-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Rationals()|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nRational Field\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.741
+    },
+    {
+      "id": "image-1-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Rationals()|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nRational Field\n1\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.782
+    },
+    {
+      "id": "image-1-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Rationals()|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nRational Field\n3\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.81
+    },
+    {
+      "id": "image-1-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Rationals()|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 8 }\nRational Field\n2\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.694
+    },
+    {
+      "id": "image-2-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->GF(7)|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nFinite field of size 7\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.796
+    },
+    {
+      "id": "image-2-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->GF(7)|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nFinite field of size 7\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.687
+    },
+    {
+      "id": "image-2-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->GF(7)|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nFinite field of size 7\n1\nFldFinElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.729
+    },
+    {
+      "id": "image-2-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->GF(7)|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nFinite field of size 7\n3\nFldFinElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.797
+    },
+    {
+      "id": "image-2-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->GF(7)|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nFinite field of size 7\n1\nFldFinElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.839
+    },
+    {
+      "id": "image-3-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers(5)|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nResidue class ring of integers modulo 5\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.711
+    },
+    {
+      "id": "image-3-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers(5)|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nResidue class ring of integers modulo 5\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.848
+    },
+    {
+      "id": "image-3-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers(5)|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nResidue class ring of integers modulo 5\n1\nRngIntResElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.824
+    },
+    {
+      "id": "image-3-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers(5)|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nResidue class ring of integers modulo 5\n3\nRngIntResElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.802
+    },
+    {
+      "id": "image-3-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->Integers(5)|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 3 }\nResidue class ring of integers modulo 5\n2\nRngIntResElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.843
+    },
+    {
+      "id": "image-4-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Integers())|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring in $.1 over Integer Ring\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.707
+    },
+    {
+      "id": "image-4-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Integers())|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring in $.1 over Integer Ring\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.788
+    },
+    {
+      "id": "image-4-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Integers())|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1\n}\nUnivariate Polynomial Ring in $.1 over Integer Ring\n1\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.814
+    },
+    {
+      "id": "image-4-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Integers())|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1,\n    2,\n    3\n}\nUnivariate Polynomial Ring in $.1 over Integer Ring\n3\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.785
+    },
+    {
+      "id": "image-4-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Integers())|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1,\n    8\n}\nUnivariate Polynomial Ring in $.1 over Integer Ring\n2\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.835
+    },
+    {
+      "id": "image-5-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Rationals())|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring in $.1 over Rational Field\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.818
+    },
+    {
+      "id": "image-5-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Rationals())|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring in $.1 over Rational Field\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.768
+    },
+    {
+      "id": "image-5-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Rationals())|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1\n}\nUnivariate Polynomial Ring in $.1 over Rational Field\n1\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.827
+    },
+    {
+      "id": "image-5-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Rationals())|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1,\n    2,\n    3\n}\nUnivariate Polynomial Ring in $.1 over Rational Field\n3\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.697
+    },
+    {
+      "id": "image-5-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(Rationals())|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{\n    1,\n    8\n}\nUnivariate Polynomial Ring in $.1 over Rational Field\n2\nRngUPolElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.768
+    },
+    {
+      "id": "image-6-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(GF(7))|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring over GF(7)\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.73
+    },
+    {
+      "id": "image-6-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(GF(7))|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{}\nUnivariate Polynomial Ring over GF(7)\n0\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.759
+    },
+    {
+      "id": "image-6-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(GF(7))|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1}); S; Universe(S); #S;\n   ^\nRuntime error: a set of polynomials over a finite field (or of their rings) is \nnot supported yet\n\n\n>> S:=f({1}); S; Universe(S); #S;\n              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1}); S; Universe(S); #S;\n                          ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1}); S; Universe(S); #S;\n                               ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.76
+    },
+    {
+      "id": "image-6-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(GF(7))|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,2,3}); S; Universe(S); #S;\n   ^\nRuntime error: a set of polynomials over a finite field (or of their rings) is \nnot supported yet\n\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                  ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                                   ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.704
+    },
+    {
+      "id": "image-6-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->PolynomialRing(GF(7))|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,8}); S; Universe(S); #S;\n   ^\nRuntime error: a set of polynomials over a finite field (or of their rings) is \nnot supported yet\n\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                            ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                                 ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.719
+    },
+    {
+      "id": "image-7-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1,2,3}|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({}); S; Universe(S); #S;\n             ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.81
+    },
+    {
+      "id": "image-7-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1,2,3}|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({Integers()|}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                        ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                    ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.807
+    },
+    {
+      "id": "image-7-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1,2,3}|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nInteger Ring\n1\nRngIntElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.724
+    },
+    {
+      "id": "image-7-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1,2,3}|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nInteger Ring\n3\nRngIntElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.777
+    },
+    {
+      "id": "image-7-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1,2,3}|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,8}); S; Universe(S); #S;\n   ^\nRuntime error in map application: Element is not in the codomain of the map\n\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                            ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                                 ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.74
+    },
+    {
+      "id": "image-8-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{Rationals()|1,2,3}|x:->x>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({}); S; Universe(S); #S;\n             ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.836
+    },
+    {
+      "id": "image-8-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{Rationals()|1,2,3}|x:->x>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({Integers()|}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                        ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                    ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.757
+    },
+    {
+      "id": "image-8-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{Rationals()|1,2,3}|x:->x>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nRational Field\n1\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.812
+    },
+    {
+      "id": "image-8-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{Rationals()|1,2,3}|x:->x>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1, 2, 3 }\nRational Field\n3\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.777
+    },
+    {
+      "id": "image-8-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{Rationals()|1,2,3}|x:->x>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,8}); S; Universe(S); #S;\n   ^\nRuntime error in map application: Element is not in the codomain of the map\n\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                            ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                                 ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.771
+    },
+    {
+      "id": "image-9-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1/2,1}|x:->1>;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({}); S; Universe(S); #S;\n             ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.821
+    },
+    {
+      "id": "image-9-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1/2,1}|x:->1>;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({Integers()|}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                        ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                    ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.753
+    },
+    {
+      "id": "image-9-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1/2,1}|x:->1>;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nRational Field\n1\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.757
+    },
+    {
+      "id": "image-9-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1/2,1}|x:->1>;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nRational Field\n1\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.738
+    },
+    {
+      "id": "image-9-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{1/2,1}|x:->1>;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "{ 1 }\nRational Field\n1\nFldRatElt\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.821
+    },
+    {
+      "id": "image-10-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">;\nS:=f({}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({}); S; Universe(S); #S;\n             ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.751
+    },
+    {
+      "id": "image-10-typed-empty",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">;\nS:=f({Integers()|}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({Integers()|}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                        ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                    ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({Integers()|}); S; Universe(S); #S;\n                                         ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.774
+    },
+    {
+      "id": "image-10-single",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">;\nS:=f({1}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({1}); S; Universe(S); #S;\n              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1}); S; Universe(S); #S;\n                          ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1}); S; Universe(S); #S;\n                               ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.765
+    },
+    {
+      "id": "image-10-many",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">;\nS:=f({1,2,3}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,2,3}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                  ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                              ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,2,3}); S; Universe(S); #S;\n                                   ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.692
+    },
+    {
+      "id": "image-10-outside",
+      "mode": "magma",
+      "source": "\nf:=map<Integers()->{\"a\",\"b\"}|x:->\"a\">;\nS:=f({1,8}); S; Universe(S); #S;\nif #S gt 0 then Type(Setseq(S)[1]); end if;\n\n",
+      "stdout": "\n>> S:=f({1,8}); S; Universe(S); #S;\n   ^\nRuntime error in map application: the image of a set under a map to this \ncodomain is not supported yet\n\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                            ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> S:=f({1,8}); S; Universe(S); #S;\n                                 ^\nUser error: Identifier 'S' has not been declared or assigned\n\n>> if #S gt 0 then Type(Setseq(S)[1]); end if;\n       ^\nUser error: Identifier 'S' has not been declared or assigned\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.809
+    },
+    {
+      "id": "scalar-set",
+      "mode": "magma",
+      "source": "f:=map<{{1,2},{3}}->Integers()|s:->#s>; f({1,2}); f({3});\n",
+      "stdout": "2\n1\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.853
+    },
+    {
+      "id": "arrow-pairs",
+      "mode": "magma",
+      "source": "f:=map<{1,2,3}->{4,5}|3->4,2->5,1->4>; f; Image(f);\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <3, 4>\n    <2, 5>\n    <1, 4>\n{ 4, 5 }\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.809
+    },
+    {
+      "id": "set-graph",
+      "mode": "magma",
+      "source": "f:=map<{1,2,3}->{4,5}|{<3,4>,<2,5>,<1,4>}>; f; Image(f);\n",
+      "stdout": "Mapping from: { 1, 2, 3 } to { 4, 5 }\n    <3, 4>\n    <2, 5>\n    <1, 4>\n{ 4, 5 }\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.783
+    },
+    {
+      "id": "hom-rule",
+      "mode": "magma",
+      "source": "f:=hom<Integers()->Integers()|x:->x+1>; f(2);\n",
+      "stdout": "3\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.763
+    },
+    {
+      "id": "pmap-rule",
+      "mode": "magma",
+      "source": "f:=pmap<{1,2}->{4,5}|x:->x+3>; f(0); f(1); f(3);\n",
+      "stdout": "\n>> f:=pmap<{1,2}->{4,5}|x:->x+3>; f(0); f(1); f(3);\n                                  ^\nRuntime error in map application: Element is not in the domain of the map\n\n4\n\n>> f:=pmap<{1,2}->{4,5}|x:->x+3>; f(0); f(1); f(3);\n                                              ^\nRuntime error in map application: Element is not in the domain of the map\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.758
+    },
+    {
+      "id": "graph-infinite",
+      "mode": "magma",
+      "source": "map<Integers()->Integers()|1->2>; map<Rationals()->Rationals()|1->2>;\n",
+      "stdout": "\n>> map<Integers()->Integers()|1->2>; map<Rationals()->Rationals()|1->2>;\n      ^\nRuntime error in map< ... >: Domain of map has no cardinality algorithm\n\n\n>> map<Integers()->Integers()|1->2>; map<Rationals()->Rationals()|1->2>;\n                                        ^\nRuntime error in map< ... >: Domain of map has no cardinality algorithm\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.71
+    },
+    {
+      "id": "partial-infinite",
+      "mode": "magma",
+      "source": "f:=pmap<Integers()->Integers()|1->2>; f(1); f(2);\n",
+      "stdout": "2\n\n>> f:=pmap<Integers()->Integers()|1->2>; f(1); f(2);\n                                               ^\nRuntime error in map application: Application of map failed\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.765
+    },
+    {
+      "id": "graph-unsupported-domain",
+      "mode": "magma",
+      "source": "map<GF(3)->GF(3)|[<GF(3)!0,GF(3)!0>]>;\n",
+      "stdout": "\n>> map<GF(3)->GF(3)|[<GF(3)!0,GF(3)!0>]>;\n      ^\nRuntime error in map< ... >: a map given by a graph on this domain is not \nsupported yet\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.761
+    },
+    {
+      "id": "graph-empty-domain",
+      "mode": "magma",
+      "source": "f:=map<{}->{}|[]>; f; Image(f); f(1);\n",
+      "stdout": "Mapping from: {} to {}\n{}\n\n>> f:=map<{}->{}|[]>; f; Image(f); f(1);\n                                   ^\nRuntime error in map application: Application of map failed\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.753
+    },
+    {
+      "id": "inverse-missing",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Integers()|x:->x+1>; g:=Inverse(f); g; g(1); 1 @@ f; Inverse(g)(1);\n",
+      "stdout": "Mapping from: Integer Ring to Integer Ring\n\n>> f:=map<Integers()->Integers()|x:->x+1>; g:=Inverse(f); g; g(1); 1 @@ f; Inverse(g)(1);\n                                                             ^\nRuntime error in map application: There is no rule for calculating the preimage\n\n\n>> f:=map<Integers()->Integers()|x:->x+1>; g:=Inverse(f); g; g(1); 1 @@ f; Inverse(g)(1);\n                                                                     ^\nRuntime error in '@@': There is no rule for calculating the preimage\n\n2\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.843
+    },
+    {
+      "id": "inverse-membership",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Integers()|x:->x,y:->y/2>; 4 @@ f; 3 @@ f; (1/2) @@ f; Inverse(f)(3);\n",
+      "stdout": "2\n\n>> f:=map<Integers()->Integers()|x:->x,y:->y/2>; 4 @@ f; 3 @@ f; (1/2) @@ f; Inverse(f)(3);\n                                                           ^\nRuntime error in '@@': Element is not in the codomain of the map\n\n\n>> f:=map<Integers()->Integers()|x:->x,y:->y/2>; 4 @@ f; 3 @@ f; (1/2) @@ f; Inverse(f)(3);\n                                                                       ^\nRuntime error in '@@': Element is not in the codomain of the map\n\n\n>> f:=map<Integers()->Integers()|x:->x,y:->y/2>; 4 @@ f; 3 @@ f; (1/2) @@ f; Inverse(f)(3);\n                                                                             ^\nRuntime error in map application: Element is not in the codomain of the map\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.823
+    },
+    {
+      "id": "composition-mismatch",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Rationals()|x:->x>; g:=map<Integers()->Integers()|x:->x>; f*g;\n",
+      "stdout": "\n>> f:=map<Integers()->Rationals()|x:->x>; g:=map<Integers()->Integers()|x:->x>; f*g;\n                                                                                ^\nRuntime error in '*': The codomain of the first map is not the domain of the \nsecond\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.738
+    },
+    {
+      "id": "composition-equal-domain",
+      "mode": "magma",
+      "source": "f:=map<{1,2}->{3,4}|x:->x+2>; g:=map<{4,3}->{5,6}|x:->x+2>; (f*g)(1);\n",
+      "stdout": "5\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.692
+    },
+    {
+      "id": "composition-graph-inverse",
+      "mode": "magma",
+      "source": "f:=map<{1}->{2}|1->2>; g:=map<{2}->{3}|x:->3,y:->2>; Inverse(f*g);\n",
+      "stdout": "\n>> f:=map<{1}->{2}|1->2>; g:=map<{2}->{3}|x:->3,y:->2>; Inverse(f*g);\n                                                        ^\nRuntime error in 'Inverse': Map has no inverse\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.776
+    },
+    {
+      "id": "image-rule-refused",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Integers()|x:->x>; Image(f);\n",
+      "stdout": "\n>> f:=map<Integers()->Integers()|x:->x>; Image(f);\n                                         ^\nRuntime error in 'Image': Image of this map is not supported yet\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.744
+    },
+    {
+      "id": "rule-domain-error",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Integers()|x:->x>; f(1/2);\n",
+      "stdout": "\n>> f:=map<Integers()->Integers()|x:->x>; f(1/2);\n                                         ^\nRuntime error in map application: Element is not in the domain of the map\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.725
+    },
+    {
+      "id": "rule-codomain-error",
+      "mode": "magma",
+      "source": "f:=map<Integers()->Integers()|x:->x/2>; f(1); f(2);\n",
+      "stdout": "\n>> f:=map<Integers()->Integers()|x:->x/2>; f(1); f(2);\n                                           ^\nRuntime error in map application: Element is not in the codomain of the map\n\n1\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.782
+    },
+    {
+      "id": "intrinsic-type-errors",
+      "mode": "magma",
+      "source": "Inverse(2); Image(2); 2 @@ 3;\n",
+      "stdout": "\n>> Inverse(2); Image(2); 2 @@ 3;\n   ^\nRuntime error in 'Inverse': Bad argument types\n\n\n>> Inverse(2); Image(2); 2 @@ 3;\n               ^\nRuntime error in 'Image': Image of this map is not supported yet\n\n\n>> Inverse(2); Image(2); 2 @@ 3;\n                           ^\nRuntime error in '@@': Bad argument types\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.794
+    },
+    {
+      "id": "callback-True-True-False",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",True),Domain(\"codomain\",True),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if False else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "105\n[('domain', 'contains', 4), ('rule', 4), ('codomain', 'contains', 5), ('codomain', 'coerce', 5)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.794
+    },
+    {
+      "id": "callback-False-True-False",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",False),Domain(\"codomain\",True),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if False else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "MagmaError Element is not in the domain of the map map application None\n[('domain', 'contains', 4)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.849
+    },
+    {
+      "id": "callback-True-False-False",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",True),Domain(\"codomain\",False),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if False else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "MagmaError Element is not in the codomain of the map map application None\n[('domain', 'contains', 4), ('rule', 4), ('codomain', 'contains', 5)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.758
+    },
+    {
+      "id": "callback-True-True-True",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",True),Domain(\"codomain\",True),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if True else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "103\n[('codomain', 'contains', 4), ('inverse', 4), ('domain', 'contains', 3), ('domain', 'coerce', 3)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.721
+    },
+    {
+      "id": "callback-False-True-True",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",True),Domain(\"codomain\",False),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if True else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "MagmaError Element is not in the codomain of the map '@@' (12, 7)\n[('codomain', 'contains', 4)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.765
+    },
+    {
+      "id": "callback-True-False-True",
+      "mode": "python",
+      "source": "\nimport _magma as m\nevents=[]\nclass Domain:\n    def __init__(self,name,allowed): self.name,self.allowed=name,allowed\n    def _magma_contains(self,x):\n        events.append((self.name,\"contains\",x))\n        return self.allowed\n    def _magma_coerce(self,x):\n        events.append((self.name,\"coerce\",x))\n        return x+100\ndef rule(x):\n    events.append((\"rule\",x))\n    return x+1\ndef inverse(x):\n    events.append((\"inverse\",x))\n    return x-1\nf=m.MMap(Domain(\"domain\",False),Domain(\"codomain\",True),rule,inverse)\ntry:\n    print(m._preimage(f,4,(12,7)) if True else f(4))\nexcept m.MagmaError as e:\n    print(type(e).__name__,str(e),e.where,e.pos)\nprint(events)\n\n",
+      "stdout": "MagmaError Element is not in the codomain of the map '@@' (12, 7)\n[('codomain', 'contains', 4), ('inverse', 4), ('domain', 'contains', 3)]\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.732
+    },
+    {
+      "id": "existing-error-position",
+      "mode": "python",
+      "source": "\nimport _magma as m\ndef fail(x): raise m.MagmaError(\"inner\", \"rule\", True, (3,5))\nf=m.MMap(m._ZZ,m._ZZ,lambda x:x,fail)\ntry: m._preimage(f,1,(12,7))\nexcept m.MagmaError as e: print(str(e), e.where, e.pos)\ntry: m._map(\"map\",m._ZZ,m._ZZ,pairs=[(1,2)],pos=(4,6))\nexcept m.MagmaError as e: print(str(e), e.where, e.pos)\n\n",
+      "stdout": "inner rule (3, 5)\nDomain of map has no cardinality algorithm map< ... > (4, 6)\n",
+      "stderr": "",
+      "exit_code": 0,
+      "timeout": false,
+      "seconds": 2.711
+    }
+  ],
+  "identical": true,
+  "differences": [],
+  "baseline_count": 174
+}
