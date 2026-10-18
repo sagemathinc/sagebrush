@@ -1,4 +1,5 @@
-//! kernels/src/libm.rs (glibc's exp and log over arrays) and random.rs
+//! kernels/src/libm.rs (glibc's exp and log over arrays), crsin.rs (sin and
+//! cos, whose exact products become one fused multiply-add) and random.rs
 //! (numpy.random's fills, whose normals call log) built with relaxed SIMD,
 //! so that the fused multiply-adds are the hardware's.  Used only
 //! where fma_probe() shows they are fused; elsewhere, and where relaxed SIMD
@@ -10,6 +11,8 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
+#[path = "../../src/crsin.rs"]
+mod crsin;
 #[path = "../../src/libm.rs"]
 #[allow(dead_code)]
 mod libm;
