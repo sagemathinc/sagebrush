@@ -140,8 +140,40 @@ for label, v in [
     ("a vector over QQ", S.vector(S.QQ, [1, S.QQ(2) / 3])), ("a vector over ZZ", S.vector([1, 2, 3])), ("a vector over RDF", S.vector(S.RDF, [1, 2])),
     ("a polynomial over QQ", u ** 3 - S.QQ(3) / 4 * u + 1), ("a polynomial over ZZ", 2 * t ** 3 - t - 7),
     ("a polynomial in two variables", x ** 2 - S.QQ(3) / 4 * y + x * y ** 3), ("the zero polynomial", u - u),
+    ("a sparse polynomial in one variable", u ** 7 - S.QQ(1) / 3 * u ** 2 + 5),
 ]:
     roundtrip("Sage " + label, v, "sage")
+# (a univariate polynomial's dict() is keyed by int exponents, as in Sage's)
+v = _sbx.encode(u ** 7 - S.QQ(1) / 3 * u ** 2 + 5, "sage")
+report(v == {"t": "poly", "ring": "QQ", "vars": ["u"], "v": "u^7 - 1/3*u^2 + 5"}, "Sage a univariate polynomial, term by term from dict(),", v)
+v = _sbx.encode(2 * t ** 3 - t - 7, "sage")
+report(v == {"t": "poly", "ring": "ZZ", "vars": ["t"], "v": "2*t^3 - t - 7"}, "Sage a univariate polynomial over ZZ,", v)
+# a dense univariate polynomial costs its degree + 1 of the element budget
+# (dict() scans every coefficient), however few its terms. Cheaply: u^10^4 + 1
+# under a limit of 10^5 elements, lowered for the check only. One copy is
+# carried; twenty references are refused after at most ten scans.
+report(_sbx.LIMITS["elements"] == 10 ** 7, "the element limit is 10^7 by default,", _sbx.LIMITS["elements"])
+big = u ** 10000 + 1
+v = _sbx.encode(big, "sage")
+report(v["v"] == "u^10000 + 1", "Sage u^10000 + 1, one of them,", v["v"])
+scans = [0]
+_dict = type(big).dict
+
+
+def _counted(self):
+    scans[0] += 1
+    return _dict(self)
+
+
+_limit = _sbx.LIMITS["elements"]
+_sbx.LIMITS["elements"] = 10 ** 5
+type(big).dict = _counted
+try:
+    refused("Sage twenty references to u^10000 + 1 under a limit of 10^5", [big] * 20, "sage", "more than 100000 elements")
+finally:
+    type(big).dict = _dict
+    _sbx.LIMITS["elements"] = _limit
+report(scans[0] <= 10, "twenty references to u^10000 + 1 refused after at most ten scans:", scans[0])
 refused("Sage a symbolic expression", S.var("z") ** 2 + 1, "sage", "symbolic")
 refused("Sage a matrix over the Symbolic Ring", S.matrix([[S.var("z"), 1]]), "sage", "Symbolic Ring")
 refused("Sage a matrix over GF(7)", S.matrix(S.GF(7), [[1, 2]]), "sage", "Finite Field of size 7")
