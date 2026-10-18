@@ -130,7 +130,12 @@ Copyright (c) 2001 Python Software Foundation. See
 ### NumPy (BSD 3-Clause)
 
 `lib/numpy/__init__.py` (`poly1d.__str__` and `_raise_power`, from
-`numpy/lib/_polynomial_impl.py`), `src/runtime/numpy.ts` (array printing), `src/runtime/numpy_random.ts`,
+`numpy/lib/_polynomial_impl.py`), `src/runtime/numpy.ts` (array printing;
+complex powers, `cmul`, `cdiv` and `cpow`, from `npy_cpow` in
+`numpy/_core/src/npymath/npy_math_complex.c.src`; the complex reciprocal,
+`crecip`, from `numpy/_core/src/umath/loops.c.src`; and the `**` operator's
+routes, `fastScalarPower`, from `fast_scalar_power` in
+`numpy/_core/src/multiarray/number.c`), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with
 NumPy's seeding, PCG64 with SeedSequence, and the distributions) follow
 NumPy's code so that their output and random streams match NumPy's
