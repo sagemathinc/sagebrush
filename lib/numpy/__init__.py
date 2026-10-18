@@ -71,6 +71,10 @@ class generic:
     def astype(self, dt):
         return array(self).astype(dt)[()]
 
+    def tobytes(self, order="C"):
+        """The scalar's bytes in memory, as a 0-d array of its dtype holds them."""
+        return array(self).tobytes(order)
+
 
 class number(generic):
     __slots__ = ()
