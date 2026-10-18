@@ -1978,6 +1978,8 @@ def _image_universe(cod, empty):
     if supported(cod):
         return cod
     if isinstance(cod, MSet) and not empty:
+        # A declared universe is authoritative: refuse unsupported ones
+        # here. Inference below runs only when no universe was declared.
         if cod.universe is not None:
             return cod.universe if supported(cod.universe) else None
         inferred = getattr(cod, "_inf", None)
