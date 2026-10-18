@@ -20,7 +20,7 @@ read. No PARI source was read or ported.
   group and the regulator to any precision.
 - General number fields (`nf/`): class group, regulator and roots of unity
   of Q[x]/(f), f monic (`nf::bnf::bnfinit`). This is new and slower than
-  PARI at small discriminants; see the table below.
+  PARI at small discriminants; see the tables below.
 
 ```
 cargo run --release -p sagebrush-classgroup --example qcl -- -100000000000000000000000000319
@@ -93,68 +93,83 @@ These use Buchmann's method on the same relations.
   √(2D)/2m, which makes Q(x) change sign. For D < 10^20, γ with |B| < √D are
   also found by trial division.
 
-## Timing against PARI 2.17.4
+## Timing against PARI
 
-One core of an AMD EPYC 7B13. D = −p for primes p ≡ 3 (mod 4) above 10^k.
-PARI is `quadclassunit(D)` in a running gp. Ours is `class_group(D)` with the
-small-prime table already built (gp likewise starts with its prime table).
-Times are in ms:
-- up to 10^23: the mean over 50 discriminants;
-- from 10^25: the median of 3.
+Measured with `sagebrush bench` (the Python package's command; see
+[results/bench](../../results/bench/README.md) for the runs, with every
+sample): one core of an AMD EPYC 7B13, the 48-core machine otherwise idle
+(load average about 1: the benchmark's own core), PARI/GP 2.17.1, Oct 18
+2026.
 
-All 42 benchmark discriminants agree with PARI. So do 405 random fundamental
+The default call, `sagebrush.nf.quadratic_class_group`, proves the result under GRH with an analytic
+certificate (h\* below twice a proven lower bound for h; `nf/certify.rs`).
+With `quadratic_class_group_data(d, certify=False)` the certificate is
+skipped: the result is then conditional on GRH and on the stopping rule's
+estimate, like PARI's `quadclassunit`, and says so. Both are shown. Below
+10^25 the certificate costs 75–150 ms, which dominates at small |D|.
+
+Imaginary quadratic fields: D = −p for the first primes p ≡ 3 (mod 4) above
+10^k (`sagebrush/bench/data/imagquad.txt`). PARI is `quadclassunit(D)` in a
+running gp; both sides have their prime tables built. Each time is the
+median over the n discriminants of each one's median of 3 samples (one
+sample for calls over 10 s), in ms; a ratio below 1 means Sagebrush is
+faster. Reproduce with `sagebrush bench imagquad` (`--large` adds
+10^37–10^47). All agree with PARI, as do 405 random fundamental
 discriminants from 10^4 to 10^30, of both kinds (D ≡ 1 mod 4 and D = 4m) and
 including non-cyclic groups.
 
-| k  | PARI  | ours |
-|----|------:|-----:|
-| 9  |  0.42 | 0.98 |
-| 11 |  0.76 | 1.32 |
-| 13 |  1.52 | 1.96 |
-| 15 |  3.04 | 3.95 |
-| 17 |  6.08 | 5.99 |
-| 19 |  12.0 |  6.6 |
-| 21 |  24.8 | 10.4 |
-| 23 |  54.6 | 13.7 |
-| 25 |    78 |   18 |
-| 27 |   183 |   31 |
-| 29 |   415 |   63 |
-| 31 |   770 |   76 |
-| 33 |  1850 |  116 |
-| 35 |  2299 |  213 |
+| k | n | certified (default) | uncertified | PARI | certified / PARI | uncertified / PARI |
+|---:|---:|---:|---:|---:|---:|---:|
+| 9 | 5 | 77.3 | 0.91 | 0.55 | 142 | 1.68 |
+| 11 | 5 | 78.4 | 1.36 | 0.89 | 88 | 1.53 |
+| 13 | 5 | 78.5 | 2.34 | 2.02 | 39 | 1.16 |
+| 15 | 5 | 80.0 | 3.02 | 3.45 | 23 | 0.88 |
+| 17 | 5 | 149 | 4.69 | 8.14 | 18 | 0.58 |
+| 19 | 5 | 149 | 6.89 | 17.7 | 8.46 | 0.39 |
+| 21 | 5 | 152 | 9.81 | 39.7 | 3.83 | 0.25 |
+| 23 | 5 | 163 | 17.9 | 90.0 | 1.81 | 0.20 |
+| 25 | 3 | 168 | 24.9 | 102 | 1.66 | 0.25 |
+| 27 | 3 | 183 | 39.8 | 235 | 0.78 | 0.17 |
+| 29 | 3 | 322 | 52.2 | 550 | 0.58 | 0.09 |
+| 31 | 3 | 358 | 76.4 | 1,098 | 0.33 | 0.07 |
+| 33 | 3 | 411 | 123 | 2,253 | 0.18 | 0.05 |
+| 35 | 3 | 493 | 183 | 3,194 | 0.15 | 0.06 |
+| 37 | 1 | 995 | 474 | 14,396 | 0.07 | 0.03 |
+| 39 | 1 | 1,308 | 631 | 17,924 | 0.07 | 0.04 |
+| 41 | 1 | 1,970 | 1,055 | 60,997 | 0.03 | 0.02 |
+| 43 | 1 | 2,149 | 1,042 | 39,605 | 0.05 | 0.03 |
+| 45 | 1 | 4,237 | 2,780 | 123,206 | 0.03 | 0.02 |
+| 47 | 1 | 8,848 | 5,221 | 283,920 | 0.03 | 0.02 |
 
-Beyond 10^35, one discriminant per size. All six agree with PARI:
-
-| k  | PARI (s) | ours (s) | ratio |
-|----|---------:|---------:|------:|
-| 37 |     11.1 |     0.45 |   24× |
-| 39 |     13.2 |     0.61 |   22× |
-| 41 |     48.6 |     1.11 |   44× |
-| 43 |     30.3 |     1.02 |   30× |
-| 45 |     97.1 |     2.89 |   34× |
-| 47 |    219.4 |     5.37 |   41× |
+Certified, Sagebrush is faster than PARI from about 10^27 and 18–32× faster
+at 10^41–10^47 (10^47: 8.8 s against 284 s). Uncertified it is faster from
+about 10^15, and 38–58× faster at 10^41–10^47.
 
 Real quadratic fields: D = p for the first three primes p ≡ 1 (mod 4) above
-10^k, `quadclassunit(D)` against `class_group_real(D)`. The table shows the
-median of three, in ms. All 51 agree with PARI, and so do 200 random
-fundamental discriminants from 10^5 to 10^30 and all 29 sampled from 10^3 to
-10^5: the class group exactly and the regulator to at least 15 significant
-digits.
+10^k (`sagebrush/bench/data/realquad.txt`), `quadclassunit(D)` against
+`quadratic_class_group_data(D)`, the class group exactly and the regulator
+to 15 significant digits. Reproduce with `sagebrush bench realquad`. All
+agree with PARI, as do 200 random fundamental discriminants from 10^5 to
+10^30 and all 29 sampled from 10^3 to 10^5.
 
-| k  | PARI | ours |
-|----|-----:|-----:|
-| 9  |    1 |    9 |
-| 13 |    3 |   19 |
-| 17 |    6 |   37 |
-| 21 |   26 |   62 |
-| 25 |   85 |  102 |
-| 29 |  197 |  184 |
-| 31 |  306 |  253 |
-| 33 |  638 |  383 |
-| 35 | 1274 |  738 |
-| 37 | 2180 |  616 |
-| 39 | 2608 |  934 |
-| 41 | 4570 | 1417 |
+| k | n | certified (default) | uncertified | PARI | certified / PARI | uncertified / PARI |
+|---:|---:|---:|---:|---:|---:|---:|
+| 9 | 3 | 90.8 | 3.99 | 1.22 | 74 | 3.27 |
+| 13 | 3 | 113 | 13.1 | 3.20 | 35 | 4.09 |
+| 17 | 3 | 219 | 32.8 | 8.17 | 27 | 4.02 |
+| 21 | 3 | 262 | 45.6 | 33.8 | 7.76 | 1.35 |
+| 25 | 3 | 328 | 69.9 | 118 | 2.78 | 0.59 |
+| 29 | 3 | 605 | 135 | 231 | 2.62 | 0.59 |
+| 31 | 3 | 1,439 | 244 | 462 | 3.11 | 0.53 |
+| 33 | 3 | 1,518 | 346 | 824 | 1.84 | 0.42 |
+| 35 | 3 | 1,062 | 390 | 1,744 | 0.61 | 0.22 |
+| 37 | 3 | 1,375 | 602 | 2,380 | 0.58 | 0.25 |
+| 39 | 3 | 1,767 | 798 | 3,469 | 0.51 | 0.23 |
+| 41 | 3 | 2,530 | 1,212 | 5,894 | 0.43 | 0.21 |
+
+Certified, Sagebrush is faster than PARI from about 10^35 (2.3× at 10^41) and
+slower below (74× at 10^9, 2.6× at 10^29). Uncertified it is faster from
+about 10^25 (4.9× at 10^41) and up to 4× slower below 10^21.
 
 ## General number fields (`src/nf/`)
 
@@ -196,29 +211,57 @@ digits.
 - **Acceptance:** h·R < √2 times the residue estimate (Bach-averaged Euler
   products of ζ_K), as in the quadratic case.
 
-Random fields f = xⁿ + Σ aᵢxⁱ of degree 3–6, against PARI 2.17's
-`bnfinit(f, 1)`, one core. All 30 agree with PARI in d, the class group
-and the regulator. A selection (times in ms):
+Random fields f = xⁿ + Σ aᵢxⁱ of degree 3–6 against PARI 2.17.1's
+`bnfinit(f, 1)`, one core: the 30 fields of
+`sagebrush/bench/data/nf-fields.txt`, drawn with a fixed seed by
+`make_nf.py` (one per target size of the polynomial's discriminant). All 30
+agree with PARI in d, the class group and the regulator. Sagebrush's time
+is that of the default call `sagebrush.nf.bnf(f)`, GRH with the analytic
+certificate (every one of the 30 was certified). Times in ms, sorted by
+degree and |d|; reproduce with `sagebrush bench nf` (`--large` adds
+the six largest).
 
-| field   | \|d\|   | PARI   | ours    |
-|---------|---------|-------:|--------:|
-| cubic   | 10¹²    |     10 |      18 |
-| cubic   | 10²⁸    |  2,279 |     966 |
-| cubic   | 10²⁸    |  2,548 |   1,122 |
-| cubic   | 10³²    |  5,251 |   1,125 |
-| cubic   | 10³²    |  3,648 |   1,153 |
-| quartic | 10²⁶    |    347 |     835 |
-| quartic | 10³⁴    |  6,361 |   6,267 |
-| quartic | 10³⁶    |  6,448 |  28,472 |
-| quartic | 10⁴¹    | 46,644 | 176,585 |
-| quintic | 10²³    |     86 |     252 |
-| sextic  | 10²³    |     90 |     310 |
+| # | field | |d| | PARI | ours | ours / PARI | h |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | cubic | 5.8e8 | 3.32 | 85.8 | 26 | 1 |
+| 2 | cubic | 2.9e12 | 25.0 | 165 | 6.59 | 2 |
+| 3 | cubic | 2.3e16 | 50.7 | 289 | 5.71 | 1 |
+| 4 | cubic | 1.7e20 | 450 | 391 | 0.87 | 1 |
+| 5 | cubic | 1.4e24 | 723 | 670 | 0.93 | 3 |
+| 6 | cubic | 1.0e27 | 2,810 | 1,480 | 0.53 | 1 |
+| 7 | cubic | 2.1e27 | 2,146 | 1,263 | 0.59 | 1 |
+| 9 | cubic | 1.2e31 | 6,495 | 1,811 | 0.28 | 1 |
+| 8 | cubic | 1.0e32 | 9,137 | 1,472 | 0.16 | 24 |
+| 29 | cubic | 2.7e35 | 8,354 | 1,411 | 0.17 | 1 |
+| 10 | quartic | 5.9e12 | 9.29 | 182 | 20 | 1 |
+| 11 | quartic | 3.1e16 | 27.8 | 346 | 12 | 1 |
+| 12 | quartic | 1.1e22 | 215 | 478 | 2.22 | 1 |
+| 30 | quartic | 1.7e22 | 129 | 445 | 3.45 | 1 |
+| 13 | quartic | 1.8e24 | 626 | 606 | 0.97 | 2 |
+| 14 | quartic | 1.3e29 | 1,443 | 2,112 | 1.46 | 1 |
+| 15 | quartic | 3.7e33 | 15,766 | 5,548 | 0.35 | 1 |
+| 16 | quartic | 2.4e36 | 11,244 | 3,815 | 0.34 | 2 |
+| 17 | quartic | 1.9e41 | 120,441 | 33,545 | 0.28 | 1 |
+| 18 | quintic | 3.8e12 | 9.50 | 208 | 22 | 1 |
+| 19 | quintic | 3.2e16 | 35.5 | 392 | 11 | 1 |
+| 20 | quintic | 7.1e19 | 70.0 | 1,248 | 18 | 1 |
+| 21 | quintic | 2.2e22 | 141 | 1,656 | 12 | 1 |
+| 22 | quintic | 2.7e27 | 905 | 4,287 | 4.74 | 1 |
+| 23 | sextic | 2.9e10 | 9.67 | 1,180 | 122 | 1 |
+| 24 | sextic | 3.8e14 | 24.4 | 1,633 | 67 | 1 |
+| 25 | sextic | 1.4e20 | 83.5 | 1,860 | 22 | 1 |
+| 26 | sextic | 1.7e23 | 164 | 2,088 | 13 | 1 |
+| 27 | sextic | 5.1e26 | 561 | 6,351 | 11 | 1 |
+| 28 | sextic | 1.4e29 | 1,826 | 40,517 | 22 | 2 |
 
-The field-specific GRH bound made this 3–10× faster than with the uniform
-4 log²|d| (for example, 4.7 s down to 1.0 s on the first 10²⁸ cubic).
-Cubics are now faster than PARI from about 10²⁵. For quartics, most time goes
-into ideal products P_i P_j for relations (BigInt HNF), the next thing to
-speed up.
+Cubics are faster than PARI from about |d| = 10^20 (6× at 10^32–10^36), and
+quartics from about 10^33 (3.6× at 10^41). Quintics and sextics are slower at
+every size tested: 5–22× and 11–122×.
+
+The field-specific GRH bound made bnfinit 3–10× faster than with the uniform
+4 log²|d| (for example, 4.7 s down to 1.0 s on a cubic of 10²⁸). For
+quartics and beyond, most time goes into ideal products P_i P_j for
+relations (BigInt HNF), the next thing to speed up.
 
 ### Without GRH (`nf/proof.rs`, `nf/zimmert.rs`)
 
