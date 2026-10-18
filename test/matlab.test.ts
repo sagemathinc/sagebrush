@@ -2550,3 +2550,61 @@ test("spline and interp1's spline solve their tridiagonal system in its band, wi
     "spline with 200001 data sites for 1 row of values is not supported in Sagebrush: too much work.",
     "interp1's 'spline' method with 100001 sample points for 2 columns of values is not supported in Sagebrush: too much work.", "[2.5 7]"]);
 });
+
+test("atan2 at signed zeros as MathWorks documents (0 for (0,-0) and (-0,-0), unlike IEEE and Octave); deconv and gamma(-Inf) refused in words", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "disp([atan2(0, -0), atan2(-0, -0), 1 / atan2(0, -0), 1 / atan2(-0, -0)])",
+    "disp([atan2(0, 0), 1 / atan2(-0, 0), atan2(1, -0), atan2(-1, -0)])",
+    "disp(class(atan2(single(0), single(-0)))), disp(atan2(single(-0), single(-0)))",
+    "try, [q, r] = deconv([Inf 2 3], [1 2]); catch e, disp(e.message), end",
+    "try, q = deconv([1 2 3], [NaN 2]); catch e, disp(e.message), end",
+    "[q, r] = deconv([1 2 3], [1 2]); disp(mat2str([q r]))",
+    "try, y = gamma([1 -Inf]); catch e, disp(e.message), end",
+    "disp([gamma(Inf), 1 / gamma(0)])",
+  ].join("\n")], { encoding: "utf8" });
+  const refused = "deconv of values that include Inf or NaN is not supported in Sagebrush: its result for them is not certified. Divide finite values.";
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
+    "0     0   Inf   Inf", "0      -Inf    1.5708   -1.5708", "single", "0", refused, refused, "[1 0 0 0 3]",
+    "gamma of -Inf is not supported in Sagebrush: it has no limit there.", "Inf     0"]);
+});
+
+test("trapz with a scalar spacing X is X*trapz(Y), as MathWorks documents, where X/2 or half a pair sum is subnormal (Octave departs there)", () => {
+  const { execFileSync } = require("node:child_process");
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
+    "x = 5e-324; y = [1e300 1e300]; disp(sprintf('%.17g %d', trapz(x, y), isequal(trapz(x, y), x*trapz(y))))",
+    "x = 1e300; y = [5e-324 0]; disp(sprintf('%.17g %d', trapz(x, y), isequal(trapz(x, y), x*trapz(y))))",
+    "x = single(1e-45); y = single([1e38 1e38]); q = trapz(x, y); disp(sprintf('%s %.9g %d', class(q), q, isequal(q, x*trapz(y))))",
+    "x = single(1e30); y = single([1e-45 0]); q = trapz(x, y); disp(sprintf('%s %.9g %d', class(q), q, isequal(q, x*trapz(y))))",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "4.9406564584124657e-24 1", "0 1", "single 1.40129842e-07 1", "single 0 1"]);
+});
+
+test("trapz in single admits its steps' work before making them: refused in words past the budget, made below it", () => {
+  const { execFileSync } = require("node:child_process");
+  const path = require("node:path");
+  const cli = path.join(__dirname, "..", "src", "cli.js");
+  // (the bound itself, and its two sides with the budget lowered, on small arrays: an 11-by-10
+  // single array is (11 - 1) * 10 = 100 steps, a 12-by-10 one 110; stored transposed)
+  const unit = execFileSync(process.execPath, [cli, "-c", [
+    "import numpy as np, _matlab as m",
+    "print(m._SINGLE_STEPS_WORK)",
+    "m._SINGLE_STEPS_WORK = 100",
+    "q = m.trapz_n(m._finish(np.ones((10, 11)), 'single'))",
+    "print(m.class_(q), m._dims(q), float(m._farr(q).reshape(-1)[0]))",
+    "try:",
+    "    m.trapz_n(m._finish(np.ones((10, 12)), 'single'))",
+    "except m.MatlabError as e:",
+    "    print(e)",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(unit.trim().split("\n").map((s: string) => s.trim()), ["20000000", "single (1, 10) 10.0",
+    "trapz of single values with 12 points for 10 columns is not supported in Sagebrush: too much work."]);
+  const out = execFileSync(process.execPath, [cli, "--matlab", "-c", [
+    "q = trapz(single(ones(1001, 20))); disp([class(q) ' ' mat2str(size(q)) ' ' num2str(q(1))])",
+    "try, q = trapz([1 2 3], single([1 2])); catch e, disp(e.message), end",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "single [1 20] 1000",
+    "Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension."]);
+});
