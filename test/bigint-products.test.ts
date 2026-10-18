@@ -31,22 +31,33 @@ test("big-integer products are balanced, not quadratic", () => {
   assert.ok(a < 1.5 && b < 1.5 && c < 1.5, `factorial ${a} s, prod ${b} s, comb ${c} s`);
 });
 
-// (comb and perm with k of 0 or 1 return 1 or n before any size bound,
-// which reads n's digits: with those refused, the trivial cases still
-// answer, and one that is bounded, comb(n, 2), trips the guard;
-// daybreak2's LIMIT-PTREE-1)
-test("comb and perm of k 0 or 1 read nothing of n", () => {
+// (comb and perm bound their sizes without making n's digits, which for
+// an n near the largest BigInt are a string of 256 MiB: with any big
+// integer's digits refused, k of 0 or 1 answer at once (daybreak2's
+// LIMIT-PTREE-1), k of 2 and more bound n's size from its leading bits and
+// answer (LIMIT-AF5-1), and one near the largest BigInt is refused at once;
+// hex(n), which makes the digits, shows the guard is on)
+test("comb and perm bound n's size without making its digits", () => {
   const guard = ["--require", __dirname + "/../../test/bigint-products-trivial.cjs"];
-  const trivial = [
-    "import math",
+  const src = [
+    "import math, time",
     "n = 2**200000 + 12345",
     "r = [math.comb(n, 0), math.comb(n, 1) == n, math.comb(n, n), math.comb(n, n - 1) == n, math.perm(n, 0), math.perm(n, 1) == n]",
-    "print(r, math.comb(n, 1) is not None)",
+    "r += [math.comb(n, 2) == n * (n - 1) // 2, math.perm(n, 2) == n * (n - 1), math.comb(n, 3) == n * (n - 1) * (n - 2) // 6, math.comb(n, n - 2) == math.comb(n, 2)]",
+    "huge = 2**(2**29 + 1000)",
+    "t = time.perf_counter()",
+    "for f, k in [(math.comb, 2), (math.perm, 2), (math.comb, 40), (math.perm, 3)]:",
+    "    try:",
+    "        f(huge, k)",
+    "        r.append('computed')",
+    "    except MemoryError:",
+    "        r.append('refused')",
+    "print(r, time.perf_counter() - t < 2)",
   ].join("\n");
-  const out = execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", trivial], { encoding: "utf8" });
-  assert.equal(out.trim(), "[1, True, 1, True, 1, True] True");
-  const bounded = "import math\nmath.comb(2**200000, 2)";
-  assert.throws(() => execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", bounded], { encoding: "utf8", stdio: "pipe" }), /hex digits of a big integer read/);
+  const out = execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", src], { encoding: "utf8", timeout: 120000 });
+  assert.equal(out.trim(), "[1, True, 1, True, 1, True, True, True, True, True, 'refused', 'refused', 'refused', 'refused'] True");
+  const control = "import math\nhex(2**200000)";
+  assert.throws(() => execFileSync(process.execPath, [...guard, __dirname + "/../src/cli.js", "-c", control], { encoding: "utf8", stdio: "pipe" }), /digits of a big integer read/);
 });
 
 // (a product known too big for a BigInt is a MemoryError at once, its size
