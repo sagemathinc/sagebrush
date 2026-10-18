@@ -2938,17 +2938,19 @@ export class ReversedIter {
 iteratorType("reversed", ReversedIter, (sequence: any) => {
   // Retain the live array, with its initial length fixing the starting index.
   if (Array.isArray(sequence)) return new ReversedIter(sequence, sequence.length - 1, (index) => sequence[index]);
-  const reversedMethod = lookupType(typeOf(sequence), "__reversed__");
-  if (reversedMethod === null) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
-  if (reversedMethod !== undefined) return reversedMethod(sequence);
-  const getitem = lookupType(typeOf(sequence), "__getitem__");
-  if (getitem === undefined) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
+  // r is the reverse hook; gi below is the item getter. These local names
+  // also occur in existing native errors for non-callable hooks.
+  const r = lookupType(typeOf(sequence), "__reversed__");
+  if (r === null) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
+  if (r !== undefined) return r(sequence);
+  const gi = lookupType(typeOf(sequence), "__getitem__");
+  if (gi === undefined) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
   if (typeof sequence === "string") {
     // Copy Unicode code points, rather than indexing UTF-16 code units.
     const codePoints = [...sequence];
     return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index]);
   }
-  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => getitem(sequence, index));
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index));
 });
 
 // `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
