@@ -377,13 +377,21 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
 }
 
 /// Class group of the quadratic field of fundamental discriminant d (and
-/// the regulator, d > 0), by the quadratic algorithms.
+/// the regulator, d > 0), by the quadratic algorithms, with the analytic
+/// certificate.
 pub fn quadratic(d: &BigInt) -> Result<(BigInt, Vec<BigInt>, Option<String>, bool), String> {
+    quadratic_with(d, true)
+}
+
+/// quadratic, with the analytic certificate only if `certify` (the last
+/// field says whether the result is certified; see imag::class_group_with
+/// and realq::class_group_real_with).
+pub fn quadratic_with(d: &BigInt, certify: bool) -> Result<(BigInt, Vec<BigInt>, Option<String>, bool), String> {
     if d.is_negative() {
-        let (g, _, certified) = crate::imag::class_group_certified(d)?;
+        let (g, _, certified) = crate::imag::class_group_with(d, certify)?;
         Ok((g.h, g.cyc, None, certified))
     } else {
-        let (r, _) = crate::realq::class_group_real(d)?;
+        let (r, _) = crate::realq::class_group_real_with(d, certify)?;
         Ok((r.group.h, r.group.cyc, Some(fixed_to_decimal(&r.reg_fixed, r.prec, r.reg_digits)), r.certified))
     }
 }
