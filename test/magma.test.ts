@@ -1966,3 +1966,149 @@ test("DihedralGroup(3) is Sym(3) in a set, and groups meet in collections as Mag
     assert.ok(o.includes(m) && o.endsWith("end "), e + " => " + o);
   }
 });
+
+test("VectorSpace, KSpace and RSpace as Magma's: unit vectors, coercion, membership, equality, Basis, Generators and Zero", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's for the same lines, and so are the
+  // errors; then Sagebrush's refusals: Magma's order of a set of vectors,
+  // vectors of degree 0, other rings, and the size bounds)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.equal(run("V := VectorSpace(Rationals(), 3); V; Type(V); Dimension(V); Degree(V);\nV.1; V.3; Type(V.1); Parent(V.1); Basis(V);\nv := V![1,2,3]; v; v in V; V!0; Zero(V); V![1/2, 0, 1]; 2*V.1 - V.3;\nW := RSpace(Integers(), 2); W; Type(W); Basis(W); W.1 + W.2; W![4,5]; Zero(W); RSpace(Integers(),3)!V.1;\nK := KSpace(Rationals(), 2); K; K eq VectorSpace(Rationals(), 2); RSpace(Rationals(), 2);\nV eq VectorSpace(Rationals(), 3); V ne V; Type(V) eq ModTupFld; Type(W) eq ModTupRng;\nVector([1,2,3]) in RSpace(Integers(), 3); Vector(Rationals(), [1,2,3]) eq v; V!Vector([1,2,3]); Type(V!Vector([1,2,3]));\n#Generators(V); V.2 in Generators(V); Generators(V) eq {V.1, V.2, V.3}; Generators(VectorSpace(Rationals(), 1));\nX := VectorSpace(Rationals(), 0); X; Basis(X); Dimension(X); Generators(X);\nZero(Integers()); Zero(Rationals()); Eltseq(V.2); Universe(Eltseq(V.2)); Universe(Eltseq(W.1));\n[V| [1,2,3], 0]; {Vector([1,0])};"), "Full Vector space of degree 3 over Rational Field\nModTupFld\n3\n3\n(1 0 0)\n(0 0 1)\nModTupFldElt\nFull Vector space of degree 3 over Rational Field\n[\n    (1 0 0),\n    (0 1 0),\n    (0 0 1)\n]\n(1 2 3)\ntrue\n(0 0 0)\n(0 0 0)\n(1/2   0   1)\n( 2  0 -1)\nFull RSpace of degree 2 over Integer Ring\nModTupRng\n[\n    (1 0),\n    (0 1)\n]\n(1 1)\n(4 5)\n(0 0)\n(1 0 0)\nFull Vector space of degree 2 over Rational Field\ntrue\nFull Vector space of degree 2 over Rational Field\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\n(1 2 3)\nModTupFldElt\n3\ntrue\ntrue\n{\n    (1)\n}\nFull Vector space of degree 0 over Rational Field\n[]\n0\n{}\n0\n0\n[ 0, 1, 0 ]\nRational Field\nInteger Ring\n[\n    (1 2 3),\n    (0 0 0)\n]\n{\n    (1 0)\n}\nend\n");
+  // (a collection over a vector space: each element coerced into it, as V!x,
+  // when made, appended, included, assigned, and for in and Index)
+  assert.equal(run("V := VectorSpace(Rationals(), 3); [V| [1,2,3], 0]; [V| ]; {V| [1,2,3]}; {@V| [1,2,3], V.1 @};\nS := [V| V.1]; Append(S, [1,2,3]); Append(~S, 0); S; Include({V| V.1}, [0,1,0]) eq {V.1, V.2};\nS := [V| V.1]; [1,2,3] in S; V.1 in S; V.2 in S; [1,0,0] in S; 0 in S; Vector([1,0,0]) in S; Index(S, V.1); Position(S, [1,0,0]); Index(S, 0);\nT := {V| V.1}; [1,0,0] in T; Vector([1,0,0]) in T; [1,0,0] notin T;\n[1,0,0] in Basis(V); [1,0,0] in Generators(V); Universe(Basis(V)); Universe(Generators(V)); Index(Basis(V), [0,0,1]);\nS := [V| V.1]; S[2] := [1,2,3]; S;\nW := RSpace(Integers(), 2); [W| [4,5], W.2];"), "[\n    (1 2 3),\n    (0 0 0)\n]\n[]\n{\n    (1 2 3)\n}\n{@\n    (1 2 3),\n    (1 0 0)\n@}\n[\n    (1 0 0),\n    (1 2 3)\n]\n[\n    (1 0 0),\n    (0 0 0)\n]\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\n1\n1\n0\ntrue\ntrue\nfalse\ntrue\ntrue\nFull Vector space of degree 3 over Rational Field\nFull Vector space of degree 3 over Rational Field\n3\n[\n    (1 0 0),\n    (1 2 3)\n]\n[\n    (4 5),\n    (0 1)\n]\nend\n");
+  // (conversions keep the vector space: what goes in later is coerced, astra
+  // CORR-7E2-1; astra's five cases)
+  assert.equal(run("V := VectorSpace(Rationals(),2); S := Setseq({V|}); Append(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Seqset([V|]); Include(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Setseq({V|V.1}); [1,0] in S;\nV := VectorSpace(Rationals(),2); S := Eltseq([V|]); Append(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); S := Set([V|]); Include(~S,[1,2]); S;\nV := VectorSpace(Rationals(),2); Universe(Setseq({V|V.1})); Universe(Seqset([V| V.2])); Universe(Eltseq([V| V.1]));\nV := VectorSpace(Rationals(),2); Eltseq(Basis(V)); Eltseq([V| V.1, V.2]);"), "[\n    (1 2)\n]\n{\n    (1 2)\n}\ntrue\n[\n    (1 2)\n]\n{\n    (1 2)\n}\nFull Vector space of degree 2 over Rational Field\nFull Vector space of degree 2 over Rational Field\nFull Vector space of degree 2 over Rational Field\n[\n    (1 0),\n    (0 1)\n]\n[\n    (1 0),\n    (0 1)\n]\nend\n");
+  const errs: [string, string][] = [
+    ["V := VectorSpace(Rationals(), 3); x := V.4;", "Runtime error in '.': Argument 2 (4) should be in the range [1 .. 3]"],
+    ["V := VectorSpace(Rationals(), 3); x := V.0;", "Runtime error in '.': Argument 2 (0) should be in the range [1 .. 3]"],
+    ["V := VectorSpace(Rationals(), 0); x := V.1;", "Runtime error in '.': Argument 2 (1) should be in the range [1 .. 0]"],
+    ["V := VectorSpace(Rationals(), -1);", "Runtime error in 'VectorSpace': Argument 2 (-1) should be >= 1"],
+    ["V := RSpace(Integers(), -1);", "Runtime error in 'RSpace': Argument 2 (-1) should be >= 1"],
+    ["V := VectorSpace(Integers(), 2);", "Runtime error in 'VectorSpace': Argument 1 is not a field"],
+    ["V := KSpace(Integers(), 2);", "Runtime error in 'KSpace': Argument 1 is not a field"],
+    ["V := RSpace(Integers(), 1/2);", "Runtime error in 'RSpace': Bad argument types Argument types given: RngInt, FldRatElt"],
+    ["V := VectorSpace(5, 2);", "Runtime error in 'VectorSpace': Bad argument types Argument types given: RngIntElt, RngIntElt"],
+    ["V := VectorSpace(Rationals());", "Runtime error in 'VectorSpace': Bad argument types Argument types given: FldRat"],
+    ["V := VectorSpace(Rationals(), true);", "Runtime error in 'VectorSpace': Bad argument types Argument types given: FldRat, BoolElt"],
+    ["V := VectorSpace(Rationals(), 2, 3);", "Runtime error in 'VectorSpace': Bad argument types Argument types given: FldRat, RngIntElt, RngIntElt"],
+    ["V := VectorSpace(Rationals(), 3); x := V![1,2];", "Runtime error in '!': Sequence argument length (2) should be 3 to be coerced into a matrix or vector"],
+    ["V := VectorSpace(Rationals(), 2); x := V![];", "Runtime error in '!': Sequence argument length (0) should be 2 to be coerced into a matrix or vector"],
+    ["V := VectorSpace(Rationals(), 3); x := #V;", "Runtime error in '#': Cardinality is infinite or not feasibly computable"],
+    ["W := RSpace(Integers(), 2); x := #W;", "Runtime error in '#': Cardinality is infinite or not feasibly computable"],
+    ["W := RSpace(Integers(), 2); x := W![1/2, 1];", "Runtime error in '!': Cannot coerce sequence element 1 into the coefficient ring"],
+    ["V := VectorSpace(Rationals(), 2); x := V![\"a\", \"b\"];", "Runtime error in '!': Cannot coerce sequence element 1 into the coefficient ring"],
+    ["V := VectorSpace(Rationals(), 3); x := V!(1/2);", "Runtime error in '!': Illegal coercion LHS: ModTupFld RHS: FldRatElt"],
+    ["W := RSpace(Integers(), 2); x := W!1;", "Runtime error in '!': Illegal coercion LHS: ModTupRng RHS: RngIntElt"],
+    ["V := VectorSpace(Rationals(), 3); x := V!\"a\";", "Runtime error in '!': Illegal coercion LHS: ModTupFld RHS: MonStgElt"],
+    ["V := VectorSpace(Rationals(), 3); x := V!true;", "Runtime error in '!': Illegal coercion LHS: ModTupFld RHS: BoolElt"],
+    ["V := VectorSpace(Rationals(), 3); x := V!Vector([1,2]);", "Runtime error in '!': Arguments have incompatible degrees LHS: ModTupFld RHS: ModTupRngElt"],
+    ["V := VectorSpace(Rationals(), 3); x := RSpace(Integers(),3)!(V.1/2);", "Runtime error in '!': Cannot coerce element from source coefficent ring into the destination coefficient ring"],
+    ["V := VectorSpace(Rationals(), 3); x := Vector([1,2,3]) in V;", "Runtime error in 'in': Arguments are not compatible"],
+    ["V := VectorSpace(Rationals(), 3); x := Vector(Rationals(), [1,2]) in V;", "Runtime error in 'in': Arguments are not compatible"],
+    ["V := VectorSpace(Rationals(), 3); x := 1 in V;", "Runtime error in 'in': Bad argument types"],
+    ["V := VectorSpace(Rationals(), 3); x := V eq VectorSpace(Rationals(), 2);", "Runtime error in 'eq': Arguments are not compatible Argument types given: ModTupFld[FldRat], ModTupFld[FldRat]"],
+    ["V := VectorSpace(Rationals(), 3); x := V eq RSpace(Integers(), 3);", "Runtime error in 'eq': Arguments are not compatible Argument types given: ModTupRng[FldRat], ModTupRng[RngInt]"],
+    ["x := RSpace(Integers(), 2) eq RSpace(Integers(), 3);", "Runtime error in 'eq': Arguments are not compatible Argument types given: ModTupRng[RngInt], ModTupRng[RngInt]"],
+    ["x := RSpace(Integers(), 2) eq VectorSpace(Rationals(), 2);", "Runtime error in 'eq': Arguments are not compatible Argument types given: ModTupRng[RngInt], ModTupRng[FldRat]"],
+    ["V := VectorSpace(Rationals(), 2); x := V eq 1;", "Runtime error in 'eq': Bad argument types Argument types given: ModTupFld[FldRat], RngIntElt"],
+    ["V := VectorSpace(Rationals(), 2); x := V eq Rationals();", "Runtime error in 'eq': Bad argument types Argument types given: ModTupFld[FldRat], FldRat"],
+    ["x := Zero(5);", "Runtime error in 'Zero': Bad argument types Argument types given: RngIntElt"],
+    ["x := Basis(Sym(3));", "Runtime error in 'Basis': Bad argument types Argument types given: GrpPerm"],
+    ["V := VectorSpace(Rationals(), 3); Generators(V);", "the order of a set of vectors is not supported yet"],
+    ["X := {Vector([1,0]), Vector([0,1])}; X;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(), 2); for v in Generators(V) do v; end for;", "the order of a set of vectors is not supported yet"],
+    ["x := Zero(VectorSpace(Rationals(), 0));", "a vector of degree 0 is not supported yet"],
+    ["x := VectorSpace(Rationals(), 0)!0;", "a vector of degree 0 is not supported yet"],
+    ["x := VectorSpace(GF(5), 2);", "VectorSpace over a ring other than the integers or the rationals is not supported yet"],
+    ["x := VectorSpace(Rationals(), 10^9);", "a vector space of degree more than"],
+    ["x := Basis(VectorSpace(Rationals(), 10^4));", "Basis of a vector space of degree more than"],
+    ["x := Generators(RSpace(Integers(), 10^4));", "Generators of a vector space of degree more than"],
+    ["x := Generators(Sym(3));", "Generators of a GrpPerm is not supported yet"],
+    ["V := VectorSpace(Rationals(), 2); x := V![true, false];", "coercion of a sequence of these elements into a vector space is not supported yet"],
+    ["V := VectorSpace(Rationals(), 3); x := [V| [1,2]];", "Runtime error in [ ... ]: Coerce failed for sequence element"],
+    ["W := RSpace(Integers(), 2); x := [W| [1/2, 1]];", "Runtime error in [ ... ]: Coerce failed for sequence element"],
+    ["V := VectorSpace(Rationals(), 3); x := {V| [1,2]};", "Runtime error in { ... }: Cannot coerce argument 1 into the universe"],
+    ["V := VectorSpace(Rationals(), 3); x := {@V| 1/2 @};", "Runtime error in {@ ... @}: Cannot coerce argument 1 into the universe"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Append(S, [1,2]);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Append(S, 1/2);", "Runtime error in 'Append': Cannot coerce element into the universe"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Index(S, [1,2]);", "Runtime error in 'Index': Cannot coerce element into the universe"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := 1 in S;", "Runtime error in 'in': No valid universe containing all elements"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := (1/2) in S;", "Runtime error in 'in': No valid universe containing all elements"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := \"a\" in S;", "Runtime error in 'in': No valid universe containing all elements"],
+    ["V := VectorSpace(Rationals(), 3); S := [V| V.1]; x := Vector(Rationals(), [1,0]) in S;", "Runtime error in 'in': No valid universe containing all elements"],
+    ["V := VectorSpace(Rationals(), 3); x := [V| V.1] cat [V| V.2];", "concatenating sequences over a vector space is not supported yet"],
+    ["V := VectorSpace(Rationals(), 10^4); v := V.1; x := [V| v : i in [1..101]];", "a collection of vectors with more than"],
+    // (astra CORR-7E2-2: a multiset's enumeration, Sprint, a set in a tuple)
+    ["V := VectorSpace(Rationals(),2); for v in {* V.1,V.2 *} do v; end for;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); for v in {* V.2,V.1 *} do v; end for;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); Sprint({V.1,V.2});", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); <{V.1,V.2}>;", "the order of a set of vectors is not supported yet"],
+    ["V := VectorSpace(Rationals(),2); {* V.2, V.1 *};", "the order of a set of vectors is not supported yet"],
+    // (Eltseq of a set of vectors, or of the space: Magma's error, astra CORR-5C2-1)
+    ["V := VectorSpace(Rationals(),2); S := Eltseq({V|});", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetEnum[ModTupFldElt[FldRat]]"],
+    ["V := VectorSpace(Rationals(),2); S := Eltseq({@V|V.1@});", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetIndx[ModTupFldElt[FldRat]]"],
+    ["V := VectorSpace(Rationals(),2); S := Eltseq({*V|*});", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetMulti[ModTupFldElt[FldRat]]"],
+    ["W := RSpace(Integers(),2); S := Eltseq({W|});", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetEnum[ModTupRngElt[RngInt]]"],
+    ["V := VectorSpace(Rationals(),2); S := Eltseq(Generators(V));", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetEnum[ModTupFldElt[FldRat]]"],
+    ["S := Eltseq({Vector([1,2])});", "Runtime error in 'Eltseq': Bad argument types Argument types given: SetEnum[ModTupRngElt[RngInt]]"],
+    ["V := VectorSpace(Rationals(),2); S := Eltseq(V);", "Runtime error in 'Eltseq': Bad argument types Argument types given: ModTupFld[FldRat]"]
+  ];
+  for (const [e, m] of errs) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|AttributeError/.test(o), e + " => " + o);
+  }
+});
+
+test("a collection over a vector space is admitted by its total entries before any vector is coerced or keyed (daybreak2 on 7e2a1348)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  // (degree 10^4 and just enough items to pass the bound on entries: each
+  // refusal comes before the first coercion or set key; one item fewer is
+  // admitted, every item coerced)
+  const f = join(mkdtempSync(join(tmpdir(), "magma-vspace-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "calls = [0]",
+    "coerce, key = m._MVectorSpace._magma_coerce, m._key",
+    "def spy_coerce(self, x):",
+    "    calls[0] += 1",
+    "    return coerce(self, x)",
+    "def spy_key(x):",
+    "    if isinstance(x, m._MVector):",
+    "        calls[0] += 1",
+    "    return key(x)",
+    "m._MVectorSpace._magma_coerce = spy_coerce",
+    "m._key = spy_key",
+    "n = 10 ** 4",
+    "V = m.VectorSpace(m._QQ, n)",
+    "v = V._unit(0)",
+    "k = m._COLLECT_MAX // n + 1",
+    "def attempt(label, f):",
+    "    calls[0] = 0",
+    "    try:",
+    "        f()",
+    "        print(label, 'admitted', calls[0])",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused' if 'entries in all' in str(e) else str(e), calls[0])",
+    "attempt('seq', lambda: m._into_universe([v] * k, V, 'seq'))",
+    "attempt('set', lambda: m._into_universe([v] * k, V, 'set'))",
+    "S = m.MSeq([v] * (k - 1), V)",
+    "attempt('append', lambda: m._lift('Append', S, v))",
+    "attempt('include', lambda: m._lift('Include', S, v))",
+    "attempt('insert', lambda: m._lift('Insert', S, v))",
+    "attempt('index', lambda: m._lift('Index', S, v))",
+    "attempt('assign', lambda: m._assign_path(m.MSeq([v], V), [('idx', k, None)], v))",
+    "attempt('fewer', lambda: m._into_universe([v] * (k - 1), V, 'seq'))",
+    "print('k-1', k - 1)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(60000) });
+  const lines = r.stdout.trim().split("\n");
+  const k1 = Number(lines.pop()!.split(" ")[1]);
+  assert.deepEqual(lines, ["seq refused 0", "set refused 0", "append refused 0", "include refused 0", "insert refused 0", "index admitted 1", "assign refused 0", "fewer admitted " + k1], r.stdout + r.stderr);
+});
