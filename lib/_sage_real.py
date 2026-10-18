@@ -1415,11 +1415,14 @@ def _lit_of(x):
 
 def _to_real(R, x, base=10):
     prec, rnd = R._prec, R._rnd
+    # (at 53 bits to nearest a literal's digits and its value are the same
+    # number: neither is read differently, ambiguous or not)
+    same = prec == 53 and rnd == "RNDN"
     # (an element of RR past the doubles is its 53-bit value, not its float;
     # a decimal literal's, its digits: RealField(100)(1e400) is 1e400)
     big = _rr_big_mp(x)
     if big is not None:
-        lit = _lit_of(x)
+        lit = None if same else _lit_of(x)
         if lit is not None:
             return _parse(R, lit)
         x = big
@@ -1437,7 +1440,7 @@ def _to_real(R, x, base=10):
         _rational_bits(x)
         m, e = _round_q(x.numerator, x.denominator, prec, rnd) if x else (0, 0)
         return RealNumberMP(R, m, e)
-    lit = _lit_of(x)
+    lit = None if same else _lit_of(x)
     if lit is not None:
         return _parse(R, lit)
     if isinstance(x, float):
