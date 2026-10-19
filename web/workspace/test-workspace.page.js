@@ -78,6 +78,14 @@ async function writeCas() {
   await w.write(f.path, "bb", { base: 0 });
   const fr = await w.read(f.path);
   check(dec(fr.content) === "bb" && fr.rev === 1 && fr.entry.size === 2, "a file written, its revision counted");
+  await w.write(f.path, "bb");
+  check((await w.history(f.path)).length === 1, "writing the same bytes again keeps no version");
+  const g = await w.create("/g.txt", { content: "" });
+  await w.write(g.path, "now");
+  check((await w.history(g.path)).length === 1 && (await w.version(g.path, 0)).length === 0, "an empty file written over is kept as a version (CORR-12C-4)");
+  await w.write(g.path, "", { keepEmpty: false });
+  await w.write(g.path, "again", { keepEmpty: false });
+  check((await w.history(g.path)).length === 2, "…but Python's emptying before a write (keepEmpty: false) keeps no empty version");
   check(await fails(w.write(f.path, "c", { base: 0 }), "conflict"), "a file's stale write refused");
   w.close();
 }
@@ -263,7 +271,7 @@ async function migration() {
   await rawPut(w.main, "notebooks", { id: "nb4", name: "Late", mode: "python", cells: [], rev: 1, updated: 8 });
   await rawDel(w.main, "notebooks", "nb2");
   const r4 = await W.migrate(w, localStorage);
-  check((await paths(w)).includes("/Recovered/Late.ipynb") && r4.recovered === 1, "a notebook found later is listed in /Recovered");
+  check((await paths(w)).includes("/Late.ipynb") && r4.notebooks === 1 && r4.recovered === 0, "a notebook found later (an older tab's) is listed at the top, as notebooks are");
   const gone = (await w.list("/")).find((e) => e.ref === "nb2");
   check(gone?.missing === true && r4.missing === 1, "an entry whose notebook is gone is marked missing, and kept");
   check(await fails(w.read(gone.path), "missing"), "…reading it says so");
