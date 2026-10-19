@@ -1271,6 +1271,7 @@ class TextFileStore {
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
 async function open(store, id, kind = "browser") {
+  await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
   ttShow(false);
   current = { id, kind };
@@ -1316,7 +1317,7 @@ async function bindDiskFile(path, doc = null) {
   const { dir, sep, name } = splitPath(path);
   diskFile = { path, dir, sep, name };
   const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
-  if (doc) { nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
+  if (doc) { await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
   await open(store, "file:" + path, "file");
   try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
@@ -1539,6 +1540,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "delete": {
       if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
+      await nb.mayLeave();
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
       await wsForgetNotebook(current.id);
@@ -2058,6 +2060,7 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
 // kept as before.  window.sagebrush.workspace: the workspace as an agent
 // sees it (§8.2), its changes credited to agent:page.
 let ws = null;
+let wsSettled = false;
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
@@ -2066,16 +2069,24 @@ const wsReady = (async () => {
     window.sagebrush.workspace = w.forAgent("agent:page");
     return w;
   } catch (e) { console.warn("workspace:", e); return null; }
+  finally { wsSettled = true; }
 })();
 // (the workspace, or null if it isn't open within a few seconds)
 const wsNow = () => Promise.race([wsReady, new Promise((r) => setTimeout(() => r(null), 5000))]);
 async function wsListNotebook(id, name, mode) {
   try { await wsAdoptNotebook(id, name, mode); } catch (e) { console.warn("workspace:", e); }
 }
-// (the same, its failure the caller's: a full folder, no free name)
+// (the same, its failure the caller's: a full folder, no free name, or the
+// workspace not open yet (LIMIT-900-1); in a browser where it can't be
+// opened at all, notebooks are kept as before it, in IndexedDB, listed
+// from there: nothing to list them in)
 async function wsAdoptNotebook(id, name, mode) {
   const w = await wsNow();
-  if (!w || (await w.pathOf("notebook", id))) return;
+  if (!w) {
+    if (wsSettled && !ws) return;
+    throw new Error("the workspace isn't open yet");
+  }
+  if (await w.pathOf("notebook", id)) return;
   await w.locked(async () => {
     if (await w.pathOf("notebook", id)) return;
     await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python" });

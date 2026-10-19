@@ -1634,15 +1634,26 @@ export function createNotebook(root, opts = {}) {
   let detachedConflict = null;
   // (such saves the page couldn't keep, the latest of each showing: tried
   // again by saved(), which rejects while any is not kept; a save of
-  // another document doesn't make them kept, CORR-E46-1)
+  // another document doesn't make them kept, CORR-E46-1.  Every keeping,
+  // first or again, runs in turn with the saves (saveChain), so an older
+  // one never lands after a newer one, CORR-900-1)
   const unkept = new Map();
+  // (documents left with saves still to make, or not kept: at most
+  // MAX_LEFT; past it, no other document is shown until they are, so what
+  // is held for them is bounded, LIMIT-900-2)
+  const MAX_LEFT = 4;
+  const outstanding = new Set();
+  const leftCount = () => [...outstanding].filter((s) => s !== shown).length;
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); };
   async function keepDetached(key, doc, theirs) {
     try {
       if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
       await detachedConflict(doc, theirs, key);
       unkept.delete(key);
+      leftSettled(key);
     } catch (e) {
       unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      outstanding.add(key);
       emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
@@ -1681,6 +1692,8 @@ export function createNotebook(root, opts = {}) {
     emit("change", doc);
     if (store) {
       let sent = doc;
+      mine.inflight = (mine.inflight ?? 0) + 1;
+      outstanding.add(mine);
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
@@ -1716,7 +1729,7 @@ export function createNotebook(root, opts = {}) {
         if (lastJson === json) lastJson = null;
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -1729,8 +1742,12 @@ export function createNotebook(root, opts = {}) {
       flush();
       await saveChain;
       if (lastSaveError) throw lastSaveError;
-      // (saves of documents no longer shown that couldn't be kept: tried again)
-      for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs);
+      // (saves of documents no longer shown that couldn't be kept: tried
+      // again, in turn with the saves; one kept or replaced meanwhile isn't)
+      if (unkept.size) {
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        await saveChain;
+      }
       if (unkept.size) throw [...unkept.values()].at(-1).error;
       if (!timer && !savesPending) return;
     }
@@ -2183,6 +2200,17 @@ export function createNotebook(root, opts = {}) {
      * such save of one showing of a document, so a later one can go where
      * the first went.  saved() waits for it, and tries again what it failed
      * to keep (rejecting while any isn't kept).  Returns the one it replaces. */
+    /** Before another document is shown: resolves if this one may be left;
+     * else (MAX_LEFT documents left with saves not yet made or kept) tries
+     * those again and rejects, saying why, if they still aren't (LIMIT-900-2). */
+    async mayLeave() {
+      if (leftCount() < MAX_LEFT) return;
+      await saved().catch(() => {});
+      const n = leftCount();
+      if (n >= MAX_LEFT) throw new Error(`changes to ${n} notebooks you left aren't saved or kept yet${unkept.size ? ` (${[...unkept.values()].at(-1).error?.message ?? "not kept"})` : ""}: another opens once they are`);
+    },
+    /** Documents left here with saves not yet made, or not kept (LIMIT-900-2). */
+    get leftOutstanding() { return leftCount(); },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
     detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
     get store() { return store; },
