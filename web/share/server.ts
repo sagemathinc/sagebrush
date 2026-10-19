@@ -201,6 +201,18 @@ async function account(req: Request, env: ShareEnv): Promise<Who | null> {
   return row ? { id: row.account_id, session } : null;
 }
 
+/**
+ * The session a request carries, with its expiry (seconds), for the sync
+ * service (web/sync/server.ts), which authenticates exactly as sharing does.
+ */
+export async function sessionOf(req: Request, env: ShareEnv): Promise<{ id: string; session: string; expires: number } | null> {
+  const t = cookies(req).get(SESSION);
+  if (!t || !env.SHARE_DB) return null;
+  const session = await sha256Hex(t);
+  const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number }>();
+  return row ? { id: row.account_id, session, expires: row.expires } : null;
+}
+
 /** A session cookie, or null if the account is being deleted or was deleted in CoCalc. */
 async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }): Promise<string | null> {
   const db = env.SHARE_DB!;
@@ -630,22 +642,37 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
 
 /** Admin calls are signed: HMAC-SHA256(key, timestamp \n METHOD \n path \n body). */
 async function signed(req: Request, env: ShareEnv, body: string): Promise<boolean> {
-  if (!env.PURGE_KEY) return false;
+  return signedWith(req, env.PURGE_KEY, body);
+}
+/** The same check with another key (the sync service's plan notices use LIMITS_KEY, design/sync-server.md §6). */
+export async function signedWith(req: Request, key: string | undefined, body: string): Promise<boolean> {
+  if (!key) return false;
   const ts = req.headers.get("x-sagebrush-timestamp") ?? "";
   const sig = req.headers.get("x-sagebrush-signature") ?? "";
   if (!/^\d{1,12}$/.test(ts) || Math.abs(now() - Number(ts)) > 300) return false;
-  const want = "sha256=" + (await hmac(env.PURGE_KEY, `${ts}\n${req.method}\n${new URL(req.url).pathname}\n${body}`));
+  const want = "sha256=" + (await hmac(key, `${ts}\n${req.method}\n${new URL(req.url).pathname}\n${body}`));
   return same(sig, want);
 }
 
-/** Start (or resume) deleting all of an account's shared data. */
-async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
+/**
+ * Bind a purge's request id to its account, for good: its record, made if
+ * there is none (pending: the scheduled job runs a pending purge whatever
+ * becomes of this request), and "conflict" if the id already names another
+ * account or operation.  The sync service binds through this too, before it
+ * touches any account object (design/sync-server.md §7.1, CORR-E9C-1).
+ */
+export async function bindPurge(env: ShareEnv, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
   const db = env.SHARE_DB!;
   const h = await accountHash(account);
   await db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES (?1, ?2, ?3, ?4, 'pending', ?5) ON CONFLICT(request_id) DO NOTHING").bind(rid, h, account, kind, now()).run();
   const p = await db.prepare("SELECT account_hash, kind, collection FROM purges WHERE request_id = ?1").bind(rid).first<{ account_hash: string; kind: string; collection: string | null }>();
   // (a request id names one operation: the same id for another account is refused)
-  if (!p || p.account_hash !== h || p.kind !== kind || p.collection !== null) return "conflict";
+  return !p || p.account_hash !== h || p.kind !== kind || p.collection !== null ? "conflict" : "accepted";
+}
+
+/** Start (or resume) deleting all of an account's shared data. */
+async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
+  if ((await bindPurge(env, account, rid, kind)) === "conflict") return "conflict";
   ctx.waitUntil(runPurge(env, rid));
   return "accepted";
 }
