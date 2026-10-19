@@ -20,7 +20,7 @@
 // person does that, from the file browser (§2.4, §8.2).
 import { inTx, req, hex, openWorkspaceDb } from "./db";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 export type Entry = {
@@ -38,8 +38,8 @@ export type Entry = {
   rev?: number;
   /** a data file's own id, which a rename keeps: its versions' (§2.5) */
   fid?: string;
-  /** in Trash: where it was, and when it was put there */
-  trashed?: { from: string; at: number };
+  /** in Trash: where it was, when it was put there, and that time's own id (Undo's, CORR-989-2) */
+  trashed?: { from: string; at: number; id?: string };
   /** a board made from an edited example or a board on the web: its address */
   origin?: string;
   /** a data file recovered from Trash bytes with no entry: from which Trash key, and their SHA-256 (CORR-DF0-1) */
@@ -62,11 +62,25 @@ export class WorkspaceError extends Error {
   constructor(public code: WorkspaceErrorCode, message: string, public current?: unknown) { super(message); }
 }
 
+/** What the board page keeps of a board of this browser's in localStorage, by its id (web/board/page.ts). */
+export const BOARD_KEYS = {
+  local: (id: string) => "sagebrush-board:local:" + id,
+  here: (id: string) => "sagebrush-board:local:" + id + "#here",
+  pending: (id: string) => "sagebrush-workspace-pending:" + id,
+  unread: (id: string) => "sagebrush-workspace-pending-unread:" + id,
+};
 const CHANNEL = "sagebrush-workspace";
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+// (the same entry, put in Trash the same time: each time something is put
+// in Trash has an id of its own, which a clock that ties can't give
+// (CORR-989-2); and the same entry: a data file known by its own id (its
+// key is its path), a document by its id)
+const sameTrashed = (e: Entry, x: Entry) =>
+  !!e.trashed?.id && e.trashed.id === x.trashed?.id &&
+  e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) && e.trashed.from === x.trashed?.from;
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
@@ -232,16 +246,25 @@ export class Workspace {
   }
 
   /** `from` (and, for a folder, everything in it) moved to `to`, which must
-   * be free.  A document whose title was its name gets the new name. */
-  async rename(from: string, to: string): Promise<Entry> {
+   * be free.  A document whose title was its name gets the new name.
+   * `opts.still`, asked holding the lock: false, and nothing is moved
+   * (undefined returned): a rename asked for earlier and since superseded,
+   * as a typed title's by a rename in the file browser (CORR-0B0-1).
+   * `opts.retitle` false: the title left to the page that has the document
+   * open, which saves it with its other changes (written here, it would be
+   * a change from elsewhere to that page: CORR-0B0-2). */
+  async rename(from: string, to: string, opts?: { retitle?: boolean }): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean }): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean } = {}): Promise<Entry | undefined> {
     const a = path(from), b = path(to);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
     if (a === b) return this.mustStat(a);
     if (within(b, a)) throw new WorkspaceError("invalid", "a folder can't go inside itself");
     return this.locked(async () => {
+      if (opts.still && !opts.still()) return undefined;
       const moved = await this.move(a, b, "rename");
-      await this.retitle(moved[0], a);
+      if (opts.retitle !== false) await this.retitle(moved[0], a);
       return moved[0];
     });
   }
@@ -281,14 +304,19 @@ export class Workspace {
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
-      return (await this.move(q, dest, "remove", { from: q, at: this.now() }))[0];
+      return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
     });
   }
 
-  /** What `p` in Trash was, put back where it was (or, if that's taken now, the first free `name (2)`, … there). */
-  async restore(p: string): Promise<Entry> {
+  /** What `p` in Trash was, put back where it was (or, if that's taken now,
+   * the first free `name (2)`, … there).  With `expect` (what remove
+   * returned), only that same entry, put in Trash that time: checked
+   * holding the lock, a WorkspaceError("missing") if it isn't the one
+   * there now, nothing moved (Undo, CORR-0B0-3). */
+  async restore(p: string, expect?: Entry): Promise<Entry> {
     return this.locked(async () => {
       const e = await this.mustStat(p);
+      if (expect && !sameTrashed(e, expect)) throw new WorkspaceError("missing", `${nameOf(expect.trashed?.from ?? expect.path)} was already restored or deleted`);
       if (!e.trashed) throw new WorkspaceError("invalid", within(e.path, TRASH) ? "restore the folder it is in" : `${e.path} isn't in Trash`);
       const from = e.trashed.from, folder = parentOf(from);
       const taken = new Set((await this.list(folder).catch(() => [] as Entry[])).map((x) => x.path));
@@ -369,6 +397,81 @@ export class Workspace {
       });
       this.tell({ ops });
       return freed;
+    });
+  }
+
+  /** Entries in Trash removed for good (§2.4): `paths` (each with what is
+   * in it), or everything in Trash.  Their contents go too: a notebook's
+   * record and its TimeTravel, a board's record and its TimeTravel, a data
+   * file's bytes and its versions.  Only a person may, from the file
+   * browser after confirming: refused for an agent's workspace, and not
+   * offered to agents.  The entries go first, so a failure part way leaves
+   * contents without entries (listed again by reconcile), never entries
+   * without contents.  Logged.  Returns how many entries went. */
+  async emptyTrash(paths?: string[]): Promise<number> {
+    if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can empty Trash");
+    const tops = paths?.map((p) => path(p)) ?? [TRASH];
+    for (const t of tops) if (!within(t, TRASH) || (paths && t === TRASH)) throw new WorkspaceError("invalid", `${t} isn't in Trash`);
+    return this.locked(async () => {
+      const ops: Op[] = [];
+      const gone: Entry[] = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+        const st = tx.objectStore("entries"), out: Entry[] = [];
+        for (const t of tops) {
+          const top: Entry | undefined = t === TRASH ? undefined : await req(st.get(t));
+          if (t !== TRASH && !top) continue;
+          const under: Entry[] = await req(st.getAll(subtree(t)));
+          for (const e of [...(top ? [top] : []), ...under]) {
+            st.delete(e.path);
+            out.push(e);
+          }
+          this.log(tx, ops, { op: "emptyTrash", path: t, kind: top?.kind ?? "folder" });
+        }
+        return out;
+      });
+      // (then their contents, and their histories)
+      const hdb = gone.some((e) => e.kind === "notebook") ? await openHistoryDb() : null;
+      const bdb = gone.some((e) => e.kind === "board") ? await openBoardHistoryDb() : null;
+      const fids = new Set(gone.filter((e) => e.kind === "file" && e.fid).map((e) => e.fid!));
+      for (const e of gone) {
+        if (e.ref === null) continue;
+        try {
+          if (e.kind === "notebook") {
+            await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
+            if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, Infinity])); });
+          } else if (e.kind === "board") {
+            await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
+            // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
+            const pre = "board:local:" + e.ref;
+            if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
+            // (and what the board page keeps of it in localStorage: the copy
+            // from before the workspace, its mark as written here, a closed
+            // page's changes; none of them bring it back, or vouch for a
+            // board under its id)
+            try {
+              const ls = (globalThis as any).localStorage as Storage | undefined;
+              for (const k of Object.values(BOARD_KEYS)) ls?.removeItem(k(e.ref));
+            } catch {}
+          } else if (e.kind === "file") {
+            await inTx(this.ws, "trash", "readwrite", async (tx) => { tx.objectStore("trash").delete(e.ref!); });
+          }
+        } catch (err) { console.warn("workspace: emptying Trash:", err); }
+      }
+      if (fids.size) {
+        await inTx(this.ws, ["versions", "versionBytes", "meta"], "readwrite", async (tx) => {
+          const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+          let freed = 0;
+          for (const fid of fids) {
+            const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
+            for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
+          }
+          const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
+          meta.put(Math.max(0, total - freed), "versionBytes");
+        });
+      }
+      hdb?.close();
+      bdb?.close();
+      this.tell({ ops });
+      return gone.length;
     });
   }
 

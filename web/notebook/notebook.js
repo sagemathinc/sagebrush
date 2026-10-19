@@ -1619,13 +1619,52 @@ export function createNotebook(root, opts = {}) {
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
   let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
-  // the document last known to be the store's (loaded, received, or saved
-  // here): its revision and cells by id, the base of three-way merges with
-  // changes from elsewhere (stores.js: revisions)
-  let synced = null;
+  // The document shown, from when it is loaded until another is (or it is
+  // detached): what is known of it, which its saves keep to, even one still
+  // waiting its turn when another document is shown (CORR-989-1).
+  // - synced: the document last known to be the store's (loaded, received,
+  //   or saved here): its revision and cells by id, the base of three-way
+  //   merges with changes from elsewhere (stores.js: revisions)
+  // - remoteSeen: documents applied from elsewhere so far: a save waiting
+  //   its turn, made before one, is made again from what is here then, which
+  //   has that change merged in, so it never writes the change back over
+  //   (CORR-0B0-2); only while this document is the one shown
+  let shown = { synced: null, remoteSeen: 0 };
+  // (the page's: keeps a save of a document no longer shown that met a change made elsewhere)
+  let detachedConflict = null;
+  // (such saves the page couldn't keep, the latest of each showing: tried
+  // again by saved(), which rejects while any is not kept; a save of
+  // another document doesn't make them kept, CORR-E46-1.  Every keeping,
+  // first or again, runs in turn with the saves (saveChain), so an older
+  // one never lands after a newer one, CORR-900-1)
+  const unkept = new Map();
+  // (documents left with saves still to make, or not kept: at most
+  // MAX_LEFT; past it, no other document is shown until they are, so what
+  // is held for them is bounded, LIMIT-900-2)
+  const MAX_LEFT = 4;
+  const outstanding = new Set();
+  const leftCount = () => [...outstanding].filter((s) => s !== shown).length;
+  // ("left": how many, said whenever it may have changed: the page asks
+  // before closing while there are any, their saves only here)
+  const leftChanged = () => emit("left", leftCount());
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); leftChanged(); };
+  async function keepDetached(key, doc, theirs) {
+    try {
+      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
+      await detachedConflict(doc, theirs, key);
+      unkept.delete(key);
+      leftSettled(key);
+    } catch (e) {
+      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      outstanding.add(key);
+      leftChanged();
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+    }
+  }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
-  const setSynced = (rev, list) => { synced = { rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) }; };
+  const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
+  const setSynced = (rev, list) => { shown.synced = syncedOf(rev, list); };
   function snapshot() {
     return {
       ...meta, mode,
@@ -1651,38 +1690,51 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
-    const doc = snapshot(), json = JSON.stringify(doc);
+    const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
     if (store) {
+      let sent = doc;
+      mine.inflight = (mine.inflight ?? 0) + 1;
+      outstanding.add(mine);
+      leftChanged();
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
       const st = store;
       const start = () => {
-        try { return Promise.resolve(st.save(synced?.rev !== undefined ? { ...doc, baseRev: synced.rev } : doc)); } catch (e) { return Promise.reject(e); }
+        if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
+        const base = mine.synced?.rev;
+        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent)); } catch (e) { return Promise.reject(e); }
       };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
       saveChain = p.then((t) => {
-        if (store !== st) return;
         if (t && typeof t === "object" && t.conflict) {
-          // written elsewhere first: merge that, then save the merge
+          // written elsewhere first: merge that, then save the merge; a
+          // document no longer shown has nothing here to merge into: what
+          // this save had is kept by the page, beside the other, never over
+          // it, before saved() resolves (CORR-B54-1)
+          if (mine !== shown || store !== st) {
+            return keepDetached(mine, sent, t.conflict);
+          }
           if (lastJson === json) lastJson = null;
           applyRemote(t.conflict, true, true);
           return;
         }
+        // (its revision kept for its next save, shown or not)
         const r = t && typeof t === "object" ? t.rev : undefined;
-        if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, doc.cells);
+        if (r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev) mine.synced = syncedOf(r, sent.cells);
+        if (mine !== shown || store !== st) return;
         lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -1695,6 +1747,13 @@ export function createNotebook(root, opts = {}) {
       flush();
       await saveChain;
       if (lastSaveError) throw lastSaveError;
+      // (saves of documents no longer shown that couldn't be kept: tried
+      // again, in turn with the saves; one kept or replaced meanwhile isn't)
+      if (unkept.size) {
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        await saveChain;
+      }
+      if (unkept.size) throw [...unkept.values()].at(-1).error;
       if (!timer && !savesPending) return;
     }
     throw new Error("changed elsewhere each time it was saved");
@@ -1721,6 +1780,8 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     loading = true;
+    shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
+    leftChanged();
     pixels = new PixelBudget();
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
@@ -1761,9 +1822,10 @@ export function createNotebook(root, opts = {}) {
   function applyRemote(doc, keepLocal = true, fromConflict = false) {
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     // an older revision than the synced one (a late message) changes nothing
-    if (keepLocal && rev !== undefined && synced?.rev !== undefined && rev <= synced.rev && !fromConflict) return;
+    if (keepLocal && rev !== undefined && shown.synced?.rev !== undefined && rev <= shown.synced.rev && !fromConflict) return;
+    shown.remoteSeen++;
     loading = true;
-    const base = keepLocal ? synced?.cells ?? null : null;
+    const base = keepLocal ? shown.synced?.cells ?? null : null;
     let dirty = false;
     meta = { ...meta, ...rest };
     if (m && m !== mode) setMode(m, false);
@@ -2138,7 +2200,27 @@ export function createNotebook(root, opts = {}) {
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       return doc;
     },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; },
+    /** A save of a document no longer shown here met a change made
+     * elsewhere: `f(doc, theirs, key)` keeps `doc` (what that save had)
+     * somewhere of its own, never over theirs; `key` is the same for every
+     * such save of one showing of a document, so a later one can go where
+     * the first went.  saved() waits for it, and tries again what it failed
+     * to keep (rejecting while any isn't kept).  Returns the one it replaces. */
+    /** Before another document is shown: resolves if this one may be left;
+     * else (MAX_LEFT documents left with saves not yet made or kept) tries
+     * those again and rejects, saying why, if they still aren't (LIMIT-900-2). */
+    async mayLeave() {
+      if (leftCount() < MAX_LEFT) return;
+      await saved().catch(() => {});
+      const n = leftCount();
+      if (n >= MAX_LEFT) throw Object.assign(new Error(`changes to ${n} notebooks you left aren't saved or kept yet${unkept.size ? ` (${[...unkept.values()].at(-1).error?.message ?? "not kept"})` : ""}: another opens once they are`), { leaving: true });
+    },
+    /** Documents left here with saves not yet made, or not kept (LIMIT-900-2). */
+    get leftOutstanding() { return leftCount(); },
+    /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
+    get unkeptCount() { return unkept.size; },
+    onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },

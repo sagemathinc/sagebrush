@@ -141,7 +141,8 @@ async function trash() {
   await w.create("/d/new.txt", { content: "N2" });
   await w.remove("/d/new.txt");
   check((await paths(w, "/Trash", false)).join() === "/Trash/new (2).txt,/Trash/new.txt", "two things of one name in Trash");
-  check(typeof w.emptyTrash === "undefined" && typeof w.purge === "undefined", "no verb removes contents for good");
+  const ag = w.forAgent("agent:x");
+  check(typeof ag.emptyTrash === "undefined" && typeof ag.dropVersions === "undefined" && typeof ag.forget === "undefined", "no agent verb removes contents for good");
   w.close();
 }
 
@@ -534,8 +535,119 @@ async function recoveryConflict() {
   v.close();
 }
 
+async function emptying() {
+  const w = await fresh();
+  const nb = await w.create("/t/n.ipynb");
+  const bd = await w.create("/t/b.board.json");
+  await w.create("/t/f.txt", { content: "v1" });
+  await w.write("/t/f.txt", "v2");
+  const keep = await w.create("/keep.txt", { content: "stay" });
+  const fid = (await w.stat("/t/f.txt")).fid;
+  // (rows of each document's TimeTravel, as the pages keep them)
+  const putRow = (name, nbKey) => new Promise((ok) => { const r = indexedDB.open(name); r.onsuccess = () => { const tx = r.result.transaction("history", "readwrite"); tx.objectStore("history").put({ nb: nbKey, time: 1, env: {} }); tx.oncomplete = () => { r.result.close(); ok(); }; }; });
+  const countRows = (name, nbKey) => new Promise((ok) => { const r = indexedDB.open(name); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").count(IDBKeyRange.bound([nbKey, -Infinity], [nbKey, Infinity])); q.onsuccess = () => { r.result.close(); ok(q.result); }; }; });
+  await new Promise((ok) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => r.result.createObjectStore("history", { keyPath: ["nb", "time"] }); r.onsuccess = () => { r.result.close(); ok(); }; });
+  await new Promise((ok) => { const r = indexedDB.open("sagebrush-board-history"); r.onupgradeneeded = () => r.result.createObjectStore("history", { keyPath: ["nb", "time"] }); r.onsuccess = () => { r.result.close(); ok(); }; });
+  await putRow("sagebrush-history", nb.ref);
+  await putRow("sagebrush-board-history", "board:local:" + bd.ref + ":0123456789abcdef0123456789abcdef");
+  await w.remove("/t");
+  w.actor = "agent:helper";
+  check(await fails(w.emptyTrash(), "invalid"), "an agent can't empty Trash");
+  w.actor = "person";
+  check(await fails(w.emptyTrash(["/keep.txt"]), "invalid"), "emptyTrash takes only what is in Trash");
+  check((await w.emptyTrash()) === 4, "emptying Trash removes its entries (a folder and three)");
+  check((await paths(w, "/Trash")).length === 0 && (await w.stat("/keep.txt")) !== undefined, "…Trash is empty, the rest stays");
+  check((await rawGet(w.main, "notebooks", nb.ref)) === undefined && (await rawGet(w.ws, "boards", bd.ref)) === undefined && (await rawKeys(w.ws, "trash")).length === 0, "…their contents are gone");
+  check((await countRows("sagebrush-history", nb.ref)) === 0, "…the notebook's TimeTravel too");
+  check((await countRows("sagebrush-board-history", "board:local:" + bd.ref + ":0123456789abcdef0123456789abcdef")) === 0, "…and the board's");
+  const vs = await new Promise((ok) => { const q = w.ws.transaction("versions").objectStore("versions").index("byFile").count(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])); q.onsuccess = () => ok(q.result); });
+  check(vs === 0, "…and the file's versions");
+  check((await w.ops()).some((o) => o.op === "emptyTrash"), "emptying Trash is logged");
+  // one item of Trash only
+  await w.remove("/keep.txt");
+  await w.create("/other.txt", { content: "o" });
+  await w.remove("/other.txt");
+  check((await w.emptyTrash(["/Trash/keep.txt"])) === 1 && (await w.stat("/Trash/other.txt")) !== undefined, "emptying one item leaves the rest of Trash");
+  check(typeof (w.forAgent("agent:x")).emptyTrash === "undefined", "the agent facade has no emptyTrash");
+  w.close();
+}
+
+// Undo of Move to Trash: that entry, put in Trash that time, only
+// (CORR-0B0-3); a rename asked for earlier and superseded, not made
+// (CORR-0B0-1); a rename that leaves the title to the page (CORR-0B0-2)
+async function intents() {
+  const w = await fresh();
+  await w.create("/undo.txt", { content: "original" });
+  const t = await w.remove("/undo.txt");
+  await w.restore("/Trash/undo.txt");
+  await w.rename("/undo.txt", "/original-moved.txt");
+  await w.create("/undo.txt", { content: "UNRELATED" });
+  const t2 = await w.remove("/undo.txt");
+  check(t2.path === t.path, "(a different file in Trash at the same path)");
+  check(await fails(w.restore(t.path, t), "missing"), "Undo of a file restored, renamed, and its name's new file trashed: refused");
+  check(dec((await w.read("/Trash/undo.txt")).content) === "UNRELATED" && (await w.stat("/undo.txt")) === undefined && dec((await w.read("/original-moved.txt")).content) === "original", "…nothing moved");
+  check((await w.restore(t2.path, t2)).path === "/undo.txt", "Undo of the one there now restores it");
+  // a document: the same id trashed again later is another time in Trash
+  const nb = await w.create("/n.ipynb");
+  const tn = await w.remove("/n.ipynb");
+  await w.restore(tn.path);
+  const tn2 = await w.remove("/n.ipynb");
+  check(tn2.ref === nb.ref && await fails(w.restore(tn.path, tn), "missing"), "Undo of a notebook since restored and trashed again: refused");
+  check((await w.restore(tn2.path, tn2)).path === "/n.ipynb", "…and of the latest time, restored");
+  // a folder (no id of its own): when it was made and trashed
+  await w.mkdir("/d");
+  const td = await w.remove("/d");
+  await w.restore(td.path);
+  await w.rename("/d", "/d-moved");
+  await w.mkdir("/d");
+  await w.remove("/d");
+  check(await fails(w.restore(td.path, td), "missing") && (await w.stat("/d-moved")) !== undefined, "Undo of a folder whose name is now another folder's in Trash: refused");
+  // a clock that ties (CORR-989-2): a folder (no id, no fid), restored and
+  // moved away, its name's new folder trashed at the same time; and one
+  // file put in Trash twice at the same time: each time is its own
+  {
+    const t = Date.now(), wt = await W.Workspace.open({ name: `ws-test-tied-${n}`, mainName: `main-test-tied-${n}`, now: () => t });
+    await wt.mkdir("/collision");
+    await wt.create("/collision/original.txt", { content: "ORIGINAL" });
+    const old = await wt.remove("/collision");
+    await wt.restore(old.path);
+    await wt.rename("/collision", "/original-kept");
+    await wt.mkdir("/collision");
+    await wt.create("/collision/replacement.txt", { content: "UNRELATED" });
+    const repl = await wt.remove("/collision");
+    check(await fails(wt.restore(old.path, old), "missing") && (await wt.stat("/Trash/collision/replacement.txt")) !== undefined && (await wt.stat("/collision")) === undefined, "same clock: Undo of a folder whose name is another folder's in Trash now, refused: " + JSON.stringify([old.trashed, repl.trashed]));
+    await wt.create("/same.txt", { content: "s" });
+    const once = await wt.remove("/same.txt");
+    await wt.restore(once.path);
+    const twice = await wt.remove("/same.txt");
+    check(await fails(wt.restore(once.path, once), "missing"), "same clock: Undo of the first time a file went to Trash, after it was restored and trashed again: refused");
+    check((await wt.restore(twice.path, twice)).path === "/same.txt", "…of the second, restored");
+    wt.close();
+  }
+  // superseded: nothing moved, undefined
+  check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => false })) === undefined && (await w.stat("/n.ipynb")) !== undefined, "a rename superseded by the time it holds the lock: not made");
+  check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => true }))?.path === "/m.ipynb", "…and one still current, made");
+  // the title left to the page
+  const rec = await w.read("/m.ipynb");
+  await w.write("/m.ipynb", { ...rec.content, name: "m" }, { base: rec.rev });
+  await w.rename("/m.ipynb", "/k.ipynb", { retitle: false });
+  check((await w.read("/k.ipynb")).content.name === "m", "retitle: false leaves the notebook's name to the page");
+  const rk = await w.read("/k.ipynb");
+  await w.write("/k.ipynb", { ...rk.content, name: "k" }, { base: rk.rev });
+  await w.rename("/k.ipynb", "/j.ipynb");
+  check((await w.read("/j.ipynb")).content.name === "j", "…which a rename otherwise makes its new name (its name having been its file's)");
+  // emptying Trash of a board: what the board page keeps of it in localStorage goes too, another board's stays
+  const gone = await w.create("/gone.board.json"), kept = await w.create("/kept.board.json");
+  for (const b of [gone, kept]) for (const k of Object.values(W.BOARD_KEYS)) localStorage.setItem(k(b.ref), "x");
+  await w.remove("/gone.board.json");
+  await w.emptyTrash();
+  check(Object.values(W.BOARD_KEYS).every((k) => localStorage.getItem(k(gone.ref)) === null), "emptying Trash of a board removes its copy from before, its mark as written here, and a closed page's changes");
+  check(Object.values(W.BOARD_KEYS).every((k) => localStorage.getItem(k(kept.ref)) === "x"), "…and not another board's");
+  w.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, folderLimit, migrationFull]) {
+  for (const t of [intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

@@ -49,7 +49,8 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt } from "../workspace/index";
+import { mountBrowser } from "../workspace/browser";
 import { within } from "./idb-open";
 
 const q = new URLSearchParams(location.search);
@@ -100,12 +101,14 @@ function localDoc(id: string): BoardDoc | null {
   }
 }
 /** A new board of this browser's, written, listed, and read back as written:
- * its id; null if storage refused any of it (and nothing of it left) */
-function makeLocal(d: BoardDoc): string | null {
+ * its id; null if storage refused any of it (and nothing of it left).
+ * `here`: marked as written here (as makeInWorkspace's: a copy no more
+ * than what it copies, CORR-30D-1). */
+function makeLocal(d: BoardDoc, here = true): string | null {
   const id = hex(6), key = localKey(id), text = JSON.stringify(d);
   try {
     localStorage.setItem(key, text);
-    localStorage.setItem(key + "#here", "1");
+    if (here) localStorage.setItem(key + "#here", "1");
     if (localStorage.getItem(key) !== text || !listLocal(id, d) || !localBoards().some((b) => b.id === id)) throw new Error(STORAGE_REFUSED);
     return id;
   } catch {
@@ -632,7 +635,7 @@ const host: BoardHost = {
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
   newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
-  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   // (an exported file's or a frame's empty board opens as any other)
   editBlank: !file,
   // the function search beside a code item being written: the notebook's
@@ -660,6 +663,59 @@ requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstP
 export { mountBoard, host, mounted };
 // (for a host whose documents are kept elsewhere: a copy in this browser first; the tests' fake remote)
 export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
+
+// The file browser (design §4): a sidebar on the left, over the board's
+// left edge (which moves aside), shown and hidden by Files in the top bar,
+// remembered with the notebook page's
+if (ws && local) {
+  const side = document.createElement("div");
+  side.id = "wssidebar";
+  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:272px;border-right:1px solid #d4d4cb;z-index:30";
+  side.hidden = true;
+  document.body.append(side);
+  const btn = document.createElement("button");
+  btn.textContent = "Files";
+  btn.title = "Your notebooks, boards and files (in this browser)";
+  btn.setAttribute("aria-pressed", "false");
+  btn.dataset.sbb = "files";
+  document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
+  const boardEl = document.getElementById("board")!;
+  let browser: ReturnType<typeof mountBrowser> | null = null;
+  const phone = () => matchMedia("(max-width: 640px)").matches;
+  const show = (on: boolean) => {
+    side.hidden = !on;
+    boardEl.style.left = on && !phone() ? "272px" : "";
+    side.style.width = phone() ? "" : "272px";
+    side.style.right = phone() ? "0" : "";
+    btn.setAttribute("aria-pressed", String(on));
+    try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
+    dispatchEvent(new Event("resize"));
+    if (on && !browser) browser = mountBrowser(side, {
+      ws,
+      current: () => ({ kind: "board", ref: source.slice(6) }),
+      open(e, how) {
+        const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+        if (how === "tab") return void window.open(url, "_blank", "noopener");
+        if (e.kind === "board" && e.ref === source.slice(6)) return;
+        void wsFlush().then(() => location.assign(url));
+      },
+      close: () => show(false),
+      // (this board renamed here: its title follows, saved by this page as
+      // its other changes are, never written beside them: CORR-0B0-2)
+      retitles: (e) => e.kind === "board" && e.ref === source.slice(6),
+      renamed(e, was) {
+        if (e.kind === "board" && e.ref === source.slice(6)) {
+          const base = (p: string) => splitExt(nameOf(p))[0];
+          void mounted.retitle(base(e.path), base(was));
+        }
+      },
+    });
+  };
+  btn.onclick = () => show(side.hidden !== false);
+  let pref: string | null = null;
+  try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
+  if (pref === "1") show(true);
+}
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
