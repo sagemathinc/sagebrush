@@ -13,6 +13,9 @@ for f in nf.py poly.py linalg.py preparse.py; do pairs="$pairs lib/sagebrush/$f:
 # (and Sage mode's packages, packages/<name>/py/*.py, which lib/ no longer
 # has: scripts/packages.mjs; the CPython package keeps them as before)
 for f in packages/cremona-small/py/*.py; do pairs="$pairs $f:$DEST/_sagelib/${f##*/}"; done
+# (and the workspace verbs' schema, for sagebrush-mcp's workspace tools:
+# web/workspace/schema.json, written by web/workspace/verbs.ts)
+[ -f web/workspace/schema.json ] && pairs="$pairs web/workspace/schema.json:$DEST/workspace_schema.json"
 bad=0
 for pair in $pairs; do
   src=${pair%%:*}; dst=${pair#*:}

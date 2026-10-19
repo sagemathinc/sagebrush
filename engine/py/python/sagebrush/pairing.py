@@ -41,14 +41,14 @@ import struct
 import threading
 import time
 
-from sagebrush.workspace_tools import NotConnected, PageError, loads_strict, strict_json
+from sagebrush.workspace_tools import LIMITS, NotConnected, PageError, loads_strict, strict_json
 
 PATH = "/sagebrush"
 PROTOCOL = 1
 ORIGINS = ("https://sagebrush.space",)
 #: a frame's payload (and a fragmented message's) at most this many bytes:
 #: 8 MiB of contents as base64, with the JSON around it
-MAX_FRAME = 12 * 2**20
+MAX_FRAME = LIMITS["maxFrameBytes"]  # (12 MiB: web/workspace/schema.json)
 MAX_HEADER = 16 * 1024
 #: before the hello has paired a connection, a message is at most this big
 #: (a hello is a few hundred bytes): an unpaired connection can make the
@@ -59,7 +59,7 @@ CHUNK = 64 * 1024
 CODE_SECONDS = 300
 CODE_TRIES = 5
 HELLO_SECONDS = 30
-IN_FLIGHT = 8
+IN_FLIGHT = LIMITS["inFlight"]
 #: connections still in their handshake or hello at once; more are closed at once
 UNPAIRED = 8
 _GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
