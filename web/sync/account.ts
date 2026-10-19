@@ -1516,12 +1516,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.wakeBy(Date.now() + 1000);
   }
 
+  /** Tests only (SYNC_TEST_PIN_MS bound): make knownKeys this slow, as an overloaded object is. */
+  private slowKnownMs = 0;
+  async testSlowKnown(a: { ms: number }): Promise<void> {
+    if (testMode(this.env)) this.slowKnownMs = a.ms;
+  }
+
   /**
    * Which of these R2 keys this account is responsible for (§9's inventory):
    * a holding's, a reservation's, or one already in its outbox.  An account
    * with no storage knows none.
    */
   async knownKeys(a: { keys: string[] }): Promise<{ known: string[]; statements: number }> {
+    if (testMode(this.env) && this.slowKnownMs) await new Promise((r) => setTimeout(r, this.slowKnownMs));
     if (!this.exists()) return { known: [], statements: 0 };
     // (set-wise: one statement per KNOWN_CHUNK keys, LIMIT-268-2)
     const known: string[] = [];

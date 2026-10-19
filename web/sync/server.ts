@@ -397,11 +397,27 @@ async function adminSyncPurgeStatus(req: Request, env: Env, rid: string, account
  * late commit, whenever it lands, even after its account is deleted or
  * turned on again: a live account keeps every key it knows.
  */
-export async function syncScheduled(env: Env): Promise<{ pages: number; checked: number; deleted: number; calls: number; pruned: number }> {
-  const out = { pages: 0, checked: 0, deleted: 0, calls: 0, pruned: 0 };
+export async function syncScheduled(env: Env, opts: { deadlineMs?: number; prefix?: string } = {}): Promise<{ pages: number; checked: number; deleted: number; calls: number; pruned: number; stopped: boolean }> {
+  const out = { pages: 0, checked: 0, deleted: 0, calls: 0, pruned: 0, stopped: false };
   if (!env.SYNC_ACCOUNT || !env.SHARE_DB || !env.SHARE_BUCKET) return out;
   const db = env.SHARE_DB;
   const test = testMode(env);
+  // (a wall-clock bound on the whole run, LIMIT-SYNC-CRON-1: every call it makes, D1, R2 or an
+  // account object, starts only before the deadline and is waited for only until it; past it the
+  // run stops where it is.  Each step is safe to stop after: a prune or a delete that lands late
+  // only does what the run meant, and a page's cursor moves only after the page is done)
+  const deadline = Date.now() + (test && opts.deadlineMs !== undefined ? opts.deadlineMs : INVENTORY_DEADLINE_MS);
+  const step = async <T>(call: () => Promise<T>): Promise<{ v: T } | null> => {
+    // (once stopped, stopped: a timer may fire a moment before the clock reads the deadline)
+    if (out.stopped || Date.now() >= deadline) {
+      out.stopped = true;
+      return null;
+    }
+    out.calls++;
+    const r = await beforeDeadline(call(), deadline);
+    if (!r) out.stopped = true;
+    return r;
+  };
   const [page, pages] = test ? [50, 2] : [INVENTORY_PAGE, INVENTORY_PAGES];
   const old = Date.now() - (test ? 1000 : INVENTORY_AGE_MS);
   // CoCalc's purge receipts past their polling lifetime (CORR-1C2-1): 30 days after they finished,
@@ -415,19 +431,24 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
     ["DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE state = 'deleting' AND created < ?1 LIMIT ?2)", nowS - (test ? 6 : (3 * RECEIPT_TTL_MS) / 1000)],
   ] as const) {
     for (let n = 0; n < prunePages; n++) {
-      const r = (await db.prepare(sql).bind(before, prunePage).run()) as unknown as { meta?: { changes?: number } };
-      out.calls++;
-      const changed = r?.meta?.changes ?? 0;
+      const r = await step(() => db.prepare(sql).bind(before, prunePage).run() as unknown as Promise<{ meta?: { changes?: number } }>);
+      if (!r) return out;
+      const changed = r.v?.meta?.changes ?? 0;
       out.pruned += changed;
       if (changed < prunePage) break;
     }
   }
-  // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still fits)
-  const worst = 2 + 1 + page + 1;
+  // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still
+  // fits: the cursor read and the list, the account lookup, an account call per object, the delete
+  // and the cursor write)
+  const worst = 2 + 1 + page + 1 + 1;
   for (let n = 0; n < pages && out.calls + worst <= INVENTORY_CALLS; n++) {
-    const at = await db.prepare("SELECT v FROM meta WHERE k = 'sync_inventory_cursor'").first<{ v: string }>();
-    const l = await env.SHARE_BUCKET.list({ prefix: "s/", limit: page, ...(at?.v ? { cursor: at.v } : {}) });
-    out.calls += 2;
+    const at = await step(() => db.prepare("SELECT v FROM meta WHERE k = 'sync_inventory_cursor'").first<{ v: string }>());
+    if (!at) return out;
+    const cursor = at.v?.v;
+    const listed = await step(() => env.SHARE_BUCKET!.list({ prefix: test && opts.prefix ? opts.prefix : "s/", limit: page, ...(cursor ? { cursor } : {}) }));
+    if (!listed) return out;
+    const l = listed.v;
     const byPrefix = new Map<string, string[]>();
     for (const o of l.objects) {
       if (new Date(o.uploaded).valueOf() > old) continue;
@@ -437,24 +458,25 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
     const known = new Set<string>();
     if (byPrefix.size) {
       // one lookup for the whole page, by the indexed prefix
-      const accounts = (await db.prepare("SELECT account_hash, prefix, state FROM sync_accounts WHERE prefix IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...byPrefix.keys()])).all<{ account_hash: string; prefix: string; state: string }>()).results;
-      out.calls++;
-      // one call to each live account the page names, with its keys
-      for (const a of accounts) {
+      const found = await step(() => db.prepare("SELECT account_hash, prefix, state FROM sync_accounts WHERE prefix IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...byPrefix.keys()])).all<{ account_hash: string; prefix: string; state: string }>());
+      if (!found) return out;
+      // one call to each live account the page names, with its keys; a run that stops before all
+      // have answered deletes nothing of the page (a key a slow account knows must not be lost)
+      for (const a of found.v.results) {
         if (a.state === "purged") continue;
-        for (const k of (await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + a.account_hash)).knownKeys({ keys: byPrefix.get(a.prefix) ?? [] })).known) known.add(k);
-        out.calls++;
+        const r = await step(() => env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + a.account_hash)).knownKeys({ keys: byPrefix.get(a.prefix) ?? [] }));
+        if (!r) return out;
+        for (const k of r.v.known) known.add(k);
       }
       // one delete for the page
       const gone = [...byPrefix.values()].flat().filter((k) => !known.has(k));
       if (gone.length) {
-        await env.SHARE_BUCKET.delete(gone);
-        out.calls++;
+        if (!(await step(() => env.SHARE_BUCKET!.delete(gone)))) return out;
         out.deleted += gone.length;
       }
     }
     // (the cursor moves only past a page done in full)
-    await db.prepare("INSERT INTO meta (k, v) VALUES ('sync_inventory_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(l.truncated ? (l.cursor ?? "") : "").run();
+    if (!(await step(() => db.prepare("INSERT INTO meta (k, v) VALUES ('sync_inventory_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(l.truncated ? (l.cursor ?? "") : "").run()))) return out;
     out.pages++;
     out.checked += l.objects.length;
     if (!l.truncated) break;
@@ -463,6 +485,23 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
 }
 /** The inventory's pages: objects in each, at most this many a run, and at most this many calls a run (LIMIT-268-1). */
 const INVENTORY_PAGE = 100, INVENTORY_PAGES = 5, INVENTORY_CALLS = 400;
+/**
+ * How long a run may take (LIMIT-SYNC-CRON-1), the whole of it: no call starts past it, and none is
+ * waited for beyond it.  Cloudflare ends a cron at 15 minutes; this leaves 5.
+ */
+const INVENTORY_DEADLINE_MS = 10 * 60_000;
+/** A call's answer, or null if the deadline passes first: a late answer is then let go (disposed). */
+async function beforeDeadline<T>(p: Promise<T>, deadline: number): Promise<{ v: T } | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((r) => (timer = setTimeout(() => r(null), Math.max(0, deadline - Date.now()))));
+  try {
+    const r = await Promise.race([p.then((v) => ({ v })), late]);
+    if (r === null) p.then((x) => (x as Partial<Disposable> | null)?.[Symbol.dispose]?.(), () => {});
+    return r;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 /** How old an object must be before the inventory may delete it: far beyond any upload's reservation. */
 const INVENTORY_AGE_MS = 2 * 86400_000;
 /** How long CoCalc may poll a purge's status after it finished (CORR-1C2-1). */
