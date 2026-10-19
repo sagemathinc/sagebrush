@@ -10,14 +10,19 @@ import { TRASH, freePath, join, nameOf, parentOf, splitExt, within } from "./pat
 
 export type BrowserHost = {
   ws: Workspace;
-  /** The path of the document open in the page, if any. */
-  current?: () => string | undefined;
+  /** The document open in the page, if any: known by its id, wherever it is
+   * moved to meanwhile (here, or in another tab). */
+  current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
   upload?(files: File[], folder: string): Promise<void>;
-  /** An entry renamed or moved here (the page retitles what it has open). */
-  renamed?(e: Entry): void;
+  /** An entry about to be renamed here: its rename asked for anywhere else on the page is superseded. */
+  renaming?(e: Entry): void;
+  /** Whether the page has this document open and retitles it itself (in renamed), saved with its other changes. */
+  retitles?(e: Entry): boolean;
+  /** An entry renamed or moved here, from `was` (the page retitles what it has open). */
+  renamed?(e: Entry, was: string): void;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
 };
@@ -200,9 +205,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       l.push(e);
     }
     for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || a.path.localeCompare(b.path));
+    const cur = host.current?.();
+    curPath = cur ? entries.find((e) => e.kind === cur.kind && e.ref === cur.ref)?.path : undefined;
     render();
   }
   const children = (folder: string) => byParent.get(folder) ?? [];
+  // (the open document's path, as of the latest refresh)
+  let curPath: string | undefined;
 
   function metaOf(e: Entry) {
     if (e.missing) return "missing";
@@ -216,7 +225,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     r.setAttribute("role", "treeitem");
     r.dataset.path = e.path;
     r.style.paddingLeft = 8 + depth * 16 + "px";
-    if (host.current?.() === e.path) r.classList.add("cur");
+    if (curPath === e.path) r.classList.add("cur");
     if (e.missing) r.classList.add("missing");
     const isOpen = e.kind === "folder" && (open.has(e.path) || query !== "");
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
@@ -346,10 +355,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }
 
   async function toTrash(e: Entry) {
-    if (host.current?.() && within(host.current()!, e.path)) return say("That's open here: open something else first");
+    const cur = host.current?.(), at = cur ? await w.pathOf(cur.kind, cur.ref).catch(() => undefined) : undefined;
+    if (at && within(at, e.path)) return say("That's open here: open something else first");
     try {
       const t = await w.remove(e.path);
-      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path).catch(fail).then(refresh));
+      // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
+      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).catch(fail).then(refresh));
     } catch (err) { fail(err); }
     refresh();
   }
@@ -371,7 +382,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       done = true;
       const v = input.value.trim();
       if (keep && v && v !== base) {
-        try { host.renamed?.(await w.rename(e.path, join(parentOf(e.path), v + ext))); } catch (err) { fail(err); }
+        host.renaming?.(e);
+        try {
+          // (a document renamed since the row was drawn, as by its typed title: where it is now)
+          const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? (await w.pathOf(e.kind, e.ref)) ?? e.path : e.path;
+          host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e) }), from);
+        } catch (err) { fail(err); }
       }
       refresh();
     };

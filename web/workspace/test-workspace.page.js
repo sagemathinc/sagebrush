@@ -572,8 +572,60 @@ async function emptying() {
   w.close();
 }
 
+// Undo of Move to Trash: that entry, put in Trash that time, only
+// (CORR-0B0-3); a rename asked for earlier and superseded, not made
+// (CORR-0B0-1); a rename that leaves the title to the page (CORR-0B0-2)
+async function intents() {
+  const w = await fresh();
+  await w.create("/undo.txt", { content: "original" });
+  const t = await w.remove("/undo.txt");
+  await w.restore("/Trash/undo.txt");
+  await w.rename("/undo.txt", "/original-moved.txt");
+  await w.create("/undo.txt", { content: "UNRELATED" });
+  const t2 = await w.remove("/undo.txt");
+  check(t2.path === t.path, "(a different file in Trash at the same path)");
+  check(await fails(w.restore(t.path, t), "missing"), "Undo of a file restored, renamed, and its name's new file trashed: refused");
+  check(dec((await w.read("/Trash/undo.txt")).content) === "UNRELATED" && (await w.stat("/undo.txt")) === undefined && dec((await w.read("/original-moved.txt")).content) === "original", "…nothing moved");
+  check((await w.restore(t2.path, t2)).path === "/undo.txt", "Undo of the one there now restores it");
+  // a document: the same id trashed again later is another time in Trash
+  const nb = await w.create("/n.ipynb");
+  const tn = await w.remove("/n.ipynb");
+  await w.restore(tn.path);
+  const tn2 = await w.remove("/n.ipynb");
+  check(tn2.ref === nb.ref && await fails(w.restore(tn.path, tn), "missing"), "Undo of a notebook since restored and trashed again: refused");
+  check((await w.restore(tn2.path, tn2)).path === "/n.ipynb", "…and of the latest time, restored");
+  // a folder (no id of its own): when it was made and trashed
+  await w.mkdir("/d");
+  const td = await w.remove("/d");
+  await w.restore(td.path);
+  await w.rename("/d", "/d-moved");
+  await w.mkdir("/d");
+  await w.remove("/d");
+  check(await fails(w.restore(td.path, td), "missing") && (await w.stat("/d-moved")) !== undefined, "Undo of a folder whose name is now another folder's in Trash: refused");
+  // superseded: nothing moved, undefined
+  check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => false })) === undefined && (await w.stat("/n.ipynb")) !== undefined, "a rename superseded by the time it holds the lock: not made");
+  check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => true }))?.path === "/m.ipynb", "…and one still current, made");
+  // the title left to the page
+  const rec = await w.read("/m.ipynb");
+  await w.write("/m.ipynb", { ...rec.content, name: "m" }, { base: rec.rev });
+  await w.rename("/m.ipynb", "/k.ipynb", { retitle: false });
+  check((await w.read("/k.ipynb")).content.name === "m", "retitle: false leaves the notebook's name to the page");
+  const rk = await w.read("/k.ipynb");
+  await w.write("/k.ipynb", { ...rk.content, name: "k" }, { base: rk.rev });
+  await w.rename("/k.ipynb", "/j.ipynb");
+  check((await w.read("/j.ipynb")).content.name === "j", "…which a rename otherwise makes its new name (its name having been its file's)");
+  // emptying Trash of a board: what the board page keeps of it in localStorage goes too, another board's stays
+  const gone = await w.create("/gone.board.json"), kept = await w.create("/kept.board.json");
+  for (const b of [gone, kept]) for (const k of Object.values(W.BOARD_KEYS)) localStorage.setItem(k(b.ref), "x");
+  await w.remove("/gone.board.json");
+  await w.emptyTrash();
+  check(Object.values(W.BOARD_KEYS).every((k) => localStorage.getItem(k(gone.ref)) === null), "emptying Trash of a board removes its copy from before, its mark as written here, and a closed page's changes");
+  check(Object.values(W.BOARD_KEYS).every((k) => localStorage.getItem(k(kept.ref)) === "x"), "…and not another board's");
+  w.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

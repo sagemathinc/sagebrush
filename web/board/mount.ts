@@ -2186,6 +2186,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   return {
     board,
     bench,
+    /** The board's title made `t` if it is `was` (its file renamed by the
+     * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
+    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false) : Promise.resolve(null)),
     /** Unmount: what is being written is kept first; then nothing of the
      * board is left (its listeners and effects, the code engine and its
      * interpreter, TimeTravel's history, its elements; its stylesheet with

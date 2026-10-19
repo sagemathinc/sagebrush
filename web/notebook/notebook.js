@@ -1623,6 +1623,10 @@ export function createNotebook(root, opts = {}) {
   // here): its revision and cells by id, the base of three-way merges with
   // changes from elsewhere (stores.js: revisions)
   let synced = null;
+  // (documents applied from elsewhere so far: a save waiting its turn, made
+  // before one, is made again from what is here then, which has that change
+  // merged in, so it never writes the change back over: CORR-0B0-2)
+  let remoteSeen = 0;
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
   const setSynced = (rev, list) => { synced = { rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) }; };
@@ -1651,17 +1655,19 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
-    const doc = snapshot(), json = JSON.stringify(doc);
+    const doc = snapshot(), json = JSON.stringify(doc), seen = remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
     if (store) {
+      let sent = doc;
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
       const st = store;
       const start = () => {
-        try { return Promise.resolve(st.save(synced?.rev !== undefined ? { ...doc, baseRev: synced.rev } : doc)); } catch (e) { return Promise.reject(e); }
+        if (seen !== remoteSeen) sent = snapshot();
+        try { return Promise.resolve(st.save(synced?.rev !== undefined ? { ...sent, baseRev: synced.rev } : sent)); } catch (e) { return Promise.reject(e); }
       };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
@@ -1675,7 +1681,7 @@ export function createNotebook(root, opts = {}) {
           return;
         }
         const r = t && typeof t === "object" ? t.rev : undefined;
-        if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, doc.cells);
+        if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, sent.cells);
         lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
@@ -1762,6 +1768,7 @@ export function createNotebook(root, opts = {}) {
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     // an older revision than the synced one (a late message) changes nothing
     if (keepLocal && rev !== undefined && synced?.rev !== undefined && rev <= synced.rev && !fromConflict) return;
+    remoteSeen++;
     loading = true;
     const base = keepLocal ? synced?.cells ?? null : null;
     let dirty = false;

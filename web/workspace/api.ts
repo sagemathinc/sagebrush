@@ -62,11 +62,24 @@ export class WorkspaceError extends Error {
   constructor(public code: WorkspaceErrorCode, message: string, public current?: unknown) { super(message); }
 }
 
+/** What the board page keeps of a board of this browser's in localStorage, by its id (web/board/page.ts). */
+export const BOARD_KEYS = {
+  local: (id: string) => "sagebrush-board:local:" + id,
+  here: (id: string) => "sagebrush-board:local:" + id + "#here",
+  pending: (id: string) => "sagebrush-workspace-pending:" + id,
+  unread: (id: string) => "sagebrush-workspace-pending-unread:" + id,
+};
 const CHANNEL = "sagebrush-workspace";
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+// (the same entry, put in Trash the same time: a data file's key is its
+// path, so it is known by its own id; a document by its id; each by when it
+// was made and when and from where it was put in Trash)
+const sameTrashed = (e: Entry, x: Entry) =>
+  e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) &&
+  !!e.trashed && e.trashed.at === x.trashed?.at && e.trashed.from === x.trashed?.from;
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
@@ -232,16 +245,25 @@ export class Workspace {
   }
 
   /** `from` (and, for a folder, everything in it) moved to `to`, which must
-   * be free.  A document whose title was its name gets the new name. */
-  async rename(from: string, to: string): Promise<Entry> {
+   * be free.  A document whose title was its name gets the new name.
+   * `opts.still`, asked holding the lock: false, and nothing is moved
+   * (undefined returned): a rename asked for earlier and since superseded,
+   * as a typed title's by a rename in the file browser (CORR-0B0-1).
+   * `opts.retitle` false: the title left to the page that has the document
+   * open, which saves it with its other changes (written here, it would be
+   * a change from elsewhere to that page: CORR-0B0-2). */
+  async rename(from: string, to: string, opts?: { retitle?: boolean }): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean }): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean } = {}): Promise<Entry | undefined> {
     const a = path(from), b = path(to);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
     if (a === b) return this.mustStat(a);
     if (within(b, a)) throw new WorkspaceError("invalid", "a folder can't go inside itself");
     return this.locked(async () => {
+      if (opts.still && !opts.still()) return undefined;
       const moved = await this.move(a, b, "rename");
-      await this.retitle(moved[0], a);
+      if (opts.retitle !== false) await this.retitle(moved[0], a);
       return moved[0];
     });
   }
@@ -285,10 +307,15 @@ export class Workspace {
     });
   }
 
-  /** What `p` in Trash was, put back where it was (or, if that's taken now, the first free `name (2)`, … there). */
-  async restore(p: string): Promise<Entry> {
+  /** What `p` in Trash was, put back where it was (or, if that's taken now,
+   * the first free `name (2)`, … there).  With `expect` (what remove
+   * returned), only that same entry, put in Trash that time: checked
+   * holding the lock, a WorkspaceError("missing") if it isn't the one
+   * there now, nothing moved (Undo, CORR-0B0-3). */
+  async restore(p: string, expect?: Entry): Promise<Entry> {
     return this.locked(async () => {
       const e = await this.mustStat(p);
+      if (expect && !sameTrashed(e, expect)) throw new WorkspaceError("missing", `${nameOf(expect.trashed?.from ?? expect.path)} was already restored or deleted`);
       if (!e.trashed) throw new WorkspaceError("invalid", within(e.path, TRASH) ? "restore the folder it is in" : `${e.path} isn't in Trash`);
       const from = e.trashed.from, folder = parentOf(from);
       const taken = new Set((await this.list(folder).catch(() => [] as Entry[])).map((x) => x.path));
@@ -415,6 +442,14 @@ export class Workspace {
             // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
             const pre = "board:local:" + e.ref;
             if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
+            // (and what the board page keeps of it in localStorage: the copy
+            // from before the workspace, its mark as written here, a closed
+            // page's changes; none of them bring it back, or vouch for a
+            // board under its id)
+            try {
+              const ls = (globalThis as any).localStorage as Storage | undefined;
+              for (const k of Object.values(BOARD_KEYS)) ls?.removeItem(k(e.ref));
+            } catch {}
           } else if (e.kind === "file") {
             await inTx(this.ws, "trash", "readwrite", async (tx) => { tx.objectStore("trash").delete(e.ref!); });
           }
