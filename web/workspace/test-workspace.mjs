@@ -42,11 +42,17 @@ if (!built.success) {
   console.error(built.logs.join("\n"));
   process.exit(1);
 }
+// (fileopen.ts on its own, as the pages load it: Recent's lookups, CORR-FD1-2)
+const opened = await Bun.build({ entrypoints: [join(here, "fileopen.ts")], outdir: site, naming: "fileopen.js", target: "browser", format: "esm" });
+if (!opened.success) {
+  console.error(opened.logs.join("\n"));
+  process.exit(1);
+}
 copyFileSync(join(here, "test-workspace.page.js"), join(site, "cases.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>workspace test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
-  if (!["/", "/ws.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
+  if (!["/", "/ws.js", "/fileopen.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
   const f = Bun.file(join(site, p === "/" ? "index.html" : p.slice(1)));
   return new Response(f, { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
 } });

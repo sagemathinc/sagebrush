@@ -191,6 +191,26 @@ Notebooks and boards keep every change (TimeTravel). Data files have had no hist
 - Each says what it will free and asks to confirm, and each is logged.
 - **Agents can't do it.** The API's `dropVersions` refuses a workspace acting for an agent, and the agent surfaces (§8.2) don't offer it.
 
+### 2.6 Long histories: local snapshots (proposed, Oct 19)
+
+**Today, opening a document replays its whole history.** `IdbPatchStore.loadInitial` reads every patch the document ever had (`hasMore: false`). A notebook used for months, whose runs also write the execution journal, gets slower to open with every session.
+
+**A local snapshot bounds that,** with the same rule as the server's (design/sync-server.md §4.7). patchflow 0.12 already reads snapshot envelopes (`isSnapshot`, `snapshot`, `stopAtSnapshots`, and `loadInitial`'s `hasMore`), so the sync protocol is unchanged.
+- **When:** after 500 patches, or 4 MB of patches, since the last snapshot. It is taken by the tab that commits, at its head, only when the head is a clean cut (`isCut`) and its value checks out (`verifyValue` isn't "mismatch"). Otherwise it waits for the next commit.
+- **Where:** a `snapshots` store beside `history` in both history databases, keyed `[doc, time]`. The latest 3 are kept, and older snapshots are removed (patches never are).
+- **Opening:** `loadInitial` returns the latest snapshot and the patches from its time on, with `hasMore` true when older patches exist. When patchflow says the loaded part isn't enough (`needsMoreHistory`, e.g. a patch from another tab made just before the snapshot), older patches are loaded until it is.
+- **A snapshot never replaces history.** Every patch stays in IndexedDB, and Clear, delete and forget remove the snapshots with the patches.
+- **Its cost is bounded and counted** (LIMIT-775-3):
+  - **Size:** the snapshot's encoded value is measured before anything is written. If it passes the document limit (64 MiB, `maxBoardBytes`), no snapshot is written, and the next attempt waits for the next threshold.
+  - **One transaction, best effort:** the new snapshot is written, and the oldest beyond 3 removed, in one readwrite transaction of the `snapshots` store, separate from the patch's own write. So a document never has more than 3, and the committing patch never waits on the snapshot or fails with it.
+  - **When it is refused** (`QuotaExceededError`, or any error): nothing is retried on the following commits. The next attempt is at the next threshold (another 500 patches or 4 MB), and after 3 refusals in a row none is tried again until the page is reloaded. Nothing of the person's is lost, because the patches are kept, so this isn't a "Not saved".
+  - **Counted:** the snapshots' bytes are in the meter's history share (§6.3), and the Storage panel shows them under history ("snapshots: 12 MB"). At most 3 values of each document are kept, and a document's snapshots go when its history is cleared.
+  - **Time:** encoding the value once per 500 patches, after the commit, off the path of typing.
+- **A deep replay is shown, not hidden.** Opening reads at most the latest snapshot and the patches after it, unless patchflow's `needsMoreHistory` asks for older ones. That is rare, but it may go back to the start. When more than 2,000 older patches are loaded, the status line says "Loading full history…", with a count, until the document is ready.
+- **TimeTravel pages older history in:** the slider covers what is loaded, and its left end offers "Older versions…", which loads the previous 500 patches (a reverse cursor) until the start, when the history is marked full. Versions are named by patch id, never by index, because indexes shift as older history loads.
+- **What needs the whole history loads it first:** sending a board's history to CoCalc (`patches()`), the export with histories (§7.11), and "Rebuild from history". The `.sbreplay` download reads IndexedDB directly, so it is unaffected.
+- **Backup (step 8)** can upload a local snapshot as the server's (§4.7), when its patch is a batch boundary.
+
 ---
 
 ## 3. One File menu, identical in both editors
@@ -224,7 +244,7 @@ Delete                     (to Trash)
 - Revert to the original moves to the board's ⋯ menu as well, and is shown only for boards that have an original.
 - Duplicate becomes Save a copy…, which asks for the name.
 - Open file… and Save as… stay in the desktop app, under Upload… and Save a copy…, where they act on disk files.
-- Install as an app… moves to the site menu (the Sagebrush logo), since it isn't about the file.
+- Install as an app… moves out of File, since it isn't about the file. The notebook page has no site menu yet, so it goes in ⋯ (step 3a); the one page (step 5) can give it a site menu.
 
 **Upload…** takes any files, by picker or by drop. The rule is that **Upload never converts behind the user's back:**
 - `.ipynb`, `.board.json` and `.sbreplay` become documents (an `.sbreplay` keeps its history, as today).
@@ -455,10 +475,12 @@ It is made of objects that each serve one account or one document, so it grows b
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
   - Signing out on a shared computer offers to remove this device's local copy, as a separate choice.
-- **When the account may no longer sync:**
-  - nothing is deleted;
-  - sync pauses and the server copy becomes read-only, so it can still be downloaded (Download all, as a zip);
-  - the person is always told before anything is removed.
+- **When the account may no longer sync** (the membership ended; decided Oct 19):
+  - sync pauses and the server copy becomes **read-only for 90 days**. It can still be opened and downloaded: Download all, and the export (§7.11);
+  - after the 90 days, the server copy is **deleted**, by the same path as "Delete my synced data";
+  - the person gets an email when the membership ends, and another about 14 days before the deletion. Renewing within the 90 days turns sync back on, with nothing lost;
+  - **each device's own copy is never touched:** it stays in that browser, as a workspace that doesn't sync;
+  - the timer and the emails are the server's (auth's). The FAQ's wording is on the Sagebrush site, and business terms aren't in this repo.
 - **Limits** come from the account's limits, as sharing's do (`storage_bytes`).
   - Over the limit, new files stop uploading and say so. Document edits (small patches) keep syncing.
   - Nothing already synced is removed.
@@ -555,6 +577,100 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 | Losing data (a bug, a bad deploy) | 30-day point-in-time recovery of every Durable Object's SQLite. Copies off Cloudflare, encrypted, as in sharing.md's Backups section. Trash. Nothing removed by quota pressure. |
 
 **The server's attack surface is small:** it stores, orders and relays, and never runs user code. All compute stays in each person's browser, inside the runner.
+
+### 7.11 Export and import (William, Oct 19)
+
+**One click exports the whole workspace as one file, and Import takes such a file back.** This is how a person keeps a copy off Sagebrush, and how they move from one Sagebrush site to another.
+
+**Two modes:**
+- **Files:** every document and data file as it is now. A notebook is its `.ipynb` and a board its `.board.json`, exactly as Download gives them, so the bundle is useful without Sagebrush.
+- **Files and histories:** the same files, plus each document's patchflow history (TimeTravel), the files its sessions read (as `.sbreplay` keeps them), and the data files' versions (§2.5).
+
+**Where an export is made:**
+- **In the browser,** from this device's workspace. It needs no account and works offline; it is the File menu's "Export workspace…" and the Storage panel's.
+- **On the server** (auth's half), for a synced account. It is a rate-limited export job that builds the same bundle from the account's objects and R2, then offers a private, time-limited download.
+  - This is what a phone (§7.5, which holds only part of the workspace) and an account in its read-only 90 days (§7.4) use.
+  - auth's design note sets the limits: one running export per account, and a few a day.
+
+**The browser's export streams; it never builds the bundle in memory** (LIMIT-775-1):
+- **The writer** is a streaming zip writer:
+  - it takes one entry at a time: it reads the entry's bytes from IndexedDB, writes them, and lets them go;
+  - data files are stored as they are, and text is deflated through `CompressionStream`;
+  - it writes Zip64 records when the bundle passes 4 GiB or 65,535 members;
+  - a history is written as it is read, one envelope per line from an IndexedDB cursor, never as one array;
+  - peak memory is one entry (at most 200 MB, the upload limit) plus the compressor's window.
+- **Where it writes, in order of preference:**
+  1. **`showSaveFilePicker`** (Chromium and the desktop app). The chosen file's `FileSystemWritableFileStream` takes the chunks as they come, with no size limit beyond the disk.
+  2. **Elsewhere (Firefox, Safari):** a file in the origin-private file system (OPFS), written by a worker through a sync access handle, then downloaded from its disk-backed `File`. It needs the preflight's upper bound (below) free in the storage quota, checked before starting, and the OPFS file is deleted when the download has started or the export is cancelled.
+  3. **A Blob in memory, only when neither is available,** and only for a bundle whose preflight upper bound is at most **256 MiB**. Anything larger is refused before anything is read, saying to use the server's export (for a synced account) or a browser that can save files.
+- **A preflight pass comes first, and writes nothing to the sink.** It builds and serializes `manifest.json` in memory, measures its exact UTF-8 size, and checks it against its 64 MiB cap. It then enumerates the exact member set:
+  - `manifest.json`;
+  - each entry's file;
+  - each history and each versions file;
+  - the blobs, deduplicated by `sha256`.
+
+  It sums two separate numbers:
+  - the **uncompressed bytes** of all members, the manifest included. These are checked against the importer's 20 GiB total.
+  - an **upper bound of the bundle's size**, not an estimate, for choosing the sink:
+    - **each member's zip records,** at their largest. A local header (30 bytes), a central header (46), a data descriptor (24) and Zip64 extra fields in both headers (20 and 28) come to at most 148 bytes, plus twice the member's UTF-8 name length;
+    - **the end records:** 22 + 56 + 20 bytes (end of central directory, Zip64 end record and locator);
+    - **each member's data:**
+      - a stored member's exact size;
+      - for a deflated one, the deflate bound of its size `n`: `n + (n >> 12) + (n >> 14) + (n >> 25) + 13`, as zlib's `deflateBound`;
+      - a history's size is measured by serializing its envelopes once, from a cursor, one at a time.
+- **The caps are checked on that set before writing:** at most 400,000 members (the manifest counted), at most 20 GiB of uncompressed bytes, and each member, the manifest included, within its cap (the table under Import). The sink is then chosen from the bound: the 256 MiB Blob path only when the bound is at most 256 MiB, and OPFS only when the bound is free in the quota.
+- Progress shows bytes and entries, and the export can be cancelled at any entry.
+
+**The bundle format** is documented and versioned like the board format. It is a zip, `<name>.sagebrush-workspace.zip`:
+
+```
+manifest.json            {format: "sagebrush-workspace-bundle", version: 1, mode: "files" | "history",
+                          created, site, app, entries: [...], totals: {files, bytes}}
+files/<path>             each entry's current contents (an .ipynb, a .board.json, a data file's bytes)
+history/<ref>.jsonl      one document's envelopes, oldest first, one JSON envelope per line (JSON Lines);
+                         line 1 is a header {codec, schema}; the same envelopes as .sbreplay's "history";
+                         snapshot envelopes are not exported
+blobs/<sha256>           the bytes a history's sessions read, and data files' versions' bytes, once each
+versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author, reason}], at most 20
+```
+
+- **Each manifest entry** has `{path, kind, ref?, fid, created, modified, size, sha256, mode?}`. **The manifest is authoritative:** the zip's own names are only where the bytes are, and are never used as paths.
+- **Trash isn't exported,** and neither are the device's settings or anything in localStorage.
+- **Versions:** a reader accepts its own `version` and older ones. A later version is refused with a message saying so, as a board of a later format is. Fields a reader doesn't know are ignored, and their names are listed in the import's summary.
+
+**Import:**
+- **Into an empty workspace** (a new site, a new browser), the paths are kept. Into one with documents, everything goes under `/Imported <date>/`, so nothing is replaced or merged by surprise.
+- **Every document and file gets a new identity** (fid and ref), so an import can never overwrite or join a document that is already here. The patch ids in the histories are kept, because they don't depend on the ref.
+- **Each file's bytes are checked** against the manifest's `sha256` and `size`. A file that doesn't match isn't imported, and the summary lists it; the rest go on.
+- **The file wins over its history** when they disagree, as a crafted or damaged bundle can make them do. What opens is always the file the person exported:
+  - the history is imported, and if its head value differs from `files/<path>`, the file's value is committed on top as one more version, labelled "imported";
+  - a history that doesn't decode, or fails `verifyValue`, is dropped, and the summary says so. The document is then the file alone, with no history.
+- **A snapshot envelope in an imported history isn't trusted for the value.** The exporter writes none, and import drops any it finds, replaying from the patches. After import, the local snapshot writer (§2.6) makes fresh ones from the verified value.
+- **It is bounded before anything is written** (LIMIT-775-2). The caps are one table of constants, shared by the exporter and the importer:
+
+  | What | Cap |
+  |---|---|
+  | `manifest.json` | at most 64 MiB, parsed whole, with nesting depth at most 8 and at most 100,000 entries (the workspace's `maxEntries`) |
+  | archive members | at most 400,000 (each entry's file, plus its history or versions, plus blobs), and only the names the layout above allows |
+  | one `files/` member | its kind's limit: 200 MB for a data file (the upload limit), 64 MiB for a notebook or board (`maxBoardBytes`) |
+  | one `history/` file | streamed line by line; one line at most 64 MiB (a document's limit); at most 200,000 envelopes and 256 MiB per document (patchflow holds a replayed history in memory) |
+  | one `versions/` file | at most 64 KiB and 20 records (`maxVersions`), with nesting depth at most 4 |
+  | one blob | at most 200 MB |
+  | total uncompressed | at most 20 GiB, and at most the storage left (`navigator.storage.estimate()`) less 10% |
+  | inflated bytes | counted as they are inflated, for each member and in total. There is no ratio rule: legitimate text or zero-filled data compresses far beyond any fixed ratio, so a ratio would refuse Sagebrush's own bundles. The member, history and total caps on bytes actually inflated bound a zip bomb instead. |
+
+  - The manifest's totals are checked first, against the caps and the storage left. Nothing is written if they fail.
+  - Each member is then read as a stream. The bytes actually inflated are counted, and a member is stopped as soon as it passes its declared size or its cap, and the import is stopped when the total passes its cap. A stopped member skips that entry, and the summary says why.
+  - A history over its cap is dropped, and its file is imported alone.
+  - Histories, blobs and versions count toward the total, as files do.
+  - The manifest's JSON is the only document parsed whole; histories are JSON Lines parsed one line at a time, and versions are small by their cap.
+  - Names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
+- **Everything the exporter makes can be imported.** The exporter's preflight checks the same caps on the whole member set before it writes anything (above), so an export never stops partway at a cap. Before it starts, it lists what can't be exported in full: a document whose history passes the cap is exported without its history, and the export says so, so the person can cancel. A bundle over 20 GiB is refused before starting; such a workspace is exported in parts, one top-level folder at a time.
+- **Nothing imported runs by itself.** The documents are other people's code as far as this browser knows, even when the person made the bundle, so they open as an Upload's do (§3) and run only when the person runs them.
+- **Import is the person's action.** It isn't in the agents' workspace API (§8.2) in its first version.
+- **A summary at the end** says what came in, where, and what was refused and why.
+
+**Moving between sites:** export on one, import on the other. If the new site syncs, its sync uploads the imported workspace like any other. The histories keep TimeTravel intact across the move.
 
 ---
 
@@ -813,7 +929,7 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 
 1. **The `sagebrush-workspace` database, the index, reconcile and migration,** with the store for data files' versions (§2.5), written by the API's own writes (1a). Then the pages wired to it (1b), which version Python's writes and the Files panel's deletes too. No UI. Tests: every kind of item in today's stores comes out as an entry, the localStorage copies are untouched, a write from an older tab is brought in as a copy, and a key that won't parse is kept.
 2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`, with a file's versions and "Delete older versions" (per file and per folder), and the Storage panel's "Free N MB of old versions" (§2.5, §6.3).
-3. **The one File menu** in both editors, and Upload's rule.
+3. **The one File menu** in both editors (3a), and Upload's rule (3b). Then **local snapshots** (3c, §2.6; proposed): a document opens from its latest snapshot, and TimeTravel pages older history in. It is independent of routing, helps every long-lived notebook now, and its snapshot writer is the one backup (step 8) needs.
 4. **`/w/` routing** in the server, the service worker and both pages, plus the redirects from the old addresses. Then the board page in the shell.
 5. **One page hosting both editors** (§5).
    - The board bundle loads into the notebook's page when the first board opens.
@@ -826,6 +942,10 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 9. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2), and the chat panel's remote adapter (§8.7).
 10. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
 11. **The cocalc.ai adapter, the Ask agent, and the handoffs with cocalc.ai** (§8.5, §8.6, §8.7). The adapter needs CoCalc's Agent Network to accept a person's page as a sender.
+12. **Export and import** (§7.11): the bundle format (documented and versioned), the browser's export in both modes, Import, and the UI. The server's export job is auth's half, from the account's objects and R2. Its tests include a round trip (export, import into an empty workspace, same files, same TimeTravel), and bundles that lie: a wrong hash, an oversized entry, a hostile path, a later version. Other tests:
+- the export's size bound holds for 400,000 tiny members with long names, and for incompressible data;
+- a highly compressible member (zeros) of Sagebrush's own export imports;
+- the JS heap peak of parsing a 64 MiB manifest is measured, and the cap is lowered if that peak is too high.
 
 Steps 1 to 6 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
 
