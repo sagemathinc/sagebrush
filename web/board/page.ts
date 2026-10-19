@@ -286,10 +286,15 @@ if (fromParent) {
 const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
 let wsWriting: Promise<void> = Promise.resolve(), wsLatest: BoardDoc | null = null, wsRefused: Error | null = null;
+// (the view's lineage: one more each time the board is shown a version
+// written elsewhere; a save belongs to the view it was made on, and a save
+// made on an older view never writes the board, only that conflict's copy:
+// CORR-0FC-1)
+let wsEpoch = 0, wsCopy: { epoch: number; ref: string } | null = null;
 function wsSave(id: string, d: BoardDoc) {
   const w = ws!, refused = wsRefused;
   let journaled = true;
-  const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`;
+  const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
   if (text.length > PENDING_MAX) {
     // (too large to journal: the workspace alone keeps it; an older pending copy of this page's dropped, as it is older)
     journaled = false;
@@ -299,6 +304,14 @@ function wsSave(id: string, d: BoardDoc) {
   wsWriting = wsWriting.then(async () => {
     if (wsLatest !== d) return;
     try {
+      if (epoch !== wsEpoch) {
+        // (made on the view before a conflict: into that conflict's copy, never over the board)
+        const copyPath = wsCopy?.epoch === epoch ? await w.pathOf("board", wsCopy.ref) : undefined;
+        if (copyPath) await w.write(copyPath, d);
+        else await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" });
+        dropPending(id, header + "\n");
+        return;
+      }
       let path = await w.pathOf("board", id);
       // (a board of this browser's kept before, not brought in: in the workspace now, under its own id)
       if (!path) {
@@ -313,7 +326,7 @@ function wsSave(id: string, d: BoardDoc) {
       wsRefused = null;
       if (wsLatest === d) dropPending(id, header + "\n");
     } catch (e: any) {
-      if (e?.code === "conflict") await wsConflict(w, id, d, header);
+      if (e?.code === "conflict") await wsConflict(w, id, d, header, epoch);
       else wsRefused = e instanceof Error ? e : new Error(String(e));
     }
   });
@@ -324,14 +337,18 @@ function wsSave(id: string, d: BoardDoc) {
  * own; only once that is written is its pending copy dropped; then the
  * board shows the other version, saying so (CORR-AA2-1). */
 const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
-async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string) {
+async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
-    await makeInWorkspace(w, { ...d, title });
+    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }) };
     dropPending(id, header + "\n");
     const path = await w.pathOf("board", id);
     const cur = path ? await w.read(path) : null;
     if (!cur || !isBoard(cur.content)) return;
+    // (a new view from here, as the board is about to show the other
+    // version: saves made on the old one, typed while this was handled,
+    // carry the old epoch and go to the copy; only then the new base)
+    if (epoch === wsEpoch) wsEpoch++;
     wsRev = cur.rev;
     if (wsLatest === d) wsLatest = null;
     const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
@@ -403,6 +420,7 @@ const host: BoardHost = {
               const [tagSession, tagN] = String(rec.tag ?? "").split(":");
               if (rec.rev === pend.base || (tagSession === pend.session && Number(tagN) < pend.n)) {
                 // (the record is the one the copy was made on, or an earlier save of the session that left it: the copy is newer)
+                wsEpoch++;
                 wsRev = rec.rev;
                 wsSave(id, pend.doc);
                 return { doc: pend.doc, original: null };
@@ -419,6 +437,7 @@ const host: BoardHost = {
                 }
               }
             }
+            wsEpoch++;
             wsRev = rec.rev;
             return { doc: rec.content, original: null, ...(notice ? { notice } : {}) };
           }
@@ -427,6 +446,7 @@ const host: BoardHost = {
         if (!path && pend && pend !== "unread") {
           try {
             await adoptBoard(ws, id, pend.doc);
+            wsEpoch++;
             wsRev = 1;
             dropPending(id, pend.header + "\n");
           } catch (e) { console.warn("workspace:", e); }

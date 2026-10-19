@@ -151,6 +151,59 @@ try {
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/A recovered (your changes, made while it changed elsewhere).board.json"))`), "…the recovered version is kept as a board of its own");
   check(await until(`localStorage.getItem("sagebrush-workspace-pending:${id}") === null`), "…and only then its pending copy dropped");
   check(await until(`${B}?.snapshot()?.doc?.title === "B by agent" && /changed elsewhere while you edited/.test(document.body.innerText)`), "…the board shows the other version, and says so");
+
+  // a save typed on the old view while a conflict is handled goes to the conflict's copy, never over the other version (CORR-0FC-1)
+  await go(base + "board/?doc=local:" + id);
+  await until(`${B}?.snapshot()?.doc?.title === "B by agent"`, 60000);
+  const R2 = await ev(`${W}.read("/Old board.board.json").then((r) => r.rev)`);
+  const pendA2 = `7777777777777777:1:${R2}\n` + JSON.stringify({ title: "A2 recovered", nodes: [] });
+  await ev(`localStorage.setItem("sagebrush-workspace-pending:${id}", ${JSON.stringify(pendA2)}); 1`);
+  // (the order on the workspace's lock: the agent's write B, the recovery's write A (which conflicts), then a hold
+  // that lets the edit C be typed while the conflict waits on the lock to make its copy: astra's sequence exactly)
+  await hold("D");
+  await ev(`(() => { window.__agentP2 = ${W}.write("/Old board.board.json", { title: "B2 by agent", nodes: [] }, { base: ${R2} }); return 1; })()`);
+  await ev(`(() => { window.__loadP3 = import("/board/board.js").then((m) => m.host.store.load()); return 1; })()`);
+  await sleep(400);
+  await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => { window.__heldE = true; window.__releaseE = r; })); return 1; })()`);
+  await release("D");
+  check(await until(`window.__heldE === true`), "(the conflict waits on the lock to make its copy)");
+  await ev(`${B}.edit((d) => { d.title = "C typed"; }).then(() => 1)`);
+  await sleep(200);
+  await release("E");
+  await ev(`Promise.all([window.__agentP2, window.__loadP3]).then(() => 1)`);
+  await sleep(1500); // (every queued save has had its turn)
+  check(await ev(`${W}.read("/Old board.board.json").then((r) => r.content.title === "B2 by agent")`), "a save typed on the old view during a conflict doesn't write over the other version");
+  const copyOk = await until(`${W}.read("/A2 recovered (your changes, made while it changed elsewhere).board.json").then((r) => r.content.title === "C typed").catch(() => false)`);
+  const boardsNow = copyOk ? "" : await ev(`${W}.list("/").then((l) => Promise.all(l.filter((e) => e.kind === "board").map((e) => ${W}.read(e.path).then((r) => e.path + " => " + r.content.title)))).then((x) => JSON.stringify(x))`);
+  check(copyOk, "…it goes into the conflict's copy " + boardsNow + " shown: " + (await ev(`${B}?.snapshot()?.doc?.title`)));
+  // random interleavings of the page's saves and an agent's writes: nothing either wrote last is lost
+  const seed = Number(process.env.WS_SEED ?? 7);
+  let rnd = seed;
+  const rand = () => ((rnd = (rnd * 1103515245 + 12345) % 2147483648) / 2147483648);
+  await go(base + "board/?doc=local:" + id);
+  await until(`!!${B}?.snapshot()`, 60000);
+  let lastPage = null, lastAgent = null;
+  for (let k = 0; k < 12; k++) {
+    const r = rand();
+    if (r < 0.4) {
+      lastPage = `page ${k}`;
+      await ev(`${B}.edit((d) => { d.title = ${JSON.stringify(lastPage)}; }).then(() => 1)`);
+    } else if (r < 0.8) {
+      const t = `agent ${k}`;
+      const ok = await ev(`${W}.read("/Old board.board.json").then((x) => ${W}.write("/Old board.board.json", { title: ${JSON.stringify(t)}, nodes: [] }, { base: x.rev })).then(() => true, () => false)`);
+      if (ok) lastAgent = t;
+    } else {
+      await hold("Z");
+      await sleep(Math.floor(rand() * 200));
+      await release("Z");
+    }
+    await sleep(Math.floor(rand() * 120));
+  }
+  await sleep(1500);
+  const titles = await ev(`${W}.list("/").then((l) => Promise.all(l.filter((e) => e.kind === "board").map((e) => ${W}.read(e.path).then((r) => r.content.title))))`);
+  const kept = (t) => titles.some((x) => x === t || x === t + " (your changes, made while it changed elsewhere)");
+  check(!lastPage || kept(lastPage), `random interleaving (seed ${seed}): the page's last save is kept somewhere: ${lastPage} in ${JSON.stringify(titles)}`);
+  check(!lastAgent || titles.includes(lastAgent) || titles.some((t) => /^page /.test(t) && Number(t.slice(5)) > Number(lastAgent.slice(6))), `…and the agent's last write is current, or followed by a page save made on it (seed ${seed}): ${lastAgent}`);
   // a board only a pending copy holds: brought in (CORR-12C-3)
   const lone = "fedcba987654", loneText = "dddddddddddddddd:1:0\n" + JSON.stringify({ title: "Only pending", nodes: [] });
   await ev(`localStorage.setItem("sagebrush-workspace-pending:${lone}", ${JSON.stringify(loneText)}); 1`);
