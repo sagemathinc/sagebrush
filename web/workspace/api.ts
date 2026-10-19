@@ -53,6 +53,9 @@ export type Entry = {
    * anything else (an upload, a drop, Open as…, an agent, an example, a conversion); absent, unknown (made
    * before this was kept), which counts as elsewhere.  A copy has its source's */
   made?: "person" | "elsewhere";
+  /** its folder and the NFC form of its name (nkeyOf): what names that look the same share (index byNfc,
+   * design/capabilities.md §3); absent on an entry made before, until the migrator gives it */
+  nkey?: string;
   /** a data file whose bytes are in "sagebrush-workspace"/fileBytes under its fid (design/capabilities.md §2b) */
   migrated?: boolean;
   /** a migrated data file's SHA-256 (hex), as moved; dropped by its next write */
@@ -105,6 +108,8 @@ export function askToKeep() {
   try { (globalThis.navigator as any)?.storage?.persist?.()?.catch?.(() => {}); } catch {}
 }
 const CHANNEL = "sagebrush-workspace";
+// (the Storage panel's list of names that look the same: groups, and paths in each, shown)
+const LOOKALIKE_GROUPS = 100, LOOKALIKE_MEMBERS = 10;
 // (the stores a version is kept in, with the change that keeps it)
 const VERSION_STORES = ["versions", "versionBytes", "meta"];
 // (an old copy of a migrated file's bytes, in "sagebrush"/files or in trash, not yet deleted: a key
@@ -121,6 +126,9 @@ export const LEGACY_MAX = 256 * 2 ** 20;
 export const COPIES = 2;
 // (a file kept the old way that is too large to move beside the index: what can't be done with it, and what can)
 const tooLarge = (e: Entry) => `${e.path} is too large to change here (${e.size} bytes, kept by an older version of Sagebrush): download it, then delete it and upload it again`;
+/** A path's folder and the NFC form of its name: equal for names that look the same in one folder (every
+ * name, ASCII included: U+212A KELVIN SIGN is "K" in NFC). */
+export const nkeyOf = (p: string) => parentOf(p) + "\u0000" + nameOf(p).normalize("NFC");
 const isPath = (k: string) => { try { return normPath(k) === k && k !== "/"; } catch { return false; } };
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
@@ -710,18 +718,13 @@ export class Workspace {
   /** What this browser's workspace holds, for the Storage panel (§6.3):
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
-  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][] }> {
+  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
     const all = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll())) as Entry[];
-    const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][] };
-    // (names that look the same in one folder, made before they were refused: each group, at most 100)
-    const groups = new Map<string, string[]>();
-    for (const e of all) {
-      const n = nameOf(e.path);
-      if (/^[\x00-\x7f]*$/.test(n)) continue;
-      const k = parentOf(e.path) + "\u0000" + n.normalize("NFC");
-      groups.set(k, [...(groups.get(k) ?? []), e.path]);
-    }
-    for (const g of groups.values()) if (g.length > 1 && out.lookalikes.length < 100) out.lookalikes.push(g.sort());
+    const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
+    // (names that look the same in one folder, made before they were refused: by a cursor over the index
+    // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
+    // the rest counted, never all of them held: LIMIT-CAP1B-1)
+    Object.assign(out, await this.lookalikeGroups());
     for (const e of all) {
       // (data files whose bytes the migrator hasn't moved yet, Trash's too: capabilities §2b)
       if (e.kind === "file" && !e.migrated && !e.unmoved && !e.missing && e.ref !== null) out.migration.left++;
@@ -732,6 +735,31 @@ export class Workspace {
       else if (e.kind === "notebook" || e.kind === "board") out.documents++;
     }
     return out;
+  }
+
+  /** Names that look the same in one folder: at most `groups` groups of at most `members` paths each, and
+   * how many groups and members beyond those weren't listed. */
+  async lookalikeGroups(groups = LOOKALIKE_GROUPS, members = LOOKALIKE_MEMBERS): Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
+    return inTx(this.ws, "entries", "readonly", (tx) => new Promise((ok, no) => {
+      const out: string[][] = [], more = { groups: 0, members: 0 };
+      let key: string | null = null, cur: string[] = [], n = 0;
+      const flush = () => {
+        if (n > 1) {
+          if (out.length < groups) { out.push(cur); more.members += n - cur.length; }
+          else { more.groups++; }
+        }
+      };
+      const c = tx.objectStore("entries").index("byNfc").openKeyCursor();
+      c.onsuccess = () => {
+        const r = c.result;
+        if (!r) { flush(); return ok({ lookalikes: out, lookalikesMore: more }); }
+        if (r.key !== key) { flush(); key = r.key as string; cur = []; n = 0; }
+        n++;
+        if (cur.length < members) cur.push(r.primaryKey as string);
+        r.continue();
+      };
+      c.onerror = () => no(c.error);
+    }));
   }
 
   /** (askToKeep, for the person's own writes; never for an agent's, or the migration's, which writes through adopt) */
@@ -1022,13 +1050,16 @@ export class Workspace {
     return this.mainTx("files", "readonly", (st) => st.get(e.ref!));
   }
 
-  /** A folder made before folders had ids given one (the migrator, holding the lock): only if it is still
-   * that folder (its path and when it was made) and has none.  True if it was given one. */
-  async giveFolderId(e: Pick<Entry, "path" | "created">): Promise<boolean> {
+  /** An entry made before it would have had them given its identities (the migrator, holding the lock): a
+   * folder its fid, any entry its nkey; only if it is still that entry (its path, kind and when it was
+   * made).  True if anything was given. */
+  async fillIdentity(e: Pick<Entry, "path" | "kind" | "created">): Promise<boolean> {
     return inTx(this.ws, "entries", "readwrite", async (tx) => {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
-      if (!cur || cur.kind !== "folder" || cur.fid || cur.created !== e.created) return false;
-      st.put({ ...cur, fid: hex(8) });
+      if (!cur || cur.kind !== e.kind || cur.created !== e.created) return false;
+      const fid = cur.kind === "folder" && !cur.fid, nk = cur.nkey !== nkeyOf(cur.path);
+      if (!fid && !nk) return false;
+      st.put({ ...cur, ...(fid ? { fid: hex(8) } : {}), nkey: nkeyOf(cur.path) });
       return true;
     });
   }
@@ -1211,7 +1242,7 @@ export class Workspace {
         await this.room(st, q);
         // (a data file's bytes with its entry, in this one transaction)
         if (fileBytes) tx.objectStore("fileBytes").put(fileBytes, fid!);
-        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}) };
+        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}), nkey: nkeyOf(q) };
         st.put(e);
         this.log(tx, ops, { op: "create", path: q, kind });
         return e;
@@ -1249,7 +1280,7 @@ export class Workspace {
       await this.folders(tx, parentOf(p), ops);
       await this.room(st, p);
       const t = this.now();
-      const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), path: p };
+      const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), ...(fields.kind === "folder" && !fields.fid ? { fid: hex(8) } : {}), path: p, nkey: nkeyOf(p) };
       st.put(e);
       this.log(tx, ops, { op: "adopt", path: p, kind: e.kind });
       return e;
@@ -1272,7 +1303,7 @@ export class Workspace {
         await this.room(st, at);
         const t = this.now();
         // (its own id, never reused: a folder made again is a new one, which no grant of the old names)
-        st.put({ path: at, kind: "folder", ref: null, created: t, updated: t, fid: hex(8) } satisfies Entry);
+        st.put({ path: at, kind: "folder", ref: null, created: t, updated: t, fid: hex(8), nkey: nkeyOf(at) } satisfies Entry);
         this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" });
       }
     }
@@ -1282,15 +1313,10 @@ export class Workspace {
    * characters: design/capabilities.md §3, CORR-CAP-3).  Names are kept exactly; this only stops a new
    * lookalike.  A name all ASCII has none, so is let through without looking at its folder. */
   private async lookalike(st: IDBObjectStore, p: string) {
-    const name = nameOf(p);
-    if (/^[\x00-\x7f]*$/.test(name)) return;
-    const folder = parentOf(p), nfc = name.normalize("NFC");
-    const keys = (await req(st.getAllKeys(subtree(folder)))) as string[];
-    for (const k of keys) {
-      if (k === p || parentOf(k) !== folder) continue;
-      const other = nameOf(k);
-      if (other.normalize("NFC") === nfc) throw new WorkspaceError("exists", `"${other}" is already in ${folder}, and looks the same as "${name}": choose another name`);
-    }
+    // (one bounded lookup by the index: at most two keys, whatever the folder holds; every name, ASCII
+    // included, as U+212A KELVIN SIGN is "K" in NFC: CORR-9A3-1, LIMIT-CAP1B-1)
+    const others = ((await req(st.index("byNfc").getAllKeys(IDBKeyRange.only(nkeyOf(p)), 2))) as string[]).filter((k) => k !== p);
+    if (others.length) throw new WorkspaceError("exists", `"${nameOf(others[0])}" is already in ${parentOf(p)}, and looks the same as "${nameOf(p)}": choose another name`);
   }
 
   /** Room for one more entry, `p`: in the workspace (maxEntries) and in its
@@ -1364,7 +1390,7 @@ export class Workspace {
       const out: Entry[] = [];
       for (const e of old) {
         st.delete(e.path);
-        const n: Entry = { ...e, path: to(e.path), ...(e.kind === "file" && e.ref !== null ? { ref: to(e.path) } : {}) };
+        const n: Entry = { ...e, path: to(e.path), ...(e.kind === "file" && e.ref !== null ? { ref: to(e.path) } : {}), nkey: nkeyOf(to(e.path)) };
         if (e.path === a) {
           n.updated = t;
           if (trashed) n.trashed = trashed;
