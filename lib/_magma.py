@@ -267,6 +267,9 @@ def _values(v, n, pos=None):
     if m < n:
         raise MagmaError("Expected to assign %d value(s) but only computed %d value(s)" % (n, m), ":=", False, pos)
     if isinstance(v, Multi):
+        for x in v[:n]:
+            if isinstance(x, _IsoNotModelled):
+                x._refuse()  # (a value Sagebrush doesn't model: refused at the :=)
         return list(v[:n])
     return [v]
 
@@ -9803,6 +9806,79 @@ def DihedralGroup(n):
     if n > _SYM_MAX:
         raise MagmaError("DihedralGroup(n) for n above %d is not supported yet" % _SYM_MAX, "'DihedralGroup'")
     return _MDihedralGroup(n)
+
+
+class _IsoNotModelled:
+    """The isomorphism IsIsomorphic returns with true: Magma prints it (a
+    map of fields, or of groups by their generators' images) in a form not
+    modelled, so printing it, assigning it or using it is refused."""
+
+    def _refuse(self, *args):
+        raise MagmaError("the isomorphism IsIsomorphic returns (its second value, and printing a true result) is not supported yet", "'IsIsomorphic'")
+
+    __repr__ = __str__ = __call__ = _refuse
+
+
+def _iso_result(b):
+    # (false: no second value, as Magma's: b, f := ... leaves f unassigned;
+    # true: the isomorphism, refused)
+    return _multi([b, _IsoNotModelled() if b else _NOVAL])
+
+
+def _quadratic_disc(K):
+    """The discriminant of a degree 2 field's defining polynomial, a rational."""
+    c = [_Fraction(_m_num(x)) for x in list(K._f)[:3]]
+    return c[1] * c[1] - 4 * c[0] * c[2]
+
+
+def _rational_square(q):
+    q = _Fraction(q)
+    if q < 0:
+        return False
+    a, b = q.numerator, q.denominator
+    return _math.isqrt(a) ** 2 == a and _math.isqrt(b) ** 2 == b
+
+
+def IsIsomorphic(A, B):
+    """Whether A and B are isomorphic, for what Sagebrush can decide exactly,
+    as Magma's (checked against Magma 2.18):
+    - number fields: of two degrees, false; of degree 2 (QuadraticField,
+      NumberField of a quadratic, CyclotomicField(3), (4), (6)), whether the
+      discriminants' quotient is a rational square, Q(sqrt(d1)) = Q(sqrt(d2));
+      of a higher degree, refused;
+    - Sym(n) and DihedralGroup(n): groups of two orders, false; of one type
+      and degree, true; DihedralGroup(3) and Sym(3), true; DihedralGroup(n!/2)
+      and Sym(n), n >= 4, false (its rotation has order n!/2, more than any
+      element of Sym(n)).
+    The second value, the isomorphism, is refused; with false there is none."""
+    groups = (_MSymGroup, _MDihedralGroup)
+    if isinstance(A, groups) and isinstance(B, groups):
+        order = lambda G: _math.factorial(G.n) if isinstance(G, _MSymGroup) else 2 * G.n
+        if order(A) != order(B):
+            return _iso_result(False)
+        if type(A) is type(B):
+            return _iso_result(A.n == B.n)
+        S = A if isinstance(A, _MSymGroup) else B
+        return _iso_result(S.n == 3)
+    for x in (A, B):
+        if isinstance(x, _MNumberField) and not isinstance(x, _MCycField) and x.degree() == 1:
+            # (Magma makes NumberField of a linear polynomial the rationals,
+            # FldRat, which IsIsomorphic refuses as Bad argument types; this
+            # field is kept as one of degree 1: refused, whatever the other
+            # argument, astra CORR-530-1)
+            raise MagmaError("IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet", "'IsIsomorphic'")
+    if isinstance(A, _MNumberField) and isinstance(B, _MNumberField):
+        if A.degree() != B.degree():
+            return _iso_result(False)
+        if A.degree() == 1:
+            return _iso_result(True)  # (CyclotomicField(1) and (2): both the rationals)
+        if A.degree() != 2:
+            raise MagmaError("IsIsomorphic of number fields of degree more than 2 is not supported yet", "'IsIsomorphic'")
+        return _iso_result(_rational_square(_quadratic_disc(A) * _quadratic_disc(B)))
+    known = (int, _Fraction, _IntegerRing, _RationalField, _MFinField, _MNumberField) + groups
+    if all(isinstance(x, known) and not isinstance(x, bool) for x in (A, B)):
+        raise _bad_types("IsIsomorphic", (A, B))
+    raise MagmaError("IsIsomorphic of a %s and a %s is not supported yet" % (_type_of(A), _type_of(B)), "'IsIsomorphic'")
 
 
 @_signature("Identity", "GrpPerm", ret="GrpPermElt")

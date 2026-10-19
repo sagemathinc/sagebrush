@@ -2162,3 +2162,36 @@ test("a collection over a vector space is admitted by its total entries before a
   const k1 = Number(lines.pop()!.split(" ")[1]);
   assert.deepEqual(lines, ["seq refused 0", "set refused 0", "append refused 0", "include refused 0", "insert refused 0", "index admitted 1", "assign refused 0", "fewer admitted " + k1], r.stdout + r.stderr);
 });
+
+test("IsIsomorphic as Magma's for quadratic fields and the symmetric and dihedral groups; its isomorphism refused", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (the expected text is Magma 2.18's for the same lines; with false there is
+  // no second value, as Magma's; with true Magma prints the isomorphism,
+  // which Sagebrush refuses, so a true result is assigned before it is shown)
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8" }).stdout as string;
+  assert.equal(run("IsIsomorphic(QuadraticField(2), QuadraticField(3));\nb := IsIsomorphic(QuadraticField(5), QuadraticField(45)); b;\nb := IsIsomorphic(QuadraticField(-1), QuadraticField(-4)); b;\nP<x> := PolynomialRing(Rationals());\nb := IsIsomorphic(NumberField(x^2 - 5), QuadraticField(5)); b;\nb := IsIsomorphic(NumberField(x^2 + x + 1), QuadraticField(-3)); b;\nb := IsIsomorphic(NumberField(x^2 - 12), QuadraticField(3)); b;\nb := IsIsomorphic(NumberField(x^2 - 12), QuadraticField(2)); b;\nb := IsIsomorphic(CyclotomicField(4), QuadraticField(-1)); b;\nb := IsIsomorphic(CyclotomicField(3), QuadraticField(-3)); b;\nb := IsIsomorphic(CyclotomicField(6), CyclotomicField(3)); b;\nb := IsIsomorphic(CyclotomicField(3), CyclotomicField(4)); b;\nb := IsIsomorphic(NumberField(x^3 - 2), QuadraticField(2)); b;\nIsIsomorphic(CyclotomicField(5), QuadraticField(5));\nIsIsomorphic(Sym(4), Sym(5));\nIsIsomorphic(DihedralGroup(4), DihedralGroup(5));\nIsIsomorphic(Sym(4), DihedralGroup(12));\nIsIsomorphic(Sym(5), DihedralGroup(60));\nIsIsomorphic(Sym(3), DihedralGroup(4));\nb := IsIsomorphic(Sym(3), DihedralGroup(3)); b;\nb := IsIsomorphic(DihedralGroup(3), Sym(3)); b;\nb := IsIsomorphic(DihedralGroup(7), DihedralGroup(7)); b;\nb := IsIsomorphic(Sym(4), Sym(4)); b;\nb, f := IsIsomorphic(Sym(4), Sym(5)); b;\nb := IsIsomorphic(CyclotomicField(2), CyclotomicField(1)); b;\nIsIsomorphic(CyclotomicField(1), QuadraticField(2));"), "false\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\nend\n");
+  const errs: [string, string][] = [
+    ["x := IsIsomorphic(QuadraticField(2), Sym(3));", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: FldQuad[FldRat], GrpPerm"],
+    ["x := IsIsomorphic(Rationals(), QuadraticField(2));", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: FldRat, FldQuad[FldRat]"],
+    ["x := IsIsomorphic(Rationals(), Rationals());", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: FldRat, FldRat"],
+    ["x := IsIsomorphic(Integers(), Integers());", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: RngInt, RngInt"],
+    ["x := IsIsomorphic(2, 3);", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: RngIntElt, RngIntElt"],
+    ["x := IsIsomorphic(GF(4), GF(4));", "Runtime error in 'IsIsomorphic': Bad argument types Argument types given: FldFin, FldFin"],
+    ["b, f := IsIsomorphic(QuadraticField(2), QuadraticField(3)); b; f;", "User error: Identifier 'f' has not been declared or assigned"],
+    ["IsIsomorphic(Sym(3), DihedralGroup(3));", "the isomorphism IsIsomorphic returns (its second value, and printing a true result) is not supported yet"],
+    ["b, f := IsIsomorphic(Sym(3), Sym(3));", "the isomorphism IsIsomorphic returns (its second value, and printing a true result) is not supported yet"],
+    ["IsIsomorphic(QuadraticField(5), QuadraticField(20));", "the isomorphism IsIsomorphic returns (its second value, and printing a true result) is not supported yet"],
+    ["P<x> := PolynomialRing(Rationals()); y := IsIsomorphic(NumberField(x^3-2), NumberField(x^3-2));", "IsIsomorphic of number fields of degree more than 2 is not supported yet"],
+    ["y := IsIsomorphic(VectorSpace(Rationals(),2), VectorSpace(Rationals(),2));", "IsIsomorphic of a ModTupFld and a ModTupFld is not supported yet"],
+    // (Magma lowers a linear NumberField to the rationals: refused in both orders, astra CORR-530-1)
+    ["P<x> := PolynomialRing(Rationals()); y := IsIsomorphic(NumberField(x-1), QuadraticField(2));", "IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet"],
+    ["P<x> := PolynomialRing(Rationals()); y := IsIsomorphic(QuadraticField(2), NumberField(x-1));", "IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet"],
+    ["P<x> := PolynomialRing(Rationals()); y := IsIsomorphic(NumberField(x-1), NumberField(x-1));", "IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet"],
+    ["P<x> := PolynomialRing(Rationals()); y := IsIsomorphic(NumberField(x-1), Sym(3));", "IsIsomorphic of a number field of degree 1 (Magma's rational field) is not supported yet"]
+  ];
+  for (const [e, m] of errs) {
+    const o = run(e).replace(/\s+/g, " ");
+    assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|AttributeError/.test(o), e + " => " + o);
+  }
+});
