@@ -722,19 +722,24 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
     const dm = docNs.get(docNs.idFromName(`doc:${hashOf(E)}:${docM}`));
     const M = "clientMMMM";
     await dm.hold({ name: `after:${pid(60, M)}` });
+    // (a lapse longer than a restart and its poll take under load, so the pin is still pending when
+    // the restarted object is inspected: 1 s didn't always outlast them in a crowded CI run)
+    const LAPSE = 10_000;
+    await acctE().testPinMs({ ms: LAPSE });
     const quiet = await acctE().inspect({});
     ok(quiet?.alarm === null || quiet.alarm > Date.now() + 3600_000, "(account E has no alarm soon before the pin: only the unused holding's, a day away)");
     const t0 = Date.now();
     se1.send({ ...batch(docM, 1, [[1, pid(60, M), [], "crash", [sha(HE)]]]), req: 9999 });
     await new Promise((r) => setTimeout(r, 60));
     const ia = await acctE().inspect({ sha256: sha(HE) });
-    ok(ia?.alarm !== null && ia.alarm >= t0 + 1000 && ia.alarm <= t0 + 1000 + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
+    ok(ia?.alarm !== null && ia.alarm >= t0 + LAPSE && ia.alarm <= t0 + LAPSE + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
     await acctE().crash().catch(() => {});
     // (the restarted object, with the document still holding the answer: polled until it answers, since a
     // restart under load takes longer than any fixed wait)
     let ib = null;
-    await until(async () => (ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null)) !== null, 10_000);
-    ok(ib?.alarm !== null && ib?.alarm !== undefined && ib.alarm < Date.now() + 3600_000 && ib.pins.length === 1 && ib.pins[0].state === "pending", "after a crash that lost the alarm, the restarted object arms it again for the pending pin");
+    await until(async () => (ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null)) !== null, 8_000);
+    ok(Date.now() < t0 + LAPSE, "(the restarted object answered before the pin lapsed: " + (Date.now() - t0) + " ms of " + LAPSE + ")");
+    ok(ib?.alarm !== null && ib?.alarm !== undefined && ib.alarm < Date.now() + 3600_000 && ib.pins.length === 1 && ib.pins[0].state === "pending", "after a crash that lost the alarm, the restarted object arms it again for the pending pin: " + JSON.stringify({ alarm: ib?.alarm, pins: ib?.pins?.map((p) => p.state) }));
     await dm.open({ name: `after:${pid(60, M)}` });
     await until(async () => (await acctE().inspect({ sha256: sha(HE) }).catch(() => null))?.pins[0]?.state === "held", 30_000);
     const ic = await acctE().inspect({ sha256: sha(HE) });
