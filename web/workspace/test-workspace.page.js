@@ -713,6 +713,18 @@ async function fences() {
   check((await w.rename("/rename.txt", "/renamed.txt", { expect: rep })).path === "/renamed.txt", "…bound to the one there, made");
   const nb = await w.create("/doc.ipynb");
   check((await w.rename("/doc.ipynb", "/doc2.ipynb", { expect: nb })).path === "/doc2.ipynb", "…a document bound to its ref");
+  // to Trash bound to its entry (the File menu's Delete)
+  await w.create("/del.txt", { content: "original" });
+  const delOrig = await w.stat("/del.txt");
+  await w.rename("/del.txt", "/del-moved.txt");
+  await w.create("/del.txt", { content: "replacement" });
+  check(await fails(w.remove("/del.txt", delOrig), "conflict") && dec((await w.read("/del.txt")).content) === "replacement" && (await w.stat("/Trash/del.txt")) === undefined, "a remove bound to an entry moved away, another at its path: refused, nothing in Trash");
+  check((await w.remove("/del-moved.txt", delOrig)).path === "/Trash/del-moved.txt", "…bound to it where it is now: in Trash");
+  const dn = await w.create("/deldoc.ipynb");
+  await w.rename("/deldoc.ipynb", "/deldoc-moved.ipynb");
+  await w.create("/deldoc.ipynb");
+  check(await fails(w.remove("/deldoc.ipynb", dn), "conflict") && (await w.stat("/deldoc.ipynb")) !== undefined, "…a document: another notebook at its path, refused");
+  check((await w.remove("/deldoc-moved.ipynb", dn)).path === "/Trash/deldoc-moved.ipynb", "…the notebook itself, by its ref: in Trash");
   // a read up to a size
   await w.create("/ten.txt", { content: "0123456789" });
   check(await fails(w.readUpTo("/ten.txt", 9), "limit") && dec((await w.readUpTo("/ten.txt", 10)).content) === "0123456789", "readUpTo: refused past its size, read within it");

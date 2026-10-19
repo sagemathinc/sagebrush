@@ -49,7 +49,8 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, type Entry } from "../workspace/index";
+import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
 import { within } from "./idb-open";
 
@@ -440,6 +441,15 @@ function adoptBoard(w: Workspace, id: string, d: BoardDoc): Promise<string> {
 const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
+// (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
+function openEntry(e: Entry, how: "here" | "tab") {
+  const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+  if (how === "tab") return void window.open(url, "_blank", "noopener");
+  if (e.kind === "board" && e.ref === source.slice(6)) return;
+  void wsFlush().then(() => location.assign(url));
+}
+// (this board, opened: first in the File menu's Recent, both pages')
+if (local && ws) recordOpened({ kind: "board", ref: source.slice(6) });
 const host: BoardHost = {
   store: {
     async load() {
@@ -636,6 +646,36 @@ const host: BoardHost = {
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
   newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  // The File menu's items that are the workspace's (design §3): a new
+  // notebook, a folder, Open… (the file browser as a dialog), Recent, and
+  // this board to Trash; none without the workspace, or in an exported file
+  files: ws && !file ? {
+    async newNotebook(mode: string) {
+      await wsFlush();
+      const top = new Set((await ws!.list("/")).map((e) => e.path));
+      const p = freePath("/", "Untitled", ".ipynb", (x) => top.has(x));
+      if (!p) throw new Error("no free name for a new notebook");
+      const e = await ws!.create(p, { mode });
+      location.assign("/?nb=" + encodeURIComponent(e.ref!));
+    },
+    async newFolder() {
+      const name = prompt("A new folder, at the top of your files: its name", "New folder");
+      if (!name?.trim()) return;
+      await ws!.mkdir("/" + safeName(name.trim()));
+    },
+    open: () => openFilesDialog(ws!, openEntry, () => (local ? { kind: "board", ref: source.slice(6) } : undefined)),
+    recent: async () => (await recentOpened(ws!, local ? { kind: "board", ref: source.slice(6) } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e, "here") })),
+    // (this board, by its identity, to Trash; then the latest other board, or a new one)
+    delete: local ? async () => {
+      const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
+      if (!p || !e) throw new Error("this board isn't in your files");
+      if (!confirm(`Move "${nameOf(p)}" to Trash? Trash keeps it until you empty it.`)) return;
+      await wsFlush();
+      await ws!.remove(p, { kind: "board", ref: id, fid: e.fid, created: e.created });
+      const next = (await recentOpened(ws!, { kind: "board", ref: id })).find((x) => x.kind === "board");
+      location.assign(location.pathname + (next ? "?doc=local:" + next.ref : "?new=" + encodeURIComponent(e.mode ?? "python")));
+    } : undefined,
+  } : undefined,
   // (an exported file's or a frame's empty board opens as any other)
   editBlank: !file,
   // the function search beside a code item being written: the notebook's
@@ -693,12 +733,7 @@ if (ws && local) {
     if (on && !browser) browser = mountBrowser(side, {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
-      open(e, how) {
-        const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
-        if (how === "tab") return void window.open(url, "_blank", "noopener");
-        if (e.kind === "board" && e.ref === source.slice(6)) return;
-        void wsFlush().then(() => location.assign(url));
-      },
+      open: openEntry,
       close: () => show(false),
       // (this board renamed here: its title follows, saved by this page as
       // its other changes are, never written beside them: CORR-0B0-2)
