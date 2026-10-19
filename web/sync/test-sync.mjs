@@ -661,6 +661,56 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   s2.ws.close();
 }
 
+// ---- astra's b8a77721 residuals (CORR-B8A-1..2)
+{
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  const docOf = (doc) => docNs.get(docNs.idFromName(`doc:${hashOf(A)}:${doc}`));
+  const q1 = await socket(sa);
+  await hello(q1, dev1);
+  const q2 = await socket(sa);
+  await hello(q2, dev1);
+  const H = Buffer.from("blob H for the interleavings");
+  // CORR-B8A-1: A's lookup (no) is asked for before B's attempt begins, and answered after B's (yes)
+  const docQ = "3333cccc4444";
+  await q1.ask(batch(docQ, 1, [[1, pid(1, "clientQSED"), [], "seed"]], { kind: "board" }));
+  const dq = docOf(docQ);
+  const P = pid(80, "clientQQQQ");
+  await dq.hold({ name: `accepted:${P}#1` });
+  await dq.hold({ name: `accepted:${P}#2` });
+  const refs0 = (await acctA.inspect({ sha256: sha(H) }))?.refs;
+  const aP = q1.ask(batch(docQ, 1, [[1, P, [], "P", [sha(H)]]], { expect_head: { epoch: 1, seq: 0 } }));
+  await new Promise((r) => setTimeout(r, 60));
+  const bP = q2.ask(batch(docQ, 1, [[1, P, [], "P", [sha(H)]]]));
+  await new Promise((r) => setTimeout(r, 60));
+  await dq.open({ name: `accepted:${P}#1` });
+  const aR = await aP;
+  await dq.open({ name: `accepted:${P}#2` });
+  const bR = await bP;
+  const iq = await acctA.inspect({ sha256: sha(H) });
+  const pinP = iq?.pins.find((p) => String(p.ref).endsWith(P));
+  ok(aR?.code === "conflict" && bR?.batch?.new === 1 && pinP?.state === "held" && iq.refs === refs0 + 1, "a lookup asked for before a later attempt began never decides the pin: B's patch keeps it (CORR-B8A-1)");
+  // CORR-B8A-2: the document unavailable for a while: the pin's lookups back off, and the alarm doesn't loop
+  const L = "clientOUTG";
+  const dl = docOf(LOSE);
+  const lost = await q1.ask(batch(LOSE, 1, [[1, pid(90, L), [], "outage", [sha(H)]]]));
+  ok(lost?.code === "busy", "(an answer lost, so only the alarm decides this pin)");
+  await dl.setFailAccepted({ on: true });
+  const a0 = (await acctA.inspect({}))?.alarms;
+  await new Promise((r) => setTimeout(r, 3500));
+  const io = await acctA.inspect({ sha256: sha(H) });
+  const pinL = io?.pins.find((p) => String(p.ref).endsWith(pid(90, L)));
+  ok(pinL?.state === "pending" && Number(pinL.tries) >= 2 && io.alarms - a0 <= 8, `an outage of 3.5 s: the lookups back off (tries ${pinL?.tries}, alarms ${io?.alarms - a0}), never a loop (CORR-B8A-2)`);
+  await dl.setFailAccepted({ on: false });
+  let held = false;
+  for (let w = 0; w < 30 && !held; w++) {
+    await new Promise((r) => setTimeout(r, 250));
+    held = (await acctA.inspect({ sha256: sha(H) }))?.pins.find((p) => String(p.ref).endsWith(pid(90, L)))?.state === "held";
+  }
+  ok(held, "and once the document answers, the pin is decided: committed, so held");
+  q1.ws.close();
+  q2.ws.close();
+}
+
 // ---- document sockets: single-use tickets, fences, leases, live batches (§2, §5.1)
 {
   const docS = "2222bbbb3333";

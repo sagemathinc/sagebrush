@@ -43,7 +43,8 @@ const SCHEMA = [
   // attempts at one cseq with different ids are two pins (CORR-321-1); `inflight` counts the forwards
   // that use it and haven't answered, and `lapse` is the latest pin_expires of any of them: after it,
   // none can commit, so the pin is decided by asking the document, never by one attempt's answer
-  "CREATE TABLE IF NOT EXISTS pins (doc TEXT NOT NULL, epoch INTEGER NOT NULL, ref TEXT NOT NULL, sha256 TEXT NOT NULL, state TEXT NOT NULL, inflight INTEGER NOT NULL DEFAULT 0, lapse INTEGER, PRIMARY KEY (doc, epoch, ref, sha256))",
+  // (gen rises with every attempt, so an answer asked for before an attempt began never decides the pin, CORR-B8A-1)
+  "CREATE TABLE IF NOT EXISTS pins (doc TEXT NOT NULL, epoch INTEGER NOT NULL, ref TEXT NOT NULL, sha256 TEXT NOT NULL, state TEXT NOT NULL, inflight INTEGER NOT NULL DEFAULT 0, lapse INTEGER, gen INTEGER NOT NULL DEFAULT 0, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (doc, epoch, ref, sha256))",
   "CREATE INDEX IF NOT EXISTS pins_pending ON pins (lapse) WHERE state = 'pending'",
   "CREATE TABLE IF NOT EXISTS revoked_sessions (session_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
   // document sockets (§2): a ticket is used once; ticket_docs says which documents a revoke must
@@ -51,8 +52,9 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS tickets (nonce TEXT PRIMARY KEY, session_hash TEXT NOT NULL, device TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS ticket_docs (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY (session_hash, doc))",
   "CREATE TABLE IF NOT EXISTS doc_sockets (socket TEXT PRIMARY KEY, doc TEXT NOT NULL, session_hash TEXT NOT NULL, expires INTEGER NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY (session_hash, doc))",
-  "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER)",
+  // (each retried item keeps its own retry time and tries, so an outage backs off per item, CORR-B8A-2)
+  "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (session_hash, doc))",
+  "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0)",
   "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
   "CREATE TABLE IF NOT EXISTS finalized (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)",
@@ -86,6 +88,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private inflight = new WeakMap<WebSocket, number>();
   /** The alarm as last set (read at start): so it can be set earlier without an await (CORR-321-3). */
   private alarmAt: number | null = null;
+  /** Alarms run since this object started (tests: an outage mustn't loop). */
+  private alarms = 0;
   /** Have the alarm fire by `t`: never later than one already set, and without awaiting. */
   private wakeBy(t: number) {
     const now = Date.now();
@@ -383,10 +387,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           const k = { doc, epoch, ref: patchRef(e), sha256: sha };
           const had = this.one("SELECT state FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", doc, epoch, k.ref, sha);
           if (!had) {
-            this.sql.exec("INSERT INTO pins (doc, epoch, ref, sha256, state, inflight, lapse) VALUES (?, ?, ?, ?, 'pending', 1, ?)", doc, epoch, k.ref, sha, expires);
+            this.sql.exec("INSERT INTO pins (doc, epoch, ref, sha256, state, inflight, lapse, gen) VALUES (?, ?, ?, ?, 'pending', 1, ?, 1)", doc, epoch, k.ref, sha, expires);
             this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", sha);
           } else if (had.state === "pending") {
-            this.sql.exec("UPDATE pins SET inflight = inflight + 1, lapse = max(lapse, ?) WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", expires, doc, epoch, k.ref, sha);
+            this.sql.exec("UPDATE pins SET inflight = inflight + 1, lapse = max(lapse, ?), gen = gen + 1 WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", expires, doc, epoch, k.ref, sha);
           } else continue; // held: nothing this attempt does can change it
           keys.push(k);
         }
@@ -419,22 +423,35 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private async decidePins(doc: string, keys: PinKey[]): Promise<void> {
     const now = Date.now();
     const settle = this.settleMs();
-    const ready = (k: PinKey) => {
-      const r = this.one("SELECT state, inflight, lapse FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256);
-      return !!r && r.state === "pending" && (Number(r.inflight) <= 0 || Number(r.lapse) + settle < now);
-    };
-    const todo = keys.filter(ready);
+    const state = (k: PinKey) => this.one("SELECT state, inflight, lapse, gen FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256);
+    const ready = (r: Row | undefined) => !!r && r.state === "pending" && (Number(r.inflight) <= 0 || Number(r.lapse) + settle < now);
+    // (each pin's generation as the question is asked: an answer applies only if it is still that)
+    const todo = keys.map((k) => ({ k, r: state(k) })).filter((x) => ready(x.r)).map((x) => ({ k: x.k, gen: Number(x.r!.gen) }));
     if (todo.length === 0) return;
-    const r = await this.docStub(doc).accepted({ ids: todo.map((k) => ({ epoch: k.epoch, id: idOfRef(k.ref) })) });
-    if ("error" in r) return;
-    const yes = new Set(r.ok);
+    let r: Result<string[]>;
+    try {
+      r = await this.docStub(doc).accepted({ ids: todo.map((x) => ({ epoch: x.k.epoch, id: idOfRef(x.k.ref) })) });
+    } catch (e) {
+      r = { error: { code: "busy", message: String(e) } };
+    }
     this.ctx.storage.transactionSync(() => {
-      for (const k of todo) {
-        if (!ready(k)) continue;
-        if (yes.has(`${k.epoch}:${idOfRef(k.ref)}`)) this.sql.exec("UPDATE pins SET state = 'held', inflight = 0, lapse = NULL WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256);
+      for (const { k, gen } of todo) {
+        const cur = state(k);
+        if (!ready(cur) || Number(cur!.gen) !== gen) continue;
+        if ("error" in r) {
+          // (the document didn't answer: this pin tries again after its own backoff, CORR-B8A-2)
+          this.sql.exec("UPDATE pins SET retry_at = ?, tries = tries + 1 WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", Date.now() + this.backoff(Number(this.one("SELECT tries FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256)!.tries)), k.doc, k.epoch, k.ref, k.sha256);
+          continue;
+        }
+        if (new Set(r.ok).has(`${k.epoch}:${idOfRef(k.ref)}`)) this.sql.exec("UPDATE pins SET state = 'held', inflight = 0, lapse = NULL, retry_at = NULL WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256);
         else this.drop(k);
       }
     });
+  }
+  /** A retried item's wait after `tries` failures: doubling from a minute to ten (a second to four, in tests). */
+  private backoff(tries: number): number {
+    const [base, cap] = this.env.SYNC_TEST_PIN_MS ? [200, 4000] : [60_000, 600_000];
+    return Math.min(cap, base * 2 ** Math.min(tries, 20));
   }
 
   private async batch(att: Attachment, device: string, b: Batch): Promise<BatchOut> {
@@ -745,13 +762,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
-  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
+  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
     if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
       refs: h ? Number(h.refs) : null,
-      pins: a.sha256 ? (this.sql.exec("SELECT doc, epoch, ref, state, inflight FROM pins WHERE sha256 = ? ORDER BY epoch, ref", a.sha256).toArray() as Row[]) : [],
+      pins: a.sha256 ? (this.sql.exec("SELECT doc, epoch, ref, state, inflight, gen, tries FROM pins WHERE sha256 = ? ORDER BY epoch, ref", a.sha256).toArray() as Row[]) : [],
       used: this.used(),
+      alarms: this.alarms,
       leases: Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE expires > ?", Date.now())!.n),
       outbox: Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n),
       ...(a.doc ? { doc: this.one("SELECT head_seq, epoch, bytes FROM docs WHERE doc = ?", a.doc) } : {}),
@@ -807,8 +825,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Send the fences still due (all, or one session's); true if none is left. */
   private async fenceDue(session?: string): Promise<boolean> {
     const due = (session
-      ? this.sql.exec("SELECT session_hash, doc, expires FROM fences_due WHERE session_hash = ?", session)
-      : this.sql.exec("SELECT session_hash, doc, expires FROM fences_due LIMIT 100")).toArray() as Row[];
+      ? this.sql.exec("SELECT session_hash, doc, expires, tries FROM fences_due WHERE session_hash = ?", session)
+      : this.sql.exec("SELECT session_hash, doc, expires, tries FROM fences_due WHERE retry_at IS NULL OR retry_at <= ? LIMIT 100", Date.now())).toArray() as Row[];
     let all = true;
     for (const f of due) {
       try {
@@ -816,6 +834,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.sql.exec("DELETE FROM fences_due WHERE session_hash = ? AND doc = ?", f.session_hash, f.doc);
       } catch {
         all = false;
+        this.sql.exec("UPDATE fences_due SET retry_at = ?, tries = tries + 1 WHERE session_hash = ? AND doc = ?", Date.now() + this.backoff(Number(f.tries)), f.session_hash, f.doc);
       }
     }
     return all;
@@ -826,18 +845,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * §5.4): a lapsed pin, a reservation's end, an idle holding, the outbox;
    * never later than an alarm already set, and `retry` if a step failed.
    */
-  private arm(retry?: number): void {
+  private arm(): void {
     const now = Date.now();
     const t: number[] = [];
-    const pin = this.one("SELECT MIN(lapse) AS t FROM pins WHERE state = 'pending'")?.t;
-    if (pin !== null && pin !== undefined) t.push(Number(pin) + this.settleMs() + 1);
+    // (a pending pin is due at its lapse, or at its retry if a lookup failed, whichever is later)
+    const pin = this.one("SELECT MIN(max(lapse + ?, COALESCE(retry_at, 0))) AS t FROM pins WHERE state = 'pending'", this.settleMs() + 1)?.t;
+    if (pin !== null && pin !== undefined) t.push(Number(pin));
     const res = this.one("SELECT MIN(expires) AS t FROM reservations")?.t;
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
-    if (this.one("SELECT 1 AS x FROM outbox LIMIT 1")) t.push(retry ?? now + 1000);
-    if (this.one("SELECT 1 AS x FROM fences_due LIMIT 1")) t.push(retry ?? now + 1000);
-    if (retry !== undefined) t.push(retry);
+    // (outbox keys and fences: at once if never tried, else at their own retry)
+    for (const table of ["outbox", "fences_due"]) {
+      const r = this.one(`SELECT MIN(COALESCE(retry_at, ?)) AS t FROM ${table}`, now + 1000)?.t;
+      if (r !== null && r !== undefined) t.push(Number(r));
+    }
     if (t.length === 0) return;
     this.wakeBy(Math.min(...t));
   }
@@ -847,7 +869,6 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (this alarm has fired: the next is whatever arm() sets at the end)
     this.alarmAt = null;
     if (!this.exists()) return;
-    let failed = false;
     const now = Date.now();
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
     this.ctx.storage.transactionSync(() => {
@@ -865,36 +886,29 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.addUsed(-Number(h.size));
       }
     });
-    // the outbox: R2 first, the row only once R2 has deleted it
-    let failedOutbox = false;
+    // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
     const bucket = this.env.SHARE_BUCKET;
     if (bucket)
-      for (const o of this.sql.exec("SELECT key FROM outbox LIMIT 100").toArray() as Row[]) {
+      for (const o of this.sql.exec("SELECT key, tries FROM outbox WHERE retry_at IS NULL OR retry_at <= ? LIMIT 100", now).toArray() as Row[]) {
         try {
           await bucket.delete(String(o.key));
           this.sql.exec("DELETE FROM outbox WHERE key = ?", o.key);
         } catch {
-          failedOutbox = true;
-          break;
+          this.sql.exec("UPDATE outbox SET retry_at = ?, tries = tries + 1 WHERE key = ?", Date.now() + this.backoff(Number(o.tries)), o.key);
         }
       }
     // fences a revoke couldn't deliver yet, and expired leases, tickets and records
-    if (!(await this.fenceDue())) failed = true;
+    await this.fenceDue();
     this.sql.exec("DELETE FROM doc_sockets WHERE expires < ?", now);
     this.sql.exec("DELETE FROM tickets WHERE expires < ?", now);
     this.sql.exec("DELETE FROM ticket_docs WHERE expires < ?", now);
     // pins whose every attempt has lapsed (a lost answer, or a crash): decided from the document
-    const late = this.sql.exec("SELECT doc, epoch, ref, sha256 FROM pins WHERE state = 'pending' AND lapse + ? < ? LIMIT 100", this.settleMs(), now).toArray() as Row[];
+    const late = this.sql.exec("SELECT doc, epoch, ref, sha256 FROM pins WHERE state = 'pending' AND lapse + ? < ? AND (retry_at IS NULL OR retry_at <= ?) LIMIT 100", this.settleMs(), now, now).toArray() as Row[];
     const byDoc = new Map<string, PinKey[]>();
     for (const p of late) byDoc.set(String(p.doc), [...(byDoc.get(String(p.doc)) ?? []), { doc: String(p.doc), epoch: Number(p.epoch), ref: String(p.ref), sha256: String(p.sha256) }]);
-    for (const [doc, keys] of byDoc) {
-      try {
-        await this.decidePins(doc, keys);
-      } catch {
-        failed = true;
-      }
-    }
-    this.arm(failed || failedOutbox ? now + 60_000 : undefined);
+    for (const [doc, keys] of byDoc) await this.decidePins(doc, keys);
+    this.alarms++;
+    this.arm();
   }
 }
 
