@@ -487,9 +487,9 @@ card and the full editor decide the same way.
     (its key in `dropped`);
   - otherwise it is removed. A record already gone is nothing to do.
 - **Its cost** is linear in the edit plus the current size of the records
-  it touches, plus, when it moves a group, the items under that group
-  (found through the index of children, at most the board's 100,000
-  records). That can be large: a field rewritten elsewhere to megabytes
+  it touches. When the edit moves or makes groups, it also costs one visit
+  to each item under them, shared, at most the board's 100,000 records, and
+  temporary memory for those visits. That can be large: a field rewritten elsewhere to megabytes
   costs a one-letter edit to it a pass over those megabytes. It never
   depends on the rest of the board. Work is limited by bytes for that
   reason (see Bounds). The host needs only its current document: it keeps
@@ -529,7 +529,12 @@ edges, its page):
   same page. Following parents never comes back to the item, and goes at
   most 64 levels. When an edit moves a group, or makes one, every item
   under it is checked too: a move can push a distant descendant past 64
-  levels;
+  levels. This is **one walk per edit**:
+  - it starts from the groups the edit moved or made;
+  - a visited set is shared by all of them, so each item is visited at
+    most once per edit, however the groups' subtrees overlap;
+  - it ends on data that already goes round (an agent's), since nothing is
+    visited twice;
 - **no orphans:** a group with children isn't deleted, and an item that an
   edge names isn't deleted, unless the same edit moves or deletes those
   too;
@@ -566,7 +571,9 @@ every host merges and checks the same way. Its tests:
   - of the adversarial merge: `was: "A"`, the field now nearly 8 MiB, an
     edit A to AB. Linear in that field, with no superlinear step;
   - of the indexes for an 8 MiB board of the densest shape (the most
-    small pages, items and edges the caps allow).
+    small pages, items and edges the caps allow);
+  - of an edit whose walk visits 100,000 items: once each, however many
+    groups it moves.
 
 **What an edit is.** An edit is the user's, made with the frame's editor.
 The board's own code runs in a nested frame of another origin and never
@@ -618,10 +625,12 @@ names, and nothing outside it. Nothing runs because of it.
     refuses beyond that with `retryAfter`, the time until the bucket has
     one again;
   - and by **work**: each edit costs its own size plus the current UTF-8
-    size of the records it touches. When it moves a group, it also costs
-    64 bytes for each item under it. That is charged once the merge has
-    counted them, so the budget may go below zero, and the next edits
-    wait. Each channel has a budget of 32 MiB,
+    size of the records it touches, charged before the merge. Its walk
+    under moved or made groups costs 64 bytes a visit, charged as it goes:
+    a walk that would pass what is left of the budget stops there, and the
+    edit is refused with `retryAfter`, with nothing merged. The budget
+    never goes below zero, and a walk is at most 100,000 visits (6.4 MB of
+    budget). Each channel has a budget of 32 MiB,
     refilled at 3.2 MiB a second, so at most 32 MiB of merging at once and
     3.2 MiB a second sustained. An edit past the budget is refused with
     `retryAfter`, and nothing of it is merged. An edit whose cost is more
