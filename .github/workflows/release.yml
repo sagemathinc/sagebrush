@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   release:
+    if: github.repository == 'sagemathinc/sagebrush'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

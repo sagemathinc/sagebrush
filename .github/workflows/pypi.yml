@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   wheels:
+    if: github.repository == 'sagemathinc/sagebrush'
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +56,7 @@ jobs:
           path: engine/py/dist/*.whl
 
   sdist:
+    if: github.repository == 'sagemathinc/sagebrush'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -69,7 +71,7 @@ jobs:
           path: engine/py/dist/*.tar.gz
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/py-v')
+    if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/py-v')
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
     environment: pypi

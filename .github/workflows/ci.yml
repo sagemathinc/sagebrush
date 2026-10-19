@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   changes:
+    if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     outputs:
       full: ${{ steps.paths.outputs.full }}
@@ -38,7 +39,7 @@ jobs:
 
   node-tests:
     needs: changes
-    if: needs.changes.outputs.node == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +73,7 @@ jobs:
 
   language-node:
     needs: changes
-    if: needs.changes.outputs.node == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +106,7 @@ jobs:
 
   checks:
     needs: changes
-    if: needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -150,7 +151,7 @@ jobs:
 
   web-sync:
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -177,7 +178,7 @@ jobs:
 
   web-runner:
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -217,7 +218,7 @@ jobs:
 
   web-browser:
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -333,7 +334,7 @@ jobs:
 
   conformance:
     needs: changes
-    if: needs.changes.outputs.node == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -366,7 +367,7 @@ jobs:
 
   modes:
     needs: changes
-    if: needs.changes.outputs.modes == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -414,7 +415,7 @@ jobs:
 
   engine-rust:
     needs: changes
-    if: needs.changes.outputs.engine_smoke == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -430,7 +431,7 @@ jobs:
 
   engine-wasm:
     needs: changes
-    if: needs.changes.outputs.engine_smoke == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
@@ -477,7 +478,7 @@ jobs:
 
   engine-node:
     needs: [changes, engine-wasm]
-    if: needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -515,7 +516,7 @@ jobs:
 
   engine-language:
     needs: [changes, engine-wasm]
-    if: needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -553,7 +554,7 @@ jobs:
 
   engine-modes:
     needs: [changes, engine-wasm]
-    if: needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
@@ -589,7 +590,7 @@ jobs:
 
   engine-cpython:
     needs: changes
-    if: needs.changes.outputs.engine_full == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -616,7 +617,7 @@ jobs:
           python3 sage-tests/run_cpython.py -v
 
   ci:
-    if: always()
+    if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     needs:
       - changes
       - node-tests
