@@ -918,19 +918,27 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private async recordPurged(): Promise<void> {
     const r = this.hasMeta() ? this.get("purged_record") : undefined;
     if (r === undefined) return;
-    const db = this.env.SHARE_DB;
-    if (!db) return;
+    // (no D1 bound, as a misconfigured deployment would be: a failure like any other, which waits its
+    // backoff, never an alarm spinning on a record it can't write, LIMIT-BF3-1)
+    const db = testMode(this.env) && this.noDb ? undefined : this.env.SHARE_DB;
     const v = JSON.parse(r) as { hash: string; generation: number; finished: number; request_id: string; kind: string; docs: number; bytes: number; tries?: number; retry_at?: number };
     const now = Date.now();
     if ((v.retry_at ?? 0) > now) return;
     try {
       if (testMode(this.env)) this.recordCalls++;
       if (testMode(this.env) && this.failRecord) throw new Error("D1 unavailable (test seam)");
+      if (!db) throw new Error("no D1 bound");
       await db.batch([
         db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND generation = ?7")
           .bind(v.hash, v.finished, v.request_id, v.kind, v.docs, v.bytes, v.generation),
         db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation < ?3 AND state <> 'purged'")
           .bind(v.hash, v.finished, v.generation),
+        // CoCalc's purge is found by its own request id, even when its generation never reached D1
+        // (CORR-BF3-1): the row, whatever generation up to this one it holds, takes the id, or a
+        // purged row of this generation is made.  The account is fenced, so no newer row can exist.
+        ...(v.kind === "admin"
+          ? [db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation, request_id, kind, finished, docs, bytes) VALUES (?1, substr(?1, 1, 32), 'purged', ?2, ?3, ?4, 'admin', ?2, ?5, ?6) ON CONFLICT(account_hash) DO UPDATE SET request_id = excluded.request_id, kind = 'admin' WHERE sync_accounts.generation <= excluded.generation").bind(v.hash, v.finished, v.generation, v.request_id, v.docs, v.bytes)]
+          : []),
       ]);
       // (only the record written: one for a later purge, written meanwhile, stays)
       this.sql.exec("DELETE FROM meta WHERE k = 'purged_record' AND v = ?", r);
@@ -1144,6 +1152,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private failRecord = false;
   private recordCalls = 0;
+  private noDb = false;
+  /** Tests only: run the D1 record as if SHARE_DB weren't bound. */
+  async setNoDb(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.noDb = a.on;
+  }
   private recordWaits: number[] = [];
   /** Tests only: fire the alarm now, before anything is due. */
   async wakeNow(): Promise<void> {
