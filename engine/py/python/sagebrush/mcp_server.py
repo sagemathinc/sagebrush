@@ -361,6 +361,7 @@ OUTPUT_SCHEMAS = {
     }),
 }
 OUTPUT_SCHEMAS.update({name: WS.OUTPUT_SCHEMA for name in WS.NAMES})
+OUTPUT_SCHEMAS["workspace_connect"] = WS.CONNECT_OUTPUT_SCHEMA
 
 # (structuredContent and outputSchema are in the protocol from this version)
 STRUCTURED_SINCE = "2025-06-18"
@@ -619,7 +620,8 @@ class Server:
         self.plots = 0
         self.threads = []
         self.protocol = PROTOCOL_VERSIONS[0]
-        self.link = None  # the paired Sagebrush page, for the workspace tools (None: not paired)
+        self.link = None  # the pairing with the person's Sagebrush page (sagebrush/pairing.py), once asked for
+        self.client = {}  # the client's clientInfo, from initialize
 
     # ---- transport
     def send(self, msg):
@@ -724,6 +726,8 @@ class Server:
 
         if name in WS.NAMES:
             return WS.call(self.link, name, args)
+        if name == "workspace_connect":
+            return self.connect()
         if name in ("sage", "python"):
             if not isinstance(args.get("code"), str):
                 raise _Invalid("`code` (a string) is required")
@@ -772,6 +776,26 @@ class Server:
             return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
         raise KeyError(name)
 
+    def connect(self):
+        """workspace_connect: listen for the person's page (127.0.0.1 only),
+        with a fresh one-time code; or, once paired, what it granted."""
+        from sagebrush.pairing import Pairing, CODE_SECONDS
+
+        if self.link is None:
+            name = str(self.client.get("title") or self.client.get("name") or "an agent")[:80]
+            self.link = Pairing({"name": name, "client": str(self.client.get("name") or "unknown")[:80], "version": str(self.client.get("version") or "")[:40]})
+        st = self.link.status()
+        if st["paired"]:
+            result = dict(code=None, port=st["port"], expires_in_seconds=None, paired=True, granted=st["granted"], grant=st["grant"], page=st["page"])
+            text = "A Sagebrush page is paired%s." % (" and has granted access" if st["granted"] else "; the person has not granted access yet")
+        else:
+            port, code = self.link.start()
+            result = dict(code=code, port=port, expires_in_seconds=CODE_SECONDS, paired=False, granted=False, grant=None, page=None)
+            text = ("Ask the person to open Sagebrush (Chrome or Firefox), choose Chat, Connect an agent, and enter this code within 5 minutes: %s "
+                    "(port %d). They then choose what you may do in their workspace." % (code, port))
+            print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
+        return [_text(text)], {"result": result, "error": None}, False
+
     def structured(self):
         return self.protocol >= STRUCTURED_SINCE
 
@@ -819,6 +843,8 @@ class Server:
             return
         if method == "initialize":
             v = params.get("protocolVersion")
+            info = params.get("clientInfo")
+            self.client = info if isinstance(info, dict) else {}
             self.protocol = v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
             self.reply(rid, {
                 "protocolVersion": self.protocol,
@@ -875,6 +901,8 @@ class Server:
         for s in (self.session, self.tool_session):
             if s is not None:
                 s.close()
+        if self.link is not None:
+            self.link.close()
 
 
 class _Invalid(ValueError):
