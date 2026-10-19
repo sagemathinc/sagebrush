@@ -642,11 +642,15 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
 
 /** Admin calls are signed: HMAC-SHA256(key, timestamp \n METHOD \n path \n body). */
 async function signed(req: Request, env: ShareEnv, body: string): Promise<boolean> {
-  if (!env.PURGE_KEY) return false;
+  return signedWith(req, env.PURGE_KEY, body);
+}
+/** The same check with another key (the sync service's plan notices use LIMITS_KEY, design/sync-server.md §6). */
+export async function signedWith(req: Request, key: string | undefined, body: string): Promise<boolean> {
+  if (!key) return false;
   const ts = req.headers.get("x-sagebrush-timestamp") ?? "";
   const sig = req.headers.get("x-sagebrush-signature") ?? "";
   if (!/^\d{1,12}$/.test(ts) || Math.abs(now() - Number(ts)) > 300) return false;
-  const want = "sha256=" + (await hmac(env.PURGE_KEY, `${ts}\n${req.method}\n${new URL(req.url).pathname}\n${body}`));
+  const want = "sha256=" + (await hmac(key, `${ts}\n${req.method}\n${new URL(req.url).pathname}\n${body}`));
   return same(sig, want);
 }
 
