@@ -457,7 +457,12 @@ card and the full editor decide the same way.
 
 - **set, on a record that exists:** each field in `fields`:
   - **a text column:** the change from `was` to the new value, applied as
-    a text patch to the field as it is now. Both people's typing is kept;
+    a text patch to the field as it is now. Both people's typing is kept.
+    The patch is one span: what changed between `was` and the new value,
+    found by the common start and end. It is placed in the field as it is
+    now the same way, so it takes one linear pass over each text and never
+    searches. Where the two changed the same part, this edit's text wins
+    that part;
   - **any other field:** takes the new value: this edit is the later side.
 - **set with `create`:** the record is made from `fields`. If one with that
   key was made meanwhile elsewhere, it is merged as above, against an empty
@@ -470,9 +475,13 @@ card and the full editor decide the same way.
   - if a text column was changed elsewhere since `was`, the record is kept
     (its key in `dropped`);
   - otherwise it is removed. A record already gone is nothing to do.
-- **Its cost** grows with the records the edit touches, not with the board.
-  The host needs only its current document: it keeps no older revisions.
-  An edit merges the same way whatever `base` it names, as must a retry.
+- **Its cost** is linear in the edit plus the current size of the records
+  it touches. That can be large: a field rewritten elsewhere to megabytes
+  costs a one-letter edit to it a pass over those megabytes. It never
+  depends on the rest of the board. Work is limited by bytes for that
+  reason (see Bounds). The host needs only its current document: it keeps
+  no older revisions. An edit merges the same way whatever `base` it names,
+  as must a retry.
 
 ### The checks
 
@@ -513,7 +522,9 @@ edges, its page):
 - **ids:** within a page, two items never share an id, nor two pages, as
   the keys guarantee. Items on different pages may share one;
 - **size:** at most 8 MiB as UTF-8 JSON. This is a running total of each
-  record's exact encoded size, updated by the records touched.
+  record's exact encoded size, updated by the records touched;
+- **count:** at most 100,000 records, so that the indexes stay small
+  whatever the board's shape.
 
 The checks start from the records touched and use indexes the host keeps:
 - each page's items and their kinds;
@@ -533,9 +544,14 @@ Sagebrush provides the merge, the checks and the indexes as one object,
 every host merges and checks the same way. Its tests:
 - **compare it with a whole-board check**, on random sequences of edits:
   anything the whole-board rules refuse, it refuses;
-- **measure the CPU time and peak heap** of a small edit, and of a remote
-  change, against an 8 MiB board. Both stay proportional to the edit, not
-  to the board.
+- **measure the CPU time and peak heap:**
+  - of a small edit and of a remote change against an 8 MiB board, which
+    stay proportional to the edit and the records it touches, not to the
+    board;
+  - of the adversarial merge: `was: "A"`, the field now nearly 8 MiB, an
+    edit A to AB. Linear in that field, with no superlinear step;
+  - of the indexes for an 8 MiB board of the densest shape (the most
+    small pages, items and edges the caps allow).
 
 **What an edit is.** An edit is the user's, made with the frame's editor.
 The board's own code runs in a nested frame of another origin and never
@@ -586,6 +602,13 @@ names, and nothing outside it. Nothing runs because of it.
     a second: a burst of up to 20 at once, then 2 a second sustained. It
     refuses beyond that with `retryAfter`, the time until the bucket has
     one again;
+  - and by **work**: each edit costs its own size plus the current UTF-8
+    size of the records it touches. Each channel has a budget of 32 MiB,
+    refilled at 3.2 MiB a second, so at most 32 MiB of merging at once and
+    3.2 MiB a second sustained. An edit past the budget is refused with
+    `retryAfter`, and nothing of it is merged. An edit whose cost is more
+    than the whole budget can't be needed: an editable board is at most
+    8 MiB;
   - the host sends `remote` at most 4 times a second per channel,
     coalescing what arrives meanwhile into one change set.
 - **Ids:** the host remembers the last 100 answered edit ids per channel,
