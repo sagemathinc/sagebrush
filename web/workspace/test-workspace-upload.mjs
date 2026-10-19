@@ -256,6 +256,68 @@ try {
     if (item === "deleteboard") check(!opened, "Trash: nothing can be written in the board while it is moved there");
     else check(!opened || title === "TYPED_WHILE_LEAVING", `${item}: what was written while it was made is kept (opened: ${opened}, title: ${title})`);
   }
+  // Undo and Redo while the page is leaving (New board, Trash): nothing changes, with both an undo
+  // and a redo to make; the board is left as it was, and nothing is lost (astra's CORR-59D-1)
+  const key = (shift) => ev(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: ${shift ? '"Z"' : '"z"'}, code: "KeyZ", ctrlKey: true, shiftKey: ${!!shift}, bubbles: true, cancelable: true })); return 1; })()`);
+  const title = () => ev(`sagebrush.board.snapshot().doc.nodes[0].title`);
+  for (const item of ["deleteboard", "newboard"]) {
+    await freshBoard(`/Undo-${item}.board.json`);
+    await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
+    await ev(`sagebrush.board.edit((d) => { d.nodes[0].title = "After"; }).then(() => 1)`);
+    await ev(`sagebrush.board.edit((d) => { d.nodes[0].title = "After2"; }).then(() => 1)`);
+    await key(false);
+    check(await until(`sagebrush.board.snapshot().doc.nodes[0].title === "After"`, 5000), `(${item}: an undo to make, and a redo)`);
+    check(await until(`${W}.read("/Undo-${item}.board.json").then((r) => r.content.nodes[0].title === "After")`), `(${item}: saved)`);
+    const d0 = dialogs.length, at = await ev(`location.search`);
+    await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
+    await sleep(300);
+    await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
+    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock)`);
+    await key(false); await sleep(300);
+    check((await title()) === "After", `${item}, leaving: Undo changes nothing (${await title()})`);
+    await key(true); await sleep(300);
+    check((await title()) === "After", `${item}, leaving: Redo changes nothing (${await title()})`);
+    await ev(`sagebrush.board.edit((d) => { d.nodes[0].title = "AGENT"; }).then(() => 1)`); await sleep(300);
+    check((await title()) === "After", `${item}, leaving: an edit through the board's API changes nothing`);
+    await ev(`(() => { window.__release(); return 1; })()`);
+    check(await until(`location.search !== ${JSON.stringify(at)}`, 30000) && (await until(`!!${W}`, 30000)), `${item}: the page goes`);
+    check(!dialogs.slice(d0).some((d) => /aren't kept|couldn't be kept/.test(d.message)), `${item}: nothing said lost`);
+    if (item === "newboard") check(await until(`${W}.read("/Undo-newboard.board.json").then((r) => r.content.nodes[0].title === "After")`), "New board: the board left as it was");
+  }
+  // the workspace's lock never given up (another tab holding it for good): New board and Trash
+  // give up waiting, say so, make nothing and move nothing, the board writable again; and the
+  // lock given up later doesn't run what was abandoned (daybreak2's LIMIT-59D-1)
+  const boards = () => ev(`${W}.list("/").then((l) => l.filter((e) => e.kind === "board").length)`);
+  for (const item of ["newboard", "deleteboard"]) {
+    const ref = await freshBoard(`/Stuck-${item}.board.json`), here = await ev(`location.search`), before = await boards();
+    await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
+    await until(`window.__entered`, 5000);
+    await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
+    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}, the lock never given up: waiting for it)`);
+    check(await until(`document.body.innerText.includes("your files are busy")`, 20000), `${item}, the lock never given up: it gives up waiting, saying so`);
+    check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`)), `…its request for the lock withdrawn`);
+    check((await ev(`location.search`)) === here, `…the board stays`);
+    check(await writeInPlace(null, "WRITABLE_AGAIN"), `…and can be written in again`);
+    await ev(`(() => { document.querySelector(".board-editing .be-title")?.blur(); window.__release(); return 1; })()`);
+    await sleep(2000);
+    check((await ev(`location.search`)) === here, `…the lock given up later: the page still doesn't go`);
+    if (item === "newboard") check((await boards()) === before + 0, `…and no board was made (${before} → ${await boards()})`);
+    else check(!!(await stat(`/Stuck-${item}.board.json`)), "…and the board wasn't moved to Trash");
+  }
+  // the lock given up just as the wait ends: either it was done and the page went, or nothing was
+  // done and the board stays; never done after the board was released
+  {
+    const ref = await freshBoard("/Racing.board.json"), here = await ev(`location.search`), before = await boards();
+    await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
+    await sleep(300);
+    await ev(`(() => { document.querySelector("[data-sbb=newboard]").click(); return 1; })()`);
+    await sleep(9950);
+    await ev(`(() => { window.__release(); return 1; })()`);
+    await sleep(4000);
+    await until(`!!${W}`, 30000);
+    const went = (await ev(`location.search`)) !== here, made = (await boards()) - before;
+    check((went && made === 1) || (!went && made === 0), `the lock given up as the wait ends: done and gone, or not done at all (went: ${went}, made: ${made})`);
+  }
   // the same, the board's own save refused (its storage full): it stays open, saying so, and what was written is not left behind
   await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
   await sleep(300);

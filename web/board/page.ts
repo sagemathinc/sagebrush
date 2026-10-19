@@ -169,11 +169,11 @@ const PENDING_MAX = 8 * 2 ** 20;
  * (SEC-89C-3); a board made blank here is, and a copy is as trusted as what
  * it copies: a copy the page makes by itself (a conflict's, a closed
  * page's changes) never more (CORR-30D-1). */
-async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean): Promise<string> {
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
-  const e = await w.create(p, { content: d, mode: d.mode ?? "python" });
+  const e = await w.create(p, { content: d, mode: d.mode ?? "python", signal });
   if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
@@ -498,12 +498,25 @@ async function leaveFor(url: string, what: string): Promise<boolean> {
  * what is being written kept first; nothing written while it is made (the board frozen); then left
  * through the same boundary.  Made but not left (a save refused), or not made: the board as it was.
  * (astra's CORR-134-1: a check before the work is not a boundary at the leaving) */
-async function departFor(what: string, work: () => Promise<string | undefined>) {
+// (the workspace's lock waited for at most this long by a departure: another tab may hold it for
+// good; the work's lock request is then withdrawn, so it never runs, now or later: daybreak2's
+// LIMIT-59D-1)
+const DEPART_MS = 10_000;
+async function departFor(what: string, work: (signal: AbortSignal) => Promise<string | undefined>) {
   if (!(await settled(what))) return;
   mounted.freeze(true);
   let left = false;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), DEPART_MS);
   try {
-    const url = await work();
+    let url: string | undefined;
+    try {
+      url = await work(ctl.signal);
+    } catch (e: any) {
+      if (e?.name === "AbortError") throw new Error("your files are busy (another tab is changing them), so nothing was done. Try again in a moment");
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (url) left = await leaveFor(url, what);
   } finally {
     if (!left) mounted.freeze(false);
@@ -515,7 +528,12 @@ async function departFor(what: string, work: () => Promise<string | undefined>) 
 async function settled(what: string): Promise<boolean> {
   for (let i = 0; ; i++) {
     try { await mounted.keepWriting(); } catch (err) { alert(`"${what}" isn't opened: what was being written here couldn't be kept (${String((err as Error)?.message ?? err).slice(0, 200)}), so this board stays open.`); return false; }
-    await wsFlush();
+    // (the saves waited for, but not for good: one that waits on a lock another tab never gives up
+    // goes on, and this board stays; LIMIT-59D-1)
+    let late: ReturnType<typeof setTimeout> | undefined;
+    const saved = await Promise.race([wsFlush().then(() => true), new Promise<boolean>((r) => (late = setTimeout(() => r(false), DEPART_MS)))]);
+    clearTimeout(late);
+    if (!saved) { alert(`"${what}" isn't opened: this board's last changes are still being saved (your files are busy), so it stays open. Try again in a moment.`); return false; }
     if (local && ws && wsRefused) { alert(`"${what}" isn't opened: this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it stays open. Download it (File) to keep them.`); return false; }
     if (!mounted.writing()) return true;
     // (someone writing on and on as the page tries to go: after 10 passes it stays, nothing lost)
@@ -776,17 +794,17 @@ const host: BoardHost = {
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
-  newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async () => localUrl(await makeInWorkspace(ws, blankBoard(mode), true))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
-  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async () => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
+  newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async (signal) => localUrl(await makeInWorkspace(ws, blankBoard(mode), true, signal))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
+  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
   // The File menu's items that are the workspace's (design §3): a new
   // notebook, a folder, Open… (the file browser as a dialog), Recent, and
   // this board to Trash; none without the workspace, or in an exported file
   files: ws && !file ? {
-    newNotebook: (mode: string) => departFor("A new notebook", async () => {
+    newNotebook: (mode: string) => departFor("A new notebook", async (signal) => {
       const top = new Set((await ws!.list("/")).map((e) => e.path));
       const p = freePath("/", "Untitled", ".ipynb", (x) => top.has(x));
       if (!p) throw new Error("no free name for a new notebook");
-      const e = await ws!.create(p, { mode });
+      const e = await ws!.create(p, { mode, signal });
       return "/?nb=" + encodeURIComponent(e.ref!);
     }),
     async newFolder() {
@@ -802,8 +820,8 @@ const host: BoardHost = {
       const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
       if (!p || !e || e.kind !== "board" || e.ref !== id) throw new Error("this board isn't in your files");
       if (!confirm(`Move "${nameOf(p)}" to Trash? Trash keeps it until you empty it.`)) return;
-      await departFor("The next board", async () => {
-        await ws!.remove(p, { kind: "board", ref: id, fid: e.fid, created: e.created });
+      await departFor("The next board", async (signal) => {
+        await ws!.remove(p, { kind: "board", ref: id, fid: e.fid, created: e.created }, signal);
         const next = (await recentOpened(ws!, { kind: "board", ref: id })).find((x) => x.kind === "board");
         return location.pathname + (next ? "?doc=local:" + next.ref : "?new=" + encodeURIComponent(e.mode ?? "python"));
       });

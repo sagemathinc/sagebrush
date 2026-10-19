@@ -233,8 +233,11 @@ export class Editor {
     if (this.inplace && !this.board.item(this.inplace.id)) this.inplace.abandon();
   }
   async undo() {
+    // (not while the page is leaving: astra's CORR-59D-1)
+    if (this.leaving) return;
     // (what is being written is kept first: it is what undo takes back)
     await this.inplace?.end();
+    if (this.leaving) return;
     const cur = this.doc(), prev = this.undos.pop();
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
@@ -243,7 +246,9 @@ export class Editor {
     this.gone();
   }
   async redo() {
+    if (this.leaving) return;
     await this.inplace?.end();
+    if (this.leaving) return;
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
