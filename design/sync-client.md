@@ -33,7 +33,8 @@
 **What goes up: the operation log.** Every change to the workspace already records an op in its own transaction (`ops`), and slice 1 adds the contents' identity to each op:
 - `ref`;
 - for a data file, its `fid`, `sha256` and `size`;
-- for a write, `base` (the `sha256` it replaced).
+- for a write, `base` (the `sha256` it replaced);
+- `after`: the identity's resulting state, `{id, parent, name, kind, sha256, size, trashed}`, with `parent` the parent folder's identity (C3's replay and C2's summary use it).
 
 This is the "client's log plus identity" of sync-server §3. Hashing new bytes happens before their transaction, as the 1a migration already does.
 
@@ -92,11 +93,13 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
 - an ack maps each `dseq` to its `seq`;
 - `fid` (16 hex) is accepted and echoed on any op of any kind, folders included. Its uniqueness and stability are the reducer's to check.
 
-**Storage** (one more schema-only upgrade: no data moved):
+**Storage** (one more schema-only upgrade: no data moved. As in 1b's fix for CORR-D01-1, it drops the migration's state, so the migrator gives older entries their identity key):
 - `outbox`, keyed by `[ns, dseq]`;
 - `syncIndex`, the confirmed index, per `ns`;
-- `adoptJournal`, the first sync's captured tree (C3);
-- `pins`, by `sha256`: the bytes committed here and not yet decided (C2), with their total.
+- `adoptJournal`, the first sync's captured tree, keyed by identity, with a `byParent` index (C3);
+- `pins`, keyed `[id, seq]`: the bytes committed here and not yet decided (C2), with their total;
+- `pending`, by identity: what is waiting to go up for it (C2);
+- the outbox's index `byIdent`, and the entries' index `byIdent` (on each entry's identity, written when it is made, and by the migrator for older entries, as 1b does for `nkey`).
 
 `ns` is the namespace: `account_hash : generation : device`, from `welcome`.
 
@@ -117,7 +120,7 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
 - A crash leaves either the whole page or none. Ops made while the outbox is full are found by the next scan, from the watermark, in pages.
 - **Ops this device applied from the server** (C3) are recorded with `origin: "server"`, an explicit field. The scan skips them. The device id is not an origin: this device's own echo carries its own device, and is never recorded as a new op (C3).
 - **Ops not yet scanned are kept:** dropping op records (`dropOps`) never goes past the watermark.
-- **A `dseq` is never skipped locally.** A record whose bytes this device no longer has is still sent. The server decides it (`missing`), and the current state then goes as a new write (C2).
+- **A `dseq` is never skipped locally.** A record whose bytes this device no longer has is still sent. The server decides it: accepted if it holds those bytes already, else `missing`. Either way, the current state then goes as a new write based on that answer (C2).
 
 **One sender per device.**
 - The tab holding the Web Lock `sagebrush-sync:<ns>` is the only one with the account socket, the only allocator of `dseq`, and the only sender.
@@ -145,54 +148,93 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
 - outbox full: more edits, crash, reload, drain, and every local edit represented exactly once;
 - each scan page within its count and byte bounds.
 
-### C2. Committed bytes are pinned until decided (CORR-8E7-2, LIMIT-SC1-R2)
+### C2. Committed bytes are pinned until decided (CORR-8E7-2, LIMIT-SC1-R2, LIMIT-SC1-R4)
 
 **Pinned at the local commit, not at the scan.**
-- While sync is on, every local change that commits new bytes adds their `sha256` to `pins`, in the same transaction, with the file's `fid`.
-- A later write that replaces bytes still in `pins` keeps them as a version, in its own transaction. It does so even where it otherwise wouldn't keep one (empty bytes, `keepEmpty: false`).
+- While sync is on, every local change that commits new bytes records a pin, `pins` keyed `[id, seq]` (the identity and the committing op), with its `sha256` and size, in the same transaction.
+- A later write that replaces bytes still pinned keeps them as a version, in its own transaction. It does so even where it otherwise wouldn't keep one (empty bytes, `keepEmpty: false`).
 - The version is then exempt from pruning, from `dropVersions`, and from emptying Trash (which removes the entry; the bytes stay until decided).
-- The scan hands the pin to the outbox record that names the hash.
+- The scan hands the pin to the outbox record that names the hash. The adoption journal owns its records' pins until they drain (C3).
 - A decision releases it: accepted once the `seq` is confirmed (C3), even when the ack came before the echo; refused at once. After that, ordinary retention applies.
 
 **An upload reads exactly the bytes its record names:** the current file if its hash matches, else the pinned version. Current bytes are never sent under an older hash.
 
-**A cap on pinned bytes, without ever refusing a local save** (LIMIT-SC1-R2). A pin on bytes that are still the file's current ones costs nothing extra; only pinned bytes kept apart, as versions, count. That total is kept in the same transactions, and capped (1 GiB, or less when the browser's quota is smaller: half the estimated free space at the time). A change that would pass the cap:
-1. **collapses unscanned intermediate writes** to the same file: they never become records. The scan sends the latest write, with `base` the last hash the server knows. Their pins go.
-2. then, if still over, **doesn't pin** the bytes it replaces. The local save always succeeds. A record already made for those bytes is still sent (C1). The server refuses it `missing`, the scan sends the file's current state as a new write, and the device and the server converge on the current bytes.
+**The pending summary** (LIMIT-SC1-R4). Per identity, `pending` holds one record, written in the same transaction as each change, scan page or decision that touches the identity:
+- `latest`: the seq and resulting state (`after`, §3) of its newest local op;
+- `allocated`: its newest write record not refused (`dseq`, `sha256`, whether its bytes are still pinned, decided or not);
+- `collapsed`: a seq at or below which its unscanned writes are not sent;
+- `held`: set when a write was passed over by the scan and waits for a decision (below).
+
+The record goes when nothing is pending for the identity. Every rule below reads and writes this one record, plus a bounded number of pins. None of them walks the `ops` tail.
+
+**A write's `base`** is the `sha256` of the identity's `allocated` record if it has one, else its hash in the confirmed index. A write that follows an allocated A is therefore based on A, never on an older confirmed Z: A and its successor reach the reducer in that order, and no spurious conflict copy is made (astra).
+
+**A cap on pinned bytes, without ever refusing a local save** (LIMIT-SC1-R2). A pin on bytes that are still the file's current ones costs nothing extra; only pinned bytes kept apart, as versions, count. That total is kept in the same transactions as the pins, and capped (1 GiB, or less when the browser's quota is smaller: half the estimated free space at the time). A save that would pass the cap does the following, all in its own transaction and all bounded:
+1. **Collapses the identity's unscanned writes:** `collapsed` is set to the previous `latest` seq. That is one record written, whatever the length of the tail. The scan then skips those writes (no records), and sends only the newest, with its `base` as above. At most 32 of their pins are released now, through the pins' `[id, seq]` key range, each one taking its size off the total in the same transaction. The rest are released later, by a cleanup task in pages of 500, one transaction each.
+2. **If still over, it doesn't pin the bytes it replaces.** The local save always succeeds. If those bytes belong to a record already allocated (A), A is still sent, unchanged (C1), and is now *unpinned*.
 - The Sync panel says "some intermediate versions weren't uploaded", and lists their files.
 
+**An unpinned record's decision is the server's, not presumed** (astra). The server checks its own holdings, not this device's, so A may be:
+- **accepted:** the blob was uploaded before (an ack lost), or another device uploaded the same bytes. A takes effect like any accepted op. If the view later needs A's bytes (say, after a refusal of what followed), they are fetched like any remote content (C5).
+- **refused `missing`:** A is removed (C1), and `allocated` falls back to the identity's confirmed hash.
+
+Until A is decided, the scan allocates no further write for that identity. It sets `held` and passes on, so the watermark isn't stuck: one record written per skipped op. A's decision, in its own transaction, clears `held` and allocates one write for the identity's current state. Its `base` is A's hash if A was accepted, else the confirmed hash. So the current state is scheduled in both cases, from the actual answer.
+
+A held write is part of the view (C3). Its bytes are the file's current ones, so it adds nothing to the cap.
+
 **Tests:**
-- offline A then B writes to one file, then reconnect (A and B both uploaded, in order);
+- offline A then B writes to one file, then reconnect (A and B both uploaded, in order; B's `base` is A);
 - the same with the outbox full, and with the sender closed;
 - pruning, `dropVersions` and emptying Trash while A is pinned;
 - an ack accepted before the echo (still pinned until the echo);
-- overwrites with a tiny cap: saves never fail, the server converges on the current bytes;
-- a crash mid-way: no pin leaked, every pin owned by a record or a pending change.
+- overwrites with a tiny cap: saves never fail, and the server converges on the current bytes, with no conflict copy, in three vectors:
+  - the server lacks A (refused `missing`; the successor's base is the confirmed hash);
+  - A was uploaded before and its ack lost (accepted; the successor's base is A);
+  - another device had uploaded A's bytes (accepted; likewise);
+- **a long offline tail** (50,000 ops across 1,000 files), then 200 overwrites of one file at a 1 MiB cap. Each save reads and writes at most 40 records, counted by an instrumented store, and its longest task stays under 50 ms. The cleanup then drains in pages of 500;
+- a crash mid-way, including part-way through the paged cleanup: no pin leaked, every pin owned by an op, a record or the journal, and the byte total equal to the sum of the retained pins.
 
 ### C3. The confirmed index and the optimistic view (CORR-8E7-3)
 
 **The confirmed index (`syncIndex`).** It is the reducer applied to the server's log in `seq` order, own ops included. Its cursor `sync:<ns>:cursor` is written in the same transaction as each page applied to it.
 
-**What the person sees** is the workspace's own index. It equals the confirmed index plus every local op not yet confirmed, reduced on top in order:
-- the outbox's records, undecided or awaiting their echo, in `dseq` order;
-- then the local ops not yet scanned, in their `seq` order (astra: an unscanned B is part of the view, so a remote page or a rebuild never overwrites it). After each confirmed page, the affected identities' views are recomputed, and the difference is applied to the workspace's entries. That happens in the same transaction as the page and the cursor: entries, `syncIndex` and meta are all in the workspace's database. A crash leaves all of it or none.
+**What the person sees** is the workspace's own index. It equals the confirmed index with every local intent not yet confirmed reduced on top, in this order:
+1. the outbox's records, undecided or awaiting their echo, in `dseq` order;
+2. the undrained adoption journal, as adopts, in its drain order (below; astra: the journal is part of the view, so the `index` after `welcome`, or a rebuild, never erases captured entries);
+3. held writes (C2);
+4. the local ops not yet scanned, in `seq` order (an unscanned B is part of the view, so a remote page or a rebuild never overwrites it).
+
+After each confirmed page, the affected identities' views are recomputed, and the difference is applied to the workspace's entries. Each identity's layers are found by key, not by a scan: the outbox's `byIdent` index, the journal by `id`, and `pending` (whose `latest.after` stands for its unscanned ops). That happens in the same transaction as the page and the cursor: entries, `syncIndex` and meta are all in the workspace's database. A crash leaves all of it or none.
 
 **This device's own echo,** an `index` op with this `device` and a `dseq` in the outbox, is applied to the confirmed index like any other op.
 - The outbox record is marked confirmed and removed. Nothing is applied to the view twice, since the view already had it.
 - The order doesn't matter: an ack before the echo leaves the record "accepted, awaiting echo"; an echo before the ack confirms it at once.
 
-**First sync: the adoption journal** (CORR-8E7-3, LIMIT-SC1-R1). A device's existing tree is captured into `adoptJournal`, then sent as `adopt` records through the bounded outbox:
-1. **Start**, in one transaction: the boundary `W0`, the latest local op seq, is recorded.
-2. **Capture by path,** in pages of 500, each page one transaction with its progress key: each entry's identity, metadata and hash, its bytes pinned (C2).
-3. **Close the capture.** A path walk alone isn't a snapshot: a file renamed from behind the cursor to ahead of it, or the other way, is missed or caught twice. So, after the walk, every identity that an op with seq above `W0` touched is read again, in pages. If it exists, its current state replaces or adds its journal record; if it doesn't, its record goes. Ops are read up to `W1`, the latest seq when this step began. Repeat until a pass finds no op past the last `W1`.
-   - The journal is then exactly the tree as of `W1`.
-   - The scan watermark is set to `W1`: those ops' effects are already in the journal, so they aren't sent twice.
-4. **Connect.** The account socket is opened only now. So the `index` the server sends right after `welcome` (it doesn't wait to be asked) is applied to the confirmed index as usual. The journal is not yet sent, so nothing collides with it locally.
-5. **Drain:** the journal goes into the outbox a page at a time, as the outbox has room. It is bounded by the outbox's caps, never the tree's size, so the 100,000-entry maximum fills and drains repeatedly rather than waiting at the cap.
-   - Then ops after `W1` follow, through the scan.
-   - In the server's order, the cloud's entries come first, so this device's colliding adopts become `name (2)`.
+**First sync: the adoption journal** (CORR-8E7-3, LIMIT-SC1-R1, LIMIT-SC1-R3). A device's existing tree is captured into `adoptJournal`, then sent as `adopt` records through the bounded outbox. It starts once the 1a/1b migration is done, so every entry has its identity and its hash.
 
-A crash anywhere resumes from the journal's progress keys. A capture interrupted mid-walk resumes the walk, and step 3 covers whatever changed meanwhile.
+The journal is keyed by identity. Each record holds `{id, parent, name, kind, sha256, size, trashed}`, where `parent` is the parent folder's identity (or the root), never a path. A folder's move is then one record changed, and its descendants follow it by construction, captured before the move or after it (astra's descendant point). Paths are derived only when a record drains.
+
+Every local op records `after`: its identity's resulting state, in the same form (§3). For a folder op, that is the folder's own record.
+
+1. **Start**, in one transaction: `W0`, the latest local op seq, is recorded, and the scan watermark is set to `W0`. Ops after it are kept (C1's retention), and the scanner is idle until the journal has drained.
+2. **Walk by identity,** through the entries' `byIdent` index (`fid` for files and folders, `ref` for documents), in pages of 500, each page one transaction with its progress key. Each record holds the entry's state and the pin on its bytes (C2). An identity's place in this order doesn't change when it is renamed or moved, so a move during the walk can't hide an entry or show it twice.
+3. **Close at a finite boundary** (LIMIT-SC1-R3, astra's atomic closure). When the walk ends, one short transaction, under the workspace's lock, reads the latest op seq as `W1` and records it with the journal's state, `closing`. Every local change records its op inside the lock and in a transaction of its own, so each op is either at most `W1` or after it: never both, never neither.
+   - Then the ops in `(W0, W1]`, and only those, are replayed into the journal in pages of 500, each one transaction with its progress key. Each op's `after` replaces its identity's record (or removes it, for a forget). That is an assignment, so an op whose effect the walk already saw is harmless when replayed.
+   - Ops after `W1` are left to the scanner.
+   - The work is fixed when `W1` is chosen: at most the ops made during the walk. Continuous edits can't extend it, and no quiet interval is needed.
+   - The last replay page, in the same transaction, sets the scan watermark to `W1` and marks the journal `captured`. The journal is then exactly the tree as of `W1`.
+4. **Connect.** The account socket is opened only now. So the `index` the server sends right after `welcome` (it doesn't wait to be asked) is applied to the confirmed index as usual, and the journal stays in the view (layer 2).
+5. **Drain**, top-down from the root through the journal's `byParent` index: parents before their children; a record under a trashed or forgotten ancestor is not adopted. Each page is one transaction, as the outbox has room:
+   - it marks its journal records sent;
+   - makes their outbox records, with the next `dseq`s and paths derived from their parents';
+   - and hands their pins to those records.
+   - The drained records sit at the outbox's end, in the same order as the journal's head, which comes right after the outbox in the view. So a drain changes nothing visible: no gap, no double application.
+   - Each record is then retired once, by its echo or its refusal (C1).
+   - This is bounded by the outbox's caps, never the tree's size, so the 100,000-entry maximum fills and drains repeatedly rather than waiting at the cap.
+   - When the journal is drained, it is deleted in pages, and the scanner starts from `W1`.
+   - In the server's order, the cloud's entries come first, so this device's colliding adopts become `name (2)`, in the view as well.
+
+A crash anywhere resumes from the journal's state and progress keys: a walk mid-way resumes the walk; a closing resumes the replay at its page; a drain resumes its pages.
 
 **An op that can't be applied** to the view (it fails a local check, such as a path rule or a limit) is still in the confirmed index, and the cursor passes it. The view leaves it out and lists it in the Sync panel. Nothing redefines the server's log.
 
@@ -201,9 +243,13 @@ A crash anywhere resumes from the journal's progress keys. A capture interrupted
 - an ack lost, then the echo;
 - the echo before the ack;
 - a crash between a page and its cursor (impossible by construction; tested as a crash mid-page);
-- a reload mid-adoption;
-- a file renamed from behind the capture's cursor to ahead of it, and the other way, and deleted, during the capture (each captured exactly once, as of `W1`);
-- the `index` after `welcome` arriving while the journal drains;
+- a reload mid-adoption: in the walk, in the replay, and in the drain;
+- during the walk:
+  - a file renamed, moved between folders, and deleted;
+  - a folder containing already captured children moved, and another moved before its children were captured. Each identity is captured exactly once, at its `W1` path;
+- **a final local write racing the closing transaction:** it is in the journal or sent by the scan, exactly once;
+- **continuous edits throughout the capture** (an autosave every 100 ms on a 10,000-entry tree): the socket opens within the quiet capture time ×1.5 + 2 s, and the journal begins draining. The replay reads only `(W0, W1]`, and the edits after `W1` are sent after the journal, each once;
+- the `index` after `welcome`, and a rebuild, while most of a large journal is undrained, with colliding paths and later local edits to undrained entries: none of them disappears from the view, and the colliding ones become `name (2)`;
 - 100,000 entries through repeated outbox fill and drain, with a crash and reload in each phase;
 - a remote create at the same path before this device's queued create (the confirmed order gives the remote one `/x` and this one `/x (2)`, on both devices).
 
@@ -295,7 +341,7 @@ It holds that reservation until its last large reference is dropped. The same ho
 
 - `blobs/check` takes at most 1,000 hashes per request.
 - The first sync's adoption and a rebuild page through the 100,000-entry maximum:
-  - adoption: captured 500 entries per transaction, by path; drained from the journal into the outbox as it has room (C3);
+  - adoption: captured 500 entries per transaction, in identity order; the ops made meanwhile replayed 500 per transaction; drained from the journal into the outbox as it has room (C3);
   - rebuild: the server's log at 1,000 ops or 1 MiB per page, reduced into `syncIndex` page by page, its cursor durable.
 - Neither ever holds the whole tree in memory.
 - **Tests:** 100,000 entries, with the pages' counts and bytes bounded, and a crash and reload mid-way.
@@ -306,14 +352,14 @@ It holds that reservation until its last large reference is dropped. The same ho
 |---|---|---|---|
 | 0 | Before: capabilities 1a and 1b merged (fileBytes, folder ids, provenance) | board, in review | — |
 | 1 | `sync-reduce.ts` and its JSON vectors (C4: identity, order, derived conflict copies, two-device replay) | board | 1.5 days |
-| 2 | The ops' identity fields (`ref`, `fid`, `sha256`, `size`, `base`) recorded with each op; version 3's stores; the outbox, the scan watermark and pins (C1, C2) | board | 1.5 days |
+| 2 | The ops' identity fields (`ref`, `fid`, `sha256`, `size`, `base`, `after`) recorded with each op; the new stores and indexes; the outbox, the scan watermark, pins, the pending summary and its paged cleanup (C1, C2) | board | 2 days |
 | 3 | `sync-client.ts`: the sender lock, the socket, hello/welcome/index/pull_index, ops and acks, lost acks, refusals and rebuild, pace and backoff (L3), blobs check/PUT with the reservation (L2, L4); tested against Miniflare (web/sync/test-entry.ts, as test-sync.mjs runs it) | board | 2.5 days |
-| 4 | The confirmed index and the view (C3), the first sync's adoption, the durable fetch queue against the read budget (L1), downloads by compare-and-swap (C5) | board | 2 days |
+| 4 | The confirmed index and the view with its four layers (C3), the first sync's adoption (walk by identity, closing replay, top-down drain), the durable fetch queue against the read budget (L1), downloads by compare-and-swap (C5) | board | 2.5 days |
 | 5 | The switch, enable's refusals, the foot status, row icons, "Delete my synced data" | board | 1 day |
 | 6 | The two-browser test: two Chrome profiles, one Miniflare, the site; then the same against dev once lite4b's limits answer carries `sync` | board, with auth | 1 day |
 | — | The session and allowlist (done: the cookie, SYNC_ACCOUNTS plus `sync.enabled`), enable's refusal wording (in progress), lite4b's `sync` limits block (a cocalc-ai PR; lite4 deploys it), the dev deploy, the server importing `sync-reduce.ts` (later, for compaction) | auth | — |
 
-That is about 9½ working days for board, three more than the first draft, for the contracts in §3a. Each step is its own branch, reviewed and CI'd as usual. Steps 1 and 2 can start as soon as 1b is in review. Step 6 on dev waits on lite4b's limits; until then everything is tested against Miniflare.
+That is about 10½ working days for board, four more than the first draft, for the contracts in §3a. Each step is its own branch, reviewed and CI'd as usual. Steps 1 and 2 can start as soon as 1b is in review. Step 6 on dev waits on lite4b's limits; until then everything is tested against Miniflare.
 
 ## 5. Limits and checks the slice keeps
 
