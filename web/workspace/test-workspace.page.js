@@ -602,6 +602,28 @@ async function intents() {
   await w.mkdir("/d");
   await w.remove("/d");
   check(await fails(w.restore(td.path, td), "missing") && (await w.stat("/d-moved")) !== undefined, "Undo of a folder whose name is now another folder's in Trash: refused");
+  // a clock that ties (CORR-989-2): a folder (no id, no fid), restored and
+  // moved away, its name's new folder trashed at the same time; and one
+  // file put in Trash twice at the same time: each time is its own
+  {
+    const t = Date.now(), wt = await W.Workspace.open({ name: `ws-test-tied-${n}`, mainName: `main-test-tied-${n}`, now: () => t });
+    await wt.mkdir("/collision");
+    await wt.create("/collision/original.txt", { content: "ORIGINAL" });
+    const old = await wt.remove("/collision");
+    await wt.restore(old.path);
+    await wt.rename("/collision", "/original-kept");
+    await wt.mkdir("/collision");
+    await wt.create("/collision/replacement.txt", { content: "UNRELATED" });
+    const repl = await wt.remove("/collision");
+    check(await fails(wt.restore(old.path, old), "missing") && (await wt.stat("/Trash/collision/replacement.txt")) !== undefined && (await wt.stat("/collision")) === undefined, "same clock: Undo of a folder whose name is another folder's in Trash now, refused: " + JSON.stringify([old.trashed, repl.trashed]));
+    await wt.create("/same.txt", { content: "s" });
+    const once = await wt.remove("/same.txt");
+    await wt.restore(once.path);
+    const twice = await wt.remove("/same.txt");
+    check(await fails(wt.restore(once.path, once), "missing"), "same clock: Undo of the first time a file went to Trash, after it was restored and trashed again: refused");
+    check((await wt.restore(twice.path, twice)).path === "/same.txt", "…of the second, restored");
+    wt.close();
+  }
   // superseded: nothing moved, undefined
   check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => false })) === undefined && (await w.stat("/n.ipynb")) !== undefined, "a rename superseded by the time it holds the lock: not made");
   check((await w.rename("/n.ipynb", "/m.ipynb", { still: () => true }))?.path === "/m.ipynb", "…and one still current, made");

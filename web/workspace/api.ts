@@ -38,8 +38,8 @@ export type Entry = {
   rev?: number;
   /** a data file's own id, which a rename keeps: its versions' (§2.5) */
   fid?: string;
-  /** in Trash: where it was, and when it was put there */
-  trashed?: { from: string; at: number };
+  /** in Trash: where it was, when it was put there, and that time's own id (Undo's, CORR-989-2) */
+  trashed?: { from: string; at: number; id?: string };
   /** a board made from an edited example or a board on the web: its address */
   origin?: string;
   /** a data file recovered from Trash bytes with no entry: from which Trash key, and their SHA-256 (CORR-DF0-1) */
@@ -74,12 +74,13 @@ const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
-// (the same entry, put in Trash the same time: a data file's key is its
-// path, so it is known by its own id; a document by its id; each by when it
-// was made and when and from where it was put in Trash)
+// (the same entry, put in Trash the same time: each time something is put
+// in Trash has an id of its own, which a clock that ties can't give
+// (CORR-989-2); and the same entry: a data file known by its own id (its
+// key is its path), a document by its id)
 const sameTrashed = (e: Entry, x: Entry) =>
-  e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) &&
-  !!e.trashed && e.trashed.at === x.trashed?.at && e.trashed.from === x.trashed?.from;
+  !!e.trashed?.id && e.trashed.id === x.trashed?.id &&
+  e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) && e.trashed.from === x.trashed?.from;
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
@@ -303,7 +304,7 @@ export class Workspace {
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
-      return (await this.move(q, dest, "remove", { from: q, at: this.now() }))[0];
+      return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
     });
   }
 
