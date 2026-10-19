@@ -158,16 +158,21 @@ if (!ws) wsAbandoned = true;
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
 /** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
 const PENDING_MAX = 8 * 2 ** 20;
-/** A new board in the workspace, `/<title>.board.json` (the first free name): its id. */
-async function makeInWorkspace(w: Workspace, d: BoardDoc): Promise<string> {
+/** A new board in the workspace, `/<title>.board.json` (the first free name): its id.
+ * `here`: marked as written here, its notes' remote pictures shown at once
+ * (SEC-89C-3); a board made blank here is, and a copy is as trusted as what
+ * it copies: a copy the page makes by itself (a conflict's, a closed
+ * page's changes) never more (CORR-30D-1). */
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
   const e = await w.create(p, { content: d, mode: d.mode ?? "python" });
-  // (written here: its notes' remote pictures show at once, as a new board's always have, SEC-89C-3)
-  try { localStorage.setItem("sagebrush-board:local:" + e.ref + "#here", "1"); } catch {}
+  if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
+const hereKey = (id: string) => "sagebrush-board:local:" + id + "#here";
+const isHere = (key: string) => { try { return localStorage.getItem(key) === "1"; } catch { return false; } };
 const safeTitle = (t: unknown) => String(t ?? "").replace(/[\/\u0000-\u001f\u007f]/g, "-").trim().slice(0, 200).trim() || "Untitled board";
 /** The workspace's latest board in this language (not in Trash, not missing): its id. */
 async function latestInWorkspace(w: Workspace, mode: string): Promise<string | null> {
@@ -186,7 +191,7 @@ let unsaved: string | null = null;
     const mode = MODES.includes(asked) ? asked : "python";
     let id: string | null = null;
     if (ws) {
-      try { id = (recent ? await latestInWorkspace(ws, mode) : null) ?? (await makeInWorkspace(ws, blankBoard(mode))); } catch (e) { console.warn("workspace:", e); }
+      try { id = (recent ? await latestInWorkspace(ws, mode) : null) ?? (await makeInWorkspace(ws, blankBoard(mode), true)); } catch (e) { console.warn("workspace:", e); }
     } else id = (recent ? latestLocal(mode) : null) ?? makeLocal(blankBoard(mode));
     if (id) {
       q.delete("new");
@@ -335,7 +340,7 @@ function wsSave(id: string, d: BoardDoc) {
           }
         }
         if (!copyPath) {
-          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }), rev: 1 };
+          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }, isHere(hereKey(id))), rev: 1 };
           logSave("to a new copy", d, epoch);
         }
         if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
@@ -378,7 +383,7 @@ const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>()
 async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
-    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }), rev: 1 };
+    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }, isHere(hereKey(id))), rev: 1 };
     dropPending(id, header + "\n");
     const path = await w.pathOf("board", id);
     const cur = path ? await w.read(path) : null;
@@ -467,7 +472,7 @@ const host: BoardHost = {
               else {
                 // (the record moved on since, by another writer: neither is dropped; the copy kept as a board of its own: CORR-12C-2)
                 try {
-                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" });
+                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" }, isHere(hereKey(id)));
                   dropPending(id, pend.header + "\n");
                   notice = "**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".";
                 } catch (e: any) {
@@ -626,8 +631,8 @@ const host: BoardHost = {
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
-  newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode))); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
-  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" })); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   // (an exported file's or a frame's empty board opens as any other)
   editBlank: !file,
   // the function search beside a code item being written: the notebook's

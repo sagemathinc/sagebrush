@@ -97,6 +97,38 @@ try {
   await sleep(300);
   await ev(`(() => { document.querySelector('[data-sbb="duplicate"]').click(); return 1; })()`);
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/To copy (copy).board.json"))`, 30000), "Duplicate makes a board of the workspace: To copy (copy)");
+  const markOf = (path) => ev(`${W}.stat(${JSON.stringify(path)}).then((e) => localStorage.getItem("sagebrush-board:local:" + e.ref + "#here"))`);
+  check((await markOf("/To copy (copy).board.json")) === "1", "…a copy of a board written here, marked as one");
+  // a copy is never trusted more than what it copies (CORR-30D-1): a board
+  // an agent wrote, with a remote picture, isn't marked; a closed page's
+  // changes to it, recovered as a board of their own, aren't either, and
+  // their picture waits for a click; of a board written here, they are
+  const remotePics = () => ev(`[...document.querySelectorAll("img")].filter((i) => (i.getAttribute("src") ?? "").includes("example.invalid")).length`);
+  for (const [name, trusted] of [["Foreign source", false], ["Own source", true]]) {
+    const ref = await ev(`(async () => {
+      const original = { title: ${JSON.stringify(name)}, nodes: [{ id: "remote", text: "![remote](https://example.invalid/probe.png)" }] };
+      const e = await ${W}.create(${JSON.stringify("/" + name + ".board.json")}, { content: original });
+      if (${trusted}) localStorage.setItem("sagebrush-board:local:" + e.ref + "#here", "1");
+      const r = await ${W}.read(e.path);
+      await ${W}.write(e.path, { ...original, title: "Changed elsewhere" }, { base: r.rev });
+      localStorage.setItem("sagebrush-workspace-pending:" + e.ref, "0123456789abcdef:1:1" + String.fromCharCode(10) + JSON.stringify(original));
+      return e.ref;
+    })()`);
+    await go(base + "board/?doc=local:" + ref);
+    const copy = "/" + name + " (unsaved changes from a closed page).board.json";
+    check(await until(`${W}?.stat(${JSON.stringify(copy)}).then((e) => !!e)`, 60000), `${name}: a closed page's changes, recovered as a board of their own`);
+    check((await markOf(copy)) === (trusted ? "1" : null), `…${trusted ? "marked, as the board written here is" : "not marked as written here: the agent's board isn't"}`);
+    await go(base + "board/?doc=local:" + (await ev(`${W}.stat(${JSON.stringify(copy)}).then((e) => e.ref)`)));
+    await until(`!!${B}?.snapshot()`, 60000);
+    await sleep(1500);
+    check((await remotePics()) === (trusted ? 1 : 0), `…opened, its remote picture ${trusted ? "shown at once" : "waits for a click"}`);
+    if (!trusted) {
+      // Duplicate of a board not written here: not marked either
+      await ev(`(() => { document.querySelector('[data-sbb="duplicate"]').click(); return 1; })()`);
+      const dup = "/" + name + " (unsaved changes from a closed page) (copy).board.json";
+      check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === ${JSON.stringify(dup)}))`, 30000) && (await markOf(dup)) === null, "…and its Duplicate isn't marked");
+    }
+  }
   // an agent's change through window.sagebrush.workspace is credited to it
   await ev(`${W}.mkdir("/From the agent").then(() => 1)`);
   check(await ev(`${W}.ops().then((o) => o.at(-1).op === "mkdir" && o.at(-1).by === "agent:page")`), "an agent's change is credited to agent:page");
