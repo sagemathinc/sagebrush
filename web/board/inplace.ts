@@ -13,7 +13,7 @@
 // and a whole visit is one undo step.  A part left empty is taken off.
 
 import type { Board } from "./board";
-import type { BoardDoc, DocGroup, DocNote } from "./doc";
+import { getOwn, type BoardDoc, type DocGroup, type DocNote } from "./doc";
 import { docHead, entryExamples, searchIndex, type DocEntry } from "../docsearch";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { highlight as highlightPython, highlightMarkdown } from "../notebook/highlight.js";
@@ -99,7 +99,8 @@ export class InPlace {
     this.hasCode = !this.group && note.code !== undefined;
     this.bornCode = this.fresh && this.hasCode;
     this.hideCode = !!note.hideCode;
-    if (!this.group && note.image && d.images?.[note.image]) this.pic = { key: note.image, info: d.images[note.image] };
+    const pic = note.image ? getOwn(d.images, note.image) : undefined;
+    if (!this.group && note.image && pic) this.pic = { key: note.image, info: pic };
     this.build(note);
     this.toolbar();
     this.listen();
