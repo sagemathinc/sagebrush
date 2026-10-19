@@ -15,7 +15,15 @@
 //   trash    the bytes of data files in Trash, by their path there (out of
 //            "sagebrush"/"files", which every interpreter is sent)
 //   ops      the operation log, one record per change (keyPath "seq",
-//            counted up): what sync will send (§7.2)
+//            counted up): what sync will send (§7.2).  Every change to the
+//            entries adds its op in the same transaction, so the latest seq
+//            is the index's generation (the migrator's "did anything change
+//            during this pass", design/capabilities.md §2b).  The
+//            generation never goes down: Workspace.generation() is the
+//            latest seq or meta's "opsFloor", whichever is larger, and
+//            anything that deletes op records (Workspace.dropOps) first
+//            records the highest seq it deletes as opsFloor, in the same
+//            transaction
 //   versions data files' earlier versions (§2.5): one record each (keyPath
 //            "id", counted up), by file id and time (index byFile [fid, t])
 //            and by time (index byTime)

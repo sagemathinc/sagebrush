@@ -12,8 +12,11 @@
 //   workspace's lock (Workspace.migrateOne), so a change never interleaves
 //   with it, and a change waiting for the lock goes between two files.
 // - Its memory is the page's reservation (reserve.ts), taken before the
-//   workspace's lock, never while holding it; a file grown past what was
-//   reserved is left for the next pass.
+//   workspace's lock, never while holding it.  A value kept the old way has
+//   no size until it is read, so each read reserves LEGACY_MAX × COPIES,
+//   exclusively (it waits until nothing else is held), and the index's size
+//   is corrected from the bytes read (LIMIT-CAP1A-1); one larger than
+//   LEGACY_MAX is marked unmoved and not read for this again.
 // - Quota first: without room for a file and MIGRATE.headroom, it pauses
 //   (the old copies stay where they are, and are read there), says so in
 //   the Storage panel, and tries again only when something is freed in
@@ -22,11 +25,12 @@
 //   index's generation when it began, its checkpoint, whether it did any
 //   work), paused, or done.  A pass walks the whole index from its first
 //   path; the migration is done only when a whole pass did nothing and the
-//   index's generation (the operation log's latest seq: every change to the
-//   entries records an op in its own transaction) is still the one it began
+//   index's generation (Workspace.generation: the operation log's latest seq,
+//   which never goes down; every change to the entries records an op in its
+//   own transaction) is still the one it began
 //   with, checked holding the lock (CORR-CAP-46A-1).
 import type { Entry, Workspace } from "./api";
-import { WorkspaceError } from "./api";
+import { COPIES, LEGACY_MAX } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
 
@@ -39,8 +43,8 @@ export const MIGRATE = {
   ms: 2000,
   /** room kept free beyond a file's size before it is moved */
   headroom: 16 * 2 ** 20,
-  /** the copies of a file's bytes held while it is moved (as read, and as given to IndexedDB): reserved as size × this */
-  copies: 2,
+  /** the copies of a file's bytes held while it is moved: COPIES (api.ts) */
+  copies: COPIES,
   /** (tests: awaited after each batch, with the state written) */
   afterBatch: null as null | ((s: MigrationState) => Promise<void> | void),
 };
@@ -124,7 +128,7 @@ async function migrate(w: Workspace) {
     const s = await readState(w);
     if (s.done || s.paused) return;
     if (!s.pass) {
-      s.pass = { start: await w.lastSeq(), at: "", work: false };
+      s.pass = { start: await w.generation(), at: "", work: false };
       await writeState(w, s);
     }
     const r = await batch(w, s.pass);
@@ -137,7 +141,7 @@ async function migrate(w: Workspace) {
     if (r === "end") {
       // (done only if this whole pass did nothing and nothing changed the index meanwhile, checked holding the lock)
       const done = await w.locked(async () => {
-        const gen = await w.lastSeq(), staleLeft = (await w.staleCopies(1)).length > 0;
+        const gen = await w.generation(), staleLeft = (await w.staleCopies(1)).length > 0;
         if (!s.pass!.work && gen === s.pass!.start && !staleLeft) {
           await writeState(w, { done: true });
           return true;
@@ -159,9 +163,15 @@ async function migrate(w: Workspace) {
 async function batch(w: Workspace, p: { start: number; at: string; work: boolean }): Promise<"end" | "more" | "paused"> {
   const t0 = performance.now();
   let moved = 0, bytes = 0;
-  // old copies a crash left (their entries already migrated): deleted first
+  // old copies a crash left (their entries already migrated): deleted first, if still the bytes moved
+  // (their bytes are read: reserved first)
   for (const [where, key] of await w.staleCopies(MIGRATE.files)) {
-    await w.locked(() => w.dropStale(where, key));
+    const release = await reserve(LEGACY_MAX * MIGRATE.copies);
+    try {
+      await w.locked(() => w.dropStale(where, key));
+    } finally {
+      release();
+    }
     p.work = true;
     moved++;
   }
@@ -170,29 +180,25 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
   if (!next.length) return "end";
   for (const e of next) {
     if (moved >= MIGRATE.files || bytes >= MIGRATE.bytes || performance.now() - t0 > MIGRATE.ms) return "more";
-    if (e.kind === "file" && !e.migrated && e.ref !== null) {
+    if (e.kind === "file" && !e.migrated && !e.unmoved && e.ref !== null) {
       const size = e.size ?? 0;
       if (!(await room(size))) return "paused";
-      // (reserved before the workspace's lock, never while holding it)
-      const release = await reserve(size * MIGRATE.copies);
+      // (reserved before the workspace's lock, never while holding it: its true size is known only once read)
+      const release = await reserve(LEGACY_MAX * MIGRATE.copies);
       try {
         const r = await w.locked(async () => {
           const cur = await w.stat(e.path);
-          if (!cur || cur.kind !== "file" || cur.migrated || cur.ref === null) return "none";
-          // (grown past what was reserved: left for the next pass, which reserves its new size)
-          if ((cur.size ?? 0) > size) return "grew";
+          if (!cur || cur.kind !== "file" || cur.migrated || cur.unmoved || cur.ref === null) return "none";
           try {
-            const after = await w.migrateOne(cur, size);
-            return after.migrated ? "moved" : "none";
+            const after = await w.migrateOne(cur, LEGACY_MAX);
+            return after.migrated ? "moved" : after.unmoved ? "unmoved" : "none";
           } catch (err) {
-            if (err instanceof WorkspaceError && err.code === "limit") return "grew";
             if (isQuota(err)) return "quota";
             throw err;
           }
         });
         if (r === "quota") return "paused";
-        if (r !== "none") p.work = true;
-        if (r === "moved") { moved++; bytes += size; }
+        if (r === "moved") { p.work = true; moved++; bytes += size; }
       } finally {
         release();
       }

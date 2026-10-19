@@ -216,31 +216,27 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     await w.adopt("/", safeName(rec.name), ".ipynb", { kind: "notebook", ref: id, mode: typeof rec.mode === "string" ? rec.mode : "python", created: rec.updated ?? Date.now(), updated: rec.updated ?? Date.now() });
     r.notebooks++;
   }
-  // bytes the old way at a moved file's own key, not marked as its old copy: written there since by a
-  // page still running the code from before (its workspace closed by the upgrade, it saves the old way):
-  // the same bytes, dropped; others, kept beside it as a file of their own, never lost (capabilities §2b)
+  // bytes the old way at a moved file's own key, not marked as its old copy (a marked one is compared and
+  // deleted, or kept, by dropStale): written there since by a page still running the code from before
+  // (its workspace closed by the upgrade, it saves the old way): kept beside it as a file of their own,
+  // never lost (capabilities §2b, CORR-F81-1).  Not read here (reconcile holds the lock, and a reservation
+  // can't be taken holding it: LIMIT-CAP1A-1): its size comes when the migrator moves it.
   const movedByRef = new Map(entries.filter((e) => e.kind === "file" && e.migrated && e.ref !== null && !e.trashed && !within(e.path, TRASH)).map((e) => [e.ref!, e]));
   // (keys a file not yet moved names: such bytes are that file's, a copy already kept)
   const oldWay = new Set(entries.filter((e) => e.kind === "file" && !e.migrated && e.ref !== null && !e.trashed && !within(e.path, TRASH)).map((e) => e.ref!));
   for (const key of fileKeys) {
     const moved = typeof key === "string" ? movedByRef.get(key) : undefined;
     if (!moved || stale.has("files:" + key) || oldWay.has(key)) continue;
-    const bytes = await w.mainTx("files", "readonly", (st) => st.get(key));
-    if (bytes === undefined) continue;
-    const now = await inTx(w.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(moved.fid!)));
-    if (now !== undefined && now.byteLength === bytes.byteLength && (await bytesHash(now)) === (await bytesHash(bytes))) {
-      await w.mainTx("files", "readwrite", (st) => st.delete(key));
-      continue;
-    }
     const [base, ext] = splitExt(nameOf(moved.path));
-    await w.adopt(parentOf(moved.path), base + " (from an older tab)", ext, { kind: "file", ref: key, size: bytes.byteLength ?? bytes.length ?? 0, rev: 0 });
+    await w.adopt(parentOf(moved.path), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 });
     r.recovered++;
   }
   // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
   for (const key of fileKeys) {
     if (typeof key !== "string" || refs.file.has(key) || stale.has("files:" + key)) continue;
-    const bytes = await w.mainTx("files", "readonly", (st) => st.get(key));
-    const size = bytes?.length ?? bytes?.byteLength ?? 0;
+    // (not read for its size: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1);
+    // the migrator, which reserves first, gives it its size as it moves it)
+    const size = undefined;
     let p: string | null = null;
     try { p = normPath(key); } catch {}
     if (p !== null && p !== "/" && !within(p, TRASH)) {
