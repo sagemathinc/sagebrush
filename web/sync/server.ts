@@ -21,7 +21,47 @@ import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncE
 import { allowed, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
-export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+
+/** An admin call's body: at most this many bytes (LIMIT-5E2-1). */
+const ADMIN_BODY = 4096;
+/**
+ * Before any work on an admin call (LIMIT-5E2-1): the per-IP admin limit
+ * (mandatory: without it, sync's admin routes are off), then, for a POST,
+ * a declared Content-Length of at most ADMIN_BODY.  A refusal here reads no
+ * body and calls no object and no database.
+ */
+async function adminGate(req: Request, env: Env): Promise<Response | null> {
+  if (!env.SYNC_ADMIN_LIMIT || !env.SYNC_ACCOUNT) return err(404, "sync is not enabled here");
+  if (!(await env.SYNC_ADMIN_LIMIT.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return err(429, "too many requests");
+  if (req.method === "POST") {
+    const cl = req.headers.get("content-length");
+    if (cl === null) return err(411, "Content-Length is required");
+    if (!/^\d{1,6}$/.test(cl) || Number(cl) < 1 || Number(cl) > ADMIN_BODY) return err(413, "bad request");
+  }
+  return null;
+}
+/** A body read to at most `max` bytes, as text, or null if it is longer (whatever its headers say). */
+async function readBounded(req: Request, max: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) all.set(p, (at += p.length) - p.length);
+  return new TextDecoder().decode(all);
+}
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => json({ error, ...extra }, status);
@@ -60,13 +100,18 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   }
   // CoCalc's signed calls (§6, §9): a plan notice, and its purge of a deleted account, which
   // sharing then handles too (sync's part runs from the account object's alarm)
-  if (p === "/api/admin/limits" && req.method === "POST") return adminLimits(req, env);
+  if (p === "/api/admin/limits" && req.method === "POST") return (await adminGate(req, env)) ?? adminLimits(req, env);
   if (p === "/api/admin/purge" && req.method === "POST") {
-    if (env.SYNC_ACCOUNT && env.SHARE_DB) await adminSyncPurge(req.clone(), env);
+    if (env.SYNC_ACCOUNT && env.SHARE_DB) {
+      // (gated here first: sharing then reads the same request, which has passed the same bounds)
+      const no = await adminGate(req, env);
+      if (no) return no;
+      await adminSyncPurge(req.clone(), env);
+    }
     return null;
   }
   const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})$/i);
-  if (sp && req.method === "GET") return adminSyncPurgeStatus(req, env, sp[1]);
+  if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1]);
   if (!p.startsWith("/api/sync/")) return null;
   // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
@@ -152,8 +197,10 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
 async function adminLimits(req: Request, env: Env): Promise<Response> {
   if (!env.SYNC_ACCOUNT || !env.LIMITS_KEY) return err(404, "sync is not enabled here");
-  const body = await req.text();
-  if (body.length > 4096 || !(await signedWith(req, env.LIMITS_KEY, body))) return err(401, "bad signature");
+  const body = await readBounded(req, ADMIN_BODY);
+  // (a body longer than the Content-Length that passed the gate: a second line, its own answer)
+  if (body === null) return err(400, "bad request", { message: "the body is longer than it said" });
+  if (!(await signedWith(req, env.LIMITS_KEY, body))) return err(401, "bad signature");
   let v: { request_id?: unknown; account_id?: unknown; issued?: unknown; limits?: unknown };
   try {
     v = JSON.parse(body);
@@ -167,8 +214,8 @@ async function adminLimits(req: Request, env: Env): Promise<Response> {
 
 /** Sync's part of CoCalc's signed purge (§9): the account object deletes everything it holds. */
 async function adminSyncPurge(req: Request, env: Env): Promise<void> {
-  const body = await req.text();
-  if (body.length > 4096 || !(await signedWith(req, env.PURGE_KEY, body))) return;
+  const body = await readBounded(req, ADMIN_BODY);
+  if (body === null || !(await signedWith(req, env.PURGE_KEY, body))) return;
   let v: { request_id?: unknown; account_id?: unknown };
   try {
     v = JSON.parse(body);
@@ -215,7 +262,11 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
     await stub.abandon({ id });
     return err(400, "invalid", { message: "the bytes don't match their SHA-256 or their length" });
   }
-  return answer(await stub.finalize({ account, id, size: stored.size }), (v) => json(v, 201));
+  const f = await stub.finalize({ account, id, size: stored.size });
+  // (not finalized: nothing will own this object, so it goes now; the account's outbox has it too
+  // when it can, CORR-5E2-2)
+  if ("error" in f) await env.SHARE_BUCKET!.delete(key).catch(() => {});
+  return answer(f, (v) => json(v, 201));
 }
 
 /**
