@@ -786,6 +786,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.storeLimits(l);
       this.set("limits_issued", l.issued ?? 0);
       this.set("limits_fetched", Date.now());
+      // (a lower limit can leave the claim holding more than fits: the alarm gives it back, CORR-BDA-1)
+      this.arm();
       return l;
     } catch {
       // (the plan stored now, not the one read before the await)
@@ -856,8 +858,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** What sync claims at a time: L / 64, between 4 and 64 MiB, never more than L (in tests, at least 64 bytes, or a seam's). */
   private chunk(L: number): number {
-    if (testMode(this.env) && this.chunkOverride) return Math.min(this.chunkOverride, L);
-    return Math.min(L, testMode(this.env) ? Math.max(64, Math.floor(L / 64)) : Math.min(64 << 20, Math.max(4 << 20, Math.floor(L / 64))));
+    // (never below a byte: a limit of 0 has nothing to divide by)
+    if (testMode(this.env) && this.chunkOverride) return Math.max(1, Math.min(this.chunkOverride, L));
+    return Math.max(1, Math.min(L, testMode(this.env) ? Math.max(64, Math.floor(L / 64)) : Math.min(64 << 20, Math.max(4 << 20, Math.floor(L / 64)))));
   }
   private chunkOverride = 0;
   /** How far document batches may take the claim past L: max(L / 10, 50 MB) (in tests, 256 bytes at least). */
@@ -884,7 +887,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (this.fits(need, kind)) return;
       // (found full a moment ago: refused again without asking D1, so a full budget costs at most one
       // D1 call a minute, never one an edit, LIMIT-97A-1; a new limit ends the wait)
-      if (Date.now() < Number(this.get(`full_until_${kind}`) ?? 0)) throw new SyncError("storage_full", "this account's storage is full", { used: this.syncUsed() });
+      // (temporary: a client tells "full, try again shortly" from "full" by its retry_after)
+      const until = Number(this.get(`full_until_${kind}`) ?? 0);
+      if (Date.now() < until) throw new SyncError("storage_full", "this account's storage was full a moment ago; try again shortly", { used: this.syncUsed(), retry_after: until - Date.now() });
       const l = await this.limits();
       if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again", { retry_after: 1000 });
       const r = await this.raise(need, kind, l.storage_bytes);
@@ -938,8 +943,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (!r) continue;
         this.set("claim", r.claim_bytes);
         this.set("claim_dirty", 0);
-        // (new limits since the statement: the caps stay as they set them, and the next write asks again)
-        if (Number(this.get("limits_rev") ?? 0) !== rev) return "busy";
+        // (new limits since the statement: the caps stay as they set them, and the next write asks again;
+        // what it was granted, unusable now, is given back by the alarm, armed here, CORR-BDA-1)
+        if (Number(this.get("limits_rev") ?? 0) !== rev) {
+          this.arm();
+          return "busy";
+        }
         if (cap === L) this.set("blob_cap", r.claim_bytes);
         this.set("doc_cap", r.claim_bytes);
         if (this.fits(need, kind)) return "ok";
@@ -1079,6 +1088,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.set("limits_issued", a.issued);
         this.set("limits_fetched", Date.now());
       });
+      // (a lower limit can leave the claim holding more than fits: the alarm gives it back, CORR-BDA-1)
+      this.arm();
       return { applied: true };
     });
   }
