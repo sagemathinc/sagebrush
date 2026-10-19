@@ -103,6 +103,7 @@ try {
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "sylow"; i.dispatchEvent(new Event("input")); return 1; })()`);
   check(await until(`document.querySelectorAll("#wssidebar .frow").length === 1 && !!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`), "search shows what matches");
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+  await until(`!!document.querySelector("#wssidebar .frow.cur")`);
   // renaming the open notebook renames it on the page
   const cur = await ev(`document.querySelector("#wssidebar .frow.cur")?.dataset.path`);
   await ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);
@@ -116,6 +117,36 @@ try {
   check(await until(`!!document.querySelector('[data-sbb="files"]') && !${S}.hidden`), "the board page has Files, and the sidebar is still open (remembered)");
   check(await until(`document.querySelector("#wssidebar .frow.cur")?.dataset.path === "/Sylow theorems.board.json"`), "…with the board marked");
   await shot("board-sidebar");
+
+  // many entries (LIMIT-0B0-1, -2): put straight into the index, as a big workspace would hold them
+  await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("entries", "readwrite"), st = tx.objectStore("entries"), t = Date.now();
+    st.put({ path: "/many", kind: "folder", ref: null, created: t, updated: t });
+    for (let i = 0; i < 2500; i++) { const f = "/many/f" + String(i).padStart(4, "0"); st.put({ path: f, kind: "folder", ref: null, created: t, updated: t }); for (let k = 0; k < 3; k++) st.put({ path: f + "/x" + k + ".txt", kind: "file", ref: f + "/x" + k + ".txt", size: 1, rev: 0, created: t, updated: t }); }
+    st.put({ path: "/full", kind: "folder", ref: null, created: t, updated: t });
+    for (let i = 0; i < 10000; i++) st.put({ path: "/full/e" + i, kind: "file", ref: "/full/e" + i, size: 1, rev: 0, created: t, updated: t });
+    tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
+  await go(base);
+  await until(`!!${W} && !${S}.hidden && !!document.querySelector(${JSON.stringify(rowSel("/many"))})`, 60000);
+  // a search matching 7,500 entries in 2,500 folders: drawn once typing pauses, quickly, and capped
+  const tSearch = await ev(`new Promise((ok) => { const i = document.querySelector("#wssidebar .fsearch"); const t0 = performance.now(); i.value = "x"; i.dispatchEvent(new Event("input")); const wait = () => (document.querySelectorAll("#wssidebar .frow").length > 100 ? ok(performance.now() - t0) : setTimeout(wait, 20)); wait(); })`);
+  const rowsN = await ev(`document.querySelectorAll("#wssidebar .frow").length`);
+  check(tSearch < 3000 && rowsN <= 1000 && /more not shown/.test(await ev(`document.querySelector("#wssidebar .ftree").innerText`)), `a search over 10,000+ entries in 2,500 folders: ${Math.round(tSearch)} ms, ${rowsN} rows drawn, the rest said`);
+  await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+  await sleep(400);
+  // a drop into a full folder reads nothing
+  await ev(`(() => { window.__reads = 0; const ab = File.prototype.arrayBuffer; File.prototype.arrayBuffer = function () { window.__reads++; return ab.call(this); }; return 1; })()`);
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/full"))})`);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/full"))}); const dt = new DataTransfer(); dt.items.add(new File(["1"], "new1.txt")); dt.items.add(new File(["2"], "new2.txt")); r.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true })); r.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); return 1; })()`);
+  check(await until(`/is full/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`), "a drop into a full folder is refused, and says so");
+  check(await ev(`window.__reads === 0`) && await ev(`${W}.stat("/full/new1.txt").then((e) => e === undefined)`), "…without reading the files");
+  // a menu on a short, narrow screen stays inside it, scrolling (LIMIT-0B0-3)
+  await send("Emulation.setDeviceMetricsOverride", { width: 320, height: 240, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/many"))}); r.scrollIntoView(); r.querySelector(".more").click(); return 1; })()`);
+  const mr = await ev(`(() => { const m = document.querySelector(".sbfmenu").getBoundingClientRect(); return [m.left, m.top, m.right, m.bottom, innerWidth, innerHeight, getComputedStyle(document.querySelector(".sbfmenu")).overflowY]; })()`);
+  check(mr[0] >= 0 && mr[1] >= 0 && mr[2] <= mr[4] && mr[3] <= mr[5] && mr[6] === "auto", "a menu on a 320×240 screen stays inside it: " + JSON.stringify(mr));
+  await ev(`(() => { document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()); return 1; })()`);
+  await send("Emulation.clearDeviceMetricsOverride");
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);

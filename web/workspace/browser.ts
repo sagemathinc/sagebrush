@@ -24,6 +24,8 @@ export type BrowserHost = {
 
 const OPEN_KEY = "sagebrush-files-open";
 const RECENT = 5;
+/** At most this many rows drawn at once; past it, a row says how many more (LIMIT-0B0-2). */
+const MAX_ROWS = 1000;
 
 const ICONS: Record<string, string> = {
   notebook: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="1.5" width="11" height="13" rx="1.5" fill="none" stroke="#2a6fb0" stroke-width="1.4"/><path d="M5 5h6M5 8h6M5 11h4" stroke="#2a6fb0" stroke-width="1.3"/></svg>',
@@ -118,10 +120,18 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
     b.onclick = (ev) => { ev.stopPropagation(); close(); act(); };
     menu.append(b);
   }
-  const r = at.getBoundingClientRect();
-  menu.style.left = Math.min(r.left, innerWidth - 200) + "px";
-  menu.style.top = Math.min(r.bottom + 2, innerHeight - 40 - items.length * 30) + "px";
+  // (inside the window, measured: below the element, else above it; scrolling if the window is too short: LIMIT-0B0-3)
+  menu.style.maxHeight = `${Math.max(80, innerHeight - 8)}px`;
+  menu.style.overflowY = "auto";
+  menu.style.visibility = "hidden";
   document.body.append(menu);
+  const r = at.getBoundingClientRect(), m = menu.getBoundingClientRect();
+  const left = Math.max(4, Math.min(r.left, innerWidth - m.width - 4));
+  const below = r.bottom + 2, above = r.top - 2 - m.height;
+  const top = below + m.height <= innerHeight - 4 ? below : above >= 4 ? above : Math.max(4, innerHeight - 4 - m.height);
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+  menu.style.visibility = "";
   (menu.querySelector("button") as HTMLElement | null)?.focus();
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
@@ -178,12 +188,21 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   };
   const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
+  // (each folder's entries, sorted, built once per refresh: LIMIT-0B0-2)
+  let byParent = new Map<string, Entry[]>();
   async function refresh() {
     try { entries = await w.list(trashView ? TRASH : "/", { recursive: true }); } catch (e) { fail(e); }
+    byParent = new Map();
+    for (const e of entries) {
+      const p = parentOf(e.path);
+      let l = byParent.get(p);
+      if (!l) byParent.set(p, (l = []));
+      l.push(e);
+    }
+    for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || a.path.localeCompare(b.path));
     render();
   }
-  const byPath = () => new Map(entries.map((e) => [e.path, e]));
-  const children = (folder: string) => entries.filter((e) => parentOf(e.path) === folder).sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || a.path.localeCompare(b.path));
+  const children = (folder: string) => byParent.get(folder) ?? [];
 
   function metaOf(e: Entry) {
     if (e.missing) return "missing";
@@ -259,14 +278,20 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
         tree.append(h("div", { className: "fgrp", textContent: "This browser" }));
       }
       const shown = q ? new Set(entries.filter((e) => nameOf(e.path).toLowerCase().includes(q)).flatMap((e) => ancestors(e.path).concat(e.path))) : null;
+      let drawn = 0, more = 0;
+      const frag = document.createDocumentFragment();
       const walk = (folder: string, depth: number) => {
         for (const e of children(folder)) {
           if (shown && !shown.has(e.path)) continue;
-          tree.append(row(e, depth));
+          if (drawn >= MAX_ROWS) { more++; continue; }
+          frag.append(row(e, depth));
+          drawn++;
           if (e.kind === "folder" && (open.has(e.path) || shown)) walk(e.path, depth + 1);
         }
       };
       walk("/", 0);
+      tree.append(frag);
+      if (more) tree.append(h("div", { className: "fempty", textContent: `${more} more not shown${q ? ": search for more of the name" : ": close some folders, or search"}` }));
       if (!entries.length) tree.append(h("div", { className: "fempty", textContent: "Nothing here yet: New makes a notebook or a board, Upload (or a drop) brings files." }));
     }
     foot.replaceChildren();
@@ -368,14 +393,26 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     } catch (err) { fail(err); }
   }
 
-  async function upload(files: File[], folder: string) {
+  async function upload(all: File[], folder: string) {
+    // (as many new names as the folder has room for, counted before any file is read; a name already
+    // there is written over and takes no room; the workspace checks again as it writes: LIMIT-0B0-1)
+    const here = new Set(children(folder).map((e) => nameOf(e.path)));
+    let room = Math.max(0, LIMITS.maxFolderEntries - here.size);
+    const files: File[] = [], refused: string[] = [];
+    for (const f of all) {
+      if (here.has(f.name)) files.push(f);
+      else if (room > 0) { room--; here.add(f.name); files.push(f); }
+      else refused.push(f.name);
+    }
+    if (refused.length) say(`${folder === "/" ? "The top folder" : folder} is full (${LIMITS.maxFolderEntries} entries): not added: ${refused.slice(0, 5).join(", ")}${refused.length > 5 ? ` and ${refused.length - 5} more` : ""}`);
+    if (!files.length) return;
     if (host.upload) return host.upload(files, folder).then(refresh);
-    const refused: string[] = [];
     for (const f of files) {
       if (f.size > LIMITS.maxFileBytes) { refused.push(f.name); continue; }
       try { await w.putFile(join(folder, f.name), new Uint8Array(await f.arrayBuffer())); } catch (err) { refused.push(f.name); fail(err); }
     }
-    say(`${files.length - refused.length} file${files.length - refused.length === 1 ? "" : "s"} added` + (refused.length ? `; not added: ${refused.join(", ")}` : ""));
+    const added = files.length - refused.length + (all.length - files.length);
+    say(`${added} file${added === 1 ? "" : "s"} added` + (refused.length ? `; not added: ${refused.slice(0, 5).join(", ")}` : ""));
     if (folder !== "/") { open.add(folder); saveOpen(); }
     refresh();
   }
@@ -405,7 +442,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
   moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }]]);
-  search.oninput = () => { query = search.value.trim(); render(); };
+  // (the search drawn once typing pauses: LIMIT-0B0-2)
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  search.oninput = () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchTimer = null; query = search.value.trim(); render(); }, 150);
+  };
 
   // (changes from this tab, other tabs and agents: shown, at most a few times a second)
   let pending: ReturnType<typeof setTimeout> | null = null;
