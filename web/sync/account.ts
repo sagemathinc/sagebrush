@@ -514,7 +514,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return testMode(this.env) ? 10 : 60_000;
   }
   private pinMs(): number {
-    const t = (testMode(this.env) ? Number(this.env.SYNC_TEST_PIN_MS) : 0);
+    const t = testMode(this.env) ? this.testPin || Number(this.env.SYNC_TEST_PIN_MS) : 0;
     return Number.isSafeInteger(t) && t > 0 ? t : PIN_MS;
   }
   /** Take back a pin, by its whole identity, idempotently: its reference goes too. */
@@ -1582,6 +1582,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
 
+
+  /**
+   * Tests only (SYNC_TEST_PIN_MS bound): this object's pins lapse after ms, not SYNC_TEST_PIN_MS,
+   * for a test that must outlast a restart under load.  Held in memory: a pin keeps the lapse it
+   * was made with, in its row, through a crash.
+   */
+  private testPin = 0;
+  async testPinMs(a: { ms: number }): Promise<void> {
+    if (testMode(this.env)) this.testPin = a.ms;
+  }
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
   async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; reservations: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
