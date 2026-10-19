@@ -184,7 +184,12 @@ Notebooks and boards keep every change (TimeTravel). Data files have had no hist
   - the storage meter shows versions as their own part (§6.3).
 - **If storage is too full to keep even the previous version,** the overwrite is refused and says so. Old bytes are never dropped silently.
 - **Reading versions:** `history(path)` and `version(path, i)` list and read them (§8.2). TimeTravel shows them for a file, and "Undo this agent's changes" restores them.
-- **Dropping versions:** only a person can, from the file browser.
+- **Deleting old versions is easy, and only a person does it** (William, Oct 18: "make it easy for the user to explicitly delete old versions"). There are three places:
+  - **per file:** "Delete older versions" in its history;
+  - **per folder:** "Delete older versions in this folder" in the file browser's ⋯;
+  - **in the Storage panel:** "Free N MB of old versions".
+- Each says what it will free and asks to confirm, and each is logged.
+- **Agents can't do it.** The API's `dropVersions` refuses a workspace acting for an agent, and the agent surfaces (§8.2) don't offer it.
 
 ---
 
@@ -731,7 +736,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 Each step is a branch of its own, reviewed as usual, with pictures for William for any visible step. Each step's tests fail without it.
 
 1. **The `sagebrush-workspace` database, the index, reconcile and migration,** with the store for data files' versions (§2.5), written by the API's own writes (1a). Then the pages wired to it (1b), which version Python's writes and the Files panel's deletes too. No UI. Tests: every kind of item in today's stores comes out as an entry, the localStorage copies are untouched, a write from an older tab is brought in as a copy, and a key that won't parse is kept.
-2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`.
+2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`, with a file's versions and "Delete older versions" (per file and per folder), and the Storage panel's "Free N MB of old versions" (§2.5, §6.3).
 3. **The one File menu** in both editors, and Upload's rule.
 4. **`/w/` routing** in the server, the service worker and both pages, plus the redirects from the old addresses. Then the board page in the shell.
 5. **One page hosting both editors** (§5).
