@@ -9352,11 +9352,14 @@ export class GeneratedParser extends BaseParser {
         const p = this;
         let _mark = p.mark;
         const _children: any[] = [];
+        let _forgot = p.mark;
         { // statement
             let statement_var: any;
             while ((statement_var = p.statement_rule())) {
                 _children.push(statement_var);
                 _mark = p.mark;
+                p.forget_memos(_forgot, _mark);
+                _forgot = _mark;
             }
             p.mark = _mark;
         }
