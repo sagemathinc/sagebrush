@@ -4,6 +4,9 @@
   "limits": {
     "maxContentBytes": 8388608,
     "maxFrameBytes": 12582912,
+    "maxPath": 1024,
+    "maxDepth": 32,
+    "maxName": 255,
     "maxList": 10000,
     "maxHistory": 100,
     "inFlight": 8,

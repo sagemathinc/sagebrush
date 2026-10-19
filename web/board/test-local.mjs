@@ -7,6 +7,7 @@
 // (not blank) opens as before, not in Edit.  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-local.mjs
+// (Since the workspace (step 1b), it runs on the fallback: ?workspace=0.)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,11 +36,15 @@ const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 
+// (this test is of the fallback, boards kept in localStorage, where the
+// workspace can't be opened: ?workspace=0, on a loopback host only; the
+// workspace's own boards are web/workspace/test-workspace-pages.mjs's)
+const noWs = (q) => { const [path, hash = ""] = q.split("#"); return path + (path.includes("?") ? "&" : "?") + "workspace=0" + (hash ? "#" + hash : ""); };
 const go = async (q) => {
-  await send("Page.navigate", { url: `${base}board/${q}` });
+  await send("Page.navigate", { url: `${base}board/${noWs(q)}` });
   return until("!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null", 60000);
 };
-const here = () => ev("(() => { const s = window.sagebrush.board.snapshot(); return { search: location.search, editing: document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true', mode: s.doc.mode ?? 'python', title: s.doc.title, items: s.items.length, revert: !document.querySelector('[data-sbb=revert]').hidden }; })()");
+const here = () => ev("(() => { const s = window.sagebrush.board.snapshot(); return { search: location.search.replace(/([?&])workspace=0(&|$)/, (m, a, b) => (b ? a : '')), editing: document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true', mode: s.doc.mode ?? 'python', title: s.doc.title, items: s.items.length, revert: !document.querySelector('[data-sbb=revert]').hidden }; })()");
 const list = () => ev("JSON.parse(localStorage.getItem('sagebrush-boards') ?? '[]')");
 const LOCAL = /^\?doc=local:[0-9a-f]{12}$/;
 

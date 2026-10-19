@@ -18,10 +18,12 @@
 //   yet updated, still writes there) is brought in again, once per change,
 //   as `<title> (from an older tab)`: never merged, never written over.  A
 //   key that doesn't hold a board is left alone and reported.
-// - Then reconcile: notebooks and data files get entries (the first time, a
-//   notebook at the top as `/<name>.ipynb`, a data file at its own path);
-//   contents found with no entry later go to `/Recovered/`; an entry whose
-//   contents are gone is marked missing, never removed.
+// - Then reconcile: notebooks and data files get entries (a notebook at
+//   the top as `/<name>.ipynb`, whenever it is found: one made by a page
+//   not yet writing through the workspace is an ordinary notebook; a data
+//   file at its own path); a board's record or Trash bytes with no entry,
+//   whose entry was lost, go to `/Recovered/`; an entry whose contents are
+//   gone is marked missing, never removed.
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
 import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
@@ -43,8 +45,10 @@ export const signature = (doc: unknown): Promise<string> => bytesHash(new TextEn
 export type MigrateReport = { boards: number; copies: number; unreadable: string[]; notebooks: number; files: number; recovered: number; missing: number; full?: string };
 
 /** Everything of this browser's in the workspace (above); safe to run at every load. */
-export function migrate(w: Workspace, storage: KeyValue): Promise<MigrateReport> {
+/** `proceed`: asked once the lock is held; false, and nothing is done (a page that gave up on the workspace meanwhile: LIMIT-12C-3). */
+export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () => boolean } = {}): Promise<MigrateReport> {
   return w.locked(async () => {
+    if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
@@ -202,9 +206,11 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     if (refs.notebook.has(id)) continue;
     const rec = await w.mainTx("notebooks", "readonly", (st) => st.get(id));
     if (!rec) continue;
-    await w.adopt(first ? "/" : RECOVERED, safeName(rec.name), ".ipynb", { kind: "notebook", ref: id, mode: typeof rec.mode === "string" ? rec.mode : "python", created: rec.updated ?? Date.now(), updated: rec.updated ?? Date.now() });
-    if (first) r.notebooks++;
-    else r.recovered++;
+    // (at the top, always: a notebook with no entry is one a page not yet
+    // writing through the workspace made (an older tab, the installed app
+    // not yet updated), or made as the workspace opened; not a loss)
+    await w.adopt("/", safeName(rec.name), ".ipynb", { kind: "notebook", ref: id, mode: typeof rec.mode === "string" ? rec.mode : "python", created: rec.updated ?? Date.now(), updated: rec.updated ?? Date.now() });
+    r.notebooks++;
   }
   // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
   for (const key of fileKeys) {
