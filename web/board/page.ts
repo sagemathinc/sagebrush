@@ -301,16 +301,44 @@ function wsSave(id: string, d: BoardDoc) {
     try {
       let path = await w.pathOf("board", id);
       // (a board of this browser's kept before, not brought in: in the workspace now, under its own id)
-      if (!path) path = await adoptBoard(w, id, d);
-      // (tagged with this save's session and number: a later load orders the record against a pending copy by them, CORR-2D1-2)
-      wsRev = (await w.write(path, d, { tag: header })).rev;
+      if (!path) {
+        path = await adoptBoard(w, id, d);
+        wsRev = 1;
+      }
+      // (tagged with this save's session and number: a later load orders the
+      // record against a pending copy by them, CORR-2D1-2; and only over the
+      // revision this page knows: what someone else wrote since is never
+      // written over, CORR-AA2-1)
+      wsRev = (await w.write(path, d, { tag: header, ...(wsRev ? { base: wsRev } : {}) })).rev;
       wsRefused = null;
       if (wsLatest === d) dropPending(id, header + "\n");
     } catch (e: any) {
-      wsRefused = e instanceof Error ? e : new Error(String(e));
+      if (e?.code === "conflict") await wsConflict(w, id, d, header);
+      else wsRefused = e instanceof Error ? e : new Error(String(e));
     }
   });
   if (refused && !journaled) throw new Error(STORAGE_REFUSED);
+}
+/** The board changed elsewhere (an agent, another tab) since this page last
+ * read or wrote it: both kept.  This page's version becomes a board of its
+ * own; only once that is written is its pending copy dropped; then the
+ * board shows the other version, saying so (CORR-AA2-1). */
+const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string) {
+  try {
+    const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
+    await makeInWorkspace(w, { ...d, title });
+    dropPending(id, header + "\n");
+    const path = await w.pathOf("board", id);
+    const cur = path ? await w.read(path) : null;
+    if (!cur || !isBoard(cur.content)) return;
+    wsRev = cur.rev;
+    if (wsLatest === d) wsLatest = null;
+    const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
+    for (const f of wsSubs) await f(cur.content as BoardDoc, notice);
+  } catch (e: any) {
+    wsRefused = e instanceof Error ? e : new Error(String(e));
+  }
 }
 /** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
 function dropPending(id: string, prefix: string) {
@@ -399,6 +427,7 @@ const host: BoardHost = {
         if (!path && pend && pend !== "unread") {
           try {
             await adoptBoard(ws, id, pend.doc);
+            wsRev = 1;
             dropPending(id, pend.header + "\n");
           } catch (e) { console.warn("workspace:", e); }
           return { doc: pend.doc, original: null };
@@ -440,6 +469,8 @@ const host: BoardHost = {
     revert() {
       try { localStorage.removeItem(saveKey); } catch {}
     },
+    // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
+    ...(local && ws ? { subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; } } : {}),
     // (whether it was written here, a new board: kept beside it, never in it)
     writtenHere(set) {
       const k = saveKey + "#here";
