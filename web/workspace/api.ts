@@ -50,7 +50,7 @@ export type Entry = {
 export type Op = { seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind };
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
 export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
-export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string };
+export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
 export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxFolderEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
 /** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
  * workspace at most 100,000 entries, a folder at most 10,000 of its own.  §2.5: a data file's latest 20
@@ -138,13 +138,13 @@ export class Workspace {
   /** An entry and its contents: a notebook's document, a board's document,
    * a data file's bytes, a folder's entries; with the revision to give
    * write() as `base`. */
-  async read(p: string): Promise<{ entry: Entry; content: any; rev: number }> {
+  async read(p: string): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
     const e = await this.mustStat(p);
     if (e.kind === "folder") return { entry: e, content: await this.list(e.path), rev: 0 };
     const c = await this.contents(e);
     if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
     if (e.kind === "notebook") return { entry: e, content: c, rev: c.rev ?? 0 };
-    if (e.kind === "board") return { entry: e, content: (c as BoardRecord).doc, rev: (c as BoardRecord).rev };
+    if (e.kind === "board") return { entry: e, content: (c as BoardRecord).doc, rev: (c as BoardRecord).rev, ...((c as BoardRecord).tag ? { tag: (c as BoardRecord).tag } : {}) };
     return { entry: e, content: c, rev: e.rev ?? 0 };
   }
 
@@ -178,7 +178,8 @@ export class Workspace {
   /** New contents for a notebook, board or data file; with `base` (the
    * revision read() gave), only if nothing else wrote it since: otherwise a
    * WorkspaceError("conflict") with the current contents, nothing written. */
-  async write(p: string, content: unknown, opts: { base?: number } = {}): Promise<{ entry: Entry; rev: number }> {
+  /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean } = {}): Promise<{ entry: Entry; rev: number }> {
     return this.locked(async () => {
       const e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
@@ -199,7 +200,8 @@ export class Workspace {
           const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(e.ref!));
           if (!cur) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
           if (opts.base !== undefined && cur.rev !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, cur.doc);
-          st.put({ ...cur, doc: content, rev: cur.rev + 1, updated: t });
+          const { tag: _t, ...rest } = cur;
+          st.put({ ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) });
           return cur.rev + 1;
         });
       } else if (e.kind === "file") {
@@ -208,8 +210,8 @@ export class Workspace {
         const old = await this.contents(e);
         if (opts.base !== undefined && (e.rev ?? 0) !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, old);
         // (the bytes it had, kept as a version first: a write that can't keep them doesn't happen)
-        // (nothing to lose, nothing kept: an empty file (Python's open("w") empties it before writing), or the same bytes again)
-        if (old !== undefined && old.length > 0 && !sameBytes(old, b)) await this.keepVersion(e, old);
+        // (nothing to lose, nothing kept: the same bytes again, or, asked for (Python's writes: open("w") empties a file first), empty bytes; CORR-12C-4)
+        if (old !== undefined && !sameBytes(old, b) && (old.length > 0 || opts.keepEmpty !== false)) await this.keepVersion(e, old);
         await this.mainTx("files", "readwrite", (st) => st.put(b, e.ref!));
         rev = (e.rev ?? 0) + 1;
         size = b.length;
@@ -378,16 +380,16 @@ export class Workspace {
   }
 
   /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through. */
-  async putFile(p: string, bytes: unknown): Promise<Entry> {
+  async putFile(p: string, bytes: unknown, opts: { keepEmpty?: boolean } = {}): Promise<Entry> {
     const q = path(p);
     const e = await this.stat(q);
     if (!e) return this.create(q, { content: bytes }).catch(async (err) => {
       // (made meanwhile, by another tab: written over instead)
-      if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return (await this.write(q, bytes)).entry;
+      if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return (await this.write(q, bytes, opts)).entry;
       throw err;
     });
     if (e.kind !== "file") throw new WorkspaceError("exists", `${q} is a ${e.kind}, not a file`);
-    return (await this.write(q, bytes)).entry;
+    return (await this.write(q, bytes, opts)).entry;
   }
 
   /** An entry dropped from the index, its contents already removed by the

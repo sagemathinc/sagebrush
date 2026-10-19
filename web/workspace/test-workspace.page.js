@@ -82,7 +82,10 @@ async function writeCas() {
   check((await w.history(f.path)).length === 1, "writing the same bytes again keeps no version");
   const g = await w.create("/g.txt", { content: "" });
   await w.write(g.path, "now");
-  check((await w.history(g.path)).length === 0, "nor does writing over an empty file");
+  check((await w.history(g.path)).length === 1 && (await w.version(g.path, 0)).length === 0, "an empty file written over is kept as a version (CORR-12C-4)");
+  await w.write(g.path, "", { keepEmpty: false });
+  await w.write(g.path, "again", { keepEmpty: false });
+  check((await w.history(g.path)).length === 2, "…but Python's emptying before a write (keepEmpty: false) keeps no empty version");
   check(await fails(w.write(f.path, "c", { base: 0 }), "conflict"), "a file's stale write refused");
   w.close();
 }

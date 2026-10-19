@@ -141,11 +141,21 @@ const openLocal = (id: string) => location.assign(location.pathname + "?doc=loca
 // keeps nothing, an exported file, a frame or the benchmark: none); none,
 // where storage can't be opened in time (boards kept in localStorage as
 // before)
+// (one owner: a workspace that opens after the page gave up on it is closed
+// unused, and the page keeps boards as before for this visit: LIMIT-12C-3)
+let wsAbandoned = false;
 const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ? null : await within(Workspace.open().then(async (w) => {
-  try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+  try { await migrate(w, localStorage, { proceed: () => !wsAbandoned }); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+  if (wsAbandoned) {
+    w.close();
+    return null;
+  }
   return w;
 }).catch((e) => { console.warn("workspace:", e); return null; }), 5000, null);
-const PENDING = "sagebrush-workspace-pending:";
+if (!ws) wsAbandoned = true;
+const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
+/** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
+const PENDING_MAX = 8 * 2 ** 20;
 /** A new board in the workspace, `/<title>.board.json` (the first free name): its id. */
 async function makeInWorkspace(w: Workspace, d: BoardDoc): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
@@ -263,15 +273,28 @@ if (fromParent) {
 
 // Saving a board of the workspace: the document written to localStorage at
 // once as pending, then to the workspace, one write at a time, the latest
-// only (one written over by a later save is skipped); the pending copy
-// dropped once the workspace has it.  A write the workspace refused makes
-// the next save say so (thrown, as a refused localStorage write was:
+// only (one written over by a later save is skipped).  A pending copy is
+// "<session>:<n>\n<JSON>": this page's session (random, per load) and the
+// save's number.  Once the workspace has a save, its pending copy is
+// dropped, but only if it is still that save's (another tab's newer save
+// is never dropped: CORR-12C-1).  The workspace's record is tagged with the
+// session that wrote it, so a later load can tell a pending copy that is
+// newer than the record (same session) from one the record has moved past
+// (another writer: CORR-12C-2).  A write the workspace refused makes the
+// next save say so (thrown, as a refused localStorage write was:
 // HARD-7F9-1), and is tried again with it.
+const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
 let wsWriting: Promise<void> = Promise.resolve(), wsLatest: BoardDoc | null = null, wsRefused: Error | null = null;
 function wsSave(id: string, d: BoardDoc) {
   const w = ws!, refused = wsRefused;
   let journaled = true;
-  try { localStorage.setItem(PENDING + id, JSON.stringify(d)); } catch { journaled = false; }
+  const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`;
+  if (text.length > PENDING_MAX) {
+    // (too large to journal: the workspace alone keeps it; an older pending copy of this page's dropped, as it is older)
+    journaled = false;
+    dropPending(id, SESSION + ":");
+  } else try { localStorage.setItem(PENDING + id, header + "\n" + text); } catch { journaled = false; }
   wsLatest = d;
   wsWriting = wsWriting.then(async () => {
     if (wsLatest !== d) return;
@@ -279,15 +302,35 @@ function wsSave(id: string, d: BoardDoc) {
       let path = await w.pathOf("board", id);
       // (a board of this browser's kept before, not brought in: in the workspace now, under its own id)
       if (!path) path = await adoptBoard(w, id, d);
-      await w.write(path, d);
+      wsRev = (await w.write(path, d, { tag: SESSION })).rev;
       wsRefused = null;
-      if (wsLatest === d) try { localStorage.removeItem(PENDING + id); } catch {}
+      if (wsLatest === d) dropPending(id, header + "\n");
     } catch (e: any) {
       wsRefused = e instanceof Error ? e : new Error(String(e));
     }
   });
   if (refused && !journaled) throw new Error(STORAGE_REFUSED);
 }
+/** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
+function dropPending(id: string, prefix: string) {
+  try {
+    const cur = localStorage.getItem(PENDING + id);
+    if (cur !== null && cur.startsWith(prefix)) localStorage.removeItem(PENDING + id);
+  } catch {}
+}
+/** A pending copy as kept: its session and document; null if there is none; "unread" if it can't be read (too large, or not ours). */
+function readPending(id: string): { session: string; base: number; doc: BoardDoc } | null | "unread" {
+  const raw = localStorage.getItem(PENDING + id);
+  if (raw === null) return null;
+  const m = raw.length <= PENDING_MAX + 64 ? /^([0-9a-f]{16}):\d+:(\d+)\n/.exec(raw) : null;
+  let doc: unknown = null;
+  if (m) try { doc = JSON.parse(raw.slice(m[0].length)); } catch {}
+  if (m && isBoard(doc)) return { session: m[1], base: Number(m[2]), doc: doc as BoardDoc };
+  // (set aside, never parsed again, never dropped: LIMIT-12C-4)
+  try { localStorage.setItem(PENDING_UNREAD + id, raw); localStorage.removeItem(PENDING + id); } catch {}
+  return "unread";
+}
+const sameDoc = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 /** Every save so far in the workspace (before the page goes elsewhere). */
 const wsFlush = () => wsWriting;
 /** A board kept before only in localStorage, put in the workspace under its id. */
@@ -319,16 +362,43 @@ const host: BoardHost = {
       // original to go back to; gone, a blank one that says so)
       if (local && ws) {
         const id = source.slice(6);
-        // (a save the workspace hadn't taken when the page closed: newer than its copy)
-        let pending: BoardDoc | null = null;
-        try { pending = JSON.parse(localStorage.getItem(PENDING + id) ?? "null"); } catch {}
+        // (a save the workspace hadn't taken when a page closed)
+        const pend = readPending(id);
+        let notice = pend === "unread" ? "**A copy of this board left by a page closed while saving couldn't be read.** It's set aside in this browser; the board as last kept is shown." : "";
         const path = await ws.pathOf("board", id);
         if (path) {
-          const kept = pending && isBoard(pending) ? pending : (await ws.read(path).catch(() => null))?.content;
-          if (isBoard(kept)) {
-            if (pending && isBoard(pending)) wsSave(id, pending);
-            return { doc: kept, original: null };
+          const rec = await ws.read(path).catch(() => null);
+          if (rec && isBoard(rec.content)) {
+            if (pend && pend !== "unread") {
+              if (rec.tag === pend.session || rec.rev === pend.base) {
+                // (the record is the one the copy was made on, or was last written by the session that left it: the copy is newer)
+                wsRev = rec.rev;
+                wsSave(id, pend.doc);
+                return { doc: pend.doc, original: null };
+              }
+              if (sameDoc(rec.content, pend.doc)) dropPending(id, pend.session + ":");
+              else {
+                // (the record moved on since, by another writer: neither is dropped; the copy kept as a board of its own: CORR-12C-2)
+                try {
+                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" });
+                  dropPending(id, pend.session + ":");
+                  notice = "**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".";
+                } catch (e: any) {
+                  notice = `**Changes left by a page closed while saving couldn't be kept as a board of their own** (${String(e?.message ?? e)}); they stay in this browser.`;
+                }
+              }
+            }
+            wsRev = rec.rev;
+            return { doc: rec.content, original: null, ...(notice ? { notice } : {}) };
           }
+        }
+        // (a board only a pending copy holds: brought into the workspace, under its id: CORR-12C-3)
+        if (!path && pend && pend !== "unread") {
+          try {
+            await adoptBoard(ws, id, pend.doc);
+            dropPending(id, pend.session + ":");
+          } catch (e) { console.warn("workspace:", e); }
+          return { doc: pend.doc, original: null };
         }
         // (not in the workspace: as kept before, if it is; written into the workspace at the first save)
         const before = localDoc(id);
