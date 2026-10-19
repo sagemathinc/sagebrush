@@ -1644,18 +1644,20 @@ export function createNotebook(root, opts = {}) {
   const MAX_LEFT = 4;
   const outstanding = new Set();
   const leftCount = () => [...outstanding].filter((s) => s !== shown).length;
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); };
+  // ("left": how many, said whenever it may have changed: the page asks
+  // before closing while there are any, their saves only here)
+  const leftChanged = () => emit("left", leftCount());
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); leftChanged(); };
   async function keepDetached(key, doc, theirs) {
     try {
       if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
       await detachedConflict(doc, theirs, key);
       unkept.delete(key);
       leftSettled(key);
-      emit("unkept", unkept.size);
     } catch (e) {
       unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
       outstanding.add(key);
-      emit("unkept", unkept.size);
+      leftChanged();
       emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
@@ -1696,6 +1698,7 @@ export function createNotebook(root, opts = {}) {
       let sent = doc;
       mine.inflight = (mine.inflight ?? 0) + 1;
       outstanding.add(mine);
+      leftChanged();
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
@@ -1778,6 +1781,7 @@ export function createNotebook(root, opts = {}) {
   function load(doc) {
     loading = true;
     shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
+    leftChanged();
     pixels = new PixelBudget();
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
@@ -2216,7 +2220,7 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
