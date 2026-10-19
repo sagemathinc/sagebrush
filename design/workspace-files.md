@@ -606,8 +606,13 @@ versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author,
 - **Into an empty workspace** (a new site, a new browser), the paths are kept. Into one with documents, everything goes under `/Imported <date>/`, so nothing is replaced or merged by surprise.
 - **Every document and file gets a new identity** (fid and ref), so an import can never overwrite or join a document that is already here. The patch ids in the histories are kept, because they don't depend on the ref.
 - **Each file's bytes are checked** against the manifest's `sha256` and `size`. A file that doesn't match isn't imported, and the summary lists it; the rest go on.
+- **The file wins over its history** when they disagree, as a crafted or damaged bundle can make them do. What opens is always the file the person exported:
+  - the history is imported, and if its head value differs from `files/<path>`, the file's value is committed on top as one more version, labelled "imported";
+  - a history that doesn't decode, or fails `verifyValue`, is dropped, and the summary says so. The document is then the file alone, with no history.
+- **A snapshot envelope in an imported history isn't trusted for the value.** Import replays from the patches, or checks the snapshot against them before using it, and a snapshot that doesn't match is dropped.
 - **It is bounded before anything is written:**
-  - the manifest's counts and totals are checked against the storage left (§6.3) and against fixed caps on entries and bytes;
+  - the manifest's counts and totals are checked against the storage left (§6.3) and against fixed caps on entries and bytes. Histories, blobs and versions count toward the bytes, as files do;
+  - a history is replayed by patchflow, so each document's history is capped as well: a number of envelopes, and bytes;
   - each entry is read one at a time, never the whole zip in memory;
   - an entry whose uncompressed size exceeds the manifest's, or whose compression ratio is absurd, stops the import;
   - names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
