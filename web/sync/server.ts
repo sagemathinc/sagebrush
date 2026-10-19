@@ -139,7 +139,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     const rec = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
     if (rec?.state === "deleting") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
     const r = await stub.enable({ account: who.id, hash });
-    if ("ok" in r) await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, state, created) VALUES (?1, 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
+    if ("ok" in r) await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created) VALUES (?1, substr(?1, 1, 32), 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
     return answer(r, json);
   }
   if (p === "/api/sync/v1/delete" && m === "POST") {
@@ -254,35 +254,54 @@ async function adminSyncPurgeStatus(req: Request, env: Env, rid: string): Promis
  * late commit, whenever it lands, even after its account is deleted or
  * turned on again: a live account keeps every key it knows.
  */
-export async function syncScheduled(env: Env): Promise<{ checked: number; deleted: number }> {
-  if (!env.SYNC_ACCOUNT || !env.SHARE_DB || !env.SHARE_BUCKET) return { checked: 0, deleted: 0 };
+export async function syncScheduled(env: Env): Promise<{ pages: number; checked: number; deleted: number; calls: number }> {
+  const out = { pages: 0, checked: 0, deleted: 0, calls: 0 };
+  if (!env.SYNC_ACCOUNT || !env.SHARE_DB || !env.SHARE_BUCKET) return out;
   const db = env.SHARE_DB;
-  const at = await db.prepare("SELECT v FROM meta WHERE k = 'sync_inventory_cursor'").first<{ v: string }>();
-  const l = await env.SHARE_BUCKET.list({ prefix: "s/", limit: 1000, ...(at?.v ? { cursor: at.v } : {}) });
-  const old = Date.now() - (env.SYNC_TEST_PIN_MS ? 1000 : INVENTORY_AGE_MS);
-  const byPrefix = new Map<string, string[]>();
-  for (const o of l.objects) {
-    if (new Date(o.uploaded).valueOf() > old) continue;
-    const p = o.key.split("/")[1] ?? "";
-    byPrefix.set(p, [...(byPrefix.get(p) ?? []), o.key]);
-  }
-  let deleted = 0;
-  for (const [p, keys] of byPrefix) {
-    const accounts = (await db.prepare("SELECT account_hash, state FROM sync_accounts WHERE substr(account_hash, 1, 32) = ?1").bind(p).all<{ account_hash: string; state: string }>()).results;
+  const test = !!env.SYNC_TEST_PIN_MS;
+  const [page, pages] = test ? [50, 2] : [INVENTORY_PAGE, INVENTORY_PAGES];
+  const old = Date.now() - (test ? 1000 : INVENTORY_AGE_MS);
+  // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still fits)
+  const worst = 2 + 1 + page + 1;
+  for (let n = 0; n < pages && out.calls + worst <= INVENTORY_CALLS; n++) {
+    const at = await db.prepare("SELECT v FROM meta WHERE k = 'sync_inventory_cursor'").first<{ v: string }>();
+    const l = await env.SHARE_BUCKET.list({ prefix: "s/", limit: page, ...(at?.v ? { cursor: at.v } : {}) });
+    out.calls += 2;
+    const byPrefix = new Map<string, string[]>();
+    for (const o of l.objects) {
+      if (new Date(o.uploaded).valueOf() > old) continue;
+      const p = o.key.split("/")[1] ?? "";
+      byPrefix.set(p, [...(byPrefix.get(p) ?? []), o.key]);
+    }
     const known = new Set<string>();
-    for (const a of accounts) {
-      if (a.state === "purged") continue;
-      for (const k of await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + a.account_hash)).knownKeys({ keys })) known.add(k);
+    if (byPrefix.size) {
+      // one lookup for the whole page, by the indexed prefix
+      const accounts = (await db.prepare("SELECT account_hash, prefix, state FROM sync_accounts WHERE prefix IN (SELECT value FROM json_each(?1))").bind(JSON.stringify([...byPrefix.keys()])).all<{ account_hash: string; prefix: string; state: string }>()).results;
+      out.calls++;
+      // one call to each live account the page names, with its keys
+      for (const a of accounts) {
+        if (a.state === "purged") continue;
+        for (const k of (await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + a.account_hash)).knownKeys({ keys: byPrefix.get(a.prefix) ?? [] })).known) known.add(k);
+        out.calls++;
+      }
+      // one delete for the page
+      const gone = [...byPrefix.values()].flat().filter((k) => !known.has(k));
+      if (gone.length) {
+        await env.SHARE_BUCKET.delete(gone);
+        out.calls++;
+        out.deleted += gone.length;
+      }
     }
-    const gone = keys.filter((k) => !known.has(k));
-    if (gone.length) {
-      await env.SHARE_BUCKET.delete(gone);
-      deleted += gone.length;
-    }
+    // (the cursor moves only past a page done in full)
+    await db.prepare("INSERT INTO meta (k, v) VALUES ('sync_inventory_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(l.truncated ? (l.cursor ?? "") : "").run();
+    out.pages++;
+    out.checked += l.objects.length;
+    if (!l.truncated) break;
   }
-  await db.prepare("INSERT INTO meta (k, v) VALUES ('sync_inventory_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(l.truncated ? (l.cursor ?? "") : "").run();
-  return { checked: l.objects.length, deleted };
+  return out;
 }
+/** The inventory's pages: objects in each, at most this many a run, and at most this many calls a run (LIMIT-268-1). */
+const INVENTORY_PAGE = 100, INVENTORY_PAGES = 5, INVENTORY_CALLS = 400;
 /** How old an object must be before the inventory may delete it: far beyond any upload's reservation. */
 const INVENTORY_AGE_MS = 2 * 86400_000;
 

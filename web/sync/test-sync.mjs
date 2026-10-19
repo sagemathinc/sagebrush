@@ -1129,11 +1129,28 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await bucket.put(unknownA, "stray");
   await new Promise((r) => setTimeout(r, 1200)); // (the test's age threshold is 1 s; in a deployment, 2 days)
   const worker = await mf.getWorker("sync");
-  await worker.scheduled({ cron: "17 3 * * *" });
+  // (the test's pages are 50 objects, 2 a run: run until the cursor wraps)
+  for (let i = 0; i < 6; i++) await worker.scheduled({ cron: "17 3 * * *" });
   ok((await bucket.head(lateG)) === null, "the inventory deletes a late commit under a purged account's prefix, whenever it lands");
   ok((await bucket.head(unknownA)) === null, "and an object a live account doesn't know");
   const keys = (await bucket.list({ prefix: `s/${hashOf(A).slice(0, 32)}/` })).objects.map((o) => o.key);
   ok(keys.length === 1, "while the live account keeps the object it holds, and only that");
+  // many distinct prefixes in a page (LIMIT-268-1): 230 objects, each under an account nobody has
+  for (let i = 0; i < 230; i++) await bucket.put(`s/${i.toString(16).padStart(32, "0")}/${"d".repeat(36)}`, "x");
+  await new Promise((r) => setTimeout(r, 1200));
+  const runs = [];
+  // (the scheduled handler's own stats: run syncScheduled through the test entry's route)
+  for (let i = 0; i < 6; i++) {
+    const r = await fetchAt(SITE, "/__test/inventory", { method: "POST" });
+    runs.push(await r.json());
+  }
+  const left = (await bucket.list({ prefix: "s/0000000000000000000000000000", limit: 1000 })).objects.length;
+  ok(runs.every((r) => r.pages <= 2 && r.calls <= 2 * (2 + 1 + 50 + 1)), "each run is bounded: at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
+  ok(runs[0].deleted <= 100 && runs.slice(0, 3).reduce((n, r) => n + r.deleted, 0) >= 230 && left === 0, `the cursor continues across runs until every page is done (${runs.map((r) => r.deleted).join(",")})`);
+  // one account owning a whole page (LIMIT-268-2): knownKeys is set-wise
+  const many = Array.from({ length: 1000 }, (_, i) => `s/${hashOf(A).slice(0, 32)}/${i.toString(16).padStart(36, "0")}`);
+  const kk = await acctNs.get(acctNs.idFromName("acct:" + hashOf(A))).knownKeys({ keys: [...many, ...keys] });
+  ok(kk.statements <= 11 && kk.known.length === 1 && kk.known[0] === keys[0], `knownKeys of 1,001 keys: ${kk.statements} statements, and it knows exactly the held one`);
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

@@ -39,6 +39,7 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
   "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER)",
+  "CREATE INDEX IF NOT EXISTS holdings_key ON holdings (key)",
   // a pin (§4.3): its identity is the patch's own, (doc, epoch, client, cseq, id, sha256), so two
   // attempts at one cseq with different ids are two pins (CORR-321-1); `inflight` counts the forwards
   // that use it and haven't answered, and `lapse` is the latest pin_expires of any of them: after it,
@@ -58,6 +59,7 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (session_hash, doc))",
   "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0)",
   "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS reservations_key ON reservations (key)",
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
   "CREATE TABLE IF NOT EXISTS finalized (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS reads (day INTEGER NOT NULL, who TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (day, who))",
@@ -69,6 +71,8 @@ export interface Limits { storage_bytes: number; max_file_bytes: number; sync: {
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, storage_bytes: 1 << 30, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
+/** Keys knownKeys checks in one statement (LIMIT-268-2). */
+const KNOWN_CHUNK = 100;
 /** Tickets issued a minute, per session and per account (LIMIT-6D6-3). */
 const TICKETS_PER_MINUTE_SESSION = 60;
 const TICKETS_PER_MINUTE_ACCOUNT = 240;
@@ -907,11 +911,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * a holding's, a reservation's, or one already in its outbox.  An account
    * with no storage knows none.
    */
-  async knownKeys(a: { keys: string[] }): Promise<string[]> {
-    if (!this.exists()) return [];
-    return a.keys.filter((k) =>
-      this.one("SELECT 1 AS x FROM holdings WHERE key = ?", k) || this.one("SELECT 1 AS x FROM reservations WHERE key = ?", k) || this.one("SELECT 1 AS x FROM outbox WHERE key = ?", k),
-    );
+  async knownKeys(a: { keys: string[] }): Promise<{ known: string[]; statements: number }> {
+    if (!this.exists()) return { known: [], statements: 0 };
+    // (set-wise: one statement per KNOWN_CHUNK keys, LIMIT-268-2)
+    const known: string[] = [];
+    let statements = 0;
+    for (let i = 0; i < a.keys.length; i += KNOWN_CHUNK) {
+      const chunk = JSON.stringify(a.keys.slice(i, i + KNOWN_CHUNK));
+      const rows = this.sql.exec(
+        "SELECT key FROM holdings WHERE key IN (SELECT value FROM json_each(?1)) UNION SELECT key FROM reservations WHERE key IN (SELECT value FROM json_each(?1)) UNION SELECT key FROM outbox WHERE key IN (SELECT value FROM json_each(?1))",
+        chunk,
+      ).toArray() as Row[];
+      statements++;
+      for (const r of rows) known.push(String(r.key));
+    }
+    return { known, statements };
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
