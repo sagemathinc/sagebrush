@@ -1,5 +1,7 @@
 // The Worker that web/sync/test-sync.mjs runs in Miniflare: the sync API,
-// with sharing's sign-in for sessions, and the two object classes.
+// with sharing's sign-in for sessions, and the two object classes.  It alone
+// turns the test seams on (web/sync/env.ts testMode); no deployed entry does.
+(globalThis as { __SAGEBRUSH_SYNC_TEST__?: boolean }).__SAGEBRUSH_SYNC_TEST__ = true;
 import { handleShare } from "../share/server.ts";
 import { handleSync, handleSyncFiles, syncScheduled, type Env } from "./server.ts";
 export { SyncAccount } from "./account.ts";

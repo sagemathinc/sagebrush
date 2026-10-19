@@ -20,7 +20,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { SyncError, LIMITS, RECHECK_MS, attempt, attemptAsync, clientOf, enc, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
 export { unwrap, type Result } from "./protocol.ts";
-import type { SyncEnv } from "./env.ts";
+import { testMode, type SyncEnv } from "./env.ts";
 
 /** Who sent a batch, as the account object authenticated it. */
 export interface Writer {
@@ -178,7 +178,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       }
       const out = this.decide(a, head, now);
       // (the test seam: this document's answers are lost after the commit, §4.3)
-      if (this.env.SYNC_TEST_LOSE !== undefined && this.env.SYNC_TEST_LOSE === b.doc && out.new > 0) this.lose = true;
+      if (testMode(this.env) && this.env.SYNC_TEST_LOSE === b.doc && out.new > 0) this.lose = true;
       return out;
     }));
   }
@@ -188,7 +188,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
   // batch before it is decided, or after it is decided and before it answers, for interleavings
   private gates = new Map<string, { wait: Promise<void>; open: () => void }>();
   async hold(a: { name: string }): Promise<void> {
-    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (!testMode(this.env)) return;
     let open!: () => void;
     const wait = new Promise<void>((r) => (open = r));
     this.gates.set(a.name, { wait, open });
@@ -392,7 +392,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
   private failAccepted = false;
   /** Tests only: make accepted() fail, as an outage would. */
   async setFailAccepted(a: { on: boolean }): Promise<void> {
-    if (this.env.SYNC_TEST_PIN_MS) this.failAccepted = a.on;
+    if (testMode(this.env)) this.failAccepted = a.on;
   }
   private acceptedNow(a: { ids: { epoch: number; id: string }[] }): Result<string[]> {
     return attempt(() => {
@@ -579,7 +579,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     this.sql.exec("INSERT INTO session_fences (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO UPDATE SET expires = max(expires, excluded.expires)", a.session, a.expires);
     this.sql.exec("DELETE FROM session_fences WHERE expires < ?", Date.now());
     // (keepOpen, a test seam: the fence without its close, so the check on every message is what refuses)
-    if (a.keepOpen && this.env.SYNC_TEST_PIN_MS) return;
+    if (a.keepOpen && testMode(this.env)) return;
     for (const ws of this.ctx.getWebSockets(`s:${a.session}`)) this.end(ws, "session ended");
   }
 

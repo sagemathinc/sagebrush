@@ -35,6 +35,15 @@ export interface SyncEnv {
   SHARE_DEV?: string;
 }
 
+/**
+ * Whether the test seams are on: only in the Worker built from web/sync/test-entry.ts, which sets
+ * this flag when it loads, and only with SYNC_TEST_PIN_MS bound.  No deployed entry sets the flag,
+ * so no binding alone can turn a seam on in production: a code guarantee, not one of config.
+ */
+export function testMode(env: SyncEnv): boolean {
+  return (globalThis as { __SAGEBRUSH_SYNC_TEST__?: boolean }).__SAGEBRUSH_SYNC_TEST__ === true && !!env.SYNC_TEST_PIN_MS;
+}
+
 /** Whether `account` may sync here (§11): only those listed. */
 export function allowed(env: SyncEnv, account: string): boolean {
   return (env.SYNC_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
