@@ -262,10 +262,11 @@ async function recordPurge(env: Env, hash: string, r: { state: string; request_i
     const now = Math.floor(Date.now() / 1000);
     const marks = [db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
       .bind(hash, now, r.request_id, kind, r.retired)];
-    // (CoCalc's request is then found by its own id, whatever the row's state, CORR-BF3-1)
-    if (kind === "admin") marks.push(db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation, request_id, kind, finished, docs, bytes) VALUES (?1, substr(?1, 1, 32), 'purged', ?2, ?3, ?4, 'admin', ?2, ?5, ?6) ON CONFLICT(account_hash) DO UPDATE SET request_id = excluded.request_id, kind = 'admin' WHERE sync_accounts.generation <= excluded.generation").bind(hash, now, r.retired, r.request_id, 0, 0));
     await db.batch(marks);
   }
+  // (nothing held: CoCalc's request is done at once, by its own receipt, CORR-1C2-1)
+  if (r.state === "none" && kind === "admin")
+    await db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE request_id = ?1 AND state = 'deleting'").bind(r.request_id, Math.floor(Date.now() / 1000)).run();
 }
 
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
@@ -298,6 +299,9 @@ async function adminSyncPurge(req: Request, env: Env): Promise<void> {
   }
   if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return;
   const hash = await accountHash(v.account_id);
+  // CoCalc's receipt first (CORR-1C2-1), so the purge's completion, which comes after the account
+  // object's answer, always finds it; a retried id keeps its receipt, and touches no other
+  await env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, ?2, 'deleting', ?3)").bind(v.request_id, hash, Math.floor(Date.now() / 1000)).run();
   // (the account object decides, whatever D1 says: an account still registering has no row yet;
   // no generation named, as whatever it holds goes, CORR-02C-1)
   const r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
@@ -307,7 +311,8 @@ async function adminSyncPurge(req: Request, env: Env): Promise<void> {
 /** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */
 async function adminSyncPurgeStatus(req: Request, env: Env, rid: string): Promise<Response> {
   if (!env.SHARE_DB || !(await signedWith(req, env.PURGE_KEY, ""))) return err(401, "bad signature");
-  const r = await env.SHARE_DB.prepare("SELECT state, docs, bytes FROM sync_accounts WHERE request_id = ?1").bind(rid).first();
+  // (by the request's own receipt, never the account's row, which a later request changes: CORR-1C2-1)
+  const r = await env.SHARE_DB.prepare("SELECT state, docs, bytes FROM sync_admin_requests WHERE request_id = ?1").bind(rid).first();
   return r ? json({ request_id: rid, ...r }) : err(404, "no such request");
 }
 
@@ -327,6 +332,12 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
   const test = testMode(env);
   const [page, pages] = test ? [50, 2] : [INVENTORY_PAGE, INVENTORY_PAGES];
   const old = Date.now() - (test ? 1000 : INVENTORY_AGE_MS);
+  // CoCalc's purge receipts past their polling lifetime (CORR-1C2-1): 30 days after they finished,
+  // 90 if they never did; at most 1,000 a run, one call
+  const ttl = Math.floor((Date.now() - (test ? 2000 : RECEIPT_TTL_MS)) / 1000);
+  await db.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE (finished IS NOT NULL AND finished < ?1) OR created < ?2 LIMIT 1000)")
+    .bind(ttl, Math.floor((Date.now() - (test ? 6000 : 3 * RECEIPT_TTL_MS)) / 1000)).run();
+  out.calls++;
   // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still fits)
   const worst = 2 + 1 + page + 1;
   for (let n = 0; n < pages && out.calls + worst <= INVENTORY_CALLS; n++) {
@@ -370,6 +381,8 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
 const INVENTORY_PAGE = 100, INVENTORY_PAGES = 5, INVENTORY_CALLS = 400;
 /** How old an object must be before the inventory may delete it: far beyond any upload's reservation. */
 const INVENTORY_AGE_MS = 2 * 86400_000;
+/** How long CoCalc may poll a purge's status after it finished (CORR-1C2-1). */
+const RECEIPT_TTL_MS = 30 * 86400_000;
 
 /**
  * An upload (§5.4): reserve, stream to R2 with the SHA-256 for R2 to

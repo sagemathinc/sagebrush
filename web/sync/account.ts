@@ -933,11 +933,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           .bind(v.hash, v.finished, v.request_id, v.kind, v.docs, v.bytes, v.generation),
         db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation < ?3 AND state <> 'purged'")
           .bind(v.hash, v.finished, v.generation),
-        // CoCalc's purge is found by its own request id, even when its generation never reached D1
-        // (CORR-BF3-1): the row, whatever generation up to this one it holds, takes the id, or a
-        // purged row of this generation is made.  The account is fenced, so no newer row can exist.
+        // every CoCalc request still waiting on this account is done (CORR-1C2-1): its receipt, by its
+        // own id, apart from the row; the account is fenced, so this purge is its last
         ...(v.kind === "admin"
-          ? [db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation, request_id, kind, finished, docs, bytes) VALUES (?1, substr(?1, 1, 32), 'purged', ?2, ?3, ?4, 'admin', ?2, ?5, ?6) ON CONFLICT(account_hash) DO UPDATE SET request_id = excluded.request_id, kind = 'admin' WHERE sync_accounts.generation <= excluded.generation").bind(v.hash, v.finished, v.generation, v.request_id, v.docs, v.bytes)]
+          ? [db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?2, docs = ?3, bytes = ?4 WHERE account_hash = ?1 AND state = 'deleting'").bind(v.hash, v.finished, v.docs, v.bytes)]
           : []),
       ]);
       // (only the record written: one for a later purge, written meanwhile, stays)
