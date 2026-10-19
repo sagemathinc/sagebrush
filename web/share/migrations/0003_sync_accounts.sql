@@ -17,10 +17,12 @@ CREATE TABLE sync_accounts (
 CREATE INDEX sync_accounts_prefix ON sync_accounts(prefix);
 -- One receipt per CoCalc purge request, by its id (CORR-1C2-1): what CoCalc's
 -- status call answers, apart from the account's row, which a later request
--- would change.  Written before the account object is asked, completed with
--- the purge's D1 record; kept 30 days after it finished (90 if it never did),
+-- would change.  Written once the account object has answered, only for an
+-- account that held sync state (the request id is bound to its account
+-- before that, by sharing's purges row, CORR-E9C-1); completed with the
+-- purge's D1 record; kept 30 days after it finished (90 if it never did),
 -- then pruned by the daily job.  At most 8 an account, a new id evicting its
--- oldest, and none for an account that never synced (LIMIT-233-1).
+-- oldest, and none for an account that never synced (LIMIT-233-1, LIMIT-5DC-1).
 CREATE TABLE sync_admin_requests (
   request_id TEXT PRIMARY KEY,
   account_hash TEXT NOT NULL,
