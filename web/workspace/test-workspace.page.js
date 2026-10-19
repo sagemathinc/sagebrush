@@ -1071,11 +1071,68 @@ async function migrateUndersized() {
   check(heldW.length > 0 && heldW.every((h) => h >= W.LEGACY_MAX * W.COPIES) && W.reserved().held === 0, "a write to a file kept the old way: its old bytes read under the reservation, released after: " + heldW.join());
   x.close();
   // larger than any value kept the old way can be: not moved, said, not read for it again; a move refused
+  // (a) its index saying so: marked without reading it at all
+  const t = await v1([["/huge/t.bin", "y".repeat(100)]]);
+  const lt = t.legacyBytes.bind(t);
+  let readsT = 0;
+  t.legacyBytes = async (e) => { readsT++; return lt(e); };
+  const afterT = await t.locked(async () => t.migrateOne(await t.stat("/huge/t.bin"), 10));
+  check(!afterT.migrated && afterT.unmoved && afterT.size === 100 && readsT === 0, "a value whose index says it is over the bound: marked, never read (" + readsT + " reads)");
+  // every change to it refused before any read of the old store, and nothing written (daybreak2)
+  const get = IDBObjectStore.prototype.get, oldGets = [];
+  IDBObjectStore.prototype.get = function (k) { if (this.name === "files" || this.name === "trash") oldGets.push(this.name + ":" + k); return get.apply(this, arguments); };
+  const ops0 = (await t.ops()).length, e0 = JSON.stringify(await t.stat("/huge/t.bin"));
+  try {
+    check(await fails(t.write("/huge/t.bin", "new"), "limit") && await fails(t.duplicate("/huge/t.bin"), "limit") && await fails(t.rename("/huge/t.bin", "/huge/u.bin"), "limit") && await fails(t.remove("/huge/t.bin"), "limit") && await fails(t.remove("/huge"), "limit"), "writing, copying, renaming or putting it (or its folder) in Trash: refused, saying why");
+    check(oldGets.length === 0 && readsT === 0, "…none of them reads the old store: " + oldGets.join());
+    check((await t.ops()).length === ops0 && JSON.stringify(await t.stat("/huge/t.bin")) === e0 && (await rawGet(t.main, "files", "/huge/t.bin")) !== undefined, "…and none of them writes anything");
+    // the way out: deleted for good by a person, without reading it; never by an agent
+    const ag = t.forAgent("agent:x");
+    const asAgent = Object.create(t);
+    asAgent.actor = "agent:x";
+    check(typeof ag.discard === "undefined" && await fails(asAgent.discard("/huge/t.bin", JSON.parse(e0)), "invalid"), "an agent can't delete it for good (not offered, and refused)");
+    const before = oldGets.length;
+    await t.discard("/huge/t.bin", JSON.parse(e0));
+    const readByDiscard = oldGets.length - before;
+    check(!(await t.stat("/huge/t.bin")) && (await rawGet(t.main, "files", "/huge/t.bin")) === undefined && readByDiscard === 0, "a person deletes it for good: its entry and old bytes gone, never read (" + readByDiscard + " reads)");
+    check((await t.ops()).some((o) => o.op === "discard" && o.path === "/huge/t.bin"), "…logged");
+    check(await fails(t.discard("/huge/none.bin", { fid: "x", created: 1 }), "missing"), "…a file not there: missing");
+  } finally {
+    IDBObjectStore.prototype.get = get;
+  }
+  // one parked in Trash: restoring it refused without reading it
+  const tt = await v1([], [["/Trash/big.bin", "z".repeat(50), "/big.bin"]]);
+  await tt.locked(async () => tt.migrateOne(await tt.stat("/Trash/big.bin"), 10));
+  const g2 = [];
+  IDBObjectStore.prototype.get = function (k) { if (this.name === "files" || this.name === "trash") g2.push(k); return get.apply(this, arguments); };
+  try {
+    check((await tt.stat("/Trash/big.bin")).unmoved && await fails(tt.restore("/Trash/big.bin"), "limit") && g2.length === 0, "one in Trash: restoring it refused, the old store not read");
+  } finally {
+    IDBObjectStore.prototype.get = get;
+  }
+  await tt.discard("/Trash/big.bin", await tt.stat("/Trash/big.bin"));
+  check(!(await tt.stat("/Trash/big.bin")) && (await rawKeys(tt.ws, "trash")).length === 0, "…and deleted for good from there");
+  tt.close();
+  // an ordinary file isn't deleted for good this way: it goes to Trash
+  const o = await fresh();
+  await o.create("/plain.txt", { content: "p" });
+  const pe = await o.stat("/plain.txt");
+  check(await fails(o.discard("/plain.txt", pe), "invalid"), "an ordinary file isn't deleted for good this way");
+  o.close();
+  t.legacyBytes = lt;
+  t.close();
+  // (b) its index saying less than it is: read once, marked, never read by the migration again
   const v = await v1([["/huge/h.bin", "y"]]);
   await rawPut(v.main, "files", new Uint8Array(100), "/huge/h.bin");
+  const lv = v.legacyBytes.bind(v);
+  let readsV = 0;
+  v.legacyBytes = async (e) => { readsV++; return lv(e); };
   const after = await v.locked(async () => v.migrateOne(await v.stat("/huge/h.bin"), 10));
-  check(!after.migrated && after.unmoved && after.size === 100, "a value larger than the bound: not moved, the entry says so, with its size");
+  check(!after.migrated && after.unmoved && after.size === 100 && readsV === 1, "a value over the bound, its index saying less: read once, not moved, the entry says so, with its size");
+  await v.locked(async () => v.migrateOne(await v.stat("/huge/h.bin"), 10));
   await W.startMigrator(v);
+  check(readsV === 1, "…and never read by the migration again (" + readsV + " reads)");
+  v.legacyBytes = lv;
   check((await W.migrationState(v)).done && (await v.usage()).migration.left === 0 && (await v.read("/huge/h.bin")).content.length === 100, "…the migration done without it; it is still read where it is");
   check(await fails(v.rename("/huge", "/huge2"), "limit"), "…and moving it is refused (its bytes stay where they are)");
   w.close();
