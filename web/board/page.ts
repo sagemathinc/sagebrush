@@ -483,12 +483,27 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
-  // (this board's saves made first; one refused, it stays open, saying why, never left behind
-  // unsaved (astra's CORR-4B3-2))
-  void wsFlush().then(() => {
-    if (local && ws && wsRefused) return void alert(`"${nameOf(e.path)}" isn't opened: this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it stays open. Download it (File) to keep them.`);
-    location.assign(url);
-  });
+  void leaveFor(url, nameOf(e.path));
+}
+// Leaving this board for another page, whichever way (an open, an upload, the file browser): what
+// is being written ended and kept, at the moment of leaving (so what was typed while an upload was
+// read is kept too), the saves made, and, one refused, this board stays open, saying why: never left
+// behind unsaved (astra's CORR-4B3-2, CORR-BCD-1)
+async function leaveFor(url: string, what: string) {
+  if (await settled(what)) location.assign(url);
+}
+/** What is being written ended and kept, and every save made, until nothing more is being written
+ * (what was typed while the last save was made, kept too); true to go: then the page goes in the
+ * same step, with nothing written between.  False, said why: this board stays open. */
+async function settled(what: string): Promise<boolean> {
+  for (let i = 0; ; i++) {
+    try { await mounted.keepWriting(); } catch (err) { alert(`"${what}" isn't opened: what was being written here couldn't be kept (${String((err as Error)?.message ?? err).slice(0, 200)}), so this board stays open.`); return false; }
+    await wsFlush();
+    if (local && ws && wsRefused) { alert(`"${what}" isn't opened: this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it stays open. Download it (File) to keep them.`); return false; }
+    if (!mounted.writing()) return true;
+    // (someone writing on and on as the page tries to go: it stays, nothing lost)
+    if (i >= 10) return false;
+  }
 }
 // (this board, opened: first in the File menu's Recent, both pages')
 if (local && ws) recordOpened({ kind: "board", ref: source.slice(6) });
@@ -744,14 +759,14 @@ const host: BoardHost = {
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
-  newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
-  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  newBoard: file ? undefined : ws ? async (mode) => { if (!(await settled("A new board"))) return; openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  duplicate: file ? undefined : ws ? async (d) => { if (!(await settled("The copy"))) return; openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   // The File menu's items that are the workspace's (design §3): a new
   // notebook, a folder, Open… (the file browser as a dialog), Recent, and
   // this board to Trash; none without the workspace, or in an exported file
   files: ws && !file ? {
     async newNotebook(mode: string) {
-      await wsFlush();
+      if (!(await settled("A new notebook"))) return;
       const top = new Set((await ws!.list("/")).map((e) => e.path));
       const p = freePath("/", "Untitled", ".ipynb", (x) => top.has(x));
       if (!p) throw new Error("no free name for a new notebook");
@@ -771,7 +786,7 @@ const host: BoardHost = {
       const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
       if (!p || !e || e.kind !== "board" || e.ref !== id) throw new Error("this board isn't in your files");
       if (!confirm(`Move "${nameOf(p)}" to Trash? Trash keeps it until you empty it.`)) return;
-      await wsFlush();
+      if (!(await settled("The next board"))) return;
       await ws!.remove(p, { kind: "board", ref: id, fid: e.fid, created: e.created });
       const next = (await recentOpened(ws!, { kind: "board", ref: id })).find((x) => x.kind === "board");
       location.assign(location.pathname + (next ? "?doc=local:" + next.ref : "?new=" + encodeURIComponent(e.mode ?? "python")));
