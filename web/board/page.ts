@@ -50,6 +50,7 @@ import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
 import { Workspace, migrate, freePath } from "../workspace/index";
+import { mountBrowser } from "../workspace/browser";
 import { within } from "./idb-open";
 
 const q = new URLSearchParams(location.search);
@@ -660,6 +661,51 @@ requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).firstP
 export { mountBoard, host, mounted };
 // (for a host whose documents are kept elsewhere: a copy in this browser first; the tests' fake remote)
 export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
+
+// The file browser (design §4): a sidebar on the left, over the board's
+// left edge (which moves aside), shown and hidden by Files in the top bar,
+// remembered with the notebook page's
+if (ws && local) {
+  const side = document.createElement("div");
+  side.id = "wssidebar";
+  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:272px;border-right:1px solid #d4d4cb;z-index:30";
+  side.hidden = true;
+  document.body.append(side);
+  const btn = document.createElement("button");
+  btn.textContent = "Files";
+  btn.title = "Your notebooks, boards and files (in this browser)";
+  btn.setAttribute("aria-pressed", "false");
+  btn.dataset.sbb = "files";
+  document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
+  const boardEl = document.getElementById("board")!;
+  let browser: ReturnType<typeof mountBrowser> | null = null, currentPath: string | undefined;
+  const phone = () => matchMedia("(max-width: 640px)").matches;
+  const show = (on: boolean) => {
+    side.hidden = !on;
+    boardEl.style.left = on && !phone() ? "272px" : "";
+    side.style.width = phone() ? "" : "272px";
+    side.style.right = phone() ? "0" : "";
+    btn.setAttribute("aria-pressed", String(on));
+    try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
+    dispatchEvent(new Event("resize"));
+    if (on && !browser) browser = mountBrowser(side, {
+      ws,
+      current: () => currentPath,
+      open(e, how) {
+        const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+        if (how === "tab") return void window.open(url, "_blank", "noopener");
+        if (e.kind === "board" && e.ref === source.slice(6)) return;
+        void wsFlush().then(() => location.assign(url));
+      },
+      close: () => show(false),
+    });
+  };
+  btn.onclick = () => show(side.hidden !== false);
+  void ws.pathOf("board", source.slice(6)).then((p) => { currentPath = p; browser?.refresh(); });
+  let pref: string | null = null;
+  try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
+  if (pref === "1") show(true);
+}
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
