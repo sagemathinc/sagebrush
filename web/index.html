@@ -391,6 +391,8 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
+import { uploadFiles, openableAs, convertCopy } from "./workspace/upload.ts";
+import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1582,7 +1584,7 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;
-    case "import": $("#importinput").click(); break;
+    case "import": { const inp = $("#importinput"); inp.multiple = !!ws; inp.accept = ws ? "" : ".ipynb,.py,.sage,.m,.mag,.sbreplay"; inp.click(); break; }
     case "openfile": {
       const p = await TAURI.dialog.open({ multiple: false, filters: [{ name: "Notebooks", extensions: ["ipynb", "sage", "py", "m"] }] });
       if (p) await openDiskFile(String(p));
@@ -1647,9 +1649,11 @@ fileMenu.addEventListener("click", async (e) => {
   }
 });
 $("#importinput").onchange = async (e) => {
-  const f = e.target.files?.[0];
+  const files = [...(e.target.files ?? [])], f = files[0];
   e.target.value = "";
   if (!f) return;
+  // (with the workspace: Upload's rule, design §3; without it, the one file opened, as before)
+  if (ws) return uploadHere(files);
   try {
     if (/\.sbreplay$/i.test(f.name)) {
       saveNow();
@@ -1667,7 +1671,6 @@ $("#importinput").onchange = async (e) => {
 // The portable bundle (.sbreplay, gzipped JSON): the notebook, its TimeTravel
 // history (the patches, with the execution journal) and the bytes of the
 // files its sessions read, so that another browser can resume its versions.
-const BUNDLE = "sagebrush-notebook-history";
 async function makeBundle() {
   const hdb = await historyDbReady, bdb = await blobDbReady;
   const rows = hdb ? ((await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([current.id, ""], [current.id, "\uffff"])))) ?? []) : [];
@@ -1680,21 +1683,12 @@ async function makeBundle() {
   const json = JSON.stringify({ format: BUNDLE, version: 1, notebook: doc, history: rows.map((r) => r.env), blobs });
   return pipe(new TextEncoder().encode(json), new CompressionStream("gzip"));
 }
+// (read back by notebook/bundle.js, shared with Upload… on both pages)
 async function openBundle(bytes) {
-  const b = JSON.parse(new TextDecoder().decode(await pipe(bytes, new DecompressionStream("gzip"))));
-  if (b?.format !== BUNDLE || !Array.isArray(b.history) || !b.notebook) throw new Error("not a Sagebrush notebook with history");
-  const hdb = await historyDbReady, bdb = await blobDbReady;
-  // the files' bytes, checked against their hashes
-  for (const [h, data64] of Object.entries(b.blobs ?? {})) {
-    const data = dec64(data64);
-    if ((await bytesHash(data)) === h || h.startsWith("c53:")) await putBlob(bdb, data);
-  }
+  const b = await readBundle(bytes);
   const id = newId();
-  if (hdb) await idb(hdb, "history", "readwrite", (st) => { let r = null; for (const env of b.history) if (env?.time) r = st.put({ nb: id, time: env.time, env }); return r; });
-  // (never written here, whatever it says: notebook.js remotePictures)
-  const { id: _i, rev: _r, updated: _u, here: _h, ...doc } = b.notebook;
-  // (the cells keep their ids: the journal refers to them)
-  await open(new IdbStore(db, id, { ...doc, id }), id);
+  await keepBundle(b, id, { hdb: await historyDbReady, bdb: await blobDbReady });
+  await open(new IdbStore(db, id, { ...b.notebook, id }), id);
   return id;
 }
 window.sagebrush.bundle = makeBundle;
@@ -1830,6 +1824,49 @@ async function addFiles(list, folder = "/") {
   announce(`${added} file${added === 1 ? "" : "s"} added` + (refused.length ? `; not added: ${refused.join(", ")}` : ""));
   if (refused.length) statusEl.textContent = `Not added: ${refused.join(", ")}`;
 }
+// Upload… and files dropped on the page, with the workspace: its rule
+// (design/workspace-files.md §3, workspace/upload.ts), never converting
+// unasked: .ipynb, .board.json and .sbreplay become documents, anything else
+// a data file (given to the interpreters).  Then one document made is
+// opened; one file it recognises is offered as what it can be (a converted
+// copy beside it).  Into the open notebook's folder, or the one given.
+async function uploadHere(list, folder) {
+  if (!ws) return addFiles(list, folder);
+  if (folder === undefined) {
+    const at = current.kind === "browser" ? await ws.pathOf("notebook", current.id).catch(() => undefined) : undefined;
+    folder = at ? parentOf(at) : "/";
+  }
+  const r = await uploadFiles(ws, list, folder, {
+    maxBytes: LIMITS.maxFileBytes,
+    mode: nb.mode,
+    replay: async (bytes) => {
+      const b = await readBundle(bytes);
+      return { notebook: b.notebook, keep: async (ref) => keepBundle(b, ref, { hdb: await historyDbReady, bdb: await blobDbReady }) };
+    },
+    keepFile: async (p, data) => { await ws.putFile(p, data); filePut(p, data); },
+  });
+  renderFiles();
+  wsBrowser?.refresh();
+  const n = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
+  announce([r.made.length && n(r.made.length, "document") + " made", r.kept.length && n(r.kept.length, "file") + " added"].filter(Boolean).join(", ") || "Nothing added");
+  if (r.refused.length) statusEl.textContent = `Not added: ${r.refused.join("; ")}`;
+  if (r.made.length === 1 && !r.kept.length) return openEntry(r.made[0]);
+  if (r.kept.length === 1 && !r.made.length) {
+    const e = r.kept[0], as = openableAs(nameOf(e.path));
+    if (as && confirm(`Open "${nameOf(e.path)}" as a ${as}?\n\nA converted copy, "${splitExt(nameOf(e.path))[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${nameOf(e.path)}" stays as it is.`)) await openAs(e, as);
+  }
+  if (r.kept.length || r.made.length) wsShowFiles(true);
+}
+// (a data file opened as a document: its converted copy, beside it; a board's
+// made on the board page, which reads boards' other formats)
+async function openAs(e, as) {
+  if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
+  try {
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode });
+    wsBrowser?.refresh();
+    openEntry(made);
+  } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
+}
 filesBtn.onclick = () => {
   // (with the workspace, ⋯ → Files is the file browser; the old panel is for a browser without one)
   if (ws) return wsShowFiles(wsSidebar.hidden);
@@ -1842,7 +1879,7 @@ $("#uploadinput").onchange = (e) => { addFiles([...e.target.files]); e.target.va
 // drop files anywhere on the page
 addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); filesEl.classList.add("drop"); if (ws) wsShowFiles(true); else if (filesEl.hidden) filesBtn.click(); } });
 addEventListener("dragleave", (e) => { if (!e.relatedTarget) filesEl.classList.remove("drop"); });
-addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); filesEl.classList.remove("drop"); addFiles([...e.dataTransfer.files]); } });
+addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventDefault(); filesEl.classList.remove("drop"); uploadHere([...e.dataTransfer.files]); } });
 
 // ------------------------------------------------------------ documentation search
 // The functions the notebook's language has, and only those: Sage's, every
@@ -2277,7 +2314,8 @@ function wsShowFiles(on) {
         }
         else { saveNow(); location.assign(url); }
       },
-      upload: (files, folder) => addFiles(files, folder),
+      upload: (files, folder) => uploadHere(files, folder),
+      openAs: (e, as) => openAs(e, as),
       close: () => wsShowFiles(false),
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)

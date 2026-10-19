@@ -60,7 +60,9 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
 
   // a board dropped on /board/: its own caption, not the welcome's and its tour (friction 7)
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  // (?workspace=0: a dropped file opens in the board shown, the in-place path whose races this
+  // tests (the library's); with the workspace it is uploaded instead, test-workspace-upload.mjs)
+  await send("Page.navigate", { url: `${base}board/?runner=0&workspace=0` });
   if (!(await until(`${B}?.snapshot().items.length > 0`, 60000))) throw new Error("the board did not open");
   check((await state()).where === "11 steps", "(the welcome says its tour: 11 steps): " + (await state()).where);
   const DROP = { title: "Mine", intro: "My own intro", pages: [{ title: "First", nodes: [note("a")], steps: [step("a"), step("a", 2)] }, { title: "Second", nodes: [note("b")] }] };

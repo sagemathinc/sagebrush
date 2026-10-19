@@ -73,3 +73,24 @@ export function freePath(folder: string, base: string, ext: string, taken: (p: s
   }
   return undefined;
 }
+
+// Upload's rule by name (design/workspace-files.md §3; upload.ts does it)
+export type DocKind = "notebook" | "board";
+
+/** What Upload makes of a file, by its name. */
+export function uploadAs(name: string): DocKind | "replay" | "file" {
+  const n = name.toLowerCase();
+  if (n.endsWith(".ipynb") && n.length > 6) return "notebook";
+  if (n.endsWith(".board.json") && n.length > 11) return "board";
+  if (n.endsWith(".sbreplay") && n.length > 9) return "replay";
+  return "file";
+}
+
+/** What a data file can be opened as (a converted copy beside it), or null. */
+export function openableAs(name: string): DocKind | null {
+  const n = name.toLowerCase();
+  if (uploadAs(n) !== "file") return null;
+  if (/\.(py|sage|m|mag)$/.test(n)) return "notebook";
+  if (/\.(json|canvas|mmd|mermaid|md|html|htm|board|slides)$/.test(n)) return "board";
+  return null;
+}

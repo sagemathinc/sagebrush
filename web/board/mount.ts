@@ -150,6 +150,9 @@ export interface BoardHost {
     open?(): void;
     recent?(): Promise<{ label: string; title?: string; open: () => void }[]>;
     delete?(): void | Promise<void>;
+    /** Upload… and files dropped on the board (not pictures), in `mode` (the board's): the rule of
+     * design §3 (workspace/upload.ts); what to say, if anything.  None: a file opens in this board, as before. */
+    upload?(files: File[], mode: string): Promise<string | void>;
   };
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
@@ -1662,13 +1665,20 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
+  // (with the host's files: Upload's rule, design §3, any files, several)
+  if (host.files?.upload) { picker.multiple = true; picker.removeAttribute("accept"); }
+  async function uploadToHost(files: File[]) {
+    const said = await host.files!.upload!(files, doc?.mode ?? "python").catch(fail);
+    if (said && !destroyed) say(said);
+  }
   // (a file read while another document is loaded, by an agent or the
   // host: that one, newer, wins; the file, read too late, is not opened
   // over it)
   picker.onchange = async () => {
-    const f = picker.files?.[0], g = loadGen;
+    const files = [...(picker.files ?? [])], f = files[0], g = loadGen;
     picker.value = "";
     if (!f) return;
+    if (host.files?.upload) return uploadToHost(files);
     const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
@@ -1687,6 +1697,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const f = files[0], g = loadGen;
     if (!f) return;
+    if (host.files?.upload) return uploadToHost(files);
     const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
