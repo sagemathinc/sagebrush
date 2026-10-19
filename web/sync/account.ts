@@ -835,6 +835,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /**
+   * Where CoCalc's purge of this account stands, from this object alone, the
+   * authority (CORR-5D0-1): `deleting` while its purge runs; `purged` once it
+   * has, `never_synced` if there was nothing to delete; `not_requested` if no
+   * CoCalc purge has reached it (CoCalc then sends it again).  Reads only.
+   */
+  async purgeState(): Promise<{ state: "deleting" | "purged" | "never_synced" | "not_requested" }> {
+    if (!this.deleted()) return { state: "not_requested" };
+    if (this.exists()) return { state: this.state() === "deleting" ? "deleting" : "not_requested" };
+    return { state: this.retired() > 0 ? "purged" : "never_synced" };
+  }
+
+  /**
    * One step of a purge, from the alarm: each document deletes itself; every
    * holding, reservation and export goes to the outbox; the outbox empties;
    * the whole s/<hash>/ prefix is listed and deleted (whatever the tables

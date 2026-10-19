@@ -29,6 +29,8 @@ const M = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"; // allowlisted, never synced; 
 const N = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"; // allowlisted; registering, never in D1, when CoCalc purges it
 const O = "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"; // allowlisted; its purge held while another account reuses its request id
 const P = "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1"; // never synced; the other account
+const Q = "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"; // allowlisted; its purge held while its receipt is evicted
+const RF = "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"; // never synced; CoCalc's purge of it can't reach its account object
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -65,6 +67,7 @@ fake.limits.set(K, sync(1 << 20, 1 << 20));
 fake.limits.set(L, sync(1 << 20, 1 << 20));
 fake.limits.set(M, sync(1 << 20, 1 << 20));
 fake.limits.set(O, sync(1 << 20, 1 << 20));
+fake.limits.set(Q, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -80,7 +83,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1488,7 +1491,36 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridRetry }))).status === 202 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).first()).n === 8 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridsL[2]}`)).status === 200, "a retried id evicts nothing");
   const ridP = crypto.randomUUID();
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: P, request_id: ridP }))).status === 202 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridP}`)).status === 404 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(P)).first()).n === 0 && (await acctP.lifecycle())?.deleted === true,
-    "an account that never synced is purged (and fenced), keeps no receipt, and its status is 404: nothing for sync to wait on");
+    "an account that never synced is purged (and fenced), and keeps no receipt");
+  // CORR-5D0-1: the status names the account, and the account object answers whenever no receipt says
+  // purged: certain for every case the adapter meets
+  const status = async (rid, acct) => { const r = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${rid}${acct ? "/" + acct : ""}`); return [r.status, await r.json()]; };
+  const [sP, bP] = await status(ridP, P);
+  ok(sP === 200 && bP.state === "never_synced" && bP.source === "account", "never synced: 200 never_synced, from the account object (done: nothing to wait for): " + JSON.stringify(bP));
+  const [sE0, bE0] = await status(ridsL[0], L);
+  ok(sE0 === 200 && bE0.state === "purged" && bE0.source === "account", "completed, then its receipt evicted: 200 purged, from the account object: " + JSON.stringify(bE0));
+  const [sNo, bNo] = await status(crypto.randomUUID(), crypto.randomUUID());
+  ok(sNo === 404 && bNo.state === "not_requested", "an account no CoCalc purge has reached: 404 not_requested (send it again), never done");
+  const [sX] = await status(ridsL[3], P);
+  ok(sX === 409, "a request id asked about under another account: 409");
+  // the object can't be reached: nothing recorded, 503 for CoCalc to send it again; no receipt left
+  const ridRF = crypto.randomUUID();
+  const rf = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: RF, request_id: ridRF }));
+  ok(rf.status === 503 && (await rf.json()).error === "busy" && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(RF)).first()).n === 0 && (await status(ridRF, RF))[0] === 404,
+    "a purge whose account object can't be reached answers 503, keeps no receipt, and its status is 404 not_requested");
+  // pending, then evicted: Q's purge is held; 8 more ids evict R's receipt; the account object still says deleting
+  const sq = await signIn(Q);
+  const acctQ = acctNs.get(acctNs.idFromName("acct:" + hashOf(Q)));
+  ok((await post(sq, "/api/sync/v1/enable", {})).status === 200 && (await put(sq, Buffer.from("Q's file"))).status === 201, "(Q: on, with a file)");
+  await acctQ.holdPurge({ on: true });
+  const ridQ = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: Q, request_id: ridQ }))).status === 202 && (await status(ridQ, Q))[1].state === "deleting", "(CoCalc purges Q, request R, held: deleting)");
+  for (let i = 0; i < 8; i++) await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: Q, request_id: crypto.randomUUID() }));
+  const [sQ, bQ] = await status(ridQ, Q);
+  const rcQ = await db.prepare("SELECT 1 AS x FROM sync_admin_requests WHERE request_id = ?1").bind(ridQ).first();
+  ok(rcQ === null && sQ === 200 && bQ.state === "deleting" && bQ.source === "account", "pending, then its receipt evicted: still 200 deleting, from the account object, never done: " + JSON.stringify(bQ));
+  await acctQ.holdPurge({ on: false });
+  ok(await until(async () => (await status(ridQ, Q))[1].state === "purged"), "and purged once the account object is done");
   await db.prepare("DELETE FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).run();
   // the prune drains a backlog beyond one run's capacity (test: 2 kinds x 3 pages x 50 = 300 a run)
   await new Promise((r) => setTimeout(r, 1100));
