@@ -160,11 +160,43 @@ try {
   await until(`!!${W} && !!document.querySelector("#cells textarea")`, 60000);
   const asked = await ev(`(async () => { await new Promise((r) => setTimeout(r, 1500)); const before = window.__asked; const ta = document.querySelector("#cells textarea"); ta.value += " "; ta.dispatchEvent(new Event("input", { bubbles: true })); ta.value += " "; ta.dispatchEvent(new Event("input", { bubbles: true })); return [before, window.__asked]; })()`);
   check(asked[0] === 0 && asked[1] === 1, "a page opened asks nothing; the first edit asks the browser to keep the storage, once: " + JSON.stringify(asked));
+  // what a preview reads (LIMIT-F85-1): a file too large to preview, or a
+  // kind with none, isn't read at all; Download reads it
+  await ev(`(() => { window.__reads = []; const g = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function (k) { if (this.name === "files") __reads.push(String(k)); return g.apply(this, arguments); }; return 1; })()`);
+  await ev(`(async () => { const b = new Uint8Array(5 * 2 ** 20).fill(44); await ${W}.create("/huge.csv", { content: b }); await ${W}.create("/other.bin", { content: new Uint8Array([1, 2, 3]) }); return 1; })()`);
+  await openRow("/huge.csv");
+  check(await until(`/too large to preview here \\(5\\.0 MB\\)/.test(${P}?.textContent ?? "")`) && (await ev(`!__reads.includes("/huge.csv")`)), "a 5 MB table isn't read to be previewed: too large, said: " + JSON.stringify(await ev(`__reads`)));
+  await panelButton(/^Download$/);
+  check(await until(`__reads.includes("/huge.csv")`), "…Download reads it");
+  await closePanel();
+  await openRow("/other.bin");
+  check(await until(`/No preview/.test(${P}?.textContent ?? "")`) && (await ev(`!__reads.includes("/other.bin")`)), "a kind with no preview isn't read");
+  await closePanel();
+  // a stale preview's actions never touch another file put at its path (CORR-F85-1, -2)
+  await ev(`(async () => { const w = ${W}; await w.create("/victim.txt", { content: "original" }); await w.write("/victim.txt", "original current"); await w.create("/v2.txt", { content: "old" }); await w.write("/v2.txt", "current"); return 1; })()`);
+  await openRow("/victim.txt");
+  await until(`/Earlier versions \\(1\\)/.test(${P}?.textContent ?? "")`);
+  await ev(`(async () => { const w = ${W}; await w.rename("/victim.txt", "/moved.txt"); await w.create("/victim.txt", { content: "replacement" }); await w.write("/victim.txt", "replacement 2"); return 1; })()`);
+  await panelButton(/^Delete older versions/);
+  await sleep(600);
+  const hv = [await history("/moved.txt"), await history("/victim.txt")];
+  check(hv[0] === 1 && hv[1] === 1 && /changed since it was shown/.test(await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`)), "Delete older versions in a preview of a file renamed, another put at its path: neither's versions go, and it says so: " + JSON.stringify(hv));
+  await openRow("/v2.txt");
+  await until(`/Earlier versions \\(1\\)/.test(${P}?.textContent ?? "")`);
+  await ev(`(async () => { let entered; const ready = new Promise((r) => (entered = r)); const gate = new Promise((r) => (window.__releaseLock = r)); window.__held = navigator.locks.request("sagebrush-workspace", async () => { entered(); await gate; }); await ready; const w = ${W}; window.__moving = w.rename("/v2.txt", "/moved2.txt"); window.__replacing = w.create("/v2.txt", { content: "replacement" }); return 1; })()`);
+  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 2)`);
+  await ev(`(() => { [...document.querySelectorAll(".sbfprev .vr button")].find((b) => b.textContent === "Restore").click(); return 1; })()`);
+  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 3)`), "(Restore's write waiting third for the lock, after the rename and the replacement)");
+  await ev(`(async () => { __releaseLock(); await __held; await __moving; await __replacing; await new Promise((r) => setTimeout(r, 800)); return 1; })()`);
+  const after = [await text("/v2.txt"), await text("/moved2.txt")];
+  check(after[0] === "replacement" && after[1] === "current" && /changed since it was shown/.test(await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`)), "Restore in a preview, the file renamed and another put at its path first: nothing written, said: " + JSON.stringify(after));
   // the board page: the same preview
   await go(base + "board/?new=python");
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector('[data-sbb="files"]')`, 60000);
   if (await ev(`${S}?.hidden !== false`)) await click('[data-sbb="files"]');
-  await openRow("/data");
+  // (the folder open as it was left, remembered; else opened)
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/data"))})`);
+  if (await ev(`document.querySelector(${JSON.stringify(rowSel("/data"))}).getAttribute("aria-expanded") !== "true"`)) await click(rowSel("/data"));
   await openRow("/data/notes.txt");
   check(await until(`${P}?.querySelector("pre")?.textContent === "v5"`), "the board page's file browser previews a file the same way");
   await shot("board-preview");
