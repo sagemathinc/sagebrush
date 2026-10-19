@@ -21,6 +21,7 @@ const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are
 const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pending but what a test makes (alarms)
 const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
 const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outlives its reservation
+const H = "88888888-8888-4888-8888-888888888888"; // allowlisted; its first registration in D1 fails
 
 let failures = 0;
 let count = 0;
@@ -47,6 +48,7 @@ fake.limits.set(D, sync(1 << 20, 1 << 20));
 fake.limits.set(E, sync(1 << 20, 1 << 20));
 fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 10 });
 fake.limits.set(G, sync(1 << 20, 1 << 20));
+fake.limits.set(H, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -62,7 +64,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1" },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1151,6 +1153,13 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const many = Array.from({ length: 1000 }, (_, i) => `s/${hashOf(A).slice(0, 32)}/${i.toString(16).padStart(36, "0")}`);
   const kk = await acctNs.get(acctNs.idFromName("acct:" + hashOf(A))).knownKeys({ keys: [...many, ...keys] });
   ok(kk.statements <= 11 && kk.known.length === 1 && kk.known[0] === keys[0], `knownKeys of 1,001 keys: ${kk.statements} statements, and it knows exactly the held one`);
+  // CORR-00F-1: H's registration in D1 fails; no write is taken; the inventory never deletes a held file
+  const sh = await signIn(H);
+  const en = await post(sh, "/api/sync/v1/enable", {});
+  ok(en.status === 503, "turning sync on fails if its D1 registration does");
+  const hp = await put(sh, Buffer.from("H's file"));
+  ok(hp.status === 403, "and the account then takes no write: its object was never given storage (" + hp.status + ")");
+  ok((await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(H)).first()) === null && (await bucket.list({ prefix: `s/${hashOf(H).slice(0, 32)}/` })).objects.length === 0, "nothing of H's is in D1 or R2");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

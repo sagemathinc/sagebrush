@@ -825,6 +825,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * with at most uploadsAtOnce running.  A blob already held needs no upload.
    */
   async reserve(a: { account: string; sha256: string; size: number }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+    // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
     const l = await this.limits();
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
@@ -942,6 +944,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * grant).  Bytes authorized, at issue.
    */
   async read(a: { account: string; sha256: string; who: string }): Promise<Result<{ key: string; size: number }>> {
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
     const l = await this.limits();
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, false);

@@ -28,6 +28,8 @@ declare class FixedLengthStream extends TransformStream<Uint8Array, Uint8Array> 
 }
 
 export type Env = SyncEnv & ShareEnv & {
+  /** a test seam: registering this account id in D1 fails, as an outage would (CORR-00F-1) */
+  SYNC_TEST_FAIL_ENROLL?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
   SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
@@ -138,9 +140,19 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     // (a purge still running, or the account's record says it is being deleted: not yet)
     const rec = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
     if (rec?.state === "deleting") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
-    const r = await stub.enable({ account: who.id, hash });
-    if ("ok" in r) await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created) VALUES (?1, substr(?1, 1, 32), 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
-    return answer(r, json);
+    // The account is registered in D1 first, and only then given storage (CORR-00F-1): the daily
+    // inventory finds an account's objects by this row, so an account object that could take writes
+    // without it would see its own files deleted.  A failure here leaves no storage at all; a row
+    // whose account object then fails to start holds nothing, which is harmless.
+    try {
+      if (env.SYNC_TEST_FAIL_ENROLL && env.SYNC_TEST_FAIL_ENROLL === who.id) throw new Error("D1 unavailable (test seam)");
+      await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created) VALUES (?1, substr(?1, 1, 32), 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
+      const reg = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
+      if (reg?.state !== "active") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
+    } catch {
+      return err(503, "busy", { message: "turning sync on didn't finish; try again" });
+    }
+    return answer(await stub.enable({ account: who.id, hash }), json);
   }
   if (p === "/api/sync/v1/delete" && m === "POST") {
     const b = (await req.json().catch(() => null)) as { confirm?: unknown } | null;
