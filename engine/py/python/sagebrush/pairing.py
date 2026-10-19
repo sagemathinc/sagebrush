@@ -7,12 +7,17 @@ Through it, the workspace tools reach the person's workspace
 What guards it (any program on this computer can reach the port, so the
 port is not the guard; the code is):
 - it listens on 127.0.0.1 only, never on another interface;
-- the handshake must come from an allowed origin, exactly (Origin), to
+- the handshake must come from an allowed origin, exactly (Origin:
+  https://sagebrush.space, and SAGEBRUSH_MCP_DEV_ORIGIN when set), to
   this port at 127.0.0.1 or localhost (Host, against DNS rebinding), at
   the path /sagebrush, as WebSocket version 13; anything else gets 403;
 - the page's first message is "hello" with the code: 128 random bits,
   shown as 26 base32 letters, compared in constant time, used once, and
   valid for 5 minutes; 5 wrong codes and the code is retired;
+- a page the person told to remember this agent reconnects with the
+  session secret the hello's result gave it (32 random bytes): this server
+  keeps only its SHA-256, only while it runs, forgets it when the grant is
+  revoked, and after 5 wrong tries;
 - after the hello, one page is paired; another connection is refused;
 - nothing runs before the person's grant (the page's "grant.changed"),
   and the grant is the page's: this server only follows it, and can't
@@ -35,6 +40,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import socket
 import struct
@@ -44,6 +50,10 @@ import time
 from sagebrush.workspace_tools import LIMITS, NotConnected, PageError, loads_strict, strict_json
 
 PATH = "/sagebrush"
+#: SAGEBRUSH_MCP_DEV_ORIGIN: one more origin allowed, exactly, for a
+#: development server of the page (http://localhost:<port> or
+#: http://127.0.0.1:<port>); off by default
+DEV_ORIGIN_ENV = "SAGEBRUSH_MCP_DEV_ORIGIN"
 PROTOCOL = 1
 ORIGINS = ("https://sagebrush.space",)
 #: a frame's payload (and a fragmented message's) at most this many bytes:
@@ -82,6 +92,11 @@ class Pairing:
 
     def __init__(self, agent, origins=ORIGINS, on_notify=None, now=time.monotonic):
         self.agent = agent  # {name, client, version}: what the hello's reply says
+        dev = os.environ.get(DEV_ORIGIN_ENV, "")
+        if dev:
+            if not re.fullmatch(r"http://(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}", dev):
+                raise ValueError("%s must be exactly http://localhost:<port> or http://127.0.0.1:<port>" % DEV_ORIGIN_ENV)
+            origins = tuple(origins) + (dev,)
         self.origins = tuple(origins)
         self.on_notify = on_notify or (lambda method, params: None)
         self.now = now
@@ -101,6 +116,8 @@ class Pairing:
         self.send_lock = threading.Lock()
         self.closed = False
         self.unpaired = 0
+        self.session_hash = None  # the SHA-256 of the page's session secret, for reconnecting
+        self.session_tries = 0
 
     # ---- listening
     def start(self):
@@ -254,10 +271,25 @@ class Pairing:
             self._reply_error(c, rid, "protocol", "this server speaks protocol %d" % PROTOCOL)
             self._close(c, 1002, "protocol")
             return False
-        given = params.get("code")
+        given, session = params.get("code"), params.get("session")
+        secret = None
         with self.lock:
             if self.conn is not None:
                 refused = "another page is paired with this agent"
+            elif (given is None) == (session is None):
+                refused = "hello carries a code or a session, one of them"
+            elif session is not None:
+                # (a page the person told to remember this agent, reconnecting:
+                # its secret, kept here only as SHA-256, for this server's life)
+                if self.session_hash is None:
+                    refused = "this agent no longer knows that page: ask the agent for a new code"
+                elif not isinstance(session, str) or not hmac.compare_digest(hashlib.sha256(session.encode("utf-8")).digest(), self.session_hash):
+                    self.session_tries += 1
+                    if self.session_tries >= CODE_TRIES:
+                        self.session_hash = None
+                    refused = "wrong session"
+                else:
+                    refused = None
             elif self.code is None or self.now() >= self.code_until:
                 refused = "the code has expired: ask the agent for a new one"
             elif not isinstance(given, str) or not hmac.compare_digest(given.strip().upper().encode(), self.code.encode()):
@@ -268,6 +300,11 @@ class Pairing:
             else:
                 refused = None
                 self.code = None  # used once
+                # a fresh session secret for this pairing, kept only as its hash
+                secret = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+                self.session_hash = hashlib.sha256(secret.encode("utf-8")).digest()
+                self.session_tries = 0
+            if refused is None:
                 self.conn = c
                 self.generation += 1
                 page = params.get("page")
@@ -276,7 +313,10 @@ class Pairing:
             self._reply_error(c, rid, "refused", refused)
             self._close(c, 1008, refused)
             return False
-        self._send(c, {"jsonrpc": "2.0", "id": rid, "result": {"protocol": PROTOCOL, "agent": self.agent, "wants": {"write": True, "run": False}}})
+        result = {"protocol": PROTOCOL, "agent": self.agent, "wants": {"write": True, "run": False}}
+        if secret is not None:
+            result["session"] = secret  # (the page keeps it only if the person ticks "Remember this agent")
+        self._send(c, {"jsonrpc": "2.0", "id": rid, "result": result})
         return True
 
     def _dispatch(self, msg):
@@ -290,6 +330,8 @@ class Pairing:
                 with self.lock:
                     self.grant = params if isinstance(params, dict) and params else None
                     self.generation += 1
+                    if self.grant is None:
+                        self.session_hash = None  # (revoked: the page forgets the secret, and so does this server)
             elif method in ("chat.message", "chat.permission"):
                 self.on_notify(method, params)
             return
