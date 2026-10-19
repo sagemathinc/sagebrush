@@ -90,6 +90,7 @@ jobs:
           CHROME=google-chrome node web/workspace/test-workspace-preview.mjs
           CHROME=google-chrome node web/workspace/test-workspace-filemenu.mjs
           bun web/board/test-own-names.mjs
+          bun web/board/test-edit-state.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
       - name: conformance (Node)

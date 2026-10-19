@@ -476,7 +476,10 @@ card and the full editor decide the same way.
     So a key changed only elsewhere keeps that change, and keys added on
     both sides keep both, even for the first picture of a board;
   - **any other value** (a number, a list, a switch from one kind to
-    another): takes the new value. This edit is the later side.
+    another): takes the new value. This edit is the later side;
+  - **a field removed on one side and changed on the other** (a field set
+    to `null` here, changed elsewhere since `was`, or the reverse): the
+    change is kept, at every level of a map, as dbMerge3 keeps it.
 - **set with `create`:** the record is made from `fields`. If one with that
   key was made meanwhile elsewhere, it is merged as above, against an empty
   `was`.
