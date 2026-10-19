@@ -107,17 +107,28 @@ def test_chat_next_and_reply():
 
 def test_malformed_messages_are_not_delivered():
     chat, client, page = make(push=True)
+    # (each: the message, the reason's code, and whether the conversation and id are echoed)
     bad = [
-        None, "text", {},
-        dict(msg(), conversation="/Algebra/Sylow.board.json"),  # not a chat document
-        dict(msg(), conversation="Sylow.chat"), dict(msg(), conversation="/a/../b.chat"),
-        dict(msg(), id=""), dict(msg(), id="a b"), dict(msg(), id=5),
-        dict(msg(), author="Person"), dict(msg(), author="agent"), dict(msg(), author="collaborator:a b"), dict(msg(), author=None),
-        dict(msg(), text=3), dict(msg(), text="x" * (CH.MAX_TEXT + 1)), dict(msg(), context="x"),
+        (None, "malformed", False, False), ("text", "malformed", False, False), ({}, "conversation", False, False),
+        (dict(msg(), conversation="/Algebra/Sylow.board.json"), "conversation", False, True),  # not a chat document
+        (dict(msg(), conversation="Sylow.chat"), "conversation", False, True), (dict(msg(), conversation="/a/../b.chat"), "conversation", False, True),
+        (dict(msg(), id=""), "id", True, False), (dict(msg(), id="a b"), "id", True, False), (dict(msg(), id=5), "id", True, False),
+        (dict(msg(), author="Person"), "author", True, True), (dict(msg(), author="agent"), "author", True, True),
+        (dict(msg(), author="collaborator:a b"), "author", True, True), (dict(msg(), author=None), "author", True, True),
+        (dict(msg(), text=3), "text", True, True), (dict(msg(), text="x" * (CH.MAX_TEXT + 1)), "too_long", True, True),
+        (dict(msg(), context="x"), "context", True, True),
     ]
-    for b in bad:
+    for b, code, conv, mid in bad:
+        page.sent.clear()
         chat.on_page("chat.message", b)
-    assert client == [] and page.sent == []
+        # (not delivered, and the page is told why: board's chat.rejected)
+        assert client == [], b
+        (method, params), = page.sent
+        assert method == "chat.rejected" and params["reason"]["code"] == code and params["reason"]["message"], (b if not isinstance(b, dict) else code, params)
+        assert ("conversation" in params) == conv and ("id" in params) == mid, (code, params)
+        if mid:
+            assert params["id"] == "m1"
+    page.sent.clear()
     # context fields that don't check out are left out, not passed on
     chat.on_page("chat.message", msg(path="../etc", kind="exe", rev=-1, selection={"items": ["ok", "a b", 3] + ["x%d" % i for i in range(100)]}))
     meta = client[-1][1]["meta"]
@@ -131,7 +142,7 @@ def test_queue_bounds_and_drops():
         chat.on_page("chat.message", msg(i, text="x"))
     drops = [p for m, p in page.sent if m == "chat.dropped"]
     assert [d["ids"] for d in drops] == [["m%d" % i] for i in range(5)], drops
-    assert sum(len(q) for q in chat.queue.values()) == CH.QUEUE_PER_CONVERSATION
+    assert len(chat.queue) == CH.QUEUE_PER_CONVERSATION == chat.counts["/Algebra/Sylow.chat"]
     # the byte bound across conversations: the oldest go first, and the page hears which
     page.sent.clear()
     big = "y" * (200 * 1024)
@@ -170,6 +181,110 @@ def test_permission_relay():
     chat.link = lambda: page
     chat.on_page("chat.permission", {"request_id": "ghijk", "behavior": "allow"})
     assert len(client) == 1
+
+
+def test_global_arrival_order():
+    """CORR-B011-2 (astra): delivery and eviction both take the oldest
+    message first, whatever its conversation: A1, B2, A3 come out in that
+    order, and the byte bound drops A1 first."""
+    chat, client, page = make(push=False)
+    for i, conv in [(1, "/A.chat"), (2, "/B.chat"), (3, "/A.chat")]:
+        chat.on_page("chat.message", msg(i, text="t%d" % i, conv=conv))
+    assert [chat.next(0)["id"] for _ in range(3)] == ["m1", "m2", "m3"]
+    assert chat.bytes == 0 and not chat.counts and not chat.queue
+    big = "y" * (250 * 1024)  # (five of these are over the 1 MiB bound; four are not)
+    for i, conv in [(1, "/A.chat"), (2, "/B.chat"), (3, "/A.chat"), (4, "/C.chat"), (5, "/D.chat")]:
+        chat.on_page("chat.message", msg(i, text=big, conv=conv))
+    assert not [p for m, p in page.sent if m == "chat.rejected"]
+    drops = [(p["conversation"], p["ids"]) for m, p in page.sent if m == "chat.dropped"]
+    assert drops == [("/A.chat", ["m1"])], drops  # (the oldest message, not the oldest conversation's newest)
+    assert [chat.next(0)["id"] for _ in range(4)] == ["m2", "m3", "m4", "m5"]
+
+
+def test_one_chat_next_at_a_time():
+    """LIMIT-B011-1 (daybreak2): one chat_next waits at a time; another is
+    refused at once, not parked in a thread; after it returns, the next is
+    admitted.  Through the server, tool calls in flight are bounded too."""
+    chat, client, page = make(push=False)
+    out = {}
+    t = threading.Thread(target=lambda: out.update(m=chat.next(5)))
+    t.start()
+    time.sleep(0.1)
+    t0 = time.time()
+    try:
+        chat.next(5)
+    except CH.Busy:
+        pass
+    else:
+        raise AssertionError("a second chat_next waited")
+    assert time.time() - t0 < 0.5
+    chat.on_page("chat.message", msg())
+    t.join(5)
+    assert out["m"]["id"] == "m1" and not chat.waiting
+    assert chat.next(0) is None  # (admitted again)
+    try:
+        from sagebrush import mcp_server
+    except Exception as e:
+        if os.environ.get("CI"):
+            raise
+        print("  (the server part skipped: %s)" % e)
+        return
+    srv = mcp_server.Server(io.StringIO())
+    srv.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "codex"}}})
+    before = threading.active_count()
+    for i in range(40):
+        srv.handle({"jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": {"name": "chat_next", "arguments": {"timeout": 2}}})
+    time.sleep(0.3)
+    assert threading.active_count() - before <= mcp_server.MAX_CALLS, threading.active_count() - before
+    for t in srv.threads:
+        t.join(10)
+    replies = [r for r in (json.loads(x) for x in srv.out.getvalue().splitlines()) if isinstance(r.get("id"), int) and r["id"] >= 1]
+    refused = [r for r in replies if "error" in r and "too many tool calls" in r["error"]["message"]]
+    busy = [r for r in replies if "result" in r and r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "busy"]
+    waited = [r for r in replies if "result" in r and not r["result"]["isError"]]
+    # (one waits; every other is refused at once, as busy, or by the cap if they overlap)
+    assert len(waited) == 1 and len(busy) + len(refused) == 39, (len(refused), len(busy), len(waited))
+    # the cap on tool calls in flight, with calls that hold their thread
+    gate = threading.Event()
+    srv2 = mcp_server.Server(io.StringIO())
+    srv2.call_tool = lambda name, args, rid=None: (gate.wait(10), ([{"type": "text", "text": "x"}], None, False))[1]
+    for i in range(mcp_server.MAX_CALLS + 5):
+        srv2.handle({"jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": {"name": "guide", "arguments": {}}})
+    time.sleep(0.2)
+    over = [json.loads(x) for x in srv2.out.getvalue().splitlines()]
+    assert len(over) == 5 and all("too many tool calls" in r["error"]["message"] for r in over), over
+    assert len(srv2.running) == mcp_server.MAX_CALLS
+    gate.set()
+    for t in srv2.threads:
+        t.join(10)
+
+
+def test_text_cap_in_bytes():
+    """daybreak2 (b011ccd4): text is capped in UTF-8 bytes, so a message at
+    the cap always fits the queue."""
+    chat, client, page = make(push=False)
+    at_cap = "\U0001F600" * (CH.MAX_TEXT // 4)  # (256 KiB of 4-byte characters)
+    chat.on_page("chat.message", msg(text=at_cap))
+    assert not [m for m, p in page.sent if m in ("chat.rejected", "chat.dropped")], page.sent
+    assert chat.next(0)["text"] == at_cap
+    chat.on_page("chat.message", msg(2, text=at_cap + "x"))
+    (m, p), = [x for x in page.sent if x[0] == "chat.rejected"]
+    assert p["reason"]["code"] == "too_long" and p["id"] == "m2"
+
+
+def test_prompts_belong_to_their_pairing():
+    """astra (b011ccd4): a prompt relayed to one pairing can't be answered
+    after the page paired again (even the same person's page): the new page
+    never saw it."""
+    chat, client, page = make(push=True)
+    page.pairings = 1
+    chat.on_permission_request({"request_id": "abcde", "tool_name": "Bash", "description": "x", "input_preview": "{}"})
+    page.pairings = 2  # (paired again)
+    chat.on_page("chat.permission", {"request_id": "abcde", "behavior": "allow"})
+    assert client == []
+    chat.on_permission_request({"request_id": "fghij", "tool_name": "Bash", "description": "x", "input_preview": "{}"})
+    chat.on_page("chat.permission", {"request_id": "fghij", "behavior": "allow"})
+    assert client == [("notifications/claude/channel/permission", {"request_id": "fghij", "behavior": "allow"})]
 
 
 def test_end_to_end():
