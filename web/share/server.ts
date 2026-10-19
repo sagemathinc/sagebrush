@@ -84,7 +84,7 @@ export interface ShareEnv {
 /** What sharing asks of a sync account object (web/sync/account.ts). */
 export interface SyncClaims {
   releaseClaim(a: { account: string }): Promise<{ released: number }>;
-  usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number } | null>;
+  usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number; retention?: { state: string; readonly_since: number | null; purge_after: number | null } } | null>;
 }
 interface Ctx { waitUntil(p: Promise<unknown>): void }
 
@@ -342,11 +342,12 @@ async function usage(env: ShareEnv, id: string): Promise<number> {
  * claim (above).  If the account object can't be reached, sync's claim stands
  * in for its parts.
  */
-async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number } }> {
+async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number }; sync_retention?: { state: string; readonly_since: number | null; purge_after: number | null } }> {
   const db = env.SHARE_DB!;
   const t = now();
   const s = await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS files, (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS versions").bind(id, t).first<{ files: number; versions: number }>();
   const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number };
+  let retention: { state: string; readonly_since: number | null; purge_after: number | null } | undefined;
   if (env.SYNC_ACCOUNT) {
     const h = await accountHash(id);
     const row = await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1 AND state <> 'purged'").bind(h).first<{ claim_bytes: number }>();
@@ -356,13 +357,15 @@ async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; us
         if (u) {
           parts.sync_files = u.files;
           parts.sync_documents = u.documents;
+          // (after a membership ends: read-only, and when the synced data will be deleted, §6.2)
+          retention = u.retention;
         }
       } catch {
         parts.sync_claim = row.claim_bytes;
       }
     }
   }
-  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0), usage_breakdown: parts };
+  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0), usage_breakdown: parts, ...(retention ? { sync_retention: retention } : {}) };
 }
 
 /**

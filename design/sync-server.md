@@ -6,7 +6,8 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
-| Oct 19 | (this change, §6.1) | **One storage budget for sharing and sync.** `storage_full` now means the account's one `storage_bytes` is used, by sharing and sync together. A file upload stops at it. Document batches go on past it, into the ceiling (`max(storage_bytes / 10, 50 MB)`), and only then get `storage_full`. `GET /api/share/me` answers `usage`, the sum, and `usage_breakdown: {sharing_files, sharing_versions, sync_files, sync_documents}` (`sync_claim` in place of sync's lines if its account object can't be reached). A batch or upload can answer `busy` with `retry_after` while the budget can't be checked; retry it. (§6.1) |
+| Oct 19 | (this change, §6.2) | **After a membership ends**, the account's `state` is `readonly`: every write is refused with `readonly`, the socket gets an `error` `readonly` with `purge_after`, and reading, pulling and "Download all" keep working. `GET /api/share/me` has `sync_retention: {state, readonly_since, purge_after}` (ms). The Sync panel shows the help line in web/drafts/faq-sync.md, with `purge_after`'s date. A renewal before then makes the account `active` again. (§6.2) |
+| Oct 19 | (§6.1) | **One storage budget for sharing and sync.** `storage_full` now means the account's one `storage_bytes` is used, by sharing and sync together. A file upload stops at it. Document batches go on past it, into the ceiling (`max(storage_bytes / 10, 50 MB)`), and only then get `storage_full`. `GET /api/share/me` answers `usage`, the sum, and `usage_breakdown: {sharing_files, sharing_versions, sync_files, sync_documents}` (`sync_claim` in place of sync's lines if its account object can't be reached). A batch or upload can answer `busy` with `retry_after` while the budget can't be checked; retry it. (§6.1) |
 | Oct 19 | (CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
 | Oct 19 | 00579315 | A batch over a document socket may now name blobs, since it is decided by the account object like any other. Presence is coalesced per socket (the latest wins, at most 10 a second), at most 4 KiB in UTF-8 bytes. Tickets are issued at a rate: 60 a minute per session, 240 per account, then `rate`. Signing out can answer 503 if the revoke couldn't be recorded; the session then stays, so try again. (§2, §5.1) |
 | Oct 19 | 7962976e | A socket message may be up to 2 MiB in UTF-8 bytes (§8). The ops rate counts each op, so a message of 500 ops uses 500 of the 2,000 a minute. Over it, the whole message is refused with `rate` and `retry_after`. |
@@ -424,7 +425,7 @@ GET  /api/sync/v1/blob/<sha256> -> 303 to a signed URL on the user-content domai
 
 ## 6. Limits from cocalc.ai, and the plan notice
 
-**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with one more field for sync: `{storage_bytes, max_file_bytes, private_links, sync: {enabled, version_bytes, read_bytes_per_day}}`. `storage_bytes` is the one budget for sharing and sync together (§6.1). A `sync.storage_bytes` CoCalc may still send is ignored.
+**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with one more field for sync: `{storage_bytes, max_file_bytes, private_links, sync: {enabled, version_bytes, read_bytes_per_day, retention_days}}` (`retention_days` is optional, 90 if absent, §6.2). `storage_bytes` is the one budget for sharing and sync together (§6.1). A `sync.storage_bytes` CoCalc may still send is ignored.
 - **Whether a plan includes sync** is `sync.enabled`, a boolean in CoCalc's editable membership tiers, not a constant here. By default the free tier has it off (abuse risk) and every other tier on. It is CoCalc's config; this server only reads it. CoCalc decides the numbers per membership; they are not in this repository (sagebrush/business-material-out-of-repo).
 - **They are cached in the account object for 6 hours,** not 10 minutes (§7.3). With 100,000 accounts active, that is about 5 requests a second to cocalc.ai.
 - **When the cache is old,** the limits are fetched again, and the cached value is used while the fetch runs.
@@ -492,6 +493,24 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
 **The breakdown** (`GET /api/share/me`): `usage` is the sum, and `usage_breakdown` has `sharing_files`, `sharing_versions`, `sync_files` and `sync_documents` (sync's versions will join them, §3). Sync's lines come from a read-only account-object call. It is for display only: enforcement is the claim.
 
 **Without a known limit** (CoCalc unreachable, nothing cached): writes that fit the claim already held go on; anything needing a raise answers `busy` with `retry_after`, never `storage_full` and never unlimited.
+
+### 6.2 After a membership ends
+
+William's decision (Oct 19): read-only, then deleted after a retention period, with email first.
+
+- **The period is CoCalc's:** `sync.retention_days` in its limits, 90 if it says nothing. In code it is read from the limits, never a constant there.
+- **When a plan stops including sync** (a notice, or a fetch, saying `sync.enabled: false`):
+  - the account becomes `readonly`, and every write is refused with `readonly`;
+  - it records `readonly_since` once: the time CoCalc says the plan changed (the notice's `issued`, never later than now);
+  - its sockets are told, with the deadline.
+- **Renewed before the deadline** (`sync.enabled: true` again): `readonly_since` is cleared, and the account is `active` again. A renewal at or after the deadline doesn't stop the deletion.
+- **At `readonly_since + retention_days`,** the account object's alarm, armed for that time, runs the same purge as "Delete my synced data", with the same steps, fences and D1 record. The boundary counts as past: at the deadline exactly, the purge starts.
+- **Late and repeated notices:** limits apply only if newer than those held (`issued`). So a repeated notice never resets the clock (`readonly_since` is set once), and a late one never ends it.
+- **What the person sees:** `/api/share/me` has `sync_retention: {state, readonly_since, purge_after}`, and the Sync panel says it (the help line in web/drafts/faq-sync.md). The FAQ entry is drafted there too, unpublished until sync opens beyond its test accounts.
+- **Emails are CoCalc's** (it has the address and the mail system). This server sends none. The hook:
+  - `GET /api/admin/sync-retention/<account_id>`, signed with LIMITS_KEY, answers `{state, readonly_since, purge_after, now}`, or 404 if the account never synced;
+  - after sending the notice that ends a plan's sync, CoCalc reads it, sends the first email with `purge_after`'s date, and schedules a second for about 14 days before `purge_after`;
+  - before sending each, it asks again, and sends nothing if `readonly_since` is null (renewed) or the state is no longer `readonly`.
 
 ## 7. Deleting
 
@@ -628,6 +647,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
   - it is how the daily job finds an account's objects. It follows the account object, and never decides anything: CoCalc's purge goes to the account object whatever the row says, since an account still registering has no row yet;
   - the hash alone names the object, so the row needs no account id.
 - **The purge** (sharing's `purgeAccount`): if the account has a `sync_accounts` row, the purge record also waits for the account object's purge. The purge's `files` step then covers both prefixes.
+- **The off-site copy** (planned): William's office rclone mirror, which snapshots R2 and drops snapshots after about a month, is to cover the sync prefix too, as sharing's "Backups" says. It reads with a read-only R2 token from William's side. So a deletion leaves the off-site copy within about 31 days.
 - **The daily job** (`syncScheduled`, beside sharing's `scheduled`):
   - it lists `s/` a page at a time, resuming where the last run stopped, as sharing's inventory does for `a/`;
   - for each object older than two days, it finds the account by the key's prefix in `sync_accounts`:
