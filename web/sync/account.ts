@@ -902,6 +902,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.wakeBy(Date.now() + 1000);
   }
 
+  /**
+   * Which of these R2 keys this account is responsible for (§9's inventory):
+   * a holding's, a reservation's, or one already in its outbox.  An account
+   * with no storage knows none.
+   */
+  async knownKeys(a: { keys: string[] }): Promise<string[]> {
+    if (!this.exists()) return [];
+    return a.keys.filter((k) =>
+      this.one("SELECT 1 AS x FROM holdings WHERE key = ?", k) || this.one("SELECT 1 AS x FROM reservations WHERE key = ?", k) || this.one("SELECT 1 AS x FROM outbox WHERE key = ?", k),
+    );
+  }
+
   /** Which of these blobs this account must upload (advisory, §5.4). */
   async missing(a: { account: string; blobs: string[] }): Promise<Result<string[]>> {
     return attempt(() => {

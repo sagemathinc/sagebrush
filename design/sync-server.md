@@ -510,10 +510,12 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
   - it is written when sync is turned on, and it is how the purge finds that an account has an account object;
   - the hash alone names the object, so the row needs no account id.
 - **The purge** (sharing's `purgeAccount`): if the account has a `sync_accounts` row, the purge record also waits for the account object's purge. The purge's `files` step then covers both prefixes.
-- **The daily job** (sharing's `scheduled`):
-  - it also lists `s/` a page at a time, as its inventory does for `a/`;
-  - it asks the owning account object about each object older than two days, and deletes those the account object doesn't know (holdings, segments, snapshots, exports, reservations);
-  - this catches an R2 write whose transaction failed.
+- **The daily job** (`syncScheduled`, beside sharing's `scheduled`):
+  - it lists `s/` a page at a time, resuming where the last run stopped, as sharing's inventory does for `a/`;
+  - for each object older than two days, it finds the account by the key's prefix in `sync_accounts`:
+    - a purged or unknown account: the object is deleted;
+    - a live one: its account object is asked which keys it knows (holdings, reservations, the outbox), and the rest are deleted;
+  - this catches an R2 write whose transaction failed, and a put that commits late (CORR-5E2-2): R2 gives no bound on when a put that has sent its last byte commits, so the upload's cut-off (§5.4) bounds only the transfer, and this job stays responsible for every key, whenever its commit lands, even after the account was deleted or turned on again.
 
 ## 10. Encryption
 
