@@ -49,6 +49,7 @@ const R1 = "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"; // lapses, then renews inside
 const R2 = "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2"; // lapses past the window
 const R3 = "d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3"; // repeated and late notices
 const R4 = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4"; // the clock at the boundary
+const W1 = "d5d5d5d5-d5d5-4d5d-8d5d-d5d5d5d5d5d5"; // a purge with more expired reservations than one step takes
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -93,7 +94,7 @@ fake.limits.set(T5, sync(1 << 20, 1 << 20));
 fake.limits.set(T6, sync(1 << 20, 1 << 20));
 for (const u of [U1, U2, U3, V1]) fake.limits.set(u, sync(10_000, 1 << 20));
 const plan = (enabled, days = 3) => ({ storage_bytes: 1 << 20, max_file_bytes: 50_000, sync: { enabled, version_bytes: 1000, read_bytes_per_day: 1 << 20, retention_days: days } });
-for (const r of [R1, R2, R3, R4]) fake.limits.set(r, plan(true));
+for (const r of [R1, R2, R3, R4, W1]) fake.limits.set(r, plan(true));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -110,7 +111,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1895,10 +1896,27 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await post(sr4, "/api/sync/v1/enable", {})).status === 200, "(R4: on)");
   const t4 = Date.now();
   await notice(R4, false, t4);
-  const before = await acctR4.retainAt({ at: t4 + 3000 - 1 });
-  ok(before === "keep" && (await acctR4.lifecycle())?.state === "readonly", "one millisecond before the deadline: kept, read-only");
-  const at = await acctR4.retainAt({ at: t4 + 3000 });
-  ok(at === "purge" && (await until(async () => (await acctR4.lifecycle())?.state !== "readonly")), "at the deadline exactly: the purge starts");
+  // (the purge runs at the deadline plus a delay of 0 to an hour, a 24th of a day, fixed per account: never before)
+  const pat = await acctR4.retentionPurgeAt();
+  const [, b4] = await retentionOf(R4);
+  ok(b4.purge_after === t4 + 3000 && pat >= b4.purge_after && pat < b4.purge_after + 1000 / 24, "the purge time is the deadline plus this account's delay, within an hour after it, never before; purge_after stays the deadline: " + JSON.stringify({ deadline: b4.purge_after, purge_at: pat }));
+  const atDeadline = await acctR4.retainAt({ at: b4.purge_after - 1 });
+  const before = await acctR4.retainAt({ at: pat - 1 });
+  ok(atDeadline === "keep" && before === "keep" && (await acctR4.lifecycle())?.state === "readonly", "before the deadline, and one millisecond before the purge time: kept, read-only");
+  const at = await acctR4.retainAt({ at: pat });
+  ok(at === "purge" && (await until(async () => (await acctR4.lifecycle())?.state !== "readonly")), "at the purge time exactly: the purge starts");
+  // LIMIT-445-1: a purge step takes at most 200 expired reservations; the purge still finishes
+  const sw1 = await signIn(W1);
+  const acctW1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(W1)));
+  ok((await post(sw1, "/api/sync/v1/enable", {})).status === 200, "(W1: on)");
+  ok((await acctW1.seedReservations({ n: 450 })) === 450, "(450 expired reservations, as if their uploads died and no alarm tidied them)");
+  await acctW1.holdPurge({ on: true });
+  ok((await del(sw1, W1)).status === 202, "(W1: Delete my synced data, its steps held)");
+  const steps = [];
+  for (let i = 0; i < 4; i++) steps.push((await acctW1.purgeStepOnce())?.reservations);
+  ok(steps[0] === 250 && steps[1] === 50 && steps[2] === 0, "each purge step takes at most 200 of them: " + JSON.stringify(steps));
+  await acctW1.holdPurge({ on: false });
+  ok(await until(async () => (await rowState(W1)) === "purged"), "and the purge finishes");
   const [g5, b5] = await retentionOf(crypto.randomUUID());
   ok(g5 === 404, "CoCalc asking about an account that never synced: 404");
 }

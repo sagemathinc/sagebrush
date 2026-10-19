@@ -504,7 +504,10 @@ William's decision (Oct 19): read-only, then deleted after a retention period, w
   - it records `readonly_since` once: the time CoCalc says the plan changed (the notice's `issued`, never later than now);
   - its sockets are told, with the deadline.
 - **Renewed before the deadline** (`sync.enabled: true` again): `readonly_since` is cleared, and the account is `active` again. A renewal at or after the deadline doesn't stop the deletion.
-- **At `readonly_since + retention_days`,** the account object's alarm, armed for that time, runs the same purge as "Delete my synced data", with the same steps, fences and D1 record. The boundary counts as past: at the deadline exactly, the purge starts.
+- **At `readonly_since + retention_days`,** plus a delay of 0 to an hour fixed per account by its hash (never before the deadline), the account object's alarm, armed for that time, runs the same purge as "Delete my synced data", with the same steps, fences and D1 record.
+  - The delay spreads a mass lapse, so accounts aren't all purged at once. `purge_after`, the deadline the person and CoCalc are told, is unchanged, and "deleted after 90 days" stays true.
+  - The boundary counts as past: at the purge time exactly, the purge starts.
+- **Every purge step is bounded** (LIMIT-445-1): at most 200 expired reservations, 500 holdings and 1,000 pins a step, as well as the existing 50 documents, 500 outbox keys and 1,000 listed R2 keys. A step that stops at a full page has the alarm run again at once.
 - **Late and repeated notices:** limits apply only if newer than those held (`issued`). So a repeated notice never resets the clock (`readonly_since` is set once), and a late one never ends it.
 - **What the person sees:** `/api/share/me` has `sync_retention: {state, readonly_since, purge_after}`, and the Sync panel says it (the help line in web/drafts/faq-sync.md). The FAQ entry is drafted there too, unpublished until sync opens beyond its test accounts.
 - **Emails are CoCalc's** (it has the address and the mail system). This server sends none. The hook:
