@@ -1,17 +1,19 @@
 {
   "name": "@sagemathinc/sagebrush-board",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Sagebrush boards: a whiteboard for agents and people (notes with Markdown and math, live code, pages, a tour, TimeTravel), mounted in an element by its host",
   "keywords": ["whiteboard", "board", "markdown", "math", "python", "notebook"],
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./submission": {
       "types": "./dist/submission.d.ts",
-      "import": "./dist/submission.js"
+      "import": "./dist/submission.js",
+      "default": "./dist/submission.js"
     }
   },
   "files": ["dist", "README.md"],
