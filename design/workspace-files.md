@@ -200,6 +200,13 @@ Notebooks and boards keep every change (TimeTravel). Data files have had no hist
 - **Where:** a `snapshots` store beside `history` in both history databases, keyed `[doc, time]`. The latest 3 are kept, and older snapshots are removed (patches never are).
 - **Opening:** `loadInitial` returns the latest snapshot and the patches from its time on, with `hasMore` true when older patches exist. When patchflow says the loaded part isn't enough (`needsMoreHistory`, e.g. a patch from another tab made just before the snapshot), older patches are loaded until it is.
 - **A snapshot never replaces history.** Every patch stays in IndexedDB, and Clear, delete and forget remove the snapshots with the patches.
+- **Its cost is bounded and counted** (LIMIT-775-3):
+  - **Size:** the snapshot's encoded value is measured before anything is written. If it passes the document limit (64 MiB, `maxBoardBytes`), no snapshot is written, and the next attempt waits for the next threshold.
+  - **One transaction, best effort:** the new snapshot is written, and the oldest beyond 3 removed, in one readwrite transaction of the `snapshots` store, separate from the patch's own write. So a document never has more than 3, and the committing patch never waits on the snapshot or fails with it.
+  - **When it is refused** (`QuotaExceededError`, or any error): nothing is retried on the following commits. The next attempt is at the next threshold (another 500 patches or 4 MB), and after 3 refusals in a row none is tried again until the page is reloaded. Nothing of the person's is lost, because the patches are kept, so this isn't a "Not saved".
+  - **Counted:** the snapshots' bytes are in the meter's history share (§6.3), and the Storage panel shows them under history ("snapshots: 12 MB"). At most 3 values of each document are kept, and a document's snapshots go when its history is cleared.
+  - **Time:** encoding the value once per 500 patches, after the commit, off the path of typing.
+- **A deep replay is shown, not hidden.** Opening reads at most the latest snapshot and the patches after it, unless patchflow's `needsMoreHistory` asks for older ones. That is rare, but it may go back to the start. When more than 2,000 older patches are loaded, the status line says "Loading full history…", with a count, until the document is ready.
 - **TimeTravel pages older history in:** the slider covers what is loaded, and its left end offers "Older versions…", which loads the previous 500 patches (a reverse cursor) until the start, when the history is marked full. Versions are named by patch id, never by index, because indexes shift as older history loads.
 - **What needs the whole history loads it first:** sending a board's history to CoCalc (`patches()`), the export with histories (§7.11), and "Rebuild from history". The `.sbreplay` download reads IndexedDB directly, so it is unaffected.
 - **Backup (step 8)** can upload a local snapshot as the server's (§4.7), when its patch is a batch boundary.
@@ -585,17 +592,30 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
   - This is what a phone (§7.5, which holds only part of the workspace) and an account in its read-only 90 days (§7.4) use.
   - auth's design note sets the limits: one running export per account, and a few a day.
 
+**The browser's export streams; it never builds the bundle in memory** (LIMIT-775-1):
+- **The writer** is a streaming zip writer:
+  - it takes one entry at a time: it reads the entry's bytes from IndexedDB, writes them, and lets them go;
+  - data files are stored as they are, and text is deflated through `CompressionStream`;
+  - it writes Zip64 records when the bundle passes 4 GiB or 65,535 members;
+  - a history is written as it is read, one envelope per line from an IndexedDB cursor, never as one array;
+  - peak memory is one entry (at most 200 MB, the upload limit) plus the compressor's window.
+- **Where it writes, in order of preference:**
+  1. **`showSaveFilePicker`** (Chromium and the desktop app). The chosen file's `FileSystemWritableFileStream` takes the chunks as they come, with no size limit beyond the disk.
+  2. **Elsewhere (Firefox, Safari):** a file in the origin-private file system (OPFS), written by a worker through a sync access handle, then downloaded from its disk-backed `File`. It needs the bundle's estimated size free in the storage quota, checked before starting, and the OPFS file is deleted when the download has started or the export is cancelled.
+  3. **A Blob in memory, only when neither is available,** and only for a bundle of at most **256 MiB** (estimated from the entries' sizes before starting). Anything larger is refused before anything is read, saying to use the server's export (for a synced account) or a browser that can save files.
+- **The estimate** is the sum of the entries' sizes, histories' and versions' bytes, plus 1% and 64 KiB of zip records. Progress shows bytes and entries, and the export can be cancelled at any entry.
+
 **The bundle format** is documented and versioned like the board format. It is a zip, `<name>.sagebrush-workspace.zip`:
 
 ```
 manifest.json            {format: "sagebrush-workspace-bundle", version: 1, mode: "files" | "history",
                           created, site, app, entries: [...], totals: {files, bytes}}
 files/<path>             each entry's current contents (an .ipynb, a .board.json, a data file's bytes)
-history/<ref>.json       one document's envelopes, oldest first (snapshot envelopes included);
-                         the same envelopes, codec and schema as .sbreplay's "history"
-blobs/<sha256>           the bytes a history's sessions read, once each
-versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author, reason}]
-                         (each version's bytes are in blobs/)
+history/<ref>.jsonl      one document's envelopes, oldest first, one JSON envelope per line (JSON Lines);
+                         line 1 is a header {codec, schema}; the same envelopes as .sbreplay's "history";
+                         snapshot envelopes are not exported
+blobs/<sha256>           the bytes a history's sessions read, and data files' versions' bytes, once each
+versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author, reason}], at most 20
 ```
 
 - **Each manifest entry** has `{path, kind, ref?, fid, created, modified, size, sha256, mode?}`. **The manifest is authoritative:** the zip's own names are only where the bytes are, and are never used as paths.
@@ -609,13 +629,27 @@ versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author,
 - **The file wins over its history** when they disagree, as a crafted or damaged bundle can make them do. What opens is always the file the person exported:
   - the history is imported, and if its head value differs from `files/<path>`, the file's value is committed on top as one more version, labelled "imported";
   - a history that doesn't decode, or fails `verifyValue`, is dropped, and the summary says so. The document is then the file alone, with no history.
-- **A snapshot envelope in an imported history isn't trusted for the value.** Import replays from the patches, or checks the snapshot against them before using it, and a snapshot that doesn't match is dropped.
-- **It is bounded before anything is written:**
-  - the manifest's counts and totals are checked against the storage left (§6.3) and against fixed caps on entries and bytes. Histories, blobs and versions count toward the bytes, as files do;
-  - a history is replayed by patchflow, so each document's history is capped as well: a number of envelopes, and bytes;
-  - each entry is read one at a time, never the whole zip in memory;
-  - an entry whose uncompressed size exceeds the manifest's, or whose compression ratio is absurd, stops the import;
-  - names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
+- **A snapshot envelope in an imported history isn't trusted for the value.** The exporter writes none, and import drops any it finds, replaying from the patches. After import, the local snapshot writer (§2.6) makes fresh ones from the verified value.
+- **It is bounded before anything is written** (LIMIT-775-2). The caps are one table of constants, shared by the exporter and the importer:
+
+  | What | Cap |
+  |---|---|
+  | `manifest.json` | at most 64 MiB, parsed whole, with nesting depth at most 8 and at most 100,000 entries (the workspace's `maxEntries`) |
+  | archive members | at most 400,000 (each entry's file, plus its history or versions, plus blobs), and only the names the layout above allows |
+  | one `files/` member | its kind's limit: 200 MB for a data file (the upload limit), 64 MiB for a notebook or board (`maxBoardBytes`) |
+  | one `history/` file | streamed line by line; one line at most 64 MiB (a document's limit); at most 200,000 envelopes and 256 MiB per document (patchflow holds a replayed history in memory) |
+  | one `versions/` file | at most 64 KiB and 20 records (`maxVersions`), with nesting depth at most 4 |
+  | one blob | at most 200 MB |
+  | total uncompressed | at most 20 GiB, and at most the storage left (`navigator.storage.estimate()`) less 10% |
+  | compression ratio | each member at most 200:1 (uncompressed to compressed), counted on the bytes actually inflated |
+
+  - The manifest's totals are checked first, against the caps and the storage left. Nothing is written if they fail.
+  - Each member is then read as a stream. The bytes actually inflated are counted, and a member is stopped as soon as it passes its declared size, its cap or the ratio. A stopped member skips that entry, and the summary says why.
+  - A history over its cap is dropped, and its file is imported alone.
+  - Histories, blobs and versions count toward the total, as files do.
+  - The manifest's JSON is the only document parsed whole; histories are JSON Lines parsed one line at a time, and versions are small by their cap.
+  - Names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
+- **Everything the exporter makes can be imported.** The exporter checks the same caps as it goes. Before it starts, it lists what can't be exported in full: a document whose history passes the cap is exported without its history, and the export says so, so the person can cancel. A bundle over 20 GiB is refused before starting; such a workspace is exported in parts, one top-level folder at a time.
 - **Nothing imported runs by itself.** The documents are other people's code as far as this browser knows, even when the person made the bundle, so they open as an Upload's do (§3) and run only when the person runs them.
 - **Import is the person's action.** It isn't in the agents' workspace API (§8.2) in its first version.
 - **A summary at the end** says what came in, where, and what was refused and why.
