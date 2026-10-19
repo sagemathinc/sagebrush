@@ -59,6 +59,10 @@ const X1 = "dbdbdbdb-dbdb-4dbd-8dbd-dbdbdbdbdbdb"; // a plan without sync from t
 const X2 = "dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc"; // a plan that ends between enable and the first batch
 const Z0 = "dddddddd-0000-4ddd-8ddd-dddddddddd00"; // turned on while CoCalc is down: nothing cached
 const Z1 = "dddddddd-0001-4ddd-8ddd-dddddddddd01"; // a lapse while a claim raise is answered
+const ST1 = "5a5a5a5a-0001-4a5a-8a5a-5a5a5a5a5a01"; // GET /status: never synced, plan with sync
+const ST2 = "5a5a5a5a-0002-4a5a-8a5a-5a5a5a5a5a02"; // GET /status: not on the allowlist
+const ST3 = "5a5a5a5a-0003-4a5a-8a5a-5a5a5a5a5a03"; // GET /status beside an enable
+const ST4 = "5a5a5a5a-0004-4a5a-8a5a-5a5a5a5a5a04"; // GET /status while CoCalc is down
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -107,6 +111,7 @@ for (const r of [R1, R2, R3, R4, W1, W2, Y1, Y2, Y3, Y4, X2]) fake.limits.set(r,
 fake.limits.set(X1, plan(false));
 fake.limits.set(Z0, sync(1 << 20, 1 << 20));
 fake.limits.set(N, sync(1 << 20, 1 << 20)); // (enable asks for the plan first)
+for (const st of [ST1, ST2, ST3, ST4]) fake.limits.set(st, sync(1 << 20, 1 << 20));
 fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
@@ -124,7 +129,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -2057,6 +2062,49 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) <= 16_384), "with no further request, the alarm gives the grant back, to at most a chunk (CORR-AB4-1)");
   const [g5, b5] = await retentionOf(crypto.randomUUID());
   ok(g5 === 404, "CoCalc asking about an account that never synced: 404");
+}
+
+// ---- the page's question: GET /api/sync/v1/status, which never creates or registers anything
+{
+  const status = async (session) => {
+    const r = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: session, "sec-fetch-site": "same-origin" } });
+    return [r.status, await r.json()];
+  };
+  const nothing = async (id) => (await acctNs.get(acctNs.idFromName("acct:" + hashOf(id))).lifecycle())?.state === null && (await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first()) === null;
+  const s1 = await signIn(ST1);
+  let [c, b] = await status(s1);
+  ok(c === 200 && b.available === true && b.state === "off" && b.generation === undefined && b.reason === undefined && (await nothing(ST1)), "status of an account never synced, whose plan has sync: available, off, and nothing is made: " + JSON.stringify(b));
+  for (let i = 0; i < 5; i++) await status(s1);
+  await new Promise((r) => setTimeout(r, 1100)); // (past the object's minute, a second in tests: it asks CoCalc again)
+  [c, b] = await status(s1);
+  ok(b.available === true && (await nothing(ST1)), "asked again and again, before and after the plan it remembers grows old: still nothing is made");
+  const s2 = await signIn(ST2);
+  [c, b] = await status(s2);
+  ok(c === 200 && b.available === false && b.reason === "not_allowlisted" && b.state === "off" && (await nothing(ST2)), "off the allowlist: not available, not_allowlisted (for the page's logic: it hides the switch)");
+  const sx = await signIn(X1);
+  [c, b] = await status(sx);
+  ok(b.available === false && b.reason === "plan_has_no_sync" && b.state === "off" && (await nothing(X1)), "a plan without sync: plan_has_no_sync, nothing made: " + JSON.stringify(b));
+  fake.down = true;
+  const s4 = await signIn(ST4);
+  [c, b] = await status(s4);
+  fake.down = false;
+  ok(b.available === false && b.reason === "cocalc_unreachable" && b.state === "off" && (await nothing(ST4)), "CoCalc down: cocalc_unreachable, nothing made: " + JSON.stringify(b));
+  [c, b] = await status(s4);
+  ok(b.available === true, "and once CoCalc answers (the unreachable answer isn't remembered past a second in tests): available");
+  [c, b] = await status(sa);
+  ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)), "an account on: its state and generation: " + JSON.stringify(b));
+  [c, b] = await status(await signIn(X2));
+  ok(b.available === true && b.state === "readonly", "an account whose plan ended: readonly: " + JSON.stringify(b));
+  // beside an enable: the statuses are answered from whatever is so, and the one enable registers once
+  const s3 = await signIn(ST3);
+  const [en, ...st] = await Promise.all([post(s3, "/api/sync/v1/enable", {}), status(s3), status(s3), status(s3), status(s3)]);
+  const enb = await en.json();
+  const [, after] = await status(s3);
+  ok(en.status === 200 && enb.state === "active" && enb.generation === 1 && st.every(([c2, b2]) => c2 === 200 && b2.available === true && ["off", "registering", "active"].includes(b2.state)) && after.state === "active" && after.generation === 1 && (await genOf(ST3)) === 1,
+    "statuses beside an enable: each answers off, registering or active, the enable registers generation 1 once, and status then says active 1: " + JSON.stringify({ enb, st: st.map(([, x]) => x.state), after }));
+  // and a status from another site is refused like every sync request
+  const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
+  ok(xr.status === 403, "a status asked from another site is refused (403)");
 }
 
 await mf.dispose();
