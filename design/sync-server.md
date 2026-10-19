@@ -6,7 +6,8 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
-| Oct 19 | (this change, CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
+| Oct 19 | (this change, §6.1) | **One storage budget for sharing and sync.** `storage_full` now means the account's one `storage_bytes` is used, by sharing and sync together. A file upload stops at it. Document batches go on past it, into the ceiling (`max(storage_bytes / 10, 50 MB)`), and only then get `storage_full`. `GET /api/share/me` answers `usage`, the sum, and `usage_breakdown: {sharing_files, sharing_versions, sync_files, sync_documents}` (`sync_claim` in place of sync's lines if its account object can't be reached). A batch or upload can answer `busy` with `retry_after` while the budget can't be checked; retry it. (§6.1) |
+| Oct 19 | (CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
 | Oct 19 | 00579315 | A batch over a document socket may now name blobs, since it is decided by the account object like any other. Presence is coalesced per socket (the latest wins, at most 10 a second), at most 4 KiB in UTF-8 bytes. Tickets are issued at a rate: 60 a minute per session, 240 per account, then `rate`. Signing out can answer 503 if the revoke couldn't be recorded; the session then stays, so try again. (§2, §5.1) |
 | Oct 19 | 7962976e | A socket message may be up to 2 MiB in UTF-8 bytes (§8). The ops rate counts each op, so a message of 500 ops uses 500 of the 2,000 a minute. Over it, the whole message is refused with `rate` and `retry_after`. |
 | Oct 19 | 050fb688 | **Clear history, for a stale device:** don't replace the root with your current value. Compute `merge3(acknowledged base, root, local)` and send root → result from a new client. If a record clashes, keep the local value as `<name> (conflict, <device>)`. Pins and releases are named `(doc, epoch, ref, sha256)` (server-side only). (§4.6) |
@@ -423,7 +424,8 @@ GET  /api/sync/v1/blob/<sha256> -> 303 to a signed URL on the user-content domai
 
 ## 6. Limits from cocalc.ai, and the plan notice
 
-**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with one more field for sync: `{storage_bytes, max_file_bytes, private_links, sync: {enabled, storage_bytes, version_bytes, read_bytes_per_day}}`. CoCalc decides the numbers per membership; they are not in this repository (sagebrush/business-material-out-of-repo).
+**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with one more field for sync: `{storage_bytes, max_file_bytes, private_links, sync: {enabled, version_bytes, read_bytes_per_day}}`. `storage_bytes` is the one budget for sharing and sync together (§6.1). A `sync.storage_bytes` CoCalc may still send is ignored.
+- **Whether a plan includes sync** is `sync.enabled`, a boolean in CoCalc's editable membership tiers, not a constant here. By default the free tier has it off (abuse risk) and every other tier on. It is CoCalc's config; this server only reads it. CoCalc decides the numbers per membership; they are not in this repository (sagebrush/business-material-out-of-repo).
 - **They are cached in the account object for 6 hours,** not 10 minutes (§7.3). With 100,000 accounts active, that is about 5 requests a second to cocalc.ai.
 - **When the cache is old,** the limits are fetched again, and the cached value is used while the fetch runs.
 - **If CoCalc can't be reached,** the cached value is kept, however old. With nothing cached, uploads are refused and document batches are still accepted (below). An outage is never read as zero, or as no limit.
@@ -435,15 +437,61 @@ GET  /api/sync/v1/blob/<sha256> -> 303 to a signed URL on the user-content domai
 - **For an account that never turned on sync,** the notice is a no-op: 200 with `{applied: false}`. Nothing is created for it.
 
 **What the limits do:**
-- **Over `storage_bytes`:**
-  - blob uploads stop with `storage_full`, and the page says so;
-  - **document batches keep being accepted,** since edits are small (§7.4), up to a hard ceiling of the limit plus 10% (at least 50 MB). Beyond the ceiling they are refused with `storage_full`, and wait on the device;
-  - nothing already synced is removed.
+- **Over `storage_bytes`** (sharing and sync together, §6.1):
+  - file uploads, sharing's and sync's, stop with `storage_full`, and the page says so;
+  - **document batches keep being accepted,** since edits are small (§7.4), up to a named ceiling: `storage_bytes` plus `max(storage_bytes / 10, 50 MB)`. Beyond the ceiling they are refused with `storage_full`, and wait on the device;
+  - nothing already synced is removed, and nothing is removed on a downgrade either.
 - **`sync.enabled` false** (the plan no longer includes sync): the account becomes `readonly`.
   - Nothing is deleted.
   - Every write is refused with `readonly`.
   - Reading, pulling and "Download all" keep working.
   - The page says why (§7.4).
+
+### 6.1 One storage budget for sharing and sync
+
+William's decision (Oct 19): one `storage_bytes` covers sharing and sync together, and the user sees what each part holds.
+
+**The invariant:**
+$$\text{sharing} + \text{sync} \le \text{storage\_bytes} + \text{ceiling}, \qquad \text{ceiling} = \max(\text{storage\_bytes} / 10,\ 50\ \text{MB}),$$
+where only sync's document batches ever use the ceiling. Sharing, and every file upload, stop at `storage_bytes`.
+
+**How (an escrow):**
+- D1's `sync_accounts.claim_bytes` is the most sync may use. Only the account object changes it.
+  - **Raise:** one conditional statement per cap. The claim grows by $\min(\text{whole chunks}, \text{cap} - \text{claim} - \text{sharing})$, where `sharing` is sharing's own SQL for the account's bytes, as long as that covers what is short. So the last part below a cap is taken in one write, never one an edit (LIMIT-97A-1). $C = \min(\text{clamp}(\text{storage\_bytes}/64,\ 4\ \text{MiB},\ 64\ \text{MiB}),\ \text{storage\_bytes})$. A file raise uses `cap = storage_bytes`; a document raise tries that first, then `storage_bytes + ceiling`.
+  - **Full:** a raise refused for space isn't asked of D1 again, for that kind, for 60 s, or until the limits change. Meanwhile the refusal is `storage_full` with `retry_after`, the time left, so a client can tell "full, try again shortly" from "full". A full budget costs at most one D1 statement a minute per cap: one for files, up to two for documents (`storage_bytes`, then the ceiling). Never one an edit.
+  - **Unusable grants are given back:** a raise D1 granted, answered after new limits, installs D1's claim but no caps, and arms the alarm. So does a new limit from a notice or a fetch. The alarm gives back slack beyond $2C$, with no further request needed (CORR-BDA-1).
+  - **After every await:** nothing D1 answered is installed unless the account is still the same generation, not deleting (CORR-97A-1). The caps aren't restored if the limits changed meanwhile, a revision counted with every new `storage_bytes` (CORR-97A-2). A queued raise reads the current limit when it runs, not the one it was queued with.
+  - The raise names the account's generation and requires `state = 'active'`, so a dead or deleting generation can't raise.
+- **Sharing's check counts the whole claim:** its reservation is one INSERT with `sharing + claim + new ≤ storage_bytes`. Once documents have taken sync into the ceiling, `sharing + claim > storage_bytes` already, so sharing refuses even one byte. It is a plain integer comparison in SQLite, with no wrap and no clamp to zero.
+- **Sync's check is local:** `files + documents + held + new ≤ cap`.
+  - `cap` for files is `blob_cap`: the claim as of the last time D1 found `sharing + claim ≤ storage_bytes`, lowered by every release. So files stop at `storage_bytes` even when documents hold claim in the ceiling.
+  - `cap` for documents is `doc_cap`, the same, as of the last raise.
+  - A new `storage_bytes` (a fetch or a notice) sets both caps to 0, so the next write has D1 check the claim against it again. A downgrade takes effect at once.
+- **Batches are held:**
+  - a batch's body is exactly what its document's total can grow by (a resend grows it by less), so its bytes are held, `batch_holds`, from admission until the document answers;
+  - at most 200 holds are open per account, as many as a document's live batches. Past that, a new batch gets `busy` with `retry_after`, so a stream of lost answers can't grow the table (LIMIT-97A-2);
+  - a refusal before the forward (a blob not yet uploaded, when pinning) gives the hold back at once. Any failure after the forward began, with the hold still open, wakes the alarm for it (CORR-97A-3);
+  - the answer's total then replaces the hold, in one step;
+  - a lost answer's hold stays until its attempt can no longer commit (its pins' lapse). The alarm then asks the document its total (`info()`, bounded at 2 s), which replaces the hold.
+- **Ordering:** every raise and release goes through one chain in the account object, so its claim is never above D1's. A raise writes D1 first, then the object's value (from `RETURNING`). A release lowers the object's value first, then D1. A release that D1 misses is retried from the alarm with backoff; until then D1 is only higher, so room goes unused, never overshot.
+- **Release:**
+  - the alarm gives back slack beyond $2C$, keeping $C$;
+  - **at sharing's edge:** a sharing upload refused for space asks the account object, once, to give back everything it doesn't use, and tries once more. If the object can't be reached, or its give-back can't reach D1, the refusal stands: never fail open.
+- **Purge:** the purge's D1 record sets `claim_bytes = 0` for its generation (and for older ones). A new generation's registration starts at 0. So the space returns to sharing.
+
+**Bounds:**
+- **Overshoot:**
+  - none beyond the invariant: each side's check is one serialized D1 statement, and sync never uses more than D1 granted;
+  - sharing and files never exceed `storage_bytes`;
+  - documents exceed it only into the named ceiling.
+- **Under-use:** at most about $2C$ a person, which shows as free in the breakdown. Sharing's release-and-retry recovers it at the edge.
+- **D1 writes:** one per chunk of growth, one per tail below each cap (`storage_bytes`, then the ceiling), plus one per release. When full, at most one statement per kind a minute. Never one per edit. In the tests:
+  - 20 batches of 1,000 bytes on a 1 MiB budget made at most 3;
+  - with production's chunk and less than one left, 11 edits made 2 writes, and further refused edits made none.
+
+**The breakdown** (`GET /api/share/me`): `usage` is the sum, and `usage_breakdown` has `sharing_files`, `sharing_versions`, `sync_files` and `sync_documents` (sync's versions will join them, §3). Sync's lines come from a read-only account-object call. It is for display only: enforcement is the claim.
+
+**Without a known limit** (CoCalc unreachable, nothing cached): writes that fit the claim already held go on; anything needing a raise answers `busy` with `retry_after`, never `storage_full` and never unlimited.
 
 ## 7. Deleting
 

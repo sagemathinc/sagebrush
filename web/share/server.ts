@@ -74,6 +74,17 @@ export interface ShareEnv {
   /** dev deployments only: "1" enables /auth/dev and default limits */
   SHARE_DEV?: string;
   DEV_AUTH_TOKEN?: string;
+  /**
+   * The sync service's account objects, when sync is on here: one storage
+   * budget covers both (design/sync-server.md §6.1), so sharing counts the
+   * bytes sync has claimed, and asks sync to give back what it doesn't use.
+   */
+  SYNC_ACCOUNT?: { idFromName(name: string): unknown; get(id: unknown): SyncClaims };
+}
+/** What sharing asks of a sync account object (web/sync/account.ts). */
+export interface SyncClaims {
+  releaseClaim(a: { account: string }): Promise<{ released: number }>;
+  usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number } | null>;
 }
 interface Ctx { waitUntil(p: Promise<unknown>): void }
 
@@ -304,26 +315,88 @@ async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   }
 }
 
-// (SQL: what account ?1 uses, reservations still running at ?2 included)
-const USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
+// (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync
+// service's claim on the same budget, CLAIM, is added where sync is on)
+export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
   + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+/** sharing's clock, in seconds (reservations' expiry) */
+export const nowSeconds = () => now();
+// (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
+// sharing counts all of it; once documents have taken sync into its ceiling, sharing is already over
+// and refuses, §6.1)
+const CLAIM = ` + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?8 AND state <> 'purged')`;
+// (without sync, ?8 is still named, adding nothing, so every caller binds the same parameters)
+const used = (env: ShareEnv) => SHARING_USED + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
 
-async function usage(db: D1, id: string): Promise<number> {
-  const r = await db.prepare(`SELECT ${USED} AS n`).bind(id, now()).first<{ n: number }>();
+/** What the account's budget has in use: sharing's bytes, and sync's claim where sync is on. */
+async function usage(env: ShareEnv, id: string): Promise<number> {
+  const r = await env.SHARE_DB!.prepare(`SELECT ${used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
+/**
+ * The account's usage, and what each part holds (§6.1): sharing's files, its
+ * versions' manifests, and sync's files and documents.  `usage` is their sum,
+ * against the one storage_bytes.  For display only: what is enforced is the
+ * claim (above).  If the account object can't be reached, sync's claim stands
+ * in for its parts.
+ */
+async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number } }> {
+  const db = env.SHARE_DB!;
+  const t = now();
+  const s = await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS files, (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS versions").bind(id, t).first<{ files: number; versions: number }>();
+  const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number };
+  if (env.SYNC_ACCOUNT) {
+    const h = await accountHash(id);
+    const row = await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1 AND state <> 'purged'").bind(h).first<{ claim_bytes: number }>();
+    if (row) {
+      try {
+        const u = await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + h)).usage({ account: id });
+        if (u) {
+          parts.sync_files = u.files;
+          parts.sync_documents = u.documents;
+        }
+      } catch {
+        parts.sync_claim = row.claim_bytes;
+      }
+    }
+  }
+  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0), usage_breakdown: parts };
+}
+
+/**
+ * At the edge (§6.1): sharing was refused for space, so sync is asked once to
+ * give back the part of its claim it doesn't use.  True if it gave back any,
+ * and the caller may try once more; false if there was none, sync isn't on
+ * here, or its account object couldn't be reached (the refusal then stands:
+ * never fail open).
+ */
+async function releaseSync(env: ShareEnv, id: string): Promise<boolean> {
+  if (!env.SYNC_ACCOUNT) return false;
+  try {
+    const h = await accountHash(id);
+    if (!(await env.SHARE_DB!.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1 AND state <> 'purged' AND claim_bytes > 0").bind(h).first())) return false;
+    return (await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + h)).releaseClaim({ account: id })).released > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Reserve bytes for an R2 object about to be written: one conditional INSERT. */
-async function reserve(db: D1, who: Who, bytes: number, limit: number, key: string): Promise<{ id: string; expires: number } | null> {
+async function reserve(env: ShareEnv, who: Who, bytes: number, limit: number, key: string, again = true): Promise<{ id: string; expires: number } | null> {
+  const db = env.SHARE_DB!;
   const rid = crypto.randomUUID();
   const t = now();
+  const h = await accountHash(who.id);
   try {
-    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${USED} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit)])) as D1Result<unknown>[];
-    return r[2]?.meta?.changes === 1 ? { id: rid, expires: t + RESERVE_SECONDS } : null;
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
+    if (r[2]?.meta?.changes === 1) return { id: rid, expires: t + RESERVE_SECONDS };
   } catch {
     return null;
   }
+  // (refused for space: sync gives back what it doesn't use, and this is tried once more, §6.1)
+  return again && (await releaseSync(env, who.id)) ? reserve(env, who, bytes, limit, key, false) : null;
 }
 /** Batch statements that use up the reservation, failing the batch if it expired or was reclaimed. */
 const consume = (db: D1, rid: string) => [
@@ -358,10 +431,12 @@ async function check(req: Request, env: ShareEnv, who: Who): Promise<Response> {
     for (const x of r.results) held.add(x.sha256);
   }
   const missing = [...new Map(blobs.filter((b) => !held.has(b.sha256)).map((b) => [b.sha256, b])).values()];
-  // (advisory: each PUT reserves its bytes atomically)
-  const used = await usage(env.SHARE_DB!, id);
+  // (advisory: each PUT reserves its bytes atomically; at the edge, sync gives back what it doesn't
+  // use first, §6.1)
   const adding = missing.reduce((s, b) => s + b.size, 0);
-  if (used + adding > lim.storage_bytes) return json({ error: "over your storage limit", used, adding, storage_bytes: lim.storage_bytes }, 413);
+  let inUse = await usage(env, id);
+  if (inUse + adding > lim.storage_bytes && (await releaseSync(env, id))) inUse = await usage(env, id);
+  if (inUse + adding > lim.storage_bytes) return json({ error: "over your storage limit", used: inUse, adding, storage_bytes: lim.storage_bytes }, 413);
   return json({ missing: missing.map((b) => b.sha256) });
 }
 
@@ -376,7 +451,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
   const db = env.SHARE_DB!;
   if (await db.prepare("SELECT 1 AS x FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(id, sha).first()) return json({ ok: true });
   const key = await newKey(id);
-  const res = await reserve(db, who, size, lim.storage_bytes, key);
+  const res = await reserve(env, who, size, lim.storage_bytes, key);
   if (!res) return err(413, "over your storage limit");
   const rid = res.id;
   let obj: { size: number } | null = null;
@@ -474,7 +549,7 @@ async function commit(req: Request, env: ShareEnv, who: Who, cid: string): Promi
   const hash = await sha256Hex(text);
   const key = await newKey(id);
   // (a manifest is stored and counted as the account's bytes too)
-  const res = await reserve(db, who, bytes, lim.storage_bytes, key);
+  const res = await reserve(env, who, bytes, lim.storage_bytes, key);
   if (!res) return err(413, "over your storage limit");
   const rid = res.id;
   try {
@@ -789,7 +864,7 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
   if (!who || !id) return err(401, "sign in first");
   if (p === "/api/share/me" && m === "GET") {
     const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
-    return json({ account_id: id, ...a, usage: await usage(env.SHARE_DB, id), limits: await limits(env, who) });
+    return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
   if (m !== "GET" && m !== "PUT" && m !== "DELETE" && !/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
