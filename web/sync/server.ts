@@ -19,6 +19,7 @@ import { sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
 import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
+import type { SyncAccount } from "./account.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
 /** How long before its reservation ends an upload is cut off (§5.4, CORR-5E2-2). */
@@ -32,6 +33,8 @@ export type Env = SyncEnv & ShareEnv & {
   SYNC_TEST_HOLD_ENABLE?: string;
   /** a test seam: registering this account id in D1 fails, as an outage would (CORR-00F-1) */
   SYNC_TEST_FAIL_ENROLL?: string;
+  /** tests only: CoCalc's purge of this account id fails to reach its account object */
+  SYNC_TEST_FAIL_PURGE?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
   SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
@@ -123,8 +126,8 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     }
     return null;
   }
-  const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})$/i);
-  if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1]);
+  const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})(?:\/([0-9a-f-]{8,100}))?$/i);
+  if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1], sp[2]);
   if (!p.startsWith("/api/sync/")) return null;
   // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
@@ -265,12 +268,6 @@ async function recordPurge(env: Env, hash: string, r: { state: string; request_i
       .bind(hash, now, r.request_id, kind, r.retired)];
     await db.batch(marks);
   }
-  // (nothing held: CoCalc's request is done at once, by its own receipt, CORR-1C2-1; for an account
-  // that never synced there is nothing to wait for, and no receipt is kept: its status is 404)
-  if (r.state === "none" && kind === "admin" && (r.retired ?? 0) === 0)
-    await db.prepare("DELETE FROM sync_admin_requests WHERE request_id = ?1 AND account_hash = ?2 AND state = 'deleting'").bind(r.request_id, hash).run();
-  else if (r.state === "none" && kind === "admin")
-    await db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE request_id = ?1 AND account_hash = ?3 AND state = 'deleting'").bind(r.request_id, Math.floor(Date.now() / 1000), hash).run();
 }
 
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
@@ -309,37 +306,68 @@ async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> 
   }
   if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return null;
   const hash = await accountHash(v.account_id);
-  // CoCalc's receipt first (CORR-1C2-1), so the purge's completion, which comes after the account
-  // object's answer, always finds it; a retried id keeps its receipt, and touches no other
-  // Every purge is admitted: sharing's deletion never waits on sync's bookkeeping (CORR-E0D-1's cap
-  // coupling).  The receipts are bounded by total instead (LIMIT-233-1): at most RECEIPTS_PER_ACCOUNT
-  // an account, a new id evicting the account's oldest in the same transaction, and none kept for an
-  // account that never synced (below).  CoCalc's purge fences an account for good, so the table never
-  // holds more than RECEIPTS_PER_ACCOUNT x the accounts that ever had sync state, and the daily prune
-  // empties it 30 days on.
-  const now = Math.floor(Date.now() / 1000);
-  await env.SHARE_DB!.batch([
-    env.SHARE_DB!.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE account_hash = ?2 AND NOT EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) ORDER BY rowid DESC LIMIT -1 OFFSET ?3)")
-      .bind(v.request_id, hash, RECEIPTS_PER_ACCOUNT - 1),
-    env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, ?2, 'deleting', ?3)").bind(v.request_id, hash, now),
-  ]);
-  const receipt = await env.SHARE_DB!.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
-  // (an id names one account for good: the same id for another is refused, before any account object
+  const db = env.SHARE_DB!;
+  // (an id names one account for good: the same id for another is refused before any account object
   // is asked or any receipt changed, CORR-E0D-1)
-  if (receipt && receipt.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
-  // (the account object decides, whatever D1 says: an account still registering has no row yet;
-  // no generation named, as whatever it holds goes, CORR-02C-1)
-  const r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
+  const prior = await db.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
+  if (prior && prior.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
+  // The account object decides, whatever D1 says (an account still registering has no row yet; no
+  // generation named, as whatever it holds goes, CORR-02C-1).  Every purge is admitted: sharing's
+  // deletion never waits on sync's bookkeeping.  If the object can't be reached, nothing is recorded
+  // and the whole purge answers 503, for CoCalc to send again (CORR-5D0-1).
+  let r: Awaited<ReturnType<SyncAccount["purge"]>>;
+  try {
+    if (testMode(env) && env.SYNC_TEST_FAIL_PURGE === v.account_id) throw new Error("the account object is unavailable (test seam)");
+    r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
+  } catch {
+    return err(503, "busy", { message: "sync's part of the purge didn't start; send it again" });
+  }
   await recordPurge(env, hash, r, "admin");
+  // CoCalc's receipt, by its own id (CORR-1C2-1), written only once the object has answered, and only
+  // for an account that held sync state: so the table never holds more than RECEIPTS_PER_ACCOUNT x the
+  // accounts that ever had sync state (LIMIT-233-1, CORR-5D0-1).  A new id evicts the account's oldest
+  // in the same transaction; a retried id keeps its receipt.  Whatever a receipt says, the status call
+  // asks the object itself unless the receipt says purged, so a completion that ran before this write,
+  // or an evicted receipt, never misleads it.
+  const nothing = r.state === "none" && (r.retired ?? 0) === 0;
+  if (!nothing) {
+    const now = Math.floor(Date.now() / 1000);
+    const done = r.state === "none";
+    await db.batch([
+      db.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE account_hash = ?2 AND NOT EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) ORDER BY rowid DESC LIMIT -1 OFFSET ?3)")
+        .bind(v.request_id, hash, RECEIPTS_PER_ACCOUNT - 1),
+      db.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created, finished, docs, bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)")
+        .bind(v.request_id, hash, done ? "purged" : "deleting", now, done ? now : null, done ? 0 : null),
+    ]);
+    // (two requests with one new id for two accounts, at once: the second finds the first's receipt)
+    const mine = await db.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
+    if (mine && mine.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
+  }
   return null;
 }
 
-/** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */
-async function adminSyncPurgeStatus(req: Request, env: Env, rid: string): Promise<Response> {
+/**
+ * GET /api/admin/sync-purge/<request_id>[/<account_id>] (signed): where
+ * sync's part of a purge is (CORR-5D0-1).  A receipt that says purged answers
+ * with its counts.  Otherwise the account object answers, the authority:
+ * `deleting`, `purged`, or `never_synced` (nothing to delete: done).  The
+ * account is the receipt's, or the one named in the path; naming it is what
+ * makes the answer certain after a receipt is evicted or for an account that
+ * never synced.  404 only means sync's part never started (no receipt, and
+ * the account object has had no CoCalc purge): send the purge again.  It
+ * never means done.
+ */
+async function adminSyncPurgeStatus(req: Request, env: Env, rid: string, account: string | undefined): Promise<Response> {
   if (!env.SHARE_DB || !(await signedWith(req, env.PURGE_KEY, ""))) return err(401, "bad signature");
-  // (by the request's own receipt, never the account's row, which a later request changes: CORR-1C2-1)
-  const r = await env.SHARE_DB.prepare("SELECT state, docs, bytes FROM sync_admin_requests WHERE request_id = ?1").bind(rid).first();
-  return r ? json({ request_id: rid, ...r }) : err(404, "no such request");
+  const r = await env.SHARE_DB.prepare("SELECT account_hash, state, docs, bytes FROM sync_admin_requests WHERE request_id = ?1").bind(rid).first<{ account_hash: string; state: string; docs: number | null; bytes: number | null }>();
+  const named = account ? await accountHash(account) : undefined;
+  if (r && named && r.account_hash !== named) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
+  if (r?.state === "purged") return json({ request_id: rid, state: "purged", docs: r.docs, bytes: r.bytes, source: "receipt" });
+  const hash = r?.account_hash ?? named;
+  if (!hash || !env.SYNC_ACCOUNT) return err(404, "no such request", { message: "name the account to ask it: /api/admin/sync-purge/<request_id>/<account_id>" });
+  const st = await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + hash)).purgeState();
+  if (st.state === "not_requested") return err(404, "no such request", { state: "not_requested", message: "sync's part of this purge never started; send the purge again" });
+  return json({ request_id: rid, state: st.state, source: "account" });
 }
 
 /**
