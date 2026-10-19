@@ -7,6 +7,7 @@
 // (not blank) opens as before, not in Edit.  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-local.mjs
+// (Since the workspace (step 1b), it runs on the fallback: ?workspace=0.)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,11 +36,15 @@ const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 
+// (this test is of the fallback, boards kept in localStorage, where the
+// workspace can't be opened: ?workspace=0, on a loopback host only; the
+// workspace's own boards are web/workspace/test-workspace-pages.mjs's)
+const noWs = (q) => { const [path, hash = ""] = q.split("#"); return path + (path.includes("?") ? "&" : "?") + "workspace=0" + (hash ? "#" + hash : ""); };
 const go = async (q) => {
-  await send("Page.navigate", { url: `${base}board/${q}` });
+  await send("Page.navigate", { url: `${base}board/${noWs(q)}` });
   return until("!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null", 60000);
 };
-const here = () => ev("(() => { const s = window.sagebrush.board.snapshot(); return { search: location.search, editing: document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true', mode: s.doc.mode ?? 'python', title: s.doc.title, items: s.items.length, revert: !document.querySelector('[data-sbb=revert]').hidden }; })()");
+const here = () => ev("(() => { const s = window.sagebrush.board.snapshot(); return { search: location.search.replace(/([?&])workspace=0(&|$)/, (m, a, b) => (b ? a : '')), editing: document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true', mode: s.doc.mode ?? 'python', title: s.doc.title, items: s.items.length, revert: !document.querySelector('[data-sbb=revert]').hidden }; })()");
 const list = () => ev("JSON.parse(localStorage.getItem('sagebrush-boards') ?? '[]')");
 const LOCAL = /^\?doc=local:[0-9a-f]{12}$/;
 
@@ -78,6 +83,8 @@ try {
   await until(`location.search !== ${JSON.stringify(a.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
   const d = await here();
   check(LOCAL.test(d.search) && d.title === "Sage sketch (copy)" && d.items === 1 && d.mode === "sage", "Duplicate: a copy of its own: " + JSON.stringify(d));
+  const markOf = (search) => ev(`localStorage.getItem("sagebrush-board:local:" + ${JSON.stringify(search.match(/local:([0-9a-f]{12})/)[1])} + "#here")`);
+  check((await markOf(d.search)) === "1", "...a copy of a board written here, marked as one");
   // File > New board: a new blank board in the same language, in Edit; the copy stays
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until(`location.search !== ${JSON.stringify(d.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
@@ -88,6 +95,14 @@ try {
   check((await here()).items === 1, "...and the copy is as it was");
   await go(a.search);
   check((await here()).title === "Sage sketch", "...and so is the first");
+  // Duplicate of a board not written here: a copy not marked either (CORR-30D-1)
+  await ev(`(localStorage.removeItem("sagebrush-board:local:" + ${JSON.stringify(a.search.match(/local:([0-9a-f]{12})/)[1])} + "#here"), 1)`);
+  await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
+  await until(`location.search !== ${JSON.stringify(a.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
+  const d2 = await here();
+  check(d2.search !== d.search && (await markOf(d2.search)) === null, "Duplicate of a board not marked as written here: not marked: " + JSON.stringify(d2));
+  await ev(`(localStorage.setItem("sagebrush-board:local:" + ${JSON.stringify(a.search.match(/local:([0-9a-f]{12})/)[1])} + "#here", "1"), 1)`);
+  await go(a.search);
   // a board of this browser's, written and read again: as written
   await go("?new=sage");
   await ev("window.sagebrush.board.edit((d) => { d.title = 'Kept'; d.nodes = [{ id: 'k', title: 'here' }]; }).then(() => 1)");

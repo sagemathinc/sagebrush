@@ -24,6 +24,18 @@
 // window.sagebrush.board is the API for an agent driving the page (in the
 // shared browser, say): load(doc), focus(ids), step(n), snapshot(), run(),
 // outputs(), versions(), version(i); window.board is the board itself.
+//
+// The workspace (web/workspace/, design/workspace-files.md): boards made
+// here are documents of this browser's workspace, `/<title>.board.json`,
+// kept in its IndexedDB under their ids (which the address still names,
+// ?doc=local:ID, until routing by path comes).  At load, what this browser
+// kept before (boards in localStorage) is brought in (migrate: nothing
+// deleted).  Each save is also written at once to localStorage as pending
+// (`sagebrush-workspace-pending:ID`) until the workspace has it, so a page
+// closed mid-write loses nothing: the next load takes the pending copy.
+// Where the workspace can't be opened, boards are kept in localStorage as
+// before.  window.sagebrush.workspace is the workspace as an agent sees it
+// (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
@@ -37,6 +49,9 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
+import { Workspace, migrate, freePath, nameOf, splitExt } from "../workspace/index";
+import { mountBrowser } from "../workspace/browser";
+import { within } from "./idb-open";
 
 const q = new URLSearchParams(location.search);
 
@@ -86,12 +101,14 @@ function localDoc(id: string): BoardDoc | null {
   }
 }
 /** A new board of this browser's, written, listed, and read back as written:
- * its id; null if storage refused any of it (and nothing of it left) */
-function makeLocal(d: BoardDoc): string | null {
+ * its id; null if storage refused any of it (and nothing of it left).
+ * `here`: marked as written here (as makeInWorkspace's: a copy no more
+ * than what it copies, CORR-30D-1). */
+function makeLocal(d: BoardDoc, here = true): string | null {
   const id = hex(6), key = localKey(id), text = JSON.stringify(d);
   try {
     localStorage.setItem(key, text);
-    localStorage.setItem(key + "#here", "1");
+    if (here) localStorage.setItem(key + "#here", "1");
     if (localStorage.getItem(key) !== text || !listLocal(id, d) || !localBoards().some((b) => b.id === id)) throw new Error(STORAGE_REFUSED);
     return id;
   } catch {
@@ -122,7 +139,50 @@ function latestLocal(mode: string): string | null {
   return found;
 }
 const blankBoard = (mode: string): BoardDoc => ({ title: "Untitled board", ...(mode !== "python" ? { mode: mode as BoardDoc["mode"] } : {}), seed: hex(32), nodes: [] });
-const openLocal = (id: string) => location.assign(location.pathname + "?doc=local:" + id);
+// (?workspace=0, on a loopback host only (tests of the fallback, as ?runner=0): boards kept in localStorage as before)
+const noWorkspace = q.get("workspace") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const openLocal = (id: string) => location.assign(location.pathname + "?doc=local:" + id + (noWorkspace ? "&workspace=0" : ""));
+// This browser's workspace, what was kept before brought in (a page that
+// keeps nothing, an exported file, a frame or the benchmark: none); none,
+// where storage can't be opened in time (boards kept in localStorage as
+// before)
+// (one owner: a workspace that opens after the page gave up on it is closed
+// unused, and the page keeps boards as before for this visit: LIMIT-12C-3)
+let wsAbandoned = false;
+const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") || noWorkspace ? null : await within(Workspace.open().then(async (w) => {
+  try { await migrate(w, localStorage, { proceed: () => !wsAbandoned }); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+  if (wsAbandoned) {
+    w.close();
+    return null;
+  }
+  return w;
+}).catch((e) => { console.warn("workspace:", e); return null; }), 5000, null);
+if (!ws) wsAbandoned = true;
+const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
+/** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
+const PENDING_MAX = 8 * 2 ** 20;
+/** A new board in the workspace, `/<title>.board.json` (the first free name): its id.
+ * `here`: marked as written here, its notes' remote pictures shown at once
+ * (SEC-89C-3); a board made blank here is, and a copy is as trusted as what
+ * it copies: a copy the page makes by itself (a conflict's, a closed
+ * page's changes) never more (CORR-30D-1). */
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean): Promise<string> {
+  const top = new Set((await w.list("/")).map((e) => e.path));
+  const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
+  if (!p) throw new Error("no free name for a new board");
+  const e = await w.create(p, { content: d, mode: d.mode ?? "python" });
+  if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
+  return e.ref!;
+}
+const hereKey = (id: string) => "sagebrush-board:local:" + id + "#here";
+const isHere = (key: string) => { try { return localStorage.getItem(key) === "1"; } catch { return false; } };
+const safeTitle = (t: unknown) => String(t ?? "").replace(/[\/\u0000-\u001f\u007f]/g, "-").trim().slice(0, 200).trim() || "Untitled board";
+/** The workspace's latest board in this language (not in Trash, not missing): its id. */
+async function latestInWorkspace(w: Workspace, mode: string): Promise<string | null> {
+  const boards = (await w.list("/", { recursive: true })).filter((e) => e.kind === "board" && !e.missing && (e.mode ?? "python") === mode);
+  boards.sort((a, b) => b.updated - a.updated);
+  return boards[0]?.ref ?? null;
+}
 // ?new=MODE and ?recent=MODE: one of them says both what and in which
 // language: new if it is there, else recent; the first value of either
 // (CORR-7F9-3).  A new board storage refused: shown, as not kept, the
@@ -132,7 +192,10 @@ let unsaved: string | null = null;
   const made = q.getAll("new"), recent = !made.length, asked = (recent ? q.getAll("recent") : made)[0];
   if (asked !== undefined && !embedded()) {
     const mode = MODES.includes(asked) ? asked : "python";
-    const id = (recent ? latestLocal(mode) : null) ?? makeLocal(blankBoard(mode));
+    let id: string | null = null;
+    if (ws) {
+      try { id = (recent ? await latestInWorkspace(ws, mode) : null) ?? (await makeInWorkspace(ws, blankBoard(mode), true)); } catch (e) { console.warn("workspace:", e); }
+    } else id = (recent ? latestLocal(mode) : null) ?? makeLocal(blankBoard(mode));
     if (id) {
       q.delete("new");
       q.delete("recent");
@@ -220,6 +283,159 @@ if (fromParent) {
   }
 }
 
+// Saving a board of the workspace: the document written to localStorage at
+// once as pending, then to the workspace, one write at a time, the latest
+// only (one written over by a later save is skipped).  A pending copy is
+// "<session>:<n>\n<JSON>": this page's session (random, per load) and the
+// save's number.  Once the workspace has a save, its pending copy is
+// dropped, but only if it is still that save's (another tab's newer save
+// is never dropped: CORR-12C-1).  The workspace's record is tagged with the
+// session that wrote it, so a later load can tell a pending copy that is
+// newer than the record (same session) from one the record has moved past
+// (another writer: CORR-12C-2).  A write the workspace refused makes the
+// next save say so (thrown, as a refused localStorage write was:
+// HARD-7F9-1), and is tried again with it.
+const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
+let wsWriting: Promise<void> = Promise.resolve(), wsRefused: Error | null = null;
+// (the latest save of each view: a save is passed over only for a later
+// save of the same view; a save of a newer view never makes an older
+// view's save skipped, CORR-105-2)
+const wsLatest = new Map<number, BoardDoc>();
+// (what happened to the saves, the latest 200: for tests and for finding out why)
+const wsLog: { t: number; what: string; title: string; epoch: number; base?: number }[] = [];
+const logSave = (what: string, d: BoardDoc, epoch: number, base?: number) => {
+  wsLog.push({ t: Date.now(), what, title: String(d?.title ?? ""), epoch, ...(base !== undefined ? { base } : {}) });
+  if (wsLog.length > 200) wsLog.shift();
+};
+// (the view's lineage: one more each time the board is shown a version
+// written elsewhere; a save belongs to the view it was made on, and a save
+// made on an older view never writes the board, only that conflict's copy:
+// CORR-0FC-1)
+let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = null;
+function wsSave(id: string, d: BoardDoc) {
+  const w = ws!, refused = wsRefused;
+  let journaled = true;
+  const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
+  if (text.length > PENDING_MAX) {
+    // (too large to journal: the workspace alone keeps it; an older pending copy of this page's dropped, as it is older)
+    journaled = false;
+    dropPending(id, SESSION + ":");
+  } else try { localStorage.setItem(PENDING + id, header + "\n" + text); } catch { journaled = false; }
+  wsLatest.set(epoch, d);
+  logSave("save", d, epoch, wsRev);
+  wsWriting = wsWriting.then(async () => {
+    if (wsLatest.get(epoch) !== d) return logSave("passed over", d, epoch);
+    try {
+      if (epoch !== wsEpoch) {
+        // (made on the view before a conflict: into that conflict's copy,
+        // never over the board; the copy is a board like any other: written
+        // only over its own revision, else a new copy, CORR-105-1)
+        const copy = wsCopy?.epoch === epoch ? wsCopy : null;
+        let copyPath = copy ? await w.pathOf("board", copy.ref) : undefined;
+        if (copy && copyPath) {
+          try {
+            copy.rev = (await w.write(copyPath, d, { base: copy.rev })).rev;
+            logSave("to the copy", d, epoch, copy.rev);
+          } catch (e: any) {
+            if (e?.code !== "conflict") throw e;
+            copyPath = undefined;
+          }
+        }
+        if (!copyPath) {
+          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }, isHere(hereKey(id))), rev: 1 };
+          logSave("to a new copy", d, epoch);
+        }
+        if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
+        dropPending(id, header + "\n");
+        return;
+      }
+      let path = await w.pathOf("board", id);
+      // (a board of this browser's kept before, not brought in: in the workspace now, under its own id)
+      if (!path) {
+        path = await adoptBoard(w, id, d);
+        wsRev = 1;
+      }
+      // (tagged with this save's session and number: a later load orders the
+      // record against a pending copy by them, CORR-2D1-2; and only over the
+      // revision this page knows: what someone else wrote since is never
+      // written over, CORR-AA2-1)
+      // (always with a base: a page that knows no revision writes nothing over anything, it conflicts)
+      wsRev = (await w.write(path, d, { tag: header, base: wsRev })).rev;
+      logSave("written", d, epoch, wsRev);
+      wsRefused = null;
+      if (wsLatest.get(epoch) === d) {
+        wsLatest.delete(epoch);
+        dropPending(id, header + "\n");
+      }
+    } catch (e: any) {
+      if (e?.code === "conflict") {
+        logSave("conflict", d, epoch, wsRev);
+        await wsConflict(w, id, d, header, epoch);
+      }
+      else wsRefused = e instanceof Error ? e : new Error(String(e));
+    }
+  });
+  if (refused && !journaled) throw new Error(STORAGE_REFUSED);
+}
+/** The board changed elsewhere (an agent, another tab) since this page last
+ * read or wrote it: both kept.  This page's version becomes a board of its
+ * own; only once that is written is its pending copy dropped; then the
+ * board shows the other version, saying so (CORR-AA2-1). */
+const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
+  try {
+    const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
+    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }, isHere(hereKey(id))), rev: 1 };
+    dropPending(id, header + "\n");
+    const path = await w.pathOf("board", id);
+    const cur = path ? await w.read(path) : null;
+    if (!cur || !isBoard(cur.content)) return;
+    // (a new view from here, as the board is about to show the other
+    // version: saves made on the old one, typed while this was handled,
+    // carry the old epoch and go to the copy; only then the new base)
+    if (epoch === wsEpoch) wsEpoch++;
+    wsRev = cur.rev;
+    if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
+    const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
+    for (const f of wsSubs) await f(cur.content as BoardDoc, notice);
+  } catch (e: any) {
+    wsRefused = e instanceof Error ? e : new Error(String(e));
+  }
+}
+/** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
+function dropPending(id: string, prefix: string) {
+  try {
+    const cur = localStorage.getItem(PENDING + id);
+    if (cur !== null && cur.startsWith(prefix)) localStorage.removeItem(PENDING + id);
+  } catch {}
+}
+/** A pending copy as kept: its session and document; null if there is none; "unread" if it can't be read (too large, or not ours). */
+function readPending(id: string): { header: string; session: string; n: number; base: number; doc: BoardDoc } | null | "unread" {
+  const raw = localStorage.getItem(PENDING + id);
+  if (raw === null) return null;
+  const m = raw.length <= PENDING_MAX + 64 ? /^(([0-9a-f]{16}):(\d+):(\d+))\n/.exec(raw) : null;
+  let doc: unknown = null;
+  if (m) try { doc = JSON.parse(raw.slice(m[0].length)); } catch {}
+  if (m && isBoard(doc)) return { header: m[1], session: m[2], n: Number(m[3]), base: Number(m[4]), doc: doc as BoardDoc };
+  // (set aside, never parsed again, never dropped: LIMIT-12C-4)
+  try { localStorage.setItem(PENDING_UNREAD + id, raw); localStorage.removeItem(PENDING + id); } catch {}
+  return "unread";
+}
+const sameDoc = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** Every save so far in the workspace (before the page goes elsewhere). */
+const wsFlush = () => wsWriting;
+/** A board kept before only in localStorage, put in the workspace under its id. */
+function adoptBoard(w: Workspace, id: string, d: BoardDoc): Promise<string> {
+  return w.locked(async () => {
+    const top = new Set((await w.list("/")).map((e) => e.path));
+    const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
+    if (!p) throw new Error("no free name for this board");
+    const e = await w.adopt("/", p.slice(1, -".board.json".length), ".board.json", { kind: "board", ref: id, mode: d.mode ?? "python" }, { at: p, board: { id, doc: d, rev: 1, updated: Date.now() } });
+    return e.path;
+  });
+}
+
 // (the function search's indexes, by language, as fetched)
 const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
@@ -236,6 +452,56 @@ const host: BoardHost = {
       if (unsaved) return { doc: blankBoard(unsaved), original: null, notice: `**This board isn't kept:** ${STORAGE_REFUSED}. Download it (File) to keep what you write, or make room and reload.` };
       // (a board of this browser's: as it was last written here, with no
       // original to go back to; gone, a blank one that says so)
+      if (local && ws) {
+        const id = source.slice(6);
+        // (a save the workspace hadn't taken when a page closed)
+        const pend = readPending(id);
+        let notice = pend === "unread" ? "**A copy of this board left by a page closed while saving couldn't be read.** It's set aside in this browser; the board as last kept is shown." : "";
+        const path = await ws.pathOf("board", id);
+        if (path) {
+          const rec = await ws.read(path).catch(() => null);
+          if (rec && isBoard(rec.content)) {
+            if (pend && pend !== "unread") {
+              // (the record's writer: a session and that session's save number)
+              const [tagSession, tagN] = String(rec.tag ?? "").split(":");
+              if (rec.rev === pend.base || (tagSession === pend.session && Number(tagN) < pend.n)) {
+                // (the record is the one the copy was made on, or an earlier save of the session that left it: the copy is newer)
+                wsEpoch++;
+                wsRev = rec.rev;
+                wsSave(id, pend.doc);
+                return { doc: pend.doc, original: null };
+              }
+              if (sameDoc(rec.content, pend.doc) || (tagSession === pend.session && Number(tagN) >= pend.n)) dropPending(id, pend.header + "\n");
+              else {
+                // (the record moved on since, by another writer: neither is dropped; the copy kept as a board of its own: CORR-12C-2)
+                try {
+                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" }, isHere(hereKey(id)));
+                  dropPending(id, pend.header + "\n");
+                  notice = "**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".";
+                } catch (e: any) {
+                  notice = `**Changes left by a page closed while saving couldn't be kept as a board of their own** (${String(e?.message ?? e)}); they stay in this browser.`;
+                }
+              }
+            }
+            wsEpoch++;
+            wsRev = rec.rev;
+            return { doc: rec.content, original: null, ...(notice ? { notice } : {}) };
+          }
+        }
+        // (a board only a pending copy holds: brought into the workspace, under its id: CORR-12C-3)
+        if (!path && pend && pend !== "unread") {
+          try {
+            await adoptBoard(ws, id, pend.doc);
+            wsEpoch++;
+            wsRev = 1;
+            dropPending(id, pend.header + "\n");
+          } catch (e) { console.warn("workspace:", e); }
+          return { doc: pend.doc, original: null };
+        }
+        // (not in the workspace: as kept before, if it is; written into the workspace at the first save)
+        const before = localDoc(id);
+        return before ? { doc: before, original: null } : { doc: blankBoard("python"), original: null, notice: "**This board isn't in this browser** (any more): what you write here is kept as a board of its own." };
+      }
       if (local) {
         const kept = localDoc(source.slice(6));
         return kept ? { doc: kept, original: null } : { doc: blankBoard("python"), original: null, notice: "**This board isn't in this browser** (any more): what you write here is kept as a board of its own." };
@@ -262,12 +528,15 @@ const host: BoardHost = {
     save(d) {
       if (fromParent) return;
       if (unsaved) throw new Error(STORAGE_REFUSED);
+      if (local && ws) return wsSave(source.slice(6), d);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
       if (local && !listLocal(source.slice(6), d)) throw new Error(STORAGE_REFUSED);
     },
     revert() {
       try { localStorage.removeItem(saveKey); } catch {}
     },
+    // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
+    ...(local && ws ? { subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; } } : {}),
     // (whether it was written here, a new board: kept beside it, never in it)
     writtenHere(set) {
       const k = saveKey + "#here";
@@ -365,8 +634,8 @@ const host: BoardHost = {
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
-  newBoard: file ? undefined : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
-  duplicate: file ? undefined : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  newBoard: file ? undefined : ws ? async (mode) => { await wsFlush(); openLocal(await makeInWorkspace(ws, blankBoard(mode), true)); } : (mode) => { const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
+  duplicate: file ? undefined : ws ? async (d) => { await wsFlush(); openLocal(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"))); } : (d) => { const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); openLocal(id); },
   // (an exported file's or a frame's empty board opens as any other)
   editBlank: !file,
   // the function search beside a code item being written: the notebook's
@@ -395,6 +664,59 @@ export { mountBoard, host, mounted };
 // (for a host whose documents are kept elsewhere: a copy in this browser first; the tests' fake remote)
 export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 
+// The file browser (design §4): a sidebar on the left, over the board's
+// left edge (which moves aside), shown and hidden by Files in the top bar,
+// remembered with the notebook page's
+if (ws && local) {
+  const side = document.createElement("div");
+  side.id = "wssidebar";
+  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:272px;border-right:1px solid #d4d4cb;z-index:30";
+  side.hidden = true;
+  document.body.append(side);
+  const btn = document.createElement("button");
+  btn.textContent = "Files";
+  btn.title = "Your notebooks, boards and files (in this browser)";
+  btn.setAttribute("aria-pressed", "false");
+  btn.dataset.sbb = "files";
+  document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
+  const boardEl = document.getElementById("board")!;
+  let browser: ReturnType<typeof mountBrowser> | null = null;
+  const phone = () => matchMedia("(max-width: 640px)").matches;
+  const show = (on: boolean) => {
+    side.hidden = !on;
+    boardEl.style.left = on && !phone() ? "272px" : "";
+    side.style.width = phone() ? "" : "272px";
+    side.style.right = phone() ? "0" : "";
+    btn.setAttribute("aria-pressed", String(on));
+    try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
+    dispatchEvent(new Event("resize"));
+    if (on && !browser) browser = mountBrowser(side, {
+      ws,
+      current: () => ({ kind: "board", ref: source.slice(6) }),
+      open(e, how) {
+        const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+        if (how === "tab") return void window.open(url, "_blank", "noopener");
+        if (e.kind === "board" && e.ref === source.slice(6)) return;
+        void wsFlush().then(() => location.assign(url));
+      },
+      close: () => show(false),
+      // (this board renamed here: its title follows, saved by this page as
+      // its other changes are, never written beside them: CORR-0B0-2)
+      retitles: (e) => e.kind === "board" && e.ref === source.slice(6),
+      renamed(e, was) {
+        if (e.kind === "board" && e.ref === source.slice(6)) {
+          const base = (p: string) => splitExt(nameOf(p))[0];
+          void mounted.retitle(base(e.path), base(was));
+        }
+      },
+    });
+  };
+  btn.onclick = () => show(side.hidden !== false);
+  let pref: string | null = null;
+  try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
+  if (pref === "1") show(true);
+}
+
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
-(window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent };
+(window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}) };

@@ -18,6 +18,24 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
+// schema.json as verbs.ts writes it, and its verbs the agent facade's (no drift)
+{
+  const { schemaText, VERBS } = await import("./verbs.ts");
+  const { readFileSync } = await import("node:fs");
+  const kept = readFileSync(join(here, "schema.json"), "utf8");
+  if (kept !== schemaText()) {
+    console.error("FAIL: web/workspace/schema.json is stale: bun web/workspace/verbs.ts --write");
+    process.exit(1);
+  }
+  const api = readFileSync(join(here, "api.ts"), "utf8");
+  const facade = /const verbs = \[([^\]]*)\] as const/.exec(api)?.[1].match(/"(\w+)"/g)?.map((x) => x.slice(1, -1)) ?? [];
+  const wire = Object.keys(VERBS);
+  const missing = wire.filter((v) => !facade.includes(v)), extra = facade.filter((v) => !wire.includes(v) && v !== "watch" && v !== "ops");
+  if (missing.length || extra.length || facade.includes("dropVersions") || facade.includes("forget")) {
+    console.error(`FAIL: the wire verbs and the agent facade differ: missing ${missing}, extra ${extra}`);
+    process.exit(1);
+  }
+}
 const site = mkdtempSync(join(tmpdir(), "sb-ws-site-"));
 const built = await Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
 if (!built.success) {
