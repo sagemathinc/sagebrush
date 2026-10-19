@@ -20,6 +20,7 @@ const C = "33333333-3333-4333-8333-333333333333"; // signed in, never allowliste
 const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are first asked for while CoCalc is down
 const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pending but what a test makes (alarms)
 const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
+const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outlives its reservation
 
 let failures = 0;
 let count = 0;
@@ -45,6 +46,7 @@ fake.limits.set(B, sync(1 << 20, 1 << 20));
 fake.limits.set(D, sync(1 << 20, 1 << 20));
 fake.limits.set(E, sync(1 << 20, 1 << 20));
 fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 10 });
+fake.limits.set(G, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -60,7 +62,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1" },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1072,6 +1074,45 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   }
   ok(state === "purged", "and then it finishes");
   ok((await bucket.head(late.ok.key)) === null && (await bucket.list({ prefix: `s/${hashOf(E).slice(0, 32)}/` })).objects.length === 0, "with the late upload's bytes gone (CORR-5E2-2)");
+}
+
+// ---- an upload that outlives its reservation, with the Worker's immediate delete off (CORR-5E2-2)
+{
+  const bucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  const sg = await signIn(G);
+  await post(sg, "/api/sync/v1/enable", {});
+  const bytes = Buffer.from("late");
+  let send2;
+  const second = new Promise((r) => (send2 = r));
+  const body = new ReadableStream({
+    async start(c) {
+      c.enqueue(bytes.subarray(0, 2));
+      await second;
+      try {
+        c.enqueue(bytes.subarray(2));
+        c.close();
+      } catch {}
+    },
+  });
+  const upload = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: sg, origin: SITE, "content-type": "application/octet-stream", "content-length": "4" }, body, duplex: "half" });
+  await new Promise((r) => setTimeout(r, 200));
+  ok((await post(sg, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(G: Delete my synced data, while an upload's bytes are still coming)");
+  // (the test's reservation is 3 s and the cut-off a second before it: just after the cut-off, the
+  // reservation is already given back; then, past the reservation's end, the rest of the bytes are sent)
+  await new Promise((r) => setTimeout(r, 2300));
+  const iG = await acctNs.get(acctNs.idFromName("acct:" + hashOf(G))).inspect({}).catch(() => null);
+  ok(iG === null || iG.reservations === 0, "an upload cut off gives its reservation back at once");
+  await new Promise((r) => setTimeout(r, 1200));
+  send2();
+  const res = await upload.then((r) => r.status).catch(() => "aborted");
+  let state = null;
+  for (let w = 0; w < 60 && state !== "purged"; w++) {
+    await new Promise((r) => setTimeout(r, 250));
+    state = (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(G)).first())?.state;
+  }
+  await new Promise((r) => setTimeout(r, 500));
+  ok(res === 408, `an upload still streaming at its cut-off is ended (${res}), before its reservation does`);
+  ok(state === "purged" && (await bucket.list({ prefix: `s/${hashOf(G).slice(0, 32)}/` })).objects.length === 0, "and no object of it ever appears, though the purge finished and the Worker's own delete is off (CORR-5E2-2)");
 }
 
 await mf.dispose();
