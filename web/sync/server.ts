@@ -259,8 +259,12 @@ async function recordPurge(env: Env, hash: string, r: { state: string; request_i
     await db.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = ?3 WHERE account_hash = ?1 AND generation = ?4 AND state <> 'purged'").bind(hash, r.request_id, r.kind ?? kind, r.generation).run();
   } else if (r.state === "none" && (r.retired ?? 0) > 0) {
     await gate(env, "record-none");
-    await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
-      .bind(hash, Math.floor(Date.now() / 1000), r.request_id, kind, r.retired).run();
+    const now = Math.floor(Date.now() / 1000);
+    const marks = [db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
+      .bind(hash, now, r.request_id, kind, r.retired)];
+    // (CoCalc's request is then found by its own id, whatever the row's state, CORR-BF3-1)
+    if (kind === "admin") marks.push(db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation, request_id, kind, finished, docs, bytes) VALUES (?1, substr(?1, 1, 32), 'purged', ?2, ?3, ?4, 'admin', ?2, ?5, ?6) ON CONFLICT(account_hash) DO UPDATE SET request_id = excluded.request_id, kind = 'admin' WHERE sync_accounts.generation <= excluded.generation").bind(hash, now, r.retired, r.request_id, 0, 0));
+    await db.batch(marks);
   }
 }
 

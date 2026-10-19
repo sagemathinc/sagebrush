@@ -26,6 +26,7 @@ const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enab
 const K = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // allowlisted; its first enable is held too, while CoCalc purges it
 const L = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"; // allowlisted; D1 answers held late at the Worker (astra's staging)
 const M = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"; // allowlisted, never synced; CoCalc deletes it while requests are past their session check
+const N = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"; // allowlisted; registering, never in D1, when CoCalc purges it
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -76,7 +77,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1405,6 +1406,43 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await gateSet("record-deleting", false);
   await dL3;
   ok(await until(async () => (await acctL.lifecycle())?.record_pending === false) && (await rowOf(L))?.state === "active" && (await rowOf(L))?.generation === 3, "and 2's late writes, when they land, leave 3 alone");
+  // LIMIT-BF3-1: a pending record with no D1 bound waits its backoff, as a failure does; its alarm doesn't spin
+  await acctL.setNoDb({ on: true });
+  ok((await post(sl, "/api/sync/v1/delete", { confirm: "delete", generation: 3 })).status === 202 && (await until(async () => (await acctL.lifecycle())?.state === null && (await acctL.lifecycle())?.record_tries >= 1)), "(L: 3 is deleted with no D1 bound: its record waits)");
+  const nd0 = await acctL.lifecycle();
+  await acctL.wakeNow();
+  await new Promise((r) => setTimeout(r, 1000));
+  const nd1 = await acctL.lifecycle();
+  ok(nd1.record_pending && nd1.record_calls - nd0.record_calls <= 3 && nd1.record_tries >= nd0.record_tries && nd1.alarm >= nd1.record_retry_at - 5 && nd1.record_retry_at > Date.now(), "with no D1 bound, an alarm doesn't re-arm at once: at most a backed-off attempt or two in a second, the alarm at the record's retry: " + JSON.stringify([nd1.record_calls - nd0.record_calls, nd1.record_tries]));
+  await acctL.setNoDb({ on: false });
+  ok(await until(async () => (await acctL.lifecycle())?.record_pending === false && (await rowOf(L))?.state === "purged"), "once D1 is bound again, the record is written at its next attempt");
+  // CORR-BF3-1 (astra's trace): a self-delete's record fails; the next generation, made in the account
+  // object but never in D1, is purged by CoCalc; the coalesced record then still answers CoCalc's id
+  ok((await (await post(sl, "/api/sync/v1/enable", {})).json()).generation === 4, "(L: generation 4)");
+  await acctL.setFailRecord({ on: true });
+  ok((await post(sl, "/api/sync/v1/delete", { confirm: "delete", generation: 4 })).status === 202 && (await until(async () => (await acctL.lifecycle())?.state === null && (await acctL.lifecycle())?.retired === 4)), "(4 is deleted by its owner; D1's record fails: the row says deleting, under the self id)");
+  ok((await acctL.enable({ account: L, hash: hashOf(L) }))?.ok?.state === "registering", "(the account object makes 5, registering; it never reaches D1)");
+  const ridL = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridL }))).status === 202 && (await until(async () => (await acctL.lifecycle())?.retired === 5)), "(CoCalc purges L: 5 is deleted, and the account fenced)");
+  await acctL.setFailRecord({ on: false });
+  ok(await until(async () => (await acctL.lifecycle())?.record_pending === false), "(the coalesced record is written)");
+  const stL = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`);
+  const stLB = await stL.json();
+  const rowL = await rowOf(L);
+  ok(stL.status === 200 && stLB.state === "purged" && rowL?.state === "purged" && rowL.generation === 4, "CoCalc's status finds its request by its own id though its generation never reached D1; the row stays at 4 (CORR-BF3-1): " + JSON.stringify([stL.status, rowL]));
+  const ridL2 = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridL2 }))).status === 202, "(CoCalc purges L again, with a new id: the object holds nothing)");
+  const stL2 = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`);
+  ok(stL2.status === 200 && (await stL2.json()).state === "purged", "a repeated purge, answered none, is found by its own id too, though the row was purged already");
+  // an account with no row at all: N registers in the account object only; CoCalc purges it; the record
+  // makes a purged row, under CoCalc's id (one that never synced, M, has none: CoCalc doesn't wait, §9)
+  const acctN = acctNs.get(acctNs.idFromName("acct:" + hashOf(N)));
+  ok((await acctN.enable({ account: N, hash: hashOf(N) }))?.ok?.state === "registering" && (await rowOf(N)) === null, "(N: generation 1, registering, no row)");
+  const ridN = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: N, request_id: ridN }))).status === 202 && (await until(async () => (await acctN.lifecycle())?.state === null && (await acctN.lifecycle())?.record_pending === false)), "(CoCalc purges N)");
+  const stN = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridN}`);
+  const rowN = await rowOf(N);
+  ok(stN.status === 200 && (await stN.json()).state === "purged" && rowN?.state === "purged" && rowN.generation === 1 && rowN.request_id === ridN, "a purged row of generation 1 is made, and CoCalc's status finds it by its id");
   // CORR-B92-1: CoCalc's purge leaves the account deleted for good, storage or none: an enable or a
   // request already past its session check (astra's probe) is refused when it arrives
   const sm = await signIn(M);
