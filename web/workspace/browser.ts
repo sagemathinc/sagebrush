@@ -390,6 +390,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   async function toTrash(e: Entry) {
     const cur = host.current?.(), at = cur ? await w.pathOf(cur.kind, cur.ref).catch(() => undefined) : undefined;
     if (at && within(at, e.path)) return say("That's open here: open something else first");
+    // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
+    if (e.kind === "file" && e.unmoved) {
+      if (!confirm(`"${nameOf(e.path)}" is too large to put in Trash (${fmtSize(e.size ?? 0)}, kept by an older version of Sagebrush). Delete it for good? To keep it, Download it first.`)) return;
+      try {
+        await w.discard(e.path, e);
+        say(`"${nameOf(e.path)}" deleted for good`);
+      } catch (err) { fail(err); }
+      return refresh();
+    }
     try {
       const t = await w.remove(e.path);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)

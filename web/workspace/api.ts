@@ -111,6 +111,8 @@ type StaleMark = { fid: string; size: number; sha256: string };
 export const LEGACY_MAX = 256 * 2 ** 20;
 /** The copies of a file's bytes held while it is moved (as read, and as compared or given to IndexedDB). */
 export const COPIES = 2;
+// (a file kept the old way that is too large to move beside the index: what can't be done with it, and what can)
+const tooLarge = (e: Entry) => `${e.path} is too large to change here (${e.size} bytes, kept by an older version of Sagebrush): download it, then delete it and upload it again`;
 const isPath = (k: string) => { try { return normPath(k) === k && k !== "/"; } catch { return false; } };
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
@@ -338,6 +340,8 @@ export class Workspace {
     const b = bytesOf(content);
     if (b.length > this.limits.maxFileBytes) throw new WorkspaceError("limit", `a file is at most ${this.limits.maxFileBytes} bytes`);
     if (opts.fid !== undefined && e.fid !== opts.fid) throw new WorkspaceError("conflict", `${e.path} is another file now`);
+    // (one too large to move beside the index: not written, and its old bytes not read to be kept (astra))
+    if (e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
     const old = await this.contents(e);
     if (opts.base !== undefined && (e.rev ?? 0) !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, old);
     // (the bytes it had, kept as a version: a write that can't keep them doesn't happen)
@@ -411,6 +415,7 @@ export class Workspace {
     return this.locked(async () => {
       const e = await this.mustStat(p);
       if (e.kind === "folder") throw new WorkspaceError("invalid", "a folder can't be duplicated yet");
+      if (e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
       const c = await this.contents(e);
       if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
       let dest = to === undefined ? undefined : path(to);
@@ -798,6 +803,32 @@ export class Workspace {
     return (await this.write(q, bytes, opts)).entry;
   }
 
+  /** A data file too large to move beside the index (`unmoved`), deleted for good WITHOUT reading it:
+   * Trash can't take it (putting it there would read it, daybreak2).  Only a person may, after confirming
+   * (the file browser's Delete), and not an agent.  `expect`: the entry confirmed, by its identity.  Its
+   * old copy goes first, then its entry (a failure between leaves an entry naming nothing, which reconcile
+   * marks missing; never bytes no entry names).  Logged. */
+  async discard(p: string, expect: Pick<Entry, "fid" | "created">): Promise<void> {
+    if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can delete a file for good");
+    const q = path(p);
+    return this.locked(async () => {
+      const e = await this.mustStat(q);
+      if (e.kind !== "file" || !e.unmoved) throw new WorkspaceError("invalid", `${q} goes to Trash; only a file too large to move is deleted for good`);
+      if (e.fid !== expect.fid || e.created !== expect.created) throw new WorkspaceError("conflict", `${q} is another file now`);
+      if (e.ref !== null) {
+        if (e.trashed || within(e.path, TRASH)) await inTx(this.ws, "trash", "readwrite", async (tx) => { tx.objectStore("trash").delete(e.ref!); });
+        else if (this.main) await this.mainTx("files", "readwrite", (st) => st.delete(e.ref!));
+      }
+      const ops: Op[] = [];
+      await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+        const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(q));
+        if (cur && cur.fid === e.fid && cur.created === e.created) st.delete(q);
+        this.log(tx, ops, { op: "discard", path: q, kind: "file" });
+      });
+      this.tell({ ops });
+    });
+  }
+
   /** An entry dropped from the index, its contents already removed by the
    * page (a notebook deleted from the Open dialog, as before Trash is in
    * the UI).  For the pages only: not offered to agents. */
@@ -974,18 +1005,21 @@ export class Workspace {
    * Returns the entry as it is now. */
   async migrateOne(e: Entry, max = LEGACY_MAX): Promise<Entry> {
     if (e.kind !== "file" || e.migrated || e.unmoved || e.ref === null) return e;
+    const same = (cur: Entry | undefined) => !!cur && cur.kind === "file" && !cur.migrated && cur.ref === e.ref && cur.fid === e.fid && (cur.rev ?? 0) === (e.rev ?? 0);
+    const mark = async (size: number) => (await inTx(this.ws, "entries", "readwrite", async (tx) => {
+      const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+      if (!same(cur)) return cur;
+      const n: Entry = { ...cur!, size, unmoved: "too large to move" };
+      st.put(n);
+      return n;
+    })) ?? e;
+    // (its index already says it is larger than the bound: marked without reading it (daybreak2). Only an
+    // index that says less than the bytes are costs a read past the reservation, once: IndexedDB gives no
+    // value's length without materializing it, so that case can't be found any earlier)
+    if (typeof e.size === "number" && Number.isFinite(e.size) && e.size > max) return mark(e.size);
     const old = await this.legacyBytes(e);
     if (old === undefined) return e;
-    const same = (cur: Entry | undefined) => !!cur && cur.kind === "file" && !cur.migrated && cur.ref === e.ref && cur.fid === e.fid && (cur.rev ?? 0) === (e.rev ?? 0);
-    if (old.byteLength > max) {
-      return (await inTx(this.ws, "entries", "readwrite", async (tx) => {
-        const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
-        if (!same(cur)) return cur;
-        const n: Entry = { ...cur!, size: old.byteLength, unmoved: "too large to move" };
-        st.put(n);
-        return n;
-      })) ?? e;
-    }
+    if (old.byteLength > max) return mark(old.byteLength);
     const fid = e.fid ?? hex(8), sha256 = await bytesHash(old);
     const where = e.trashed || within(e.path, TRASH) ? "trash" : "files", key = e.ref;
     const now: Entry | undefined = await inTx(this.ws, ["entries", "fileBytes", "meta"], "readwrite", async (tx) => {
@@ -1253,7 +1287,7 @@ export class Workspace {
     const old = await read();
     // (a file too large to move beside the index stays where its bytes are, so it isn't moved; nothing is)
     const stuck = old.find((e) => e.kind === "file" && e.unmoved);
-    if (stuck) throw new WorkspaceError("limit", `${stuck.path} is too large to move here (${stuck.size} bytes): download it, delete it, and upload it again`);
+    if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     const ops: Op[] = [];
     const moved = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
       const st = tx.objectStore("entries");
