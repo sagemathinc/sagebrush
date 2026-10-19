@@ -241,8 +241,8 @@ async function migration() {
   check(r.unreadable.join() === "sagebrush-board:local:cccccccccccc", "a key that isn't a board is reported");
   check(r.boards === 3 && r.notebooks === 3 && r.files === 2 && r.recovered === 1, "the report's counts: " + JSON.stringify(r));
   check(!all.some((p) => p.includes("not kept")), "a board storage refused (unsaved) isn't one to bring in");
-  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => !k.startsWith(W.MOVED)).sort().map((k) => [k, localStorage.getItem(k)])));
-  check(before === after, "localStorage is left as it was (markers aside)");
+  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
+  check(before === after, "localStorage is left exactly as it was");
   check(localStorage.getItem("sagebrush-board:local:cccccccccccc") === "{not json", "…the unreadable key too");
   // again: nothing new
   const r2 = await W.migrate(w, localStorage);
@@ -255,10 +255,10 @@ async function migration() {
   check((await rawGet(w.ws, "boards", ids[0])).doc.nodes[0].text === "hi", "…the board itself untouched");
   await W.migrate(w, localStorage);
   check((await paths(w)).length === now.length, "…and only once");
-  // a lost marker: the board is found by its id, not brought in twice
-  localStorage.removeItem(W.MOVED + "sagebrush-board:local:" + ids[1]);
+  // changed back to what was brought in first: nothing new (it was brought in already)
+  localStorage.setItem("sagebrush-board:local:" + ids[0], JSON.stringify(board("My board", { mode: "sage" })));
   await W.migrate(w, localStorage);
-  check((await paths(w)).length === now.length, "a lost marker brings in nothing twice");
+  check((await paths(w)).length === now.length, "a document already brought in from a key isn't brought in again");
   // reconcile, later: new contents with no entry in /Recovered; contents gone marked, never dropped
   await rawPut(w.main, "notebooks", { id: "nb4", name: "Late", mode: "python", cells: [], rev: 1, updated: 8 });
   await rawDel(w.main, "notebooks", "nb2");
@@ -270,6 +270,130 @@ async function migration() {
   await rawPut(w.main, "notebooks", { id: "nb2", name: "Untitled", mode: "magma", cells: [], rev: 1, updated: 6 });
   await W.migrate(w, localStorage);
   check(!(await w.stat(gone.path)).missing, "…and unmarked when it's back");
+  w.close();
+}
+
+// (localStorage that can't be written: what migrate must not need, CORR-4A0-2)
+const readOnly = (m) => ({ get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null, getItem: (k) => m.get(k) ?? null, setItem() { throw new Error("refused"); } });
+
+async function migrationProvenance() {
+  // edited examples and changed local boards, with localStorage refusing every write: each document once (CORR-4A0-2)
+  let w = await fresh();
+  let m = new Map([["sagebrush-board:examples/a.json", JSON.stringify(board("Edited"))]]);
+  await W.migrate(w, readOnly(m));
+  await W.migrate(w, readOnly(m));
+  check((await w.list("/", { recursive: true })).filter((e) => e.kind === "board").length === 1, "an edited example is brought in once, with storage refusing writes");
+  w.close();
+  w = await fresh();
+  m = new Map([["sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify(board("Old"))]]);
+  await W.migrate(w, readOnly(m));
+  m.set("sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify(board("Changed")));
+  await W.migrate(w, readOnly(m));
+  await W.migrate(w, readOnly(m));
+  const names = (await w.list("/")).filter((e) => e.kind === "board").map((e) => e.path).sort();
+  check(names.join() === "/Changed (from an older tab).board.json,/Old.board.json", "a changed board: the original and one copy: " + names.join());
+  w.close();
+}
+
+async function recovery() {
+  // bytes in Trash with no entry: a failure while recovering them leaves no entry without contents, and a retry makes one (CORR-4A0-1)
+  const w = await fresh();
+  await rawPut(w.ws, "trash", enc("only copy"), "/Trash/orphan.txt");
+  const real = w.mainTx.bind(w);
+  w.mainTx = async (st, mode, f) => { if (st === "files" && mode === "readwrite") throw new Error("injected file write failure"); return real(st, mode, f); };
+  let threw = false;
+  try { await W.migrate(w, readOnly(new Map())); } catch { threw = true; }
+  w.mainTx = real;
+  check(threw, "a failed write is said");
+  check((await w.list("/", { recursive: true })).length === 0, "…and no entry was made");
+  check(dec(await rawGet(w.ws, "trash", "/Trash/orphan.txt")) === "only copy", "…the bytes are still in Trash");
+  // a stop after the bytes were written, before the entry: the retry reuses them
+  const adopt = w.adopt.bind(w);
+  w.adopt = async () => { throw new Error("injected stop"); };
+  try { await W.migrate(w, readOnly(new Map())); } catch {}
+  w.adopt = adopt;
+  check(dec(await rawGet(w.main, "files", "/Recovered/orphan.txt")) === "only copy", "(the bytes were written before the stop)");
+  await W.migrate(w, readOnly(new Map()));
+  const all = await paths(w);
+  check(all.join() === "/Recovered,/Recovered/orphan.txt", "the retry makes one entry, reusing the bytes: " + all.join());
+  check(dec((await w.read("/Recovered/orphan.txt")).content) === "only copy" && (await rawKeys(w.ws, "trash")).length === 0, "…readable, and out of Trash");
+  // an entry naming no contents is shown missing
+  await new Promise((ok) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/broken.txt", kind: "file", ref: null, created: 0, updated: 0 }); tx.oncomplete = ok; });
+  await W.migrate(w, readOnly(new Map()));
+  check((await w.stat("/broken.txt")).missing === true, "an entry naming no contents is marked missing");
+  w.close();
+}
+
+async function edges() {
+  const w = await fresh();
+  // a name starting with U+FFFF is in its folder's subtree (CORR-4A0-3)
+  const u = "/f/" + String.fromCharCode(0xffff) + "x.txt";
+  await w.create(u, { content: "hello" });
+  check((await w.list("/f", { recursive: true })).length === 1, "a U+FFFF name is listed");
+  await w.rename("/f", "/g");
+  check((await w.stat("/g/" + String.fromCharCode(0xffff) + "x.txt")) !== undefined && !(await w.stat(u)) && dec(await rawGet(w.main, "files", "/g/" + String.fromCharCode(0xffff) + "x.txt")) === "hello", "…and moves with its folder, bytes and all");
+  await w.remove("/g");
+  check((await paths(w, "/Trash")).length === 2, "…and goes to Trash with it");
+  // a move that would make a descendant too deep or too long is refused whole (CORR-4A0-4)
+  await w.create("/a/x.txt", { content: "x" });
+  const deep = "/" + Array(32).fill("d").join("/");
+  check(await fails(w.rename("/a", deep), "invalid"), "a move making a path 33 deep is refused");
+  check(dec((await w.read("/a/x.txt")).content) === "x" && !(await w.stat(deep)), "…nothing moved");
+  await w.create("/b/" + "n".repeat(200) + ".txt", { content: "y" });
+  const long = "/" + Array(4).fill("m".repeat(250)).join("/");
+  check(await fails(w.rename("/b", long), "invalid"), "a move making a path over 1024 characters is refused");
+  check((await w.stat("/b/" + "n".repeat(200) + ".txt")) !== undefined, "…nothing moved");
+  w.close();
+}
+
+async function noLocks() {
+  // without Web Locks, nothing is changed (CORR-4A0-5)
+  const w = await fresh();
+  const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, "locks");
+  Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+  try {
+    const r = await Promise.allSettled([w.create("/race.txt", { content: "first" }), w.create("/race.txt", { content: "second" })]);
+    check(r.every((x) => x.status === "rejected" && x.reason?.code === "storage"), "without Web Locks, changes are refused");
+    check(!(await w.stat("/race.txt")) && (await rawKeys(w.main, "files")).length === 0, "…and nothing was written");
+  } finally {
+    delete navigator.locks;
+    if (!("locks" in navigator) && desc) Object.defineProperty(Navigator.prototype, "locks", desc);
+  }
+  check(typeof navigator.locks?.request === "function", "(Web Locks restored)");
+  w.close();
+}
+
+async function rollback() {
+  // a clock set back: the count still holds (CORR-BEF-1)
+  let clock = 1000;
+  n++;
+  localStorage.clear();
+  const w = await W.Workspace.open({ name: `ws-test-${n}`, mainName: `main-test-${n}`, now: () => clock, limits: { ...W.LIMITS, maxVersions: 2 } });
+  await w.create("/c.txt", { content: "c0" });
+  for (const [t, x] of [[2000, "c1"], [3000, "c2"], [1500, "c3"]]) { clock = t; await w.write("/c.txt", x); }
+  const h = await w.history("/c.txt");
+  check(h.length === 2, "a clock set back: still at most maxVersions: " + h.length);
+  check(dec(await w.version("/c.txt", 1)) === "c2" && dec(await w.version("/c.txt", 0)) === "c1", "…the latest ones kept, in the order kept");
+  w.close();
+}
+
+async function dropping() {
+  const w = await fresh();
+  await w.create("/d/a.txt", { content: "a0" });
+  await w.create("/d/b.txt", { content: "b0" });
+  await w.create("/e.txt", { content: "e0" });
+  for (const x of ["1", "2", "3"]) { await w.write("/d/a.txt", "a" + x); await w.write("/d/b.txt", "b" + x); await w.write("/e.txt", "e" + x); }
+  w.actor = "agent:helper";
+  check(await fails(w.dropVersions("/d/a.txt"), "invalid"), "an agent can't drop versions");
+  check((await w.history("/d/a.txt")).length === 3, "…none dropped");
+  w.actor = "person";
+  check((await w.dropVersions("/d/a.txt", { keep: 1 })) === 4, "a person drops a file's older versions, keeping the latest (bytes freed)");
+  check((await w.history("/d/a.txt")).length === 1 && dec(await w.version("/d/a.txt", 0)) === "a2", "…the latest kept");
+  check((await w.dropVersions("/d")) === 8 && (await w.history("/d/b.txt")).length === 0, "…a folder's, all of them");
+  check((await w.history("/e.txt")).length === 3, "…others' untouched");
+  check((await w.dropVersions("/")) === 6 && (await w.history("/e.txt")).length === 0, "…everything's, with /");
+  check((await w.ops()).filter((o) => o.op === "dropVersions").map((o) => o.path).join() === "/d/a.txt,/d,/", "each drop is logged");
+  check(dec((await w.read("/d/a.txt")).content) === "a3", "the files themselves are untouched");
   w.close();
 }
 
@@ -329,7 +453,7 @@ async function versions() {
 }
 
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationFull]) {
+  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, edges, noLocks, rollback, dropping, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

@@ -75,8 +75,10 @@ function bytesOf(c: unknown): Uint8Array {
 function path(p: unknown): string {
   try { return normPath(p); } catch (e) { throw new WorkspaceError("invalid", e instanceof PathError ? e.message : String(e)); }
 }
-// (every path at and under `p`, in the entries' key order)
-const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/", p + "/￿"));
+// (every path under `p`: the keys from `p/` up to, not including, `p0`, "0"
+// being the character after "/", so every name, whatever its first
+// character, is in it: CORR-4A0-3)
+const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/", p + "0", false, true));
 
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
@@ -302,12 +304,14 @@ export class Workspace {
     return inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(after, true))));
   }
 
-  /** A data file's kept versions, oldest first (§2.5); `version(p, i)` reads one's bytes.  (Notebooks' and boards' TimeTravel comes with the pages, step 1b.) */
+  /** A data file's kept versions, in the order they were kept (§2.5); `version(p, i)` reads one's bytes.  (Notebooks' and boards' TimeTravel comes with the pages, step 1b.) */
   async history(p: string): Promise<Version[]> {
     const e = await this.mustStat(p);
     if (e.kind !== "file") throw new WorkspaceError("invalid", "history() is for data files here; a document's is its TimeTravel");
     if (!e.fid) return [];
-    return inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").index("byFile").getAll(IDBKeyRange.bound([e.fid, -Infinity], [e.fid, Infinity]))));
+    const vs: Version[] = await inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").index("byFile").getAll(IDBKeyRange.bound([e.fid, -Infinity], [e.fid, Infinity]))));
+    // (in the order they were kept: the ids count up, whatever the clock did)
+    return vs.sort((x, y) => x.id! - y.id!);
   }
 
   /** The bytes of a data file's version `i` (an index into history()). */
@@ -317,6 +321,49 @@ export class Workspace {
     const b = await inTx(this.ws, "versionBytes", "readonly", (tx) => req(tx.objectStore("versionBytes").get(v.id!)));
     if (b === undefined) throw new WorkspaceError("missing", `the bytes of that version are gone`);
     return b;
+  }
+
+  /** Old versions of data files dropped for good (§2.5): those of `p` (a
+   * file, every file in a folder, or with "/" every version kept), each
+   * file keeping its latest `keep` (default none).  Only a person may, from
+   * the file browser or the Storage panel after confirming: a workspace
+   * acting for an agent (actor "agent:…") is refused, and the agent surfaces
+   * (window.sagebrush.workspace, MCP, the endpoint) don't offer it.  Logged.
+   * Returns the bytes freed. */
+  async dropVersions(p: string, opts: { keep?: number } = {}): Promise<number> {
+    const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0));
+    if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
+    return this.locked(async () => {
+      let fids: Set<string> | null = null, kind: Kind = "folder";
+      if (q !== "/") {
+        const e = await this.mustStat(q);
+        kind = e.kind;
+        const files = e.kind === "folder" ? (await this.list(q, { recursive: true })).filter((x) => x.kind === "file") : e.kind === "file" ? [e] : [];
+        fids = new Set(files.map((x) => x.fid).filter((x): x is string => !!x));
+      }
+      const ops: Op[] = [];
+      const freed = await inTx(this.ws, ["versions", "versionBytes", "meta", "ops"], "readwrite", async (tx) => {
+        const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+        const all: Version[] = await req(vs.index("byFile").getAll());
+        const byFid = new Map<string, Version[]>();
+        for (const v of all) if (!fids || fids.has(v.fid)) byFid.set(v.fid, [...(byFid.get(v.fid) ?? []), v]);
+        let freed = 0;
+        for (const list of byFid.values()) {
+          list.sort((x, y) => x.id! - y.id!);
+          for (const v of list.slice(0, Math.max(0, list.length - keep))) {
+            vs.delete(v.id!);
+            vb.delete(v.id!);
+            freed += v.size;
+          }
+        }
+        const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
+        meta.put(Math.max(0, total - freed), "versionBytes");
+        this.log(tx, ops, { op: "dropVersions", path: q, kind });
+        return freed;
+      });
+      this.tell({ ops });
+      return freed;
+    });
   }
 
   // ------------------------------------------------------------ inside
@@ -337,16 +384,19 @@ export class Workspace {
         vb.put(bytes, id);
         let total = ((await req(meta.get("versionBytes"))) as number | undefined ?? 0) + bytes.length;
         const drop = (v: Version) => { vs.delete(v.id!); vb.delete(v.id!); total -= v.size; };
-        // (this file's: past the count or the age)
-        const mine: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-        mine.forEach((v, i) => { if (v.id !== id && (i < mine.length - this.limits.maxVersions || v.t < t - this.limits.maxVersionAgeMs)) drop(v); });
-        // (everyone's, oldest first, past the bytes)
+        // (this file's others, oldest first, by the order they were kept (the
+        // ids count up; a clock set back doesn't reorder them): past the
+        // count left beside the one just kept, or past the age.  The one just
+        // kept is counted apart, so the count is always right: CORR-BEF-1)
+        const others = ((await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as Version[]).filter((v) => v.id !== id).sort((x, y) => x.id! - y.id!);
+        const room = Math.max(0, this.limits.maxVersions - 1);
+        others.forEach((v, i) => { if (i < others.length - room || v.t < t - this.limits.maxVersionAgeMs) drop(v); });
+        // (everyone's, oldest first, past the bytes; deletes made above are already out of this read)
         if (total > this.limits.maxVersionBytes) {
-          const gone = new Set(mine.filter((v) => v.id !== id && (mine.indexOf(v) < mine.length - this.limits.maxVersions || v.t < t - this.limits.maxVersionAgeMs)).map((v) => v.id));
-          const old: Version[] = await req(vs.index("byTime").getAll());
+          const old: Version[] = await req(vs.getAll());
           for (const v of old) {
             if (total <= this.limits.maxVersionBytes) break;
-            if (v.id === id || gone.has(v.id)) continue;
+            if (v.id === id) continue;
             drop(v);
           }
         }
@@ -358,10 +408,14 @@ export class Workspace {
     }
   }
 
-  /** `f` holding the workspace's lock: one change at a time in all of this browser's tabs. */
-  locked<T>(f: () => Promise<T>): Promise<T> {
+  /** `f` holding the workspace's lock: one change at a time in all of this
+   * browser's tabs.  Without Web Locks there is no such lock, and changes
+   * that span the two databases could interleave and undo each other's
+   * bytes, so none are made (CORR-4A0-5): a WorkspaceError("storage"). */
+  async locked<T>(f: () => Promise<T>): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
-    return locks ? locks.request(LOCK, f) : f();
+    if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
+    return locks.request(LOCK, f);
   }
 
   async mustStat(p: string): Promise<Entry> {
@@ -430,7 +484,11 @@ export class Workspace {
       await this.mainTx("files", "readwrite", (st) => st.put(b, q));
       ref = q;
       size = b.length;
-      undo = () => this.mainTx("files", "readwrite", (st) => st.delete(q));
+      // (taken back only if no entry names them: never another's bytes)
+      undo = async () => {
+        const named = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getKey(["file", q])));
+        if (named === undefined) await this.mainTx("files", "readwrite", (st) => st.delete(q));
+      };
     }
     const ops: Op[] = [];
     try {
@@ -455,13 +513,18 @@ export class Workspace {
   /** An entry for contents that are already kept (migration, reconcile):
    * at `base + ext` in `folder`, or the first free `base (2) + ext`, …
    * Hold the lock (locked()) around it. */
-  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }): Promise<Entry> {
+  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][] } = {}): Promise<Entry> {
+    // (with the entry, in its transaction: a board's record, records in meta; or neither, nor the entry)
     const ops: Op[] = [];
-    const entry = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+    const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length ? ["meta"] : [])];
+    const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
       const st = tx.objectStore("entries");
       const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
-      const p = freePath(folder, base, ext, (x) => taken.has(x));
+      const p = also.at ?? freePath(folder, base, ext, (x) => taken.has(x));
       if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
+      if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
+      if (also.board) tx.objectStore("boards").put(also.board);
+      for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
       await this.folders(tx, folder, ops);
       await this.room(st, 1);
       const t = this.now();
@@ -516,6 +579,10 @@ export class Workspace {
     });
     const to = (p: string) => b + p.slice(a.length);
     const inTrash = (p: string) => within(p, TRASH);
+    // (every new path a path the workspace takes, before anything moves: CORR-4A0-4)
+    for (const e of old) {
+      try { normPath(to(e.path)); } catch (err) { throw new WorkspaceError("invalid", `moving ${a} to ${b} would make ${to(e.path).slice(0, 80)}…: ${(err as Error).message}`); }
+    }
     // data files whose bytes move: [entry, new key]
     const files = old.filter((e) => e.kind === "file" && e.ref !== null).map((e) => [e, to(e.path)] as const);
     const copied: (() => Promise<unknown>)[] = [];
