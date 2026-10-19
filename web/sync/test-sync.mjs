@@ -33,6 +33,17 @@ const Q = "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"; // allowlisted; its purge held
 const RF = "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"; // never synced; CoCalc's purge of it can't reach its account object
 const S1 = "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4"; // allowlisted, with a file; one purge request id is sent for it and for S2 at once
 const S2 = "f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5"; // never synced
+// (the one storage budget, §6.1: each has storage_bytes 10,000 unless said)
+const T1 = "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1"; // a sharing upload and a sync upload at the edge, at once
+const T2 = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"; // documents into the ceiling, then a downgrade
+const T3 = "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"; // sharing at the edge: release and retry; a lost answer's hold; the purge
+const T4 = "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"; // storage_bytes 1 MiB: D1 writes per growth
+const T5 = "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5"; // storage_bytes 1 MiB, production's chunk (4 MiB, so L): the tail below a cap
+const T6 = "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"; // open holds at the cap
+const U1 = "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"; // a raise's answer held across a purge and a new generation
+const U2 = "e8e8e8e8-e8e8-4e8e-8e8e-e8e8e8e8e8e8"; // a raise's answer held across a downgrade
+const U3 = "e9e9e9e9-e9e9-4e9e-8e9e-e9e9e9e9e9e9"; // a batch refused before its forward
+const V1 = "eaeaeaea-eaea-4eae-8eae-eaeaeaeaeaea"; // a grant made unusable by a downgrade: given back with no further request
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -55,7 +66,8 @@ const URL_KEY = "url-key";
 const LOSE = "fa17fa17fa17";
 // ---- a fake CoCalc: the limits (§6)
 const fake = { limits: new Map(), down: false };
-const sync = (storage, reads) => ({ storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: storage, version_bytes: 1000, read_bytes_per_day: reads } });
+// (one storage_bytes for sharing and sync together, §6.1)
+const sync = (storage, reads) => ({ storage_bytes: storage, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: reads } });
 fake.limits.set(A, sync(30_000, 60_000));
 fake.limits.set(B, sync(1 << 20, 1 << 20));
 fake.limits.set(D, sync(1 << 20, 1 << 20));
@@ -70,6 +82,11 @@ fake.limits.set(L, sync(1 << 20, 1 << 20));
 fake.limits.set(M, sync(1 << 20, 1 << 20));
 fake.limits.set(O, sync(1 << 20, 1 << 20));
 fake.limits.set(Q, sync(1 << 20, 1 << 20));
+for (const t of [T1, T2, T3]) fake.limits.set(t, sync(10_000, 1 << 20));
+fake.limits.set(T4, sync(1 << 20, 1 << 20));
+fake.limits.set(T5, sync(1 << 20, 1 << 20));
+fake.limits.set(T6, sync(1 << 20, 1 << 20));
+for (const u of [U1, U2, U3, V1]) fake.limits.set(u, sync(10_000, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -86,7 +103,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -447,7 +464,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   r = await put(sa, other);
   ok(r.status === 201, "a second blob");
   r = await put(sa, Buffer.alloc(20_000, 3));
-  ok(r.status === 507 && (await r.json()).error === "storage_full", "over sync.storage_bytes: storage_full");
+  ok(r.status === 507 && (await r.json()).error === "storage_full", "over storage_bytes: storage_full");
   // a read: debited at issue, a 303 to a signed URL on the user-content domain
   r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "same-origin" } });
   const loc = r.headers.get("location") ?? "";
@@ -570,7 +587,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   await new Promise((res) => setTimeout(res, 1200));
   let up = await put(sb, Buffer.from("b after a malformed plan"));
   ok(up.status === 201, "a plan without its sync part keeps the last good limits, never sync off");
-  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: "lots", version_bytes: 1, read_bytes_per_day: 1 } });
+  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: "lots", read_bytes_per_day: 1 } });
   await new Promise((res) => setTimeout(res, 1200));
   up = await put(sb, Buffer.from("b after a second malformed plan"));
   ok(up.status === 201, "nor does a malformed number");
@@ -963,7 +980,7 @@ const signedPost = (key, path, body, ts = Math.floor(Date.now() / 1000)) => fetc
 });
 const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SITE, path, { headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": "sha256=" + createHmac("sha256", key).update(`${ts}\nGET\n${path}\n`).digest("hex") } });
 {
-  const tiny = { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: 5, version_bytes: 0, read_bytes_per_day: 0 } };
+  const tiny = { storage_bytes: 5, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 0, read_bytes_per_day: 0 } };
   const body = (issued, limits = tiny, account_id = D) => JSON.stringify({ request_id: crypto.randomUUID(), account_id, issued, limits });
   let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: body(100) });
   ok(r.status === 401, "a plan notice that isn't signed is refused");
@@ -1577,8 +1594,10 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const ridN = crypto.randomUUID();
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: N, request_id: ridN }))).status === 202 && (await until(async () => (await acctN.lifecycle())?.state === null && (await acctN.lifecycle())?.record_pending === false)), "(CoCalc purges N)");
   const stN = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridN}`);
+  // (the body read at once, before another call to the Worker)
+  const stNB = await stN.json();
   const rowN = await rowOf(N);
-  ok(stN.status === 200 && (await stN.json()).state === "purged" && rowN === null, "CoCalc's status finds it by its receipt: purged, with no row ever made");
+  ok(stN.status === 200 && stNB.state === "purged" && rowN === null, "CoCalc's status finds it by its receipt: purged, with no row ever made");
   // CORR-B92-1: CoCalc's purge leaves the account deleted for good, storage or none: an enable or a
   // request already past its session check (astra's probe) is refused when it arrives
   const sm = await signIn(M);
@@ -1599,6 +1618,223 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await bucket.put(fresh, "fresh");
   await worker.scheduled({ cron: "17 3 * * *" });
   ok((await bucket.head(fresh)) !== null, "an object younger than the threshold is never touched (an upload may be finishing)");
+}
+
+// ---- the one storage budget for sharing and sync (§6.1)
+{
+  const L = 10_000;
+  const sharePut = (session, bytes) => fetchAt(SITE, `/api/share/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
+  const claimOf = async (id) => (await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first())?.claim_bytes;
+  const sharingOf = async (id) => (await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS n").bind(id, Math.floor(Date.now() / 1000)).first()).n;
+  // T1: one sharing upload and one sync upload, each fitting alone, not both, at once
+  const st1 = await signIn(T1);
+  ok((await post(st1, "/api/sync/v1/enable", {})).status === 200, "(T1: sync on, storage_bytes 10,000 for both)");
+  const [sh1, sy1] = await Promise.all([sharePut(st1, Buffer.alloc(6000, 11)), put(st1, Buffer.alloc(6000, 12))]);
+  const won = [sh1.status === 200 || sh1.status === 201, sy1.status === 201];
+  const tot1 = (await sharingOf(T1)) + (await claimOf(T1));
+  ok(won.filter(Boolean).length === 1 && tot1 <= L && [413, 507].includes(won[0] ? sy1.status : sh1.status),
+    "a sharing upload and a sync upload at the edge, at once: exactly one goes, the other is refused, and sharing + claim stays within storage_bytes: " + JSON.stringify({ sharing: sh1.status, sync: sy1.status, tot1 }));
+  // T3: sync's claim holds slack it doesn't use; sharing at the edge asks it back, once, and goes
+  const st3 = await signIn(T3);
+  const acctT3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T3)));
+  ok((await post(st3, "/api/sync/v1/enable", {})).status === 200, "(T3: sync on)");
+  const r3 = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack")), size: 8000 });
+  await acctT3.abandon({ id: r3.ok.id });
+  const b3 = await acctT3.budget();
+  ok(r3?.ok?.id && b3.claim >= 8000 && b3.files === 0 && (await claimOf(T3)) === b3.claim, "(T3: an upload reserved and abandoned leaves the claim holding " + b3.claim + " it doesn't use)");
+  const sh3 = await sharePut(st3, Buffer.alloc(5000, 31));
+  ok([200, 201].includes(sh3.status) && (await claimOf(T3)) === 0 && (await acctT3.budget()).claim === 0, "sharing at the edge: sync gives back its unused claim, and the upload goes (" + sh3.status + ")");
+  // (fail closed: the give-back can't reach D1, so the refusal stands)
+  const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
+  await acctT3.abandon({ id: r3b.ok.id });
+  const held3 = await claimOf(T3);
+  await acctT3.setFailClaim({ on: true });
+  const sh3b = await sharePut(st3, Buffer.alloc(4900, 32));
+  ok(sh3b.status === 413 && (await claimOf(T3)) === held3, "if sync's give-back can't reach D1, sharing's refusal stands: never fail open (" + sh3b.status + ", claim " + held3 + ")");
+  await acctT3.setFailClaim({ on: false });
+  ok(await until(async () => (await acctT3.budget()).dirty === false && (await claimOf(T3)) === (await acctT3.budget()).claim), "(the alarm writes the give-back D1 missed)");
+  ok((await claimOf(T3)) + (await sharingOf(T3)) <= L, "and sharing + claim is within storage_bytes throughout");
+  // T3: a lost answer's hold stays until its attempt can't commit, then the document's total replaces it
+  const s3 = await socket(st3);
+  await hello(s3, dev1);
+  const lostT3 = await s3.ask(batch(LOSE, 1, [[1, pid(1, "clientT3LO"), [], "x".repeat(300)]], { kind: "board" }));
+  const bh = await acctT3.budget();
+  ok(lostT3?.code === "busy" && bh.holds === 1 && bh.held === 300, "a batch whose answer is lost keeps its 300 bytes held against the budget");
+  ok(await until(async () => { const b = await acctT3.budget(); return b.holds === 0 && b.held === 0 && b.documents === 300; }), "once its attempt can no longer commit, the alarm asks the document: its total (300) replaces the hold");
+  s3.ws.close();
+  // T3: the purge gives the claim back
+  ok((await del(st3, T3)).status === 202 && (await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(T3)).first())?.state === "purged")), "(T3: Delete my synced data)");
+  ok((await claimOf(T3)) === 0, "the purge sets the claim to 0, so the space is sharing's again");
+  // T2: documents may take the claim past storage_bytes into the ceiling (max(L / 10, 256 in tests) = 1,000), no further
+  const st2 = await signIn(T2);
+  const acctT2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T2)));
+  ok((await post(st2, "/api/sync/v1/enable", {})).status === 200, "(T2: sync on)");
+  const s2 = await socket(st2);
+  await hello(s2, dev1);
+  const docT2 = "7272cafe7272";
+  const codes = [];
+  for (let i = 1; i <= 8; i++) {
+    const a = await s2.ask(batch(docT2, 1, [[i, pid(i, "clientT2CE"), i > 1 ? [pid(i - 1, "clientT2CE")] : [], "d".repeat(1500)]], i === 1 ? { kind: "board" } : {}));
+    codes.push(a?.batch?.new === 1 ? "ok" : a?.code);
+  }
+  const b2 = await acctT2.budget();
+  const c2 = await claimOf(T2);
+  ok(codes.slice(0, 7).every((c) => c === "ok") && codes[7] === "storage_full" && b2.documents === 10_500 && c2 > L && c2 <= L + 1000,
+    "document batches go past storage_bytes into the ceiling (10,500 of 10,000 + 1,000), and the one past the ceiling is refused, storage_full: " + JSON.stringify({ codes, documents: b2.documents, claim: c2 }));
+  const shIn = await sharePut(st2, Buffer.from("1"));
+  const syIn = await put(st2, Buffer.from("1"));
+  ok(shIn.status === 413 && syIn.status === 507, "with sync in the ceiling, sharing refuses even one byte (its check is already over, never wrapped), and so do sync's files: " + JSON.stringify([shIn.status, syIn.status]));
+  // T2: a downgrade below what is held refuses growth and deletes nothing
+  // (as CoCalc would: its limits answer and its notice both say 5,000)
+  fake.limits.set(T2, sync(5000, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: T2, issued: Date.now(), limits: sync(5000, 1 << 20) }))).json()).applied === true, "(T2 downgraded to 5,000)");
+  const after = await s2.ask(batch(docT2, 1, [[8, pid(8, "clientT2CE"), [pid(7, "clientT2CE")], "e"]]));
+  const pulled = await s2.ask({ t: "pull", doc: docT2, epoch: 1, after: 0 });
+  ok(after?.code === "storage_full" && (await acctT2.budget()).documents === 10_500 && (pulled?.items?.length ?? 0) > 0, "after the downgrade, a new batch is refused and nothing is deleted: the document still reads in full");
+  s2.ws.close();
+  // T4: D1 writes per growth: one raise per chunk (storage_bytes / 64), not one per edit
+  const st4 = await signIn(T4);
+  const acctT4 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T4)));
+  ok((await post(st4, "/api/sync/v1/enable", {})).status === 200, "(T4: sync on, storage_bytes 1 MiB, chunk 16,384)");
+  const s4 = await socket(st4);
+  await hello(s4, dev1);
+  const docT4 = "7474cafe7474";
+  for (let i = 1; i <= 20; i++) await s4.ask(batch(docT4, 1, [[i, pid(i, "clientT4WR"), i > 1 ? [pid(i - 1, "clientT4WR")] : [], "w".repeat(1000)]], i === 1 ? { kind: "board" } : {}));
+  const b4 = await acctT4.budget();
+  ok(b4.documents === 20_000 && b4.calls <= 3, "20 batches, 20,000 bytes: " + b4.calls + " D1 claim writes, one a chunk, not one an edit");
+  s4.ws.close();
+  // LIMIT-97A-1: production's chunk (4 MiB, so L itself), with less than a chunk left below the cap: the
+  // tail is taken in one write, and a full budget is refused without a D1 call an edit
+  const st5 = await signIn(T5);
+  const acctT5 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T5)));
+  ok((await post(st5, "/api/sync/v1/enable", {})).status === 200, "(T5: sync on, storage_bytes 1 MiB)");
+  await acctT5.setChunk({ bytes: 4 << 20 });
+  ok([200, 201].includes((await sharePut(st5, Buffer.alloc(40_000, 51))).status), "(sharing holds 40,000 first: less than a chunk is left)");
+  const s5 = await socket(st5);
+  await hello(s5, dev1);
+  const docT5 = "7575cafe7575";
+  const c5 = [];
+  for (let i = 1; i <= 14; i++) {
+    const a = await s5.ask(batch(docT5, 1, [[i, pid(i, "clientT5TL"), i > 1 ? [pid(i - 1, "clientT5TL")] : [], "t".repeat(100_000)]], i === 1 ? { kind: "board" } : {}));
+    c5.push(a?.batch?.new === 1 ? "ok" : a?.code);
+    if (a?.batch?.new !== 1) break;
+  }
+  const calls5 = (await acctT5.budget()).calls;
+  const more = [];
+  const writes5 = (await acctT5.budget()).writes;
+  // (each as large as the one refused: none fits)
+  for (let i = 0; i < 6; i++) more.push((await s5.ask(batch(docT5, 1, [[1, pid(100 + i, `clientT5M${i}`), [], "v".repeat(100_000)]])))?.code ?? "ok");
+  const b5 = await acctT5.budget();
+  const c5d = await claimOf(T5);
+  ok(c5.filter((c) => c === "ok").length >= 10 && c5.at(-1) === "storage_full" && writes5 === 2 && calls5 <= 5 && c5d + 40_000 <= (1 << 20) + Math.max(256, Math.floor((1 << 20) / 10)),
+    "with production's chunk and less than one left, 11 edits: the tail below L and the ceiling's are one D1 write each (2), with " + calls5 + " statements in all: " + JSON.stringify({ batches: c5, writes: writes5, calls: calls5, claim: c5d }));
+  ok(more.every((c) => c === "storage_full") && b5.calls - calls5 <= 2 && b5.writes === writes5, "and, full, 6 more edits are refused with at most 2 D1 statements (once refused, a while without asking), none a write: " + JSON.stringify({ more, calls: b5.calls - calls5 }));
+  s5.ws.close();
+  // LIMIT-97A-2: at most 200 open holds; a zero-byte batch takes one too
+  const st6 = await signIn(T6);
+  const acctT6 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T6)));
+  ok((await post(st6, "/api/sync/v1/enable", {})).status === 200, "(T6: sync on)");
+  const s6 = await socket(st6);
+  await hello(s6, dev1);
+  const z1 = await s6.ask(batch(LOSE, 1, [[1, pid(1, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z1?.code === "busy" && (await acctT6.budget()).holds === 1, "(a zero-byte batch whose answer is lost holds a row)");
+  ok((await acctT6.seedHolds({ n: 198 })) === 199, "(199 open holds)");
+  const z2 = await s6.ask(batch("7676cafe7676", 1, [[1, pid(2, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z2?.batch?.new === 1 && (await acctT6.budget()).holds === 199, "the 200th, answered, goes, and its hold is gone at once");
+  await acctT6.seedHolds({ n: 1 });
+  const z3 = await s6.ask(batch("7777cafe7777", 1, [[1, pid(3, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z3?.code === "busy" && (await acctT6.budget()).holds === 200, "with 200 open, a new batch is refused, busy with retry_after, and makes no row (LIMIT-97A-2)");
+  s6.ws.close();
+  // CORR-97A-1: a raise's D1 answer, held across a purge of its generation and a new one: never installed
+  const gs = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  const su1 = await signIn(U1);
+  const acctU1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U1)));
+  ok((await post(su1, "/api/sync/v1/enable", {})).status === 200, "(U1: sync on, generation 1)");
+  await gs("claim-raise-answer", true);
+  const pr1 = acctU1.reserve({ account: U1, sha256: sha(Buffer.from("u1 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(U1)) >= 5000), "(the raise's statement ran in D1: 5,000 granted, its answer held)");
+  ok((await del(su1, U1)).status === 202 && (await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(U1)).first())?.state === "purged")), "(meanwhile, Delete my synced data: generation 1 purged, its claim 0)");
+  const en2u = await (await post(su1, "/api/sync/v1/enable", {})).json();
+  ok(en2u.generation === 2 && en2u.state === "active", "(sync on again: generation 2)");
+  await gs("claim-raise-answer", false);
+  const rr1 = await pr1;
+  const bu1 = await acctU1.budget();
+  ok(rr1?.error && bu1.claim === 0 && bu1.files === 0 && (await claimOf(U1)) === 0, "the old raise's answer, arriving now, is not installed in generation 2: no claim, no reservation (CORR-97A-1): " + JSON.stringify({ r: rr1, claim: bu1.claim, files: bu1.files }));
+  // CORR-97A-2: a raise's answer held across a downgrade: the downgrade's zeroed caps stand
+  const su2 = await signIn(U2);
+  const acctU2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U2)));
+  ok((await post(su2, "/api/sync/v1/enable", {})).status === 200, "(U2: sync on, storage_bytes 10,000)");
+  await gs("claim-raise-answer", true);
+  const pr2 = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(U2)) >= 5000), "(the raise's statement ran: its answer held)");
+  // (and a second upload's raise queued behind it, with the limit as it was when it asked)
+  const pr2b = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise, queued")), size: 4000 });
+  await new Promise((r) => setTimeout(r, 200));
+  fake.limits.set(U2, sync(0, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: U2, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
+  await gs("claim-raise-answer", false);
+  const rr2 = await pr2;
+  const rr2b = await pr2b;
+  const bu2 = await acctU2.budget();
+  ok(rr2b?.error !== undefined, "the raise queued behind it, run after the downgrade, reads the new limit, not the one it was queued with, and admits nothing: " + JSON.stringify(rr2b));
+  ok(rr2?.error && bu2.blob_cap === 0 && bu2.files === 0 && (await put(su2, Buffer.from("u2 after"))).status !== 201, "the older raise's answer doesn't restore the caps the downgrade zeroed, and nothing is reserved or taken (CORR-97A-2): " + JSON.stringify({ r: rr2, blob_cap: bu2.blob_cap, files: bu2.files }));
+  // CORR-97A-3: a batch refused before its forward (its blob was never uploaded) gives its hold back
+  const su3 = await signIn(U3);
+  const acctU3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U3)));
+  ok((await post(su3, "/api/sync/v1/enable", {})).status === 200, "(U3: sync on)");
+  const s3u = await socket(su3);
+  await hello(s3u, dev1);
+  const nb = await s3u.ask(batch("7979cafe7979", 1, [[1, pid(1, "clientU3NB"), [], "abc", [sha(Buffer.from("never uploaded"))]]], { kind: "board" }));
+  const bu3 = await acctU3.budget();
+  ok(nb?.code && nb.code !== "busy" && bu3.holds === 0 && bu3.held === 0, "a batch refused before its forward (a blob not uploaded) leaves no hold: " + JSON.stringify({ code: nb?.code, holds: bu3.holds, held: bu3.held }));
+  s3u.ws.close();
+  // CORR-BDA-1: a raise D1 granted, answered after a downgrade: no caps, and the grant is given back by
+  // the alarm alone, even with the first give-back failing
+  const sv1 = await signIn(V1);
+  const acctV1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(V1)));
+  ok((await post(sv1, "/api/sync/v1/enable", {})).status === 200, "(V1: sync on, empty, storage_bytes 10,000)");
+  await gs("claim-raise-answer", true);
+  const prv = acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(V1)) >= 5000), "(the raise's statement ran in D1: its answer held)");
+  fake.limits.set(V1, sync(0, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
+  await acctV1.setFailClaim({ on: true });
+  await gs("claim-raise-answer", false);
+  const rv = await prv;
+  const bv = await acctV1.budget();
+  ok(rv?.error && bv.blob_cap === 0 && bv.files === 0 && bv.alarm !== null, "the grant arrives after the downgrade: no caps, nothing reserved, and the alarm is armed for it: " + JSON.stringify({ r: rv?.error?.code, claim: bv.claim, alarm: bv.alarm !== null }));
+  await new Promise((r) => setTimeout(r, 800));
+  const bv2 = await acctV1.budget();
+  ok((await claimOf(V1)) >= 5000 && bv2.alarm !== null && bv2.dirty === true, "while the give-back can't reach D1, it is retried from the alarm, which stays armed: D1 still holds the grant");
+  await acctV1.setFailClaim({ on: false });
+  ok(await until(async () => (await claimOf(V1)) <= 1 && (await acctV1.budget()).claim <= 1 && (await acctV1.budget()).dirty === false), "with no further request, the alarm gives the unusable grant back, in D1 too (CORR-BDA-1): " + (await claimOf(V1)));
+  // (and a lower limit alone: slack within 2 chunks of the old one, beyond 2 of the new, is given back)
+  fake.limits.set(V1, sync(10_000, 1 << 20));
+  await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(10_000, 1 << 20) }));
+  const rv2 = await acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 small")), size: 100 });
+  await acctV1.abandon({ id: rv2.ok.id });
+  // (until no alarm is pending at all: the upload's own end has passed, so only the notice can arm one)
+  ok(await until(async () => (await acctV1.budget()).alarm === null, 10_000), "(nothing pending: no alarm)");
+  const slack = await claimOf(V1);
+  ok(rv2?.ok?.id && slack >= 100 && slack <= 2 * 156, "(an unused claim of " + slack + ", within 2 chunks of 10,000: kept)");
+  fake.limits.set(V1, sync(1000, 1 << 20));
+  await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now() + 1, limits: sync(1000, 1 << 20) }));
+  ok(await until(async () => (await claimOf(V1)) <= 64), "a notice lowering the limit to 1,000 (chunk 64) has the alarm give back what is beyond 2 chunks of it, with no further request: " + (await claimOf(V1)));
+  // (the cache's refusal says it is temporary)
+  const full1 = await s3u_full_probe();
+  async function s3u_full_probe() {
+    const sx = await signIn(T5);
+    const so = await socket(sx);
+    await hello(so, dev2);
+    const a = await so.ask(batch("7575cafe7575", 1, [[1, pid(300, "clientT5RA"), [], "w".repeat(100_000)]]));
+    const b = await so.ask(batch("7575cafe7575", 1, [[1, pid(301, "clientT5RB"), [], "w".repeat(100_000)]]));
+    so.ws.close();
+    return [a, b];
+  }
+  ok(full1[1]?.code === "storage_full" && Number(full1[1]?.detail?.retry_after) > 0, "a refusal from the full cache is storage_full with retry_after, the time left: try again shortly: " + JSON.stringify(full1[1]?.detail));
+  // the breakdown: sharing's files and versions, sync's files and documents, against the one storage_bytes
+  const me = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: st2 } })).json();
+  ok(me.usage_breakdown?.sync_documents === 10_500 && me.usage_breakdown.sync_files === 0 && me.usage_breakdown.sharing_files === 0 && me.usage === 10_500, "the usage breakdown shows each part, sync's documents on their own line, and their sum: " + JSON.stringify({ usage: me.usage, parts: me.usage_breakdown }));
 }
 
 await mf.dispose();
