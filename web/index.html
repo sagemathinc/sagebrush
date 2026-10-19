@@ -739,11 +739,12 @@ function sayNotLeft(err) {
   wsBrowser?.say(m);
 }
 addEventListener("unhandledrejection", (ev) => { if (ev.reason?.leaving) { ev.preventDefault(); sayNotLeft(ev.reason); } });
-// (closing the page while some couldn't be kept: the browser asks first,
-// they are only here; not for saves merely still being written.  The
-// listener is there only meanwhile: a page with one is slower to leave)
+// (closing the page while notebooks left have saves still being written,
+// or not kept: the browser asks first, they are only here; the shown
+// one's own saves don't count.  The listener is there only meanwhile: a
+// page with one is slower to leave)
 const askBeforeLeaving = (ev) => { ev.preventDefault(); ev.returnValue = ""; };
-nb.on("unkept", (n) => (n > 0 ? addEventListener : removeEventListener)("beforeunload", askBeforeLeaving));
+nb.on("left", (n) => (n > 0 ? addEventListener : removeEventListener)("beforeunload", askBeforeLeaving));
 // A save of a notebook no longer open here met a change made elsewhere
 // (CORR-B54-1): what it had is kept as a notebook of its own, "<name> (your
 // changes, made while it changed elsewhere)", beside the other version,

@@ -301,16 +301,21 @@ try {
     return 1;
   })()`);
   const copyOf = (name) => "/" + name + " (your changes, made while it changed elsewhere)";
+  const unloadAsks = () => ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); dispatchEvent(e); return e.defaultPrevented; })()`);
+  check((await unloadAsks()) === false, "closing the page with nothing of a notebook left outstanding doesn't ask");
   // CORR-E46-1: the page fails to keep them; a save of B meanwhile succeeds;
   // saved() still rejects, and once keeping works again, the edit is kept
   await heldSwitch("D held");
+  check((await unloadAsks()) === true, "closing the page while a notebook left (D) has saves still being written asks first");
   await ev(`(() => { window.__pageKeep = sagebrush.notebook.onDetachedConflict(() => { throw new Error("injected: no room"); }); return 1; })()`);
   await ev(`(async () => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "B saved meanwhile"); nb.flush(); return 1; })()`);
   await writeElsewhere("/D held.ipynb", "D remote concurrent");
   const failed = await ev(`(async () => { __gate[1].open(); __gate[2].open(); let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } const w = sagebrush.workspace; return { error, b: (await w.read("/B separate.ipynb")).content.cells[0].code, copies: (await w.list("/")).filter((e) => e.path.startsWith(${JSON.stringify(copyOf("D held"))})).map((e) => e.path) }; })()`);
+  check((await unloadAsks()) === true, "…and while they couldn't be kept");
   check(failed.error && /injected/.test(failed.error) && failed.b === "B saved meanwhile" && failed.copies.length === 0, "a save of D no longer shown that the page couldn't keep: saved() rejects, though B's save after it succeeded: " + JSON.stringify(failed));
   const recovered = await ev(`(async () => { sagebrush.notebook.onDetachedConflict(__pageKeep); let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } const w = sagebrush.workspace, c = await w.read(${JSON.stringify(copyOf("D held") + ".ipynb")}).catch(() => null); return { error, theirs: (await w.read("/D held.ipynb")).content.cells[0].code, copy: c?.content.cells[0].code ?? null }; })()`);
   check(recovered.error === null && recovered.copy === "D held second" && recovered.theirs === "D remote concurrent", "…and is tried again: kept once it can be, D's latest edit, the other version as it was: " + JSON.stringify(recovered));
+  check((await unloadAsks()) === false, "…and not once they are kept");
   // CORR-E46-2: a copy changed by someone after it was made is never written over by a later save
   await heldSwitch("E held");
   await writeElsewhere("/E held.ipynb", "E remote concurrent");
@@ -419,7 +424,6 @@ try {
   await sleep(1500);
   const side = await ev(`({ status: document.querySelector("#status").textContent, toast: document.querySelector("#wssidebar .ftoast")?.textContent ?? "", shown: sagebrush.notebook.snapshot().name })`);
   check(/4 notebooks you left/.test(side.status) && /4 notebooks you left/.test(side.toast) && side.shown === "B separate", "…opened from the file browser: not opened, said there and in the status line, B staying: " + JSON.stringify(side));
-  const unloadAsks = () => ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); dispatchEvent(e); return e.defaultPrevented; })()`);
   check((await unloadAsks()) === true, "…and closing the page asks first, those changes only here");
   const unbound = await ev(`(async () => {
     const nb = sagebrush.notebook, w = sagebrush.workspace;
