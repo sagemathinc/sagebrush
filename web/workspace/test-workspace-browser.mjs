@@ -111,12 +111,120 @@ try {
   await typeInto("Renamed here");
   check(await until(`document.querySelector("#nbname").value === "Renamed here"`), "renaming the open notebook renames it on the page: " + cur);
   check(await until(`${W}.stat("/Renamed here.ipynb").then((e) => !!e)`), "…and its file");
+  const f2Cur = () => ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);
+  const typeTitle = (t) => ev(`(() => { const i = document.querySelector("#nbname"); i.value = ${JSON.stringify(t)}; i.dispatchEvent(new Event("input")); return 1; })()`);
+  const nbPaths = () => ev(`${W}.list("/").then((l) => l.filter((e) => e.kind === "notebook").map((e) => e.path).sort())`);
+  // a title typed, then (before its rename, 0.8 s later) the file renamed in
+  // the sidebar: the sidebar's, the later, stays (CORR-0B0-1)
+  await typeTitle("Queued title");
+  await f2Cur();
+  await until(`!!document.querySelector("#wssidebar .frow input")`);
+  await typeInto("Sidebar final");
+  await sleep(1500);
+  check((await ev(`document.querySelector("#nbname").value`)) === "Sidebar final" && (await ev(`${W}.stat("/Sidebar final.ipynb").then((e) => !!e)`)) && !(await ev(`${W}.stat("/Queued title.ipynb").then((e) => !!e)`)), "a typed title's rename, superseded by a rename in the sidebar before it was made, isn't made: " + JSON.stringify(await nbPaths()));
+  // …even one already waiting for the workspace's lock when the sidebar's is asked for
+  await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__unlock = r))); return 1; })()`);
+  await typeTitle("Held title");
+  await sleep(1300); // (its rename asked for: waiting for the lock)
+  await until(`!!document.querySelector("#wssidebar .frow.cur")`);
+  await f2Cur();
+  await until(`!!document.querySelector("#wssidebar .frow input")`);
+  await typeInto("After held");
+  await sleep(300);
+  await ev(`(() => { window.__unlock(); return 1; })()`);
+  await sleep(1500);
+  check((await ev(`document.querySelector("#nbname").value`)) === "After held" && (await ev(`${W}.stat("/After held.ipynb").then((e) => !!e)`)) && !(await ev(`${W}.stat("/Held title.ipynb").then((e) => !!e)`)), "…even one already waiting for the lock: " + JSON.stringify(await nbPaths()));
+  // the open notebook renamed in another tab while its saves are queued
+  // here: no save made before that change writes the old name back over it
+  // (CORR-0B0-2).  The first save held, a second queued behind it.
+  await ev(`sagebrush.notebook.saved().then(() => 1)`);
+  await ev(`(async () => {
+    const nb = sagebrush.notebook, real = nb.store;
+    let calls = 0, release;
+    window.__real = real;
+    window.__entered = new Promise((r) => (window.__enter = r));
+    const hold = new Promise((r) => (release = r));
+    window.__releaseSave = () => release();
+    await nb.attach({ load: () => real.load(), save: async (d) => { if (++calls === 1) { __enter(); await hold; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    nb.setMeta({ probeOne: 1 }); nb.flush();
+    await __entered;
+    nb.setMeta({ probeTwo: 2 }); nb.flush();
+    return 1;
+  })()`);
+  const t2 = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base)}`, { method: "PUT" })).json();
+  const ws2 = new WebSocket(t2.webSocketDebuggerUrl);
+  await new Promise((r) => (ws2.onopen = r));
+  let n2 = 0; const waiting2 = new Map();
+  ws2.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waiting2.has(d.id)) { waiting2.get(d.id)(d.result ?? d.error); waiting2.delete(d.id); } };
+  const ev2 = async (expression) => { const id = ++n2; const r = await new Promise((ok) => { waiting2.set(id, ok); ws2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 800)); return r.result?.value; };
+  for (let i = 0; i < 600 && !(await ev2(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
+  await ev2(`sagebrush.workspace.rename("/After held.ipynb", "/While saving.ipynb").then(() => 1)`);
+  check(await until(`sagebrush.notebook.snapshot().name === "While saving"`), "(the rename in another tab, shown here)");
+  await ev(`(() => { __releaseSave(); return 1; })()`);
+  await ev(`sagebrush.notebook.saved().then(() => 1)`);
+  await sleep(500);
+  const kept = await ev2(`sagebrush.workspace.read("/While saving.ipynb").then((r) => ({ name: r.content.name, one: r.content.probeOne, two: r.content.probeTwo }))`);
+  check(kept.name === "While saving" && kept.one === 1 && kept.two === 2, "saves queued here before a rename in another tab don't write the old name back: " + JSON.stringify(kept));
+  ws2.close();
+  await send("Target.closeTarget", { targetId: t2.id });
+  await ev(`sagebrush.notebook.attach(__real).then(() => 1)`);
+  // the open notebook renamed in its own sidebar while saves are queued: the name kept is the new one
+  await ev(`(async () => {
+    const nb = sagebrush.notebook, real = __real;
+    let calls = 0, release;
+    window.__entered = new Promise((r) => (window.__enter = r));
+    const hold = new Promise((r) => (release = r));
+    window.__releaseSave = () => release();
+    await nb.attach({ load: () => real.load(), save: async (d) => { if (++calls === 1) { __enter(); await hold; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    nb.setMeta({ probeThree: 3 }); nb.flush();
+    await __entered;
+    nb.setMeta({ probeFour: 4 }); nb.flush();
+    return 1;
+  })()`);
+  await until(`document.querySelector("#wssidebar .frow.cur")?.dataset.path === "/While saving.ipynb"`);
+  await f2Cur();
+  await until(`!!document.querySelector("#wssidebar .frow input")`);
+  await typeInto("Own sidebar");
+  check(await until(`document.querySelector("#nbname").value === "Own sidebar"`), "(renamed in its own sidebar while a save is held)");
+  await ev(`(() => { __releaseSave(); return 1; })()`);
+  await ev(`sagebrush.notebook.saved().then(() => 1)`);
+  await sleep(500);
+  const kept2 = await ev(`${W}.read("/Own sidebar.ipynb").then((r) => ({ name: r.content.name, four: r.content.probeFour }))`);
+  check(kept2.name === "Own sidebar" && kept2.four === 4, "…its saves queued before it keep the new name: " + JSON.stringify(kept2));
+  await ev(`sagebrush.notebook.attach(__real).then(() => 1)`);
+  // Undo of Move to Trash: that file, put in Trash that time; not another
+  // since put there under the same name (CORR-0B0-3)
+  await ev(`${W}.create("/undo.txt", { content: "original" }).then(() => 1)`);
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/undo.txt"))})`);
+  await click(rowSel("/undo.txt") + " .more");
+  await menu("Move to Trash");
+  await until(`!!document.querySelector("#wssidebar .ftoast button")`);
+  await ev(`(async () => { await ${W}.restore("/Trash/undo.txt"); await ${W}.rename("/undo.txt", "/original-moved.txt"); await ${W}.create("/undo.txt", { content: "UNRELATED" }); await ${W}.remove("/undo.txt"); return 1; })()`);
+  await until(`!!document.querySelector("#wssidebar .ftoast button")`);
+  await click("#wssidebar .ftoast button");
+  await sleep(800);
+  const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
+  check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
+  check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
   // opening a board from the notebook page
   await click(rowSel("/Sylow theorems.board.json"));
   check(await until(`location.pathname.startsWith("/board/") && /doc=local:[0-9a-f]{12}/.test(location.search) && !!window.sagebrush?.board?.snapshot()`, 60000), "a board opens from the notebook page's sidebar");
   check(await until(`!!document.querySelector('[data-sbb="files"]') && !${S}.hidden`), "the board page has Files, and the sidebar is still open (remembered)");
   check(await until(`document.querySelector("#wssidebar .frow.cur")?.dataset.path === "/Sylow theorems.board.json"`), "…with the board marked");
   await shot("board-sidebar");
+  // the open board renamed in its sidebar: its title follows, saved by the
+  // page with its other changes; nothing taken for a change made elsewhere
+  // (no copy of "your changes"), CORR-0B0-2
+  await f2Cur();
+  await until(`!!document.querySelector("#wssidebar .frow input")`);
+  await typeInto("Sylow renamed");
+  check(await until(`${W}.stat("/Sylow renamed.board.json").then((e) => !!e) && document.querySelector('[data-sbb="title"]').textContent === "Sylow renamed"`), "renaming the open board renames it on the page");
+  check(await until(`document.querySelector("#wssidebar .frow.cur")?.dataset.path === "/Sylow renamed.board.json"`), "…still marked as open");
+  await sleep(800);
+  await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "after", text: "after the rename" }); }).then(() => 1)`);
+  await sleep(2000);
+  const rb = await ev(`(async () => { const r = await ${W}.read("/Sylow renamed.board.json"); return { title: r.content.title, after: (r.content.nodes ?? []).some((n) => n.id === "after"), copies: (await ${W}.list("/", { recursive: true })).filter((e) => /your changes/.test(e.path)).map((e) => e.path), log: sagebrush.saveLog().map((x) => x.what) }; })()`);
+  check(rb.title === "Sylow renamed" && rb.after && rb.copies.length === 0, "…and an edit after it is saved over it, the new title kept, no conflict: " + JSON.stringify(rb));
 
   // many entries (LIMIT-0B0-1, -2): put straight into the index, as a big workspace would hold them
   await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("entries", "readwrite"), st = tx.objectStore("entries"), t = Date.now();

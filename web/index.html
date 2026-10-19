@@ -2045,23 +2045,33 @@ async function wsListNotebook(id, name, mode) {
     });
   } catch (e) { console.warn("workspace:", e); }
 }
-let wsRenameTimer = null;
+// (each typed title a new rename, superseding the one before; a rename in
+// the file browser supersedes them all, even one already waiting for the
+// workspace's lock: checked holding it, CORR-0B0-1)
+let wsRenameTimer = null, wsRenameGen = 0;
+function wsRenameCancel() { clearTimeout(wsRenameTimer); wsRenameGen++; }
 function wsRenameSoon() {
-  clearTimeout(wsRenameTimer);
-  const id = current.id, name = docName();
+  wsRenameCancel();
+  const id = current.id, name = docName(), gen = wsRenameGen;
   if (current.kind !== "browser" || !id) return;
   wsRenameTimer = setTimeout(async () => {
     const w = await wsNow();
     if (!w) return;
-    try {
-      const from = await w.pathOf("notebook", id);
-      if (!from) return;
-      const folder = parentOf(from), base = safeName(name || "Untitled");
-      if (splitExt(nameOf(from))[0] === base) return;
-      const taken = new Set((await w.list(folder)).map((e) => e.path));
-      const to = freePath(folder, base, ".ipynb", (p) => taken.has(p) && p !== from);
-      if (to && to !== from) await w.rename(from, to);
-    } catch (e) { console.warn("workspace: rename:", e); }
+    // (moved elsewhere meanwhile, by another tab: from where it is then)
+    for (let i = 0; i < 3 && gen === wsRenameGen; i++) {
+      try {
+        const from = await w.pathOf("notebook", id);
+        if (!from) return;
+        const folder = parentOf(from), base = safeName(name || "Untitled");
+        if (splitExt(nameOf(from))[0] === base) return;
+        const taken = new Set((await w.list(folder)).map((e) => e.path));
+        const to = freePath(folder, base, ".ipynb", (p) => taken.has(p) && p !== from);
+        if (to && to !== from) await w.rename(from, to, { still: () => gen === wsRenameGen });
+        return;
+      } catch (e) {
+        if (e?.code !== "missing" && e?.code !== "exists") return void console.warn("workspace: rename:", e);
+      }
+    }
   }, 800);
 }
 async function wsForgetNotebook(id) {
@@ -2097,13 +2107,9 @@ async function wsFile(path, data, opts = {}) {
 // button shows and hides it, remembered; the first time, it is shown if
 // there is more than one document.
 const wsSidebar = $("#wssidebar"), wsFilesBtn = $("#wsfilesbtn");
-let wsBrowser = null, wsCurrentPath;
-async function wsTrackCurrent() {
-  const w = await wsNow();
-  if (!w || current.kind !== "browser" || !current.id) return;
-  wsCurrentPath = await w.pathOf("notebook", current.id).catch(() => undefined);
-  wsBrowser?.refresh();
-}
+let wsBrowser = null;
+// (the notebook open here marked again: one opened, or listed)
+function wsTrackCurrent() { wsBrowser?.refresh(); }
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
@@ -2112,7 +2118,7 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
-      current: () => wsCurrentPath,
+      current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
         if (how === "tab") return void window.open(url, "_blank", "noopener");
@@ -2126,7 +2132,11 @@ function wsShowFiles(on) {
       },
       upload: (files, folder) => addFiles(files, folder),
       close: () => wsShowFiles(false),
-      // (the open notebook renamed here: its name follows, as if typed)
+      // (the open notebook renamed here: a typed title's rename not yet made
+      // is dropped, and its name follows, as if typed)
+      renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
+      // (and saved by the notebook, after what it has yet to save: CORR-0B0-2)
+      retitles: (e) => e.kind === "notebook" && e.ref === current.id && current.kind === "browser",
       renamed(e) {
         if (e.kind === "notebook" && e.ref === current.id) {
           const base = splitExt(nameOf(e.path))[0];
