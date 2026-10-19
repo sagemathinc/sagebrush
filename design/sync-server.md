@@ -499,7 +499,13 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
 William's decision (Oct 19): read-only, then deleted after a retention period, with email first.
 
 - **The period is CoCalc's:** `sync.retention_days` in its limits, 90 if it says nothing. In code it is read from the limits, never a constant there.
-- **The plan is read before sync admits any write** (CORR-445-2). Turning sync on fetches it before the account is confirmed, so a plan without sync makes the account `readonly` from the start. A batch or a clear checks the account again after every wait (the room for it, which may fetch the plan), before anything is held or sent. If CoCalc can't be reached at enable, the plan is fetched before the first write that needs room.
+- **The plan is read before sync is turned on** (CORR-445-2, and the enable change of Oct 19, from the dev smoke test).
+  - `POST /api/sync/v1/enable` asks CoCalc for the plan first:
+    - a plan without sync gets 403 "sync isn't available for this account", with nothing registered;
+    - CoCalc unreachable, or answering without the `sync` block, gets 503 `busy` "CoCalc can't be reached to check this account's plan; try again", with nothing registered;
+    - otherwise the account registers, keeping that plan.
+  - An account already on refreshes its plan first, so enable answers `readonly` once the plan has ended, and `busy` while nothing is known. It never answers `active` for an account whose plan isn't known.
+  - The confirm applies the plan enable kept (fetched again only if it's old). A plan that ends in between arrives as CoCalc's notice, and makes the account `readonly` before any write. A batch or a clear checks the account again after every wait (the room for it, which may fetch the plan), before anything is held or sent. If CoCalc can't be reached at enable, the plan is fetched before the first write that needs room.
 - **When a plan stops including sync** (a notice, or a fetch, saying `sync.enabled: false`):
   - the account becomes `readonly`, and every write is refused with `readonly`;
   - it records, once: `readonly_since`, the time CoCalc says the plan changed (the notice's `issued`, never later than now); the time sync learned of it; and **the deadline, fixed then** (CORR-445-1):

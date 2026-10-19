@@ -182,8 +182,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * recorded that generation in D1 (the inventory finds an account's objects
    * by its row, CORR-00F-1) and confirmed it.  An account registering or on
    * answers its own generation; one being deleted refuses until it's done.
+   *
+   * The plan comes first: enable never answers for an account whose plan
+   * CoCalc hasn't told (`busy`, "CoCalc can't be reached"), and never turns
+   * sync on for a plan without it (`forbidden`, "sync isn't available for
+   * this account").  An account already on answers with the state its plan
+   * gives it: `readonly` once the plan has no sync (§6.2).
    */
   async enable(a: { account: string; hash: string }): Promise<Result<{ state: string; generation: number }>> {
+    // (before the transaction, which can't await: an account already here refreshes its own limits,
+    // which also applies them; a new one only asks, storing nothing until it registers.  Everything is
+    // checked again in the transaction, after the await)
+    let plan: Limits | null = null;
+    if (allowed(this.env, a.account) && !this.deleted()) {
+      plan = this.exists() && this.get("account_id") === a.account ? await this.limits().catch(() => null) : await this.planOf(a.account);
+    }
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
@@ -192,8 +205,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (had !== undefined) {
         if (had !== a.account) throw new SyncError("forbidden", "not this account");
         if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
+        if (!this.get("limits")) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: 5000 });
         return { state: this.state(), generation: Number(this.get("generation")) };
       }
+      if (!plan) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: 5000 });
+      if (!plan.sync.enabled) throw new SyncError("forbidden", "sync isn't available for this account");
       const generation = Number(this.get("retired") ?? 0) + 1;
       for (const s of SCHEMA) this.sql.exec(s);
       this.set("account_id", a.account);
@@ -201,6 +217,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("generation", generation);
       this.set("created", Date.now());
       this.set("state", "registering");
+      // (the plan just checked is the one kept: a second enable meanwhile, and the confirm, find it)
+      this.storeLimits(plan, plan.issued ?? Date.now());
+      this.set("limits_issued", plan.issued ?? 0);
+      this.set("limits_fetched", Date.now());
       return { state: "registering", generation };
     }));
   }
@@ -780,11 +800,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const env = this.env;
     if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : cached ? JSON.parse(cached) : null;
     try {
-      const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
-      u.searchParams.set("account_id", this.get("account_id")!);
-      const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
-      if (!r.ok) throw new Error(String(r.status));
-      const l = checkLimits(await r.json());
+      const l = await this.askCoCalc(this.get("account_id")!);
       // (after the await: what is stored now, since a notice may have landed meanwhile; a newer one
       // stands, never undone by a fetch, §6, CORR-5E2-3)
       const now = this.get("limits");
@@ -803,6 +819,20 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const now = this.get("limits");
       return now ? JSON.parse(now) : null;
     }
+  }
+  /** CoCalc's plan for an account, as it answers now; throws if it can't be reached or answers badly. */
+  private async askCoCalc(account: string): Promise<Limits> {
+    const u = new URL("/api/v2/sagebrush/limits", this.env.COCALC_ORIGIN);
+    u.searchParams.set("account_id", account);
+    const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + this.env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error(String(r.status));
+    return checkLimits(await r.json());
+  }
+  /** The plan of an account not registered here, stored nowhere: null if CoCalc can't say (§6). */
+  private async planOf(account: string): Promise<Limits | null> {
+    const env = this.env;
+    if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
+    return this.askCoCalc(account).catch(() => null);
   }
   private used(): number {
     return Number(this.get("used_bytes") ?? 0);

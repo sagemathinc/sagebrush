@@ -106,6 +106,7 @@ const plan = (enabled, days = 3) => ({ storage_bytes: 1 << 20, max_file_bytes: 5
 for (const r of [R1, R2, R3, R4, W1, W2, Y1, Y2, Y3, Y4, X2]) fake.limits.set(r, plan(true));
 fake.limits.set(X1, plan(false));
 fake.limits.set(Z0, sync(1 << 20, 1 << 20));
+fake.limits.set(N, sync(1 << 20, 1 << 20)); // (enable asks for the plan first)
 fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
@@ -517,14 +518,20 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   fake.down = true;
   let r = await put(sa, Buffer.from("while down"));
   ok(r.status === 201, "CoCalc down: an account with cached limits still uploads");
-  // (a fresh account, turned on while CoCalc is down: turning sync on fetches the plan, and can't)
+  // (a fresh account, turned on while CoCalc is down: turning sync on asks for the plan first, and
+  // can't, so it isn't turned on at all, never "active" with nothing known)
   const sd = await signIn(Z0);
-  await post(sd, "/api/sync/v1/enable", {});
+  const acctZ0 = acctNs.get(acctNs.idFromName("acct:" + hashOf(Z0)));
+  const ez = await post(sd, "/api/sync/v1/enable", {});
+  const ezb = await ez.json();
+  ok(ez.status === 503 && ezb.error === "busy" && /CoCalc can't be reached/.test(ezb.message) && (await acctZ0.lifecycle())?.state === null && (await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z0)).first()) === null,
+    "CoCalc down and nothing known: enable says CoCalc can't be reached, and registers nothing (no row, no state): " + JSON.stringify(ezb));
   r = await put(sd, Buffer.from("d while down"));
-  ok(r.status === 503 && (await r.json()).error === "busy", "CoCalc down and nothing cached: the upload waits, never read as zero or as no limit");
+  ok(r.status === 403, "and the account takes no upload: sync isn't on");
   fake.down = false;
+  const ez2 = await (await post(sd, "/api/sync/v1/enable", {})).json();
   r = await put(sd, Buffer.from("d while down"));
-  ok(r.status === 201, "and goes once CoCalc answers");
+  ok(ez2.state === "active" && r.status === 201, "once CoCalc answers, enable turns it on, and the upload goes");
 }
 // ---- an op that names a data file's bytes (§3)
 {
@@ -2004,13 +2011,16 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const [, b4b] = await retentionOf(Y4);
   ok(b4b.state === "readonly" && b4b.readonly_since === recv - 100 * 1000 && b4b.purge_after >= recv + 1000 && b4b.purge_after < recv + 1000 + 2000, "a notice issued 100 days ago: the clock starts then, but the purge is no sooner than the floor after it arrived (14 days; 1 in tests): " + JSON.stringify(b4b));
   // CORR-445-2: the plan is read before sync admits any write
+  // and a plan without sync from the start isn't turned on at all: enable says so, and nothing is made
   const sx1 = await signIn(X1);
-  const ex1 = await (await post(sx1, "/api/sync/v1/enable", {})).json();
+  const rx1 = await post(sx1, "/api/sync/v1/enable", {});
+  const ex1 = await rx1.json();
+  const acctX1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(X1)));
   const ox1 = await socket(sx1);
-  await hello(ox1, dev1);
-  const bx1 = await ox1.ask(batch("8181cafe8181", 1, [[1, pid(1, "clientX1RO"), [], "abc"]], { kind: "board" }));
-  ok(ex1.state === "readonly" && bx1?.code === "readonly", "a plan without sync from the start: turning sync on makes it read-only at once, and the first batch is refused (CORR-445-2): " + JSON.stringify([ex1.state, bx1?.code]));
-  ox1.ws.close();
+  const hx1 = ox1.status === 101 ? await hello(ox1, dev1) : null;
+  ok(rx1.status === 403 && ex1.message === "sync isn't available for this account" && (await acctX1.lifecycle())?.state === null && (await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(X1)).first()) === null && hx1?.welcome?.t !== "welcome",
+    "a plan without sync from the start: enable says sync isn't available for this account, and registers nothing; no socket session is welcomed: " + JSON.stringify([rx1.status, ex1, hx1?.welcome]));
+  if (ox1.status === 101) ox1.ws.close();
   const sx2 = await signIn(X2);
   const acctX2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(X2)));
   ok((await (await post(sx2, "/api/sync/v1/enable", {})).json()).state === "active", "(X2: on)");
@@ -2024,6 +2034,10 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const bgx2 = await acctX2.budget();
   ok(bx2?.code === "readonly" && ix2.head.seq === 0 && ix2.total === 0 && bgx2.holds === 0 && bgx2.held === 0, "a plan that ended since: the first batch fetches it, is refused readonly, and commits nothing, holding nothing: " + JSON.stringify({ code: bx2?.code, head: ix2.head, holds: bgx2.holds }));
   ox2.ws.close();
+  // an account already on asks its plan again when enable is sent: read-only now, it says so, never "active"
+  const ex2 = await post(sx2, "/api/sync/v1/enable", {});
+  const ex2b = await ex2.json();
+  ok(ex2.status === 200 && ex2b.state === "readonly", "enable on an account whose plan ended answers readonly, not active: " + JSON.stringify(ex2b));
   // CORR-AB4-1: a lapse while a raise's grant is on its way back (storage_bytes unchanged): the upload is
   // refused readonly, and the grant is given back by the alarm, with no further request
   const sz1 = await signIn(Z1);
