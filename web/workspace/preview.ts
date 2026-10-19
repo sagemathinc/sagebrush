@@ -52,7 +52,8 @@ export function parseDelimited(text: string, sep: string, maxRows: number): stri
 
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : n < 2 ** 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
 const fmtTime = (t: number) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-const who = (by: string) => (by === "person" ? "you" : by.startsWith("agent:") ? by.slice(6) : by);
+// (who wrote a version, in plain words: an in-page agent writes through window.sagebrush.workspace, as agent:page)
+const who = (by: string) => (by === "person" ? "you" : by === "agent:page" ? "an agent in this page" : by.startsWith("agent:") ? `an agent (${by.slice(6)})` : by);
 
 const STYLE = `
 .sbfprev { position: fixed; inset: 0; z-index: 900; background: rgba(20,24,21,.38); display: flex; align-items: center; justify-content: center; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
