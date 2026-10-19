@@ -184,8 +184,9 @@ function plainProblem(m: unknown, depth: number, bytes: number, MAX = 200_000): 
 const goodName = (f: string) => f.length > 0 && f.length <= EDIT_LIMITS.fieldName && !BAD_NAMES.has(f);
 function keyProblem(k: unknown): string | null {
   if (!isObj(k) || !TYPES.has(k.type as string) || typeof k.page !== "string" || typeof k.id !== "string") return "a change's key is {type, page, id}";
-  // (an edge's id is made from its two ends (history.ts toRecords): room for both)
-  const idMax = k.type === "edge" ? 2 * EDIT_LIMITS.keyChars + 32 : EDIT_LIMITS.keyChars;
+  // (an edge's id is the JSON of its two ends and its ordinal (history.ts toRecords): room for both ends
+  // escaped at worst, 6 characters each (\u0000), and the ordinal (astra's CORR-40A-1))
+  const idMax = k.type === "edge" ? 2 * (6 * EDIT_LIMITS.keyChars + 2) + 48 : EDIT_LIMITS.keyChars;
   if (k.page.length > EDIT_LIMITS.keyChars || k.id.length > idMax) return `a key's page and id are at most ${EDIT_LIMITS.keyChars} characters (an edge's id ${idMax})`;
   if (k.type === "doc" && (k.page !== "" || k.id !== "")) return "the doc record's key is {type: \"doc\", page: \"\", id: \"\"}";
   if (k.type === "page" && k.id !== "") return "a page record's id is \"\"";
