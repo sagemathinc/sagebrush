@@ -136,6 +136,21 @@ try {
   // an agent can't claim a page session's tag
   await ev(`${W}.read("/Old board.board.json").then((r) => ${W}.write("/Old board.board.json", r.content, { base: r.rev, tag: "${S}:99:0" })).then(() => 1)`);
   check(await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const g = r.result.transaction("boards").objectStore("boards").get(${JSON.stringify(id)}); g.onsuccess = () => { const t = g.result.tag; r.result.close(); ok(t === undefined); }; }; })`), "an agent's write carries no session tag, whatever it asks");
+
+  // a recovery's write meets a change made since load read the board: both kept (CORR-AA2-1)
+  const R = await ev(`${W}.read("/Old board.board.json").then((r) => r.rev)`);
+  const pendA = `8888888888888888:1:${R}\n` + JSON.stringify({ title: "A recovered", nodes: [] });
+  await ev(`localStorage.setItem("sagebrush-workspace-pending:${id}", ${JSON.stringify(pendA)}); 1`);
+  await hold("C");
+  await ev(`(() => { window.__agentP = ${W}.write("/Old board.board.json", { title: "B by agent", nodes: [] }, { base: ${R} }); return 1; })()`);
+  await ev(`(() => { window.__loadP2 = import("/board/board.js").then((m) => m.host.store.load()); return 1; })()`);
+  await sleep(500);
+  await release("C");
+  await ev(`Promise.all([window.__agentP, window.__loadP2]).then(() => 1)`);
+  check(await until(`${W}.read("/Old board.board.json").then((r) => r.content.title === "B by agent")`), "the change made in between isn't written over");
+  check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/A recovered (your changes, made while it changed elsewhere).board.json"))`), "…the recovered version is kept as a board of its own");
+  check(await until(`localStorage.getItem("sagebrush-workspace-pending:${id}") === null`), "…and only then its pending copy dropped");
+  check(await until(`${B}?.snapshot()?.doc?.title === "B by agent" && /changed elsewhere while you edited/.test(document.body.innerText)`), "…the board shows the other version, and says so");
   // a board only a pending copy holds: brought in (CORR-12C-3)
   const lone = "fedcba987654", loneText = "dddddddddddddddd:1:0\n" + JSON.stringify({ title: "Only pending", nodes: [] });
   await ev(`localStorage.setItem("sagebrush-workspace-pending:${lone}", ${JSON.stringify(loneText)}); 1`);
