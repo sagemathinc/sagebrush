@@ -1,0 +1,382 @@
+{
+  "$comment": "Written by web/workspace/verbs.ts (bun web/workspace/verbs.ts --write); do not edit.",
+  "protocol": 1,
+  "limits": {
+    "maxContentBytes": 8388608,
+    "maxFrameBytes": 12582912,
+    "maxList": 10000,
+    "maxHistory": 100,
+    "inFlight": 8,
+    "perSecond": 100,
+    "burst": 200
+  },
+  "verbs": {
+    "workspace.list": {
+      "description": "The entries in a folder (with recursive, everything under it), by path; Trash only when listed itself.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.stat": {
+      "description": "One entry, or null.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.read": {
+      "description": "An entry and its contents, with the revision to give write as base.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.write": {
+      "description": "New contents for a notebook, board or data file, only if its revision is still base (else a conflict, with the current contents). A data file's old bytes are kept as a version.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "content": {
+            "description": "A notebook's document ({cells: [...]}) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "json"
+                ],
+                "properties": {
+                  "json": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "base64"
+                ],
+                "properties": {
+                  "base64": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "base": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "base"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.create": {
+      "description": "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "content": {
+            "description": "A notebook's document ({cells: [...]}) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "json"
+                ],
+                "properties": {
+                  "json": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "base64"
+                ],
+                "properties": {
+                  "base64": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "mode": {
+            "enum": [
+              "python",
+              "sage",
+              "magma",
+              "matlab"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.mkdir": {
+      "description": "A folder, and any above it that aren't there.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.rename": {
+      "description": "An entry (a folder with all it holds) moved to a free path.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.duplicate": {
+      "description": "A copy of a notebook, board or data file, at to (else the first free \"name (2)\" beside it).",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.remove": {
+      "description": "An entry put in Trash; nothing of its contents removed.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.restore": {
+      "description": "An entry in Trash put back where it was (or beside what took its place).",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.history": {
+      "description": "A data file's kept versions, in the order kept.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.version": {
+      "description": "The bytes of one of a data file's versions (an index into history).",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "description": "A workspace path: absolute, \"/\"-separated"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "index"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
