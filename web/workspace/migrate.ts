@@ -45,8 +45,10 @@ export const signature = (doc: unknown): Promise<string> => bytesHash(new TextEn
 export type MigrateReport = { boards: number; copies: number; unreadable: string[]; notebooks: number; files: number; recovered: number; missing: number; full?: string };
 
 /** Everything of this browser's in the workspace (above); safe to run at every load. */
-export function migrate(w: Workspace, storage: KeyValue): Promise<MigrateReport> {
+/** `proceed`: asked once the lock is held; false, and nothing is done (a page that gave up on the workspace meanwhile: LIMIT-12C-3). */
+export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () => boolean } = {}): Promise<MigrateReport> {
   return w.locked(async () => {
+    if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {

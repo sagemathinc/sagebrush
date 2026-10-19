@@ -397,7 +397,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS } from "./workspace/index.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1609,11 +1609,48 @@ function filePut(path, data) {
   for (const e of kernels.values()) e.journal?.fileEvent(path, data);
   nb.filesChanged([path]); // (the reactive notebook: the cells reading it rerun)
 }
-async function fileChanged(path, data) {
-  // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
-  if (!(await wsFile(path, data))) await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+// Python's writes and deletes, kept one at a time, in a queue that holds
+// only each path's latest state (a file written again before it was kept is
+// kept once, as it is now), its bytes bounded: past FILE_QUEUE_MAX, a write
+// isn't queued and says so (the interpreter still has it).  The workspace's
+// stored versions are bounded by its own limits; this bounds what waits in
+// memory (LIMIT-12C-2).
+let FILE_QUEUE_MAX = 256 * 2 ** 20;
+const fileQueue = new Map(); // path -> Uint8Array | null (the latest state not yet kept)
+let fileQueueBytes = 0, fileDraining = null, fileQueueRefused = 0;
+const queuedBytes = (d) => (d ? d.length : 0);
+function fileChanged(path, data) {
+  const before = fileQueue.has(path) ? queuedBytes(fileQueue.get(path)) : 0;
+  if (fileQueueBytes - before + queuedBytes(data) > FILE_QUEUE_MAX) {
+    fileQueueRefused++;
+    statusEl.textContent = `${path} isn't saved in this browser: too much is waiting to be saved (it is still in Python's files)`;
+    return;
+  }
+  fileQueue.delete(path); // (re-inserted: a path's place is its latest change)
+  fileQueue.set(path, data);
+  fileQueueBytes += queuedBytes(data) - before;
+  fileDraining ??= drainFiles();
+}
+async function drainFiles() {
+  try {
+    while (fileQueue.size) {
+      const [path, data] = fileQueue.entries().next().value;
+      fileQueue.delete(path);
+      fileQueueBytes -= queuedBytes(data);
+      // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
+      try {
+        if ((await wsFile(path, data, { keepEmpty: false })) === "fallback") await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+      } catch (e) { statusEl.textContent = `${path}: ${e?.message ?? e}`; }
+    }
+  } finally { fileDraining = null; }
   if (!filesEl.hidden) renderFiles();
 }
+// (for tests and agents in the page: uploads, and what waits to be kept)
+window.sagebrush.files = {
+  add: (list) => addFiles(list),
+  queue: () => ({ paths: fileQueue.size, bytes: fileQueueBytes, draining: !!fileDraining, refused: fileQueueRefused }),
+  setQueueMax: (n) => { FILE_QUEUE_MAX = n; },
+};
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
   const keys = await allPaths(), vals = await allFiles();
@@ -1628,18 +1665,32 @@ async function renderFiles() {
     dl.onclick = () => download(k.split("/").pop(), vals[i], "application/octet-stream");
     const rm = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕" }));
     rm.setAttribute("aria-label", `Delete ${k}`);
-    rm.onclick = async () => { if (!(await wsFile(k, null))) await idb(db, "files", "readwrite", (st) => st.delete(k)); filePut(k, null); renderFiles(); };
+    rm.onclick = async () => {
+      const r = await wsFile(k, null);
+      if (r === "refused") return;
+      if (r === "fallback") await idb(db, "files", "readwrite", (st) => st.delete(k));
+      filePut(k, null);
+      renderFiles();
+    };
   });
   if (!keys.length) ul.textContent = "No files yet.";
 }
+// (uploads: a file over the limit refused by its size, never read; only files kept are given to the interpreters and counted: LIMIT-12C-1)
 async function addFiles(list) {
+  let added = 0;
+  const refused = [];
   for (const f of list) {
+    if (f.size > LIMITS.maxFileBytes) { refused.push(`${f.name} (over ${LIMITS.maxFileBytes / 2 ** 20} MB)`); continue; }
     const data = new Uint8Array(await f.arrayBuffer()), path = "/" + f.name;
-    if (!(await wsFile(path, data))) await idb(db, "files", "readwrite", (st) => st.put(data, path));
+    const r = await wsFile(path, data);
+    if (r === "refused") { refused.push(f.name); continue; }
+    if (r === "fallback") await idb(db, "files", "readwrite", (st) => st.put(data, path));
     filePut(path, data);
+    added++;
   }
   renderFiles();
-  announce(`${list.length} file${list.length === 1 ? "" : "s"} added`);
+  announce(`${added} file${added === 1 ? "" : "s"} added` + (refused.length ? `; not added: ${refused.join(", ")}` : ""));
+  if (refused.length) statusEl.textContent = `Not added: ${refused.join(", ")}`;
 }
 filesBtn.onclick = () => {
   filesEl.hidden = !filesEl.hidden;
@@ -2011,21 +2062,24 @@ async function wsForgetNotebook(id) {
     if (p) await w.forget(p);
   } catch (e) { console.warn("workspace:", e); }
 }
-// (a data file written (bytes) or deleted (null) through the workspace: true if it was)
-async function wsFile(path, data) {
+// A data file written (bytes) or deleted (null) through the workspace:
+// "kept"; "refused" (a limit, or storage refused it: said, nothing written);
+// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before)
+async function wsFile(path, data, opts = {}) {
   const w = await wsNow();
-  if (!w) return false;
+  if (!w) return "fallback";
   try {
     if (data === null) {
-      if (!(await w.stat(path))) return false;
+      if (!(await w.stat(path))) return "fallback";
       await w.remove(path);
-    } else await w.putFile(path, data);
-    return true;
+    } else await w.putFile(path, data, opts);
+    return "kept";
   } catch (e) {
-    // (a path the workspace doesn't take: kept as before, listed by reconcile; a refused write: said)
-    if (e?.code === "invalid") return false;
-    statusEl.textContent = `${path}: ${e?.message ?? e}`;
-    return e?.code !== "limit" && e?.code !== "storage" ? false : true;
+    if (e?.code === "limit" || e?.code === "storage") {
+      statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
+      return "refused";
+    }
+    return "fallback";
   }
 }
 

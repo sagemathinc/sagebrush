@@ -8,6 +8,8 @@
 //   bun web/workspace/verbs.ts --write    (schema.json written again)
 // web/workspace/test-workspace.mjs fails when schema.json is stale.
 
+import { MAX_PATH, MAX_DEPTH, MAX_NAME } from "./paths";
+
 /** At most this much content (a document's JSON, a file's bytes) in one call, either way: more is refused with its size, never cut. */
 export const MAX_CONTENT_BYTES = 8 * 2 ** 20;
 /** One WebSocket frame: 8 MiB of bytes is about 10.7 MiB as base64, with the JSON around it (agreed with sagebrush-python). */
@@ -49,7 +51,7 @@ export function schema() {
   return {
     $comment: "Written by web/workspace/verbs.ts (bun web/workspace/verbs.ts --write); do not edit.",
     protocol: 1,
-    limits: { maxContentBytes: MAX_CONTENT_BYTES, maxFrameBytes: MAX_FRAME_BYTES, maxList: MAX_LIST, maxHistory: MAX_HISTORY, inFlight: 8, perSecond: 100, burst: 200 },
+    limits: { maxContentBytes: MAX_CONTENT_BYTES, maxFrameBytes: MAX_FRAME_BYTES, maxPath: MAX_PATH, maxDepth: MAX_DEPTH, maxName: MAX_NAME, maxList: MAX_LIST, maxHistory: MAX_HISTORY, inFlight: 8, perSecond: 100, burst: 200 },
     verbs: Object.fromEntries(Object.entries(VERBS).map(([name, v]) => [`workspace.${name}`, { description: v.description, params: { $schema: "https://json-schema.org/draft/2020-12/schema", ...v.params } }])),
   };
 }
