@@ -35,6 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
+import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
@@ -138,6 +139,18 @@ export interface BoardHost {
   newBoard?(mode: string): void | Promise<void>;
   /** Duplicate: a copy of this board as a board of its own, opened in its place; none: no Duplicate.  Throws as newBoard does */
   duplicate?(d: BoardDoc): void | Promise<void>;
+  /** The File menu's items that need the host's files (web/workspace/filemenu.ts): a new notebook or
+   * folder, Open… (the file browser as a dialog), Recent, and Delete (this board to Trash); none: disabled */
+  /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
+   * (design/workspace-files.md §3); otherwise (the library in another site) it is hidden */
+  fullFileMenu?: boolean;
+  files?: {
+    newNotebook?(mode: string): void | Promise<void>;
+    newFolder?(): void | Promise<void>;
+    open?(): void;
+    recent?(): Promise<{ label: string; title?: string; open: () => void }[]>;
+    delete?(): void | Promise<void>;
+  };
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
   /** the function search's index of a language (web/docsearch.ts), shown
@@ -181,7 +194,7 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" hidden><button data-sbb="newboard">New board</button><button data-sbb="open">Open… (JSON, a board as HTML, JSON Canvas, Mermaid, a CoCalc board)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="examples">Examples…</button><button data-sbb="duplicate" hidden>Duplicate</button><hr><button data-sbb="html">Download as HTML (one file)</button><button data-sbb="download">Download JSON</button><button data-sbb="canvas">Download JSON Canvas</button><button data-sbb="copyjson">Copy JSON</button><hr><button data-sbb="print">Print or save as PDF…</button><button data-sbb="revert" hidden>Revert to the original</button></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
@@ -283,6 +296,27 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (the parts, found within root by their data-sbb: no ids, which two
   // boards on a page, or the host's own elements, would share)
   const $ = (part: string) => root.querySelector<HTMLElement>(`[data-sbb="${part}"]`)!;
+  // The one File menu, as the notebook's (design/workspace-files.md §3):
+  // drawn by filemenu.ts with this board's keys; what isn't here, disabled
+  renderFileMenu($("filemenu"), {
+    attr: "data-sbb",
+    keys: { newNotebook: "newnotebook", newBoard: "newboard", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
+    disabled: {
+      newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
+      saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
+    },
+    downloads: [
+      { key: "download", label: ".board.json" },
+      { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
+      { key: "canvas", label: "JSON Canvas" },
+      { key: "copyjson", label: "Copy JSON" },
+    ],
+    recent: host.files?.recent,
+    // (Sagebrush's board page shows what it can't do here disabled; a board
+    // in another site's page offers only what its host gives)
+    hideDisabled: !host.fullFileMenu,
+    chosen: () => { $("filemenu").hidden = true; },
+  });
   ($("home") as HTMLAnchorElement).href = host.home ?? "/";
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
@@ -1585,9 +1619,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       fail(e);
     }
   }
-  // (what the host does not have is not offered: an exported file has no examples beside it)
-  $("examples").hidden = !host.examples;
-  $("html").hidden = !host.exportHtml;
   $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });
@@ -1672,7 +1703,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
   };
   // (a board of its own, where the host keeps several: what is being written kept first)
-  $("duplicate").hidden = !host.duplicate;
+
   // (one that can't be kept: not gone to, this board staying, and why said)
   // (nor while what was written here isn't kept: kept now, or this board
   // stays, HARD-933-1)
@@ -1692,6 +1723,28 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     await editor.keepWriting();
     elsewhereNot("No new board made", () => host.newBoard!(doc?.mode ?? "python"));
   };
+  // (the File menu's items that are the host's files: as New board's, what is being written kept first)
+  $("newnotebook").onclick = async () => {
+    await editor.keepWriting();
+    elsewhereNot("No new notebook made", () => host.files!.newNotebook!(doc?.mode ?? "python"));
+  };
+  $("newfolder").onclick = () => elsewhereNot("No folder made", () => host.files!.newFolder!());
+  $("openfiles").onclick = () => host.files?.open?.();
+  $("deleteboard").onclick = async () => {
+    await editor.keepWriting();
+    elsewhereNot("Not moved to Trash", () => host.files!.delete!());
+  };
+  // (Rename…: the title, renamed where it is, in Edit)
+  $("rename").onclick = () => { if (!editor.on) editBtn.click(); $("title").click(); };
+  // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys, as on the notebook page)
+  on(window, "keydown", (e: KeyboardEvent) => {
+    const it = fileMenuKey(e);
+    if (!it) return;
+    const b = $("filemenu").querySelector<HTMLButtonElement>(`[data-item="${it}"]`);
+    if (!b || b.disabled) return;
+    e.preventDefault();
+    b.click();
+  });
   const emptyBoard = () => (newOutputs(true), (writtenHere = host.store?.writtenHere?.(true) ?? false), editor.commit((d) => {
     for (const k of Object.keys(d)) delete (d as any)[k];
     Object.assign(d, { title: "Untitled board", seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), nodes: [] });

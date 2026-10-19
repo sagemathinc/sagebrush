@@ -72,8 +72,12 @@ try {
   // the two menus: File's and ⋯'s items, as the notebook splits them; one open at a time
   await go(a.search);
   const items = (m) => ev(`[...document.querySelectorAll('[data-sbb=${m}] > button')].map((b) => b.dataset.sbb)`);
-  check(JSON.stringify(await items("filemenu")) === JSON.stringify(["newboard", "open", "mermaid", "examples", "duplicate", "html", "download", "canvas", "copyjson", "print", "revert"]), "File: " + JSON.stringify(await items("filemenu")));
-  check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "present", "timetravel", "helpitem"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯: " + JSON.stringify(await items("menu")));
+  // (the one File menu, as the notebook's (design/workspace-files.md §3): New ▸, Open…, Recent ▸, Upload…; Save a copy…, Rename…, Download ▸, Print, Share…; Delete)
+  const top = await ev(`[...document.querySelectorAll('[data-sbb=filemenu] > button')].map((b) => b.dataset.group ?? b.dataset.item)`);
+  check(JSON.stringify(top) === JSON.stringify(["new", "open", "recent", "upload", "saveCopy", "rename", "download", "print", "share", "delete"]), "File: " + JSON.stringify(top));
+  const grp = (g) => ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=${g}]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
+  check(JSON.stringify(await grp("new")) === JSON.stringify(["newnotebook", "newboard", "newfolder", "examples"]) && JSON.stringify(await grp("download")) === JSON.stringify(["download", "html", "canvas", "copyjson"]), "File's New ▸ and Download ▸: " + JSON.stringify([await grp("new"), await grp("download")]));
+  check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "mermaid", "revert", "present", "timetravel", "helpitem"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯ (Import Mermaid… and Revert moved here): " + JSON.stringify(await items("menu")));
   await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=filebtn]').click(), 1");
   check(await ev("!document.querySelector('[data-sbb=filemenu]').hidden && document.querySelector('[data-sbb=menu]').hidden"), "one menu open at a time");
   await ev("document.body.click(), 1");
