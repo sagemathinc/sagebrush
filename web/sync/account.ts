@@ -68,6 +68,9 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS batch_holds (id TEXT PRIMARY KEY, doc TEXT NOT NULL, bytes INTEGER NOT NULL, due INTEGER NOT NULL)",
 ];
 
+/** The least time between two purge steps of one account when a step stops at a full page (§6.2). */
+const PURGE_PACE_MS = 250;
+
 /** Open batch holds an account may have at once (LIMIT-97A-2): as many as the live batches a document keeps. */
 const MAX_HOLDS = LIMITS.liveBatches;
 
@@ -209,6 +212,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * then marks that generation's row purged, as no storage will hold it again.
    */
   async confirm(a: { account: string; generation: number }): Promise<Result<{ state: string; generation: number }>> {
+    // the plan first, before any write is admitted: a plan without sync makes it read-only from the
+    // start (CORR-445-2); CoCalc unreachable, the plan is fetched again before the first write that needs it
+    if (this.exists() && this.get("account_id") === a.account && allowed(this.env, a.account)) await this.limits().catch(() => null);
     return attempt(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       if (!Number.isSafeInteger(a.generation) || a.generation < 1) throw new SyncError("invalid", "generation");
@@ -565,7 +571,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
     // (the batch's bytes, exactly what its document's total can grow by, held against the budget, §6.1)
-    return this.heldForward(b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
+    return this.heldForward(att.account, b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
   }
   /**
    * Hold `bytes` against the budget, pin the batch's blobs, and forward it
@@ -574,8 +580,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * began, with the hold still open, wakes the alarm for its due time, when
    * the document's total replaces it.
    */
-  private async heldForward(doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+  private async heldForward(account: string, doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
     await this.room(bytes, "document");
+    // (after every await, before anything is held or sent: still this account, still writable; a plan
+    // fetched just now may have made it read-only, CORR-445-2)
+    this.admit(account, true);
     const expires = Date.now() + this.pinMs();
     const held = this.hold(doc, bytes, expires);
     let keys: PinKey[];
@@ -648,7 +657,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
     // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
-    return this.heldForward(m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
+    return this.heldForward(att.account, m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
   }
 
   // ---- document sockets (§2)
@@ -845,7 +854,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * zero, so the next write has D1 check the claim against it again, and the
    * alarm gives back what no longer fits.
    */
-  private storeLimits(l: Limits, at: number) {
+  private storeLimits(l: Limits, at: number, now = Date.now()) {
     const before = this.get("limits");
     if (!before || (JSON.parse(before) as Limits).storage_bytes !== l.storage_bytes) {
       this.set("blob_cap", 0);
@@ -855,7 +864,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("limits_rev", Number(this.get("limits_rev") ?? 0) + 1);
     }
     this.set("limits", JSON.stringify(l));
-    this.applyPlan(l, at);
+    this.applyPlan(l, at, now);
   }
 
   // ---- after a membership ends (§6.2)
@@ -869,27 +878,41 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private dayMs(): number {
     return testMode(this.env) ? 1000 : 86_400_000;
   }
-  /** When a read-only account's data is deleted, or null if it isn't read-only. */
-  private deadline(): number | null {
-    const since = this.get("readonly_since");
-    if (since === undefined) return null;
-    const cached = this.get("limits");
-    const days = cached ? ((JSON.parse(cached) as Limits).sync.retention_days ?? 90) : 90;
-    return Number(since) + days * this.dayMs();
+  /** The least notice a person gets before deletion, from when sync learns of the lapse: 14 days (1 in tests). */
+  private floorDays(): number {
+    return testMode(this.env) ? 1 : 14;
   }
-  private applyPlan(l: Limits, at: number) {
+  /**
+   * When a read-only account's data is deleted, or null if it isn't
+   * read-only: fixed when the lapse is recorded, never moved by later limits
+   * (CORR-445-1).  It is max(issued + retention_days, received + 14 days):
+   * CoCalc's time is authoritative, but a late notice never deletes without
+   * the warning emails' time (§6.2).
+   */
+  private deadline(): number | null {
+    const d = this.get("purge_after");
+    return d === undefined ? null : Number(d);
+  }
+  /** `now` is the time the plan arrives (the clock, but for tests). */
+  private applyPlan(l: Limits, at: number, now = Date.now()) {
     if (!this.exists()) return;
     const st = this.state();
     if (st === "deleting") return;
     const since = this.get("readonly_since");
     if (!l.sync.enabled) {
-      if (since === undefined) this.set("readonly_since", Math.min(at, Date.now()));
+      if (since === undefined) {
+        const issued = Math.min(at, now);
+        const days = l.sync.retention_days ?? 90;
+        this.set("readonly_since", issued);
+        this.set("readonly_received", now);
+        this.set("purge_after", Math.max(issued + days * this.dayMs(), now + this.floorDays() * this.dayMs()));
+      }
       if (st === "active") this.set("state", "readonly");
       for (const ws of this.ctx.getWebSockets()) send(ws, { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: this.deadline() } });
       this.wakeBy(this.purgeAt()!);
-    } else if (since !== undefined && Date.now() < this.deadline()!) {
+    } else if (since !== undefined && now < this.deadline()!) {
       // (renewed in time: the clock ends, and the account takes writes again; past the deadline, the purge stands)
-      this.sql.exec("DELETE FROM meta WHERE k = 'readonly_since'");
+      this.sql.exec("DELETE FROM meta WHERE k IN ('readonly_since', 'readonly_received', 'purge_after')");
       if (st === "readonly") this.set("state", "active");
     }
   }
@@ -927,6 +950,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** CoCalc's signed question (§6.2): when this account's synced data will be deleted, if it will. */
   async retentionOf(a: { account: string }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
     if (!this.exists() || this.get("account_id") !== a.account) return null;
+    return this.retention();
+  }
+  /** Tests only: a plan arriving as if the clock said `now` (CORR-445-1's boundaries, with the alarm far off). */
+  async planAt(a: { limits: unknown; issued: number; now: number }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    this.storeLimits(checkLimits({ ...(a.limits as object), issued: a.issued }), a.issued, a.now);
+    this.set("limits_issued", a.issued);
     return this.retention();
   }
   /** Tests only: when the purge runs (the deadline plus this account's delay). */
@@ -1657,6 +1687,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private purgeHeld = false;
   /** A purge step that stopped at a full page: the next runs at once (LIMIT-445-1). */
   private purgeAgain = false;
+  private purgeSteps: number[] = [];
+  /** Tests only: when the alarm ran each purge step. */
+  async purgeStepTimes(): Promise<number[]> {
+    return testMode(this.env) ? [...this.purgeSteps] : [];
+  }
 
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
   async crash(): Promise<void> {
@@ -1767,9 +1802,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (this.state() === "deleting") {
       let done = false;
       try {
-        if (!this.purgeHeld) done = await this.purgeStep();
+        if (!this.purgeHeld) {
+          if (testMode(this.env)) this.purgeSteps.push(Date.now());
+          done = await this.purgeStep();
+        }
       } catch {}
-      if (!done) this.wakeBy(Date.now() + (this.purgeAgain ? 0 : testMode(this.env) ? 200 : 30_000));
+      // (a full page goes on after PURGE_PACE_MS: at most 4 steps a second an account, daybreak2's bound)
+      if (!done) this.wakeBy(Date.now() + (this.purgeAgain ? PURGE_PACE_MS : testMode(this.env) ? 200 : 30_000));
       return;
     }
     const now = Date.now();

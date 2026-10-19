@@ -499,19 +499,24 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
 William's decision (Oct 19): read-only, then deleted after a retention period, with email first.
 
 - **The period is CoCalc's:** `sync.retention_days` in its limits, 90 if it says nothing. In code it is read from the limits, never a constant there.
+- **The plan is read before sync admits any write** (CORR-445-2). Turning sync on fetches it before the account is confirmed, so a plan without sync makes the account `readonly` from the start. A batch or a clear checks the account again after every wait (the room for it, which may fetch the plan), before anything is held or sent. If CoCalc can't be reached at enable, the plan is fetched before the first write that needs room.
 - **When a plan stops including sync** (a notice, or a fetch, saying `sync.enabled: false`):
   - the account becomes `readonly`, and every write is refused with `readonly`;
-  - it records `readonly_since` once: the time CoCalc says the plan changed (the notice's `issued`, never later than now);
+  - it records, once: `readonly_since`, the time CoCalc says the plan changed (the notice's `issued`, never later than now); the time sync learned of it; and **the deadline, fixed then** (CORR-445-1):
+    $$\text{purge\_after} = \max(\text{readonly\_since} + \text{retention\_days},\ \text{received} + 14\ \text{days})$$
+    CoCalc's time is authoritative, but a late notice never deletes without warning: there are always 14 days for the two emails (@sagebrush's rule, Oct 19). Later limits, a longer or omitted `retention_days` included, never move it;
   - its sockets are told, with the deadline.
-- **Renewed before the deadline** (`sync.enabled: true` again): `readonly_since` is cleared, and the account is `active` again. A renewal at or after the deadline doesn't stop the deletion.
+- **Renewed before the deadline** (`sync.enabled: true` again, judged against the stored deadline, not one recomputed from the new plan): the clock is cleared, and the account is `active` again. A renewal at or after the deadline doesn't stop the deletion.
 - **At `readonly_since + retention_days`,** plus a delay of 0 to an hour fixed per account by its hash (never before the deadline), the account object's alarm, armed for that time, runs the same purge as "Delete my synced data", with the same steps, fences and D1 record.
   - The delay spreads a mass lapse, so accounts aren't all purged at once. `purge_after`, the deadline the person and CoCalc are told, is unchanged, and "deleted after 90 days" stays true.
   - The boundary counts as past: at the purge time exactly, the purge starts.
-- **Every purge step is bounded** (LIMIT-445-1): at most 200 expired reservations, 500 holdings and 1,000 pins a step, as well as the existing 50 documents, 500 outbox keys and 1,000 listed R2 keys. A step that stops at a full page has the alarm run again at once.
+- **Every purge step is bounded** (LIMIT-445-1): at most 200 expired reservations, 500 holdings and 1,000 pins a step, as well as the existing 50 documents, 500 outbox keys and 1,000 listed R2 keys.
+  - A step that stops at a full page runs again after 250 ms at the least, so one account's purge makes at most 4 steps a second: 800 reservations, 2,000 holdings or 4,000 pins a second (daybreak2, @sagebrush's pace).
+  - Otherwise the alarm waits its usual 30 s.
 - **Late and repeated notices:** limits apply only if newer than those held (`issued`). So a repeated notice never resets the clock (`readonly_since` is set once), and a late one never ends it.
 - **What the person sees:** `/api/share/me` has `sync_retention: {state, readonly_since, purge_after}`, and the Sync panel says it (the help line in web/drafts/faq-sync.md). The FAQ entry is drafted there too, unpublished until sync opens beyond its test accounts.
 - **Emails are CoCalc's** (it has the address and the mail system). This server sends none. The hook:
-  - `GET /api/admin/sync-retention/<account_id>`, signed with LIMITS_KEY, answers `{state, readonly_since, purge_after, now}`, or 404 if the account never synced;
+  - `GET /api/admin/sync-retention/<account_id>`, signed with LIMITS_KEY, answers `{state, readonly_since, purge_after, now}`. `purge_after` is the stored deadline above. A 404 means the account holds no synced data now: it never synced, or it was purged (a tombstone);
   - after sending the notice that ends a plan's sync, CoCalc reads it, sends the first email with `purge_after`'s date, and schedules a second for about 14 days before `purge_after`;
   - before sending each, it asks again, and sends nothing if `readonly_since` is null (renewed) or the state is no longer `readonly`.
 
