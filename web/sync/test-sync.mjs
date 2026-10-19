@@ -43,6 +43,7 @@ const T6 = "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"; // open holds at the cap
 const U1 = "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"; // a raise's answer held across a purge and a new generation
 const U2 = "e8e8e8e8-e8e8-4e8e-8e8e-e8e8e8e8e8e8"; // a raise's answer held across a downgrade
 const U3 = "e9e9e9e9-e9e9-4e9e-8e9e-e9e9e9e9e9e9"; // a batch refused before its forward
+const V1 = "eaeaeaea-eaea-4eae-8eae-eaeaeaeaeaea"; // a grant made unusable by a downgrade: given back with no further request
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -85,7 +86,7 @@ for (const t of [T1, T2, T3]) fake.limits.set(t, sync(10_000, 1 << 20));
 fake.limits.set(T4, sync(1 << 20, 1 << 20));
 fake.limits.set(T5, sync(1 << 20, 1 << 20));
 fake.limits.set(T6, sync(1 << 20, 1 << 20));
-for (const u of [U1, U2, U3]) fake.limits.set(u, sync(10_000, 1 << 20));
+for (const u of [U1, U2, U3, V1]) fake.limits.set(u, sync(10_000, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -102,7 +103,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1593,8 +1594,10 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const ridN = crypto.randomUUID();
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: N, request_id: ridN }))).status === 202 && (await until(async () => (await acctN.lifecycle())?.state === null && (await acctN.lifecycle())?.record_pending === false)), "(CoCalc purges N)");
   const stN = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridN}`);
+  // (the body read at once, before another call to the Worker)
+  const stNB = await stN.json();
   const rowN = await rowOf(N);
-  ok(stN.status === 200 && (await stN.json()).state === "purged" && rowN === null, "CoCalc's status finds it by its receipt: purged, with no row ever made");
+  ok(stN.status === 200 && stNB.state === "purged" && rowN === null, "CoCalc's status finds it by its receipt: purged, with no row ever made");
   // CORR-B92-1: CoCalc's purge leaves the account deleted for good, storage or none: an enable or a
   // request already past its session check (astra's probe) is refused when it arrives
   const sm = await signIn(M);
@@ -1785,6 +1788,50 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const bu3 = await acctU3.budget();
   ok(nb?.code && nb.code !== "busy" && bu3.holds === 0 && bu3.held === 0, "a batch refused before its forward (a blob not uploaded) leaves no hold: " + JSON.stringify({ code: nb?.code, holds: bu3.holds, held: bu3.held }));
   s3u.ws.close();
+  // CORR-BDA-1: a raise D1 granted, answered after a downgrade: no caps, and the grant is given back by
+  // the alarm alone, even with the first give-back failing
+  const sv1 = await signIn(V1);
+  const acctV1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(V1)));
+  ok((await post(sv1, "/api/sync/v1/enable", {})).status === 200, "(V1: sync on, empty, storage_bytes 10,000)");
+  await gs("claim-raise-answer", true);
+  const prv = acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(V1)) >= 5000), "(the raise's statement ran in D1: its answer held)");
+  fake.limits.set(V1, sync(0, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
+  await acctV1.setFailClaim({ on: true });
+  await gs("claim-raise-answer", false);
+  const rv = await prv;
+  const bv = await acctV1.budget();
+  ok(rv?.error && bv.blob_cap === 0 && bv.files === 0 && bv.alarm !== null, "the grant arrives after the downgrade: no caps, nothing reserved, and the alarm is armed for it: " + JSON.stringify({ r: rv?.error?.code, claim: bv.claim, alarm: bv.alarm !== null }));
+  await new Promise((r) => setTimeout(r, 800));
+  const bv2 = await acctV1.budget();
+  ok((await claimOf(V1)) >= 5000 && bv2.alarm !== null && bv2.dirty === true, "while the give-back can't reach D1, it is retried from the alarm, which stays armed: D1 still holds the grant");
+  await acctV1.setFailClaim({ on: false });
+  ok(await until(async () => (await claimOf(V1)) <= 1 && (await acctV1.budget()).claim <= 1 && (await acctV1.budget()).dirty === false), "with no further request, the alarm gives the unusable grant back, in D1 too (CORR-BDA-1): " + (await claimOf(V1)));
+  // (and a lower limit alone: slack within 2 chunks of the old one, beyond 2 of the new, is given back)
+  fake.limits.set(V1, sync(10_000, 1 << 20));
+  await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(10_000, 1 << 20) }));
+  const rv2 = await acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 small")), size: 100 });
+  await acctV1.abandon({ id: rv2.ok.id });
+  // (until no alarm is pending at all: the upload's own end has passed, so only the notice can arm one)
+  ok(await until(async () => (await acctV1.budget()).alarm === null, 10_000), "(nothing pending: no alarm)");
+  const slack = await claimOf(V1);
+  ok(rv2?.ok?.id && slack >= 100 && slack <= 2 * 156, "(an unused claim of " + slack + ", within 2 chunks of 10,000: kept)");
+  fake.limits.set(V1, sync(1000, 1 << 20));
+  await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now() + 1, limits: sync(1000, 1 << 20) }));
+  ok(await until(async () => (await claimOf(V1)) <= 64), "a notice lowering the limit to 1,000 (chunk 64) has the alarm give back what is beyond 2 chunks of it, with no further request: " + (await claimOf(V1)));
+  // (the cache's refusal says it is temporary)
+  const full1 = await s3u_full_probe();
+  async function s3u_full_probe() {
+    const sx = await signIn(T5);
+    const so = await socket(sx);
+    await hello(so, dev2);
+    const a = await so.ask(batch("7575cafe7575", 1, [[1, pid(300, "clientT5RA"), [], "w".repeat(100_000)]]));
+    const b = await so.ask(batch("7575cafe7575", 1, [[1, pid(301, "clientT5RB"), [], "w".repeat(100_000)]]));
+    so.ws.close();
+    return [a, b];
+  }
+  ok(full1[1]?.code === "storage_full" && Number(full1[1]?.detail?.retry_after) > 0, "a refusal from the full cache is storage_full with retry_after, the time left: try again shortly: " + JSON.stringify(full1[1]?.detail));
   // the breakdown: sharing's files and versions, sync's files and documents, against the one storage_bytes
   const me = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: st2 } })).json();
   ok(me.usage_breakdown?.sync_documents === 10_500 && me.usage_breakdown.sync_files === 0 && me.usage_breakdown.sharing_files === 0 && me.usage === 10_500, "the usage breakdown shows each part, sync's documents on their own line, and their sum: " + JSON.stringify({ usage: me.usage, parts: me.usage_breakdown }));
