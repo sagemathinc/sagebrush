@@ -231,6 +231,47 @@ try {
   await send("Target.closeTarget", { targetId: t3.id });
   const crossed = await ev(`(async () => { __releaseA(); await sagebrush.notebook.saved(); await new Promise((r) => setTimeout(r, 500)); const a = await sagebrush.workspace.read(__aPath), b = await sagebrush.workspace.read("/B separate.ipynb"); return { sent: __sentA, A: { name: a.content.name, code: a.content.cells[0].code }, B: { name: b.content.name, code: b.content.cells[0].code } }; })()`);
   check(crossed.A.name === cross.aName && crossed.A.code === "A second" && crossed.B.name === "B separate" && crossed.B.code === "B remote private" && crossed.sent.every((x) => x.name === cross.aName && x.code.startsWith("A ")), "a save of A still queued when B was opened (and changed elsewhere) writes A's second edit to A, from A's revision, nothing of B: " + JSON.stringify(crossed));
+  // …and if it meets a change made elsewhere to its own notebook, no longer
+  // shown here, nothing is lost: the other version stays, and what the save
+  // had is kept as a notebook of its own (CORR-B54-1, astra's trace)
+  await ev(`(async () => {
+    const nb = sagebrush.notebook, w = sagebrush.workspace;
+    await nb.saved();
+    const ce = await w.create("/C conflict.ipynb", { content: { name: "C conflict", mode: "python", cells: [{ id: "c1", code: "C start" }] } });
+    await sagebrush.open(ce.ref);
+    await nb.saved();
+    const real = nb.store;
+    let n = 0, enter;
+    window.__enterC = new Promise((r) => (enter = r));
+    const hold = new Promise((r) => (window.__releaseC = r));
+    await nb.attach({ load: () => real.load(), save: async (d) => { if (++n === 1) { enter(); await hold; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    await new Promise((r) => setTimeout(r, 0));
+    nb.setInput(nb.cells()[0], "C first"); nb.flush();
+    await __enterC;
+    nb.setInput(nb.cells()[0], "C second"); nb.flush();
+    await sagebrush.open((await w.stat("/B separate.ipynb")).ref);
+    return 1;
+  })()`);
+  const t4 = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base)}`, { method: "PUT" })).json();
+  const ws4 = new WebSocket(t4.webSocketDebuggerUrl);
+  await new Promise((r) => (ws4.onopen = r));
+  let n4 = 0; const waiting4 = new Map();
+  ws4.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waiting4.has(d.id)) { waiting4.get(d.id)(d.result ?? d.error); waiting4.delete(d.id); } };
+  const ev4 = async (expression) => { const id = ++n4; const r = await new Promise((ok) => { waiting4.set(id, ok); ws4.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 800)); return r.result?.value; };
+  for (let i = 0; i < 600 && !(await ev4(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
+  await ev4(`(async () => { const w = sagebrush.workspace, r = await w.read("/C conflict.ipynb"); await w.write("/C conflict.ipynb", { ...r.content, cells: r.content.cells.map((c) => ({ ...c, code: "C remote concurrent" })) }, { base: r.rev }); return 1; })()`);
+  ws4.close();
+  await send("Target.closeTarget", { targetId: t4.id });
+  const keptC = await ev(`(async () => {
+    __releaseC();
+    let error = null;
+    try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); }
+    const w = sagebrush.workspace, c = await w.read("/C conflict.ipynb");
+    const copy = await w.read("/C conflict (your changes, made while it changed elsewhere).ipynb").catch(() => null);
+    return { error, theirs: c.content.cells[0].code, copy: copy && { name: copy.content.name, code: copy.content.cells[0].code }, notebooks: (await w.list("/")).filter((e) => e.kind === "notebook").map((e) => e.path) };
+  })()`);
+  check(keptC.theirs === "C remote concurrent", "a save of C, no longer shown, meeting a change made elsewhere to C: the other version stays: " + JSON.stringify(keptC));
+  check(keptC.error === null && keptC.copy?.code === "C second" && keptC.copy?.name === "C conflict (your changes, made while it changed elsewhere)", "…and C's latest edit is kept as a notebook of its own, before saved() resolves: " + JSON.stringify(keptC));
   // Undo of Move to Trash: that file, put in Trash that time; not another
   // since put there under the same name (CORR-0B0-3)
   await ev(`${W}.create("/undo.txt", { content: "original" }).then(() => 1)`);
@@ -262,7 +303,7 @@ try {
   await sleep(800);
   await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "after", text: "after the rename" }); }).then(() => 1)`);
   await sleep(2000);
-  const rb = await ev(`(async () => { const r = await ${W}.read("/Sylow renamed.board.json"); return { title: r.content.title, after: (r.content.nodes ?? []).some((n) => n.id === "after"), copies: (await ${W}.list("/", { recursive: true })).filter((e) => /your changes/.test(e.path)).map((e) => e.path), log: sagebrush.saveLog().map((x) => x.what) }; })()`);
+  const rb = await ev(`(async () => { const r = await ${W}.read("/Sylow renamed.board.json"); return { title: r.content.title, after: (r.content.nodes ?? []).some((n) => n.id === "after"), copies: (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "board" && /your changes/.test(e.path)).map((e) => e.path), log: sagebrush.saveLog().map((x) => x.what) }; })()`);
   check(rb.title === "Sylow renamed" && rb.after && rb.copies.length === 0, "…and an edit after it is saved over it, the new title kept, no conflict: " + JSON.stringify(rb));
 
   // many entries (LIMIT-0B0-1, -2): put straight into the index, as a big workspace would hold them

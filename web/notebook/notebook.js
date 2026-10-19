@@ -1630,6 +1630,8 @@ export function createNotebook(root, opts = {}) {
   //   has that change merged in, so it never writes the change back over
   //   (CORR-0B0-2); only while this document is the one shown
   let shown = { synced: null, remoteSeen: 0 };
+  // (the page's: keeps a save of a document no longer shown that met a change made elsewhere)
+  let detachedConflict = null;
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
   const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
@@ -1679,9 +1681,14 @@ export function createNotebook(root, opts = {}) {
       savesPending++;
       saveChain = p.then((t) => {
         if (t && typeof t === "object" && t.conflict) {
-          // written elsewhere first: merge that, then save the merge (a
-          // document no longer shown: nothing to merge into here)
-          if (mine !== shown || store !== st) return;
+          // written elsewhere first: merge that, then save the merge; a
+          // document no longer shown has nothing here to merge into: what
+          // this save had is kept by the page, beside the other, never over
+          // it, before saved() resolves (CORR-B54-1)
+          if (mine !== shown || store !== st) {
+            if (!detachedConflict) return (lastSaveError = new Error("changed elsewhere after it was closed here: not saved"));
+            return Promise.resolve().then(() => detachedConflict(sent, t.conflict, mine)).then(() => {}, (e) => { lastSaveError = e ?? new Error("not kept"); });
+          }
           if (lastJson === json) lastJson = null;
           applyRemote(t.conflict, true, true);
           return;
@@ -2154,6 +2161,12 @@ export function createNotebook(root, opts = {}) {
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       return doc;
     },
+    /** A save of a document no longer shown here met a change made
+     * elsewhere: `f(doc, theirs, key)` keeps `doc` (what that save had)
+     * somewhere of its own, never over theirs; `key` is the same for every
+     * such save of one showing of a document, so a later one can go where
+     * the first went.  saved() waits for it. */
+    onDetachedConflict(f) { detachedConflict = f; },
     detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },

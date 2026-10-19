@@ -729,6 +729,28 @@ const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyz
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
+// A save of a notebook no longer open here met a change made elsewhere
+// (CORR-B54-1): what it had is kept as a notebook of its own, "<name> (your
+// changes, made while it changed elsewhere)", beside the other version,
+// never over it; a later save of the same opening goes to the same copy.
+const nbKept = new WeakMap();
+nb.onDetachedConflict(async (doc, theirs, key) => {
+  if (!db) throw new Error("this browser has no storage to keep it in");
+  const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, ...rest } = doc;
+  const was = String(doc.name || "Untitled"), name = was + " (your changes, made while it changed elsewhere)";
+  let id = nbKept.get(key);
+  if (!id) {
+    id = newId();
+    await new IdbStore(db, id, { ...rest, id, name }).load();
+    nbKept.set(key, id);
+    await wsListNotebook(id, name, rest.mode);
+  } else {
+    const st = new IdbStore(db, id), cur = await st.load();
+    const out = await st.save({ ...rest, id, name, baseRev: cur.rev });
+    if (typeof out === "string" || out?.conflict) throw new Error(`"${name}" couldn't be updated`);
+  }
+  statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
+});
 nb.on("saved", (text) => (savedEl.textContent = text));
 // a change made in another tab: its name and language too
 nb.on("remote", (d) => {
