@@ -151,12 +151,12 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast. */ say(text: string): void };
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -185,16 +185,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   root.append(head, search, toastEl, tree, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void) => {
-    toast = { text, undo };
+  const say = (text: string, undo?: () => void, sticky = false) => {
+    toast = { text, undo, sticky };
     renderToast();
-    setTimeout(() => { if (toast?.text === text) { toast = null; renderToast(); } }, 8000);
+    if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
     const t = h("div", { className: "ftoast", role: "status" }, h("span", { textContent: toast.text }));
     if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
+    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
     toastEl.append(t);
   };
   const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
@@ -463,7 +464,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     if (refused.length) say(`${folder === "/" ? "The top folder" : folder} is full (${LIMITS.maxFolderEntries} entries): not added: ${refused.slice(0, 5).join(", ")}${refused.length > 5 ? ` and ${refused.length - 5} more` : ""}`);
     if (!files.length) return;
-    if (host.upload) return host.upload(files, folder).then((m) => { if (m) say(m); refresh(); });
+    // (an upload's summary, its refusals in it, kept until closed)
+    if (host.upload) return host.upload(files, folder).then((m) => { if (m) say(m, undefined, /not added/i.test(m)); refresh(); });
     for (const f of files) {
       if (f.size > LIMITS.maxFileBytes) { refused.push(f.name); continue; }
       try { await w.putFile(join(folder, f.name), new Uint8Array(await f.arrayBuffer())); } catch (err) { refused.push(f.name); fail(err); }
@@ -514,6 +516,6 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     el: root,
     refresh,
     destroy() { unwatch(); root.remove(); },
-    say: (text: string) => say(text),
+    say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
   };
 }
