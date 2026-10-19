@@ -83,6 +83,7 @@ jobs:
           CHROME=google-chrome node web/board/test-frame.mjs
           CHROME=google-chrome bun web/board/test-submit.mjs
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace.mjs
           bun web/board/test-own-names.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
