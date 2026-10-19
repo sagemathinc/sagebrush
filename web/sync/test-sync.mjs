@@ -22,6 +22,7 @@ const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pendin
 const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
 const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outlives its reservation
 const H = "88888888-8888-4888-8888-888888888888"; // allowlisted; its first registration in D1 fails
+const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enable's answer is held before the account object
 
 let failures = 0;
 let count = 0;
@@ -49,6 +50,7 @@ fake.limits.set(E, sync(1 << 20, 1 << 20));
 fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 10 });
 fake.limits.set(G, sync(1 << 20, 1 << 20));
 fake.limits.set(H, sync(1 << 20, 1 << 20));
+fake.limits.set(I, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -64,7 +66,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: I },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1192,6 +1194,21 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   for (const g of [1, 2, 3]) stale.push((await acctE.enable({ account: E, hash: hashOf(E), generation: g }))?.error?.code ?? "admitted");
   ok(stale.join() === "forbidden,forbidden,forbidden" && (await put(seE, Buffer.from("E after stale enables"))).status === 403, "after two cycles, a stale enable of every retired generation is refused, and no write is taken (CORR-DE7-1): " + stale.join());
   ok((await post(seE, "/api/sync/v1/enable", {})).status === 200 && (await put(seE, Buffer.from("E, generation 4"))).status === 201, "and turning sync on again (generation 4) takes writes");
+  // CORR-A62-1: I's first-ever enable is registered (generation 1) and its answer held before the account object
+  // is reached; a delete then; the held enable arrives last
+  const si = await signIn(I);
+  const held = await (await post(si, "/api/sync/v1/enable", {})).json();
+  ok(held.held === 1, "(I's first enable is registered, generation 1, its answer held)");
+  ok((await post(si, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(I: Delete my synced data, before the account object has storage)");
+  const regI = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(I)).first();
+  ok(regI?.state === "purged", "the deletion completes in D1 though the account object had no storage");
+  const acctI = acctNs.get(acctNs.idFromName("acct:" + hashOf(I)));
+  const lateI = await acctI.enable({ account: I, hash: hashOf(I), generation: held.held });
+  ok(lateI?.error?.code === "forbidden" && (await put(si, Buffer.from("I's file"))).status === 403, "the held enable, arriving after, is refused: the purge retired its generation, and no write is taken (CORR-A62-1)");
+  // (a fresh enable: its registration, as the Worker makes it, takes the purged row to generation 2)
+  await db.prepare("UPDATE sync_accounts SET state = 'active', generation = generation + 1 WHERE account_hash = ?1 AND state = 'purged'").bind(hashOf(I)).run();
+  ok((await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(I)).first())?.generation === 2, "(registered again: generation 2)");
+  ok((await acctI.enable({ account: I, hash: hashOf(I), generation: 2 }))?.ok?.state === "active" && (await put(si, Buffer.from("I's file, generation 2"))).status === 201, "a fresh enable (generation 2) takes writes");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

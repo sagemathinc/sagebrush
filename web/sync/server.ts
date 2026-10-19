@@ -28,6 +28,8 @@ declare class FixedLengthStream extends TransformStream<Uint8Array, Uint8Array> 
 }
 
 export type Env = SyncEnv & ShareEnv & {
+  /** a test seam: this account id's enable stops after its registration, as if its answer were held (CORR-A62-1) */
+  SYNC_TEST_HOLD_ENABLE?: string;
   /** a test seam: registering this account id in D1 fails, as an outage would (CORR-00F-1) */
   SYNC_TEST_FAIL_ENROLL?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
@@ -154,6 +156,9 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     } catch {
       return err(503, "busy", { message: "turning sync on didn't finish; try again" });
     }
+    // (a test seam: the registration's answer is held here, before the account object is reached, as
+    // astra's first-enable trace holds it; the test then sends what it would, CORR-A62-1)
+    if (env.SYNC_TEST_HOLD_ENABLE && env.SYNC_TEST_HOLD_ENABLE === who.id) return json({ held: reg.generation });
     // (the account object checks the generation against its own, and against the highest it has
     // retired: a purge since this read, or any number of them, refuses it)
     return answer(await stub.enable({ account: who.id, hash, generation: reg.generation }), json);
@@ -163,7 +168,10 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     if (b?.confirm !== "delete") return err(400, "invalid", { message: 'send {"confirm": "delete"}' });
     const rid = crypto.randomUUID();
     await env.SHARE_DB.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'self' WHERE account_hash = ?1 AND state = 'active'").bind(hash, rid).run();
-    return json(await stub.purge({ request_id: rid, kind: "self" }), 202);
+    // (the registered generation goes to the purge, which retires it even if the account object has
+    // no storage yet: an enable of it still on its way is then refused, CORR-A62-1)
+    const g = await env.SHARE_DB.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
+    return json(await stub.purge({ request_id: rid, kind: "self", hash, ...(g?.state === "deleting" ? { generation: g.generation } : {}) }), 202);
   }
   if (p === "/api/sync/v1/account" && m === "GET") {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return err(426, "a WebSocket upgrade");
@@ -251,7 +259,8 @@ async function adminSyncPurge(req: Request, env: Env): Promise<void> {
   const rec = await env.SHARE_DB!.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
   if (!rec) return; // (never synced: nothing to delete)
   await env.SHARE_DB!.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'admin' WHERE account_hash = ?1 AND state <> 'purged'").bind(hash, v.request_id).run();
-  await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
+  const g = await env.SHARE_DB!.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
+  await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin", hash, ...(g?.state === "deleting" ? { generation: g.generation } : {}) });
 }
 
 /** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */
