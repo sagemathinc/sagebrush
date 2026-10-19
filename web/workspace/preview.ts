@@ -362,6 +362,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     // (files kept the old way, being moved beside the index: capabilities §2b; read where they are meanwhile)
     const mig = await migrationState(w).catch(() => ({}) as MigrationState);
     if (mig.paused) line("Moving your files' storage", "paused: storage is full. Your files are all still readable; free some space (empty Trash, delete old versions) and it goes on.", undefined, "warn");
+    // (names in one folder that look the same, made before that was refused: listed so they can be told apart; capabilities §3)
+    if (use.lookalikes.length) line("Names that look the same", use.lookalikes.slice(0, 3).map((g) => g.map((p) => `${p} (${[...nameOf(p)].map((c) => "U+" + c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")).slice(0, 40).join(" ")})`).join(" · ")).join("; ") + (use.lookalikes.length > 3 ? `; and ${use.lookalikes.length - 3} more` : ""), undefined, "warn");
     else if (use.migration.left) line("Moving your files' storage", `${use.migration.left} file${use.migration.left === 1 ? "" : "s"} left (read where they are meanwhile)`);
     body.append(dl);
     const keep = h("p", { className: "keep" });

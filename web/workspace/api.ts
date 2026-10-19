@@ -43,8 +43,16 @@ export type Entry = {
   updated: number;
   /** a data file's revision (a document's is its record's) */
   rev?: number;
-  /** a data file's own id, which a rename keeps: its versions' (§2.5), and its bytes' key in fileBytes */
+  /** a data file's or folder's own id, which a rename keeps: a file's versions' (§2.5) and its bytes' key in
+   * fileBytes; a folder's, what a grant names (design/capabilities.md §6).  Never reused: a folder removed
+   * and made again is a new one */
   fid?: string;
+  /** a document's provenance (design/capabilities.md §6, CORR-CAP-5), kept by the host, never read from the
+   * document, a file or a URL, never exported: "person", made by the person in this site's own UI (File ▸
+   * New board or New notebook, the file browser's New, a first visit's blank board); "elsewhere",
+   * anything else (an upload, a drop, Open as…, an agent, an example, a conversion); absent, unknown (made
+   * before this was kept), which counts as elsewhere.  A copy has its source's */
+  made?: "person" | "elsewhere";
   /** a data file whose bytes are in "sagebrush-workspace"/fileBytes under its fid (design/capabilities.md §2b) */
   migrated?: boolean;
   /** a migrated data file's SHA-256 (hex), as moved; dropped by its next write */
@@ -276,10 +284,24 @@ export class Workspace {
   /** A new notebook, board or data file at `p`, its kind said by its name;
    * `content` its document or bytes (else a blank one), `mode` a document's
    * language.  A path that's taken is refused, never written over. */
+  /** Its provenance: "elsewhere" (`made` given here is not read: only the host's createByPerson says "person"). */
   async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+    return this.createAs(p, opts, "elsewhere");
+  }
+  /** create(), made by the person in this site's own UI: provenance "person" (design/capabilities.md §6).
+   * For the pages' own New only: not offered to agents (forAgent), and no option of create() reaches it. */
+  async createByPerson(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+    return this.createAs(p, opts, "person");
+  }
+  /** create(), a copy of `source` (a page's copy of a board: a conflict's, a closed page's changes,
+   * Duplicate): the source's provenance, whatever it is (unknown stays unknown).  Not offered to agents. */
+  async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
+    return this.createAs(p, opts, source.made);
+  }
+  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal }, made: Entry["made"]): Promise<Entry> {
     const q = path(p), kind = kindOf(q);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, opts.content, opts.mode), opts.signal).then((e) => { this.askToKeep(); return e; });
+    return this.locked(() => this.make(q, kind, opts.content, opts.mode, undefined, made), opts.signal).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -428,9 +450,10 @@ export class Workspace {
       if (within(dest, TRASH) || (e.kind !== "file" && kindOf(dest) !== e.kind)) throw new WorkspaceError("invalid", `a copy of ${e.path} can't be ${dest}`);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
-        return this.make(dest, "notebook", doc, e.mode);
+        return this.make(dest, "notebook", doc, e.mode, undefined, e.made);
       }
-      if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin);
+      // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
+      if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
       return this.make(dest, "file", c);
     });
   }
@@ -687,9 +710,18 @@ export class Workspace {
   /** What this browser's workspace holds, for the Storage panel (§6.3):
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
-  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number } }> {
+  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][] }> {
     const all = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll())) as Entry[];
-    const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 } };
+    const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][] };
+    // (names that look the same in one folder, made before they were refused: each group, at most 100)
+    const groups = new Map<string, string[]>();
+    for (const e of all) {
+      const n = nameOf(e.path);
+      if (/^[\x00-\x7f]*$/.test(n)) continue;
+      const k = parentOf(e.path) + "\u0000" + n.normalize("NFC");
+      groups.set(k, [...(groups.get(k) ?? []), e.path]);
+    }
+    for (const g of groups.values()) if (g.length > 1 && out.lookalikes.length < 100) out.lookalikes.push(g.sort());
     for (const e of all) {
       // (data files whose bytes the migrator hasn't moved yet, Trash's too: capabilities §2b)
       if (e.kind === "file" && !e.migrated && !e.unmoved && !e.missing && e.ref !== null) out.migration.left++;
@@ -990,6 +1022,17 @@ export class Workspace {
     return this.mainTx("files", "readonly", (st) => st.get(e.ref!));
   }
 
+  /** A folder made before folders had ids given one (the migrator, holding the lock): only if it is still
+   * that folder (its path and when it was made) and has none.  True if it was given one. */
+  async giveFolderId(e: Pick<Entry, "path" | "created">): Promise<boolean> {
+    return inTx(this.ws, "entries", "readwrite", async (tx) => {
+      const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+      if (!cur || cur.kind !== "folder" || cur.fid || cur.created !== e.created) return false;
+      st.put({ ...cur, fid: hex(8) });
+      return true;
+    });
+  }
+
   /** A data file's bytes moved into fileBytes (design/capabilities.md §2b),
    * holding the lock (and, taken before it, a reservation of LEGACY_MAX ×
    * COPIES: a value kept the old way has no size until it is read,
@@ -1117,7 +1160,7 @@ export class Workspace {
   }
 
   /** The contents written, then the entry; the contents taken back if the entry can't be. */
-  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string): Promise<Entry> {
+  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"]): Promise<Entry> {
     if (await this.stat(q)) throw new WorkspaceError("exists", `${q} is there already`);
     const t = this.now();
     let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined;
@@ -1164,10 +1207,11 @@ export class Workspace {
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
         await this.folders(tx, parentOf(q), ops);
+        await this.lookalike(st, q);
         await this.room(st, q);
         // (a data file's bytes with its entry, in this one transaction)
         if (fileBytes) tx.objectStore("fileBytes").put(fileBytes, fid!);
-        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true } : {}), ...(origin ? { origin } : {}) };
+        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}) };
         st.put(e);
         this.log(tx, ops, { op: "create", path: q, kind });
         return e;
@@ -1224,11 +1268,28 @@ export class Workspace {
       const e: Entry | undefined = await req(st.get(at));
       if (e && e.kind !== "folder") throw new WorkspaceError("exists", `${at} is a ${e.kind}, not a folder`);
       if (!e) {
+        await this.lookalike(st, at);
         await this.room(st, at);
         const t = this.now();
-        st.put({ path: at, kind: "folder", ref: null, created: t, updated: t } satisfies Entry);
+        // (its own id, never reused: a folder made again is a new one, which no grant of the old names)
+        st.put({ path: at, kind: "folder", ref: null, created: t, updated: t, fid: hex(8) } satisfies Entry);
         this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" });
       }
+    }
+  }
+
+  /** `p` refused when a name in its folder looks the same but isn't (the same NFC form, different
+   * characters: design/capabilities.md §3, CORR-CAP-3).  Names are kept exactly; this only stops a new
+   * lookalike.  A name all ASCII has none, so is let through without looking at its folder. */
+  private async lookalike(st: IDBObjectStore, p: string) {
+    const name = nameOf(p);
+    if (/^[\x00-\x7f]*$/.test(name)) return;
+    const folder = parentOf(p), nfc = name.normalize("NFC");
+    const keys = (await req(st.getAllKeys(subtree(folder)))) as string[];
+    for (const k of keys) {
+      if (k === p || parentOf(k) !== folder) continue;
+      const other = nameOf(k);
+      if (other.normalize("NFC") === nfc) throw new WorkspaceError("exists", `"${other}" is already in ${folder}, and looks the same as "${name}": choose another name`);
     }
   }
 
@@ -1297,6 +1358,7 @@ export class Workspace {
         if (!now || now.ref !== e.ref || now.fid !== e.fid) throw new WorkspaceError("conflict", `${e.path} changed while it was moved`);
       }
       await this.folders(tx, parentOf(b), ops);
+      await this.lookalike(st, b);
       // (one more entry in b's folder, unless it was already there: LIMIT-094-1)
       if (parentOf(a) !== parentOf(b)) await this.folderRoom(st, parentOf(b));
       const out: Entry[] = [];

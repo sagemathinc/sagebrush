@@ -1040,9 +1040,10 @@ async function migrateUndersized() {
   // LIMIT-CAP1A-1 / CORR-F81-2: an entry whose index says 1 byte, its old bytes 5 MiB: the read is
   // reserved for what a value kept the old way can be, before the workspace's lock and before the read;
   // the size corrected; the migration done in one pass, not retried for ever
-  const w = await v1([["/u/a.bin", "x"]]);
+  // (at the top: no folder for the migrator to give an id to first, under the lock held here)
+  const w = await v1([["/ua.bin", "x"]]);
   const big = new Uint8Array(5 * 2 ** 20).fill(7);
-  await rawPut(w.main, "files", big, "/u/a.bin");
+  await rawPut(w.main, "files", big, "/ua.bin");
   const legacy = w.legacyBytes.bind(w), heldAtRead = [];
   w.legacyBytes = async (e) => { heldAtRead.push(W.reserved().held); return legacy(e); };
   // the workspace's lock held elsewhere: the migrator has its reservation while it waits for the lock
@@ -1057,8 +1058,8 @@ async function migrateUndersized() {
   release();
   try { await run; } finally { W.MIGRATE.afterBatch = null; w.legacyBytes = legacy; }
   check(heldAtRead.length > 0 && heldAtRead.every((h) => h >= W.LEGACY_MAX * W.COPIES), "…held when the old bytes are read, covering any value kept the old way: " + heldAtRead.join());
-  const e = await w.stat("/u/a.bin");
-  check(e.migrated && e.size === big.length && (await fb(w, "/u/a.bin")).length === big.length, "the index's 1 byte corrected to the bytes read, and moved");
+  const e = await w.stat("/ua.bin");
+  check(e.migrated && e.size === big.length && (await fb(w, "/ua.bin")).length === big.length, "the index's 1 byte corrected to the bytes read, and moved");
   check((await W.migrationState(w)).done && batches <= 3, "…and the migration done, not retried for ever: " + batches + " batches");
   check(W.reserved().held === 0, "…its reservation released");
   // a write to a file kept the old way reads its old bytes (as the version to keep): reserved first too
@@ -1223,8 +1224,96 @@ async function closedByUpgrade() {
   box?.remove();
 }
 
+// ---- capabilities step 1b: identities (design/capabilities.md §3, §6)
+
+async function folderIds() {
+  const w = await fresh();
+  const a = await w.mkdir("/A/B");
+  const top = await w.stat("/A");
+  check(/^[0-9a-f]{16}$/.test(a.fid ?? "") && /^[0-9a-f]{16}$/.test(top.fid ?? "") && a.fid !== top.fid, "folders made have ids of their own, the ones made on the way too");
+  await w.create("/C/x.txt", { content: "x" });
+  check(/^[0-9a-f]{16}$/.test((await w.stat("/C")).fid ?? ""), "…a folder made for a file too");
+  await w.rename("/A", "/A2");
+  check((await w.stat("/A2")).fid === top.fid && (await w.stat("/A2/B")).fid === a.fid, "a rename keeps them, inside too");
+  await w.remove("/A2");
+  await w.mkdir("/A2");
+  check((await w.stat("/A2")).fid !== top.fid && (await w.stat("/Trash/A2")).fid === top.fid, "a folder removed and made again is a new one; the removed one keeps its id in Trash");
+  w.close();
+}
+
+async function folderIdsMigrated() {
+  // folders made before they had ids: given them by the migrator, before any grant can name them
+  const w = await v1([["/old/sub/a.txt", "a"], ["/old2/b.txt", "b"]]);
+  check(!(await w.stat("/old")).fid && !(await w.stat("/old/sub")).fid, "(version 1's folders have no ids)");
+  await W.startMigrator(w);
+  const ids = await Promise.all(["/old", "/old/sub", "/old2"].map(async (p) => (await w.stat(p)).fid));
+  check(ids.every((x) => /^[0-9a-f]{16}$/.test(x ?? "")) && new Set(ids).size === 3 && (await W.migrationState(w)).done, "the migrator gives every folder an id, each its own");
+  // a folder without an id renamed behind the cursor during the candidate clean pass (astra's
+  // CORR-CAP-46A-1 with a folder): that pass doesn't count; the folder gets its id; then done
+  const v = await fresh();
+  for (const i of [1, 2, 3, 4, 5, 6]) await v.create(`/c${i}.txt`, { content: "c" });
+  const was = W.MIGRATE.files;
+  W.MIGRATE.files = 2;
+  let did = false;
+  W.MIGRATE.afterBatch = async (s) => {
+    if (!did && s.pass && !s.pass.work && s.pass.at >= "/c3.txt") {
+      did = true;
+      await v.locked(() => new Promise((ok, no) => { const tx = v.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/zz", kind: "folder", ref: null, created: 5, updated: 5 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }));
+      await v.rename("/zz", "/aa");
+    }
+  };
+  try { await W.startMigrator(v); } finally { W.MIGRATE.files = was; W.MIGRATE.afterBatch = null; }
+  check(did && /^[0-9a-f]{16}$/.test((await v.stat("/aa"))?.fid ?? "") && (await W.migrationState(v)).done, "a folder without an id moved behind the cursor during the candidate clean pass: given one before done");
+  w.close();
+  v.close();
+}
+
+async function provenance() {
+  const w = await fresh();
+  const ag = w.forAgent("agent:x");
+  const e1 = await w.create("/e.board.json"), p1 = await w.createByPerson("/p.board.json"), n1 = await w.createByPerson("/p.ipynb");
+  check(e1.made === "elsewhere" && p1.made === "person" && n1.made === "person", "create: from elsewhere; createByPerson (the pages' own New): the person's");
+  check(typeof ag.createByPerson === "undefined" && typeof ag.createCopyOf === "undefined" && typeof ag.adopt === "undefined", "an agent has no way to say the person made something");
+  const forged = await ag.create("/f.board.json", { made: "person", content: { title: "f", made: "person", nodes: [] } });
+  check(forged.made === "elsewhere" && (await w.create("/g.board.json", { made: "person" })).made === "elsewhere", "…an agent's create, or anyone's, saying made: person in its options or its document: from elsewhere");
+  // a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere
+  const dp = await w.duplicate("/p.board.json"), de = await ag.duplicate("/e.board.json"), dn = await w.duplicate("/p.ipynb");
+  check(dp.made === "person" && de.made === "elsewhere" && dn.made === "person", "Duplicate keeps the source's provenance (an agent's too)");
+  const tmp = await w.create("/tmp.board.json");
+  await w.remove(tmp.path);
+  const legacy = await w.locked(() => w.adopt("/", "old", ".board.json", { kind: "board", ref: tmp.ref }));
+  check(legacy.made === undefined && (await w.createCopyOf(legacy, "/oldcopy.board.json")).made === undefined && (await w.duplicate(legacy.path)).made === undefined, "unknown (made before it was kept) stays unknown in a copy");
+  check((await w.createCopyOf(p1, "/pc.board.json")).made === "person", "a page's copy of the person's board: the person's");
+  // a change to the document never touches it; nor a rename or Trash
+  await ag.write("/e.board.json", { title: "e", made: "person", nodes: [] });
+  await w.rename("/p.board.json", "/p2.board.json");
+  const t = await w.remove("/p2.board.json");
+  check((await w.stat("/e.board.json")).made === "elsewhere" && t.made === "person" && (await w.restore(t.path, t)).made === "person", "a write saying made: person changes nothing; a rename, Trash and restore keep it");
+  w.close();
+}
+
+async function lookalikes() {
+  const w = await fresh();
+  const composed = "/café.txt", decomposed = "/café.txt";
+  await w.create(composed, { content: "1" });
+  const r = await w.create(decomposed, { content: "2" }).then(() => null, (e) => e);
+  check(r instanceof W.WorkspaceError && r.code === "exists" && /looks the same/.test(r.message), "a name that looks the same as one in its folder (another Unicode form) is refused, saying so");
+  await w.mkdir("/résumé");
+  check(await fails(w.mkdir("/résumé"), "exists"), "…a folder too");
+  await w.create("/other.txt", { content: "o" });
+  check(await fails(w.rename("/other.txt", decomposed), "exists"), "…and a rename to one");
+  await w.create("/elsewhere" + decomposed, { content: "3" });
+  check(!!(await w.stat("/elsewhere" + decomposed)), "the same name in another folder is fine");
+  check(!!(await w.create("/Cafe.txt", { content: "c" })) && !!(await w.create("/cafe.txt", { content: "c" })), "ASCII names aren't looked at (letter case is another name)");
+  // lookalikes made before this rule: listed for the Storage panel; both keep working
+  await new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: decomposed, kind: "file", ref: decomposed, size: 1, rev: 0, fid: "dddddddddddddddd", created: 1, updated: 1 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const u = await w.usage();
+  check(u.lookalikes.length === 1 && u.lookalikes[0].join() === [composed, decomposed].sort().join(), "names that look the same, made before: listed together: " + JSON.stringify(u.lookalikes));
+  w.close();
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, provenance, lookalikes]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

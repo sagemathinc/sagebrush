@@ -175,11 +175,15 @@ const PENDING_MAX = 8 * 2 ** 20;
  * (SEC-89C-3); a board made blank here is, and a copy is as trusted as what
  * it copies: a copy the page makes by itself (a conflict's, a closed
  * page's changes) never more (CORR-30D-1). */
-async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal): Promise<string> {
+/** (`as`: its provenance (design/capabilities.md §6): `person`, made by the person here (New board, a first
+ * visit's blank board); `copyOf`, a copy of that board, its provenance; else made from elsewhere) */
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal, as: { person?: true; copyOf?: string } = {}): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
-  const e = await w.create(p, { content: d, mode: d.mode ?? "python", signal });
+  const opts = { content: d, mode: d.mode ?? "python", signal };
+  const src = as.copyOf ? await w.pathOf("board", as.copyOf).then((q) => (q ? w.stat(q) : undefined)).catch(() => undefined) : undefined;
+  const e = as.person ? await w.createByPerson(p, opts) : src ? await w.createCopyOf(src, p, opts) : await w.create(p, opts);
   if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
@@ -203,7 +207,7 @@ let unsaved: string | null = null;
     const mode = MODES.includes(asked) ? asked : "python";
     let id: string | null = null;
     if (ws) {
-      try { id = (recent ? await latestInWorkspace(ws, mode) : null) ?? (await makeInWorkspace(ws, blankBoard(mode), true)); } catch (e) { console.warn("workspace:", e); }
+      try { id = (recent ? await latestInWorkspace(ws, mode) : null) ?? (await makeInWorkspace(ws, blankBoard(mode), true, undefined, { person: true })); } catch (e) { console.warn("workspace:", e); }
     } else id = (recent ? latestLocal(mode) : null) ?? makeLocal(blankBoard(mode));
     if (id) {
       q.delete("new");
@@ -387,7 +391,7 @@ function wsSave(id: string, d: BoardDoc) {
           }
         }
         if (!copyPath) {
-          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }, isHere(hereKey(id))), rev: 1 };
+          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }, isHere(hereKey(id)), undefined, { copyOf: id }), rev: 1 };
           logSave("to a new copy", d, epoch);
         }
         if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
@@ -430,7 +434,7 @@ const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>()
 async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
-    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }, isHere(hereKey(id))), rev: 1 };
+    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }, isHere(hereKey(id)), undefined, { copyOf: id }), rev: 1 };
     dropPending(id, header + "\n");
     const path = await w.pathOf("board", id);
     const cur = path ? await w.read(path) : null;
@@ -524,14 +528,19 @@ async function departFor(what: string, work: (signal: AbortSignal) => Promise<st
   try {
     if (!(await settled(what))) return;
     mounted.freeze(true);
+    held = true;
     left = await departWork(what, work);
   } finally {
     if (!left) {
       mounted.freeze(false);
+      held = false;
       departing = null;
     }
   }
 }
+// (whether the board is held for a departure now: for tests, which can't tell its wait for the workspace's
+// lock from another's, the migrator's say)
+let held = false;
 /** The departure's work, its lock waited for at most DEPART_MS; then the page goes. Whether it went. */
 async function departWork(what: string, work: (signal: AbortSignal) => Promise<string | undefined>): Promise<boolean> {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), DEPART_MS);
@@ -659,7 +668,7 @@ const host: BoardHost = {
               else {
                 // (the record moved on since, by another writer: neither is dropped; the copy kept as a board of its own: CORR-12C-2)
                 try {
-                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" }, isHere(hereKey(id)));
+                  await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" }, isHere(hereKey(id)), undefined, { copyOf: id });
                   dropPending(id, pend.header + "\n");
                   notice = "**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".";
                 } catch (e: any) {
@@ -818,8 +827,8 @@ const host: BoardHost = {
   exportPython: () => (OWN_ENGINE ? "8 MB" : null),
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
-  newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async (signal) => localUrl(await makeInWorkspace(ws, blankBoard(mode), true, signal))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
-  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
+  newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async (signal) => localUrl(await makeInWorkspace(ws, blankBoard(mode), true, signal, { person: true }))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
+  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal, { copyOf: local ? source.slice(6) : undefined }))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
   // The File menu's items that are the workspace's (design §3): a new
   // notebook, a folder, Open… (the file browser as a dialog), Recent, and
   // this board to Trash; none without the workspace, or in an exported file
@@ -828,7 +837,7 @@ const host: BoardHost = {
       const top = new Set((await ws!.list("/")).map((e) => e.path));
       const p = freePath("/", "Untitled", ".ipynb", (x) => top.has(x));
       if (!p) throw new Error("no free name for a new notebook");
-      const e = await ws!.create(p, { mode, signal });
+      const e = await ws!.createByPerson(p, { mode, signal });
       return "/?nb=" + encodeURIComponent(e.ref!);
     }),
     async newFolder() {
@@ -936,4 +945,4 @@ if (ws && local) {
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
-(window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}) };
+(window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}) };
