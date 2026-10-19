@@ -526,6 +526,92 @@ def test_unpaired_memory_is_bounded():
     p.close()
 
 
+def wait_unpaired(p):
+    for _ in range(200):
+        if not p.status()["paired"]:
+            return
+        time.sleep(0.01)
+    raise AssertionError("still paired")
+
+
+def test_session_reconnect():
+    """"Remember this agent" (the protocol doc §2.1): a code hello's result
+    carries a session secret; the page reconnects with it, any number of
+    times, without a code; 5 wrong secrets, or a revoke, and it is
+    forgotten; a hello carries a code or a session, never both."""
+    p, port, code = new()
+    c = Client(port)
+    r = c.hello(code)
+    secret = r["result"]["session"]
+    assert isinstance(secret, str) and len(secret) == 43, secret  # (32 bytes, base64url without padding)
+    assert p.session_hash != secret.encode() and len(p.session_hash) == 32  # (only its SHA-256 is kept)
+    c.close()
+    wait_unpaired(p)
+    for _ in range(2):  # (not rotated)
+        c = Client(port)
+        c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "session": secret, "page": {"origin": ORIGIN, "path": "/"}}})
+        r = c.recv()
+        assert "result" in r and "session" not in r["result"], r
+        c.close()
+        wait_unpaired(p)
+    # both, or neither
+    port2, code2 = p.start()
+    for params in ({"protocol": 1, "code": code2, "session": secret}, {"protocol": 1}):
+        c = Client(port)
+        c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": params})
+        assert c.recv()["error"]["data"]["code"] == "refused"
+        c.close()
+    # 5 wrong secrets: forgotten, the right one refused after
+    for _ in range(P.CODE_TRIES):
+        c = Client(port)
+        c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "session": "x" * 43}})
+        assert "wrong session" in c.recv()["error"]["message"]
+        c.close()
+    c = Client(port)
+    c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "session": secret}})
+    assert "no longer knows" in c.recv()["error"]["message"]
+    c.close()
+    # a revoke forgets it too
+    port, code = p.start()
+    c = Client(port)
+    secret = c.hello(code)["result"]["session"]
+    c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"]}})
+    c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {}})
+    time.sleep(0.2)
+    c.close()
+    wait_unpaired(p)
+    c = Client(port)
+    c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "session": secret}})
+    assert "no longer knows" in c.recv()["error"]["message"]
+    c.close()
+    p.close()
+
+
+def test_dev_origin():
+    """SAGEBRUSH_MCP_DEV_ORIGIN: one more origin, exactly; off by default;
+    anything but http://localhost:<port> or http://127.0.0.1:<port> refused."""
+    dev = "http://localhost:5173"
+    p, port, code = new()
+    assert Client(port, origin=dev).status == 403  # (off by default)
+    p.close()
+    os.environ[P.DEV_ORIGIN_ENV] = dev
+    try:
+        p, port, code = new()
+        assert Client(port, origin=dev).status == 101
+        assert Client(port, origin="http://localhost:5174").status == 403
+        assert Client(port, origin=ORIGIN).status == 101
+        p.close()
+        for bad in ("https://evil.example", "http://localhost", "http://localhost:5173/", "*", "http://localhost:0"):
+            os.environ[P.DEV_ORIGIN_ENV] = bad
+            try:
+                P.Pairing({"name": "t"})
+            except ValueError:
+                continue
+            raise AssertionError("accepted %r" % bad)
+    finally:
+        del os.environ[P.DEV_ORIGIN_ENV]
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
