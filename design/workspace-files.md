@@ -601,16 +601,24 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
   - peak memory is one entry (at most 200 MB, the upload limit) plus the compressor's window.
 - **Where it writes, in order of preference:**
   1. **`showSaveFilePicker`** (Chromium and the desktop app). The chosen file's `FileSystemWritableFileStream` takes the chunks as they come, with no size limit beyond the disk.
-  2. **Elsewhere (Firefox, Safari):** a file in the origin-private file system (OPFS), written by a worker through a sync access handle, then downloaded from its disk-backed `File`. It needs the bundle's estimated size free in the storage quota, checked before starting, and the OPFS file is deleted when the download has started or the export is cancelled.
-  3. **A Blob in memory, only when neither is available,** and only for a bundle of at most **256 MiB** (estimated from the entries' sizes before starting). Anything larger is refused before anything is read, saying to use the server's export (for a synced account) or a browser that can save files.
-- **A preflight pass comes first, and writes nothing.** It enumerates the exact member set: each entry's file, each history, each versions file, and the blobs, deduplicated by `sha256`. It then computes an **upper bound** of the bundle's size, not an estimate:
-  - **each member's zip records,** at their largest. A local header (30 bytes), a central header (46), a data descriptor (24) and Zip64 extra fields in both headers (20 and 28) come to at most 148 bytes, plus twice the member's UTF-8 name length;
-  - **the end records:** 22 + 56 + 20 bytes (end of central directory, Zip64 end record and locator);
-  - **each member's data:**
-    - a stored member's exact size;
-    - for a deflated one, the deflate bound of its size `n`: `n + (n >> 12) + (n >> 14) + (n >> 25) + 13`, as zlib's `deflateBound`;
-    - a history's size is measured by serializing its envelopes once, from a cursor, one at a time.
-- **The caps are checked on that set before writing:** at most 400,000 members and 20 GiB, and each member within its cap (the table under Import). The sink is then chosen from the bound: the 256 MiB Blob path only when the bound is at most 256 MiB, and OPFS only when the bound is free in the quota.
+  2. **Elsewhere (Firefox, Safari):** a file in the origin-private file system (OPFS), written by a worker through a sync access handle, then downloaded from its disk-backed `File`. It needs the preflight's upper bound (below) free in the storage quota, checked before starting, and the OPFS file is deleted when the download has started or the export is cancelled.
+  3. **A Blob in memory, only when neither is available,** and only for a bundle whose preflight upper bound is at most **256 MiB**. Anything larger is refused before anything is read, saying to use the server's export (for a synced account) or a browser that can save files.
+- **A preflight pass comes first, and writes nothing to the sink.** It builds and serializes `manifest.json` in memory, measures its exact UTF-8 size, and checks it against its 64 MiB cap. It then enumerates the exact member set:
+  - `manifest.json`;
+  - each entry's file;
+  - each history and each versions file;
+  - the blobs, deduplicated by `sha256`.
+
+  It sums two separate numbers:
+  - the **uncompressed bytes** of all members, the manifest included. These are checked against the importer's 20 GiB total.
+  - an **upper bound of the bundle's size**, not an estimate, for choosing the sink:
+    - **each member's zip records,** at their largest. A local header (30 bytes), a central header (46), a data descriptor (24) and Zip64 extra fields in both headers (20 and 28) come to at most 148 bytes, plus twice the member's UTF-8 name length;
+    - **the end records:** 22 + 56 + 20 bytes (end of central directory, Zip64 end record and locator);
+    - **each member's data:**
+      - a stored member's exact size;
+      - for a deflated one, the deflate bound of its size `n`: `n + (n >> 12) + (n >> 14) + (n >> 25) + 13`, as zlib's `deflateBound`;
+      - a history's size is measured by serializing its envelopes once, from a cursor, one at a time.
+- **The caps are checked on that set before writing:** at most 400,000 members (the manifest counted), at most 20 GiB of uncompressed bytes, and each member, the manifest included, within its cap (the table under Import). The sink is then chosen from the bound: the 256 MiB Blob path only when the bound is at most 256 MiB, and OPFS only when the bound is free in the quota.
 - Progress shows bytes and entries, and the export can be cancelled at any entry.
 
 **The bundle format** is documented and versioned like the board format. It is a zip, `<name>.sagebrush-workspace.zip`:
