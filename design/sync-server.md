@@ -28,7 +28,7 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 | **R2** (`sagebrush-share`, the same bucket) | `s/<account hash, 32 hex>/<random>` | Blob bytes, snapshots, archived patch segments, outputs, and daily exports |
 | **D1** (`sagebrush-share`, the same database) | — | Only what sharing already has: accounts, sessions, tombstones, purges. The sync service adds one table, `sync_accounts` (§9), written when sync is turned on and when it is purged, never on an edit. |
 
-**Why the document object's name includes the owner.** The document id is made by the client: it is random, 128 bits, and made offline. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. A shared document (§7.9, phase 3) is reached by naming its owner and its id. The object checks its access list.
+**Why the document object's name includes the owner.** The document id is the client's own, made offline: a notebook's UUID, or a board's 12 random hex. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. A shared document (§7.9, phase 3) is reached by naming its owner and its id. The object checks its access list.
 
 **Why `s/` and not sharing's `a/`.** "Delete my shared data" sweeps `a/<hash>/`, and "Delete my synced data" sweeps `s/<hash>/`, so neither removes the other's bytes. Deleting the CoCalc account sweeps both (§9). Both prefixes use the same hash, the same bucket and the same upload checks (R2 refuses bytes that don't match their SHA-256).
 
@@ -72,7 +72,7 @@ meta(k, v)               account_id, account_hash, state: active | readonly | de
                           limits (JSON), limits_issued, limits_fetched, used_bytes, ...
 devices(device, name, created, last_seen, index_cursor, session_hash)
 ops(seq INTEGER PRIMARY KEY, device, dseq, t, by, op, path, "to", kind,
-    doc, sha256, size, fid, recv)                  UNIQUE(device, dseq)
+    ref, fid, sha256, size, base, recv)                  UNIQUE(device, dseq)
 entries(path PRIMARY KEY, kind, ref, mode, size, sha256, fid, created, updated,
         trashed_from, trashed_at, by, seq)          (the index as of the last op)
 docs(doc PRIMARY KEY, kind, created, bytes, head_seq, epoch, deleted)
@@ -85,20 +85,30 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 ```
 
 **The operation log is the index's history** (§7.2).
-- The client's log (`Op` in web/workspace/api.ts on the `workspace-index` branch: `{seq, t, device, by, op, path, to, kind}`) is uploaded as it is, plus the reference each op needs:
-  - for a document, its `doc` id;
-  - for a data file, its `sha256`, `size` and `fid`.
+- The client's log (`Op` in web/workspace/api.ts on the `workspace-index` branch: `{seq, t, device, by, op, path, to, kind}`) is uploaded as it is, plus the contents' identity, which @sagebrush-board adds to `Op` with the sync client:
+  - `ref`: a document's own id (a notebook's UUID, or a board's 12 hex), or a data file's key;
+  - for a data file, also its `fid` (16 hex), its `sha256` and `size`, and for a `write` its `base`, the `sha256` it replaced. `base` is how the reducer tells two devices' changes to one file apart: §7.2's `name (conflict, <device>).ext`.
+- **Ids are the client's own, and everything is keyed by (account, id).** A document object's name includes its owner (§1), and every table is per account. So a collision across accounts is impossible, and one within an account (48 random bits for a board) is negligible. The server checks each id's form: a UUID, 12 hex or 16 hex.
+- **The op names:**
+  - `create`, `mkdir`, `write`, `rename`, `remove`, `restore`;
+  - `adopt` (migration and recovery) syncs as a `create`;
+  - `forget`: the page deleting a notebook outright, before Trash has a UI. It removes the entry and its contents, as emptying Trash does for it, so it is accepted only from a person's session, never from a grant;
+  - `dropVersions`: from a person's session only (below).
 - **Idempotent by `(device, dseq)`,** where `dseq` is the device's own `seq`. An op sent again is acknowledged and not applied twice.
 - The server gives each op it accepts a `seq` of its own. **The server's order is the order of the log:** every device applies the ops in `seq` order, so all of them reach the same index.
 - **One reducer.** The conflict rules of §7.2 (the later rename wins; an edit after a delete brings the file back out of Trash; a second new file at a path becomes `name (2)`) are one pure function, `reduce(entries, op) -> entries'`. It lives in `web/workspace/sync-reduce.ts` and is used by the client and by the server, with one test suite, so they can't disagree.
 - `t` is the device's clock, shown to the person, and never used for order.
 - The server keeps `entries`, the result, because it needs paths: for quota, for an agent's scope (design/agent-endpoint.md), and to answer `list` while every device is closed. §10 says what this means for end-to-end encryption.
-- **Checked when applied:** the path (`normPath`'s rules, with the same tests as the client), the kind, the size, and that a referenced blob is held (`refs` + 1 in the same transaction) or a document is the account's. An op that fails a check is refused with its code, and the rest of the batch still applies (§5.2).
+- **Checked when applied:** the path (`normPath`'s rules, with the same tests as the client), the kind, the size, and that a referenced blob is held (`refs` + 1 in the same transaction) or a document is the account's. An op that fails a check is refused with its code, and is never in the log. The ops after it still apply, each as the reducer would apply it if the refused op had never been sent (a rename of a path that isn't there changes nothing). The client then takes the server's log as the truth, and rebuilds its index from it.
 
-**Data files' versions (§2.5) are kept on the server too,** since a backup without them would lose what versions keep.
-- A write that replaces a data file's `sha256` adds the old one as version `n`, in the same transaction.
-- The client's retention rules apply, enforced by the reducer: the latest 20, none older than 30 days, and all together at most the account's version budget.
-- Dropping old versions is an op only a person may send (`by: "person"` from a session, never from a grant: design/agent-endpoint.md).
+**Data files' versions (§2.5): the device's own versions stay on the device** in phase 1 (@sagebrush-board): they aren't uploaded. **The server keeps versions of its own:**
+- An overwrite the server sees (a `write` that replaces a data file's `sha256`) keeps the old blob as a version, in the same transaction.
+- Without this, the old blob would lose its last reference and be deleted. An agent's overwrite through the endpoint, while every device is closed, would then lose bytes, which §8.3 rules out.
+- Overwrites made between two syncs on one device have their versions only on that device.
+- The client's retention rules apply, in the reducer: the latest 20, none older than 30 days, and all together at most `sync.version_bytes`. Versions count against the quota.
+- If storage is too full to keep the previous version, the `write` is refused with `storage_full`, as on the client (§13).
+- Trash's bytes sync, as the blob of the entry in Trash.
+- `dropVersions` from a person's session drops the server's versions too. A grant can't send it (design/agent-endpoint.md).
 
 **A blob's references:** an entry, a version, a snapshot, an outputs value. When a holding reaches `refs = 0`, it goes into the outbox in the same transaction. A holding with no reference at all, a day after its upload, is unused and goes into the outbox too. The account object's alarm empties the outbox: it deletes the R2 object, and only then the row.
 
@@ -194,7 +204,7 @@ Client to server:
 
 ```
 {t: "hello", v: 1, device, name, index_after: seq, docs: [{owner, doc, after: seq}]}
-{t: "ops", req, ops: [{dseq, t, by, op, path, to?, kind, doc?, sha256?, size?, fid?}]}
+{t: "ops", req, ops: [{dseq, t, by, op, path, to?, kind, ref?, fid?, sha256?, size?, base?}]}
 {t: "batch", req, owner, doc, epoch, kind?, patches: [Env], body: base64}
 {t: "pull", req, owner, doc, after: seq, limit?}
 {t: "ticket", req, owner, doc}
@@ -373,6 +383,10 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 - **The bindings are the flag.** The Durable Object classes and `SYNC_*` bindings appear only in the dev site's configuration (`dev.sagebrush.space`, its own D1 database and R2 bucket, as sharing's do now).
   - The production configuration has no sync bindings, so `/api/sync/` answers 404 "sync is not enabled here", as sharing's routes do without theirs.
   - The classes are compiled into the site's Worker either way. Without a binding, nothing can reach them.
+- **On dev, only allowlisted accounts may sync,** because dev.sagebrush.space is public and anyone can sign in there (@sagebrush, Oct 19).
+  - The list is config, not code: `SYNC_ACCOUNTS`, a text binding of comma-separated account ids. Unset means nobody.
+  - Every sync and agent route checks it after authenticating, with 403 "sync isn't enabled for this account".
+  - So does every object, on each request. A test account removed from the list is refused at once, its sockets included, at their next message.
 - **Turning it on in production** is a change to `web/site/cloudflare.config.ts`, and only William makes it (§7.4: no production storage of private user data until he says so).
 - **Nothing public-facing changes:** no new domain, no DNS record. Signed blob URLs use a new path, `/p/`, on the existing user-content Worker, which is dev-only too until William says otherwise.
 
@@ -437,10 +451,17 @@ Those about grants and agents are answered in full in design/agent-endpoint.md �
 ## 14. Open questions
 
 **For William:**
-- Should sync's storage count separately from sharing's, as `sync.storage_bytes` (proposed), or share one number?
-- Is the dev deployment (`dev.sagebrush.space`) the right place to try it, with test accounts only, before any production flag?
+- Should sync's storage count separately from sharing's, or share one number? The code reads `sync.storage_bytes` (separate), so either answer is a change to CoCalc's limits, not to this server.
+- *Answered* (@sagebrush, Oct 19): try it on dev.sagebrush.space, restricted to `SYNC_ACCOUNTS` (§11).
 
-**For @sagebrush-board (the client):**
+**Agreed with @sagebrush-board (Oct 19):**
+- @sagebrush-board owns `sync-reduce.ts`, its JSON test vectors (loaded by both sides) and `web/workspace/sync-client.ts`, with fixtures this server replays in Miniflare.
+- `ref`, `fid` and `base` are added to `Op`.
+- Journal patches (`meta.journal`) are ordinary patches.
+- A board's snapshot is its JSON; a notebook's is its document without outputs.
+- The device's versions stay local (§3).
+
+**Still open with @sagebrush-board:**
 - the `Env` fields (§5.2);
 - `meta.blob` for large patches;
 - who sends snapshots, and when;
