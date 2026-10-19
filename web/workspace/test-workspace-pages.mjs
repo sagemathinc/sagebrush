@@ -378,9 +378,38 @@ try {
   await ev(`(() => { document.querySelector('#filelist button[aria-label="Delete /data.txt"]').click(); return 1; })()`);
   check(await until(`${W}.list("/Trash").then((l) => l.some((e) => e.path === "/Trash/data.txt"))`), "the Files panel's ✕ puts the file in Trash");
   check(await ev(`${W}.stat("/data.txt").then((e) => e === undefined)`), "…out of the folder");
+  // after a reload, the interpreter is given the files kept beside the index (capabilities §2b: the
+  // notebook page reads them through the workspace, wherever each is kept)
+  await go(base);
+  check(await until(`!!window.sagebrush?.notebook && !!${W} && /^ready/.test(document.querySelector("#status")?.textContent ?? "")`, 60000), "(the notebook page reloaded, its interpreter ready)");
+  check(await ev(`${W}.stat("/py.txt").then((e) => e?.migrated === true)`), "(Python's file is kept beside the index)");
+  await runPy('print("READ:" + open("/py.txt").read())');
+  const readOk = await until(`sagebrush.notebook.cells().some((c) => c.type === "code" && /READ:two/.test(c.el?.innerText ?? ""))`, 30000);
+  const readDiag = readOk ? "" : await ev(`(async () => JSON.stringify({ out: sagebrush.notebook.cells().filter((c) => c.type === "code").map((c) => (c.el?.innerText ?? "").slice(0, 300)), status: document.querySelector("#status")?.textContent, errs: ${JSON.stringify(errors.slice(-3))}, stat: await ${W}.stat("/py.txt") }))()`).catch((e) => String(e));
+  check(readOk, "a new interpreter reads it: its bytes given from the workspace " + readDiag);
+
   // deleting the notebook drops it from the list
   await ev(`(() => { document.querySelector('[data-f="delete"]').click(); return 1; })()`);
   check(await until(`${W}.list("/").then((l) => !l.some((e) => e.ref === ${JSON.stringify(nbId)}))`), "a deleted notebook is dropped from the workspace");
+  // a newer Sagebrush page upgrading the workspace's database: this page and a board page in another
+  // tab both lose it, and both say so, with Reload (capabilities step 1; last: nothing opens it after)
+  const tU = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "board/")}`, { method: "PUT" })).json();
+  const wsU = new WebSocket(tU.webSocketDebuggerUrl);
+  await new Promise((r) => (wsU.onopen = r));
+  let nU = 0; const waitingU = new Map();
+  wsU.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waitingU.has(d.id)) { waitingU.get(d.id)(d.result ?? d.error); waitingU.delete(d.id); } };
+  const evU = async (expression) => { const id = ++nU; const r = await new Promise((ok) => { waitingU.set(id, ok); wsU.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); return r?.result?.value; };
+  for (let i = 0; i < 600 && !(await evU(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
+  check(await evU(`!!window.sagebrush?.workspace`), "(a board page open in another tab, with the workspace)");
+  await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace", 99); r.onsuccess = () => { r.result.close(); ok(1); }; r.onerror = () => no(r.error); r.onblocked = () => no(new Error("blocked")); })`);
+  const notice = `(() => { const b = document.getElementById("sagebrush-reload-notice"); return !!b && /updated in another tab/.test(b.textContent) && [...b.querySelectorAll("button")].some((x) => x.textContent === "Reload"); })()`;
+  check(await until(notice, 10000), "the workspace upgraded by a newer page: the notebook page says so, with Reload");
+  let boardSays = false;
+  for (let i = 0; i < 100 && !(boardSays = await evU(notice).catch(() => false)); i++) await sleep(100);
+  check(boardSays, "…and so does the board page in the other tab");
+  check(/reload/.test(await ev(`${W}.read("/py.txt").then(() => "", (e) => String(e.message))`)), "…reading the files then says to reload");
+  wsU.close();
+  await send("Target.closeTarget", { targetId: tU.id });
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

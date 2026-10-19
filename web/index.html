@@ -387,7 +387,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -1406,11 +1406,7 @@ async function openShare() {
       ul.append(l);
     };
     li(fileBase() + ".ipynb", "this notebook", true, true);
-    db ??= await dbReady;
-    if (db) {
-      const keys = await allPaths(), vals = await allFiles();
-      keys.forEach((k, i) => li(String(k).replace(/^\/+/, ""), fmtSize(vals[i]?.length ?? 0), true, false));
-    }
+    for (const [k, v] of await storedFiles()) li(String(k).replace(/^\/+/, ""), fmtSize(v?.length ?? 0), true, false);
   }
   shareDlg.showModal();
 }
@@ -1421,9 +1417,9 @@ $("#shareupload").onclick = async () => {
   try {
     const name = fileBase() + ".ipynb";
     const files = [{ path: name, data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }];
-    if (db) {
-      const keys = await allPaths(), vals = await allFiles(), want = new Set([...$("#sharefiles").querySelectorAll("input:checked:not(:disabled)")].map((b) => b.value));
-      keys.forEach((k, i) => { const p = String(k).replace(/^\/+/, ""); if (want.has(p) && p !== name) files.push({ path: p, data: vals[i] }); });
+    {
+      const want = new Set([...$("#sharefiles").querySelectorAll("input:checked:not(:disabled)")].map((b) => b.value));
+      for (const [k, v] of await storedFiles()) { const p = String(k).replace(/^\/+/, ""); if (want.has(p) && p !== name) files.push({ path: p, data: v }); }
     }
     const prev = nb.snapshot().share_id ?? null;
     const r = await uploadCollection({ id: prev, title: $("#sharetitlein").value.trim() || docName(), license: $("#sharelicense").value, files }, (done, total) => { prog.textContent = total ? `uploading ${fmtSize(done)} of ${fmtSize(total)}` : ""; });
@@ -1725,13 +1721,18 @@ async function showOpen() {
 
 // Files: Python's open() works on them; the panel uploads, downloads, deletes.
 const filesEl = $("#files"), filesBtn = $("#filesbtn");
-async function allFiles() { return (await idb(db, "files", "readonly", (st) => st.getAll())) ?? []; }
-async function allPaths() { return (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? []; }
-async function sendFiles(w) {
+// (every data file not in Trash, [path, bytes]: through the workspace, which reads each where it is
+// kept, beside the index or still the old way (design/capabilities.md §2b); without one, as before)
+async function storedFiles() {
+  const w = await wsNow();
+  if (w && !w.closed) return w.dataFiles();
   db ??= await dbReady;
   if (!db) return [];
-  const keys = await allPaths(), vals = await allFiles();
-  const files = keys.map((k, i) => [k, vals[i]]);
+  const keys = (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? [], vals = (await idb(db, "files", "readonly", (st) => st.getAll())) ?? [];
+  return keys.map((k, i) => [k, vals[i]]);
+}
+async function sendFiles(w) {
+  const files = await storedFiles();
   w.postMessage({ files });
   return files;
 }
@@ -1785,7 +1786,7 @@ window.sagebrush.files = {
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
-  const keys = await allPaths(), vals = await allFiles();
+  const pairs = await storedFiles(), keys = pairs.map((x) => x[0]), vals = pairs.map((x) => x[1]);
   const ul = $("#filelist");
   ul.textContent = "";
   keys.forEach((k, i) => {
@@ -2210,6 +2211,10 @@ const wsReady = (async () => {
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
+    // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
+    w.onClosed(() => showReloadNotice());
+    if (w.closed) showReloadNotice();
+    void startMigrator(w);
     return w;
   } catch (e) { console.warn("workspace:", e); return null; }
   finally { wsSettled = true; }
@@ -2289,11 +2294,10 @@ async function wsFile(path, data, opts = {}) {
     } else await w.putFile(path, data, opts);
     return "kept";
   } catch (e) {
-    if (e?.code === "limit" || e?.code === "storage") {
-      statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
-      return "refused";
-    }
-    return "fallback";
+    // (with the workspace, never the old store instead: a file kept beside the index is read from there,
+    // so bytes put the old way would be lost unseen; said, and the interpreter still has them)
+    statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
+    return "refused";
   }
 }
 
@@ -2430,7 +2434,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
           statusEl.textContent = `fetching ${name}…`;
           data = await fetchBytes(u, name);
         }
-        await idb(db, "files", "readwrite", (st) => st.put(data, "/" + name));
+        if ((await wsFile("/" + name, data)) === "fallback") await idb(db, "files", "readwrite", (st) => st.put(data, "/" + name));
       }
       const name = decodeURIComponent(new URL(remote, location.href).pathname.split("/").pop()) || "notebook.ipynb";
       statusEl.textContent = `fetching ${name}…`;

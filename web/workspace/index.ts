@@ -5,3 +5,5 @@ export { Workspace, WorkspaceError, LIMITS, BOARD_KEYS, askToKeep, type Entry, t
 export { migrate, reconcile, signature, RECOVERED, EDITED_FOLDER, type KeyValue, type MigrateReport } from "./migrate";
 export { normPath, kindOf, safeName, freePath, splitExt, parentOf, nameOf, join, within, TRASH, PathError, type Kind } from "./paths";
 export { WS_DB, openWorkspaceDb } from "./db";
+export { startMigrator, onMigration, migrationState, MIGRATE, type MigrationState } from "./migrator";
+export { showReloadNotice } from "./notice";
