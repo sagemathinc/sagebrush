@@ -1,0 +1,264 @@
+// Bringing what this browser keeps today into the workspace
+// (design/workspace-files.md §2.3), and keeping the index true to the
+// contents afterwards (reconcile, §2.2).  Nothing here deletes anything.
+//
+// migrate(w, localStorage), once per page load:
+// - Boards made here, `sagebrush-board:local:<id>` in localStorage, are
+//   written to "sagebrush-workspace"/boards under the same id (so their
+//   TimeTravel, outputs and pictures stay theirs) and listed as
+//   `/<title>.board.json`.  This browser's edits of an example or a board on
+//   the web, `sagebrush-board:<address>`, become boards of their own in
+//   `/Edited examples/`, which remember the address.  localStorage is only
+//   read, never written.  What was brought in is recorded in the workspace's
+//   own database (meta, `import:<key>`: the SHA-256s of the documents
+//   brought in from that key), in the same transaction as the board and its
+//   entry, so a run that stops part way leaves all of one or none of it,
+//   and no later run brings the same document in twice (CORR-4A0-2).  A key
+//   whose document has changed since (an older tab, or the installed app not
+//   yet updated, still writes there) is brought in again, once per change,
+//   as `<title> (from an older tab)`: never merged, never written over.  A
+//   key that doesn't hold a board is left alone and reported.
+// - Then reconcile: notebooks and data files get entries (the first time, a
+//   notebook at the top as `/<name>.ipynb`, a data file at its own path);
+//   contents found with no entry later go to `/Recovered/`; an entry whose
+//   contents are gone is marked missing, never removed.
+import { inTx, req } from "./db";
+import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
+import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
+import { bytesHash } from "../notebook/stores.js";
+import { isBoard } from "../board/doc";
+
+/** What migrate reads and writes of localStorage. */
+export type KeyValue = { readonly length: number; key(i: number): string | null; getItem(k: string): string | null; setItem(k: string, v: string): void };
+
+const IMPORT = "import:", RECOVERING = "recovering:";
+const LOCAL = /^sagebrush-board:local:([0-9a-f]{12})$/;
+const EDITED = "sagebrush-board:";
+export const RECOVERED = "/Recovered", EDITED_FOLDER = "/Edited examples";
+const BOARD_EXT = ".board.json";
+
+/** A document's signature: the SHA-256 of its JSON. */
+export const signature = (doc: unknown): Promise<string> => bytesHash(new TextEncoder().encode(JSON.stringify(doc)));
+
+export type MigrateReport = { boards: number; copies: number; unreadable: string[]; notebooks: number; files: number; recovered: number; missing: number; full?: string };
+
+/** Everything of this browser's in the workspace (above); safe to run at every load. */
+export function migrate(w: Workspace, storage: KeyValue): Promise<MigrateReport> {
+  return w.locked(async () => {
+    const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
+    const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
+    try {
+      await migrateBoards(w, storage, r);
+      await reconcile(w, first, r);
+    } catch (e) {
+      // (the workspace full: what fitted is in, the rest still where it was, said)
+      if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
+      else throw e;
+    }
+    if (first) await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(Date.now(), "migrated"); });
+    return r;
+  });
+}
+
+// (the localStorage keys, as they are now)
+function keys(storage: KeyValue): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k !== null) out.push(k);
+  }
+  return out;
+}
+
+async function migrateBoards(w: Workspace, storage: KeyValue, r: MigrateReport) {
+  // (when each board made here was last written: the list's records)
+  const at = new Map<string, number>();
+  try {
+    const l = JSON.parse(storage.getItem("sagebrush-boards") ?? "[]");
+    if (Array.isArray(l)) for (const b of l) if (b && typeof b.id === "string" && Number.isFinite(b.at)) at.set(b.id, b.at);
+  } catch {}
+  for (const k of keys(storage)) {
+    const local = LOCAL.exec(k);
+    let source: string | null = null;
+    if (!local) {
+      if (!k.startsWith(EDITED) || k.endsWith("#here") || k.endsWith("#outputs")) continue;
+      source = k.slice(EDITED.length);
+      // (not boards of this browser's: a board that storage refused, an exported file's)
+      if (source.startsWith("local:") || source.startsWith("unsaved:") || source.startsWith("embedded:")) continue;
+    }
+    let doc: any;
+    try { doc = JSON.parse(storage.getItem(k) ?? "null"); } catch {}
+    if (!isBoard(doc)) {
+      r.unreadable.push(k);
+      continue;
+    }
+    const sig = await signature(doc);
+    const prov = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(IMPORT + k)));
+    const sigs: string[] = prov && Array.isArray(prov.sigs) ? prov.sigs.filter((x: unknown) => typeof x === "string") : [];
+    if (sigs.includes(sig)) continue;
+    const title = safeName(doc.title ?? (source ? nameOf("/" + source.split(/[?#]/)[0]) : ""));
+    const docIdText = storage.getItem(k + "#outputs");
+    const docId = docIdText && /^[0-9a-f]{32}$/.test(docIdText) ? docIdText : undefined;
+    const when = (local && at.get(local[1])) || Date.now();
+    const mode = typeof doc.mode === "string" ? doc.mode : "python";
+    // (the board under its own id the first time, if that id is free; a board of its own otherwise)
+    const later = sigs.length > 0;
+    let id = local && !later ? local[1] : null;
+    if (id !== null && (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(id!)))) !== undefined) id = null;
+    id ??= await freeBoardId(w);
+    const board: BoardRecord = { id, doc, rev: 1, updated: when, ...(docId && !later ? { docId } : {}), ...(source ? { origin: source } : {}) };
+    // (the record of what came from k, kept to the latest 100)
+    const record: [string, unknown] = [IMPORT + k, { sigs: [...sigs, sig].slice(-100), id: prov?.id ?? id }];
+    await w.adopt(local ? "/" : EDITED_FOLDER, later ? `${title} (from an older tab)` : title, BOARD_EXT,
+      { kind: "board", ref: id, mode, ...(source ? { origin: source } : {}), created: when, updated: when }, { board, meta: [record] });
+    if (later) r.copies++;
+    else r.boards++;
+  }
+}
+
+/** An id no board has (twelve hex digits, as boards made here have). */
+async function freeBoardId(w: Workspace): Promise<string> {
+  for (;;) {
+    const id = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if ((await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(id)))) === undefined) return id;
+  }
+}
+
+/** The index made true to the contents (hold the lock): contents with no
+ * entry listed (`first`: notebooks at the top; after that in /Recovered/),
+ * entries whose contents are gone marked missing (and unmarked when they
+ * are back).  Counts go in `r`. */
+export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) {
+  const entries: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll()));
+  const refs = { notebook: new Set<string>(), board: new Set<string>(), file: new Set<string>(), trash: new Set<string>() };
+  for (const e of entries) {
+    if (e.ref === null) continue;
+    if (e.kind === "file" && (e.trashed || within(e.path, TRASH))) refs.trash.add(e.ref);
+    else if (e.kind !== "folder") refs[e.kind].add(e.ref);
+  }
+  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]) : [];
+  const fileKeys = w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : [];
+  const boardIds = (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[];
+  const trashKeys = (await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").getAllKeys()))) as string[];
+  // bytes in Trash with no entry (CORR-4A0-1, CORR-094-1).  First the
+  // destination is recorded (meta "recovering:<trash key>"), then the bytes
+  // written there, where Python reads files; then, in one transaction, the
+  // entry naming them, the Trash copy dropped and the record dropped.  A
+  // run that stops part way leaves the record, and the next run finishes
+  // that same recovery: it knows its destination from the record, never
+  // from bytes that happen to be equal.
+  for (const key of trashKeys) {
+    if (refs.trash.has(key)) continue;
+    const bytes = await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key)));
+    if (bytes === undefined) continue;
+    const mark = RECOVERING + key, sha = await bytesHash(bytes);
+    const rec = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mark)));
+    let dest: string | undefined = rec && typeof rec.dest === "string" && rec.sha === sha ? rec.dest : undefined;
+    let done = false;
+    if (dest !== undefined) {
+      const listed: Entry | undefined = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(dest!)));
+      if (listed) {
+        // (an entry there: this recovery's only if it says so, written with
+        // it in one transaction (its `recovered` names this Trash key and
+        // these bytes); anything else, a person's or anyone's, is not, and
+        // this recovery goes somewhere new: CORR-DF0-1)
+        if (listed.recovered?.from === key && listed.recovered.sha === sha) done = true;
+        else dest = undefined;
+      } else {
+        // (bytes put at the recorded place by someone else since: not ours to write over, so somewhere new)
+        const there = await w.mainTx("files", "readonly", (st) => st.get(dest!));
+        if (there !== undefined && (await bytesHash(there)) !== sha) dest = undefined;
+      }
+    }
+    if (dest === undefined) {
+      const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
+      const taken = new Set(((await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAllKeys()))) as string[]));
+      const stored = new Set(w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : []);
+      for (let i = 1; i <= 10000 && !dest; i++) {
+        const p = `${RECOVERED}/${base}${i === 1 ? "" : ` (${i})`}${ext}`;
+        if (!taken.has(p) && !stored.has(p)) dest = p;
+      }
+      if (!dest) throw new WorkspaceError("limit", `no free name in ${RECOVERED}`);
+      const d = dest;
+      await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put({ dest: d, sha }, mark); });
+    }
+    const d = dest;
+    if (done) {
+      // (completed, and proved so by the entry itself; only the Trash copy and the record were left)
+      await inTx(w.ws, ["trash", "meta"], "readwrite", async (tx) => { tx.objectStore("trash").delete(key); tx.objectStore("meta").delete(mark); });
+    } else {
+      await w.mainTx("files", "readwrite", (st) => st.put(bytes, d));
+      const [base, ext] = splitExt(nameOf(d));
+      // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
+      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark] });
+      entries.push({ path: d, kind: "file", ref: d, created: 0, updated: 0 });
+    }
+    refs.file.add(d);
+    if (!fileKeys.includes(d)) fileKeys.push(d);
+    r.recovered++;
+  }
+  // notebooks
+  for (const id of notebookIds) {
+    if (refs.notebook.has(id)) continue;
+    const rec = await w.mainTx("notebooks", "readonly", (st) => st.get(id));
+    if (!rec) continue;
+    await w.adopt(first ? "/" : RECOVERED, safeName(rec.name), ".ipynb", { kind: "notebook", ref: id, mode: typeof rec.mode === "string" ? rec.mode : "python", created: rec.updated ?? Date.now(), updated: rec.updated ?? Date.now() });
+    if (first) r.notebooks++;
+    else r.recovered++;
+  }
+  // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
+  for (const key of fileKeys) {
+    if (typeof key !== "string" || refs.file.has(key)) continue;
+    const bytes = await w.mainTx("files", "readonly", (st) => st.get(key));
+    const size = bytes?.length ?? bytes?.byteLength ?? 0;
+    let p: string | null = null;
+    try { p = normPath(key); } catch {}
+    if (p !== null && p !== "/" && !within(p, TRASH)) {
+      const [base, ext] = splitExt(nameOf(p));
+      await w.adopt(parentOf(p), base, ext, { kind: "file", ref: key, size, rev: 0 });
+      r.files++;
+    } else {
+      const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
+      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: key, size, rev: 0 });
+      r.recovered++;
+    }
+  }
+  // boards with no entry
+  for (const id of boardIds) {
+    if (refs.board.has(id)) continue;
+    const rec: BoardRecord | undefined = await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").get(id)));
+    if (!rec) continue;
+    await w.adopt(RECOVERED, safeName(rec.doc?.title), BOARD_EXT, { kind: "board", ref: id, mode: rec.doc?.mode ?? "python", ...(rec.origin ? { origin: rec.origin } : {}) });
+    r.recovered++;
+  }
+  // entries whose contents are gone, or back
+  const have = { notebook: new Set(notebookIds), board: new Set(boardIds), file: new Set(fileKeys), trash: new Set(trashKeys) };
+  for (const e of entries) {
+    if (e.kind === "folder") continue;
+    if (e.ref === null) {
+      // (an entry naming no contents: shown as missing, never dropped)
+      if (!e.missing) {
+        await inTx(w.ws, "entries", "readwrite", async (tx) => {
+          const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+          if (cur && cur.ref === null && cur.kind !== "folder") st.put({ ...cur, missing: true });
+        });
+        r.missing++;
+      }
+      continue;
+    }
+    const set = e.kind === "file" && (e.trashed || within(e.path, TRASH)) ? have.trash : have[e.kind];
+    const gone = !set.has(e.ref);
+    if (gone === !!e.missing) continue;
+    await inTx(w.ws, "entries", "readwrite", async (tx) => {
+      const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+      if (!cur || cur.ref !== e.ref) return;
+      if (gone) st.put({ ...cur, missing: true });
+      else {
+        const { missing: _m, ...rest } = cur;
+        st.put(rest);
+      }
+    });
+    if (gone) r.missing++;
+  }
+}
+
