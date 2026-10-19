@@ -608,7 +608,12 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
    - An agent in the page acts with the page's own authority, so the grant is the person handing over their browser.
    - This comes in step 1.
 2. **On the person's computer:** the same verbs as MCP tools and a CLI, in the existing `sagebrush-mcp` package (engine/py-mcp), for Claude Code, Codex and others.
-   - **Before sync,** the workspace exists only inside a browser. These tools then reach it through a browser page they drive (CDP), and the person sees that page.
+   - **Before sync,** the workspace exists only inside a browser, in the person's own profile. The tools reach it through the person's **paired page** (§8.7):
+     - the MCP server listens on 127.0.0.1 and checks the Origin;
+     - the open page connects with a single-use code;
+     - the page runs only allowlisted verbs, with arguments checked against the schema, under the grant the person gave, credited to the agent. It never evaluates anything it receives.
+   - Driving a page by CDP stays for headless automation only: it would need the person's profile run with a debugging port, which is itself an attack surface. (Proposed by @sagebrush-python, Oct 19.)
+   - The wire protocol is `design/workspace-agent-protocol.md`.
    - **With sync,** they talk to the sync service directly (surface 3).
 3. **Anywhere, with sync:** an authenticated agent endpoint on the sync service (§7.3).
    - Each verb becomes an operation on the account object or patches on a document object, credited to the agent.
