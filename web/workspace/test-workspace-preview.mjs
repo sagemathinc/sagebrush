@@ -87,7 +87,7 @@ try {
   check(await until(`!!${P}?.querySelector("table")`), "clicking a CSV file opens its preview, a table");
   const table = await ev(`({ head: [...${P}.querySelectorAll("th")].map((x) => x.textContent), rows: [...${P}.querySelectorAll("tbody tr")].map((r) => [...r.cells].map((c) => c.textContent)) })`);
   check(JSON.stringify(table.head) === '["n","p"]' && table.rows.length === 4 && table.rows[3].join() === "4,7", "…its header and rows: " + JSON.stringify(table));
-  check(await until(`/Earlier versions \\(1\\)/.test(${P}.textContent) && /page/.test(${P}.querySelector(".vr").textContent)`), "…and its earlier version, by whom (the page's agent)");
+  check(await until(`/Earlier versions \\(1\\)/.test(${P}.textContent) && / · an agent in this page · /.test(${P}.querySelector(".vr").textContent)`), "…and its earlier version, by whom, in plain words (the page's agent)");
   await shot("preview-table");
   // restoring the earlier version: what was there kept as a version too
   await ev(`(() => { [...${P}.querySelectorAll(".vr button")].find((b) => b.textContent === "Restore").click(); return 1; })()`);
