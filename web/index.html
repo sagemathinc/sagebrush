@@ -1300,8 +1300,13 @@ async function open(store, id, kind = "browser") {
 const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } : c.md !== undefined ? { type: "markdown", code: c.md } : c) });
 // (a document from elsewhere: never written here, whatever it says, so its
 // remote pictures are shown when clicked: notebook.js remotePictures)
-async function openDocument(doc, here = false) {
+// (the provenance of each notebook this page makes, by id, given to the workspace as it lists it
+// (design/capabilities.md §6): "person" for New, "elsewhere" for an example, a share link or a file
+// opened, a copy's source's for Save a copy; a notebook not made here has none (unknown))
+const madeAs = new Map();
+async function openDocument(doc, here = false, made = "elsewhere") {
   const id = newId();
+  madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
   return open(new IdbStore(db, id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
 }
@@ -1566,7 +1571,9 @@ fileMenu.addEventListener("click", async (e) => {
       const name = prompt("Save a copy of this notebook as", docName() + " (copy)");
       if (!name?.trim()) break;
       const d = nb.snapshot();
-      await openDocument({ ...d, share_id: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) });
+      // (a copy has its source's provenance; unknown stays unknown)
+      const src = ws && current.id ? await ws.pathOf("notebook", current.id).then((p) => (p ? ws.stat(p) : undefined)).catch(() => undefined) : undefined;
+      await openDocument({ ...d, share_id: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
@@ -2237,7 +2244,8 @@ async function wsAdoptNotebook(id, name, mode) {
   if (await w.pathOf("notebook", id)) return;
   await w.locked(async () => {
     if (await w.pathOf("notebook", id)) return;
-    await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python" });
+    const made = madeAs.get(id);
+    await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python", ...(made ? { made } : {}) });
   });
 }
 // (each typed title a new rename, superseding the one before; a rename in

@@ -1,4 +1,5 @@
-// The migrator (design/capabilities.md §2b): data files' bytes moved from
+// The migrator (design/capabilities.md §2b): folders made before folders had
+// ids given one (§6), and data files' bytes moved from
 // "sagebrush"/files (and Trash's from trash) into
 // "sagebrush-workspace"/fileBytes, a little at a time, after the workspace
 // opens, never inside the database's upgrade.  Until a file is moved it is
@@ -180,6 +181,10 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
   if (!next.length) return "end";
   for (const e of next) {
     if (moved >= MIGRATE.files || bytes >= MIGRATE.bytes || performance.now() - t0 > MIGRATE.ms) return "more";
+    // a folder made before folders had ids: given one (design/capabilities.md §6), before any grant can name it
+    if (e.kind === "folder" && !e.fid) {
+      if (await w.locked(() => w.giveFolderId(e))) { p.work = true; moved++; }
+    }
     if (e.kind === "file" && !e.migrated && !e.unmoved && e.ref !== null) {
       const size = e.size ?? 0;
       if (!(await room(size))) return "paused";
