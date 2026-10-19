@@ -820,7 +820,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * Reserve the bytes of one upload: one transaction, against the limits,
    * with at most uploadsAtOnce running.  A blob already held needs no upload.
    */
-  async reserve(a: { account: string; sha256: string; size: number }): Promise<Result<{ have: true } | { id: string; key: string }>> {
+  async reserve(a: { account: string; sha256: string; size: number }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
     const l = await this.limits();
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
@@ -838,7 +838,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.addUsed(a.size);
       // (a dead upload's bytes come back at its end, even if nothing else happens here: LIMIT-7FB-1)
       this.wakeBy(ends + 1);
-      return { id, key };
+      return { id, key, expires: ends };
     }));
   }
 

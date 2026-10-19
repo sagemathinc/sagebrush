@@ -21,7 +21,15 @@ import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncE
 import { allowed, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
-export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+/** How long before its reservation ends an upload is cut off (§5.4, CORR-5E2-2). */
+const PUT_MARGIN_MS = 60_000;
+declare class FixedLengthStream extends TransformStream<Uint8Array, Uint8Array> {
+  constructor(length: number);
+}
+
+export type Env = SyncEnv & ShareEnv & {
+  /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
+  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
 /** An admin call's body: at most this many bytes (LIMIT-5E2-1). */
 const ADMIN_BODY = 4096;
@@ -249,12 +257,28 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   const r = await stub.reserve({ account, sha256, size });
   if ("error" in r) return answer(r, json);
   if ("have" in r.ok) return json({ sha256, have: true });
-  const { id, key } = r.ok;
+  const { id, key, expires } = r.ok;
+  // The reservation's end is enforced on the upload itself (CORR-5E2-2): the body streams to R2
+  // through a stream that is aborted a margin before it, and R2 makes an object only from a put that
+  // completes.  So once a reservation has ended, no write of its key can still appear: a put that
+  // finished in time is finalized, or its key is deleted when the reservation ends; one that didn't
+  // never exists.
+  const deadline = expires - (env.SYNC_TEST_PIN_MS ? 1000 : PUT_MARGIN_MS);
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), Math.max(0, deadline - Date.now()));
   let stored: { size: number } | null = null;
   try {
-    stored = await env.SHARE_BUCKET!.put(key, req.body!, { sha256 });
+    const fixed = new FixedLengthStream(size);
+    req.body!.pipeTo(fixed.writable, { signal: ac.signal }).catch(() => {});
+    stored = await env.SHARE_BUCKET!.put(key, fixed.readable, { sha256 });
   } catch {
     stored = null;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!stored && Date.now() >= deadline) {
+    await stub.abandon({ id });
+    return err(408, "busy", { message: "this upload took too long; send it again" });
   }
   // (R2 checks the SHA-256, and the runtime ends a request whose body isn't its Content-Length, so a
   // stored size that differs is not expected; it is still checked, a second line, LIMIT-7FB-4)
@@ -265,7 +289,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   const f = await stub.finalize({ account, id, size: stored.size });
   // (not finalized: nothing will own this object, so it goes now; the account's outbox has it too
   // when it can, CORR-5E2-2)
-  if ("error" in f) await env.SHARE_BUCKET!.delete(key).catch(() => {});
+  if ("error" in f && !env.SYNC_TEST_NO_WORKER_DELETE) await env.SHARE_BUCKET!.delete(key).catch(() => {});
   return answer(f, (v) => json(v, 201));
 }
 
