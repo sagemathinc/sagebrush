@@ -16,7 +16,7 @@ import {
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { allowed, testMode, type SyncEnv } from "./env.ts";
+import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
@@ -67,6 +67,9 @@ const SCHEMA = [
   // answer's hold stays until its attempt can no longer commit, then the document's total replaces it (§6.1)
   "CREATE TABLE IF NOT EXISTS batch_holds (id TEXT PRIMARY KEY, doc TEXT NOT NULL, bytes INTEGER NOT NULL, due INTEGER NOT NULL)",
 ];
+
+/** Open batch holds an account may have at once (LIMIT-97A-2): as many as the live batches a document keeps. */
+const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
@@ -562,11 +565,32 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
     // (the batch's bytes, exactly what its document's total can grow by, held against the budget, §6.1)
-    await this.room(b.body.length, "document");
+    return this.heldForward(b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
+  }
+  /**
+   * Hold `bytes` against the budget, pin the batch's blobs, and forward it
+   * (§6.1).  A refusal before the forward (pinning) gives the hold back at
+   * once: nothing can commit (CORR-97A-3).  Any failure after the forward
+   * began, with the hold still open, wakes the alarm for its due time, when
+   * the document's total replaces it.
+   */
+  private async heldForward(doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+    await this.room(bytes, "document");
     const expires = Date.now() + this.pinMs();
-    const held = this.hold(b.doc, b.body.length, expires);
-    const keys = this.pin(b.doc, b.epoch, b, expires);
-    return this.answered(held, b.doc, await this.forward(b.doc, keys, expires, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }), () => this.unhold(held)));
+    const held = this.hold(doc, bytes, expires);
+    let keys: PinKey[];
+    try {
+      keys = this.pin(doc, epoch, pinned, expires);
+    } catch (e) {
+      this.unhold(held);
+      throw e;
+    }
+    try {
+      return this.answered(held, doc, await this.forward(doc, keys, expires, (d) => call(d, expires), () => this.unhold(held)));
+    } catch (e) {
+      if (this.one("SELECT 1 AS x FROM batch_holds WHERE id = ?", held)) this.wakeBy(expires + this.settleMs() + 1);
+      throw e;
+    }
   }
   /** The document answered: its total replaces the hold, in one step (no moment counts neither). */
   private answered(held: string, doc: string, out: BatchOut): BatchOut {
@@ -624,11 +648,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
     // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
-    await this.room(root.body.length, "document");
-    const expires = Date.now() + this.pinMs();
-    const held = this.hold(m.doc, root.body.length, expires);
-    const keys = this.pin(m.doc, expect.epoch + 1, root, expires);
-    return this.answered(held, m.doc, await this.forward(m.doc, keys, expires, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }), () => this.unhold(held)));
+    return this.heldForward(m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
   }
 
   // ---- document sockets (§2)
@@ -828,13 +848,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!before || (JSON.parse(before) as Limits).storage_bytes !== l.storage_bytes) {
       this.set("blob_cap", 0);
       this.set("doc_cap", 0);
+      this.set("full_until_file", 0);
+      this.set("full_until_document", 0);
+      this.set("limits_rev", Number(this.get("limits_rev") ?? 0) + 1);
     }
     this.set("limits", JSON.stringify(l));
   }
-  /** What sync claims at a time: L / 64, between 4 and 64 MiB (in tests, at least 64 bytes). */
+  /** What sync claims at a time: L / 64, between 4 and 64 MiB, never more than L (in tests, at least 64 bytes, or a seam's). */
   private chunk(L: number): number {
-    return testMode(this.env) ? Math.max(64, Math.floor(L / 64)) : Math.min(64 << 20, Math.max(4 << 20, Math.floor(L / 64)));
+    if (testMode(this.env) && this.chunkOverride) return Math.min(this.chunkOverride, L);
+    return Math.min(L, testMode(this.env) ? Math.max(64, Math.floor(L / 64)) : Math.min(64 << 20, Math.max(4 << 20, Math.floor(L / 64))));
   }
+  private chunkOverride = 0;
   /** How far document batches may take the claim past L: max(L / 10, 50 MB) (in tests, 256 bytes at least). */
   private ceiling(L: number): number {
     return testMode(this.env) ? Math.max(256, Math.floor(L / 10)) : Math.max(Math.floor(L / 10), 50_000_000);
@@ -857,41 +882,64 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private async room(need: number, kind: "file" | "document"): Promise<void> {
     for (let i = 0; i < 2; i++) {
       if (this.fits(need, kind)) return;
+      // (found full a moment ago: refused again without asking D1, so a full budget costs at most one
+      // D1 call a minute, never one an edit, LIMIT-97A-1; a new limit ends the wait)
+      if (Date.now() < Number(this.get(`full_until_${kind}`) ?? 0)) throw new SyncError("storage_full", "this account's storage is full", { used: this.syncUsed() });
       const l = await this.limits();
       if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again", { retry_after: 1000 });
       const r = await this.raise(need, kind, l.storage_bytes);
-      if (r === "full") throw new SyncError("storage_full", "this account's storage is full", { limit: l.storage_bytes, used: this.syncUsed() });
+      if (r === "full") {
+        this.set(`full_until_${kind}`, Date.now() + (testMode(this.env) ? 500 : 60_000));
+        throw new SyncError("storage_full", "this account's storage is full", { limit: l.storage_bytes, used: this.syncUsed() });
+      }
       if (r === "busy") throw new SyncError("busy", "the storage budget can't be checked now; try again", { retry_after: 1000 });
     }
     if (!this.fits(need, kind)) throw new SyncError("busy", "try again", { retry_after: 200 });
   }
 
   /** One raise of the claim in D1, by whole chunks if they fit, else by exactly what is short. */
-  private raise(need: number, kind: "file" | "document", L: number): Promise<"ok" | "full" | "busy"> {
+  private raise(need: number, kind: "file" | "document", L0: number): Promise<"ok" | "full" | "busy"> {
     return this.serially(async () => {
       if (this.fits(need, kind)) return "ok";
       const db = this.env.SHARE_DB;
       if (!db) return "busy";
+      // (what this raise is for: this generation, these limits; a queued raise reads them when it runs,
+      // and nothing is installed after the await unless they are still so, CORR-97A-1/2)
+      const gen = Number(this.get("generation"));
+      const rev = Number(this.get("limits_rev") ?? 0);
+      const stored = this.get("limits");
+      const L = stored ? (JSON.parse(stored) as Limits).storage_bytes : L0;
+      const same = () => this.exists() && this.state() !== "deleting" && Number(this.get("generation")) === gen;
       // (short of the claim itself; nothing short, the claim is checked against the limit again)
       const short = Math.max(0, this.syncUsed() + need - this.claim());
       const C = this.chunk(L);
       const whole = short === 0 ? 0 : Math.ceil(short / C) * C;
+      // One statement a cap: the claim grows by whole chunks, or by all the room left below the cap if
+      // that is less, as long as it covers what is short (LIMIT-97A-1): so the last part below a cap is
+      // taken in one write, never one an edit.  Nothing short, it checks the claim against the cap.
       // (files: within L only; documents: within L first, then the ceiling)
-      const tries: [number, number][] = [[whole, L], [short, L]];
-      if (kind === "document") tries.push([whole, L + this.ceiling(L)], [short, L + this.ceiling(L)]);
-      for (const [amount, cap] of tries) {
+      const caps = kind === "document" ? [L, L + this.ceiling(L)] : [L];
+      for (const cap of caps) {
         let r: { claim_bytes: number } | null;
         try {
           if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
-          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + ?3 WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND claim_bytes + ?3 + ${SHARING_USED} <= ?6 RETURNING claim_bytes`)
-            .bind(this.get("account_id"), nowSeconds(), amount, this.get("account_hash"), Number(this.get("generation")), cap).first<{ claim_bytes: number }>();
+          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) >= ?7 RETURNING claim_bytes`)
+            .bind(this.get("account_id"), nowSeconds(), whole, this.get("account_hash"), Number(this.get("generation")), cap, short).first<{ claim_bytes: number }>();
         } catch {
           return "busy";
         }
-        if (testMode(this.env)) this.claimCalls++;
+        if (testMode(this.env)) {
+          this.claimCalls++;
+          if (r) this.claimWrites++;
+          await gate(this.env, "claim-raise-answer");
+        }
+        // (a purge, or a new generation, since the statement: this answer is not this account's any more)
+        if (!same()) return "busy";
         if (!r) continue;
         this.set("claim", r.claim_bytes);
         this.set("claim_dirty", 0);
+        // (new limits since the statement: the caps stay as they set them, and the next write asks again)
+        if (Number(this.get("limits_rev") ?? 0) !== rev) return "busy";
         if (cap === L) this.set("blob_cap", r.claim_bytes);
         this.set("doc_cap", r.claim_bytes);
         if (this.fits(need, kind)) return "ok";
@@ -915,12 +963,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("blob_cap", Math.min(Number(this.get("blob_cap") ?? 0), to));
       this.set("doc_cap", Math.min(Number(this.get("doc_cap") ?? 0), to));
       this.set("claim_dirty", 1);
+      const gen = Number(this.get("generation"));
       try {
         if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
         await this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET claim_bytes = ?3 WHERE account_hash = ?1 AND generation = ?2 AND claim_bytes > ?3")
-          .bind(this.get("account_hash"), Number(this.get("generation")), to).run();
+          .bind(this.get("account_hash"), gen, to).run();
         if (testMode(this.env)) this.claimCalls++;
-        this.set("claim_dirty", 0);
+        // (only for the generation it was for)
+        if (this.exists() && Number(this.get("generation")) === gen) this.set("claim_dirty", 0);
       } catch {}
       return cur - to;
     });
@@ -942,6 +992,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const due = expires + this.settleMs() + 1;
     const id = this.ctx.storage.transactionSync(() => {
       if (!this.fits(bytes, "document")) throw new SyncError("busy", "try again", { retry_after: 200 });
+      // (at most MAX_HOLDS open, answered or not yet settled: a stream of lost answers can't grow the
+      // table, LIMIT-97A-2; a zero-byte batch takes a row too)
+      if (Number(this.one("SELECT COUNT(*) AS n FROM batch_holds")!.n) >= MAX_HOLDS) throw new SyncError("busy", "too many batches waiting on their documents; try again", { retry_after: 1000 });
       const id = randomHex(16);
       this.sql.exec("INSERT INTO batch_holds (id, doc, bytes, due) VALUES (?, ?, ?, ?)", id, doc, bytes, due);
       this.set("held_bytes", this.heldBytes() + bytes);
@@ -1421,15 +1474,25 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private failRecord = false;
   private recordCalls = 0;
   private failClaim = false;
+  /** Tests only: the budget's chunk, as production's would be (LIMIT-97A-1); and holds seeded, due later (LIMIT-97A-2). */
+  async setChunk(a: { bytes: number }): Promise<void> {
+    if (testMode(this.env)) this.chunkOverride = a.bytes;
+  }
+  async seedHolds(a: { n: number }): Promise<number> {
+    if (!testMode(this.env) || !this.exists()) return 0;
+    for (let i = 0; i < a.n; i++) this.sql.exec("INSERT INTO batch_holds (id, doc, bytes, due) VALUES (?, ?, 0, ?)", randomHex(16), "0000seed0000", Date.now() + 3600_000);
+    return Number(this.one("SELECT COUNT(*) AS n FROM batch_holds")!.n);
+  }
   private claimCalls = 0;
+  private claimWrites = 0;
   /** Tests only: make the budget's D1 writes fail, as an unreachable D1 would (§6.1). */
   async setFailClaim(a: { on: boolean }): Promise<void> {
     if (testMode(this.env)) this.failClaim = a.on;
   }
   /** Tests only: the budget as this object holds it. */
-  async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; alarm: number | null } | null> {
+  async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; writes: number; alarm: number | null } | null> {
     if (!testMode(this.env) || !this.exists()) return null;
-    return { claim: this.claim(), blob_cap: this.blobCap(), files: this.used(), documents: this.docsBytes(), held: this.heldBytes(), holds: Number(this.one("SELECT COUNT(*) AS n FROM batch_holds")!.n), dirty: Number(this.get("claim_dirty") ?? 0) === 1, calls: this.claimCalls, alarm: await this.ctx.storage.getAlarm() };
+    return { claim: this.claim(), blob_cap: this.blobCap(), files: this.used(), documents: this.docsBytes(), held: this.heldBytes(), holds: Number(this.one("SELECT COUNT(*) AS n FROM batch_holds")!.n), dirty: Number(this.get("claim_dirty") ?? 0) === 1, calls: this.claimCalls, writes: this.claimWrites, alarm: await this.ctx.storage.getAlarm() };
   }
   private noDb = false;
   /** Tests only: run the D1 record as if SHARE_DB weren't bound. */
