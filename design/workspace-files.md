@@ -1,6 +1,6 @@
 # One workspace: notebooks, boards and files
 
-*Status: a design proposal for William (Oct 19, 2026). There is no code yet. Any visible UI goes to William with pictures before it merges. Mockups are in `design/workspace-files/` (`proto.html` and its screenshots).*
+*Status: approved by William (Oct 18, 11:31 PM PDT), with the answers in §10; step 1 is starting. Any visible UI goes to William with pictures before it merges. Mockups are in `design/workspace-files/` (`proto.html` and its screenshots).*
 
 **Who's involved**
 - Notebook page: no dedicated agent owner. William owns the product decisions; @sagebrush coordinates.
@@ -261,19 +261,23 @@ Delete                     (to Trash)
 - A file dropped on the **notebook** is uploaded to the current folder, as it is today.
 - A picture or board file dropped on the **board canvas** keeps today's behaviour: it goes into the board. The browser is the way to upload to the workspace instead.
 
-**What Python sees** is unchanged: the data files, at their paths. Notebooks and boards are listed in the browser but aren't in Python's filesystem (open question 3).
+**What Python sees** is unchanged: the data files, at their paths. Notebooks and boards are listed in the browser but aren't in Python's filesystem (William kept this default, §10).
 
 ---
 
 ## 5. Routing and URLs
 
 **The URL names the file:** `https://sagebrush.space/w/<path>`, for example `/w/Algebra/groups.ipynb` or `/w/Algebra/groups.board.json`.
-- The server, and the service worker when offline, serves the notebook page or the board page according to the extension.
+- **One page hosts both editors** (William, Oct 18: "one page to avoid confusion").
+  - `/w/<path>` always loads that page, from the server, or from the service worker when offline.
+  - The page shows the notebook editor or the board editor according to the file's extension.
+  - Switching between a notebook and a board never reloads.
+- **Until the one page lands** (step 5 in §9), the server serves the notebook page or the board page according to the extension, and switching between them reloads.
 - `/w/` and `/w/<folder>/` show the browser full-size: an empty editor isn't a useful start page.
 - Plain `/` keeps opening the last notebook, as today, and puts its path in the address.
 
 **Back and forward:**
-- Opening a file pushes a history entry (`pushState`) when it stays on the same page, and makes a normal page load when it changes editor.
+- Opening a file pushes a history entry (`pushState`). With the one page, there is never a page load; before it lands, changing editor loads the other page.
 - Back and forward go through the files opened, as in any site.
 - A rename replaces the current entry (`replaceState`).
 - Unsaved work is saved before leaving, as Open… does now (`saveNow()`, index.html:1565).
@@ -312,7 +316,12 @@ Delete                     (to Trash)
 - **Upload** uses the system picker. There is no drag and drop.
 - The top bar shows the document's name, which opens Rename when tapped. The board keeps its own compact toolbar (board.css:113, :136).
 
-### 6.2 Offline (the installed app)
+### 6.2 Offline (the installed app), and the desktop app
+
+**The desktop app** (Tauri) uses the same workspace storage as the browser (William, Oct 18).
+- Upload and Save a copy are its way to disk files, as Open file… and Save as… are today.
+- **Medium term:** the desktop app is about more RAM, more CPU and native code.
+- **Later, optionally:** a special path for reading and writing outside the sandbox, for large outputs and data.
 
 - Everything in the workspace is in the browser, so it all works offline: browse, open, rename, delete and upload.
 - **The board page joins the service worker's shell** (build.ts:365, routed through @sagebrush). Today it's missing, so boards don't open offline.
@@ -416,9 +425,12 @@ It is made of objects that each serve one account or one document, so it grows b
 ### 7.4 Privacy and accounts
 
 - **Private by default.** Synced data is never served on the user-content domain or to anyone else. Sharing remains a separate, explicit act.
-- **Encryption** is open question 11:
+- **Encryption: (a), decided** (William, Oct 18). The two choices were:
   - **(a)** Encrypted at rest by Cloudflare, as R2 is today. Account recovery is simple.
   - **(b)** End-to-end, with a key only the person's devices hold. The server can't read anything, but a lost key means lost data unless the person kept a recovery code.
+  - **What keeps (b) possible later,** without building it now:
+    - the server treats patches, snapshots and file bytes as opaque payloads in an envelope (ids, sizes, parents, author), and never parses them;
+    - names for blobs are made in one function, which could later key them with the account's secret instead of a plain SHA-256.
 - **Deleting:**
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
@@ -434,7 +446,7 @@ It is made of objects that each serve one account or one document, so it grows b
 ### 7.5 What each device keeps
 
 - **A computer keeps everything,** as now.
-- **A phone keeps the index, recent documents and anything opened.**
+- **A phone in the browser keeps the index, recent documents and anything opened or pinned** (William, Oct 18). A native phone app, planned for later, can fetch everything.
   - A large data file shows in the browser as "In the cloud", and is fetched when opened.
   - "Keep on this device" pins a file or folder.
   - This is also how a phone with little storage avoids the limits in §6.3.
@@ -519,14 +531,146 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 | A collaborator's edit running **without my say-so** | Autorun is the reactive notebook's default (design/reactive-notebook.md). **An edit from someone else never triggers a run.** The cells it changes are marked "changed by Ana, not run" until I run them, as a shared collection already behaves ("Opening a shared link never runs its code by itself"). The same rule applies to a board's code notes. |
 | A malicious or malformed patch, or a whole document | The server checks sizes, rates and the shape of each patch, and never runs anything. Every client treats remote documents as untrusted input. This is the class of the Oct 18 `__proto__` fixes (board-proto-ids, board-own-names): ids are only ever own-property keys. Outputs are already bounded and sanitized (design/security.md rules 1-4). |
 | Using storage as free file hosting | Synced files are served only to accounts with access, as `private` attachments with `nosniff` and a `sandbox` CSP, the same as files.cocalcusercontent.com. Public sharing stays the separate, explicit act it is now. Quota is per membership. |
-| Cloudflare or an insider reading data | Encrypted at rest by Cloudflare. End-to-end encryption remains question 11. With collaboration, it would mean per-document keys shared with each invitee, which is possible but means a lot more to get right, so it is not proposed for the first version. |
+| Cloudflare or an insider reading data | Encrypted at rest by Cloudflare. End-to-end encryption is not built now; the design keeps it possible (§7.4). With collaboration, it would mean per-document keys shared with each invitee, which is possible but means a lot more to get right, so it is not proposed for the first version. |
 | Losing data (a bug, a bad deploy) | 30-day point-in-time recovery of every Durable Object's SQLite. Copies off Cloudflare, encrypted, as in sharing.md's Backups section. Trash. Nothing removed by quota pressure. |
 
 **The server's attack surface is small:** it stores, orders and relays, and never runs user code. All compute stays in each person's browser, inside the runner.
 
 ---
 
-## 8. How the work would be split up (after approval)
+## 8. Agents
+
+**William (Oct 18): "We must have an agent strategy."** Agents use the workspace the way people do, by the same rules, through one API. The starting points came from @sagebrush; this section develops them.
+
+### 8.1 Principles
+
+1. **One API, three surfaces.** The verbs of the File menu are the API. The same verbs, with the same meaning and the same tests, are available:
+   - in the page;
+   - to agents on the person's own computer;
+   - to remote agents, once sync exists.
+2. **Agents are collaborators** (§7.9, §7.10).
+   - They show where they are.
+   - Everything they change is a patch credited to them, which TimeTravel shows and the person can undo.
+   - Code they write doesn't run until the person says so.
+3. **Access is granted, not assumed.**
+   - An agent sees only what it was given: by default read-only, for a stated time, and taken back at once.
+   - Nothing leaves the device without sync turned on *and* a grant made.
+
+### 8.2 The workspace API
+
+The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.ts`), and tested from the first commit.
+
+| Verb | What it does |
+|---|---|
+| `list(folder, {recursive?})` | Entries: path, kind, language, size, created, updated, revision |
+| `stat(path)` | One entry |
+| `read(path)` | A notebook's document, a board's JSON (the existing formats), or a file's bytes; with its revision |
+| `write(path, content, {base})` | Replace the contents, only if the revision is still `base` (compare-and-swap, as `IdbStore` does). On a conflict, it returns the current version. A document written whole is stored as the diff from `base`, so TimeTravel shows the change and who made it. |
+| `create(path, kind, content?)`, `mkdir(path)` | A new notebook, board, file or folder. A taken path is refused, never overwritten. |
+| `rename(from, to)`, `duplicate(path, to)` | As the File menu does them |
+| `remove(path)`, `restore(path)` | To Trash, and back out (§2.4). There is no verb that empties Trash: only a person can. |
+| `history(path)`, `version(path, i)` | TimeTravel's versions, and any one of them |
+| `watch(path, cb)` | Changes made elsewhere: another tab, device, person or agent |
+
+- **One description of the verbs,** written as TypeScript types and a generated JSON Schema, serves all three surfaces. The MCP tools and the remote endpoint are generated from it, so they can't drift apart.
+- **Fine-grained edits stay with the editors' own APIs:** `window.sagebrush.board` (load, focus, step, snapshot, run, outputs, versions; page.ts:24) and `window.sagebrush.notebook` (index.html:732). An agent edits one cell or note there, and uses the workspace API to find, open and organise files.
+
+**The three surfaces:**
+
+1. **In the page:** `window.sagebrush.workspace`, next to `window.sagebrush.board` and `.notebook`.
+   - It is for agents that drive a browser: the shared browser, CDP, Playwright.
+   - An agent in the page acts with the page's own authority, so the grant is the person handing over their browser.
+   - This comes in step 1.
+2. **On the person's computer:** the same verbs as MCP tools and a CLI, in the existing `sagebrush-mcp` package (engine/py-mcp), for Claude Code, Codex and others.
+   - **Before sync,** the workspace exists only inside a browser. These tools then reach it through a browser page they drive (CDP), and the person sees that page.
+   - **With sync,** they talk to the sync service directly (surface 3).
+3. **Anywhere, with sync:** an authenticated agent endpoint on the sync service (§7.3).
+   - Each verb becomes an operation on the account object or patches on a document object, credited to the agent.
+   - This lets cocalc.ai agents, or Claude Code and Codex running anywhere, work in a person's workspace while every device of theirs is closed.
+
+### 8.3 Agents as collaborators
+
+- **Presence:**
+  - an agent appears like a person in §7.9: a name (`agent:<name>`), a colour, and its cursor or selected cell or note;
+  - a person can **follow** it, and the view moves with its edits;
+  - the file browser shows which files an agent has open.
+- **Attribution:**
+  - every edit an agent makes is a patch credited to `agent:<name>`, and TimeTravel shows it;
+  - "Undo this agent's changes" reverts them as one step, leaving other people's edits in place.
+- **Running code:**
+  - code written by an agent is marked "written by agent:<name>, not run";
+  - autorun skips it, exactly as it skips another person's edits (§7.10);
+  - when it runs, it runs in the runner.
+  - **A considered exception, off by default:** in a conversation with an agent in the page (the Ask panel, §8.5), the person may tick "Let this agent run its code here". This lasts for that conversation only.
+    - The code still runs in the person's runner, which has no storage, no network and no cookies (design/runner.md).
+    - What the code computes stays in the person's browser, apart from the outputs the agent reads.
+- **A remote agent never runs code.** The sync service has no compute. Computing is done by an open page or by cocalc.ai (§8.6).
+
+### 8.4 Access: granted, scoped, visible
+
+- **A grant** is made by a person to one agent. It states:
+  - which folders or files;
+  - read, or read and write;
+  - an expiry, and a rate limit.
+- **The token** is held by the account object, which stores only its hash. Revoking it takes effect immediately and closes the agent's sockets.
+- **Every request** is checked against the grant, and logged in the account object: time, agent, verb, path.
+- **An "Agents with access" panel,** in the Sync panel and in the file browser's ⋯, lists every grant with its scope and last use, its log, and Revoke.
+- A file an agent can see shows a small marker in the browser.
+- **The rule from the start of §8 holds here:** nothing leaves the device unless sync is on and a grant exists. An in-page agent (surface 1) is the exception only because it *is* the person's own page.
+- **Prompt injection:**
+  - a shared notebook or board may contain text written to steer an agent that reads it;
+  - **what limits the damage:**
+    - scoped and read-only grants;
+    - no running code unless the person allows it;
+    - the runner's sandbox;
+    - undo by agent, and the access log;
+    - Trash, which only a person can empty.
+  - Agents treat workspace contents as data, never as instructions.
+
+### 8.5 The Ask panel
+
+- **What it is:** an "Ask" panel in the one page (§5). It talks to an agent through the person's linked cocalc.ai account, using the path built for deciding board questions (cocalc-ai PR #1134).
+- **It acts only through the workspace API and the editors' APIs.**
+  - The page carries out each tool call and checks it against the grant the person gave the conversation.
+  - What it makes lands as ordinary files and boards in the workspace, credited to it.
+- **Without sync,** its tool calls are relayed through the page that has the panel open.
+- **With sync,** it can use the agent endpoint and keep working on a long task while the page is closed. It still can't run code then (§8.3).
+
+### 8.6 Handing off to and from cocalc.ai
+
+- **Send to Sagebrush:**
+  - a cocalc.ai agent or person sends a board, notebook or file to a Sagebrush account;
+  - it lands in that person's `/Inbox/`, read-only until they accept it;
+  - this needs sync and a grant to cocalc.ai for `/Inbox/`.
+- **Open in cocalc.ai:**
+  - hands a notebook, with its history (already CoCalc's document format, §7.1), to a cocalc.ai project, and to an agent there;
+  - results come back by Send to Sagebrush.
+- **Later, perhaps:** a cocalc.ai project could join the sync service as one more device of the account, so work done there appears in the workspace directly.
+
+### 8.7 Phases
+
+| With | Agents get |
+|---|---|
+| Step 1 (the index) | `window.sagebrush.workspace`, its schema and tests |
+| The file browser and File menu | The same verbs in the page's agent API, documented in the page's llms.txt |
+| `sagebrush-mcp` | The verbs as MCP tools, through a driven page (before sync) |
+| Collaboration (§7.9) | Presence, crediting edits to agents, "not run" marking, undo by agent |
+| Sync, phase 2 (§7.7) | Grants, the agent endpoint, the access log, the Agents with access panel |
+| After that | The Ask panel, Send to Sagebrush, Open in cocalc.ai |
+
+### 8.8 Questions for design/security.md
+
+1. How are agent tokens issued? Through the cocalc.ai sign-in, which a person approves, or by the person on sagebrush.space? How is the token stored, and how is it rotated?
+2. What does an in-page agent's grant look like, given that the page holds the person's whole authority? Can a page restrict itself (an "agent mode" with only the granted paths), and is that worth it?
+3. "Let this agent run its code here": does the runner's sandbox, without network or storage, make this safe enough to offer? What should the person be told?
+4. Rate limits and sizes per verb, and what an over-limit agent sees.
+5. How long the access log is kept, and who may read it.
+6. Inbox: who may send to whom, spam and size limits, and what accepting does.
+7. When a shared document is shared on with an agent: does a collaborator's grant reach the owner's files? *(Proposed: no. A grant covers only what the granting person owns or may edit, and the owner sees it.)*
+
+---
+
+## 9. How the work is split up
 
 Each step is a branch of its own, reviewed as usual, with pictures for William for any visible step. Each step's tests fail without it.
 
@@ -534,28 +678,38 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`.
 3. **The one File menu** in both editors, and Upload's rule.
 4. **`/w/` routing** in the server, the service worker and both pages, plus the redirects from the old addresses. Then the board page in the shell.
-5. **Shared collections as a read-only root.** This waits for the sharing pages.
-6. **Backup (§7.7, phase 1).** Server and protocol design go first, in their own design note, with security review (design/security.md) before any upload of private data.
-7. **Sync (§7.7, phase 2).**
-8. **Collaboration (§7.9).** It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
+5. **One page hosting both editors** (§5).
+   - The board bundle loads into the notebook's page when the first board opens.
+   - The file browser, the File menu and the runner are shared.
+   - Each open document keeps its own interpreter, as each notebook does now (`kernels`).
+   - `/frame/board/` and exported boards stay pages of their own.
+6. **Shared collections as a read-only root.** This waits for the sharing pages.
+7. **Backup (§7.7, phase 1).** Server and protocol design go first, in their own design note, with security review (design/security.md) before any upload of private data.
+8. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2).
+9. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
+10. **The Ask panel and the handoffs with cocalc.ai** (§8.5, §8.6).
 
-Steps 1 to 4 don't depend on sync. The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
+Steps 1 to 5 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
 
 ---
 
-## 9. Questions for William
+## 10. William's answers (Oct 18, 11:31 PM PDT)
 
-Each one can be answered in your own words. The default this design takes, if you don't say otherwise, is given in brackets.
+> "I basically agree with EVERYTHING ... Please BUILD IT! This is such a fantastic complement to cocalc."
 
-1. **Folders:** do you want real folders, or one flat list with search? *(Real folders: they map directly onto shared collections.)*
-2. **Names:** should the browser show `groups.ipynb` and `groups.board.json`, or just "groups" with an icon? *(Full names in the browser, and short names in the title bar.)*
-3. **Python's view:** should Python's `open()` see notebooks and boards as read-only `.ipynb` and `.board.json` files too, or only the data files, as now? *(Only the data files, for now.)*
-4. **Delete:** should Delete go to Trash with Undo, or delete at once after a confirmation, as today? *(Trash.)*
-5. **The sidebar:** should it start open on a wide screen, or closed until the Files button is pressed? *(Open the first time there is more than one document, then remembered.)*
-6. **One page or two:** should the notebook and the board stay two pages (switching reloads, which takes about a second), or should one page eventually host both editors? *(Two pages for now. Everything here works either way.)*
-7. **The desktop app:** should its workspace be a folder on disk that you choose, or the same in-app storage as the browser? *(The same as the browser for now, with Upload and Save a copy for disk files, as today.)*
-8. **The old copies:** after migration, should "Free space used by old copies" be offered at all, or should the old copies just stay until the browser's storage is cleared? *(Offered, never automatic.)*
-9. **Anything missing:** is there anything you expected in the File menu that isn't in §3? (Today's Copy JSON, Import Mermaid and Install as an app all have places.)
-10. ~~Where synced data lives~~: *answered Oct 18, entirely on Cloudflare, built to scale (§7.3, §7.8).*
-11. **Encryption** (§7.4): encrypted at rest with simple recovery (a), or end-to-end with a recovery code you must keep (b)? Or (b) as an option for those who want it? *(a for now, with (b) possible later.)*
-12. **Phones** (§7.5): should a phone fetch everything, or only what's opened or pinned? *(Only what's opened or pinned.)*
+**Where his answer differs from the default:**
+- **Two pages or one** (old question 6): **one page,** "to avoid confusion" (§5, step 5).
+- **The desktop app** (old question 7): the same storage as the browser. Medium term, the desktop app is about more RAM, CPU and native code. Later, optionally, a path for reading and writing outside the sandbox (§6.2).
+- **Encryption** (old question 11): **(a).** The design keeps end-to-end possible, but it isn't built now (§7.4).
+- **Phones** (old question 12): only what is opened or pinned. A native phone app later can fetch everything (§7.5).
+- **Agents:** "the plan COMPLETELY OMITS agents. We must have an agent strategy" (§8).
+
+**These defaults stand:**
+- real folders;
+- full names in the browser and short names in the title bar;
+- Python sees data files only;
+- Delete goes to Trash;
+- the sidebar opens once there is more than one document;
+- "Free space used by old copies" is offered, never automatic;
+- the File menu as in §3;
+- sync entirely on Cloudflare, built to scale.
