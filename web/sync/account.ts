@@ -886,16 +886,28 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (since === undefined) this.set("readonly_since", Math.min(at, Date.now()));
       if (st === "active") this.set("state", "readonly");
       for (const ws of this.ctx.getWebSockets()) send(ws, { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: this.deadline() } });
-      this.wakeBy(this.deadline()!);
+      this.wakeBy(this.purgeAt()!);
     } else if (since !== undefined && Date.now() < this.deadline()!) {
       // (renewed in time: the clock ends, and the account takes writes again; past the deadline, the purge stands)
       this.sql.exec("DELETE FROM meta WHERE k = 'readonly_since'");
       if (st === "readonly") this.set("state", "active");
     }
   }
+  /**
+   * When the purge runs: the deadline plus a delay from 0 to an hour (a
+   * twenty-fourth of a day), fixed per account by its hash, never before it.
+   * So a mass lapse doesn't purge everyone at once; purge_after stays the
+   * deadline the person is told.
+   */
+  private purgeAt(): number | null {
+    const d = this.deadline();
+    if (d === null) return null;
+    const h = parseInt(String(this.get("account_hash") ?? "0").slice(0, 8), 16) || 0;
+    return d + Math.floor(((h % 1_000_000) / 1_000_000) * (this.dayMs() / 24));
+  }
   /** The alarm's part: past the deadline, the account's data is deleted, as by "Delete my synced data". */
   private retain(now: number): "keep" | "purge" | "none" {
-    const d = this.deadline();
+    const d = this.purgeAt();
     if (d === null || this.state() !== "readonly") return "none";
     if (now < d) return "keep";
     this.set("purge_reason", "retention");
@@ -916,6 +928,22 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async retentionOf(a: { account: string }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
     if (!this.exists() || this.get("account_id") !== a.account) return null;
     return this.retention();
+  }
+  /** Tests only: when the purge runs (the deadline plus this account's delay). */
+  async retentionPurgeAt(): Promise<number | null> {
+    return testMode(this.env) ? this.purgeAt() : null;
+  }
+  /** Tests only: expired reservations, as if their uploads had died and no alarm had tidied them. */
+  async seedReservations(a: { n: number }): Promise<number> {
+    if (!testMode(this.env) || !this.exists()) return 0;
+    for (let i = 0; i < a.n; i++) this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, 0, ?, ?)", randomHex(16), "0".repeat(64), `s/${String(this.get("account_hash")).slice(0, 32)}/seed${i}`, Date.now() - 1000);
+    return Number(this.one("SELECT COUNT(*) AS n FROM reservations")!.n);
+  }
+  /** Tests only: one purge step, with what is left of the reservations after it. */
+  async purgeStepOnce(): Promise<{ done: boolean; reservations: number } | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    const done = await this.purgeStep();
+    return { done, reservations: this.exists() ? Number(this.one("SELECT COUNT(*) AS n FROM reservations")!.n) : 0 };
   }
   /** Tests only: the alarm's retention decision, as if now were `at`. */
   async retainAt(a: { at: number }): Promise<string | null> {
@@ -1237,10 +1265,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // and every upload has finalized, been abandoned, or ended (CORR-5E2-2)
     this.sql.exec("DELETE FROM forwards WHERE expires < ?", now - this.settleMs());
     if (this.one("SELECT 1 AS x FROM forwards LIMIT 1")) return false;
-    for (const r of this.sql.exec("SELECT id, key FROM reservations WHERE expires < ?", now).toArray() as Row[]) {
-      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
-      this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
-    }
+    // (each step's work is bounded, a page at a time: a full page has the alarm run again at once,
+    // LIMIT-445-1; expired reservations don't count against the uploads at once, so many can wait here)
+    this.purgeAgain = false;
+    const expired = this.sql.exec("SELECT id, key FROM reservations WHERE expires < ? LIMIT 200", now).toArray() as Row[];
+    this.ctx.storage.transactionSync(() => {
+      for (const r of expired) {
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
+        this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
+      }
+    });
+    if (expired.length === 200) this.purgeAgain = true;
     if (this.one("SELECT 1 AS x FROM reservations LIMIT 1")) return false;
     for (const d of this.sql.exec("SELECT doc FROM docs LIMIT 50").toArray() as Row[]) {
       try {
@@ -1252,10 +1287,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }
     if (this.one("SELECT 1 AS x FROM docs LIMIT 1")) return false;
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings", now);
-      this.sql.exec("DELETE FROM holdings");
-      this.sql.exec("DELETE FROM pins");
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings WHERE rowid IN (SELECT rowid FROM holdings LIMIT 500)", now);
+      this.sql.exec("DELETE FROM holdings WHERE rowid IN (SELECT rowid FROM holdings LIMIT 500)");
+      this.sql.exec("DELETE FROM pins WHERE rowid IN (SELECT rowid FROM pins LIMIT 1000)");
     });
+    if (this.one("SELECT 1 AS x FROM holdings LIMIT 1") || this.one("SELECT 1 AS x FROM pins LIMIT 1")) {
+      this.purgeAgain = true;
+      return false;
+    }
     const bucket = this.env.SHARE_BUCKET;
     if (!bucket) return false;
     for (const o of this.sql.exec("SELECT key FROM outbox LIMIT 500").toArray() as Row[]) {
@@ -1616,6 +1655,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!a.on) this.wakeBy(Date.now());
   }
   private purgeHeld = false;
+  /** A purge step that stopped at a full page: the next runs at once (LIMIT-445-1). */
+  private purgeAgain = false;
 
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
   async crash(): Promise<void> {
@@ -1698,7 +1739,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
     // (a read-only account's deadline, §6.2)
-    const d = this.state() === "readonly" ? this.deadline() : null;
+    const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
     // (the budget: holds to settle, a release to write, slack to give back, §6.1)
     const budget = this.claimDue(now);
@@ -1728,7 +1769,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       try {
         if (!this.purgeHeld) done = await this.purgeStep();
       } catch {}
-      if (!done) this.wakeBy(Date.now() + (testMode(this.env) ? 200 : 30_000));
+      if (!done) this.wakeBy(Date.now() + (this.purgeAgain ? 0 : testMode(this.env) ? 200 : 30_000));
       return;
     }
     const now = Date.now();
