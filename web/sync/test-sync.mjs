@@ -1190,7 +1190,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
     runs.push(await r.json());
   }
   const left = (await bucket.list({ prefix: "s/0000000000000000000000000000", limit: 1000 })).objects.length;
-  ok(runs.every((r) => r.pages <= 2 && r.calls <= 2 * (2 + 1 + 50 + 1)), "each run is bounded: at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
+  ok(runs.every((r) => r.pages <= 2 && r.calls <= 1 + 2 * (2 + 1 + 50 + 1)), "each run is bounded: one prune of old purge receipts, then at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
   ok(runs[0].deleted <= 100 && runs.slice(0, 3).reduce((n, r) => n + r.deleted, 0) >= 230 && left === 0, `the cursor continues across runs until every page is done (${runs.map((r) => r.deleted).join(",")})`);
   // one account owning a whole page (LIMIT-268-2): knownKeys is set-wise
   const many = Array.from({ length: 1000 }, (_, i) => `s/${hashOf(A).slice(0, 32)}/${i.toString(16).padStart(36, "0")}`);
@@ -1413,7 +1413,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await acctL.wakeNow();
   await new Promise((r) => setTimeout(r, 1000));
   const nd1 = await acctL.lifecycle();
-  ok(nd1.record_pending && nd1.record_calls - nd0.record_calls <= 3 && nd1.record_tries >= nd0.record_tries && nd1.alarm >= nd1.record_retry_at - 5 && nd1.record_retry_at > Date.now(), "with no D1 bound, an alarm doesn't re-arm at once: at most a backed-off attempt or two in a second, the alarm at the record's retry: " + JSON.stringify([nd1.record_calls - nd0.record_calls, nd1.record_tries]));
+  ok(nd1.record_pending && nd1.record_calls - nd0.record_calls <= 3 && nd1.record_tries >= nd0.record_tries && nd1.record_calls - nd0.record_calls === nd1.record_tries - nd0.record_tries && nd1.alarm !== null && nd1.alarm >= nd1.record_retry_at - 5, "with no D1 bound, an alarm doesn't re-arm at once: at most a backed-off attempt or two in a second, the alarm at the record's retry: " + JSON.stringify([nd1.record_calls - nd0.record_calls, nd1.record_tries]));
   await acctL.setNoDb({ on: false });
   ok(await until(async () => (await acctL.lifecycle())?.record_pending === false && (await rowOf(L))?.state === "purged"), "once D1 is bound again, the record is written at its next attempt");
   // CORR-BF3-1 (astra's trace): a self-delete's record fails; the next generation, made in the account
@@ -1434,15 +1434,28 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridL2 }))).status === 202, "(CoCalc purges L again, with a new id: the object holds nothing)");
   const stL2 = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`);
   ok(stL2.status === 200 && (await stL2.json()).state === "purged", "a repeated purge, answered none, is found by its own id too, though the row was purged already");
-  // an account with no row at all: N registers in the account object only; CoCalc purges it; the record
-  // makes a purged row, under CoCalc's id (one that never synced, M, has none: CoCalc doesn't wait, §9)
+  // CORR-1C2-1: each request keeps its own receipt; a later one, or a retry, changes no other's
+  const stL1b = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`);
+  ok(stL1b.status === 200 && (await stL1b.json()).state === "purged", "the earlier request, polled after the later one, is still found: 200 purged (CORR-1C2-1)");
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridL }))).status === 202, "(CoCalc retries the first request, same id)");
+  const [stR, stR2] = await Promise.all([signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`), signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`)]);
+  const stRB = await stR.json();
+  ok(stR.status === 200 && stRB.state === "purged" && stR2.status === 200 && (await stR2.json()).state === "purged", "a retry answers its own receipt, and the later request's is untouched");
+  const rcpt = await db.prepare("SELECT request_id, state FROM sync_admin_requests WHERE account_hash = ?1 ORDER BY created").bind(hashOf(L)).all();
+  ok(rcpt.results.length === 2 && rcpt.results.every((x) => x.state === "purged"), "one receipt per request id, a retry adding none: " + JSON.stringify(rcpt.results));
+  // their lifetime: pruned by the daily job once past it (test: 2 s after finishing; 30 days deployed)
+  await new Promise((r) => setTimeout(r, 3200)); // (times are whole seconds: 2 s past, whatever the fraction)
+  const invL = await (await fetchAt(SITE, "/__test/inventory", {})).text();
+  ok((await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`)).status === 404 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`)).status === 404 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).first()).n === 0, "past their polling lifetime, the daily job prunes the receipts " + JSON.stringify([Math.floor(Date.now() / 1000), (await db.prepare("SELECT * FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).all()).results, await invL]));
+  // an account with no row at all: N registers in the account object only; CoCalc purges it; its
+  // receipt is completed by the record, though no row ever existed
   const acctN = acctNs.get(acctNs.idFromName("acct:" + hashOf(N)));
   ok((await acctN.enable({ account: N, hash: hashOf(N) }))?.ok?.state === "registering" && (await rowOf(N)) === null, "(N: generation 1, registering, no row)");
   const ridN = crypto.randomUUID();
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: N, request_id: ridN }))).status === 202 && (await until(async () => (await acctN.lifecycle())?.state === null && (await acctN.lifecycle())?.record_pending === false)), "(CoCalc purges N)");
   const stN = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridN}`);
   const rowN = await rowOf(N);
-  ok(stN.status === 200 && (await stN.json()).state === "purged" && rowN?.state === "purged" && rowN.generation === 1 && rowN.request_id === ridN, "a purged row of generation 1 is made, and CoCalc's status finds it by its id");
+  ok(stN.status === 200 && (await stN.json()).state === "purged" && rowN === null, "CoCalc's status finds it by its receipt: purged, with no row ever made");
   // CORR-B92-1: CoCalc's purge leaves the account deleted for good, storage or none: an enable or a
   // request already past its session check (astra's probe) is refused when it arrives
   const sm = await signIn(M);
