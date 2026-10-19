@@ -516,7 +516,10 @@ By reasoning only:
 - the Worker stopping between any two of its steps. Before D1: the object stays registering, and the next enable goes on from there. Between the upsert and `confirm`: a row is left active for a generation the object may have retired. Nothing is wrong with it: the daily job asks the object, which knows no keys, and the next enable or CoCalc purge moves the row on.
 
 **CoCalc's status: the receipt, then the account object** (CORR-BF3-1, CORR-1C2-1, CORR-5D0-1).
-- Each CoCalc purge request gets its own row in `sync_admin_requests`, keyed by its request id. It is written once the account object has answered, and only for an account that held sync state. If the object can't be reached, nothing is recorded, and the whole purge answers 503 for CoCalc to send again.
+- Each CoCalc purge request gets its own row in `sync_admin_requests`, keyed by its request id.
+- **It is bound before any account object is asked** (CORR-E9C-1). One D1 batch, which D1 runs alone, evicts the account's oldest receipt beyond 8 and inserts this one only if no account holds the id. Of two requests naming one new id for two accounts at once, exactly one binds it. The other gets 409, and its account object is never touched.
+- **It is given back** if the account object can't be reached (the whole purge then answers 503, for CoCalc to send again) or never synced. Only the receipt this request made is given back; a retry's existing one stays.
+- So receipts are kept only for accounts that held sync state. The one exception is a receipt left by a Worker that stopped between binding and giving back, which the 90-day prune removes.
 - A retried id keeps its receipt (`INSERT OR IGNORE`) and touches no other. A receipt is completed when its account's purge record reaches D1.
 - The account's D1 row is never what the status call reads, because a later request would change it.
 - **The status call**, `GET /api/admin/sync-purge/<request_id>/<account_id>` (signed; the path carries the account because the signature covers the path):
@@ -528,8 +531,8 @@ By reasoning only:
 - **Every purge is admitted.** Sharing's deletion never waits on sync's bookkeeping. The one refusal is a request id that already belongs to another account's purge: 409, before any account object is asked or any receipt changed. An id names one account for good (CORR-E0D-1).
 - **The receipts are bounded by total** (LIMIT-233-1):
   - an account keeps at most 8. A new id evicts the account's oldest, by insertion order, in the same D1 transaction as the insert;
-  - an account that never synced (the object answers `none`, nothing retired) keeps none. Its status, from the object, is `never_synced`. A purge whose object can't be reached keeps none either;
-  - CoCalc's purge fences an account for good. So the table never holds more than $8A$ receipts, where $A$ is the number of accounts that ever had sync state, whatever the rate of requests;
+  - an account that never synced (the object answers `none`, nothing retired) gives its receipt back. Its status, from the object, is `never_synced`. A purge whose object can't be reached gives its receipt back too;
+  - CoCalc's purge fences an account for good. So the table never holds more than $8A$ receipts, where $A$ is the number of accounts that ever had sync state, whatever the rate of requests, plus receipts left by a Worker stopped between binding and giving back (each pruned at 90 days);
   - 30 days after finishing, a receipt is pruned.
 - **The prune keeps up:** each kind (finished, never finished) uses its own partial index, a page of 1,000 at a time, until none is left or 10 pages are done. That is 10,000 a run for each kind, so any backlog, at most $8A$, drains in $\lceil 8A / 10{,}000 \rceil$ runs. The prune makes at most 20 calls, inside the run's 400-call budget.
 

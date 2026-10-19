@@ -31,6 +31,8 @@ const O = "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"; // allowlisted; its purge held
 const P = "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1"; // never synced; the other account
 const Q = "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"; // allowlisted; its purge held while its receipt is evicted
 const RF = "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"; // never synced; CoCalc's purge of it can't reach its account object
+const S1 = "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4"; // allowlisted, with a file; one purge request id is sent for it and for S2 at once
+const S2 = "f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5"; // never synced
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -68,6 +70,7 @@ fake.limits.set(L, sync(1 << 20, 1 << 20));
 fake.limits.set(M, sync(1 << 20, 1 << 20));
 fake.limits.set(O, sync(1 << 20, 1 << 20));
 fake.limits.set(Q, sync(1 << 20, 1 << 20));
+fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -83,7 +86,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1521,6 +1524,33 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(rcQ === null && sQ === 200 && bQ.state === "deleting" && bQ.source === "account", "pending, then its receipt evicted: still 200 deleting, from the account object, never done: " + JSON.stringify(bQ));
   await acctQ.holdPurge({ on: false });
   ok(await until(async () => (await status(ridQ, Q))[1].state === "purged"), "and purged once the account object is done");
+  // CORR-E9C-1: one new id for two accounts at once, both past the point a read would have been; the id
+  // is bound before any account object acts, so the one refused is never touched
+  const ss1 = await signIn(S1);
+  const acctS1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(S1)));
+  const acctS2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(S2)));
+  ok((await post(ss1, "/api/sync/v1/enable", {})).status === 200 && (await put(ss1, Buffer.from("S1's file"))).status === 201, "(S1: on, with a file)");
+  const race = async (first, second) => {
+    await gateSet("purge-bound", true);
+    const rid = crypto.randomUUID();
+    const p1 = signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: first, request_id: rid }));
+    await new Promise((r) => setTimeout(r, 150));
+    const p2 = signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: second, request_id: rid }));
+    await new Promise((r) => setTimeout(r, 300));
+    await gateSet("purge-bound", false);
+    return [await p1, await p2];
+  };
+  // (1) never-synced S2 binds the id first; S1, with a file, is refused and never touched
+  const [r1a, r1b] = await race(S2, S1);
+  const l1S1 = await acctS1.lifecycle();
+  ok(r1a.status === 202 && r1b.status === 409 && (await acctS2.lifecycle())?.deleted === true && l1S1?.deleted === false && l1S1.state === "active" && (await put(ss1, Buffer.from("S1's file, still on"))).status === 201,
+    "one new id for two accounts at once, both held after binding: the second (S1, with data) gets 409, its account object untouched, still on and taking writes (CORR-E9C-1): " + JSON.stringify({ a: r1a.status, b: r1b.status, l1S1 }));
+  // (2) S1 binds a new id first; never-synced S3 is refused, and not fenced either
+  const S3 = "f6f6f6f6-f6f6-4f6f-8f6f-f6f6f6f6f6f6";
+  const acctS3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(S3)));
+  const [r2a, r2b] = await race(S1, S3);
+  ok(r2a.status === 202 && r2b.status === 409 && (await acctS1.lifecycle())?.deleted === true && (await acctS3.lifecycle())?.deleted === false,
+    "and the other way round: a never-synced account refused (409) is not fenced: " + JSON.stringify({ a: r2a.status, b: r2b.status, s3: await acctS3.lifecycle() }));
   await db.prepare("DELETE FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).run();
   // the prune drains a backlog beyond one run's capacity (test: 2 kinds x 3 pages x 50 = 300 a run)
   await new Promise((r) => setTimeout(r, 1100));
