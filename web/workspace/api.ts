@@ -20,7 +20,7 @@
 // person does that, from the file browser (§2.4, §8.2).
 import { inTx, req, hex, openWorkspaceDb } from "./db";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 export type Entry = {
@@ -369,6 +369,73 @@ export class Workspace {
       });
       this.tell({ ops });
       return freed;
+    });
+  }
+
+  /** Entries in Trash removed for good (§2.4): `paths` (each with what is
+   * in it), or everything in Trash.  Their contents go too: a notebook's
+   * record and its TimeTravel, a board's record and its TimeTravel, a data
+   * file's bytes and its versions.  Only a person may, from the file
+   * browser after confirming: refused for an agent's workspace, and not
+   * offered to agents.  The entries go first, so a failure part way leaves
+   * contents without entries (listed again by reconcile), never entries
+   * without contents.  Logged.  Returns how many entries went. */
+  async emptyTrash(paths?: string[]): Promise<number> {
+    if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can empty Trash");
+    const tops = paths?.map((p) => path(p)) ?? [TRASH];
+    for (const t of tops) if (!within(t, TRASH) || (paths && t === TRASH)) throw new WorkspaceError("invalid", `${t} isn't in Trash`);
+    return this.locked(async () => {
+      const ops: Op[] = [];
+      const gone: Entry[] = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+        const st = tx.objectStore("entries"), out: Entry[] = [];
+        for (const t of tops) {
+          const top: Entry | undefined = t === TRASH ? undefined : await req(st.get(t));
+          if (t !== TRASH && !top) continue;
+          const under: Entry[] = await req(st.getAll(subtree(t)));
+          for (const e of [...(top ? [top] : []), ...under]) {
+            st.delete(e.path);
+            out.push(e);
+          }
+          this.log(tx, ops, { op: "emptyTrash", path: t, kind: top?.kind ?? "folder" });
+        }
+        return out;
+      });
+      // (then their contents, and their histories)
+      const hdb = gone.some((e) => e.kind === "notebook") ? await openHistoryDb() : null;
+      const bdb = gone.some((e) => e.kind === "board") ? await openBoardHistoryDb() : null;
+      const fids = new Set(gone.filter((e) => e.kind === "file" && e.fid).map((e) => e.fid!));
+      for (const e of gone) {
+        if (e.ref === null) continue;
+        try {
+          if (e.kind === "notebook") {
+            await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
+            if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, Infinity])); });
+          } else if (e.kind === "board") {
+            await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
+            // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
+            const pre = "board:local:" + e.ref;
+            if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
+          } else if (e.kind === "file") {
+            await inTx(this.ws, "trash", "readwrite", async (tx) => { tx.objectStore("trash").delete(e.ref!); });
+          }
+        } catch (err) { console.warn("workspace: emptying Trash:", err); }
+      }
+      if (fids.size) {
+        await inTx(this.ws, ["versions", "versionBytes", "meta"], "readwrite", async (tx) => {
+          const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+          let freed = 0;
+          for (const fid of fids) {
+            const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
+            for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
+          }
+          const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
+          meta.put(Math.max(0, total - freed), "versionBytes");
+        });
+      }
+      hdb?.close();
+      bdb?.close();
+      this.tell({ ops });
+      return gone.length;
     });
   }
 

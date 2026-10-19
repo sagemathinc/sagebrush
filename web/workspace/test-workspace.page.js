@@ -141,7 +141,8 @@ async function trash() {
   await w.create("/d/new.txt", { content: "N2" });
   await w.remove("/d/new.txt");
   check((await paths(w, "/Trash", false)).join() === "/Trash/new (2).txt,/Trash/new.txt", "two things of one name in Trash");
-  check(typeof w.emptyTrash === "undefined" && typeof w.purge === "undefined", "no verb removes contents for good");
+  const ag = w.forAgent("agent:x");
+  check(typeof ag.emptyTrash === "undefined" && typeof ag.dropVersions === "undefined" && typeof ag.forget === "undefined", "no agent verb removes contents for good");
   w.close();
 }
 
@@ -534,8 +535,45 @@ async function recoveryConflict() {
   v.close();
 }
 
+async function emptying() {
+  const w = await fresh();
+  const nb = await w.create("/t/n.ipynb");
+  const bd = await w.create("/t/b.board.json");
+  await w.create("/t/f.txt", { content: "v1" });
+  await w.write("/t/f.txt", "v2");
+  const keep = await w.create("/keep.txt", { content: "stay" });
+  const fid = (await w.stat("/t/f.txt")).fid;
+  // (rows of each document's TimeTravel, as the pages keep them)
+  const putRow = (name, nbKey) => new Promise((ok) => { const r = indexedDB.open(name); r.onsuccess = () => { const tx = r.result.transaction("history", "readwrite"); tx.objectStore("history").put({ nb: nbKey, time: 1, env: {} }); tx.oncomplete = () => { r.result.close(); ok(); }; }; });
+  const countRows = (name, nbKey) => new Promise((ok) => { const r = indexedDB.open(name); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").count(IDBKeyRange.bound([nbKey, -Infinity], [nbKey, Infinity])); q.onsuccess = () => { r.result.close(); ok(q.result); }; }; });
+  await new Promise((ok) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => r.result.createObjectStore("history", { keyPath: ["nb", "time"] }); r.onsuccess = () => { r.result.close(); ok(); }; });
+  await new Promise((ok) => { const r = indexedDB.open("sagebrush-board-history"); r.onupgradeneeded = () => r.result.createObjectStore("history", { keyPath: ["nb", "time"] }); r.onsuccess = () => { r.result.close(); ok(); }; });
+  await putRow("sagebrush-history", nb.ref);
+  await putRow("sagebrush-board-history", "board:local:" + bd.ref + ":0123456789abcdef0123456789abcdef");
+  await w.remove("/t");
+  w.actor = "agent:helper";
+  check(await fails(w.emptyTrash(), "invalid"), "an agent can't empty Trash");
+  w.actor = "person";
+  check(await fails(w.emptyTrash(["/keep.txt"]), "invalid"), "emptyTrash takes only what is in Trash");
+  check((await w.emptyTrash()) === 4, "emptying Trash removes its entries (a folder and three)");
+  check((await paths(w, "/Trash")).length === 0 && (await w.stat("/keep.txt")) !== undefined, "…Trash is empty, the rest stays");
+  check((await rawGet(w.main, "notebooks", nb.ref)) === undefined && (await rawGet(w.ws, "boards", bd.ref)) === undefined && (await rawKeys(w.ws, "trash")).length === 0, "…their contents are gone");
+  check((await countRows("sagebrush-history", nb.ref)) === 0, "…the notebook's TimeTravel too");
+  check((await countRows("sagebrush-board-history", "board:local:" + bd.ref + ":0123456789abcdef0123456789abcdef")) === 0, "…and the board's");
+  const vs = await new Promise((ok) => { const q = w.ws.transaction("versions").objectStore("versions").index("byFile").count(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])); q.onsuccess = () => ok(q.result); });
+  check(vs === 0, "…and the file's versions");
+  check((await w.ops()).some((o) => o.op === "emptyTrash"), "emptying Trash is logged");
+  // one item of Trash only
+  await w.remove("/keep.txt");
+  await w.create("/other.txt", { content: "o" });
+  await w.remove("/other.txt");
+  check((await w.emptyTrash(["/Trash/keep.txt"])) === 1 && (await w.stat("/Trash/other.txt")) !== undefined, "emptying one item leaves the rest of Trash");
+  check(typeof (w.forAgent("agent:x")).emptyTrash === "undefined", "the agent facade has no emptyTrash");
+  w.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, folderLimit, migrationFull]) {
+  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
