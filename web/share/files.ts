@@ -29,7 +29,7 @@ const BASE: Record<string, string> = {
 const plain = (status: number, text: string) => new Response(text, { status, headers: { ...BASE, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
 /** "bytes=a-b", "bytes=a-" or "bytes=-n" (one range only) */
-function parseRange(h: string | null, size: number): { offset: number; length: number } | null | "bad" {
+export function parseRange(h: string | null, size: number): { offset: number; length: number } | null | "bad" {
   if (!h) return null;
   const m = h.match(/^bytes=(\d*)-(\d*)$/);
   if (!m || (m[1] === "" && m[2] === "")) return "bad";

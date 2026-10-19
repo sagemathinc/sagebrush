@@ -136,6 +136,14 @@ export class SyncDoc extends DurableObject<SyncEnv> {
 
   /** Decide one batch (§4.1-4.5), in one transaction. */
   async batch(a: BatchIn): Promise<Result<BatchOut>> {
+    const r = this.batchNow(a);
+    if (this.lose) {
+      this.lose = false;
+      throw new Error("the answer was lost (test seam)");
+    }
+    return r;
+  }
+  private batchNow(a: BatchIn): Result<BatchOut> {
     const now = Date.now();
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.role(a.account, true);
@@ -147,9 +155,13 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       if (a.admit) {
         if (now > a.admit.expires || this.one("SELECT 1 AS x FROM fenced WHERE admission = ?", a.admit.id)) throw new SyncError("forbidden", "this write's grant changed; it was not committed");
       }
-      return this.decide(a, head, now);
+      const out = this.decide(a, head, now);
+      // (the test seam: this document's answers are lost after the commit, §4.3)
+      if (this.env.SYNC_TEST_LOSE !== undefined && this.env.SYNC_TEST_LOSE === b.doc && out.new > 0) this.lose = true;
+      return out;
     }));
   }
+  private lose = false;
 
   private decide(a: BatchIn, head: Head, now: number): BatchOut {
     const b = a.batch;
