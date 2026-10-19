@@ -685,7 +685,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 
 ### 8.5 The Ask panel
 
-- **What it is:** an "Ask" panel in the one page (§5). It talks to an agent through the person's linked cocalc.ai account, using the path built for deciding board questions (cocalc-ai PR #1134).
+- **What it is:** the built-in agent of the chat panel (§8.7), in the one page (§5). It talks to an agent through the person's linked cocalc.ai account, using the path built for deciding board questions (cocalc-ai PR #1134).
 - **It acts only through the workspace API and the editors' APIs.**
   - The page carries out each tool call and checks it against the grant the person gave the conversation.
   - What it makes lands as ordinary files and boards in the workspace, credited to it.
@@ -703,7 +703,77 @@ Each needs **either an explicit confirmation from the person at the time, or a s
   - results come back by Send to Sagebrush.
 - **Later, perhaps:** a cocalc.ai project could join the sync service as one more device of the account, so work done there appears in the workspace directly.
 
-### 8.7 Phases
+### 8.7 Chat with any agent, beside the document
+
+**William (Oct 18):** "a user connects their claude code desktop app to sagebrush; instead of only chatting inside claude code about a whiteboard, they could just chat in a panel on the left next to the whiteboard in their browser. It's still chatting with the same agent session. (the agent could be anywhere - cocalc, etc.)"
+
+**One chat panel for every agent.**
+- **Who it talks to:**
+  - the built-in Ask agent (§8.5);
+  - a Claude Code or Codex session on the person's computer;
+  - an agent in a cocalc.ai project;
+  - later, any remote agent with a grant.
+- **It's the same panel for all of them.** What differs is only the adapter that carries messages to and from the agent (below), so Ask is one case of this panel, not a UI of its own.
+- **Where it sits:** on the left, as a tab beside Files ("Files | Chat"), in both editors. On a phone it's a full-screen sheet, like the file browser.
+- **Talking to the same session:** it continues that agent session. The agent keeps its own context, and the panel doesn't start a new conversation behind the person's back.
+
+**The conversation is a workspace document.**
+- **What it is:** a chat file beside the document it is about. For `/Algebra/Sylow.board.json` that is `/Algebra/Sylow.chat`, recorded as attached to the board by the board's entry, so a rename or move keeps the two together.
+- **What it inherits, like any document:**
+  - history in TimeTravel (one record per message, patchflow, as boards are);
+  - versions, sync (§7) and search;
+  - Trash.
+- **Each message is credited:** to the person, to `agent:<name>`, or to a collaborator. Reopening the board reopens its conversation.
+- **Several conversations about one document**, one per agent, are tabs in the panel.
+- **Format:** the records follow CoCalc's chat records where they can, so a conversation can go to cocalc.ai with the document (§8.6).
+
+**Context goes with each message**, so "make this bigger" means something:
+- **Attached automatically:** the document's path and kind, its revision, the selection (cell ids, or board item and edge ids), the page and viewport, and the cursor.
+- **Shown before sending:** as a small chip ("about: note 'Sylow p-subgroups', page 2"), which the person can remove.
+- **Kept small:** these are ids, not contents. The agent reads contents through the workspace API (§8.2), within its grant.
+- **Shown as it acts:** what the agent does appears inline in the conversation ("edited note 'Sylow'", "ran cell 3"). Each entry links to that version in TimeTravel, and "Undo this" undoes it.
+
+**Adapters: one per kind of agent.** The panel doesn't care which one is in use.
+
+1. **A local agent, through `sagebrush-mcp`.**
+   - **How the page reaches it:**
+     - the agent's MCP server listens on `127.0.0.1`, and the page connects with a one-time pairing code;
+     - Chrome then asks the person to allow access to the local network;
+     - the pairing code is the sender check. Only a page that paired can speak, and only as that person.
+   - **How messages get into the session:**
+     - **Claude Code (verified Oct 19, 2026)** has *channels*: an MCP server that declares the `claude/channel` capability can push `notifications/claude/channel` events into a running session. Claude replies through a tool the server exposes (`reply`). A channel can also relay tool-approval prompts (`claude/channel/permission`), so the panel can show "Claude wants to run …: Allow or Deny".
+       - Channels are a **research preview**: a custom channel runs with `--dangerously-load-development-channels` until it is on Anthropic's allowlist, and Team and Enterprise organizations must enable channels.
+       - Events arrive only while the session is open. While the agent is busy they queue, and arrive together on its next turn.
+       - Sources: [Channels reference](https://code.claude.com/docs/en/channels-reference), [MCP in Claude Code](https://code.claude.com/docs/en/mcp).
+     - **Codex:** its MCP client gained elicitation for custom servers (openai/codex PR #17043, April 2026). Elicitation asks the *person* a question; it is not a way to give the agent a message. **I found no Codex equivalent of channels.** So for Codex, and for any client without push, the adapter falls back to tools the agent calls:
+       - `chat.next(timeout)` waits for the next message (a long poll);
+       - `chat.reply(text)` answers.
+
+       The person starts the agent in "listen to Sagebrush" mode, and it keeps calling `chat.next`. This works with any MCP client, but only while the agent is in that loop. This is unverified beyond the sources named here; recheck when building.
+2. **A cocalc.ai agent, through CoCalc's Agent Network.**
+   - The page acts as a client of the person's cocalc.ai account (the sign-in that sharing already has, §7.3, with a new scope for messaging agents) and addresses an agent by name.
+   - Replies come back to the panel.
+   - **This needs work on the CoCalc side:** a person's page as a sender that can receive replies, not just another agent. That gets its own short design with the cocalc.ai agent team.
+3. **A remote agent, through the sync service's agent endpoint** (§8.2, surface 3), once sync exists. The conversation is then a synced document. The agent writes its messages into it as patches credited to it, and the person sees them on every device.
+
+**What the panel shows about the agent:**
+- its name, where it runs ("Claude Code on this computer", "cocalc.ai: project Number theory", "remote"), and whether it's connected;
+- what its grant allows: which folders, read or write, may run code (§8.4);
+- the Agents with access panel, one click away.
+- **When the agent isn't connected,** messages queue in the conversation, marked "waiting: <agent> isn't connected". They go when it connects, and the person can delete them before then.
+- **While it acts:** a running indicator with Stop. Its cursor shows on the board or notebook (presence, §8.3).
+
+**Security:**
+- **Only the person can instruct as the person.**
+  - The author of a message is set by the page from the person's signed-in session and the adapter's pairing, never from anything in the text.
+  - An adapter accepts instructions only from its paired page (Claude Code's docs require the same: gate on the sender).
+- **Everything else is content, labelled as such:** text inside documents, a collaborator's messages in a shared conversation, Inbox items and shared collections.
+  - Adapters deliver it with its author (for a channel, as an attribute: `author="collaborator:…"`), and the agent's instructions say that only the person's messages are instructions.
+  - A collaborator can't send instructions to *my* agent: my agent's pairing and grant are mine.
+- **Limits stay with the grant:** the agent's grant bounds everything it does, however a message is phrased, and outward actions stay gated (§8.3, danger 3).
+- **Approvals relayed to the panel** (Claude Code's permission relay) come only from the paired page. They need the same sender check as messages, because whoever can answer can approve.
+
+### 8.8 Phases
 
 | With | Agents get |
 |---|---|
@@ -712,9 +782,10 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 | `sagebrush-mcp` | The verbs as MCP tools, through a driven page (before sync) |
 | Collaboration (§7.9) | Presence, crediting edits to agents, "not run" marking, undo by agent |
 | Sync, phase 2 (§7.7) | Grants, the agent endpoint, the access log, the Agents with access panel |
-| After that | The Ask panel, Send to Sagebrush, Open in cocalc.ai |
+| The chat panel (§8.7) | The panel, conversations as documents, context with each message; the local adapter through `sagebrush-mcp` (Claude Code channels; `chat.next` for others) |
+| After that | The cocalc.ai adapter, the Ask agent, Send to Sagebrush, Open in cocalc.ai; the remote adapter with sync |
 
-### 8.8 Questions for design/security.md
+### 8.9 Questions for design/security.md
 
 1. How are agent tokens issued? Through the cocalc.ai sign-in, which a person approves, or by the person on sagebrush.space? How is the token stored, and how is it rotated?
 2. What does an in-page agent's grant look like, given that the page holds the person's whole authority? Can a page restrict itself (an "agent mode" with only the granted paths), and is that worth it?
@@ -744,13 +815,14 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
    - The file browser, the File menu and the runner are shared.
    - Each open document keeps its own interpreter, as each notebook does now (`kernels`).
    - `/frame/board/` and exported boards stay pages of their own.
-6. **Shared collections as a read-only root.** This waits for the sharing pages.
-7. **Backup (§7.7, phase 1).** Server and protocol design go first, in their own design note, with security review (design/security.md) before any upload of private data.
-8. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2).
-9. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
-10. **The Ask panel and the handoffs with cocalc.ai** (§8.5, §8.6).
+6. **The chat panel and the local adapter** (§8.7): the panel beside the document, conversations as workspace documents, context with each message, and `sagebrush-mcp`'s adapter. It needs no sync, and Claude Code can use it through channels today.
+7. **Shared collections as a read-only root.** This waits for the sharing pages.
+8. **Backup (§7.7, phase 1).** Server and protocol design go first, in their own design note, with security review (design/security.md) before any upload of private data.
+9. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2), and the chat panel's remote adapter (§8.7).
+10. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
+11. **The cocalc.ai adapter, the Ask agent, and the handoffs with cocalc.ai** (§8.5, §8.6, §8.7). The adapter needs CoCalc's Agent Network to accept a person's page as a sender.
 
-Steps 1 to 5 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
+Steps 1 to 6 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
 
 ---
 
