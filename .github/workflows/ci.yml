@@ -65,10 +65,11 @@ jobs:
           node web/test-app-frontend.mjs
       - name: llms.txt and the board format page link only to pages the site serves, and the format's example renders
         run: node web/test-llms.mjs
-      - name: shared collections (the share API and the files Worker in Miniflare; sharing from the page in headless Chrome)
+      - name: shared collections and sync (the share API, the files Worker and the sync objects in Miniflare; sharing from the page in headless Chrome)
         run: |
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
+          node web/sync/test-sync.mjs
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
