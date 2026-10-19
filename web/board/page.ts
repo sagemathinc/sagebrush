@@ -285,12 +285,22 @@ if (fromParent) {
 // HARD-7F9-1), and is tried again with it.
 const SESSION = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 let wsSeq = 0, wsRev = 0; // (the workspace record's revision this page last loaded or wrote)
-let wsWriting: Promise<void> = Promise.resolve(), wsLatest: BoardDoc | null = null, wsRefused: Error | null = null;
+let wsWriting: Promise<void> = Promise.resolve(), wsRefused: Error | null = null;
+// (the latest save of each view: a save is passed over only for a later
+// save of the same view; a save of a newer view never makes an older
+// view's save skipped, CORR-105-2)
+const wsLatest = new Map<number, BoardDoc>();
+// (what happened to the saves, the latest 200: for tests and for finding out why)
+const wsLog: { t: number; what: string; title: string; epoch: number; base?: number }[] = [];
+const logSave = (what: string, d: BoardDoc, epoch: number, base?: number) => {
+  wsLog.push({ t: Date.now(), what, title: String(d?.title ?? ""), epoch, ...(base !== undefined ? { base } : {}) });
+  if (wsLog.length > 200) wsLog.shift();
+};
 // (the view's lineage: one more each time the board is shown a version
 // written elsewhere; a save belongs to the view it was made on, and a save
 // made on an older view never writes the board, only that conflict's copy:
 // CORR-0FC-1)
-let wsEpoch = 0, wsCopy: { epoch: number; ref: string } | null = null;
+let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = null;
 function wsSave(id: string, d: BoardDoc) {
   const w = ws!, refused = wsRefused;
   let journaled = true;
@@ -300,15 +310,31 @@ function wsSave(id: string, d: BoardDoc) {
     journaled = false;
     dropPending(id, SESSION + ":");
   } else try { localStorage.setItem(PENDING + id, header + "\n" + text); } catch { journaled = false; }
-  wsLatest = d;
+  wsLatest.set(epoch, d);
+  logSave("save", d, epoch, wsRev);
   wsWriting = wsWriting.then(async () => {
-    if (wsLatest !== d) return;
+    if (wsLatest.get(epoch) !== d) return logSave("passed over", d, epoch);
     try {
       if (epoch !== wsEpoch) {
-        // (made on the view before a conflict: into that conflict's copy, never over the board)
-        const copyPath = wsCopy?.epoch === epoch ? await w.pathOf("board", wsCopy.ref) : undefined;
-        if (copyPath) await w.write(copyPath, d);
-        else await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" });
+        // (made on the view before a conflict: into that conflict's copy,
+        // never over the board; the copy is a board like any other: written
+        // only over its own revision, else a new copy, CORR-105-1)
+        const copy = wsCopy?.epoch === epoch ? wsCopy : null;
+        let copyPath = copy ? await w.pathOf("board", copy.ref) : undefined;
+        if (copy && copyPath) {
+          try {
+            copy.rev = (await w.write(copyPath, d, { base: copy.rev })).rev;
+            logSave("to the copy", d, epoch, copy.rev);
+          } catch (e: any) {
+            if (e?.code !== "conflict") throw e;
+            copyPath = undefined;
+          }
+        }
+        if (!copyPath) {
+          wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title: safeTitle(d.title) + " (your changes, made while it changed elsewhere)" }), rev: 1 };
+          logSave("to a new copy", d, epoch);
+        }
+        if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
         dropPending(id, header + "\n");
         return;
       }
@@ -322,11 +348,19 @@ function wsSave(id: string, d: BoardDoc) {
       // record against a pending copy by them, CORR-2D1-2; and only over the
       // revision this page knows: what someone else wrote since is never
       // written over, CORR-AA2-1)
-      wsRev = (await w.write(path, d, { tag: header, ...(wsRev ? { base: wsRev } : {}) })).rev;
+      // (always with a base: a page that knows no revision writes nothing over anything, it conflicts)
+      wsRev = (await w.write(path, d, { tag: header, base: wsRev })).rev;
+      logSave("written", d, epoch, wsRev);
       wsRefused = null;
-      if (wsLatest === d) dropPending(id, header + "\n");
+      if (wsLatest.get(epoch) === d) {
+        wsLatest.delete(epoch);
+        dropPending(id, header + "\n");
+      }
     } catch (e: any) {
-      if (e?.code === "conflict") await wsConflict(w, id, d, header, epoch);
+      if (e?.code === "conflict") {
+        logSave("conflict", d, epoch, wsRev);
+        await wsConflict(w, id, d, header, epoch);
+      }
       else wsRefused = e instanceof Error ? e : new Error(String(e));
     }
   });
@@ -340,7 +374,7 @@ const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>()
 async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
-    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }) };
+    wsCopy = { epoch, ref: await makeInWorkspace(w, { ...d, title }), rev: 1 };
     dropPending(id, header + "\n");
     const path = await w.pathOf("board", id);
     const cur = path ? await w.read(path) : null;
@@ -350,7 +384,7 @@ async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string,
     // carry the old epoch and go to the copy; only then the new base)
     if (epoch === wsEpoch) wsEpoch++;
     wsRev = cur.rev;
-    if (wsLatest === d) wsLatest = null;
+    if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
     const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
     for (const f of wsSubs) await f(cur.content as BoardDoc, notice);
   } catch (e: any) {
@@ -620,4 +654,4 @@ export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
-(window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page") } : {}) };
+(window as any).sagebrush = { ...(window as any).sagebrush, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}) };
