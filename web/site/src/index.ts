@@ -45,12 +45,12 @@ export default {
     }
     return env.ASSETS.fetch(request);
   },
-  // The daily jobs: sharing's, then sync's inventory and receipt prune (design/sync-server.md §9),
-  // each on its own, so one failing never stops the other.  Sync's returns at once where its
+  // The daily jobs, side by side: sharing's, and sync's inventory and receipt prune
+  // (design/sync-server.md §9), each on its own, so one failing never stops the other.  Sync's returns at once where its
   // bindings aren't (the flag, §11), so this changes nothing until sync is bound.
   async scheduled() {
     const jobs = await Promise.allSettled([scheduled(env as ShareEnv), syncScheduled(env as unknown as SyncSiteEnv)]);
-    // (a failure still fails the run, as Cloudflare's cron status should show, once both have run)
+    // (a failure still fails the run, as Cloudflare's cron status should show, once both have settled)
     const failed = jobs.filter((j): j is PromiseRejectedResult => j.status === "rejected");
     if (failed.length) throw new AggregateError(failed.map((j) => j.reason), "a scheduled job failed");
   },
