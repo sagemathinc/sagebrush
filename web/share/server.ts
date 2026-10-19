@@ -654,14 +654,25 @@ export async function signedWith(req: Request, key: string | undefined, body: st
   return same(sig, want);
 }
 
-/** Start (or resume) deleting all of an account's shared data. */
-async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
+/**
+ * Bind a purge's request id to its account, for good: its record, made if
+ * there is none (pending: the scheduled job runs a pending purge whatever
+ * becomes of this request), and "conflict" if the id already names another
+ * account or operation.  The sync service binds through this too, before it
+ * touches any account object (design/sync-server.md §7.1, CORR-E9C-1).
+ */
+export async function bindPurge(env: ShareEnv, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
   const db = env.SHARE_DB!;
   const h = await accountHash(account);
   await db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES (?1, ?2, ?3, ?4, 'pending', ?5) ON CONFLICT(request_id) DO NOTHING").bind(rid, h, account, kind, now()).run();
   const p = await db.prepare("SELECT account_hash, kind, collection FROM purges WHERE request_id = ?1").bind(rid).first<{ account_hash: string; kind: string; collection: string | null }>();
   // (a request id names one operation: the same id for another account is refused)
-  if (!p || p.account_hash !== h || p.kind !== kind || p.collection !== null) return "conflict";
+  return !p || p.account_hash !== h || p.kind !== kind || p.collection !== null ? "conflict" : "accepted";
+}
+
+/** Start (or resume) deleting all of an account's shared data. */
+async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
+  if ((await bindPurge(env, account, rid, kind)) === "conflict") return "conflict";
   ctx.waitUntil(runPurge(env, rid));
   return "accepted";
 }
