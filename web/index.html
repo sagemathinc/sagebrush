@@ -1601,16 +1601,28 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "delete": {
       if (current.kind !== "browser") break;
-      // (with the workspace: to Trash, which keeps it until it is emptied;
-      // another notebook opened first; only this one, by its identity)
-      const p = ws ? await ws.pathOf("notebook", current.id).catch(() => undefined) : undefined;
-      if (ws && p) {
-        const id = current.id, entry = await ws.stat(p);
-        if (!entry || !confirm(`Move "${nbName.value}" to Trash? Trash keeps it until you empty it.`)) break;
+      // (with the workspace, or while it is still opening: to Trash, which
+      // keeps it until it is emptied, never deleted for good; another
+      // notebook opened first; only this one, by its identity.  One not in
+      // the index (a page-only forget) is listed first, then moved: CORR-FD1-1)
+      if (ws || !wsSettled) {
+        const id = current.id;
+        let entry;
+        try {
+          if (!ws) throw new Error("your files aren't open yet: try again in a moment");
+          let p = await ws.pathOf("notebook", id);
+          if (!p) { await wsAdoptNotebook(id, docName(), nb.mode); p = await ws.pathOf("notebook", id); }
+          entry = p ? await ws.stat(p) : undefined;
+          if (!entry || entry.kind !== "notebook" || entry.ref !== id) throw new Error("it isn't in your files");
+        } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
+        if (!confirm(`Move "${nbName.value}" to Trash? Trash keeps it until you empty it.`)) break;
         // (too many left unsaved: said, and this one stays open, not moved)
         try { await nb.mayLeave(); } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
-        const others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook");
-        if (others.length) await openId(others[0].ref); else await openNew("Untitled", nb.mode, [""], true);
+        // (another notebook opened in its place, and checked to be open: else this one stays)
+        const others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id);
+        try { if (others.length) await openId(others[0].ref); else await openNew("Untitled", nb.mode, [""], true); }
+        catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
+        if (current.kind === "browser" && current.id === id) { statusEl.textContent = "not moved to Trash: it is still open"; break; }
         try {
           const at = await ws.pathOf("notebook", id);
           if (!at) throw new Error("it isn't in your files any more");
@@ -1619,6 +1631,7 @@ fileMenu.addEventListener("click", async (e) => {
         } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; }
         break;
       }
+      // (the workspace can't be opened in this browser: deleted for good, as before it)
       if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       await nb.mayLeave();
       nb.detach();

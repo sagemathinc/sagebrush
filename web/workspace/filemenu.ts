@@ -40,8 +40,11 @@ export type FileMenuOptions = {
   keys: Partial<Record<FileItem, string>>;
   /** Items drawn disabled here (meaning nothing for this document). */
   disabled?: Partial<Record<FileItem, boolean>>;
-  /** Download ▸: this document's kinds, keyed. */
-  downloads: { key: string; label: string; title?: string }[];
+  /** Download ▸: this document's kinds, keyed (one the page can't make here, disabled). */
+  downloads: { key: string; label: string; title?: string; disabled?: boolean }[];
+  /** Hide what is disabled instead (and a group or rule left with nothing): the board library in
+   * another site's page, which offers only what its host gives; Sagebrush's own pages show it disabled. */
+  hideDisabled?: boolean;
   /** Recent ▸: the documents opened lately (drawn when the group is opened); none, disabled. */
   recent?: () => Promise<{ label: string; title?: string; open: () => void }[]>;
   /** Called when an item is chosen (the page closes its menu). */
@@ -136,12 +139,29 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
     b.setAttribute("role", "menuitem");
     b.setAttribute(o.attr, d.key);
     if (d.title) b.title = d.title;
+    if (d.disabled) { b.disabled = true; b.setAttribute("aria-disabled", "true"); }
     dl.append(b);
   }
   item("print", menu);
   item("share", menu);
   menu.append(el("hr"));
   item("delete", menu);
+  if (o.hideDisabled) {
+    for (const b of menu.querySelectorAll<HTMLButtonElement>("button:disabled")) b.hidden = true;
+    // (a group with nothing left to show, and its box; then rules with nothing between them)
+    for (const g of menu.querySelectorAll<HTMLButtonElement>("button[data-group]")) {
+      const box = g.nextElementSibling as HTMLElement;
+      const empty = g.dataset.group === "recent" ? !o.recent : ![...box.children].some((c) => !(c as HTMLElement).hidden);
+      if (empty) { g.hidden = true; box.hidden = true; }
+    }
+    let prevRule = true;
+    for (const c of [...menu.children] as HTMLElement[]) {
+      if (c.tagName === "HR") { c.hidden = prevRule; prevRule = true; }
+      else if (!c.hidden && !c.classList.contains("fmgroup")) prevRule = false;
+    }
+    const shown = ([...menu.children] as HTMLElement[]).filter((c) => !c.hidden && !c.classList.contains("fmgroup"));
+    if (shown.at(-1)?.tagName === "HR") shown.at(-1)!.hidden = true;
+  }
   // (an item chosen closes the menu; a group's button doesn't)
   menu.addEventListener("click", (ev) => {
     const b = (ev.target as HTMLElement).closest("button");

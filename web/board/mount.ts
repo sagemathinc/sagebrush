@@ -141,6 +141,9 @@ export interface BoardHost {
   duplicate?(d: BoardDoc): void | Promise<void>;
   /** The File menu's items that need the host's files (web/workspace/filemenu.ts): a new notebook or
    * folder, Open… (the file browser as a dialog), Recent, and Delete (this board to Trash); none: disabled */
+  /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
+   * (design/workspace-files.md §3); otherwise (the library in another site) it is hidden */
+  fullFileMenu?: boolean;
   files?: {
     newNotebook?(mode: string): void | Promise<void>;
     newFolder?(): void | Promise<void>;
@@ -304,11 +307,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     },
     downloads: [
       { key: "download", label: ".board.json" },
-      { key: "html", label: "HTML (one file)" },
+      { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
       { key: "canvas", label: "JSON Canvas" },
       { key: "copyjson", label: "Copy JSON" },
     ],
     recent: host.files?.recent,
+    // (Sagebrush's board page shows what it can't do here disabled; a board
+    // in another site's page offers only what its host gives)
+    hideDisabled: !host.fullFileMenu,
     chosen: () => { $("filemenu").hidden = true; },
   });
   ($("home") as HTMLAnchorElement).href = host.home ?? "/";
@@ -1613,8 +1619,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       fail(e);
     }
   }
-  // (what the host does not have is not offered: an exported file has no examples beside it)
-  ($("html") as HTMLButtonElement).disabled = !host.exportHtml;
   $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });
