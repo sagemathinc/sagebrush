@@ -23,6 +23,7 @@ const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its
 const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outlives its reservation
 const H = "88888888-8888-4888-8888-888888888888"; // allowlisted; its first registration in D1 fails
 const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enable's answer is held before the account object
+const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
 let count = 0;
@@ -36,6 +37,8 @@ function ok(cond, what) {
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
+// (an entry without the test seams' flag, as a deployed one is)
+const plainScript = execFileSync("bun", ["build", join(here, "test-noseams-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const PURGE_KEY = "purge-key", LIMITS_KEY = "limits-key";
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY, LIMITS_KEY };
 const URL_KEY = "url-key";
@@ -51,6 +54,7 @@ fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 10 });
 fake.limits.set(G, sync(1 << 20, 1 << 20));
 fake.limits.set(H, sync(1 << 20, 1 << 20));
 fake.limits.set(I, sync(1 << 20, 1 << 20));
+fake.limits.set(J, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -81,6 +85,17 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       ratelimits: { SYNC_FILES_LIMIT: { namespace_id: "1004", simple: { limit: 2, period: 60 } } },
     },
     { ...base, name: "files-open", bindings: { SYNC_URL_KEY: URL_KEY }, routes: ["openfiles.test/*"] },
+    // every seam's binding, but the entry doesn't turn the seams on
+    {
+      ...base,
+      script: plainScript,
+      name: "plain",
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: J, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_HOLD_ENABLE: J, SYNC_TEST_FAIL_ENROLL: "nobody" },
+      durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+      routes: ["plain.test/*"],
+      outboundService: cocalc,
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1007", simple: { limit: 100000, period: 60 } } },
+    },
     // sync's bindings, but no pre-authentication limit: off (LIMIT-321-1)
     {
       ...base,
@@ -186,6 +201,11 @@ const payloads = (item) => {
   const sp = await signIn(A, "https://prod.test");
   let r = await fetchAt("https://prod.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sp, origin: "https://prod.test", "content-type": "application/json" }, body: "{}" });
   ok(r.status === 404 && (await r.json()).error === "sync is not enabled here", "without the sync bindings, sync is a 404 (the flag)");
+  // the test seams are off in any Worker not built from the test entry, whatever is bound
+  const sj = await signIn(J, "https://plain.test");
+  const ej = await fetchAt("https://plain.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sj, origin: "https://plain.test", "content-type": "application/json" }, body: "{}" });
+  const bj = await ej.json();
+  ok(ej.status === 200 && bj.state === "active" && bj.held === undefined, "a Worker without the test entry ignores the seams' bindings: the hold-enable seam bound for this account does nothing");
   const sn = await signIn(A, "https://nolimit.test");
   r = await fetchAt("https://nolimit.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sn, origin: "https://nolimit.test", "content-type": "application/json" }, body: "{}" });
   ok(r.status === 404, "with the objects bound but no pre-authentication limit, sync is off too");
@@ -1194,6 +1214,13 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   for (const g of [1, 2, 3]) stale.push((await acctE.enable({ account: E, hash: hashOf(E), generation: g }))?.error?.code ?? "admitted");
   ok(stale.join() === "forbidden,forbidden,forbidden" && (await put(seE, Buffer.from("E after stale enables"))).status === 403, "after two cycles, a stale enable of every retired generation is refused, and no write is taken (CORR-DE7-1): " + stale.join());
   ok((await post(seE, "/api/sync/v1/enable", {})).status === 200 && (await put(seE, Buffer.from("E, generation 4"))).status === 201, "and turning sync on again (generation 4) takes writes");
+  // CORR-3ED-1: a purge of generation 3, whose D1 read was held while 3 was purged and 4 turned on, arrives last
+  const latePurge = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", hash: hashOf(E), generation: 3 });
+  const noGen = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", hash: hashOf(E) });
+  await new Promise((r) => setTimeout(r, 500));
+  const reg4 = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
+  ok(latePurge.state === "stale" && noGen.state === "stale" && reg4?.state === "active" && reg4.generation === 4, "a late purge of an older generation, or of none, does nothing to the live one (CORR-3ED-1)");
+  ok((await put(seE, Buffer.from("E, generation 4, after the late purge"))).status === 201 && (await acctE.inspect({}))?.used > 0, "and generation 4's storage and writes are untouched");
   // CORR-A62-1: I's first-ever enable is registered (generation 1) and its answer held before the account object
   // is reached; a delete then; the held enable arrives last
   const si = await signIn(I);

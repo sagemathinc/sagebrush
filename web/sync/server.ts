@@ -18,7 +18,7 @@
 import { sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
-import { allowed, type SyncEnv } from "./env.ts";
+import { allowed, testMode, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
 /** How long before its reservation ends an upload is cut off (§5.4, CORR-5E2-2). */
@@ -148,7 +148,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     // without it would see its own files deleted.  A failure here leaves no storage at all; a row
     // whose account object then fails to start holds nothing, which is harmless.
     try {
-      if (env.SYNC_TEST_FAIL_ENROLL && env.SYNC_TEST_FAIL_ENROLL === who.id) throw new Error("D1 unavailable (test seam)");
+      if (testMode(env) && env.SYNC_TEST_FAIL_ENROLL === who.id) throw new Error("D1 unavailable (test seam)");
       // (generation 1 for a new row; a purged one made active again gets the next; an active row keeps its own)
       await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, 1) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, generation = sync_accounts.generation + 1 WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
       reg = await env.SHARE_DB.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
@@ -158,7 +158,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     }
     // (a test seam: the registration's answer is held here, before the account object is reached, as
     // astra's first-enable trace holds it; the test then sends what it would, CORR-A62-1)
-    if (env.SYNC_TEST_HOLD_ENABLE && env.SYNC_TEST_HOLD_ENABLE === who.id) return json({ held: reg.generation });
+    if (testMode(env) && env.SYNC_TEST_HOLD_ENABLE === who.id) return json({ held: reg.generation });
     // (the account object checks the generation against its own, and against the highest it has
     // retired: a purge since this read, or any number of them, refuses it)
     return answer(await stub.enable({ account: who.id, hash, generation: reg.generation }), json);
@@ -283,7 +283,7 @@ export async function syncScheduled(env: Env): Promise<{ pages: number; checked:
   const out = { pages: 0, checked: 0, deleted: 0, calls: 0 };
   if (!env.SYNC_ACCOUNT || !env.SHARE_DB || !env.SHARE_BUCKET) return out;
   const db = env.SHARE_DB;
-  const test = !!env.SYNC_TEST_PIN_MS;
+  const test = testMode(env);
   const [page, pages] = test ? [50, 2] : [INVENTORY_PAGE, INVENTORY_PAGES];
   const old = Date.now() - (test ? 1000 : INVENTORY_AGE_MS);
   // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still fits)
@@ -348,7 +348,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   // completes.  So once a reservation has ended, no write of its key can still appear: a put that
   // finished in time is finalized, or its key is deleted when the reservation ends; one that didn't
   // never exists.
-  const deadline = expires - (env.SYNC_TEST_PIN_MS ? 1000 : PUT_MARGIN_MS);
+  const deadline = expires - (testMode(env) ? 1000 : PUT_MARGIN_MS);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), Math.max(0, deadline - Date.now()));
   let stored: { size: number } | null = null;
@@ -374,7 +374,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   const f = await stub.finalize({ account, id, size: stored.size });
   // (not finalized: nothing will own this object, so it goes now; the account's outbox has it too
   // when it can, CORR-5E2-2)
-  if ("error" in f && !env.SYNC_TEST_NO_WORKER_DELETE) await env.SHARE_BUCKET!.delete(key).catch(() => {});
+  if ("error" in f && !(testMode(env) && env.SYNC_TEST_NO_WORKER_DELETE)) await env.SHARE_BUCKET!.delete(key).catch(() => {});
   return answer(f, (v) => json(v, 201));
 }
 

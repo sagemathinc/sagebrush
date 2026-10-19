@@ -16,7 +16,7 @@ import {
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { allowed, type SyncEnv } from "./env.ts";
+import { allowed, testMode, type SyncEnv } from "./env.ts";
 import { MAX_PUT } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
@@ -462,10 +462,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** How long after a pin's forward lapses its answer is asked for: then the forward can't commit any more (§4.3). */
   private settleMs(): number {
-    return this.env.SYNC_TEST_PIN_MS ? 10 : 60_000;
+    return testMode(this.env) ? 10 : 60_000;
   }
   private pinMs(): number {
-    const t = Number(this.env.SYNC_TEST_PIN_MS);
+    const t = (testMode(this.env) ? Number(this.env.SYNC_TEST_PIN_MS) : 0);
     return Number.isSafeInteger(t) && t > 0 ? t : PIN_MS;
   }
   /** Take back a pin, by its whole identity, idempotently: its reference goes too. */
@@ -511,7 +511,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** A retried item's wait after `tries` failures: doubling from a minute to ten (a second to four, in tests). */
   private backoff(tries: number): number {
-    const [base, cap] = this.env.SYNC_TEST_PIN_MS ? [200, 4000] : [60_000, 600_000];
+    const [base, cap] = testMode(this.env) ? [200, 4000] : [60_000, 600_000];
     return Math.min(cap, base * 2 ** Math.min(tries, 20));
   }
 
@@ -591,7 +591,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   private leaseMs(): number {
-    return this.env.SYNC_TEST_PIN_MS ? 1000 : LEASE_MS;
+    return testMode(this.env) ? 1000 : LEASE_MS;
   }
   /** A ticket for a document socket: used once, within TICKET_MS, by this session only. */
   private ticket(att: Attachment, device: string, doc: unknown): { ticket: string; expires: number } {
@@ -632,7 +632,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private redeemGate: { wait: Promise<void>; open: () => void } | null = null;
   /** Tests only: hold the next redemption's answer until released. */
   async holdRedeem(a: { release?: boolean }): Promise<void> {
-    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (!testMode(this.env)) return;
     if (a.release) return void this.heldRedeem?.open();
     let open!: () => void;
     const wait = new Promise<void>((r) => (open = r));
@@ -688,7 +688,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private async limits(): Promise<Limits | null> {
     const cached = this.get("limits");
     const fetched = Number(this.get("limits_fetched") ?? 0);
-    if (cached && Date.now() - fetched < (this.env.SYNC_TEST_PIN_MS ? 1000 : LIMITS_TTL_MS)) return JSON.parse(cached);
+    if (cached && Date.now() - fetched < (testMode(this.env) ? 1000 : LIMITS_TTL_MS)) return JSON.parse(cached);
     const env = this.env;
     if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : cached ? JSON.parse(cached) : null;
     try {
@@ -769,6 +769,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       await this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE account_hash = ?1 AND generation = ?3 AND state = 'deleting'")
         .bind(a.hash, Math.floor(Date.now() / 1000), a.generation).run();
       return { state: "purged", request_id: a.request_id };
+    }
+    // Every purge names the generation it was asked for, and acts only on that one (CORR-3ED-1): a
+    // purge of an older generation, arriving after a newer one was turned on, leaves it alone; one
+    // with no generation does nothing.
+    if (a.generation === undefined || Number(this.get("generation")) !== a.generation) {
+      if (a.generation !== undefined && Number.isSafeInteger(a.generation)) {
+        this.ctx.storage.transactionSync(() => {
+          const retired = Math.max(Number(this.get("retired") ?? 0), Math.min(a.generation!, Number(this.get("generation")) - 1));
+          if (retired > 0) this.set("retired", retired);
+        });
+      }
+      return { state: "stale", request_id: a.request_id };
     }
     const st = this.ctx.storage.transactionSync(() => {
       if (this.state() !== "deleting") {
@@ -877,7 +889,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (this.used() + a.size > l.sync.storage_bytes) throw new SyncError("storage_full", "this account's synced storage is full", { limit: l.sync.storage_bytes, used: this.used() });
       const id = randomHex(16);
       const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
-      const ends = now + (this.env.SYNC_TEST_PIN_MS ? 3000 : RESERVE_MS);
+      const ends = now + (testMode(this.env) ? 3000 : RESERVE_MS);
       this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends);
       this.addUsed(a.size);
       // (a dead upload's bytes come back at its end, even if nothing else happens here: LIMIT-7FB-1)
@@ -1015,7 +1027,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
   async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; reservations: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
-    if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
+    if (!testMode(this.env) || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
       refs: h ? Number(h.refs) : null,
@@ -1032,7 +1044,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** Tests only: R2 keys put in the outbox, and the alarm set to now (an alarm earlier than what is pending). */
   async seed(a: { outbox?: number; alarmNow?: boolean }): Promise<number> {
-    if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return 0;
+    if (!testMode(this.env) || !this.exists()) return 0;
     for (let i = 0; i < (a.outbox ?? 0); i++) this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", `s/test/${i}`, Date.now());
     if (a.alarmNow) {
       this.alarmAt = Date.now();
@@ -1043,17 +1055,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** Tests only: make revoke fail, as an unreachable object would; and documents a session had tickets for, made up. */
   async setFailRevoke(a: { on: boolean }): Promise<void> {
-    if (this.env.SYNC_TEST_PIN_MS) this.failRevoke = a.on;
+    if (testMode(this.env)) this.failRevoke = a.on;
   }
   private failRevoke = false;
   async seedTicketDocs(a: { session: string; n: number }): Promise<void> {
-    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (!testMode(this.env)) return;
     for (let i = 0; i < a.n; i++) this.sql.exec("INSERT OR IGNORE INTO ticket_docs (session_hash, doc, expires) VALUES (?, ?, ?)", a.session, i.toString(16).padStart(12, "0"), Date.now() + 3600_000);
   }
 
   /** Tests only: hold a purge's steps (the account stays `deleting`) until released. */
   async holdPurge(a: { on: boolean }): Promise<void> {
-    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (!testMode(this.env)) return;
     this.purgeHeld = a.on;
     if (!a.on) this.wakeBy(Date.now());
   }
@@ -1061,7 +1073,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
   async crash(): Promise<void> {
-    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (!testMode(this.env)) return;
     await this.ctx.storage.deleteAlarm();
     // (flushed first: an abort drops writes not yet durable, and the point is a lost alarm)
     await this.ctx.storage.sync();
@@ -1093,7 +1105,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       ws.close(4401, "session ended");
     }
     // (a test seam: the revoke recorded, its fences not yet delivered)
-    if (a.testNoFence && this.env.SYNC_TEST_PIN_MS) return { complete: false };
+    if (a.testNoFence && testMode(this.env)) return { complete: false };
     // (the first FENCES_AT_ONCE now, the rest from the alarm; complete only when none is due)
     await this.fenceDue(a.session);
     this.arm();
@@ -1151,7 +1163,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       try {
         if (!this.purgeHeld) done = await this.purgeStep();
       } catch {}
-      if (!done) this.wakeBy(Date.now() + (this.env.SYNC_TEST_PIN_MS ? 200 : 30_000));
+      if (!done) this.wakeBy(Date.now() + (testMode(this.env) ? 200 : 30_000));
       return;
     }
     const now = Date.now();
