@@ -77,7 +77,9 @@ const LEGACY = jsonl([
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "DOM.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/` });
+  // (?workspace=0: a file opened into the board shown, the in-place path (the library's); with
+  // the workspace it is uploaded and opened as a copy, test-workspace-upload.mjs)
+  await send("Page.navigate", { url: `${base}board/?workspace=0` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   await ev("localStorage.clear()");
 

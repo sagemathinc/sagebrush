@@ -782,6 +782,11 @@ try {
     const before = await ev("window.sagebrush.board.snapshot().items.filter((i) => i.kind === 'note' || i.kind === 'group').map((i) => i.id).sort().join()");
     const cf = join(profile, "board.canvas");
     writeFileSync(cf, dc.text);
+    // (opened into the board shown: the in-place path, a page without the
+    // workspace's (the library's, ?workspace=0); with it, a file is uploaded
+    // and opened as a copy of its own: test-workspace-upload.mjs)
+    await send("Page.navigate", { url: url + "&workspace=0" });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     await ev("document.querySelector('[data-sbb=open]').click(), 1");
     const droot = await send("DOM.getDocument", { depth: -1 });
     const picker = await send("DOM.querySelector", { nodeId: droot.root.nodeId, selector: "[data-sbb=openfile]" });
@@ -798,6 +803,8 @@ try {
     await ev("window.__release(), 1");
     await sleep(1500);
     check((await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "m1", "a file whose reading ends after a document was loaded is opened over it: " + (await ev("window.sagebrush.board.snapshot().items.length")) + " items");
+    await send("Page.navigate", { url });
+    await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     await ev(`window.sagebrush.board.load({ title: "Old", nodes: [{ id: "o1", title: "Written before versions" }] })`);
     check((await docOf()).version === 1 && (await ev("window.sagebrush.board.snapshot().items.map((i) => i.id).join()")) === "o1", "a board without a version is not read as version 1");
     for (const [bad, says] of [[{ format: "sagebrush-board", version: 2, nodes: [{ id: "n2" }] }, "version 2"], [{ format: "excalidraw", nodes: [{ id: "x" }] }, "excalidraw"]]) {

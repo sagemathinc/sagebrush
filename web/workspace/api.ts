@@ -212,10 +212,10 @@ export class Workspace {
   /** A new notebook, board or data file at `p`, its kind said by its name;
    * `content` its document or bytes (else a blank one), `mode` a document's
    * language.  A path that's taken is refused, never written over. */
-  async create(p: string, opts: { content?: unknown; mode?: string } = {}): Promise<Entry> {
+  async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } = {}): Promise<Entry> {
     const q = path(p), kind = kindOf(q);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, opts.content, opts.mode)).then((e) => { this.askToKeep(); return e; });
+    return this.locked(() => this.make(q, kind, opts.content, opts.mode), opts.signal).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -338,7 +338,7 @@ export class Workspace {
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
   /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">): Promise<Entry> {
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal): Promise<Entry> {
     const q = path(p);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.locked(async () => {
@@ -349,7 +349,7 @@ export class Workspace {
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
       return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
-    });
+    }, signal);
   }
 
   /** What `p` in Trash was, put back where it was (or, if that's taken now,
@@ -756,11 +756,14 @@ export class Workspace {
   /** `f` holding the workspace's lock: one change at a time in all of this
    * browser's tabs.  Without Web Locks there is no such lock, and changes
    * that span the two databases could interleave and undo each other's
-   * bytes, so none are made (CORR-4A0-5): a WorkspaceError("storage"). */
-  async locked<T>(f: () => Promise<T>): Promise<T> {
+   * bytes, so none are made (CORR-4A0-5): a WorkspaceError("storage").
+   * With `signal`: aborted before the lock is held, `f` never runs, now or
+   * later, and this rejects (an AbortError); once held, it runs to its end
+   * (daybreak2's LIMIT-59D-1). */
+  async locked<T>(f: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
-    return locks.request(LOCK, f);
+    return signal ? locks.request(LOCK, { signal }, f) : locks.request(LOCK, f);
   }
 
   async mustStat(p: string): Promise<Entry> {

@@ -141,6 +141,10 @@ export interface BoardHost {
   duplicate?(d: BoardDoc): void | Promise<void>;
   /** The File menu's items that need the host's files (web/workspace/filemenu.ts): a new notebook or
    * folder, Open… (the file browser as a dialog), Recent, and Delete (this board to Trash); none: disabled */
+  /** A board brought in from a file (an upload, a drop, Open as…): its code doesn't run until the person
+   * presses "Run this board's code" (an interim, until design/capabilities.md's gate); `codeResumed` when they do. */
+  codePaused?: boolean;
+  codeResumed?(): void;
   /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
    * (design/workspace-files.md §3); otherwise (the library in another site) it is hidden */
   fullFileMenu?: boolean;
@@ -150,6 +154,9 @@ export interface BoardHost {
     open?(): void;
     recent?(): Promise<{ label: string; title?: string; open: () => void }[]>;
     delete?(): void | Promise<void>;
+    /** Upload… and files dropped on the board (not pictures), in `mode` (the board's): the rule of
+     * design §3 (workspace/upload.ts); what to say, if anything.  None: a file opens in this board, as before. */
+    upload?(files: File[], mode: string): Promise<string | void>;
   };
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
@@ -194,7 +201,7 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
@@ -296,6 +303,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (the parts, found within root by their data-sbb: no ids, which two
   // boards on a page, or the host's own elements, would share)
   const $ = (part: string) => root.querySelector<HTMLElement>(`[data-sbb="${part}"]`)!;
+  // (code paused until the person runs it: a board brought in from a file, host.codePaused)
+  let paused = !!host.codePaused;
   // The one File menu, as the notebook's (design/workspace-files.md §3):
   // drawn by filemenu.ts with this board's keys; what isn't here, disabled
   renderFileMenu($("filemenu"), {
@@ -509,7 +518,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     cellOf = new Map(order.filter((c) => c.page === pageIx).map((c) => [c.item, c.id]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
-    if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
+    // (a board brought in from a file: its code waits for the person's "Run this board's code")
+    if (paused) $("runpaused").hidden = !order.length;
+    else if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (the toolbar's Code: the board's language; its tool's title reads it
     // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
@@ -1295,7 +1306,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     input.onblur = () => finish(true);
   };
   editor.onSettled = () => { if (relayoutHeld) { relayoutHeld = false; relayout(); } };
-  editor.onRun = (id) => { code?.run([cell(id)]); };
+  editor.onRun = (id) => { if (paused) return resumeCode(); code?.run([cell(id)]); };
   editor.highlight = (id) => { const c = code; return c && c.highlight("", cell(id)) !== null ? (src: string) => c.highlight(src, cell(id))! : null; };
   // (Tab's completions, from the interpreter of the code's language, as the notebook's; and the host's function search)
   editor.complete = (mode, before) => code?.complete(mode as BoardMode, before) ?? Promise.resolve(null);
@@ -1662,13 +1673,35 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }
   const picker = $("openfile") as HTMLInputElement;
   $("open").onclick = () => picker.click();
+  // (with the host's files: Upload's rule, design §3, any files, several)
+  if (host.files?.upload) { picker.multiple = true; picker.removeAttribute("accept"); }
+  // "Run this board's code": the person's consent, for a board brought in from a file (or a cell's own ▶)
+  function resumeCode() {
+    if (!paused) return;
+    paused = false;
+    $("runpaused").hidden = true;
+    host.codeResumed?.();
+    const d = doc;
+    if (d) { const order = codeOrder(d); if (order.length) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e)); }
+  }
+  $("runpaused").onclick = resumeCode;
+  // (what is being written kept first, and kept by the host: else this board stays, nothing uploaded
+  // and why said, as New board's (astra's CORR-4B3-2))
+  async function uploadToHost(files: File[]) {
+    await editor.keepWriting();
+    elsewhereNot("Not uploaded", async () => {
+      const said = await host.files!.upload!(files, doc?.mode ?? "python");
+      if (said && !destroyed) say(said);
+    });
+  }
   // (a file read while another document is loaded, by an agent or the
   // host: that one, newer, wins; the file, read too late, is not opened
   // over it)
   picker.onchange = async () => {
-    const f = picker.files?.[0], g = loadGen;
+    const files = [...(picker.files ?? [])], f = files[0], g = loadGen;
     picker.value = "";
     if (!f) return;
+    if (host.files?.upload) return uploadToHost(files);
     const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   };
@@ -1687,6 +1720,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     const f = files[0], g = loadGen;
     if (!f) return;
+    if (host.files?.upload) return uploadToHost(files);
     const text = await readFile(f).catch(fail);
     if (typeof text === "string" && g === loadGen && !destroyed) await openText(text, f.name).catch(fail);
   });
@@ -2239,6 +2273,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   return {
     board,
     bench,
+    /** What is being written where it is, ended and kept in the document (the host saves it): before
+     * the host leaves the board, whichever way (astra's CORR-BCD-1). */
+    keepWriting: () => editor.keepWriting(),
+    writing: () => editor.writing,
+    /** Nothing written or changed by the person while the page makes where it goes (astra's CORR-134-1). */
+    freeze: (on: boolean) => editor.holdForLeaving(on),
     /** The board's title made `t` if it is `was` (its file renamed by the
      * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
     retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false) : Promise.resolve(null)),
