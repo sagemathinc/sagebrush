@@ -40,21 +40,48 @@ grants(
 
 ## 2. The token
 
-**Its form:** `sbg1.<account hash, 64 hex>.<grant id>.<secret, 32 random bytes, base64url>`.
-- The Worker finds the account object from the hash, and the object finds the grant from the id. No D1 read and no global table is in the path.
+**Its form:** `sbg1.<account hash, 64 hex>.<grant id>.<secret, 32 random bytes, base64url>.<tag>`.
+- **The tag** is `HMAC-SHA256(GRANT_TAG_KEY, "sbg1." + hash + "." + grant id)`, the first 16 bytes, in base64url. Only the server can make one (LIMIT-D817-1).
+- **The Worker checks the token's exact form and its tag before anything else,** and before the hash names an object. A made-up or altered token gets 401 from the Worker, and never reaches a Durable Object. Failures count against the IP's pre-authentication limit (design/sync-server.md §2).
+- Only then does the Worker find the account object from the hash, and the object find the grant from the id. No D1 read and no global table is in the path.
+- **A refused token never writes:** the account object only reads the grant row to refuse it. The access log records refusals only for a grant that exists, at most one row a minute per grant.
+- A leaked `GRANT_TAG_KEY` would let made-up tokens reach objects, though they still fail at the secret. Rotating the key is a new token version, `sbg2`, with every person asked to renew.
 - The account object stores only `SHA-256(secret)`, and compares in constant time (sharing's `same`).
 - The hash names the account without its id, and reveals nothing an attacker can use: the secret is what grants access.
 
 **How a grant is issued** (§8.9 question 1): always by the person, on sagebrush.space, from a signed-in session. Never by the agent, and never by cocalc.ai on its own. There are two ways:
 
 1. **Pairing**, for an agent with a terminal or a chat, a flow like OAuth's device authorization (RFC 8628):
-   - the agent calls `POST /api/agent/v1/pair` with `{agent, wants: {scopes, run_code}}`, and gets back `{pair_id, code: "WXYZ-1234", url, poll_secret}`, where the URL is `https://sagebrush.space/agents/pair`;
+   - the agent calls `POST /api/agent/v1/pair` with `{agent, wants: {scopes, run_code}}`, and gets back `{pair_id, code: "WXYZ-1234", url, poll_secret, interval: 5}`, where the URL is `https://sagebrush.space/agents/pair`;
    - the agent shows the person the URL and the code;
    - the person opens the URL, signed in, and types the code. The page shows what the agent asked for, which the person can narrow but never widen beyond what they choose, and they approve;
    - meanwhile the agent polls `POST /api/agent/v1/pair/<pair_id>` with its `poll_secret`, and receives the token once, after approval;
-   - a pairing expires after 10 minutes, allows 5 wrong codes, and gives its token only once, to the holder of `poll_secret`.
+   - a pairing expires after 10 minutes, and gives its token only once, to the holder of `poll_secret`.
 
-   Pairing records live in a small D1 table, since there is no account yet when the agent asks. The table is written once per pairing, never on an edit.
+   **Pairing is the one route before any account, so its bounds are all stated** (LIMIT-D817-2). Its records are a D1 table, `pairings(pair_id, code_hash, poll_hash, ip_hash, wants, state, created, expires, polls, last_poll, account, grant)`, written when a pairing is made, approved and collected. It is never written on an edit.
+   - **The request:**
+     - at most 4 KiB of JSON;
+     - `agent` at most 64 characters;
+     - `wants.scopes` at most 32 paths, each checked by `normPath`.
+     - Anything else is refused with 400 before any write.
+   - **Making one:**
+     - the IP limit first (Cloudflare's rate-limiting binding, 10 an hour per IP);
+     - then one conditional INSERT that holds only while the IP has fewer than 3 pairings pending, and the whole site fewer than 10,000. Otherwise it is refused with 429, or with 503 "pairing is busy".
+     - IPs are stored only as an HMAC with a key that changes daily.
+   - **Polling:**
+     - at most once every 5 seconds per pairing. Faster gets `slow_down`, as in RFC 8628, and the interval grows by 5 seconds;
+     - at most 150 polls per pairing, and 60 a minute per IP (the binding);
+     - each poll is one D1 read, and one write only when it slows down or collects;
+     - a wrong `poll_secret` never says whether the pairing exists.
+   - **The code** is 8 characters from a 32-letter alphabet, 40 bits, stored as an HMAC.
+     - Approving needs a signed-in session, and is limited to 5 wrong codes an hour per account, and 1,000 a minute for the whole site.
+     - A pairing approved by one account can't be approved again.
+     - After approval, the 5-pending-per-account limit applies.
+   - **Clean-up, which can't be made to grow:**
+     - each INSERT first deletes at most 20 expired rows;
+     - the scheduled job deletes every row an hour past its expiry, 1,000 at a time;
+     - **no token is ever stored:** approval makes the grant without a secret. The first poll after approval makes the secret, has the account object store its hash, and returns the token once. A second collection finds the pairing `collected`.
+   - **Failure paths never disclose a token:** an expired, used or unknown pairing gets the same 404.
 2. **From the grant dialog,** for an agent the person configures by hand:
    - the person makes the grant and copies the token, which is shown once;
    - this is also how a token reaches a cocalc.ai project, pasted as a project secret, until the cocalc.ai adapter (§10) does it for them.
@@ -74,12 +101,20 @@ grants(
   - a session cookie is ignored on these routes, so a page can't use the person's session through them;
   - a request with an `Origin` header (that is, from a web page) is refused. Agents aren't browsers, and a token pasted into a hostile page can't be read back through CORS anyway.
 
-**Every request, in this order, inside the account object:**
+**At the Worker, before any object:** the IP's pre-authentication limit, and then the token's form and tag (§2).
+
+**Then every request, in this order, inside the account object:**
 1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads). On dev, the account must also be in `SYNC_ACCOUNTS` (design/sync-server.md §11).
 2. The grant's rate limits, and then the account's (§7).
 3. The verb's paths are inside the scope, with the access the verb needs (read, or write).
-4. The verb runs. **The grant is checked again in the same transaction as any write,** so a revoke that lands while a request is running prevents its write.
-5. A row is written to the access log (§8), in that same transaction for a write.
+4. The verb runs.
+   - **A write to the index** (an op) is one transaction in the account object. The grant is checked again in it, so a revoke that lands while the request runs prevents the write.
+   - **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5):
+     - the account object checks the grant and scope, and records an admission, in one transaction;
+     - the document object commits it only if it isn't fenced and hasn't expired (60 seconds);
+     - a revoke, a narrowed scope or a rename out of scope cancels pending admissions, and completes only once they are fenced or expired.
+     - So no write admitted before a revoke commits after the revoke completes.
+5. A row is written to the access log (§8), in the same transaction as the write or the admission. A document write's row is then marked `committed` or `refused` when its answer comes.
 
 **What a refusal says:**
 - 401 `unauthorized`: no such grant, a wrong secret, or expired or revoked. The answer never says which;
@@ -113,9 +148,9 @@ grants(
 **Documents on the server.** Notebooks, boards and chats are patchflow logs, opaque to the sync objects (design/sync-server.md §10). The agent endpoint is the one place that reads them:
 - `read` and `write` on a document run in the Worker, in `web/sync/agent-docs.ts`, which uses the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
 - it reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
-- for `write`, it makes the patch from `base` to the new value, and sends it as a one-patch batch credited to the agent;
+- for `write`, it makes the patch from `base` to the new value, and sends it as a one-patch batch with `expect_head` set to the head it read (design/sync-server.md §4.4), from the grant's own patchflow client (`grant:<id>`), credited to the agent;
 - **its bounds:** documents up to 8 MB of value, and 2,000 batches since the snapshot. Beyond either, it answers 413 `limit`, and suggests opening the page;
-- a write is compare-and-swap. If the document has moved past `base`, it answers `conflict` with the current revision, as the in-page API does.
+- **a write is compare-and-swap,** checked in the document object's transaction. If the document has moved past `base`, it answers `conflict` with the current revision, as the in-page API does. A resend after a lost answer gets the original `seq`, not a conflict.
 
 ## 5. Outward actions
 
@@ -163,14 +198,15 @@ For daybreak2. Every limit is per grant, inside the account's own limits (design
 | What | Per grant |
 |---|---|
 | Requests | 60 a minute, 1,000 an hour |
-| Read | 200 MB a day, through signed URLs and document reads together |
+| Read | 200 MB a day of bytes **authorized**: a signed URL debits the blob's whole size when it is issued, and a document read debits its value's size. A grant's URL is used once (design/sync-server.md §5.4), so the bytes it can transfer are at most what was debited. |
 | Written | 100 MB a day; each write at most 32 MB (larger: as a blob, at most `max_file_bytes`) |
 | `list` | 1,000 entries a page, at most 10,000 in a call |
 | Document reads and writes | 8 MB of value; 2,000 batches since the snapshot (§4) |
 | Runs | 1 at a time, 60 an hour; each bounded by the runner's own time and memory limits |
 | Sockets | 2 |
 | Confirmations waiting | 5 |
-| Pairings | 5 waiting per account; 10 an hour per IP address before the person approves |
+| Pairings | §2: 3 pending per IP and 10,000 site-wide; 10 made an hour per IP; polls every 5 s at most, 150 per pairing, 60 a minute per IP; 5 approved and waiting per account |
+| Before authentication | 60 requests a minute per IP, 10 that fail (design/sync-server.md §2) |
 
 - **What an agent over a limit sees:**
   - 429 with `{error: "rate", limit: "requests_per_minute", retry_after}`;
@@ -246,6 +282,10 @@ The panel of §8.7 talks to a person's cocalc.ai agents through CoCalc's Agent N
 
 In Miniflare, with the sync server's harness:
 
+- **Before authentication:** a fresh, made-up account hash on every request, a bad tag, and a malformed token each get 401 from the Worker, create no object and write no row; the IP limit stops a flood.
+- **Pairing:** an oversized body is refused before any write; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
+- **Reading:** a grant's URL debits at issue and works once; parallel and overlapping range requests on it give at most one success.
+- **Document writes:** a competing append between the read and the write gives `conflict`; a revoke while the write is delayed either finds it committed (and logged) or refuses it.
 - **Grants:**
   - a token for another account, a wrong secret, an expired grant and a revoked grant each give the same 401;
   - a revoke while a write is running prevents the write;
