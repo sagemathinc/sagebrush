@@ -61,8 +61,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const enc = new TextEncoder();
 const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 const isObj = (v: unknown): v is { [k: string]: unknown } => !!v && typeof v === "object" && !Array.isArray(v);
-const keyOf = (k: Key) => k.type + "\u0000" + k.page + "\u0000" + k.id;
-const at = (page: string, id: string) => page + "\u0000" + id;
+// (a record's key, and an item's place, as JSON: no two (type, page, id) the same, whatever the ids
+// hold, NUL and quotes included (astra's CORR-64C-1))
+const keyOf = (k: Key) => JSON.stringify([k.type, k.page, k.id]);
+const at = (page: string, id: string) => JSON.stringify([page, id]);
 const itemKey = (page: string, id: string) => keyOf({ type: "item", page, id });
 const DOC = keyOf({ type: "doc", page: "", id: "" });
 const bytesOf = (r: Rec) => enc.encode(JSON.stringify(r)).length;
@@ -182,9 +184,14 @@ function plainProblem(m: unknown, depth: number, bytes: number, MAX = 200_000): 
 const goodName = (f: string) => f.length > 0 && f.length <= EDIT_LIMITS.fieldName && !BAD_NAMES.has(f);
 function keyProblem(k: unknown): string | null {
   if (!isObj(k) || !TYPES.has(k.type as string) || typeof k.page !== "string" || typeof k.id !== "string") return "a change's key is {type, page, id}";
-  if (k.page.length > EDIT_LIMITS.keyChars || k.id.length > EDIT_LIMITS.keyChars) return `a key's page and id are at most ${EDIT_LIMITS.keyChars} characters`;
+  // (an edge's id is made from its two ends (history.ts toRecords): room for both)
+  const idMax = k.type === "edge" ? 2 * EDIT_LIMITS.keyChars + 32 : EDIT_LIMITS.keyChars;
+  if (k.page.length > EDIT_LIMITS.keyChars || k.id.length > idMax) return `a key's page and id are at most ${EDIT_LIMITS.keyChars} characters (an edge's id ${idMax})`;
   if (k.type === "doc" && (k.page !== "" || k.id !== "")) return "the doc record's key is {type: \"doc\", page: \"\", id: \"\"}";
   if (k.type === "page" && k.id !== "") return "a page record's id is \"\"";
+  if (k.type === "page" && k.page === "") return "a page record's page isn't \"\"";
+  // (an item's or edge's id is never "": that is the top's, a parent of none (astra's CORR-64C-2))
+  if ((k.type === "item" || k.type === "edge") && k.id === "") return `an ${k.type}'s id isn't ""`;
   return null;
 }
 function fieldsProblem(f: unknown, what: string): string | null {
@@ -247,6 +254,8 @@ export function recordProblems(records: Iterable<Rec>): string[] {
   if (paged && !pages.size) out.push("a paged board without pages");
   if (!paged && pages.size) out.push("page records on a board without pages");
   for (const r of all.values()) {
+    const kp = keyProblem(r);
+    if (kp) out.push(kp);
     if (r.type !== "item" && r.type !== "edge") continue;
     if (paged ? !pages.has(r.page) : r.page !== "") out.push(`${r.type} ${r.id} on a page that isn't there`);
     if (r.type === "item") {
@@ -328,6 +337,7 @@ export function editState(postedText: string): EditState {
     if (!isBoard(d)) throw new Error("not a board: a document needs nodes (or pages of them)");
     const all = toRecords(d as BoardDoc);
     if (all.length > EDIT_LIMITS.records) throw new Error(`a board edited in a frame has at most ${EDIT_LIMITS.records} records`);
+    for (const r of all) { const bad = keyProblem(r); if (bad) throw new Error(`not a board this page can edit: ${bad}`); }
     // (the size an edit is held to: its records' JSON, a little more than the file's text;
     // checked before anything here changes, so a reset refused leaves the board as it was)
     const made = all.map((r) => record(r, r));
@@ -466,7 +476,9 @@ export function editState(postedText: string): EditState {
         }
         if (r.type === "edge") for (const end of [r.from, r.to]) if (typeof end !== "string" || !cur(itemKey(r.page, end))) return no(`edge "${r.id}" names an item that isn't on its page`);
       } else {
-        const old = recs.get(k)!;
+        // (made and deleted within this edit: never there, nothing to check)
+        const old = recs.get(k);
+        if (!old) continue;
         if (old.type === "doc") return no("the board's doc record isn't deleted");
         if (old.type === "item") {
           if (count(kids, d.kids, at(old.page, old.id)) > 0) return no(`group "${old.id}" still has children`);

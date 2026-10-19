@@ -189,6 +189,26 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   check(recordProblems(st.records()).some((p) => /round/.test(p)), "recordProblems ends on cyclic data, and says so");
 }
 
+// ---------------------------------------------------------------- identity: ids as files give them (astra's CORR-64C-1/2)
+{
+  // NUL inside ids: (page "a", item "b\0c") and (page "a\0b", item "c") are two items, never one
+  const st = editState(board({ pages: [{ id: "a", nodes: [{ id: "b\u0000c", text: "first" }] }, { id: "a\u0000b", nodes: [{ id: "c", text: "second" }] }] }));
+  check(st.records().filter((r) => r.type === "item").length === 2, "ids with NUL: both items kept on load");
+  check(apply(st, edit([{ op: "set", key: K("item", "a", "b\u0000c"), fields: { text: "first!" }, was: { text: "first" } }])).ok && rec(st, "item", "a", "b\u0000c").text === "first!" && rec(st, "item", "a\u0000b", "c").text === "second", "…an edit to one changes it, never the other");
+  // the empty id: the top's, never an item's
+  check(refused(apply(st, edit([{ op: "set", key: K("item", "a", ""), fields: { parent: "", pos: 0, kind: "group" }, create: true }])), /id isn't/), "an item with the empty id: refused");
+  let threw = false;
+  try { editState(board({ nodes: [{ id: "", kind: "group", children: [] }] })); } catch (e) { threw = /id isn't/.test(e.message); }
+  check(threw, "a board with an item whose id is empty: not editable here");
+  const r = st.remote([{ op: "set", key: K("item", "a", ""), fields: { parent: "" } }]);
+  check(!r.ok && st.records().every((x) => x.id !== "" || x.type === "doc" || x.type === "page"), "…nor made by a remote change");
+  check(recordProblems([{ type: "doc", page: "", id: "" }, { type: "item", page: "", id: "", parent: "", kind: "group" }]).some((p) => /id isn't/.test(p)), "recordProblems names an empty item id");
+  // (made and deleted within one edit: nothing, and no error)
+  const md = apply(st, edit([{ op: "set", key: K("item", "a", "tmp"), fields: { parent: "", pos: 3 }, create: true }, { op: "delete", key: K("item", "a", "tmp"), was: { text: null } }]));
+  check(md.ok && !rec(st, "item", "a", "tmp") && md.changes.length === 0, "an item made and deleted in one edit: nothing changes, no error");
+  check(typeof JSON.stringify(st.board()) === "string", "…and what is kept serializes");
+}
+
 // ---------------------------------------------------------------- the rate and the work
 {
   const st = editState(board({ nodes: [{ id: "a", x: 0 }] }));
@@ -259,32 +279,51 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
     for (let step = 0; step < 40; step++) {
       const recs = st.records(), items = recs.filter((r) => r.type === "item"), pages = recs.filter((r) => r.type === "page").map((r) => r.page);
       const pg = paged ? pick([...pages, "nowhere"]) : pick(["", "", "", "elsewhere"]);
-      const ids = items.map((r) => r.id), anyId = () => pick([...ids, "ghost", ""]);
+      const ids = items.map((r) => r.id), anyId = () => pick([...ids, "ghost", "", "\u0000", "x\u0000y", "__proto__", "\"", "L".repeat(200)]);
+      const newId = (p) => pick([p + Math.floor(rnd() * 1e6), "", "\u0000", "a\u0000b", "__proto__", "constructor", "\"q\"", "L".repeat(200)]);
+      // (a running view, as a frame has it: each change's was what the user saw then, after the edit's earlier changes)
+      const view = new Map(recs.map((r) => [JSON.stringify([r.type, r.page, r.id]), { ...r }]));
+      const kOf = (key) => JSON.stringify([key.type, key.page, key.id]);
+      const seeIn = (key, f) => { const r = view.get(kOf(key)); return r && f in r ? r[f] : null; };
       const changes = [];
+      const push = (c) => {
+        const k = kOf(c.key);
+        if (c.op === "set" && !c.create) c.was = Object.fromEntries(Object.keys(c.fields).map((f) => [f, seeIn(c.key, f)]));
+        if (c.op === "delete") c.was = { text: seeIn(c.key, "text") };
+        changes.push(c);
+        if (c.op === "delete") view.delete(k);
+        else if (view.has(k)) { const r = { ...view.get(k) }; for (const [f, v] of Object.entries(c.fields)) { if (v === null) delete r[f]; else r[f] = v; } view.set(k, r); }
+        else if (c.create) view.set(k, { ...c.key, ...c.fields });
+      };
       for (let n = 1 + Math.floor(rnd() * 3); n > 0; n--) {
         const kind = Math.floor(rnd() * 6);
-        if (kind === 0) changes.push({ op: "set", key: K("item", pg, "n" + Math.floor(rnd() * 1e6)), fields: { parent: pick(["", ...ids]), pos: 0, ...(rnd() < 0.3 ? { kind: "group" } : {}) }, create: true });
-        if (kind === 1 && items.length) { const r = pick(items); changes.push({ op: "delete", key: K("item", r.page, r.id), was: { text: r.text ?? null } }); }
-        if (kind === 2 && items.length) { const r = pick(items); changes.push({ op: "set", key: K("item", r.page, r.id), fields: { parent: anyId() }, was: { parent: r.parent } }); }
-        if (kind === 3) changes.push({ op: "set", key: K("edge", pg, "e" + Math.floor(rnd() * 1e6)), fields: { from: anyId(), to: anyId(), pos: 0 }, create: true });
-        if (kind === 4) { const e = recs.filter((r) => r.type === "edge"); if (e.length) { const r = pick(e); changes.push({ op: "delete", key: K("edge", r.page, r.id), was: {} }); } }
-        if (kind === 5 && paged && pages.length) changes.push({ op: "delete", key: K("page", pick(pages), ""), was: {} });
+        const live = [...view.values()].filter((r) => r.type === "item");
+        if (kind === 0) push({ op: "set", key: K("item", pg, newId("n")), fields: { parent: pick(["", ...ids]), pos: 0, ...(rnd() < 0.3 ? { kind: "group" } : {}) }, create: true });
+        if (kind === 1 && live.length) { const r = pick(live); push({ op: "delete", key: K("item", r.page, r.id) }); }
+        if (kind === 2 && live.length) { const r = pick(live); push({ op: "set", key: K("item", r.page, r.id), fields: { parent: anyId() } }); }
+        if (kind === 3) push({ op: "set", key: K("edge", pg, "e" + Math.floor(rnd() * 1e6)), fields: { from: anyId(), to: anyId(), pos: 0 }, create: true });
+        if (kind === 4) { const e = [...view.values()].filter((r) => r.type === "edge"); if (e.length) { const r = pick(e); push({ op: "delete", key: K("edge", r.page, r.id) }); } }
+        if (kind === 5 && paged && pages.length) push({ op: "delete", key: K("page", pick(pages), "") });
       }
       // the result the whole-board rules see: no one else writes here, so the merge is the edit as made
-      const naive = new Map(recs.map((r) => [JSON.stringify([r.type, r.page, r.id]), { ...r }]));
-      for (const c of changes) {
-        const k = JSON.stringify([c.key.type, c.key.page, c.key.id]);
-        if (c.op === "delete") naive.delete(k);
-        // (the merge's rules, with no one else writing: a set on a record not there makes it only with create)
-        else if (naive.has(k)) { const r = { ...naive.get(k) }; for (const [f, v] of Object.entries(c.fields)) { if (v === null) delete r[f]; else r[f] = v; } naive.set(k, r); }
-        else if (c.create) naive.set(k, { ...c.key, ...c.fields });
-      }
+      const naive = view;
       const whole = recordProblems(naive.values());
       // (a board already broken stays the whole-board rules' business only where an edit touches it: start valid, and keep it so)
       const r = apply(st, edit(changes));
       if (r.ok) accepted++; else refusedN++;
-      if (r.ok !== (whole.length === 0)) { disagreements++; if (disagreements <= 3) fails.push(`property: editState ${r.ok ? "accepted" : "refused (" + r.message + ")"}, the whole-board rules say ${JSON.stringify(whole)}: ${JSON.stringify(changes)}`); }
-      if (r.ok) check(recordProblems(st.records()).length === 0, "property: an accepted edit leaves a board the whole-board rules accept");
+      // (a change keyed by an empty item or edge id is a malformed message, refused whatever it nets to)
+      const malformed = changes.some((c) => (c.key.type === "item" || c.key.type === "edge") && c.key.id === "");
+      if (r.ok !== (!malformed && whole.length === 0)) { disagreements++; if (disagreements <= 3) fails.push(`property: editState ${r.ok ? "accepted" : "refused (" + r.message + ")"}, the whole-board rules say ${JSON.stringify(whole)}: ${JSON.stringify(changes)}`); }
+      if (r.ok) {
+        check(recordProblems(st.records()).length === 0, "property: an accepted edit leaves a board the whole-board rules accept");
+        // (independent of keyOf: no two records share (type, page, id), compared as tuples)
+        const seen = new Set(st.records().map((x) => [x.type, x.page, x.id].map((v) => v.length + ":" + v).join("|")));
+        check(seen.size === st.records().length, "property: every record's (type, page, id) its own");
+        // (what is kept serializes, and reads back as the same records)
+        let back = null;
+        try { back = editState(JSON.stringify(st.board())); } catch (e) { back = e; }
+        check(back && !(back instanceof Error) && back.records().length === st.records().length, "property: an accepted state serializes and reads back: " + (back instanceof Error ? back.message : ""));
+      }
     }
   }
   check(disagreements === 0 && accepted > 100 && refusedN > 100, `property: on 2,400 random edits editState and the whole-board rules agree (${accepted} accepted, ${refusedN} refused, ${disagreements} disagreements)`);
