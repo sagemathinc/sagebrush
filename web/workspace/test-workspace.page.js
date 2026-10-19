@@ -494,8 +494,40 @@ async function folderLimit() {
   deep.close();
 }
 
+async function recoveryConflict() {
+  // a stop after the destination was recorded, before the bytes; then a person makes a file at that very path: the original is never dropped for it (CORR-DF0-1)
+  const w = await fresh();
+  await rawPut(w.ws, "trash", enc("IRREPLACEABLE ORIGINAL"), "/Trash/conflict.txt");
+  const real = w.mainTx.bind(w);
+  w.mainTx = async (st, mode, f) => { if (st === "files" && mode === "readwrite") throw new Error("injected file write failure"); return real(st, mode, f); };
+  try { await W.migrate(w, readOnly(new Map())); } catch {}
+  w.mainTx = real;
+  await w.create("/Recovered/conflict.txt", { content: "unrelated user file" });
+  await W.migrate(w, readOnly(new Map()));
+  check(dec((await w.read("/Recovered/conflict.txt")).content) === "unrelated user file", "the person's file is untouched");
+  const all = (await paths(w, "/Recovered")).filter((p) => p.includes("conflict"));
+  const found = [];
+  for (const p of all) found.push(dec((await w.read(p)).content));
+  check(found.includes("IRREPLACEABLE ORIGINAL"), "the original is recovered beside it: " + all.join());
+  check((await rawGet(w.ws, "trash", "/Trash/conflict.txt")) === undefined, "…and only then out of Trash");
+  // a file where the /Recovered folder would be: recovery stops, the original stays in Trash; once it's gone, recovery finishes
+  const v = await fresh();
+  await v.create("/Recovered", { content: "a file named Recovered" });
+  await rawPut(v.ws, "trash", enc("ORIGINAL 2"), "/Trash/blocked.txt");
+  let threw = false;
+  try { await W.migrate(v, readOnly(new Map())); } catch { threw = true; }
+  check(threw && dec(await rawGet(v.ws, "trash", "/Trash/blocked.txt")) === "ORIGINAL 2", "a file in the folder's way: nothing recovered, the original still in Trash");
+  check(dec((await v.read("/Recovered")).content) === "a file named Recovered", "…the file in the way untouched");
+  await v.rename("/Recovered", "/Recovered.txt");
+  await W.migrate(v, readOnly(new Map()));
+  const got = (await paths(v, "/Recovered")).filter((p) => p.includes("blocked"));
+  check(got.length === 1 && dec((await v.read(got[0])).content) === "ORIGINAL 2" && (await rawGet(v.ws, "trash", "/Trash/blocked.txt")) === undefined, "…then recovered once the way is clear: " + got.join());
+  w.close();
+  v.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, edges, noLocks, rollback, dropping, folderLimit, migrationFull]) {
+  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
