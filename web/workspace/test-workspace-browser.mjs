@@ -104,6 +104,15 @@ try {
   check(await until(`document.querySelectorAll("#wssidebar .frow").length === 1 && !!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`), "search shows what matches");
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
   await until(`!!document.querySelector("#wssidebar .frow.cur")`);
+  // a change while a name is typed in place (here, another tab, an agent)
+  // doesn't take the half-typed name away; the tree is drawn once it's done
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); const i = r.querySelector("input"); i.value = "Sylow half"; return 1; })()`);
+  await ev(`${W}.create("/meanwhile.txt", { content: "x" }).then(() => 1)`);
+  await sleep(800);
+  check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
+  await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
   // renaming the open notebook renames it on the page
   const cur = await ev(`document.querySelector("#wssidebar .frow.cur")?.dataset.path`);
   await ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);
