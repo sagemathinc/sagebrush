@@ -603,7 +603,15 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
   1. **`showSaveFilePicker`** (Chromium and the desktop app). The chosen file's `FileSystemWritableFileStream` takes the chunks as they come, with no size limit beyond the disk.
   2. **Elsewhere (Firefox, Safari):** a file in the origin-private file system (OPFS), written by a worker through a sync access handle, then downloaded from its disk-backed `File`. It needs the bundle's estimated size free in the storage quota, checked before starting, and the OPFS file is deleted when the download has started or the export is cancelled.
   3. **A Blob in memory, only when neither is available,** and only for a bundle of at most **256 MiB** (estimated from the entries' sizes before starting). Anything larger is refused before anything is read, saying to use the server's export (for a synced account) or a browser that can save files.
-- **The estimate** is the sum of the entries' sizes, histories' and versions' bytes, plus 1% and 64 KiB of zip records. Progress shows bytes and entries, and the export can be cancelled at any entry.
+- **A preflight pass comes first, and writes nothing.** It enumerates the exact member set: each entry's file, each history, each versions file, and the blobs, deduplicated by `sha256`. It then computes an **upper bound** of the bundle's size, not an estimate:
+  - **each member's zip records,** at their largest. A local header (30 bytes), a central header (46), a data descriptor (24) and Zip64 extra fields in both headers (20 and 28) come to at most 148 bytes, plus twice the member's UTF-8 name length;
+  - **the end records:** 22 + 56 + 20 bytes (end of central directory, Zip64 end record and locator);
+  - **each member's data:**
+    - a stored member's exact size;
+    - for a deflated one, the deflate bound of its size `n`: `n + (n >> 12) + (n >> 14) + (n >> 25) + 13`, as zlib's `deflateBound`;
+    - a history's size is measured by serializing its envelopes once, from a cursor, one at a time.
+- **The caps are checked on that set before writing:** at most 400,000 members and 20 GiB, and each member within its cap (the table under Import). The sink is then chosen from the bound: the 256 MiB Blob path only when the bound is at most 256 MiB, and OPFS only when the bound is free in the quota.
+- Progress shows bytes and entries, and the export can be cancelled at any entry.
 
 **The bundle format** is documented and versioned like the board format. It is a zip, `<name>.sagebrush-workspace.zip`:
 
@@ -641,15 +649,15 @@ versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author,
   | one `versions/` file | at most 64 KiB and 20 records (`maxVersions`), with nesting depth at most 4 |
   | one blob | at most 200 MB |
   | total uncompressed | at most 20 GiB, and at most the storage left (`navigator.storage.estimate()`) less 10% |
-  | compression ratio | each member at most 200:1 (uncompressed to compressed), counted on the bytes actually inflated |
+  | inflated bytes | counted as they are inflated, for each member and in total. There is no ratio rule: legitimate text or zero-filled data compresses far beyond any fixed ratio, so a ratio would refuse Sagebrush's own bundles. The member, history and total caps on bytes actually inflated bound a zip bomb instead. |
 
   - The manifest's totals are checked first, against the caps and the storage left. Nothing is written if they fail.
-  - Each member is then read as a stream. The bytes actually inflated are counted, and a member is stopped as soon as it passes its declared size, its cap or the ratio. A stopped member skips that entry, and the summary says why.
+  - Each member is then read as a stream. The bytes actually inflated are counted, and a member is stopped as soon as it passes its declared size or its cap, and the import is stopped when the total passes its cap. A stopped member skips that entry, and the summary says why.
   - A history over its cap is dropped, and its file is imported alone.
   - Histories, blobs and versions count toward the total, as files do.
   - The manifest's JSON is the only document parsed whole; histories are JSON Lines parsed one line at a time, and versions are small by their cap.
   - Names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
-- **Everything the exporter makes can be imported.** The exporter checks the same caps as it goes. Before it starts, it lists what can't be exported in full: a document whose history passes the cap is exported without its history, and the export says so, so the person can cancel. A bundle over 20 GiB is refused before starting; such a workspace is exported in parts, one top-level folder at a time.
+- **Everything the exporter makes can be imported.** The exporter's preflight checks the same caps on the whole member set before it writes anything (above), so an export never stops partway at a cap. Before it starts, it lists what can't be exported in full: a document whose history passes the cap is exported without its history, and the export says so, so the person can cancel. A bundle over 20 GiB is refused before starting; such a workspace is exported in parts, one top-level folder at a time.
 - **Nothing imported runs by itself.** The documents are other people's code as far as this browser knows, even when the person made the bundle, so they open as an Upload's do (§3) and run only when the person runs them.
 - **Import is the person's action.** It isn't in the agents' workspace API (§8.2) in its first version.
 - **A summary at the end** says what came in, where, and what was refused and why.
@@ -926,7 +934,10 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 9. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2), and the chat panel's remote adapter (§8.7).
 10. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
 11. **The cocalc.ai adapter, the Ask agent, and the handoffs with cocalc.ai** (§8.5, §8.6, §8.7). The adapter needs CoCalc's Agent Network to accept a person's page as a sender.
-12. **Export and import** (§7.11): the bundle format (documented and versioned), the browser's export in both modes, Import, and the UI. The server's export job is auth's half, from the account's objects and R2. Its tests include a round trip (export, import into an empty workspace, same files, same TimeTravel), and bundles that lie: a wrong hash, an oversized entry, a hostile path, a later version.
+12. **Export and import** (§7.11): the bundle format (documented and versioned), the browser's export in both modes, Import, and the UI. The server's export job is auth's half, from the account's objects and R2. Its tests include a round trip (export, import into an empty workspace, same files, same TimeTravel), and bundles that lie: a wrong hash, an oversized entry, a hostile path, a later version. Other tests:
+- the export's size bound holds for 400,000 tiny members with long names, and for incompressible data;
+- a highly compressible member (zeros) of Sagebrush's own export imports;
+- the JS heap peak of parsing a 64 MiB manifest is measured, and the cap is lowered if that peak is too high.
 
 Steps 1 to 6 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
 
