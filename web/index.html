@@ -404,7 +404,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 const EXAMPLES = {
   "Welcome": [
@@ -781,6 +781,10 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
 });
 nb.on("saved", (text) => (savedEl.textContent = text));
+// (the person's first edit of a notebook: the browser asked, once, to keep
+// this site's storage, design/workspace-files.md §6.3; not on a visit
+// alone, whatever the page saves by itself)
+$("#cells").addEventListener("input", () => askToKeep(), { once: true });
 // a change made in another tab: its name and language too
 nb.on("remote", (d) => {
   if (typeof d.name === "string" && d.name !== nbName.value && document.activeElement !== nbName) showName(d.name);
