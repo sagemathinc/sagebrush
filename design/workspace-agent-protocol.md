@@ -126,6 +126,8 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
 - `chat.delivery` `{conversation, id, via:"channel"|"chat_next"}`: the server handed the message to the agent.
   - This doesn't prove the agent read it: Claude Code drops channel events silently when the session didn't load the server as a channel.
   - So the page shows "sent to the agent", and "read" only once a reply or an action comes back.
+- `chat.rejected` `{conversation?, id?, reason}`: a `chat.message` the server refused as malformed. Its `id` is echoed when it parsed. The page marks the message "not delivered: <reason>".
+  - What the server checks: `conversation` is a workspace path ending in `.chat`; `id` matches `[A-Za-z0-9_.:-]{1,128}`; `author` is `person`, `collaborator:<id>` or `agent:<id>`; `text` is at most 256 Ki characters; `context.path` is a workspace path; `kind` is one of the four; `rev ≥ 0`; selection ids match the id pattern, at most 50 per kind.
 - `chat.dropped` `{conversation, ids}`: queued messages the server dropped.
   - Its queue holds at most 100 messages per conversation and 1 MiB in all.
   - The page marks those messages "not delivered" and offers Resend.
