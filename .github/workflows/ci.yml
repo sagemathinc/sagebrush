@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     outputs:
       full: ${{ steps.paths.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
@@ -42,8 +42,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ubuntu-latest
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -62,22 +62,22 @@ jobs:
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Node tests, shard ${{ matrix.shard }}/6
+      - name: Node tests, shard ${{ matrix.shard }}/8
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' -print0 | sort -z)
-          node --test --test-shard=${{ matrix.shard }}/6 "${files[@]}"
+          mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' -print0 | sort -z)
+          node --test --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
-  magma-node:
+  language-node:
     needs: changes
     if: needs.changes.outputs.node == 'true'
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -95,16 +95,18 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: Magma Node tests, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/6
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
-        run: node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
+        run: |
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
 
   checks:
     needs: changes
     if: needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -149,7 +151,7 @@ jobs:
   web-sync:
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +178,7 @@ jobs:
   web-runner:
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -220,7 +222,7 @@ jobs:
       fail-fast: false
       matrix:
         group: [notebook, board-a, board-b, board-c, board-unit]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -336,7 +338,7 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [node, deno, bun]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -369,7 +371,7 @@ jobs:
       fail-fast: false
       matrix:
         group: [sage, magma-matlab, numeric, aux]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -413,7 +415,7 @@ jobs:
   engine-rust:
     needs: changes
     if: needs.changes.outputs.engine_smoke == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -429,7 +431,7 @@ jobs:
   engine-wasm:
     needs: changes
     if: needs.changes.outputs.engine_smoke == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -479,8 +481,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ubuntu-latest
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -503,22 +505,22 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/6
+      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/8
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' -print0 | sort -z)
-          node --test --test-shard=${{ matrix.shard }}/6 "${files[@]}"
+          mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' -print0 | sort -z)
+          node --test --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
-  engine-magma:
+  engine-language:
     needs: [changes, engine-wasm]
     if: needs.changes.outputs.engine_full == 'true'
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -541,16 +543,18 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Magma Node tests on the fresh engine, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests on the fresh engine, case shard ${{ matrix.shard }}/6
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
-        run: node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
+        run: |
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
 
   engine-modes:
     needs: [changes, engine-wasm]
     if: needs.changes.outputs.engine_full == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -586,7 +590,7 @@ jobs:
   engine-cpython:
     needs: changes
     if: needs.changes.outputs.engine_full == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -616,7 +620,7 @@ jobs:
     needs:
       - changes
       - node-tests
-      - magma-node
+      - language-node
       - checks
       - web-sync
       - web-runner
@@ -626,21 +630,21 @@ jobs:
       - engine-rust
       - engine-wasm
       - engine-node
-      - engine-magma
+      - engine-language
       - engine-modes
       - engine-cpython
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - name: require every selected job to pass
         env:
           RESULTS: >-
             ${{ needs.changes.result }} ${{ needs.node-tests.result }}
-            ${{ needs.magma-node.result }}
+            ${{ needs.language-node.result }}
             ${{ needs.checks.result }} ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-browser.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}
             ${{ needs.engine-rust.result }} ${{ needs.engine-wasm.result }}
-            ${{ needs.engine-node.result }} ${{ needs.engine-magma.result }}
+            ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
         run: |
