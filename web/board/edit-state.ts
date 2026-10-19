@@ -151,8 +151,8 @@ export function mergeValue(base: unknown, cur: unknown, ours: unknown, text = fa
 
 // ------------------------------------------------------------ checking a message
 /** Plain JSON data, nested at most `depth`, at most `bytes` as UTF-8: why not, or null. */
-function plainProblem(m: unknown, depth: number, bytes: number): string | null {
-  const MAX = 200_000, plain = "an edit is plain JSON data";
+function plainProblem(m: unknown, depth: number, bytes: number, MAX = 200_000): string | null {
+  const plain = "an edit is plain JSON data";
   const stack: [unknown, number][] = [[m, 1]];
   let found = 1, chars = 0;
   while (stack.length) {
@@ -258,6 +258,7 @@ export function recordProblems(records: Iterable<Rec>): string[] {
   let bytes = 0;
   for (const r of all.values()) bytes += bytesOf(r);
   if (bytes > EDIT_LIMITS.boardBytes) out.push(`more than ${EDIT_LIMITS.boardBytes / 2 ** 20} MiB`);
+  if (all.size > EDIT_LIMITS.records) out.push(`more than ${EDIT_LIMITS.records} records`);
   return out;
 }
 
@@ -265,8 +266,10 @@ export function recordProblems(records: Iterable<Rec>): string[] {
 export interface EditState {
   /** An `edit` message from the frame, merged and checked; kept only if it passes.  `now`: the clock (ms) for the rate. */
   apply(message: unknown, now?: number): Applied;
-  /** The host's own changes (another tab, an agent), as they are: no checks. */
-  remote(changes: Change[]): void;
+  /** The host's own changes (another tab, an agent), as they are, merged without rules but within the
+   * bounds: plain JSON, 8 MiB, 100,000 records, all or none.  Refused: the board can't be edited here as
+   * it now is (the host ends editing, or resets to a board that can be). */
+  remote(changes: Change[]): { ok: true } | { ok: false; message: string };
   /** The host's whole board, anew (an agent rewrote the file). */
   reset(text: string): void;
   /** An edit id the host answered itself (a refusal for the rate): remembered as answered. */
@@ -376,9 +379,11 @@ export function editState(postedText: string): EditState {
     refill(now);
     const later = (message: string, ms: number): Applied => { remember(id); return { ok: false, id, message, retryAfter: Math.max(1, Math.ceil(ms)) }; };
     if (edits < 1) return later("too many edits at once", ((1 - edits) / EDIT_LIMITS.editsPerSecond) * 1000);
+    // (each change is a pass over its record as it is: charged at that record's current size, as many
+    // times as changes name it; an edit costing more than the whole budget is never merged)
     let cost = enc.encode(JSON.stringify(m)).length;
-    const seen = new Set<string>();
-    for (const c of changes) { const k = keyOf(c.key); if (!seen.has(k)) { seen.add(k); cost += sizes.get(k) ?? 0; } }
+    for (const c of changes) cost += sizes.get(keyOf(c.key)) ?? 0;
+    if (cost > EDIT_LIMITS.workBurst) return no(`an edit is at most ${EDIT_LIMITS.workBurst / 2 ** 20} MiB of merging: its changes and the records each one passes over`);
     if (cost > work) return later("too much to merge at once", ((cost - work) / EDIT_LIMITS.workPerSecond) * 1000);
     edits -= 1;
     work -= cost;
@@ -522,19 +527,41 @@ export function editState(postedText: string): EditState {
     return { ok: true, id, changes: out, dropped };
   }
 
-  function remote(changes: Change[]) {
+  function remote(changes: Change[]): { ok: true } | { ok: false; message: string } {
+    const no = (message: string) => ({ ok: false as const, message });
+    // (values bounded by the bytes: a board's worth, at most)
+    const plain = plainProblem(changes, 32, EDIT_LIMITS.boardBytes, 2_000_000);
+    if (plain) return no(plain.replace(/an edit/g, "a remote change"));
+    if (!Array.isArray(changes)) return no("remote changes are a list");
+    // (staged: nothing kept unless the board stays within the bounds)
+    const staged = new Map<string, Rec | null>();
+    const cur = (k: string): Rec | null => (staged.has(k) ? staged.get(k)! : recs.get(k) ?? null);
     for (const c of changes) {
+      const kp = keyProblem(c?.key);
+      if (kp) return no(kp);
       const k = keyOf(c.key);
-      if (c.op === "delete") { put(k, null); continue; }
-      const now = recs.get(k);
-      const next = now ? copyRec(now) : record(c.key, {});
+      if (c.op === "delete") { staged.set(k, null); continue; }
+      if (c.op !== "set" || !isPlain(c.fields)) return no("a remote change is {op, key, fields}");
+      const now = cur(k), next = now ? copyRec(now) : record(c.key, {});
       for (const f of Object.keys(c.fields)) {
-        if (KEY_FIELDS.has(f) || BAD_NAMES.has(f)) continue;
+        if (KEY_FIELDS.has(f)) continue;
+        if (!goodName(f)) return no(`a field's name is 1 to ${EDIT_LIMITS.fieldName} characters, and not ${[...BAD_NAMES].join(", ")}`);
         const v = c.fields[f];
         if (v === null || v === undefined) delete next[f]; else next[f] = v;
       }
-      put(k, next);
+      staged.set(k, next);
     }
+    let size = bytes, count = recs.size;
+    const sized = new Map<string, number>();
+    for (const [k, r] of staged) {
+      if (recs.has(k)) { size -= sizes.get(k)!; count--; }
+      if (r) { const n = bytesOf(r); sized.set(k, n); size += n; count++; }
+    }
+    if (size > EDIT_LIMITS.boardBytes) return no(`the board is now more than ${EDIT_LIMITS.boardBytes / 2 ** 20} MiB: it can't be edited here`);
+    if (count > EDIT_LIMITS.records) return no(`the board now has more than ${EDIT_LIMITS.records} records: it can't be edited here`);
+    if (!cur(DOC)) return no("the board's doc record is gone");
+    for (const [k, r] of staged) put(k, r);
+    return { ok: true };
   }
 
   return {

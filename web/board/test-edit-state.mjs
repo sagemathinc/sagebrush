@@ -201,10 +201,42 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   let k = 0, last;
   for (let i = 0; i < 20; i++) { last = w.apply(edit([{ op: "set", key: K("item", "", "a"), fields: { x: i }, was: { x: i ? i - 1 : null } }]), 9000); if (last.ok) k++; else break; }
   check(k >= 9 && k <= 11 && last.retryAfter > 0, `work: ~10 edits of a 3 MiB record within 32 MiB, then retryAfter (${k}, ${last?.retryAfter} ms)`);
-  // a record named by several changes of one edit is charged once (daybreak2)
-  const once = editState(board({ nodes: [{ id: "a", text: "q".repeat(6 * 2 ** 20) }] }));
+  // each change is a pass over its record, charged so: five changes to a 3 MiB record cost 15 MiB (daybreak2's LIMIT-C075-1)
+  const per = editState(board({ nodes: [{ id: "a", text: "q".repeat(3 * 2 ** 20) }] }));
   const five = (n) => Array.from({ length: 5 }, (_, i) => ({ op: "set", key: K("item", "", "a"), fields: { ["f" + i]: n }, was: { ["f" + i]: n > 1 ? n - 1 : null } }));
-  check(once.apply(edit(five(1)), 20_000).ok && once.apply(edit(five(2)), 20_000).ok, "a record named five times in an edit is charged once: two such edits of a 6 MiB record fit in 32 MiB");
+  const p1 = per.apply(edit(five(1)), 20_000), p2 = per.apply(edit(five(2)), 20_000), p3 = per.apply(edit(five(3)), 20_000);
+  check(p1.ok && p2.ok && !p3.ok && p3.retryAfter > 0, `a record named five times is charged five times: two such edits of a 3 MiB record fit in 32 MiB, a third waits (${p3.message})`);
+  // the adversarial edit: hundreds of tiny text changes to one field near 8 MiB; refused before any merge
+  const adv = editState(board({ nodes: [{ id: "a", text: "A" }] }));
+  adv.remote([{ op: "set", key: K("item", "", "a"), fields: { text: "x".repeat(7_500_000) + "A" } }]);
+  const many = Array.from({ length: 500 }, () => ({ op: "set", key: K("item", "", "a"), fields: { text: "AB" }, was: { text: "A" } }));
+  const ta = performance.now(), ra = adv.apply(edit(many), 30_000), ms = performance.now() - ta;
+  check(!ra.ok && !ra.retryAfter && /MiB of merging/.test(ra.message) && ms < 200, `500 changes to a 7.5 MB field: more than the whole budget, refused before any merge (${ms.toFixed(0)} ms: ${ra.message})`);
+  check(rec(adv, "item", "", "a").text.length === 7_500_001, "…nothing merged");
+}
+
+// ---------------------------------------------------------------- remote changes: within the bounds, all or none (LIMIT-C075-2)
+{
+  const st = editState(board({ nodes: [{ id: "a", text: "a" }, { id: "b" }] }));
+  const before = JSON.stringify(st.records());
+  const big = st.remote([{ op: "set", key: K("item", "", "b"), fields: { text: "y" } }, { op: "set", key: K("item", "", "a"), fields: { text: "z".repeat(8.5 * 2 ** 20) } }]);
+  check(!big.ok && /MiB/.test(big.message) && JSON.stringify(st.records()) === before, "a remote change past 8 MiB: refused, and none of its changes kept: " + big.message);
+  // (a change within a board's bytes that takes the board past them: the board's own check)
+  const five = editState(board({ nodes: [{ id: "a", text: "f".repeat(5 * 2 ** 20) }, { id: "b" }] }));
+  const grow = five.remote([{ op: "set", key: K("item", "", "b"), fields: { text: "g".repeat(4 * 2 ** 20) } }]);
+  check(!grow.ok && /board is now more than/.test(grow.message) && !rec(five, "item", "", "b").text, "a remote change that takes the board past 8 MiB: refused, nothing kept: " + grow.message);
+  const count = st.remote(Array.from({ length: EDIT_LIMITS.records }, (_, i) => ({ op: "set", key: K("item", "", "n" + i), fields: { parent: "" } })));
+  check(!count.ok && /records/.test(count.message) && JSON.stringify(st.records()) === before, "past 100,000 records: refused, nothing kept: " + count.message);
+  const cyc = { a: 1 }; cyc.self = cyc;
+  const c1 = st.remote([{ op: "set", key: K("item", "", "a"), fields: { style: cyc } }]);
+  check(!c1.ok && JSON.stringify(st.records()) === before, "a value that refers to itself: refused: " + c1.message);
+  let deep = 1; for (let i = 0; i < 40; i++) deep = { d: deep };
+  const c2 = st.remote([{ op: "set", key: K("item", "", "a"), fields: { style: deep } }]);
+  check(!c2.ok && /deep/.test(c2.message) && JSON.stringify(st.records()) === before, "a value nested 40 deep: refused: " + c2.message);
+  const c3 = st.remote([{ op: "set", key: K("item", "", "a"), fields: JSON.parse('{"__proto__": {"polluted": 1}}') }]);
+  check(!c3.ok && !({}).polluted && JSON.stringify(st.records()) === before, "a prototype name: refused, nothing reaches Object.prototype");
+  check(st.remote([{ op: "set", key: K("item", "", "a"), fields: { text: "ok" } }]).ok && rec(st, "item", "", "a").text === "ok", "…and a remote change within the bounds: kept");
+  check(recordProblems(Array.from({ length: EDIT_LIMITS.records + 1 }, (_, i) => ({ type: i ? "item" : "doc", page: "", id: i ? "x" + i : "", parent: "" }))).some((p) => /records/.test(p)), "recordProblems counts records too");
 }
 
 // ---------------------------------------------------------------- the property test
