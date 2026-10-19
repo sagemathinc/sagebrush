@@ -50,7 +50,7 @@ import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
 import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, type Entry } from "../workspace/index";
-import { uploadFiles, openableAs, convertCopy, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
@@ -214,6 +214,8 @@ function convertedAsBoard(w: Workspace, e: Entry, mode: string): Promise<Entry> 
   let note = "";
   return convertCopy(w, e, "board", { maxBytes: LIMITS.maxBoardBytes, mode, asBoard: (name, text) => boardFromText(text, name, (md) => { note = md; }) }).then((made) => {
     if (note) try { sessionStorage.setItem(CONVERTED + made.ref, note); } catch {}
+    // (made from a file the person brought in: its code waits for them)
+    pauseBoard(made.ref!);
     return made;
   });
 }
@@ -481,7 +483,12 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
-  void wsFlush().then(() => location.assign(url));
+  // (this board's saves made first; one refused, it stays open, saying why, never left behind
+  // unsaved (astra's CORR-4B3-2))
+  void wsFlush().then(() => {
+    if (local && ws && wsRefused) return void alert(`"${nameOf(e.path)}" isn't opened: this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it stays open. Download it (File) to keep them.`);
+    location.assign(url);
+  });
 }
 // (this board, opened: first in the File menu's Recent, both pages')
 if (local && ws) recordOpened({ kind: "board", ref: source.slice(6) });
@@ -496,6 +503,7 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
   }
   const r = await uploadFiles(w, files, folder, {
     maxBytes: LIMITS.maxFileBytes,
+    docMaxBytes: LIMITS.maxBoardBytes,
     mode,
     replay: async (bytes) => {
       const b = await readBundle(bytes);
@@ -509,8 +517,15 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
   const n = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
   const said = [r.made.length ? n(r.made.length, "document") + " made" : "", r.kept.length ? n(r.kept.length, "file") + " added" : ""].filter(Boolean).join(", ") || "Nothing added";
   const refused = r.refused.length ? `; not added: ${r.refused.join("; ")}` : "";
-  if (r.made.length === 1 && !r.kept.length) openEntry(r.made[0], "here");
-  else if (r.kept.length === 1 && !r.made.length) {
+  // (a document opened, or a file offered, only for an upload of that one file; what was said carried
+  // to the page it opens; a board brought in waits for the person to run its code: astra's CORR-4B3-1)
+  const single = files.length === 1;
+  if (single && r.made.length === 1 && !r.kept.length) {
+    const e = r.made[0];
+    if (e.kind === "board") pauseBoard(e.ref!);
+    carryNotice(refused ? said + refused : "");
+    openEntry(e, "here");
+  } else if (single && r.kept.length === 1 && !r.made.length) {
     const e = r.kept[0], as = openableAs(nameOf(e.path)), name = nameOf(e.path);
     if (as && confirm(`Open "${name}" as a ${as}?\n\nA converted copy, "${splitExt(name)[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${name}" stays as it is.`)) {
       const err = await openAsHere(w, e, as, mode);
@@ -530,6 +545,9 @@ async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Pr
 const host: BoardHost = {
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
+  // (a board brought in from a file, opened here: its code waits for the person, until they run it)
+  codePaused: local && isPaused(source.slice(6)),
+  codeResumed: () => { if (local) unpause(source.slice(6)); },
   store: {
     async load() {
       if (bench) return null;
@@ -546,8 +564,8 @@ const host: BoardHost = {
         // (a save the workspace hadn't taken when a page closed)
         const pend = readPending(id);
         let notice = pend === "unread" ? "**A copy of this board left by a page closed while saving couldn't be read.** It's set aside in this browser; the board as last kept is shown." : "";
-        // (made just now from a file: what its conversion said)
-        const conv = takeConverted(id);
+        // (made just now from a file: what its conversion said, and what its upload said)
+        const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
         if (path) {

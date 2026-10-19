@@ -391,7 +391,7 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
-import { uploadFiles, openableAs, convertCopy } from "./workspace/upload.ts";
+import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
 const EXAMPLES = {
   "Welcome": [
@@ -1838,6 +1838,7 @@ async function uploadHere(list, folder) {
   }
   const r = await uploadFiles(ws, list, folder, {
     maxBytes: LIMITS.maxFileBytes,
+    docMaxBytes: LIMITS.maxBoardBytes,
     mode: nb.mode,
     replay: async (bytes) => {
       const b = await readBundle(bytes);
@@ -1849,13 +1850,25 @@ async function uploadHere(list, folder) {
   wsBrowser?.refresh();
   const n = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
   announce([r.made.length && n(r.made.length, "document") + " made", r.kept.length && n(r.kept.length, "file") + " added"].filter(Boolean).join(", ") || "Nothing added");
-  if (r.refused.length) statusEl.textContent = `Not added: ${r.refused.join("; ")}`;
-  if (r.made.length === 1 && !r.kept.length) return openEntry(r.made[0]);
-  if (r.kept.length === 1 && !r.made.length) {
+  const refused = r.refused.length ? `Not added: ${r.refused.join("; ")}` : "";
+  if (refused) statusEl.textContent = refused;
+  // (a document opened, or a file offered, only for an upload of that one file: several files are
+  // kept and listed, nothing opened, the refusals said (astra's CORR-4B3-1))
+  const single = list.length === 1;
+  if (single && r.made.length === 1 && !r.kept.length) {
+    const e = r.made[0];
+    // (a board brought in from a file: its code waits for the person; what was said carried to its page)
+    if (e.kind === "board") { pauseBoard(e.ref); carryNotice(refused); return openEntry(e); }
+    saveNow();
+    return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
+  }
+  if (single && r.kept.length === 1 && !r.made.length) {
     const e = r.kept[0], as = openableAs(nameOf(e.path));
     if (as && confirm(`Open "${nameOf(e.path)}" as a ${as}?\n\nA converted copy, "${splitExt(nameOf(e.path))[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${nameOf(e.path)}" stays as it is.`)) await openAs(e, as);
   }
-  if (r.kept.length || r.made.length) wsShowFiles(true);
+  if (r.kept.length || r.made.length || refused) wsShowFiles(true);
+  // (the refusals kept in sight, in the file browser, until closed: the status line is the interpreter's too)
+  if (refused) wsBrowser?.say(refused, true);
 }
 // (a data file opened as a document: its converted copy, beside it; a board's
 // made on the board page, which reads boards' other formats)
@@ -2456,6 +2469,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     }
   });
   document.body.classList.remove("opening");
+  // (what an upload on another page said, carried here: a refusal never lost to the navigation)
+  { const t = takeNotice(); if (t) statusEl.textContent = t; }
   // the interpreter starts once the notebook has been drawn (it is not needed for that)
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernelsMayStart = true;

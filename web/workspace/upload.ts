@@ -28,8 +28,11 @@ export function boardJson(text: string): unknown {
 }
 
 export type UploadOptions = {
-  /** At most this many bytes a file (said before it is read). */
+  /** At most this many bytes a data file or a `.sbreplay` (said before it is read; a `.sbreplay`
+   * unpacked is bounded by its reader, bundle.js BUNDLE_LIMITS). */
   maxBytes: number;
+  /** At most this many bytes an `.ipynb` or `.board.json`, which are read whole and parsed (daybreak2's LIMIT-4B3-2). */
+  docMaxBytes: number;
   /** The language of a notebook whose file doesn't say (a script). */
   mode: string;
   /** A `.sbreplay` read: its notebook, and its history kept as `ref`'s once that notebook is made (the page's databases). */
@@ -49,18 +52,39 @@ export type UploadResult = {
 
 const message = (e: unknown) => String((e as Error)?.message ?? e);
 
+/** A board opened from a file the person brought in (an upload, a drop, Open as…): its code waits for
+ * them, "Run this board's code" (an interim, until design/capabilities.md's gate; @sagebrush, on astra's
+ * CORR-4B3-1).  Kept for this tab, until they run it. */
+export const PAUSED = "sagebrush-board-paused:";
+export function pauseBoard(ref: string) { try { sessionStorage.setItem(PAUSED + ref, "1"); } catch {} }
+export function isPaused(ref: string) { try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return false; } }
+export function unpause(ref: string) { try { sessionStorage.removeItem(PAUSED + ref); } catch {} }
+/** What an upload said, for the page it opens (a refusal never lost to the navigation): taken once. */
+const NOTICE = "sagebrush-upload-notice";
+export function carryNotice(text: string) { try { if (text) sessionStorage.setItem(NOTICE, text.slice(0, 4000)); } catch {} }
+export function takeNotice(): string { try { const t = sessionStorage.getItem(NOTICE) ?? ""; sessionStorage.removeItem(NOTICE); return t; } catch { return ""; } }
+
+/** At most this many files in one upload: a folder's worth; the rest refused, said as one line. */
+export const UPLOAD_FILES = 10_000;
+/** At most this many refusals named one by one; the rest counted. */
+const NAMED = 20;
+
 /** `files` uploaded into `folder` by the rule above. */
-export async function uploadFiles(ws: Workspace, files: File[], folder: string, o: UploadOptions): Promise<UploadResult> {
+export async function uploadFiles(ws: Workspace, all: File[], folder: string, o: UploadOptions): Promise<UploadResult> {
   const out: UploadResult = { made: [], kept: [], refused: [] };
+  let unnamed = 0;
+  const refuse = (what: string) => { if (out.refused.length < NAMED) out.refused.push(what); else unnamed++; };
+  const files = all.slice(0, UPLOAD_FILES);
+  if (all.length > files.length) unnamed += all.length - files.length;
   const taken = new Set((await ws.list(folder)).map((e) => e.path));
   // (a new name only while the folder has room, said before the file is read; a data file's name
   // already there is written over and takes none: the workspace checks again as it writes, LIMIT-0B0-1)
   const room = () => taken.size < ws.limits.maxFolderEntries;
   for (const f of files) {
     const name = safeName(f.name);
-    if (f.size > o.maxBytes) { out.refused.push(`${name} (over ${Math.round(o.maxBytes / 2 ** 20)} MB)`); continue; }
-    const as = uploadAs(name);
-    if (!room() && !(as === "file" && taken.has(join(folder, name)))) { out.refused.push(`${name} (the folder is full: ${ws.limits.maxFolderEntries} entries)`); continue; }
+    const as = uploadAs(name), max = as === "notebook" || as === "board" ? o.docMaxBytes : o.maxBytes;
+    if (f.size > max) { refuse(`${name} (over ${Math.round(max / 2 ** 20)} MB)`); continue; }
+    if (!room() && !(as === "file" && taken.has(join(folder, name)))) { refuse(`${name} (the folder is full: ${ws.limits.maxFolderEntries} entries)`); continue; }
     try {
       if (as === "file") {
         const p = join(folder, name), bytes = new Uint8Array(await f.arrayBuffer());
@@ -83,11 +107,12 @@ export async function uploadFiles(ws: Workspace, files: File[], folder: string, 
       const e = await ws.create(p, { content: doc });
       taken.add(p);
       out.made.push(e);
-      if (keep) await keep(e.ref!).catch((err) => out.refused.push(`${name}: its history (${message(err)})`));
+      if (keep) await keep(e.ref!).catch((err) => refuse(`${name}: its history (${message(err)})`));
     } catch (err) {
-      out.refused.push(`${name} (${message(err)})`);
+      refuse(`${name} (${message(err)})`);
     }
   }
+  if (unnamed) out.refused.push(`and ${unnamed} more`);
   return out;
 }
 
