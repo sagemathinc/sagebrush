@@ -307,42 +307,44 @@ async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> 
   if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return null;
   const hash = await accountHash(v.account_id);
   const db = env.SHARE_DB!;
-  // (an id names one account for good: the same id for another is refused before any account object
-  // is asked or any receipt changed, CORR-E0D-1)
-  const prior = await db.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
-  if (prior && prior.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
+  // CoCalc's receipt, by its own id (CORR-1C2-1), bound BEFORE any account object is asked
+  // (CORR-E9C-1): one D1 batch, which D1 runs alone, evicts the account's oldest beyond
+  // RECEIPTS_PER_ACCOUNT and inserts the receipt only if no account holds the id yet.  So of two
+  // requests naming one new id for two accounts, exactly one binds it, and the other is refused below
+  // before its account object is touched.  A retried id keeps its receipt and evicts nothing.
+  const now = Math.floor(Date.now() / 1000);
+  const bound = (await db.batch([
+    db.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE account_hash = ?2 AND NOT EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) ORDER BY rowid DESC LIMIT -1 OFFSET ?3)")
+      .bind(v.request_id, hash, RECEIPTS_PER_ACCOUNT - 1),
+    db.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, ?2, 'deleting', ?3)").bind(v.request_id, hash, now),
+  ])) as { meta?: { changes?: number } }[];
+  const inserted = (bound[1]?.meta?.changes ?? 0) === 1;
+  await gate(env, "purge-bound");
+  const holder = await db.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
+  if (holder && holder.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
+  // (only the receipt this request made is ever taken back: a retry's existing one stays)
+  const unbind = () => (inserted ? db.prepare("DELETE FROM sync_admin_requests WHERE request_id = ?1 AND account_hash = ?2 AND state = 'deleting'").bind(v.request_id, hash).run() : null);
   // The account object decides, whatever D1 says (an account still registering has no row yet; no
   // generation named, as whatever it holds goes, CORR-02C-1).  Every purge is admitted: sharing's
-  // deletion never waits on sync's bookkeeping.  If the object can't be reached, nothing is recorded
-  // and the whole purge answers 503, for CoCalc to send again (CORR-5D0-1).
+  // deletion never waits on sync's bookkeeping.  If the object can't be reached, the receipt is taken
+  // back and the whole purge answers 503, for CoCalc to send again (CORR-5D0-1).
   let r: Awaited<ReturnType<SyncAccount["purge"]>>;
   try {
     if (testMode(env) && env.SYNC_TEST_FAIL_PURGE === v.account_id) throw new Error("the account object is unavailable (test seam)");
     r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
   } catch {
+    await unbind();
     return err(503, "busy", { message: "sync's part of the purge didn't start; send it again" });
   }
   await recordPurge(env, hash, r, "admin");
-  // CoCalc's receipt, by its own id (CORR-1C2-1), written only once the object has answered, and only
-  // for an account that held sync state: so the table never holds more than RECEIPTS_PER_ACCOUNT x the
-  // accounts that ever had sync state (LIMIT-233-1, CORR-5D0-1).  A new id evicts the account's oldest
-  // in the same transaction; a retried id keeps its receipt.  Whatever a receipt says, the status call
-  // asks the object itself unless the receipt says purged, so a completion that ran before this write,
-  // or an evicted receipt, never misleads it.
-  const nothing = r.state === "none" && (r.retired ?? 0) === 0;
-  if (!nothing) {
-    const now = Math.floor(Date.now() / 1000);
-    const done = r.state === "none";
-    await db.batch([
-      db.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE account_hash = ?2 AND NOT EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) ORDER BY rowid DESC LIMIT -1 OFFSET ?3)")
-        .bind(v.request_id, hash, RECEIPTS_PER_ACCOUNT - 1),
-      db.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created, finished, docs, bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)")
-        .bind(v.request_id, hash, done ? "purged" : "deleting", now, done ? now : null, done ? 0 : null),
-    ]);
-    // (two requests with one new id for two accounts, at once: the second finds the first's receipt)
-    const mine = await db.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
-    if (mine && mine.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
-  }
+  // Receipts are kept only for accounts that held sync state (LIMIT-233-1, CORR-5D0-1): one that never
+  // synced gives its receipt back, its status then answered by its account object (never_synced).  So
+  // the table holds at most RECEIPTS_PER_ACCOUNT x the accounts that ever had sync state, plus a
+  // receipt left by a Worker that stopped between binding and this line, pruned at 90 days.  Whatever
+  // a receipt says, the status call asks the object itself unless the receipt says purged.
+  if (r.state === "none" && (r.retired ?? 0) === 0) await unbind();
+  else if (r.state === "none")
+    await db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?3, docs = 0, bytes = 0 WHERE request_id = ?1 AND account_hash = ?2 AND state = 'deleting'").bind(v.request_id, hash, now).run();
   return null;
 }
 
