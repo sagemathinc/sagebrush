@@ -397,6 +397,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf } from "./workspace/index.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1185,7 +1186,7 @@ function showName(name) {
   nbName.value = name || "Untitled";
   document.title = `${nbName.value} — Sagebrush`;
 }
-nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); });
+nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); });
 
 // A store for a file saved as .ipynb text: the local server's file, or the app's.
 // read() gives null for a file that does not exist yet (a new notebook); a file
@@ -1238,6 +1239,7 @@ async function open(store, id, kind = "browser") {
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
+  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode);
   startHistory(id);
   presence.open(id);
   return doc;
@@ -1496,6 +1498,7 @@ fileMenu.addEventListener("click", async (e) => {
       if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, current.id).drop();
       const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
@@ -1578,6 +1581,7 @@ async function showOpen() {
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
       await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, d.id).drop();
       li.remove();
@@ -1606,7 +1610,8 @@ function filePut(path, data) {
   nb.filesChanged([path]); // (the reactive notebook: the cells reading it rerun)
 }
 async function fileChanged(path, data) {
-  await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+  // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
+  if (!(await wsFile(path, data))) await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
   if (!filesEl.hidden) renderFiles();
 }
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -1623,14 +1628,14 @@ async function renderFiles() {
     dl.onclick = () => download(k.split("/").pop(), vals[i], "application/octet-stream");
     const rm = li.appendChild(Object.assign(document.createElement("button"), { textContent: "✕" }));
     rm.setAttribute("aria-label", `Delete ${k}`);
-    rm.onclick = async () => { await idb(db, "files", "readwrite", (st) => st.delete(k)); filePut(k, null); renderFiles(); };
+    rm.onclick = async () => { if (!(await wsFile(k, null))) await idb(db, "files", "readwrite", (st) => st.delete(k)); filePut(k, null); renderFiles(); };
   });
   if (!keys.length) ul.textContent = "No files yet.";
 }
 async function addFiles(list) {
   for (const f of list) {
     const data = new Uint8Array(await f.arrayBuffer()), path = "/" + f.name;
-    await idb(db, "files", "readwrite", (st) => st.put(data, path));
+    if (!(await wsFile(path, data))) await idb(db, "files", "readwrite", (st) => st.put(data, path));
     filePut(path, data);
   }
   renderFiles();
@@ -1945,6 +1950,84 @@ addEventListener("beforeinstallprompt", (e) => {
   document.querySelector('[data-f="install"]').hidden = false;
 });
 addEventListener("appinstalled", () => { installPrompt = null; document.querySelector('[data-f="install"]').hidden = true; });
+
+// ------------------------------------------------------------ the workspace
+// (web/workspace/, design/workspace-files.md) This browser's notebooks,
+// boards and files as one tree.  Opened in the background (the notebook
+// doesn't wait for it), what was kept before brought in (migrate: nothing
+// deleted).  A notebook opened here is listed (`/<name>.ipynb`), renamed
+// with its name, and dropped from the list when it is deleted; data files
+// are written through it (an overwrite keeps the old bytes as a version, a
+// delete puts the file in Trash).  Where it can't be opened, everything is
+// kept as before.  window.sagebrush.workspace: the workspace as an agent
+// sees it (§8.2), its changes credited to agent:page.
+let ws = null;
+const wsReady = (async () => {
+  try {
+    const w = await Workspace.open();
+    try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+    ws = w;
+    window.sagebrush.workspace = w.forAgent("agent:page");
+    return w;
+  } catch (e) { console.warn("workspace:", e); return null; }
+})();
+// (the workspace, or null if it isn't open within a few seconds)
+const wsNow = () => Promise.race([wsReady, new Promise((r) => setTimeout(() => r(null), 5000))]);
+async function wsListNotebook(id, name, mode) {
+  const w = await wsNow();
+  if (!w) return;
+  try {
+    if (await w.pathOf("notebook", id)) return;
+    await w.locked(async () => {
+      if (await w.pathOf("notebook", id)) return;
+      await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python" });
+    });
+  } catch (e) { console.warn("workspace:", e); }
+}
+let wsRenameTimer = null;
+function wsRenameSoon() {
+  clearTimeout(wsRenameTimer);
+  const id = current.id, name = docName();
+  if (current.kind !== "browser" || !id) return;
+  wsRenameTimer = setTimeout(async () => {
+    const w = await wsNow();
+    if (!w) return;
+    try {
+      const from = await w.pathOf("notebook", id);
+      if (!from) return;
+      const folder = parentOf(from), base = safeName(name || "Untitled");
+      if (splitExt(nameOf(from))[0] === base) return;
+      const taken = new Set((await w.list(folder)).map((e) => e.path));
+      const to = freePath(folder, base, ".ipynb", (p) => taken.has(p) && p !== from);
+      if (to && to !== from) await w.rename(from, to);
+    } catch (e) { console.warn("workspace: rename:", e); }
+  }, 800);
+}
+async function wsForgetNotebook(id) {
+  const w = await wsNow();
+  if (!w) return;
+  try {
+    const p = await w.pathOf("notebook", id);
+    if (p) await w.forget(p);
+  } catch (e) { console.warn("workspace:", e); }
+}
+// (a data file written (bytes) or deleted (null) through the workspace: true if it was)
+async function wsFile(path, data) {
+  const w = await wsNow();
+  if (!w) return false;
+  try {
+    if (data === null) {
+      if (!(await w.stat(path))) return false;
+      await w.remove(path);
+    } else await w.putFile(path, data);
+    return true;
+  } catch (e) {
+    // (a path the workspace doesn't take: kept as before, listed by reconcile; a refused write: said)
+    if (e?.code === "invalid") return false;
+    statusEl.textContent = `${path}: ${e?.message ?? e}`;
+    return e?.code !== "limit" && e?.code !== "storage" ? false : true;
+  }
+}
 
 // (a newer version of the page, in another tab, needs the database: let it go)
 const updated = () => { statusEl.textContent = "Sagebrush was updated in another tab: reload this page to keep saving here"; };

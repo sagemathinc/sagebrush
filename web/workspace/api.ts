@@ -66,6 +66,7 @@ const CHANNEL = "sagebrush-workspace";
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
 
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
@@ -207,7 +208,8 @@ export class Workspace {
         const old = await this.contents(e);
         if (opts.base !== undefined && (e.rev ?? 0) !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, old);
         // (the bytes it had, kept as a version first: a write that can't keep them doesn't happen)
-        if (old !== undefined) await this.keepVersion(e, old);
+        // (nothing to lose, nothing kept: an empty file (Python's open("w") empties it before writing), or the same bytes again)
+        if (old !== undefined && old.length > 0 && !sameBytes(old, b)) await this.keepVersion(e, old);
         await this.mainTx("files", "readwrite", (st) => st.put(b, e.ref!));
         rev = (e.rev ?? 0) + 1;
         size = b.length;
@@ -366,6 +368,56 @@ export class Workspace {
       this.tell({ ops });
       return freed;
     });
+  }
+
+  // ------------------------------------------------------------ for the pages
+
+  /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
+  async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
+    return inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getKey([kind, ref]))) as Promise<string | undefined>;
+  }
+
+  /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through. */
+  async putFile(p: string, bytes: unknown): Promise<Entry> {
+    const q = path(p);
+    const e = await this.stat(q);
+    if (!e) return this.create(q, { content: bytes }).catch(async (err) => {
+      // (made meanwhile, by another tab: written over instead)
+      if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return (await this.write(q, bytes)).entry;
+      throw err;
+    });
+    if (e.kind !== "file") throw new WorkspaceError("exists", `${q} is a ${e.kind}, not a file`);
+    return (await this.write(q, bytes)).entry;
+  }
+
+  /** An entry dropped from the index, its contents already removed by the
+   * page (a notebook deleted from the Open dialog, as before Trash is in
+   * the UI).  For the pages only: not offered to agents. */
+  async forget(p: string): Promise<void> {
+    const q = path(p);
+    if (this.actor !== "person") throw new WorkspaceError("invalid", "only the page itself forgets entries");
+    return this.locked(async () => {
+      const ops: Op[] = [];
+      await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+        const st = tx.objectStore("entries"), e: Entry | undefined = await req(st.get(q));
+        if (!e) return;
+        if (e.kind === "folder" && (await req(st.count(subtree(q)))) > 0) throw new WorkspaceError("invalid", `${q} isn't empty`);
+        st.delete(q);
+        this.log(tx, ops, { op: "forget", path: q, kind: e.kind });
+      });
+      this.tell({ ops });
+    });
+  }
+
+  /** The workspace as an agent sees it (§8.2): the verbs, its changes
+   * credited to `actor` ("agent:<name>"), and none of what only a person
+   * does (dropVersions, forget). */
+  forAgent(actor: string) {
+    if (!/^agent:[\w.-]{1,64}$/.test(actor)) throw new WorkspaceError("invalid", "an agent is agent:<name>");
+    const as: Workspace = Object.create(this);
+    as.actor = actor;
+    const verbs = ["list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "watch", "ops"] as const;
+    return Object.freeze(Object.fromEntries(verbs.map((v) => [v, (as as any)[v].bind(as)]))) as Pick<Workspace, (typeof verbs)[number]>;
   }
 
   // ------------------------------------------------------------ inside
