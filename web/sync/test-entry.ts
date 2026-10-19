@@ -13,7 +13,11 @@ export default {
   async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const url = new URL(req.url);
     // (tests only: run the inventory and answer its stats)
-    if (url.pathname === "/__test/inventory") return Response.json(await syncScheduled(env));
+    if (url.pathname === "/__test/inventory") {
+      const d = url.searchParams.get("deadline_ms");
+      const prefix = url.searchParams.get("prefix");
+      return Response.json(await syncScheduled(env, { ...(d === null ? {} : { deadlineMs: Number(d) }), ...(prefix === null ? {} : { prefix }) }));
+    }
     // (tests only: the rest of a registration the hold-enable seam held, as the Worker would send it)
     if (url.pathname === "/__test/register") {
       const account = url.searchParams.get("account") ?? "";

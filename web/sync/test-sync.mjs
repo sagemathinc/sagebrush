@@ -1243,12 +1243,46 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
     runs.push(await r.json());
   }
   const left = (await bucket.list({ prefix: "s/0000000000000000000000000000", limit: 1000 })).objects.length;
-  ok(runs.every((r) => r.pages <= 2 && r.calls <= 2 * 3 + 2 * (2 + 1 + 50 + 1)), "each run is bounded: the receipts' prune (2 kinds, at most 3 pages each), then at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
+  ok(runs.every((r) => r.pages <= 2 && r.calls <= 2 * 3 + 2 * (2 + 1 + 50 + 1 + 1)), "each run is bounded: the receipts' prune (2 kinds, at most 3 pages each), then at most 2 pages, and per page the cursor read, one list, one lookup, one call per live account, one delete, the cursor write");
   ok(runs[0].deleted <= 100 && runs.slice(0, 3).reduce((n, r) => n + r.deleted, 0) >= 230 && left === 0, `the cursor continues across runs until every page is done (${runs.map((r) => r.deleted).join(",")})`);
   // one account owning a whole page (LIMIT-268-2): knownKeys is set-wise
   const many = Array.from({ length: 1000 }, (_, i) => `s/${hashOf(A).slice(0, 32)}/${i.toString(16).padStart(36, "0")}`);
   const kk = await acctNs.get(acctNs.idFromName("acct:" + hashOf(A))).knownKeys({ keys: [...many, ...keys] });
   ok(kk.statements <= 11 && kk.known.length === 1 && kk.known[0] === keys[0], `knownKeys of 1,001 keys: ${kk.statements} statements, and it knows exactly the held one`);
+  // LIMIT-SYNC-CRON-1: a run has a wall-clock deadline.  Past it no call starts; and a page whose
+  // account call outlasts it is left whole (nothing of it deleted, its cursor unmoved) for the next run
+  const inv = async (q = "") => JSON.parse(await (await fetchAt(SITE, "/__test/inventory" + q, {})).text());
+  const r0 = await inv("?deadline_ms=0");
+  ok(r0.stopped === true && r0.pages === 0 && r0.calls === 0 && r0.pruned === 0, "past the deadline no call starts, not even the prune's: " + JSON.stringify(r0));
+  const cursor = async () => (await db.prepare("SELECT v FROM meta WHERE k = 'sync_inventory_cursor'").first())?.v ?? "";
+  // every call counted (LIMIT-SYNC-CRON-1), on a page of 3 old objects under an account nobody has (a
+  // test-only list prefix, the cursor reset around it): the prune's 2 statements (nothing left to
+  // prune), then the cursor read, the list, the lookup, no account call, the delete, the cursor write
+  await inv(); // (whatever receipts are due go first)
+  const lone = "s/" + "f".repeat(32) + "/";
+  for (let i = 0; i < 3; i++) await bucket.put(lone + i.toString(16).padStart(36, "0"), "x");
+  await new Promise((r) => setTimeout(r, 1200));
+  const savedCursor = await cursor();
+  await db.prepare("DELETE FROM meta WHERE k = 'sync_inventory_cursor'").run();
+  const rx = await inv("?prefix=" + lone);
+  await db.prepare("INSERT INTO meta (k, v) VALUES ('sync_inventory_cursor', ?1) ON CONFLICT(k) DO UPDATE SET v = ?1").bind(savedCursor).run();
+  ok(rx.pruned === 0 && rx.pages === 1 && rx.deleted === 3 && rx.calls === 2 + 5 && !rx.stopped, "a page's calls are counted exactly, its cursor write too (2 + 5): " + JSON.stringify(rx));
+  const strayA = `s/${hashOf(A).slice(0, 32)}/${"e".repeat(36)}`;
+  await bucket.put(strayA, "stray, under a slow account");
+  await new Promise((r) => setTimeout(r, 1200));
+  const acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
+  await acctA.testSlowKnown({ ms: 4000 });
+  let slow = null;
+  for (let i = 0; i < 40 && !slow; i++) {
+    const c0 = await cursor();
+    const t0 = Date.now();
+    const r = await inv("?deadline_ms=600");
+    if (r.stopped) slow = { r, ms: Date.now() - t0, moved: (await cursor()) !== c0 };
+  }
+  ok(slow !== null && slow.ms < 3000 && !slow.moved && (await bucket.head(strayA)) !== null, "a slow account object (4 s) ends the run at its deadline (0.6 s), not when the object answers: its page's cursor unmoved, nothing of it deleted: " + JSON.stringify(slow));
+  await acctA.testSlowKnown({ ms: 0 });
+  for (let i = 0; i < 40 && (await bucket.head(strayA)) !== null; i++) await inv();
+  ok((await bucket.head(strayA)) === null && (await bucket.list({ prefix: `s/${hashOf(A).slice(0, 32)}/` })).objects.length === 1, "and once it answers again, a later run finishes the page: the stray is deleted, the held object kept");
   // CORR-00F-1: H's registration in D1 fails; no write is taken; the inventory never deletes a held file
   const sh = await signIn(H);
   const en = await post(sh, "/api/sync/v1/enable", {});
