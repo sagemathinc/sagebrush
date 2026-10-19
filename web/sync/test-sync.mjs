@@ -27,6 +27,8 @@ const K = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // allowlisted; its first enab
 const L = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"; // allowlisted; D1 answers held late at the Worker (astra's staging)
 const M = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"; // allowlisted, never synced; CoCalc deletes it while requests are past their session check
 const N = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"; // allowlisted; registering, never in D1, when CoCalc purges it
+const O = "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"; // allowlisted; its purge held while another account reuses its request id
+const P = "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1"; // never synced; the other account
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -62,6 +64,7 @@ fake.limits.set(J, sync(1 << 20, 1 << 20));
 fake.limits.set(K, sync(1 << 20, 1 << 20));
 fake.limits.set(L, sync(1 << 20, 1 << 20));
 fake.limits.set(M, sync(1 << 20, 1 << 20));
+fake.limits.set(O, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -77,7 +80,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1444,22 +1447,49 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const rcpt = await db.prepare("SELECT request_id, state FROM sync_admin_requests WHERE account_hash = ?1 ORDER BY created").bind(hashOf(L)).all();
   ok(rcpt.results.length === 2 && rcpt.results.every((x) => x.state === "purged"), "one receipt per request id, a retry adding none: " + JSON.stringify(rcpt.results));
   // their lifetime: pruned by the daily job once past it (test: 2 s after finishing; 30 days deployed)
-  await new Promise((r) => setTimeout(r, 3200)); // (times are whole seconds: 2 s past, whatever the fraction)
+  // (aged deterministically: finished 100 s ago, well past the test's 2 s lifetime)
+  await db.prepare("UPDATE sync_admin_requests SET finished = finished - 100 WHERE account_hash = ?1").bind(hashOf(L)).run();
   const invL = await (await fetchAt(SITE, "/__test/inventory", {})).text();
   ok((await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`)).status === 404 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`)).status === 404 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).first()).n === 0, "past their polling lifetime, the daily job prunes the receipts " + JSON.stringify([Math.floor(Date.now() / 1000), (await db.prepare("SELECT * FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).all()).results, await invL]));
-  // LIMIT-233-1: a hard cap on new requests a day (test: 20), refused whole, before sharing's part;
-  // a retried id is never refused
+  // CORR-E0D-1: a request id names one account for good. O's purge is held (deleting, its file still
+  // there); CoCalc's same id for another account, P, is refused before anything changes
+  const bkt = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  const so = await signIn(O);
+  const acctO = acctNs.get(acctNs.idFromName("acct:" + hashOf(O)));
+  const acctP = acctNs.get(acctNs.idFromName("acct:" + hashOf(P)));
+  ok((await post(so, "/api/sync/v1/enable", {})).status === 200 && (await put(so, Buffer.from("O's file"))).status === 201, "(O: on, with a file)");
+  await acctO.holdPurge({ on: true });
+  const ridO = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: O, request_id: ridO }))).status === 202 && (await acctO.lifecycle())?.state === "deleting", "(CoCalc purges O, request R: held, deleting)");
+  const cross = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: P, request_id: ridO }));
+  const crossB = await cross.json();
+  const rcO = await db.prepare("SELECT account_hash, state FROM sync_admin_requests WHERE request_id = ?1").bind(ridO).first();
+  const stO = await (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridO}`)).json();
+  const lcP = await acctP.lifecycle();
+  ok(cross.status === 409 && crossB.error === "conflict" && rcO?.account_hash === hashOf(O) && rcO.state === "deleting" && stO.state === "deleting" && lcP?.deleted === false && (await bkt.list({ prefix: `s/${hashOf(O).slice(0, 32)}/` })).objects.length > 0,
+    "the same id for another account is refused (409) before its account object is asked: R's receipt still names O, deleting, and O's file is still there (CORR-E0D-1): " + JSON.stringify([cross.status, rcO, stO.state, lcP]));
+  await acctO.holdPurge({ on: false });
+  ok(await until(async () => (await (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridO}`)).json()).state === "purged") && (await bkt.list({ prefix: `s/${hashOf(O).slice(0, 32)}/` })).objects.length === 0, "and R completes only when O's own purge does, its file gone");
+  // LIMIT-233-1: every purge is admitted (sharing's deletion never waits on sync); the receipts are
+  // bounded by total: at most 8 an account, a new id evicting the oldest, and none for an account that
+  // never synced
   const nowS = () => Math.floor(Date.now() / 1000);
-  const dayCount = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE created > ?1").bind(nowS() - 86400).first()).n;
-  const ridCap = crypto.randomUUID();
-  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridCap }))).status === 202, "(a request admitted under the cap)");
-  const fill = 20 - (await dayCount());
-  for (let i = 0; i < fill; i++) await db.prepare("INSERT INTO sync_admin_requests (request_id, account_hash, state, created, finished) VALUES (?1, 'seed', 'purged', ?2, ?2)").bind(`seed-cap-${i}`, nowS()).run();
-  const over = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: crypto.randomUUID() }));
-  const overB = await over.json();
-  const again = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridCap }));
-  ok((await dayCount()) === 20 && over.status === 429 && overB.error === "rate" && again.status === 202, "at the day's cap a new request is refused, 429 with retry_after, and admits nothing; a retried id still goes through: " + JSON.stringify([over.status, again.status]));
-  await db.prepare("DELETE FROM sync_admin_requests WHERE account_hash = 'seed'").run();
+  const ridsL = [];
+  for (let i = 0; i < 10; i++) {
+    const id = crypto.randomUUID();
+    ridsL.push(id);
+    ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: id }))).status === 202, `(CoCalc purges L again, request ${i + 1} of 10: admitted)`);
+  }
+  const keptL = (await db.prepare("SELECT request_id FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).all()).results.map((x) => x.request_id);
+  const stFirst = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridsL[0]}`);
+  const stLast = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridsL[9]}`);
+  ok(keptL.length === 8 && ridsL.slice(2).every((id) => keptL.includes(id)) && stFirst.status === 404 && stLast.status === 200, "10 requests for one account: all admitted, the newest 8 receipts kept, the oldest evicted: " + keptL.length);
+  const ridRetry = ridsL[5];
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridRetry }))).status === 202 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).first()).n === 8 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridsL[2]}`)).status === 200, "a retried id evicts nothing");
+  const ridP = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: P, request_id: ridP }))).status === 202 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridP}`)).status === 404 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(P)).first()).n === 0 && (await acctP.lifecycle())?.deleted === true,
+    "an account that never synced is purged (and fenced), keeps no receipt, and its status is 404: nothing for sync to wait on");
+  await db.prepare("DELETE FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).run();
   // the prune drains a backlog beyond one run's capacity (test: 2 kinds x 3 pages x 50 = 300 a run)
   await new Promise((r) => setTimeout(r, 1100));
   await (await fetchAt(SITE, "/__test/inventory", {})).text(); // (whatever is due now goes first)
@@ -1476,8 +1506,8 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const plan = async (sql, ...b) => JSON.stringify((await db.prepare("EXPLAIN QUERY PLAN " + sql).bind(...b).all()).results.map((r) => r.detail));
   const pDone = await plan("SELECT request_id FROM sync_admin_requests WHERE state = 'purged' AND finished < ?1 LIMIT ?2", 1, 1);
   const pOpen = await plan("SELECT request_id FROM sync_admin_requests WHERE state = 'deleting' AND created < ?1 LIMIT ?2", 1, 1);
-  const pDay = await plan("SELECT COUNT(*) FROM sync_admin_requests WHERE created > ?1", 1);
-  ok(pDone.includes("sync_admin_requests_finished") && pOpen.includes("sync_admin_requests_open") && pDay.includes("sync_admin_requests_created") && !/SCAN sync_admin_requests(?! USING)/.test(pDone + pOpen + pDay), "the query plans use the partial indexes, no table scan: " + [pDone, pOpen, pDay].join(" | "));
+  const pAcct = await plan("SELECT request_id FROM sync_admin_requests WHERE account_hash = ?1 ORDER BY rowid DESC LIMIT -1 OFFSET 7", "x");
+  ok(pDone.includes("sync_admin_requests_finished") && pOpen.includes("sync_admin_requests_open") && pAcct.includes("sync_admin_requests_account") && !/SCAN sync_admin_requests(?! USING)/.test(pDone + pOpen + pAcct), "the query plans use their indexes, no table scan: " + [pDone, pOpen, pAcct].join(" | "));
   // an account with no row at all: N registers in the account object only; CoCalc purges it; its
   // receipt is completed by the record, though no row ever existed
   const acctN = acctNs.get(acctNs.idFromName("acct:" + hashOf(N)));

@@ -265,9 +265,12 @@ async function recordPurge(env: Env, hash: string, r: { state: string; request_i
       .bind(hash, now, r.request_id, kind, r.retired)];
     await db.batch(marks);
   }
-  // (nothing held: CoCalc's request is done at once, by its own receipt, CORR-1C2-1)
-  if (r.state === "none" && kind === "admin")
-    await db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE request_id = ?1 AND state = 'deleting'").bind(r.request_id, Math.floor(Date.now() / 1000)).run();
+  // (nothing held: CoCalc's request is done at once, by its own receipt, CORR-1C2-1; for an account
+  // that never synced there is nothing to wait for, and no receipt is kept: its status is 404)
+  if (r.state === "none" && kind === "admin" && (r.retired ?? 0) === 0)
+    await db.prepare("DELETE FROM sync_admin_requests WHERE request_id = ?1 AND account_hash = ?2 AND state = 'deleting'").bind(r.request_id, hash).run();
+  else if (r.state === "none" && kind === "admin")
+    await db.prepare("UPDATE sync_admin_requests SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE request_id = ?1 AND account_hash = ?3 AND state = 'deleting'").bind(r.request_id, Math.floor(Date.now() / 1000), hash).run();
 }
 
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
@@ -291,8 +294,9 @@ async function adminLimits(req: Request, env: Env): Promise<Response> {
 /**
  * Sync's part of CoCalc's signed purge (§9): the account object deletes
  * everything it holds.  Null lets sharing's part go on; a response refuses
- * the whole purge (CoCalc retries it), only for a correctly signed new
- * request past the day's receipt cap (LIMIT-233-1).
+ * the whole purge, only for a correctly signed request whose id is already
+ * another account's (CORR-E0D-1).  Nothing else refuses it: sharing's
+ * deletion never waits on sync's bookkeeping.
  */
 async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> {
   const body = await readBounded(req, ADMIN_BODY);
@@ -307,14 +311,22 @@ async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> 
   const hash = await accountHash(v.account_id);
   // CoCalc's receipt first (CORR-1C2-1), so the purge's completion, which comes after the account
   // object's answer, always finds it; a retried id keeps its receipt, and touches no other
-  // A new id is admitted only while the last 24 hours have fewer than the cap, in the one statement,
-  // so the daily prune, twice the cap, always keeps up (LIMIT-233-1); a retried id always is.
+  // Every purge is admitted: sharing's deletion never waits on sync's bookkeeping (CORR-E0D-1's cap
+  // coupling).  The receipts are bounded by total instead (LIMIT-233-1): at most RECEIPTS_PER_ACCOUNT
+  // an account, a new id evicting the account's oldest in the same transaction, and none kept for an
+  // account that never synced (below).  CoCalc's purge fences an account for good, so the table never
+  // holds more than RECEIPTS_PER_ACCOUNT x the accounts that ever had sync state, and the daily prune
+  // empties it 30 days on.
   const now = Math.floor(Date.now() / 1000);
-  const cap = testMode(env) ? 20 : RECEIPTS_PER_DAY;
-  await env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) SELECT ?1, ?2, 'deleting', ?3 WHERE EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) OR (SELECT COUNT(*) FROM sync_admin_requests WHERE created > ?3 - 86400) < ?4")
-    .bind(v.request_id, hash, now, cap).run();
-  if (!(await env.SHARE_DB!.prepare("SELECT 1 AS x FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first()))
-    return err(429, "rate", { message: "too many purge requests today; try again later", retry_after: 3600_000 });
+  await env.SHARE_DB!.batch([
+    env.SHARE_DB!.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE account_hash = ?2 AND NOT EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) ORDER BY rowid DESC LIMIT -1 OFFSET ?3)")
+      .bind(v.request_id, hash, RECEIPTS_PER_ACCOUNT - 1),
+    env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, ?2, 'deleting', ?3)").bind(v.request_id, hash, now),
+  ]);
+  const receipt = await env.SHARE_DB!.prepare("SELECT account_hash FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first<{ account_hash: string }>();
+  // (an id names one account for good: the same id for another is refused, before any account object
+  // is asked or any receipt changed, CORR-E0D-1)
+  if (receipt && receipt.account_hash !== hash) return err(409, "conflict", { message: "this request id belongs to another account's purge" });
   // (the account object decides, whatever D1 says: an account still registering has no row yet;
   // no generation named, as whatever it holds goes, CORR-02C-1)
   const r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
@@ -409,8 +421,8 @@ const INVENTORY_PAGE = 100, INVENTORY_PAGES = 5, INVENTORY_CALLS = 400;
 const INVENTORY_AGE_MS = 2 * 86400_000;
 /** How long CoCalc may poll a purge's status after it finished (CORR-1C2-1). */
 const RECEIPT_TTL_MS = 30 * 86400_000;
-/** At most this many new purge requests in any 24 hours (LIMIT-233-1); far above CoCalc's deletions. */
-const RECEIPTS_PER_DAY = 5000;
+/** At most this many purge receipts an account keeps (LIMIT-233-1): a new id evicts the oldest. */
+const RECEIPTS_PER_ACCOUNT = 8;
 /** The prune's pages: 2 kinds x 10 pages x 1,000 = 20,000 a run, at least twice RECEIPTS_PER_DAY each kind. */
 const PRUNE_PAGE = 1000, PRUNE_PAGES = 10;
 
