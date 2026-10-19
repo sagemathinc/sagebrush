@@ -97,7 +97,7 @@ The board package has versions of its own. `sagebrush-board/submission`
 checks what the `sagebrush` CLI's `board answers --apply` writes, so each
 version names the CLI it pairs with as an optional peer dependency: 0.2.x
 and 0.3.x pair with `sagebrush` 0.5.x. 0.3.0 adds `editState` and
-`require()` from CommonJS.
+`require()` from CommonJS; it is published with `sagebrush` 0.5.1.
 
 ## Build and test
 
