@@ -19,7 +19,8 @@ CREATE INDEX sync_accounts_prefix ON sync_accounts(prefix);
 -- status call answers, apart from the account's row, which a later request
 -- would change.  Written before the account object is asked, completed with
 -- the purge's D1 record; kept 30 days after it finished (90 if it never did),
--- then pruned by the daily job.
+-- then pruned by the daily job, whose capacity is twice the most a day admits
+-- (LIMIT-233-1).
 CREATE TABLE sync_admin_requests (
   request_id TEXT PRIMARY KEY,
   account_hash TEXT NOT NULL,
@@ -30,4 +31,6 @@ CREATE TABLE sync_admin_requests (
   bytes INTEGER
 );
 CREATE INDEX sync_admin_requests_account ON sync_admin_requests(account_hash, state);
-CREATE INDEX sync_admin_requests_age ON sync_admin_requests(finished, created);
+CREATE INDEX sync_admin_requests_created ON sync_admin_requests(created);  -- the day's admissions
+CREATE INDEX sync_admin_requests_finished ON sync_admin_requests(finished) WHERE state = 'purged';  -- prune: done
+CREATE INDEX sync_admin_requests_open ON sync_admin_requests(created) WHERE state = 'deleting';  -- prune: never done
