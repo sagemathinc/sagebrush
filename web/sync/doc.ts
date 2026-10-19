@@ -375,6 +375,22 @@ export class SyncDoc extends DurableObject<SyncEnv> {
    * the current one is never held: clearing dropped it.
    */
   async accepted(a: { ids: { epoch: number; id: string }[] }): Promise<Result<string[]>> {
+    // (test seams: each call may be held by its own gate, accepted:<id>#<n>; and every call may fail)
+    const id = a.ids[0]?.id ?? "";
+    const n = (this.acceptedCalls.get(id) ?? 0) + 1;
+    this.acceptedCalls.set(id, n);
+    if (this.failAccepted) throw new Error("the document is unavailable (test seam)");
+    const before = this.acceptedNow(a);
+    await this.gate(`accepted:${id}#${n}`);
+    return before;
+  }
+  private acceptedCalls = new Map<string, number>();
+  private failAccepted = false;
+  /** Tests only: make accepted() fail, as an outage would. */
+  async setFailAccepted(a: { on: boolean }): Promise<void> {
+    if (this.env.SYNC_TEST_PIN_MS) this.failAccepted = a.on;
+  }
+  private acceptedNow(a: { ids: { epoch: number; id: string }[] }): Result<string[]> {
     return attempt(() => {
       if (!this.exists()) return [];
       const epoch = this.head().epoch;
