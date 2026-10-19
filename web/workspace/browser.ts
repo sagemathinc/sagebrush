@@ -5,8 +5,12 @@
 // Trash); New (notebook, board, folder) and Upload; files dropped on a
 // folder are uploaded there; Trash, with Restore and, for the person alone,
 // Delete forever and Empty Trash.  Opening is the page's (host.open).
+// A data file opens its preview, with its earlier versions; a folder's ⋯
+// deletes older versions in it; the foot's meter opens the Storage panel
+// (preview.ts, step 2b).
 import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
 import { TRASH, freePath, join, nameOf, parentOf, splitExt, within } from "./paths";
+import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 
 export type BrowserHost = {
   ws: Workspace;
@@ -159,7 +163,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const head = h("div", { className: "fh" }, h("b", { textContent: "Files" }));
   const newBtn = h("button", { className: "ib", textContent: "＋", title: "New notebook, board or folder" });
   const upBtn = h("button", { className: "ib", textContent: "⇪", title: "Upload files from this computer" });
-  const moreBtn = h("button", { className: "ib", textContent: "⋯", title: "Trash" });
+  const moreBtn = h("button", { className: "ib", textContent: "⋯", title: "Trash, Storage" });
   newBtn.setAttribute("aria-label", "New");
   upBtn.setAttribute("aria-label", "Upload");
   moreBtn.setAttribute("aria-label", "More");
@@ -208,6 +212,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const cur = host.current?.();
     curPath = cur ? entries.find((e) => e.kind === cur.kind && e.ref === cur.ref)?.path : undefined;
     render();
+    meter(false);
   }
   const children = (folder: string) => byParent.get(folder) ?? [];
   // (the open document's path, as of the latest refresh)
@@ -240,7 +245,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if ((ev.target as HTMLElement).closest("input")) return;
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
-      if (e.kind === "file") { rowMenu(r, e); return; }
+      if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
     r.onauxclick = (ev) => { if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab"); };
@@ -309,14 +314,27 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     foot.append(trashLink, h("span", { className: "sp" }));
     if (trashView && children(TRASH).length) {
       const empty = h("button", { className: "ib", textContent: "Empty Trash…", style: "font-size:12px;color:#b3261e" });
-      empty.onclick = async () => {
-        if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;
-        try { const n = await w.emptyTrash(); say(`${n} item${n === 1 ? "" : "s"} deleted for good`); } catch (e) { fail(e); }
-        refresh();
-      };
+      empty.onclick = emptyAll;
       foot.append(empty);
-    }
+    } else foot.append(meterEl);
   }
+  async function emptyAll() {
+    if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;
+    try { const n = await w.emptyTrash(); say(`${n} item${n === 1 ? "" : "s"} deleted for good`); } catch (e) { fail(e); }
+    refresh();
+  }
+  // (the storage meter, "34 MB used of 2.1 GB": opens the Storage panel; asked again at most every few seconds)
+  const meterEl = h("button", { className: "ib fmeter", style: "font-size:12px", title: "Storage in this browser" });
+  meterEl.onclick = () => storage();
+  let meterAt = 0;
+  async function meter(force = true) {
+    if (!force && Date.now() - meterAt < 5000) return;
+    meterAt = Date.now();
+    const est = await estimate();
+    meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
+  }
+  const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
+  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   function rowMenu(at: HTMLElement, e: Entry) {
@@ -334,11 +352,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
     if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
+    if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
     if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
-    items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))], "-", ["Move to Trash", () => toTrash(e), "danger"]);
+    items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
+    // (only a person deletes old versions, §2.5)
+    if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
+    items.push("-", ["Move to Trash", () => toTrash(e), "danger"]);
     popup(at, items);
   }
 
@@ -457,7 +479,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }]]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()]]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {

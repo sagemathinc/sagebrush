@@ -575,6 +575,44 @@ async function emptying() {
 // Undo of Move to Trash: that entry, put in Trash that time, only
 // (CORR-0B0-3); a rename asked for earlier and superseded, not made
 // (CORR-0B0-1); a rename that leaves the title to the page (CORR-0B0-2)
+// Step 2b's: what is held (versionsUsage, usage), a version by its id, and
+// the browser asked once, on the person's first own write, to keep the
+// storage (never for an agent's or the migration's).  First: the ask is
+// once per page.
+async function storageUse() {
+  let asked = 0;
+  try { Object.defineProperty(navigator.storage, "persist", { value: async () => { asked++; return true; }, configurable: true }); } catch {}
+  const w = await fresh();
+  localStorage.setItem("sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify({ title: "Kept before", nodes: [] }));
+  await W.migrate(w, localStorage);
+  await w.forAgent("agent:x").create("/by-agent.txt", { content: "a" });
+  check(asked === 0, "the migration's and an agent's writes don't ask the browser to keep the storage");
+  await w.create("/d/one.txt", { content: "1" });
+  await w.write("/d/one.txt", "11");
+  await w.write("/d/one.txt", "111");
+  check(asked === 1, "the person's first write asks it, once (" + asked + ")");
+  await w.create("/d/two.csv", { content: "a,b" });
+  await w.write("/d/two.csv", "a,b,c");
+  await w.create("/top.txt", { content: "t" });
+  await w.write("/top.txt", "tt");
+  await w.create("/n.ipynb");
+  const f1 = await w.versionsUsage("/d/one.txt"), fd = await w.versionsUsage("/d"), all = await w.versionsUsage();
+  check(f1.count === 2 && f1.bytes === 1 + 2, "versionsUsage of a file: its versions and their bytes " + JSON.stringify(f1));
+  check(fd.count === 3 && fd.bytes === 3 + 3, "…of a folder, its files' " + JSON.stringify(fd));
+  check(all.count === 4 && all.bytes === 3 + 3 + 1, "…of everything " + JSON.stringify(all));
+  check((await w.versionsUsage("/n.ipynb")).count === 0, "…of a notebook: none (its history is TimeTravel)");
+  const hist = await w.history("/d/one.txt");
+  check(dec(await w.versionById("/d/one.txt", hist[0].id)) === "1" && dec(await w.versionById("/d/one.txt", hist[1].id)) === "11", "versionById: a version's bytes by its id");
+  check(await fails(w.versionById("/top.txt", hist[0].id), "missing"), "…another file's version id is refused");
+  await w.dropVersions("/d/one.txt", { keep: 1 });
+  check(dec(await w.versionById("/d/one.txt", hist[1].id)) === "11" && await fails(w.versionById("/d/one.txt", hist[0].id), "missing"), "…an id stays its version's when older ones are dropped; a dropped one is missing");
+  await w.remove("/top.txt");
+  const u = await w.usage();
+  check(u.documents === 2 && u.files.count === 3 && u.files.bytes === 3 + 5 + 1 && u.trash.count === 1 && u.trash.bytes === 2 && u.versions.count === 3, "usage: documents, files, versions and Trash " + JSON.stringify(u));
+  check((await w.dropVersions("/")) === 2 + 3 + 1 && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "dropping all of them frees what versionsUsage said");
+  w.close();
+}
+
 async function intents() {
   const w = await fresh();
   await w.create("/undo.txt", { content: "original" });
@@ -647,7 +685,7 @@ async function intents() {
 }
 
 export async function run() {
-  for (const t of [intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [storageUse, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

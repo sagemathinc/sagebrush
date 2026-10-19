@@ -69,6 +69,16 @@ export const BOARD_KEYS = {
   pending: (id: string) => "sagebrush-workspace-pending:" + id,
   unread: (id: string) => "sagebrush-workspace-pending-unread:" + id,
 };
+// The first time the person saves something of their own here (not on a
+// first visit): the browser asked to keep this site's storage when space
+// runs short (§6.3), once per page.  The workspace's own writes call it;
+// the notebook page calls it for a notebook's saves.
+let keepAsked = false;
+export function askToKeep() {
+  if (keepAsked) return;
+  keepAsked = true;
+  try { (globalThis.navigator as any)?.storage?.persist?.()?.catch?.(() => {}); } catch {}
+}
 const CHANNEL = "sagebrush-workspace";
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
@@ -186,7 +196,7 @@ export class Workspace {
   async create(p: string, opts: { content?: unknown; mode?: string } = {}): Promise<Entry> {
     const q = path(p), kind = kindOf(q);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, opts.content, opts.mode));
+    return this.locked(() => this.make(q, kind, opts.content, opts.mode)).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -194,6 +204,9 @@ export class Workspace {
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean } = {}): Promise<{ entry: Entry; rev: number }> {
+    return this.writeLocked(p, content, opts).then((out) => { this.askToKeep(); return out; });
+  }
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean }): Promise<{ entry: Entry; rev: number }> {
     return this.locked(async () => {
       const e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
@@ -364,6 +377,19 @@ export class Workspace {
    * acting for an agent (actor "agent:…") is refused, and the agent surfaces
    * (window.sagebrush.workspace, MCP, the endpoint) don't offer it.  Logged.
    * Returns the bytes freed. */
+  /** The bytes of `p`'s version `id` (as history() lists it): a
+   * WorkspaceError("missing") if it isn't one of this file's, or is gone. */
+  async versionById(p: string, id: number): Promise<Uint8Array> {
+    const e = await this.mustStat(p);
+    if (e.kind !== "file" || !e.fid) throw new WorkspaceError("missing", `${path(p)} has no versions`);
+    return inTx(this.ws, ["versions", "versionBytes"], "readonly", async (tx) => {
+      const v: Version | undefined = await req(tx.objectStore("versions").get(id));
+      if (!v || v.fid !== e.fid) throw new WorkspaceError("missing", `that version of ${e.path} is gone`);
+      const b = await req(tx.objectStore("versionBytes").get(id));
+      if (b === undefined) throw new WorkspaceError("missing", "the bytes of that version are gone");
+      return b as Uint8Array;
+    });
+  }
   async dropVersions(p: string, opts: { keep?: number } = {}): Promise<number> {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0));
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
@@ -398,6 +424,54 @@ export class Workspace {
       this.tell({ ops });
       return freed;
     });
+  }
+
+  /** The old versions kept of `p`'s data files (a file, a folder's, or
+   * with "/" all of them, Trash's too): how many, and their bytes; what
+   * dropVersions(p) would free.  Read only: the versions' records, never
+   * their bytes. */
+  async versionsUsage(p = "/"): Promise<{ count: number; bytes: number }> {
+    const q = path(p);
+    let fids: Set<string> | null = null;
+    if (q !== "/") {
+      const e = await this.mustStat(q);
+      const files = e.kind === "folder" ? (await this.list(q, { recursive: true })).filter((x) => x.kind === "file") : e.kind === "file" ? [e] : [];
+      fids = new Set(files.map((x) => x.fid).filter((x): x is string => !!x));
+      if (!fids.size) return { count: 0, bytes: 0 };
+    }
+    // (all of them: their count and the running total kept with them, no
+    // record read; a folder's: each file's, at most maxVersions each)
+    return inTx(this.ws, ["versions", "meta"], "readonly", async (tx) => {
+      const vs = tx.objectStore("versions");
+      if (!fids) return { count: (await req(vs.count())) as number, bytes: (((await req(tx.objectStore("meta").get("versionBytes"))) as number | undefined) ?? 0) };
+      let count = 0, bytes = 0;
+      for (const fid of fids) {
+        const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
+        for (const v of list) { count++; bytes += v.size; }
+      }
+      return { count, bytes };
+    });
+  }
+
+  /** What this browser's workspace holds, for the Storage panel (§6.3):
+   * notebooks and boards (how many), data files (how many, their bytes),
+   * old versions, and Trash (its entries, and its data files' bytes). */
+  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number }; trash: { count: number; bytes: number } }> {
+    const all = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll())) as Entry[];
+    const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 } };
+    for (const e of all) {
+      if (within(e.path, TRASH)) {
+        if (e.path !== TRASH && parentOf(e.path) === TRASH) out.trash.count++;
+        if (e.kind === "file") out.trash.bytes += e.size ?? 0;
+      } else if (e.kind === "file") { out.files.count++; out.files.bytes += e.size ?? 0; }
+      else if (e.kind === "notebook" || e.kind === "board") out.documents++;
+    }
+    return out;
+  }
+
+  /** (askToKeep, for the person's own writes; never for an agent's, or the migration's, which writes through adopt) */
+  private askToKeep() {
+    if (this.actor === "person") askToKeep();
   }
 
   /** Entries in Trash removed for good (§2.4): `paths` (each with what is
