@@ -30,7 +30,55 @@ _SCHEMA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspa
 #: the verbs, their parameters and the protocol's limits: board's
 #: web/workspace/schema.json (written by web/workspace/verbs.ts), copied here
 #: by scripts/sync-python-package.sh, whose --check fails when they differ
-SCHEMA = json.load(open(_SCHEMA_FILE, encoding="utf-8"))
+#: the JSON Schema keywords _check enforces, and those that only describe;
+#: a schema with any other keyword is refused when it is loaded, so that an
+#: assertion this server doesn't know is never silently skipped (daybreak2)
+ASSERTIONS = {"type", "properties", "required", "additionalProperties", "minLength", "maxLength", "pattern", "minimum", "oneOf", "enum"}
+METADATA = {"description", "title", "$comment", "$schema", "default", "examples"}
+TYPES = {"object", "string", "integer", "boolean"}
+
+
+def check_schema(schema, where="schema"):
+    """ValueError unless every keyword in schema is one _check enforces or a
+    description, and each is used as _check expects."""
+    if not isinstance(schema, dict):
+        raise ValueError("%s is not a schema object" % where)
+    for k, v in schema.items():
+        if k in METADATA:
+            continue
+        if k not in ASSERTIONS:
+            raise ValueError("%s uses %r, which this server does not enforce: update sagebrush/workspace_tools.py first" % (where, k))
+        if k == "type" and v not in TYPES:
+            raise ValueError("%s has type %r, which this server does not know" % (where, v))
+        if k == "properties":
+            if not isinstance(v, dict):
+                raise ValueError("%s.properties is not an object" % where)
+            for name, sub in v.items():
+                check_schema(sub, "%s.%s" % (where, name))
+        if k == "oneOf":
+            if not isinstance(v, list) or not v:
+                raise ValueError("%s.oneOf is not a list of schemas" % where)
+            for i, sub in enumerate(v):
+                check_schema(sub, "%s.oneOf[%d]" % (where, i))
+        if k == "additionalProperties" and v is not False:
+            raise ValueError("%s.additionalProperties other than false is not enforced here" % where)
+        if k == "enum" and not (isinstance(v, list) and v):
+            raise ValueError("%s.enum is not a list" % where)
+        if k == "required" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            raise ValueError("%s.required is not a list of names" % where)
+        if k == "pattern":
+            re.compile(v)
+
+
+def load_schema(path):
+    """schema.json, every verb's parameter schema checked (check_schema)."""
+    schema = json.load(open(path, encoding="utf-8"))
+    for method, v in schema["verbs"].items():
+        check_schema(v["params"], method)
+    return schema
+
+
+SCHEMA = load_schema(_SCHEMA_FILE)
 LIMITS = SCHEMA["limits"]
 #: contents of at most this many bytes in one call, either way; larger is
 #: refused with its size, never cut short
@@ -178,7 +226,8 @@ def path_error(p):
 def _check(value, schema, where, key=None):
     """value against the JSON Schema keywords schema.json uses: type
     (object, string, integer, boolean), properties, required,
-    additionalProperties, minLength, maxLength, pattern, minimum, oneOf.
+    additionalProperties, minLength, maxLength, pattern, minimum, oneOf,
+    enum (load_schema refuses a schema with any other).
     Then this server's own bounds: no NUL and no lone surrogate in a string,
     and paths bounded as paths.ts bounds them."""
     if "oneOf" in schema:
@@ -191,6 +240,8 @@ def _check(value, schema, where, key=None):
                 pass
         if len(ok) != 1:
             raise Invalid("%s must be exactly one of %d forms" % (where, len(schema["oneOf"])))
+    if "enum" in schema and not any(type(value) is type(e) and value == e for e in schema["enum"]):
+        raise Invalid("%s must be one of %s" % (where, ", ".join(json.dumps(e) for e in schema["enum"])))
     t = schema.get("type")
     if t == "string":
         if not isinstance(value, str):

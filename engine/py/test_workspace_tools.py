@@ -434,6 +434,42 @@ def test_paths_are_refused_as_normpath_refuses_them():
         assert js == good, "normPath %s %r, the case list says %s" % ("accepts" if js else "refuses", p[:40], good)
 
 
+def test_schema_keywords_are_enforced_or_refused():
+    """daybreak2 (31e850a1): enum is enforced (create's mode is one of the
+    schema's languages), and a schema with a keyword this server does not
+    enforce is refused when loaded, so the server does not start rather than
+    skip an assertion."""
+    page = FakePage()
+    for mode in ("rust", "", "SAGE", 1, True):
+        refused(page, "workspace_create", {"path": "/n.ipynb", "mode": mode}, "invalid")
+    assert page.requests == []
+    for mode in ("python", "sage", "magma", "matlab"):
+        ok(page, "workspace_create", {"path": "/n-%s.ipynb" % mode, "mode": mode})
+    for bad in [{"type": "string", "format": "uri"}, {"type": "number"}, {"type": "object", "additionalProperties": True},
+                {"type": "object", "properties": {"x": {"type": "string", "maxItems": 3}}}, {"oneOf": [{"type": "string", "const": "a"}]},
+                {"type": "array", "items": {}}, {"enum": []}]:
+        try:
+            WS.check_schema(bad)
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % bad)
+    import tempfile
+
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    WS.check_schema(schema["verbs"]["workspace.write"]["params"])  # (the real ones are fine)
+    schema["verbs"]["workspace.stat"]["params"]["properties"]["path"]["format"] = "uri"
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(schema, f)
+    try:
+        WS.load_schema(f.name)
+    except ValueError as e:
+        assert "'format'" in str(e) and "workspace.stat" in str(e), e
+    else:
+        raise AssertionError("a schema with an unknown keyword loaded")
+    finally:
+        os.unlink(f.name)
+
+
 def test_through_the_server():
     # (the installed package, whose engine is built: in CI, after
     # pip install engine/py/dist/*.whl; elsewhere it may be absent, and this
