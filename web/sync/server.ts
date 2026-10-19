@@ -43,12 +43,11 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   const url = new URL(req.url);
   const p = url.pathname;
   if (!p.startsWith("/api/sync/")) return null;
-  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB) return err(404, "sync is not enabled here");
-  // (before anything that reads a session: one limit per IP, whatever the request claims)
-  if (env.SYNC_PREAUTH) {
-    const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-    if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests");
-  }
+  // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
+  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
+  // before anything that reads a session: one limit per IP, whatever the request claims
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests");
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages
   if (!sameSite(req)) return err(403, "cross-site request");

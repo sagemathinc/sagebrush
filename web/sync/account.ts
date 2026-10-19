@@ -258,7 +258,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.admit(att.account, true);
     if (!Array.isArray(list) || list.length === 0) throw new SyncError("invalid", "ops");
     if (list.length > LIMITS.opsPerMessage) throw new SyncError("limit", "too many ops", { limit: "ops_per_message", max: LIMITS.opsPerMessage });
-    const wait = this.opsRate.take();
+    // (every op counts, resent or new: LIMIT-321-2)
+    const wait = this.opsRate.take(list.length);
     if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
     return this.ctx.storage.transactionSync(() => {
       let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
