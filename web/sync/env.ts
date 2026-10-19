@@ -44,6 +44,23 @@ export function testMode(env: SyncEnv): boolean {
   return (globalThis as { __SAGEBRUSH_SYNC_TEST__?: boolean }).__SAGEBRUSH_SYNC_TEST__ === true && !!env.SYNC_TEST_PIN_MS;
 }
 
+/**
+ * Tests only: named gates in the Worker, which hold a step (a D1 write) until
+ * the test opens them, as a D1 answer that arrives late would.  The held
+ * request polls on its own timers (workerd refuses a promise resolved from
+ * another request).  Off outside test mode: `gate` then returns at once.
+ */
+const gates = new Set<string>();
+export async function gate(env: SyncEnv, name: string): Promise<void> {
+  if (!testMode(env)) return;
+  for (let i = 0; gates.has(name) && i < 1500; i++) await new Promise((r) => setTimeout(r, 20));
+}
+export function setGate(env: SyncEnv, name: string, on: boolean): void {
+  if (!testMode(env)) return;
+  if (on) gates.add(name);
+  else gates.delete(name);
+}
+
 /** Whether `account` may sync here (§11): only those listed. */
 export function allowed(env: SyncEnv, account: string): boolean {
   return (env.SYNC_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);

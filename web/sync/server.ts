@@ -18,7 +18,7 @@
 import { sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
-import { allowed, testMode, type SyncEnv } from "./env.ts";
+import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
 /** How long before its reservation ends an upload is cut off (§5.4, CORR-5E2-2). */
@@ -238,6 +238,7 @@ export async function register(env: Env, stub: ReturnType<NonNullable<Env["SYNC_
   if (reg?.generation !== generation || reg.state !== "active") return err(409, "conflict", { message: "turning sync on met another change; try again" });
   const c = await stub.confirm({ account, generation });
   if ("error" in c && typeof c.error.detail?.retired === "number") {
+    await gate(env, "register-cleanup");
     await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation = ?3 AND state = 'active'")
       .bind(hash, Math.floor(Date.now() / 1000), generation).run();
   }
@@ -253,11 +254,14 @@ export async function register(env: Env, stub: ReturnType<NonNullable<Env["SYNC_
  */
 async function recordPurge(env: Env, hash: string, r: { state: string; request_id: string; kind?: string; generation?: number; retired?: number }, kind: "self" | "admin"): Promise<void> {
   const db = env.SHARE_DB!;
-  if (r.state === "deleting" && r.generation !== undefined)
+  if (r.state === "deleting" && r.generation !== undefined) {
+    await gate(env, "record-deleting");
     await db.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = ?3 WHERE account_hash = ?1 AND generation = ?4 AND state <> 'purged'").bind(hash, r.request_id, r.kind ?? kind, r.generation).run();
-  else if (r.state === "none" && (r.retired ?? 0) > 0)
+  } else if (r.state === "none" && (r.retired ?? 0) > 0) {
+    await gate(env, "record-none");
     await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
       .bind(hash, Math.floor(Date.now() / 1000), r.request_id, kind, r.retired).run();
+  }
 }
 
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */

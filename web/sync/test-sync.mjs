@@ -24,6 +24,8 @@ const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outl
 const H = "88888888-8888-4888-8888-888888888888"; // allowlisted; its first registration in D1 fails
 const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enable is held after the account object answers, before D1
 const K = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // allowlisted; its first enable is held too, while CoCalc purges it
+const L = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"; // allowlisted; D1 answers held late at the Worker (astra's staging)
+const M = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"; // allowlisted, never synced; CoCalc deletes it while requests are past their session check
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -56,6 +58,9 @@ fake.limits.set(G, sync(1 << 20, 1 << 20));
 fake.limits.set(H, sync(1 << 20, 1 << 20));
 fake.limits.set(I, sync(1 << 20, 1 << 20));
 fake.limits.set(J, sync(1 << 20, 1 << 20));
+fake.limits.set(K, sync(1 << 20, 1 << 20));
+fake.limits.set(L, sync(1 << 20, 1 << 20));
+fake.limits.set(M, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -71,7 +76,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1281,8 +1286,8 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(lcRetry?.record_pending === true && lcRetry.alarm !== null, "while D1 keeps failing, the tombstone keeps its alarm armed for the record");
   await acctE.setFailRecord({ on: false });
   ok(await until(async () => (await rowOf(E))?.state === "purged" && (await acctE.lifecycle())?.record_pending === false), "with nothing else happening, the tombstone writes the record later: D1 says purged");
-  // two purges' records pending at once: generation 7's fails, then 8, registered in the account object
-  // but never in D1, is purged too; each record is kept, and written, for its own generation's row
+  // two purges while D1's record fails: generation 7's, then 8's, registered in the account object but
+  // never in D1; 8's record replaces 7's, and covers its row (LIMIT-B92-1)
   // (and two enables at once, for 7: one generation, both on)
   const both = await Promise.all([post(seE, "/api/sync/v1/enable", {}), post(seE, "/api/sync/v1/enable", {})]);
   const bothB = await Promise.all(both.map((r) => r.json()));
@@ -1295,14 +1300,42 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await rowOf(E))?.state === "deleting" && (await rowOf(E))?.generation === 7 && (await acctE.lifecycle())?.record_pending === true, "(D1: 7, deleting; both records wait)");
   await acctE.setFailRecord({ on: false });
   ok(await until(async () => (await acctE.lifecycle())?.record_pending === false), "(the records are written)");
-  ok((await rowOf(E))?.state === "purged" && (await rowOf(E))?.generation === 7, "7's record survived 8's purge: D1's row of 7 is purged");
+  ok((await rowOf(E))?.state === "purged" && (await rowOf(E))?.generation === 7, "8's record covers 7's, coalesced: D1's row of 7 is purged");
+  // LIMIT-B92-1: many cycles while D1's records fail: the tombstone keeps one record, of constant size
+  await acctE.setFailRecord({ on: true });
+  for (let g = 9; g <= 14; g++) {
+    ok((await (await post(seE, "/api/sync/v1/enable", {})).json()).generation === g && (await del(seE, E)).status === 202 && (await until(async () => (await acctE.lifecycle())?.state === null && (await acctE.lifecycle())?.retired === g)), `(cycle: generation ${g} on and deleted, D1's record failing)`);
+  }
+  const lcMany = await acctE.lifecycle();
+  ok(lcMany?.meta_rows === 2 && lcMany.record_pending === true && (await rowOf(E))?.generation === 14 && (await rowOf(E))?.state === "deleting", "after 6 cycles with D1 failing, the tombstone holds 2 rows (retired, one record): " + lcMany?.meta_rows);
+  // LIMIT-B92-2: each failure waits a capped exponential backoff with jitter; one D1 call per attempt
+  const w0 = lcMany.record_waits.length, c0 = lcMany.record_calls, t0 = lcMany.record_tries;
+  await new Promise((r) => setTimeout(r, 2500));
+  const lcB = await acctE.lifecycle();
+  const waits = lcB.record_waits.slice(w0);
+  const bk = (t) => Math.min(4000, 200 * 2 ** t);
+  ok(waits.length >= 2 && waits.every((w, i) => w >= bk(t0 + i + 1) / 2 - 1 && w <= bk(t0 + i + 1)) && lcB.record_calls - c0 === waits.length, "retries back off exponentially, with jitter, one D1 call each: " + JSON.stringify({ t0, waits }));
+  await acctE.setRecordTries({ tries: 30 });
+  const w1 = lcB.record_waits.length + (waits.length ? 0 : 0);
+  ok(await until(async () => (await acctE.lifecycle()).record_waits.length > (await acctE.lifecycle()).record_waits.length - 1 && (await acctE.lifecycle()).record_tries > 30, 8000), "(an attempt after 30 failures)");
+  const capW = (await acctE.lifecycle()).record_waits.at(-1);
+  ok(capW >= 2000 - 1 && capW <= 4000 && w1 >= 0, "and the backoff is capped (test cap 4 s): " + capW);
+  const lcCap = await acctE.lifecycle();
+  ok(lcCap.alarm !== null && lcCap.alarm >= lcCap.record_retry_at - 5, "the alarm is armed for the record's own retry time, not sooner: " + JSON.stringify([lcCap.alarm - Date.now(), lcCap.record_retry_at - Date.now()]));
+  await acctE.wakeNow();
+  await new Promise((r) => setTimeout(r, 400));
+  const lcEarly = await acctE.lifecycle();
+  ok(lcEarly.record_calls === lcCap.record_calls && lcEarly.alarm >= lcEarly.record_retry_at - 5, "an alarm before the record is due makes no D1 call, and arms again for it");
+  await acctE.setFailRecord({ on: false });
+  ok(await until(async () => (await acctE.lifecycle())?.record_pending === false, 10000), "D1 recovers: the record is written at its next attempt");
+  ok((await rowOf(E))?.state === "purged" && (await rowOf(E))?.generation === 14 && (await acctE.lifecycle())?.meta_rows === 1, "D1's row of 14 is purged; the tombstone holds only retired");
   // CoCalc's purge of an account with no storage: every generation the object retired is purged in D1,
   // and nothing more (a stray row left active, as a lost write would leave it)
   await db.prepare("UPDATE sync_accounts SET state = 'active' WHERE account_hash = ?1").bind(hashOf(E)).run();
   const ridE = crypto.randomUUID();
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: E, request_id: ridE }))).status === 202, "(CoCalc purges E, which holds nothing)");
   const regE6 = await rowOf(E);
-  ok(regE6?.state === "purged" && regE6.generation === 7 && regE6.request_id === ridE, "the account object answers none, retired 8: D1's row of 7 is purged, under CoCalc's request id");
+  ok(regE6?.state === "purged" && regE6.generation === 14 && regE6.request_id === ridE, "the account object answers none, retired 14: D1's row of 14 is purged, under CoCalc's request id");
 
   // CORR-A62-1: I's first enable is answered (generation 1, registering) and held before D1; a delete; the held registration arrives last
   const si = await signIn(I);
@@ -1339,6 +1372,54 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const lastK = await resume(K, 1);
   const regLastK = await rowOf(K);
   ok(lastK.status === 409 && regLastK?.state === "purged" && regLastK.generation === 1 && [401, 403].includes((await put(sk, Buffer.from("K's file"))).status), "the same registration once more, after: D1 stays purged, nothing is taken (the purge signed K out too)");
+  // the guards on late D1 writes, staged with D1 answers held at the Worker (astra's staging of item 11)
+  const gateSet = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  const sl = await signIn(L);
+  const acctL = acctNs.get(acctNs.idFromName("acct:" + hashOf(L)));
+  ok((await (await post(sl, "/api/sync/v1/enable", {})).json()).generation === 1, "(L: generation 1)");
+  await gateSet("record-deleting", true);
+  const dL1 = post(sl, "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
+  ok(await until(async () => (await acctL.lifecycle())?.state === null && (await rowOf(L))?.state === "purged"), "(the purge of 1 finishes and its record marks the row purged, while the deletion's own D1 write waits)");
+  await gateSet("record-deleting", false);
+  ok((await dL1).status === 202 && (await rowOf(L))?.state === "purged", "the deletion's late `deleting` write doesn't take a purged row back");
+  await gateSet("record-none", true);
+  const dL2 = post(sl, "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
+  await new Promise((r) => setTimeout(r, 200));
+  const enL2 = await (await post(sl, "/api/sync/v1/enable", {})).json();
+  await gateSet("record-none", false);
+  const rL2 = await rowOf(L);
+  ok(enL2.generation === 2 && (await dL2).status === 202 && rL2?.state === "active" && rL2.generation === 2 && (await put(sl, Buffer.from("L, generation 2"))).status === 201, "a late `none` write (retired 1) leaves generation 2, registered meanwhile, alone " + JSON.stringify([enL2, rL2]));
+  await gateSet("record-deleting", true);
+  await acctL.setFailRecord({ on: true });
+  const dL3 = post(sl, "/api/sync/v1/delete", { confirm: "delete", generation: 2 });
+  ok(await until(async () => (await acctL.lifecycle())?.retired === 2 && (await acctL.lifecycle())?.state === null) && (await rowOf(L))?.state === "active", "(2 is deleted; its D1 writes wait or fail, so its row still says active)");
+  await gateSet("register-cleanup", true);
+  const late2 = resume(L, 2);
+  await new Promise((r) => setTimeout(r, 300));
+  const enL3 = await (await post(sl, "/api/sync/v1/enable", {})).json();
+  await gateSet("register-cleanup", false);
+  const late2r = await late2;
+  const rL3 = await rowOf(L);
+  ok(enL3.generation === 3 && late2r.status === 403 && rL3?.state === "active" && rL3.generation === 3 && (await put(sl, Buffer.from("L, generation 3"))).status === 201, "a held registration of 2, refused as retired, marks only 2's row: generation 3, registered meanwhile, is untouched " + JSON.stringify([enL3, late2r.status, rL3]));
+  await acctL.setFailRecord({ on: false });
+  await gateSet("record-deleting", false);
+  await dL3;
+  ok(await until(async () => (await acctL.lifecycle())?.record_pending === false) && (await rowOf(L))?.state === "active" && (await rowOf(L))?.generation === 3, "and 2's late writes, when they land, leave 3 alone");
+  // CORR-B92-1: CoCalc's purge leaves the account deleted for good, storage or none: an enable or a
+  // request already past its session check (astra's probe) is refused when it arrives
+  const sm = await signIn(M);
+  const acctM = acctNs.get(acctNs.idFromName("acct:" + hashOf(M)));
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: M, request_id: crypto.randomUUID() }))).status === 202, "(CoCalc purges M, which never synced)");
+  const lcM = await acctM.lifecycle();
+  const lateEnM = await acctM.enable({ account: M, hash: hashOf(M) });
+  const lateResM = await acctM.reserve({ account: M, sha256: sha(Buffer.from("m")), size: 1 });
+  ok(lcM?.deleted === true && lcM.state === null && lateEnM?.error?.code === "forbidden" && lateResM?.error?.code === "forbidden" && (await acctM.lifecycle())?.state === null && (await rowOf(M)) === null,
+    "an enable and an upload that were past their session check, arriving after, are refused: no storage, no row");
+  ok([401, 403].includes((await post(sm, "/api/sync/v1/enable", {})).status) && (await acctM.lifecycle())?.state === null, "and so is every later enable");
+  const acctB = acctNs.get(acctNs.idFromName("acct:" + hashOf(B)));
+  const lateEnB = await acctB.enable({ account: B, hash: hashOf(B) });
+  const lateConfB = await acctB.confirm({ account: B, generation: 2 });
+  ok((await acctB.lifecycle())?.deleted === true && lateEnB?.error?.code === "forbidden" && lateConfB?.error?.code === "forbidden" && (await acctB.lifecycle())?.state === null, "an account CoCalc deleted with storage keeps the fence through its tombstone: a late enable or confirm is refused");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

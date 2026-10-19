@@ -148,6 +148,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private exists(): boolean {
     return this.hasMeta() && this.get("account_id") !== undefined;
   }
+  /** Whether CoCalc deleted this account: for good, whatever is stored (CORR-B92-1). */
+  private deleted(): boolean {
+    return this.hasMeta() && this.get("deleted") !== undefined;
+  }
   /** The highest generation this object has deleted (0: none). */
   private retired(): number {
     return this.hasMeta() ? Number(this.get("retired") ?? 0) : 0;
@@ -173,6 +177,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
+      if (this.deleted()) throw new SyncError("forbidden", "this account was deleted");
       const had = this.get("account_id");
       if (had !== undefined) {
         if (had !== a.account) throw new SyncError("forbidden", "not this account");
@@ -200,7 +205,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return attempt(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       if (!Number.isSafeInteger(a.generation) || a.generation < 1) throw new SyncError("invalid", "generation");
-      if (a.generation <= this.retired()) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again", { retired: this.retired() });
+      if (a.generation <= this.retired() || (this.deleted() && !this.exists())) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again", { retired: this.retired() });
       if (!this.exists() || this.get("account_id") !== a.account || Number(this.get("generation")) !== a.generation) throw new SyncError("conflict", "another registration holds this account's storage; try again");
       if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
       if (this.state() === "registering") this.set("state", "active");
@@ -792,8 +797,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * none: whatever is here goes.  With no storage, nothing is held, and
    * nothing can be until an enable makes the next generation (`none`, with the
    * highest retired, every one of which the Worker may mark purged in D1).
+   *
+   * CoCalc's purge also leaves this object deleted for good, storage or none
+   * (CORR-B92-1): an enable or a request already past its session check when
+   * the account was deleted, arriving after, is refused, as is every one
+   * after it.  CoCalc never reuses an account id.
    */
   async purge(a: { request_id: string; kind: "self" | "admin"; generation?: number }): Promise<{ state: string; request_id: string; kind?: string; generation?: number; retired?: number }> {
+    if (a.kind === "admin")
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
+        this.set("deleted", 1);
+      });
     if (!this.exists()) return { state: "none", request_id: a.request_id, retired: this.retired() };
     const generation = Number(this.get("generation"));
     if (a.generation !== undefined && a.generation !== generation) return { state: "stale", request_id: a.request_id, generation };
@@ -874,48 +889,63 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.ctx.storage.transactionSync(() => {
       // (the high-water mark only rises: a purge of an older generation can't lower it)
       const retired = Math.max(this.retired(), generation);
-      // (an earlier purge's record not yet written stays, beside this one: one per generation)
-      const pending = this.sql.exec("SELECT k, v FROM meta WHERE k LIKE 'purged_record:%'").toArray() as Row[];
+      const deleted = this.deleted();
       const tables = (this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as Row[]).map((r) => String(r.name));
       for (const t of tables) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
       this.sql.exec("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)");
       this.sql.exec("INSERT INTO meta (k, v) VALUES ('retired', ?)", String(retired));
-      for (const r of pending) this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?)", r.k, r.v);
-      this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", "purged_record:" + generation, record);
+      // (one record, whatever came before: an earlier one not yet written is covered by this one, LIMIT-B92-1)
+      this.sql.exec("INSERT INTO meta (k, v) VALUES ('purged_record', ?)", record);
+      if (deleted) this.sql.exec("INSERT INTO meta (k, v) VALUES ('deleted', '1')");
     });
     this.alarmAt = null;
-    if (!(await this.recordPurged())) this.wakeBy(Date.now() + this.recordRetryMs());
+    await this.recordPurged();
+    const due = this.recordDue();
+    if (due !== null) this.wakeBy(due);
     return true;
   }
 
   /**
-   * Write the D1 records of finished purges, each that isn't yet: only its
-   * generation's row (a registration since, which raised it, is left alone),
-   * whatever its state, as the deletion is done.  True once nothing waits.
+   * Write the D1 record of the last finished purge, if it is still to be
+   * written and due (CORR-02C-1).  There is one record, whatever the number of
+   * purges (LIMIT-B92-1): it names the newest generation deleted, whose row
+   * gets its counts and request id, whatever its state; the row of any older
+   * generation, all of them retired, that isn't purged yet is marked purged
+   * too, keeping the request id its deletion recorded.  Neither touches a row
+   * a registration since has moved on.  One D1 call per attempt; a failure
+   * waits a capped exponential backoff with jitter (LIMIT-B92-2).
    */
-  private async recordPurged(): Promise<boolean> {
-    if (!this.hasMeta()) return true;
+  private async recordPurged(): Promise<void> {
+    const r = this.hasMeta() ? this.get("purged_record") : undefined;
+    if (r === undefined) return;
     const db = this.env.SHARE_DB;
-    if (!db) return true;
-    let all = true;
-    for (const { k, v: r } of this.sql.exec("SELECT k, v FROM meta WHERE k LIKE 'purged_record:%'").toArray() as Row[]) {
-      const v = JSON.parse(String(r)) as { hash: string; generation: number; finished: number; request_id: string; kind: string; docs: number; bytes: number };
-      try {
-        if (testMode(this.env) && this.failRecord) throw new Error("D1 unavailable (test seam)");
-        await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND generation = ?7")
-          .bind(v.hash, v.finished, v.request_id, v.kind, v.docs, v.bytes, v.generation).run();
-        this.sql.exec("DELETE FROM meta WHERE k = ? AND v = ?", k, r);
-      } catch {
-        all = false;
-      }
+    if (!db) return;
+    const v = JSON.parse(r) as { hash: string; generation: number; finished: number; request_id: string; kind: string; docs: number; bytes: number; tries?: number; retry_at?: number };
+    const now = Date.now();
+    if ((v.retry_at ?? 0) > now) return;
+    try {
+      if (testMode(this.env)) this.recordCalls++;
+      if (testMode(this.env) && this.failRecord) throw new Error("D1 unavailable (test seam)");
+      await db.batch([
+        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND generation = ?7")
+          .bind(v.hash, v.finished, v.request_id, v.kind, v.docs, v.bytes, v.generation),
+        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation < ?3 AND state <> 'purged'")
+          .bind(v.hash, v.finished, v.generation),
+      ]);
+      // (only the record written: one for a later purge, written meanwhile, stays)
+      this.sql.exec("DELETE FROM meta WHERE k = 'purged_record' AND v = ?", r);
+    } catch {
+      const tries = (v.tries ?? 0) + 1;
+      const wait = Math.round(this.backoff(tries) * (0.5 + Math.random() / 2));
+      if (testMode(this.env)) this.recordWaits.push(wait);
+      // (unless a later purge's record replaced it meanwhile)
+      if (this.get("purged_record") === r) this.set("purged_record", JSON.stringify({ ...v, tries, retry_at: Date.now() + wait }));
     }
-    return all && !this.pendingRecords();
   }
-  private pendingRecords(): boolean {
-    return this.hasMeta() && this.one("SELECT 1 AS x FROM meta WHERE k LIKE 'purged_record:%' LIMIT 1") !== undefined;
-  }
-  private recordRetryMs(): number {
-    return testMode(this.env) ? 200 : 30_000;
+  /** When the pending D1 record is next due, or null if none waits. */
+  private recordDue(): number | null {
+    const r = this.hasMeta() ? this.get("purged_record") : undefined;
+    return r === undefined ? null : Math.max(Date.now(), Number((JSON.parse(r) as { retry_at?: number }).retry_at ?? 0));
   }
 
   // ---- blobs (§5.4)
@@ -1113,15 +1143,32 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (testMode(this.env)) this.failRecord = a.on;
   }
   private failRecord = false;
+  private recordCalls = 0;
+  private recordWaits: number[] = [];
+  /** Tests only: fire the alarm now, before anything is due. */
+  async wakeNow(): Promise<void> {
+    if (testMode(this.env)) this.wakeBy(Date.now());
+  }
+  /** Tests only: the pending record's tries, as if it had failed that often (to reach the backoff's cap). */
+  async setRecordTries(a: { tries: number }): Promise<void> {
+    const r = testMode(this.env) && this.hasMeta() ? this.get("purged_record") : undefined;
+    if (r !== undefined) this.set("purged_record", JSON.stringify({ ...JSON.parse(r), tries: a.tries }));
+  }
   /** Tests only: the lifecycle this object holds, a tombstone's too. */
-  async lifecycle(): Promise<{ state: string | null; generation: number | null; retired: number; record_pending: boolean; alarm: number | null } | null> {
+  async lifecycle(): Promise<{ state: string | null; generation: number | null; retired: number; deleted: boolean; record_pending: boolean; record_tries: number; record_calls: number; record_retry_at: number; record_waits: number[]; meta_rows: number; alarm: number | null } | null> {
     if (!testMode(this.env)) return null;
     const live = this.exists();
     return {
       state: live ? this.state() : null,
       generation: live ? Number(this.get("generation")) : null,
       retired: this.retired(),
-      record_pending: this.pendingRecords(),
+      deleted: this.deleted(),
+      record_pending: this.recordDue() !== null,
+      record_tries: this.hasMeta() && this.get("purged_record") ? Number(JSON.parse(this.get("purged_record")!).tries ?? 0) : 0,
+      record_calls: this.recordCalls,
+      record_retry_at: this.hasMeta() && this.get("purged_record") ? Number(JSON.parse(this.get("purged_record")!).retry_at ?? 0) : 0,
+      record_waits: [...this.recordWaits],
+      meta_rows: this.hasMeta() ? Number(this.one("SELECT COUNT(*) AS n FROM meta")!.n) : 0,
       alarm: await this.ctx.storage.getAlarm(),
     };
   }
@@ -1205,7 +1252,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const now = Date.now();
     const t: number[] = [];
     // (a finished purge's D1 record still unwritten: a tombstone has nothing else to wait for)
-    if (this.pendingRecords()) t.push(now + this.recordRetryMs());
+    const record = this.recordDue();
+    if (record !== null) t.push(record);
     if (!this.exists()) {
       if (t.length) this.wakeBy(t[0]);
       return;
