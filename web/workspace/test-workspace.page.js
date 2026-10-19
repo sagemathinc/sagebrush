@@ -317,6 +317,25 @@ async function recovery() {
   const all = await paths(w);
   check(all.join() === "/Recovered,/Recovered/orphan.txt", "the retry makes one entry, reusing the bytes: " + all.join());
   check(dec((await w.read("/Recovered/orphan.txt")).content) === "only copy" && (await rawKeys(w.ws, "trash")).length === 0, "…readable, and out of Trash");
+  // a stop after the entry but before the Trash copy is dropped (as astra injected): the retry only finishes (CORR-094-1)
+  await rawPut(w.ws, "trash", enc("second"), "/Trash/after-entry.txt");
+  const adopt2 = w.adopt.bind(w);
+  w.adopt = async (folder, base, ext, fields, also = {}) => { await adopt2(folder, base, ext, fields, { ...also, dropTrash: [], dropMeta: [] }); throw new Error("injected stop after the entry"); };
+  try { await W.migrate(w, readOnly(new Map())); } catch {}
+  w.adopt = adopt2;
+  check((await w.stat("/Recovered/after-entry.txt")) !== undefined && (await rawGet(w.ws, "trash", "/Trash/after-entry.txt")) !== undefined, "(stopped with the entry made and the Trash copy still there)");
+  await W.migrate(w, readOnly(new Map()));
+  await W.migrate(w, readOnly(new Map()));
+  const rec2 = (await paths(w, "/Recovered")).filter((p) => p.includes("after-entry"));
+  check(rec2.join() === "/Recovered/after-entry.txt", "the retry finishes that recovery, adding no second entry: " + rec2.join());
+  check((await rawGet(w.ws, "trash", "/Trash/after-entry.txt")) === undefined && dec((await w.read("/Recovered/after-entry.txt")).content) === "second", "…the Trash copy dropped, the bytes readable");
+  // a user's own file with the same bytes, at the free name, is not taken for a recovery's
+  await rawPut(w.main, "files", enc("same"), "/Recovered/twin.txt");
+  await w.adopt("/Recovered", "twin", ".txt", { kind: "file", ref: "/Recovered/twin.txt", size: 4, rev: 0 }, { at: "/Recovered/twin.txt" });
+  await rawPut(w.ws, "trash", enc("same"), "/Trash/twin.txt");
+  await W.migrate(w, readOnly(new Map()));
+  const twins = (await paths(w, "/Recovered")).filter((p) => p.includes("twin"));
+  check(twins.join() === "/Recovered/twin (2).txt,/Recovered/twin.txt", "equal bytes don't make a user's file a recovery's: " + twins.join());
   // an entry naming no contents is shown missing
   await new Promise((ok) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/broken.txt", kind: "file", ref: null, created: 0, updated: 0 }); tx.oncomplete = ok; });
   await W.migrate(w, readOnly(new Map()));
@@ -452,8 +471,31 @@ async function versions() {
   w2.close();
 }
 
+async function folderLimit() {
+  // a folder holds at most maxFolderEntries of its own (LIMIT-094-1); folders apart don't share it
+  const w = await fresh({ ...W.LIMITS, maxFolderEntries: 3 });
+  for (const i of [1, 2, 3]) await w.create(`/f/${i}.txt`, { content: "" });
+  check(await fails(w.create("/f/4.txt", { content: "" }), "limit"), "a fourth entry in a folder of three is refused");
+  check(!(await w.stat("/f/4.txt")) && (await rawKeys(w.main, "files")).length === 3, "…and nothing of it kept");
+  check(await fails(w.create("/f/sub/x.txt", { content: "" }), "limit"), "…a folder made on the way counts too");
+  for (const i of [1, 2, 3]) await w.create(`/g/${i}.txt`, { content: "" });
+  check((await w.list("/g")).length === 3, "another folder has its own room");
+  check(await fails(w.rename("/g/1.txt", "/f/moved.txt"), "limit"), "a move into a full folder is refused");
+  check((await w.stat("/g/1.txt")) !== undefined, "…nothing moved");
+  await w.rename("/f/1.txt", "/f/one.txt");
+  check((await w.stat("/f/one.txt")) !== undefined, "a rename within a full folder is fine");
+  await w.create("/top.txt", { content: "" });
+  check(await fails(w.create("/top2.txt", { content: "" }), "limit"), "the top folder is bounded too (f, g, top.txt)");
+  const deep = await fresh({ ...W.LIMITS, maxFolderEntries: 3 });
+  for (let i = 0; i < 5; i++) await deep.create(`/d/s${i}/x.txt`, { content: "" }).catch(() => {});
+  check((await deep.list("/d")).length === 3, "a folder with many below it, but only its own counted: " + (await deep.list("/d")).length);
+  check((await deep.list("/d/s0", {})).length === 1, "…its subfolders hold their own");
+  w.close();
+  deep.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, edges, noLocks, rollback, dropping, migrationFull]) {
+  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, edges, noLocks, rollback, dropping, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
