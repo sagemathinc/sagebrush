@@ -178,7 +178,9 @@ try {
   // (fromhtml.ts).  Anything else in HTML is refused, and nothing of it runs.
   at = "opened again";
   errors = [];
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  // (?workspace=0: opened into the board shown, the in-place path; with the workspace a file is
+  // uploaded and opened as a copy, test-workspace-upload.mjs)
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&workspace=0` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const docJson = () => ev("JSON.stringify(window.sagebrush.board.snapshot().doc)");
   const sayText = () => ev("document.querySelector('[data-sbb=say]').textContent");

@@ -60,7 +60,9 @@ const DOC = { title: "Links", refBase: "https://github.com/o/r/blob/main/", intr
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  // (?workspace=0: a dropped file opens in the board shown, the in-place path whose races this
+  // tests (the library's); with the workspace it is uploaded instead, test-workspace-upload.mjs)
+  await send("Page.navigate", { url: `${base}board/?runner=0&workspace=0` });
   if (!(await until(`${B}?.snapshot().items.length > 0`, 60000))) throw new Error("the board did not open");
   await ev("history.replaceState(null, '', location.pathname + location.search)");
   await ev(`${B}.load(${JSON.stringify(DOC)}).then(() => 1)`);

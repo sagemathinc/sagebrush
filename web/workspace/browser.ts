@@ -9,7 +9,7 @@
 // deletes older versions in it; the foot's meter opens the Storage panel
 // (preview.ts, step 2b).
 import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
-import { TRASH, freePath, join, nameOf, parentOf, splitExt, within } from "./paths";
+import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 
 export type BrowserHost = {
@@ -19,8 +19,10 @@ export type BrowserHost = {
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
+  /** A data file of a kind the page recognises opened as a document: a converted copy beside it (upload.ts, design §3); none: not offered. */
+  openAs?(e: Entry, as: DocKind): void | Promise<void | string>;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
-  upload?(files: File[], folder: string): Promise<void>;
+  upload?(files: File[], folder: string): Promise<void | string>;
   /** An entry about to be renamed here: its rename asked for anywhere else on the page is superseded. */
   renaming?(e: Entry): void;
   /** Whether the page has this document open and retitles it itself (in renamed), saved with its other changes. */
@@ -149,12 +151,12 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast. */ say(text: string): void };
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -183,16 +185,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   root.append(head, search, toastEl, tree, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void) => {
-    toast = { text, undo };
+  const say = (text: string, undo?: () => void, sticky = false) => {
+    toast = { text, undo, sticky };
     renderToast();
-    setTimeout(() => { if (toast?.text === text) { toast = null; renderToast(); } }, 8000);
+    if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
     const t = h("div", { className: "ftoast", role: "status" }, h("span", { textContent: toast.text }));
     if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
+    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
     toastEl.append(t);
   };
   const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
@@ -357,6 +360,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
     if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
+    // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays)
+    const as = e.kind === "file" && host.openAs ? openableAs(nameOf(e.path)) : null;
+    if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
     if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)]);
@@ -458,7 +464,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     if (refused.length) say(`${folder === "/" ? "The top folder" : folder} is full (${LIMITS.maxFolderEntries} entries): not added: ${refused.slice(0, 5).join(", ")}${refused.length > 5 ? ` and ${refused.length - 5} more` : ""}`);
     if (!files.length) return;
-    if (host.upload) return host.upload(files, folder).then(refresh);
+    // (an upload's summary, its refusals in it, kept until closed)
+    if (host.upload) return host.upload(files, folder).then((m) => { if (m) say(m, undefined, /not added/i.test(m)); refresh(); });
     for (const f of files) {
       if (f.size > LIMITS.maxFileBytes) { refused.push(f.name); continue; }
       try { await w.putFile(join(folder, f.name), new Uint8Array(await f.arrayBuffer())); } catch (err) { refused.push(f.name); fail(err); }
@@ -509,6 +516,6 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     el: root,
     refresh,
     destroy() { unwatch(); root.remove(); },
-    say: (text: string) => say(text),
+    say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
   };
 }
