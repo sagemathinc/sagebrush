@@ -41,13 +41,20 @@
 //   grants   what each document may do with the person's files (step 3;
 //            made now so that no later upgrade is needed): keyPath [doc,
 //            scope], with indexes byDoc and lastUsed
+//
+// Version 3 (design/capabilities.md §3, CORR-CAP-3):
+//
+//   entries' index byNfc, on each entry's `nkey` (its folder and the NFC
+//            form of its name): names that look the same in one folder
+//            found by one bounded lookup.  Entries made before have no
+//            nkey until the migrator gives them one
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 2;
+export const WS_VERSION = 3;
 export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
-  return openDb(name, WS_VERSION, (db, old) => {
+  return openDb(name, WS_VERSION, (db, old, tx) => {
     if (old < 1) {
       const entries = db.createObjectStore("entries", { keyPath: "path" });
       entries.createIndex("byRef", ["kind", "ref"]);
@@ -67,6 +74,7 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       grants.createIndex("byDoc", "doc");
       grants.createIndex("lastUsed", "lastUsed");
     }
+    if (old < 3) tx.objectStore("entries").createIndex("byNfc", "nkey");
   }, onClose, ms);
 }
 

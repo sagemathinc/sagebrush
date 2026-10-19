@@ -873,7 +873,7 @@ const legacyLeft = async (w) => (await w.list("/", { recursive: true })).concat(
 async function migrateV1() {
   const big = "B".repeat(70000);
   const w = await v1([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]], [["/Trash/t.txt", "in trash", "/t.txt"]]);
-  check(w.ws.version === 2 && w.ws.objectStoreNames.contains("fileBytes") && w.ws.objectStoreNames.contains("grants"), "a version 1 workspace opened: upgraded to version 2, its stores added");
+  check(w.ws.version === 3 && w.ws.objectStoreNames.contains("fileBytes") && w.ws.objectStoreNames.contains("grants"), "a version 1 workspace opened: upgraded to the current version, its stores added");
   check((await legacyLeft(w)) === 4 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing moved by the upgrade itself");
   check(dec((await w.read("/L/a.txt")).content) === "AAA" && dec((await w.read("/Trash/t.txt")).content) === "in trash", "files not yet moved are read where they are (and Trash's)");
   check((await w.dataFiles()).map(([p]) => p).sort().join() === "/L/a.txt,/L/big.bin,/top.csv", "…and given to a notebook's interpreter (dataFiles: not Trash's)");
@@ -1302,18 +1302,64 @@ async function lookalikes() {
   check(await fails(w.mkdir("/résumé"), "exists"), "…a folder too");
   await w.create("/other.txt", { content: "o" });
   check(await fails(w.rename("/other.txt", decomposed), "exists"), "…and a rename to one");
+  // every name, ASCII included, in both directions (astra's CORR-9A3-1): U+212A KELVIN SIGN is "K" in NFC
+  await w.create("/K.txt", { content: "k" });
+  check(await fails(w.create("/K.txt", { content: "x" }), "exists") && await fails(w.mkdir("/K.txt"), "exists") && await fails(w.rename("/other.txt", "/K.txt"), "exists"), "a name normalizing to an ASCII one there (U+212A next to K): refused, by create, mkdir and rename");
+  await w.create("/Km.txt", { content: "k" }).catch(() => {});
+  check(!!(await w.stat("/Km.txt")) && await fails(w.create("/Km.txt", { content: "x" }), "exists"), "…and an ASCII name whose lookalike is there first");
+  await w.create("/à.txt", { content: "a" });
+  check(await fails(w.create("/à.txt", { content: "x" }), "exists"), "U+0340 (normalizing to U+0300) next to its composed form: refused");
+  // a move carries its key: the rule then holds in the new folder, and no longer in the old
+  await w.create("/mv/r\u00e9.txt", { content: "m" });
+  await w.rename("/mv/r\u00e9.txt", "/mv2/r\u00e9.txt");
+  check(await fails(w.create("/mv2/re\u0301.txt", { content: "x" }), "exists") && !!(await w.create("/mv/re\u0301.txt", { content: "y" })), "a rename carries the name's key: refused next to it in its new folder, free in its old");
   await w.create("/elsewhere" + decomposed, { content: "3" });
   check(!!(await w.stat("/elsewhere" + decomposed)), "the same name in another folder is fine");
-  check(!!(await w.create("/Cafe.txt", { content: "c" })) && !!(await w.create("/cafe.txt", { content: "c" })), "ASCII names aren't looked at (letter case is another name)");
-  // lookalikes made before this rule: listed for the Storage panel; both keep working
-  await new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: decomposed, kind: "file", ref: decomposed, size: 1, rev: 0, fid: "dddddddddddddddd", created: 1, updated: 1 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  check(!!(await w.create("/Cafe.txt", { content: "c" })) && !!(await w.create("/cafe.txt", { content: "c" })), "letter case is another name");
+  // lookalikes made before this rule (no nkey yet): given theirs by the migrator, then listed; both keep working
+  const raw = (path) => new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path, kind: "file", ref: path, size: 1, rev: 0, fid: [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join(""), created: 1, updated: 1 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await raw(decomposed);
+  await raw("/K2K.txt");
+  await raw("/K2K.txt");
+  check((await w.usage()).lookalikes.length === 0, "(before the migrator gives them their key, the index doesn't list them)");
+  await W.startMigrator(w);
   const u = await w.usage();
-  check(u.lookalikes.length === 1 && u.lookalikes[0].join() === [composed, decomposed].sort().join(), "names that look the same, made before: listed together: " + JSON.stringify(u.lookalikes));
+  const groups = u.lookalikes.map((g) => g.join()).sort();
+  check(groups.length === 2 && groups.includes([composed, decomposed].sort().join()) && groups.includes(["/K2K.txt", "/K2K.txt"].sort().join()), "names that look the same, made before: listed together, ASCII ones too: " + JSON.stringify(u.lookalikes));
+  // capped: groups and their members, the rest counted
+  const capped = await w.lookalikeGroups(1, 1);
+  check(capped.lookalikes.length === 1 && capped.lookalikes[0].length === 1 && capped.lookalikesMore.groups === 1 && capped.lookalikesMore.members === 1, "the list is capped, groups and members both, the rest counted: " + JSON.stringify(capped));
+  w.close();
+}
+
+async function lookalikesAtScale() {
+  // the largest workspace (daybreak2's LIMIT-CAP1B-1): 100,000 entries, 10,000 of them in one folder; a
+  // lookalike check is one bounded lookup, and the Storage list a cursor: their longest task is measured
+  const w = await fresh();
+  const PATHS = [];
+  for (let i = 0; i < 10000; i++) PATHS.push(`/f${String(i).padStart(5, "0")}.txt`);
+  for (let d = 0; d < 9; d++) for (let i = 0; i < 9999; i++) PATHS.push(`/d${d}/g${String(i).padStart(5, "0")}.txt`);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"), st = tx.objectStore("entries"); for (let d = 0; d < 9; d++) st.put({ path: `/d${d}`, kind: "folder", ref: null, created: 1, updated: 1, fid: "f".repeat(15) + d, nkey: W.nkeyOf(`/d${d}`) }); for (const p of PATHS) st.put({ path: p, kind: "file", ref: p, size: 0, rev: 0, fid: "0".repeat(16), created: 1, updated: 1, migrated: true, nkey: W.nkeyOf(p) }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  let longest = 0;
+  const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+  try { po.observe({ type: "longtask" }); } catch {}
+  const big = await W.Workspace.open({ name: `ws-test-${n}`, mainName: `main-test-${n}`, limits: { ...W.LIMITS, maxEntries: 200000, maxFolderEntries: 20000 } });
+  const t0 = performance.now();
+  await big.create("/café.txt", { content: "1" });
+  const r = await fails(big.create("/café.txt", { content: "2" }), "exists");
+  const t1 = performance.now();
+  const u = await big.usage();
+  const t2 = performance.now();
+  await new Promise((ok) => setTimeout(ok, 100));
+  po.disconnect();
+  check(r && u.lookalikes.length === 0, "at 100,000 entries (10,000 in one folder): a lookalike refused by the index: " + JSON.stringify({ create: Math.round(t1 - t0), usage: Math.round(t2 - t1) }));
+  check(longest < 1000, `…its longest task under 1 s: ${Math.round(longest)} ms (create ${Math.round(t1 - t0)} ms, usage ${Math.round(t2 - t1)} ms)`);
+  big.close();
   w.close();
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, provenance, lookalikes]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, provenance, lookalikes, lookalikesAtScale]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
