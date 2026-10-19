@@ -271,7 +271,7 @@ def test_one_chat_next_at_a_time():
     time.sleep(0.2)
     assert threading.active_count() - before == 1, threading.active_count() - before
     over = [json.loads(x) for x in srv3.out.getvalue().splitlines()]
-    assert len(over) == mcp_server.MAX_CALLS + 4 + 3 and all(r["error"]["code"] == -32600 for r in over), over
+    assert len(over) == mcp_server.MAX_CALLS + 4 + 4 and all(r["error"]["code"] == -32600 for r in over), over
     assert srv3.calls == 1 and list(srv3.running) == ["same"]
     # the others still fill the cap, and no more
     for i in range(mcp_server.MAX_CALLS + 2):
@@ -287,6 +287,63 @@ def test_one_chat_next_at_a_time():
     for t in srv3.threads:
         t.join(10)
     assert "error" not in json.loads(srv3.out.getvalue().splitlines()[-1])
+
+
+def test_malformed_calls_take_no_slot():
+    """CORR-311-1 (astra): a tools/call whose params are not an object (or
+    whose name is not a string, or arguments not an object) is refused before
+    admission; and an admitted call gives its slot back however its thread
+    ends.  More malformed calls than MAX_CALLS, then a valid call still runs.
+    A request whose id is null is refused, not taken for a notification."""
+    try:
+        from sagebrush import mcp_server
+    except Exception as e:
+        if os.environ.get("CI"):
+            raise
+        print("  (the server part skipped: %s)" % e)
+        return
+    srv = mcp_server.Server(io.StringIO())
+    srv.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "codex"}}})
+    bad = [["not an object"], "x", 7, {"arguments": {}}, {"name": 3}, {"name": "chat_next", "arguments": [1]}, {"name": "chat_next", "arguments": "x"}]
+    n = mcp_server.MAX_CALLS + 4
+    srv.out.seek(0)
+    srv.out.truncate()
+    for i in range(n):
+        srv.handle({"jsonrpc": "2.0", "id": "b%d" % i, "method": "tools/call", "params": bad[i % len(bad)]})
+    for t in srv.threads:
+        t.join(10)
+    got = [json.loads(x) for x in srv.out.getvalue().splitlines()]
+    assert len(got) == n and all(r["error"]["code"] == -32602 for r in got), got
+    assert srv.calls == 0 and not srv.running
+    # an admitted call whose worker fails, however early, gives its slot back
+    real = srv._tool_call
+
+    def broken(rid, params):
+        raise AttributeError("extraction failed")
+    srv._tool_call = broken
+    srv.out.seek(0)
+    srv.out.truncate()
+    for i in range(n):
+        srv.handle({"jsonrpc": "2.0", "id": "w%d" % i, "method": "tools/call", "params": {"name": "chat_next", "arguments": {"timeout": 0}}})
+        for t in srv.threads:
+            t.join(10)
+    got = [json.loads(x) for x in srv.out.getvalue().splitlines()]
+    assert len(got) == n and all(r["error"]["code"] == -32603 for r in got), got
+    assert srv.calls == 0 and not srv.running
+    srv._tool_call = real
+    srv.out.seek(0)
+    srv.out.truncate()
+    srv.handle({"jsonrpc": "2.0", "id": "ok", "method": "tools/call", "params": {"name": "chat_next", "arguments": {"timeout": 0}}})
+    for t in srv.threads:
+        t.join(10)
+    r = json.loads(srv.out.getvalue().splitlines()[-1])
+    assert r["id"] == "ok" and "result" in r and not r["result"]["isError"], r
+    # a null id
+    srv.out.seek(0)
+    srv.out.truncate()
+    srv.handle({"jsonrpc": "2.0", "id": None, "method": "tools/call", "params": {"name": "chat_next", "arguments": {"timeout": 0}}})
+    r = json.loads(srv.out.getvalue().splitlines()[-1])
+    assert r["id"] is None and r["error"]["code"] == -32600 and srv.calls == 0, r
 
 
 def test_text_cap_in_bytes():

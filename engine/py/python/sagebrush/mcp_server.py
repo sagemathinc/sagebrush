@@ -857,13 +857,22 @@ class Server:
         return self.protocol >= STRUCTURED_SINCE
 
     def handle_tool_call(self, rid, params):
+        # (the admitted call's slot is given back however its thread ends,
+        # extraction included; astra's CORR-311-1)
+        try:
+            self._tool_call(rid, params)
+        except Exception as e:
+            self.error(rid, -32603, "%s: %s" % (type(e).__name__, e))
+        finally:
+            self.done(rid)
+
+    def _tool_call(self, rid, params):
         name = params.get("name")
         args = params.get("arguments") or {}
         try:
             content, structured, is_error = self.call_tool(name, args, rid)
         except KeyError:
             self.error(rid, -32602, "unknown tool: %s" % name)
-            self.done(rid)
             return
         except Exception as e:
             kind = ("invalid_arguments" if isinstance(e, _Invalid) else "interrupted" if isinstance(e, _Cancelled)
@@ -873,13 +882,10 @@ class Server:
             content, is_error = [_text(message)], True
             structured = {"result": None, "text": message, "status": "unknown", "assumes": [],
                           "error": {"type": kind, "exception": None if ours else type(e).__name__, "message": str(e), "traceback": ""}}
-        try:
-            out = {"content": content, "isError": is_error}
-            if self.structured():
-                out["structuredContent"] = structured
-            self.reply(rid, out)
-        finally:
-            self.done(rid)
+        out = {"content": content, "isError": is_error}
+        if self.structured():
+            out["structuredContent"] = structured
+        self.reply(rid, out)
 
     def done(self, rid):
         with self.state:
@@ -894,6 +900,11 @@ class Server:
         params = msg.get("params") or {}
         if method is None:
             return  # a response to us: nothing is ever requested
+        if rid is None and "id" in msg:
+            # (a request whose id is null: refused, not taken for a notification,
+            # which has no id at all; astra on 311f54e0)
+            self.error(None, -32600, "invalid request: the id is null")
+            return
         if rid is None:
             # notifications
             if method == "notifications/cancelled":
@@ -924,6 +935,11 @@ class Server:
             else:  # (title is in the protocol from 2025-06-18 too)
                 self.reply(rid, {"tools": [{k: v for k, v in t.items() if k != "title"} for t in TOOLS]})
         elif method == "tools/call":
+            # (malformed params are refused before admission: they never take a slot; astra's CORR-311-1)
+            if not (isinstance(params, dict) and isinstance(params.get("name"), str)
+                    and isinstance(params.get("arguments", {}), (dict, type(None)))):
+                self.error(rid, -32602, "invalid params: an object with name, a string, and arguments, an object")
+                return
             with self.state:
                 # (an id already in flight is refused: otherwise one id repeated would
                 # start any number of threads under one entry; daybreak2, LIMIT-BF6-1)
