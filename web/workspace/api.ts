@@ -337,11 +337,13 @@ export class Workspace {
 
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
-  async remove(p: string): Promise<Entry> {
+  /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">): Promise<Entry> {
     const q = path(p);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.locked(async () => {
-      await this.mustStat(q);
+      const cur = await this.mustStat(q);
+      if (expect && (cur.kind !== expect.kind || cur.created !== expect.created || cur.fid !== expect.fid || (cur.kind !== "file" && cur.ref !== expect.ref))) throw new WorkspaceError("conflict", `${q} was moved or replaced meanwhile`);
       const taken = new Set((await this.list(TRASH)).map((x) => x.path));
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));

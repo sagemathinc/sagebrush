@@ -312,26 +312,8 @@
 <footer>
   <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a> · <a href="/THIRD-PARTY-NOTICES.txt">Licenses</a></p>
 </footer>
-<div id="filemenu" class="menu" role="menu" aria-label="Notebook" hidden>
-  <button role="menuitem" data-f="new">New notebook</button>
-  <button role="menuitem" data-f="whiteboard" title="A new board, in this notebook's language, ready to write in">New whiteboard</button>
-  <button role="menuitem" data-f="open">Open…</button>
-  <button role="menuitem" data-f="examples">Examples…</button>
-  <button role="menuitem" data-f="openfile" hidden>Open file…</button>
-  <button role="menuitem" data-f="saveas" hidden>Save as…</button>
-  <button role="menuitem" data-f="duplicate">Duplicate</button>
-  <hr>
-  <button role="menuitem" data-f="ipynb">Download .ipynb</button>
-  <button role="menuitem" data-f="py">Download .py</button>
-  <button role="menuitem" data-f="marimo" title="A marimo notebook (one function per cell), which marimo opens">Download as marimo (.py)</button>
-  <button role="menuitem" data-f="bundle" title="The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version">Download with history (.sbreplay)</button>
-  <button role="menuitem" data-f="import">Upload .ipynb, .py or .sbreplay…</button>
-  <hr>
-  <button role="menuitem" data-f="print">Print or save as PDF…</button>
-  <button role="menuitem" data-f="share" id="sharemenu">Copy share link</button>
-  <button role="menuitem" data-f="install" hidden>Install as an app…</button>
-  <hr>
-  <button role="menuitem" data-f="delete" class="danger">Delete notebook</button>
+<div id="filemenu" class="menu" role="menu" aria-label="File" hidden>
+  <!-- drawn by web/workspace/filemenu.ts: the one File menu, as on the board page -->
 </div>
 <div id="moremenu" class="menu" role="menu" aria-label="More" hidden>
   <button role="menuitem" id="addmd" title="Add a Markdown (text) cell at the end">+ Text cell<kbd>M</kbd></button>
@@ -343,6 +325,7 @@
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
+  <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <a role="menuitem" id="howruns" href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener" title="How the notebook runs cells: what reruns when, and why">How cells run ↗</a>
 </div>
 <dialog id="exdlg" aria-labelledby="extitle">
@@ -406,6 +389,8 @@ import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
+import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1304,6 +1289,7 @@ async function open(store, id, kind = "browser") {
   $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
   if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(wsTrackCurrent);
+  if (kind === "browser") recordOpened({ kind: "notebook", ref: id });
   startHistory(id);
   presence.open(id);
   return doc;
@@ -1394,7 +1380,6 @@ let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
 const shareReady = shareStatus().then((s) => {
   sharing = s;
-  if (s.enabled) $("#sharemenu").textContent = "Share…";
 });
 $("#sharelink").onclick = async () => { await copyShareLink(); shareDlg.close(); };
 async function openShare() {
@@ -1498,7 +1483,47 @@ function menuOf(btn, menu) {
   stuck();
 }
 const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
+// The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
+// drawn the same as the board page's; what an item does is here, by its key
+// (data-f).  Without the workspace, what needs it is disabled.
+function drawFileMenu() {
+  const none = !ws;
+  renderFileMenu(fileMenu, {
+    attr: "data-f",
+    keys: { newNotebook: "new", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    disabled: { newFolder: none },
+    downloads: [
+      { key: "ipynb", label: ".ipynb" },
+      { key: "py", label: ".py" },
+      { key: "marimo", label: "marimo (.py)", title: "A marimo notebook (one function per cell), which marimo opens" },
+      { key: "bundle", label: "with history (.sbreplay)", title: "The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version" },
+    ],
+    // (the desktop app's own: disk files, under Upload… and Save a copy…)
+    extra: [
+      { after: "upload", key: "openfile", label: "Open file…", hidden: true },
+      { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+    ],
+    recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
+    chosen: () => toggleFileMenu(false),
+  });
+  // (Share…, as the share tests and the share dialog know it)
+  fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
+}
+// (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
+function openEntry(e, how = "here") {
+  const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
+  if (how === "tab") return void window.open(url, "_blank", "noopener");
+  if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
+  else toBoard(url);
+}
 const toggleFileMenu = menuOf(fileBtn, fileMenu);
+// (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
+document.addEventListener("keydown", (e) => {
+  const it = fileMenuKey(e);
+  if (!it) return;
+  e.preventDefault();
+  fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
+});
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
@@ -1517,9 +1542,18 @@ async function toBoard(url) {
 }
 fileMenu.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
-  if (!b) return;
+  // (a group opens in place; a disabled item, and Recent's (opened by filemenu.ts), aren't handled here)
+  if (!b || b.dataset.group || b.disabled || !b.dataset.f) return;
   toggleFileMenu(false);
   switch (b.dataset.f) {
+    case "newfolder": {
+      const name = prompt("A new folder, at the top of your files: its name", "New folder");
+      if (!name?.trim() || !ws) break;
+      try { await ws.mkdir("/" + safeName(name.trim())); wsShowFiles(true); announce(`Folder "${safeName(name.trim())}" made`); }
+      catch (err) { statusEl.textContent = String(err?.message ?? err); }
+      break;
+    }
+    case "rename": nbName.focus(); nbName.select(); break;
     case "examples":
       exDlg.showModal();
       exDlg.querySelector("#exlist button")?.focus();
@@ -1527,8 +1561,16 @@ fileMenu.addEventListener("click", async (e) => {
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
-    case "open": await showOpen(); break;
-    case "duplicate": saveNow(); { const d = nb.snapshot(); await openDocument({ ...d, share_id: undefined, name: docName() + " (copy)", cells: d.cells.map((c) => ({ ...c, id: cellId() })) }); } break;
+    // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
+    case "open": if (ws) openFilesDialog(ws, (e, how) => openEntry(e, how), () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined)); else await showOpen(); break;
+    case "duplicate": {
+      saveNow();
+      const name = prompt("Save a copy of this notebook as", docName() + " (copy)");
+      if (!name?.trim()) break;
+      const d = nb.snapshot();
+      await openDocument({ ...d, share_id: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) });
+      break;
+    }
     case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
@@ -1541,7 +1583,6 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;
     case "import": $("#importinput").click(); break;
-    case "install": installPrompt?.prompt(); break;
     case "openfile": {
       const p = await TAURI.dialog.open({ multiple: false, filters: [{ name: "Notebooks", extensions: ["ipynb", "sage", "py", "m"] }] });
       if (p) await openDiskFile(String(p));
@@ -1559,7 +1600,39 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "delete": {
-      if (current.kind !== "browser" || !confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
+      if (current.kind !== "browser") break;
+      // (with the workspace, or while it is still opening: to Trash, which
+      // keeps it until it is emptied, never deleted for good; another
+      // notebook opened first; only this one, by its identity.  One not in
+      // the index (a page-only forget) is listed first, then moved: CORR-FD1-1)
+      if (ws || !wsSettled) {
+        const id = current.id;
+        let entry;
+        try {
+          if (!ws) throw new Error("your files aren't open yet: try again in a moment");
+          let p = await ws.pathOf("notebook", id);
+          if (!p) { await wsAdoptNotebook(id, docName(), nb.mode); p = await ws.pathOf("notebook", id); }
+          entry = p ? await ws.stat(p) : undefined;
+          if (!entry || entry.kind !== "notebook" || entry.ref !== id) throw new Error("it isn't in your files");
+        } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
+        if (!confirm(`Move "${nbName.value}" to Trash? Trash keeps it until you empty it.`)) break;
+        // (too many left unsaved: said, and this one stays open, not moved)
+        try { await nb.mayLeave(); } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
+        // (another notebook opened in its place, and checked to be open: else this one stays)
+        const others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id);
+        try { if (others.length) await openId(others[0].ref); else await openNew("Untitled", nb.mode, [""], true); }
+        catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; break; }
+        if (current.kind === "browser" && current.id === id) { statusEl.textContent = "not moved to Trash: it is still open"; break; }
+        try {
+          const at = await ws.pathOf("notebook", id);
+          if (!at) throw new Error("it isn't in your files any more");
+          await ws.remove(at, { kind: "notebook", ref: id, fid: entry.fid, created: entry.created });
+          announce(`"${nameOf(at)}" moved to Trash`);
+        } catch (err) { statusEl.textContent = `not moved to Trash: ${err?.message ?? err}`; }
+        break;
+      }
+      // (the workspace can't be opened in this browser: deleted for good, as before it)
+      if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       await nb.mayLeave();
       nb.detach();
       await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
@@ -2065,9 +2138,9 @@ if ("serviceWorker" in navigator && !LOCAL && !TAURI && (location.protocol === "
 addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   installPrompt = e;
-  document.querySelector('[data-f="install"]').hidden = false;
+  document.querySelector("#installbtn").hidden = false;
 });
-addEventListener("appinstalled", () => { installPrompt = null; document.querySelector('[data-f="install"]').hidden = true; });
+addEventListener("appinstalled", () => { installPrompt = null; document.querySelector("#installbtn").hidden = true; });
 
 // ------------------------------------------------------------ the workspace
 // (web/workspace/, design/workspace-files.md) This browser's notebooks,
@@ -2224,6 +2297,10 @@ function wsShowFiles(on) {
   }
 }
 wsFilesBtn.onclick = () => wsShowFiles(wsSidebar.hidden);
+// (the File menu drawn once the workspace is open, or isn't: what needs it, enabled or not)
+drawFileMenu();
+wsReady.then(() => drawFileMenu());
+$("#installbtn").onclick = () => installPrompt?.prompt();
 wsReady.then(async (w) => {
   if (!w) return;
   wsFilesBtn.hidden = false;
@@ -2350,7 +2427,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
     for (const b of document.querySelectorAll('[data-f="openfile"], [data-f="saveas"]')) b.hidden = false;
-    const install = document.querySelector('[data-f="install"]');
+    const install = document.querySelector("#installbtn");
     if (install) install.remove();
     // files the system handed the app (double-clicked, or on the command line)
     TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
