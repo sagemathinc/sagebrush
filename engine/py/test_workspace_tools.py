@@ -59,7 +59,8 @@ class FakePage:
             out = [self.public(e) for q, e in sorted(self.entries.items()) if q != "/" and q.startswith(folder) and (params.get("recursive") or "/" not in q[len(folder):])]
             return {"entries": out}
         if verb == "stat":
-            return {"entry": self.public(self.need(p))}
+            # (as web/workspace/api.ts: an entry, or null for none)
+            return {"entry": self.public(self.entries[p]) if p in self.entries else None}
         if verb == "read":
             e = self.need(p)
             return {"entry": self.public(e), "rev": e["rev"], "content": e["content"]}
@@ -212,7 +213,7 @@ def test_page_errors_and_trash():
     page = FakePage()
     ok(page, "workspace_create", {"path": "/a.txt"})
     refused(page, "workspace_create", {"path": "/a.txt"}, "exists")  # never overwritten
-    refused(page, "workspace_stat", {"path": "/nope"}, "missing")
+    assert ok(page, "workspace_stat", {"path": "/nope"}) == {"entry": None}  # (none there: null, as schema.json says)
     ok(page, "workspace_create", {"path": "/b.txt"})
     refused(page, "workspace_rename", {"from": "/a.txt", "to": "/b.txt"}, "exists")
     e = ok(page, "workspace_remove", {"path": "/a.txt"})["entry"]
@@ -332,8 +333,9 @@ def test_path_bounds():
     assert len(at_limit[0]) == WS.MAX_PATH
     for p in at_limit:
         assert len(p) <= WS.MAX_PATH
-        s, is_error = call(page, "workspace_stat", {"path": p})
-        assert s["error"]["code"] == "missing", (p[:40], s)  # (reached the page)
+        n = len(page.requests)
+        ok(page, "workspace_stat", {"path": p})
+        assert len(page.requests) == n + 1, p[:40]  # (reached the page)
     n = len(page.requests)
     past = ["/" + "a" * WS.MAX_PATH, "/" + "/".join(["d"] * (WS.MAX_DEPTH + 1)), "/" + "n" * (WS.MAX_NAME + 1), "/ok/" + "n" * (WS.MAX_NAME + 1) + "/x"]
     for p in past:
@@ -407,9 +409,8 @@ def test_paths_are_refused_as_normpath_refuses_them():
     assert page.requests == [], page.requests
     for p, good in PATH_CASES:
         if good and p != "/":
-            s, _ = call(page, "workspace_stat", {"path": p})
-            assert s["error"]["code"] == "missing", (p[:40], s)  # (it reached the page, unchanged)
-            assert page.requests[-1][1]["path"] == p
+            ok(page, "workspace_stat", {"path": p})
+            assert page.requests[-1][1]["path"] == p, p[:40]  # (it reached the page, unchanged)
     paths_ts = os.environ.get("SAGEBRUSH_PATHS_TS") or os.path.join(HERE, "..", "..", "web", "workspace", "paths.ts")
     if not os.path.exists(paths_ts):
         print("  (normPath itself not compared: no web/workspace/paths.ts in this tree)")
@@ -468,6 +469,23 @@ def test_schema_keywords_are_enforced_or_refused():
         raise AssertionError("a schema with an unknown keyword loaded")
     finally:
         os.unlink(f.name)
+
+
+def test_stat_null_is_absence():
+    """CORR-3DF-1 (astra): schema.json's stat answers one entry or null.  An
+    explicit null is "no entry there", a success; an omitted entry, or one
+    that isn't an entry, is a protocol error."""
+    page = FakePage()
+    page.override = {"entry": None}
+    content, s, err = WS.call(page, "workspace_stat", {"path": "/gone.txt"})
+    assert not err and s["result"] == {"entry": None} and content[0]["text"] == "no entry at /gone.txt", s
+    for bad in [{}, {"entry": "x"}, {"entry": False}, {"entry": {}}, {"entry": []}, {"entry": {"path": "/a"}}]:
+        page.override = bad
+        refused(page, "workspace_stat", {"path": "/a"}, "protocol")
+    # null is stat's only: an entry-carrying verb with a null entry is still malformed
+    for name, args in [("workspace_mkdir", {"path": "/d"}), ("workspace_read", {"path": "/a"}), ("workspace_remove", {"path": "/a"})]:
+        page.override = {"entry": None, "rev": 1, "content": {"text": ""}}
+        refused(page, name, args, "protocol")
 
 
 def test_through_the_server():
