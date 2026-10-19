@@ -33,6 +33,11 @@ const Q = "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"; // allowlisted; its purge held
 const RF = "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"; // never synced; CoCalc's purge of it can't reach its account object
 const S1 = "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4"; // allowlisted, with a file; one purge request id is sent for it and for S2 at once
 const S2 = "f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5"; // never synced
+// (the one storage budget, §6.1: each has storage_bytes 10,000 unless said)
+const T1 = "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1"; // a sharing upload and a sync upload at the edge, at once
+const T2 = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"; // documents into the ceiling, then a downgrade
+const T3 = "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"; // sharing at the edge: release and retry; a lost answer's hold; the purge
+const T4 = "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"; // storage_bytes 1 MiB: D1 writes per growth
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -55,7 +60,8 @@ const URL_KEY = "url-key";
 const LOSE = "fa17fa17fa17";
 // ---- a fake CoCalc: the limits (§6)
 const fake = { limits: new Map(), down: false };
-const sync = (storage, reads) => ({ storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: storage, version_bytes: 1000, read_bytes_per_day: reads } });
+// (one storage_bytes for sharing and sync together, §6.1)
+const sync = (storage, reads) => ({ storage_bytes: storage, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: reads } });
 fake.limits.set(A, sync(30_000, 60_000));
 fake.limits.set(B, sync(1 << 20, 1 << 20));
 fake.limits.set(D, sync(1 << 20, 1 << 20));
@@ -70,6 +76,8 @@ fake.limits.set(L, sync(1 << 20, 1 << 20));
 fake.limits.set(M, sync(1 << 20, 1 << 20));
 fake.limits.set(O, sync(1 << 20, 1 << 20));
 fake.limits.set(Q, sync(1 << 20, 1 << 20));
+for (const t of [T1, T2, T3]) fake.limits.set(t, sync(10_000, 1 << 20));
+fake.limits.set(T4, sync(1 << 20, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -86,7 +94,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -447,7 +455,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   r = await put(sa, other);
   ok(r.status === 201, "a second blob");
   r = await put(sa, Buffer.alloc(20_000, 3));
-  ok(r.status === 507 && (await r.json()).error === "storage_full", "over sync.storage_bytes: storage_full");
+  ok(r.status === 507 && (await r.json()).error === "storage_full", "over storage_bytes: storage_full");
   // a read: debited at issue, a 303 to a signed URL on the user-content domain
   r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "same-origin" } });
   const loc = r.headers.get("location") ?? "";
@@ -570,7 +578,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   await new Promise((res) => setTimeout(res, 1200));
   let up = await put(sb, Buffer.from("b after a malformed plan"));
   ok(up.status === 201, "a plan without its sync part keeps the last good limits, never sync off");
-  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: "lots", version_bytes: 1, read_bytes_per_day: 1 } });
+  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: "lots", read_bytes_per_day: 1 } });
   await new Promise((res) => setTimeout(res, 1200));
   up = await put(sb, Buffer.from("b after a second malformed plan"));
   ok(up.status === 201, "nor does a malformed number");
@@ -963,7 +971,7 @@ const signedPost = (key, path, body, ts = Math.floor(Date.now() / 1000)) => fetc
 });
 const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SITE, path, { headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": "sha256=" + createHmac("sha256", key).update(`${ts}\nGET\n${path}\n`).digest("hex") } });
 {
-  const tiny = { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: 5, version_bytes: 0, read_bytes_per_day: 0 } };
+  const tiny = { storage_bytes: 5, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 0, read_bytes_per_day: 0 } };
   const body = (issued, limits = tiny, account_id = D) => JSON.stringify({ request_id: crypto.randomUUID(), account_id, issued, limits });
   let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: body(100) });
   ok(r.status === 401, "a plan notice that isn't signed is refused");
@@ -1599,6 +1607,94 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await bucket.put(fresh, "fresh");
   await worker.scheduled({ cron: "17 3 * * *" });
   ok((await bucket.head(fresh)) !== null, "an object younger than the threshold is never touched (an upload may be finishing)");
+}
+
+// ---- the one storage budget for sharing and sync (§6.1)
+{
+  const L = 10_000;
+  const sharePut = (session, bytes) => fetchAt(SITE, `/api/share/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
+  const claimOf = async (id) => (await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first())?.claim_bytes;
+  const sharingOf = async (id) => (await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS n").bind(id, Math.floor(Date.now() / 1000)).first()).n;
+  // T1: one sharing upload and one sync upload, each fitting alone, not both, at once
+  const st1 = await signIn(T1);
+  ok((await post(st1, "/api/sync/v1/enable", {})).status === 200, "(T1: sync on, storage_bytes 10,000 for both)");
+  const [sh1, sy1] = await Promise.all([sharePut(st1, Buffer.alloc(6000, 11)), put(st1, Buffer.alloc(6000, 12))]);
+  const won = [sh1.status === 200 || sh1.status === 201, sy1.status === 201];
+  const tot1 = (await sharingOf(T1)) + (await claimOf(T1));
+  ok(won.filter(Boolean).length === 1 && tot1 <= L && [413, 507].includes(won[0] ? sy1.status : sh1.status),
+    "a sharing upload and a sync upload at the edge, at once: exactly one goes, the other is refused, and sharing + claim stays within storage_bytes: " + JSON.stringify({ sharing: sh1.status, sync: sy1.status, tot1 }));
+  // T3: sync's claim holds slack it doesn't use; sharing at the edge asks it back, once, and goes
+  const st3 = await signIn(T3);
+  const acctT3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T3)));
+  ok((await post(st3, "/api/sync/v1/enable", {})).status === 200, "(T3: sync on)");
+  const r3 = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack")), size: 8000 });
+  await acctT3.abandon({ id: r3.ok.id });
+  const b3 = await acctT3.budget();
+  ok(r3?.ok?.id && b3.claim >= 8000 && b3.files === 0 && (await claimOf(T3)) === b3.claim, "(T3: an upload reserved and abandoned leaves the claim holding " + b3.claim + " it doesn't use)");
+  const sh3 = await sharePut(st3, Buffer.alloc(5000, 31));
+  ok([200, 201].includes(sh3.status) && (await claimOf(T3)) === 0 && (await acctT3.budget()).claim === 0, "sharing at the edge: sync gives back its unused claim, and the upload goes (" + sh3.status + ")");
+  // (fail closed: the give-back can't reach D1, so the refusal stands)
+  const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
+  await acctT3.abandon({ id: r3b.ok.id });
+  const held3 = await claimOf(T3);
+  await acctT3.setFailClaim({ on: true });
+  const sh3b = await sharePut(st3, Buffer.alloc(4900, 32));
+  ok(sh3b.status === 413 && (await claimOf(T3)) === held3, "if sync's give-back can't reach D1, sharing's refusal stands: never fail open (" + sh3b.status + ", claim " + held3 + ")");
+  await acctT3.setFailClaim({ on: false });
+  ok(await until(async () => (await acctT3.budget()).dirty === false && (await claimOf(T3)) === (await acctT3.budget()).claim), "(the alarm writes the give-back D1 missed)");
+  ok((await claimOf(T3)) + (await sharingOf(T3)) <= L, "and sharing + claim is within storage_bytes throughout");
+  // T3: a lost answer's hold stays until its attempt can't commit, then the document's total replaces it
+  const s3 = await socket(st3);
+  await hello(s3, dev1);
+  const lostT3 = await s3.ask(batch(LOSE, 1, [[1, pid(1, "clientT3LO"), [], "x".repeat(300)]], { kind: "board" }));
+  const bh = await acctT3.budget();
+  ok(lostT3?.code === "busy" && bh.holds === 1 && bh.held === 300, "a batch whose answer is lost keeps its 300 bytes held against the budget");
+  ok(await until(async () => { const b = await acctT3.budget(); return b.holds === 0 && b.held === 0 && b.documents === 300; }), "once its attempt can no longer commit, the alarm asks the document: its total (300) replaces the hold");
+  s3.ws.close();
+  // T3: the purge gives the claim back
+  ok((await del(st3, T3)).status === 202 && (await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(T3)).first())?.state === "purged")), "(T3: Delete my synced data)");
+  ok((await claimOf(T3)) === 0, "the purge sets the claim to 0, so the space is sharing's again");
+  // T2: documents may take the claim past storage_bytes into the ceiling (max(L / 10, 256 in tests) = 1,000), no further
+  const st2 = await signIn(T2);
+  const acctT2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T2)));
+  ok((await post(st2, "/api/sync/v1/enable", {})).status === 200, "(T2: sync on)");
+  const s2 = await socket(st2);
+  await hello(s2, dev1);
+  const docT2 = "7272cafe7272";
+  const codes = [];
+  for (let i = 1; i <= 8; i++) {
+    const a = await s2.ask(batch(docT2, 1, [[i, pid(i, "clientT2CE"), i > 1 ? [pid(i - 1, "clientT2CE")] : [], "d".repeat(1500)]], i === 1 ? { kind: "board" } : {}));
+    codes.push(a?.batch?.new === 1 ? "ok" : a?.code);
+  }
+  const b2 = await acctT2.budget();
+  const c2 = await claimOf(T2);
+  ok(codes.slice(0, 7).every((c) => c === "ok") && codes[7] === "storage_full" && b2.documents === 10_500 && c2 > L && c2 <= L + 1000,
+    "document batches go past storage_bytes into the ceiling (10,500 of 10,000 + 1,000), and the one past the ceiling is refused, storage_full: " + JSON.stringify({ codes, documents: b2.documents, claim: c2 }));
+  const shIn = await sharePut(st2, Buffer.from("1"));
+  const syIn = await put(st2, Buffer.from("1"));
+  ok(shIn.status === 413 && syIn.status === 507, "with sync in the ceiling, sharing refuses even one byte (its check is already over, never wrapped), and so do sync's files: " + JSON.stringify([shIn.status, syIn.status]));
+  // T2: a downgrade below what is held refuses growth and deletes nothing
+  // (as CoCalc would: its limits answer and its notice both say 5,000)
+  fake.limits.set(T2, sync(5000, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: T2, issued: Date.now(), limits: sync(5000, 1 << 20) }))).json()).applied === true, "(T2 downgraded to 5,000)");
+  const after = await s2.ask(batch(docT2, 1, [[8, pid(8, "clientT2CE"), [pid(7, "clientT2CE")], "e"]]));
+  const pulled = await s2.ask({ t: "pull", doc: docT2, epoch: 1, after: 0 });
+  ok(after?.code === "storage_full" && (await acctT2.budget()).documents === 10_500 && (pulled?.items?.length ?? 0) > 0, "after the downgrade, a new batch is refused and nothing is deleted: the document still reads in full");
+  s2.ws.close();
+  // T4: D1 writes per growth: one raise per chunk (storage_bytes / 64), not one per edit
+  const st4 = await signIn(T4);
+  const acctT4 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T4)));
+  ok((await post(st4, "/api/sync/v1/enable", {})).status === 200, "(T4: sync on, storage_bytes 1 MiB, chunk 16,384)");
+  const s4 = await socket(st4);
+  await hello(s4, dev1);
+  const docT4 = "7474cafe7474";
+  for (let i = 1; i <= 20; i++) await s4.ask(batch(docT4, 1, [[i, pid(i, "clientT4WR"), i > 1 ? [pid(i - 1, "clientT4WR")] : [], "w".repeat(1000)]], i === 1 ? { kind: "board" } : {}));
+  const b4 = await acctT4.budget();
+  ok(b4.documents === 20_000 && b4.calls <= 3, "20 batches, 20,000 bytes: " + b4.calls + " D1 claim writes, one a chunk, not one an edit");
+  s4.ws.close();
+  // the breakdown: sharing's files and versions, sync's files and documents, against the one storage_bytes
+  const me = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: st2 } })).json();
+  ok(me.usage_breakdown?.sync_documents === 10_500 && me.usage_breakdown.sync_files === 0 && me.usage_breakdown.sharing_files === 0 && me.usage === 10_500, "the usage breakdown shows each part, sync's documents on their own line, and their sum: " + JSON.stringify({ usage: me.usage, parts: me.usage_breakdown }));
 }
 
 await mf.dispose();

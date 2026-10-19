@@ -410,6 +410,12 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     return { next_cseq: c ? Number(c.next_cseq) : 1, ...(r ? { committed: Number(r.seq) } : {}), head: this.head() };
   }
 
+  /** The head and the document's total bytes: for settling a batch's hold whose answer was lost (§6.1). */
+  async info(): Promise<{ head: Head; total: number }> {
+    if (!this.exists()) return { head: { epoch: 0, seq: 0 }, total: 0 };
+    return { head: this.head(), total: Number(this.get("bytes") ?? 0) };
+  }
+
   // ---- document sockets (§2, §5.1)
 
   private ownerAccount() {

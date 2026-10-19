@@ -12,7 +12,8 @@ CREATE TABLE sync_accounts (
   kind TEXT,                    -- self | admin
   finished INTEGER,
   docs INTEGER,
-  bytes INTEGER
+  bytes INTEGER,
+  claim_bytes INTEGER NOT NULL DEFAULT 0  -- the part of the account's one storage budget sync may use (§6.1); only its account object raises it
 );
 CREATE INDEX sync_accounts_prefix ON sync_accounts(prefix);
 -- One receipt per CoCalc purge request, by its id (CORR-1C2-1): what CoCalc's

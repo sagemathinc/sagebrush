@@ -17,7 +17,7 @@ import {
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { allowed, testMode, type SyncEnv } from "./env.ts";
-import { MAX_PUT } from "../share/server.ts";
+import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
 
@@ -63,12 +63,16 @@ const SCHEMA = [
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
   "CREATE TABLE IF NOT EXISTS finalized (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS reads (day INTEGER NOT NULL, who TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (day, who))",
+  // a batch's bytes, held against the claim from its admission until its document answers; a lost
+  // answer's hold stays until its attempt can no longer commit, then the document's total replaces it (§6.1)
+  "CREATE TABLE IF NOT EXISTS batch_holds (id TEXT PRIMARY KEY, doc TEXT NOT NULL, bytes INTEGER NOT NULL, due INTEGER NOT NULL)",
 ];
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
-export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; storage_bytes: number; version_bytes: number; read_bytes_per_day: number }; issued?: number }
+/** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
-const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, storage_bytes: 1 << 30, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
+const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
 /** Keys knownKeys checks in one statement (LIMIT-268-2). */
@@ -557,10 +561,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const wait = this.batches.take();
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
+    // (the batch's bytes, exactly what its document's total can grow by, held against the budget, §6.1)
+    await this.room(b.body.length, "document");
     const expires = Date.now() + this.pinMs();
+    const held = this.hold(b.doc, b.body.length, expires);
     const keys = this.pin(b.doc, b.epoch, b, expires);
-    const out = await this.forward(b.doc, keys, expires, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
-    this.noteHead(b.doc, out);
+    return this.answered(held, b.doc, await this.forward(b.doc, keys, expires, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }), () => this.unhold(held)));
+  }
+  /** The document answered: its total replaces the hold, in one step (no moment counts neither). */
+  private answered(held: string, doc: string, out: BatchOut): BatchOut {
+    this.noteHead(doc, out);
+    this.unhold(held);
     return out;
   }
   /**
@@ -569,13 +580,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * document; a thrown error is a lost answer, which leaves the attempt in
    * flight until its pins lapse, when the alarm decides them (§4.3).
    */
-  private async forward(doc: string, keys: PinKey[], expires: number, call: (d: ReturnType<SyncAccount["docStub"]>) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+  private async forward(doc: string, keys: PinKey[], expires: number, call: (d: ReturnType<SyncAccount["docStub"]>) => Promise<Result<BatchOut>>, refused?: () => void): Promise<BatchOut> {
     let r: Result<BatchOut>;
     try {
       r = await this.forwarding(doc, expires, (stub) => call(stub));
     } catch (e) {
+      // (a lost answer: a hold stays until the attempt can't commit, then the alarm asks the document;
+      // nothing else would wake it then)
+      const h = this.one("SELECT MIN(due) AS t FROM batch_holds WHERE doc = ?", doc)?.t;
+      if (h !== null && h !== undefined) this.wakeBy(Number(h));
       throw new SyncError("busy", "the document didn't answer; send again");
     }
+    // (refused: nothing was stored, so a hold goes at once)
+    if ("error" in r) refused?.();
     this.ctx.storage.transactionSync(() => {
       for (const k of keys) this.sql.exec("UPDATE pins SET inflight = max(0, inflight - 1) WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", k.doc, k.epoch, k.ref, k.sha256);
     });
@@ -588,10 +605,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * that arrives late, or a resend's, can't move them back (CORR-321-2).
    */
   private noteHead(doc: string, out: { head: Head; total: number }) {
+    const before = Number(this.one("SELECT bytes FROM docs WHERE doc = ?", doc)?.bytes ?? 0);
+    const docs = this.docsBytes();
     this.sql.exec(
       "UPDATE docs SET head_seq = ?, epoch = ?, bytes = ? WHERE doc = ? AND (epoch < ? OR (epoch = ? AND head_seq < ?))",
       out.head.seq, out.head.epoch, out.total, doc, out.head.epoch, out.head.epoch, out.head.seq,
     );
+    // (the documents' bytes as one number, §6.1: changed only if the row was)
+    const after = Number(this.one("SELECT bytes FROM docs WHERE doc = ?", doc)?.bytes ?? 0);
+    if (after !== before) this.set("docs_bytes", Math.max(0, docs + after - before));
   }
 
   private async clear(att: Attachment, device: string, m: Record<string, unknown>): Promise<BatchOut> {
@@ -601,11 +623,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const rf = fields(m.root, ["patches", "body"], "clear: root");
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
+    // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
+    await this.room(root.body.length, "document");
     const expires = Date.now() + this.pinMs();
+    const held = this.hold(m.doc, root.body.length, expires);
     const keys = this.pin(m.doc, expect.epoch + 1, root, expires);
-    const out = await this.forward(m.doc, keys, expires, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
-    this.noteHead(m.doc, out);
-    return out;
+    return this.answered(held, m.doc, await this.forward(m.doc, keys, expires, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }), () => this.unhold(held)));
   }
 
   // ---- document sockets (§2)
@@ -740,7 +763,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.set("limits_fetched", Date.now());
         return JSON.parse(now);
       }
-      this.set("limits", JSON.stringify(l));
+      this.storeLimits(l);
       this.set("limits_issued", l.issued ?? 0);
       this.set("limits_fetched", Date.now());
       return l;
@@ -755,6 +778,231 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private addUsed(n: number) {
     this.set("used_bytes", Math.max(0, this.used() + n));
+  }
+
+  // ---- the one storage budget (§6.1)
+  //
+  // Sharing and sync share the account's storage_bytes, L.  D1's sync_accounts.claim_bytes is the most
+  // sync may use, raised only here, in chunks, by one conditional statement that counts sharing's bytes
+  // too; sharing's own check counts the whole claim.  So sharing + sync <= sharing + claim, and:
+  //   - files (uploads) stop at L: they must fit under blob_cap, the claim as of the last time D1 found
+  //     sharing + claim <= L (every release lowers it too);
+  //   - document batches may take the claim past L, into a named ceiling, max(L / 10, 50 MB), and no
+  //     further, so an edit never fails abruptly at the edge;
+  //   - sharing never uses the ceiling: once sync is in it, sharing's check is already over L.
+  // Every raise or release goes through one chain, so this object's claim is never above D1's: a raise
+  // writes D1 first, a release lowers this object's claim first.
+
+  /** Documents' bytes: their totals as they last said them, kept as one number (§6.1). */
+  private docsBytes(): number {
+    const v = this.get("docs_bytes");
+    if (v !== undefined) return Number(v);
+    const n = Number(this.one("SELECT COALESCE(SUM(bytes), 0) AS n FROM docs")!.n);
+    this.set("docs_bytes", n);
+    return n;
+  }
+  private heldBytes(): number {
+    return Number(this.get("held_bytes") ?? 0);
+  }
+  /** All sync holds against the budget: files and reservations, documents, and batches in flight. */
+  private syncUsed(): number {
+    return this.used() + this.docsBytes() + this.heldBytes();
+  }
+  private claim(): number {
+    return Number(this.get("claim") ?? 0);
+  }
+  private blobCap(): number {
+    return Math.min(this.claim(), Number(this.get("blob_cap") ?? 0));
+  }
+  /** The claim as of the last time D1 found sharing + claim within L plus the ceiling: what documents may use. */
+  private docCap(): number {
+    return Math.min(this.claim(), Number(this.get("doc_cap") ?? 0));
+  }
+  /**
+   * Store limits.  A new storage_bytes takes effect at once: both caps go to
+   * zero, so the next write has D1 check the claim against it again, and the
+   * alarm gives back what no longer fits.
+   */
+  private storeLimits(l: Limits) {
+    const before = this.get("limits");
+    if (!before || (JSON.parse(before) as Limits).storage_bytes !== l.storage_bytes) {
+      this.set("blob_cap", 0);
+      this.set("doc_cap", 0);
+    }
+    this.set("limits", JSON.stringify(l));
+  }
+  /** What sync claims at a time: L / 64, between 4 and 64 MiB (in tests, at least 64 bytes). */
+  private chunk(L: number): number {
+    return testMode(this.env) ? Math.max(64, Math.floor(L / 64)) : Math.min(64 << 20, Math.max(4 << 20, Math.floor(L / 64)));
+  }
+  /** How far document batches may take the claim past L: max(L / 10, 50 MB) (in tests, 256 bytes at least). */
+  private ceiling(L: number): number {
+    return testMode(this.env) ? Math.max(256, Math.floor(L / 10)) : Math.max(Math.floor(L / 10), 50_000_000);
+  }
+  private fits(need: number, kind: "file" | "document"): boolean {
+    return this.syncUsed() + need <= (kind === "file" ? this.blobCap() : this.docCap());
+  }
+  private claimChain: Promise<unknown> = Promise.resolve();
+  private serially<T>(f: () => Promise<T>): Promise<T> {
+    const p = this.claimChain.then(f, f);
+    this.claimChain = p.catch(() => {});
+    return p;
+  }
+
+  /**
+   * Room for `need` more bytes of `kind`, raising the claim if it must (at
+   * most twice).  storage_full if the budget can't give it; busy if the
+   * limits or D1 can't be read now (never read as room).
+   */
+  private async room(need: number, kind: "file" | "document"): Promise<void> {
+    for (let i = 0; i < 2; i++) {
+      if (this.fits(need, kind)) return;
+      const l = await this.limits();
+      if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again", { retry_after: 1000 });
+      const r = await this.raise(need, kind, l.storage_bytes);
+      if (r === "full") throw new SyncError("storage_full", "this account's storage is full", { limit: l.storage_bytes, used: this.syncUsed() });
+      if (r === "busy") throw new SyncError("busy", "the storage budget can't be checked now; try again", { retry_after: 1000 });
+    }
+    if (!this.fits(need, kind)) throw new SyncError("busy", "try again", { retry_after: 200 });
+  }
+
+  /** One raise of the claim in D1, by whole chunks if they fit, else by exactly what is short. */
+  private raise(need: number, kind: "file" | "document", L: number): Promise<"ok" | "full" | "busy"> {
+    return this.serially(async () => {
+      if (this.fits(need, kind)) return "ok";
+      const db = this.env.SHARE_DB;
+      if (!db) return "busy";
+      // (short of the claim itself; nothing short, the claim is checked against the limit again)
+      const short = Math.max(0, this.syncUsed() + need - this.claim());
+      const C = this.chunk(L);
+      const whole = short === 0 ? 0 : Math.ceil(short / C) * C;
+      // (files: within L only; documents: within L first, then the ceiling)
+      const tries: [number, number][] = [[whole, L], [short, L]];
+      if (kind === "document") tries.push([whole, L + this.ceiling(L)], [short, L + this.ceiling(L)]);
+      for (const [amount, cap] of tries) {
+        let r: { claim_bytes: number } | null;
+        try {
+          if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
+          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + ?3 WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND claim_bytes + ?3 + ${SHARING_USED} <= ?6 RETURNING claim_bytes`)
+            .bind(this.get("account_id"), nowSeconds(), amount, this.get("account_hash"), Number(this.get("generation")), cap).first<{ claim_bytes: number }>();
+        } catch {
+          return "busy";
+        }
+        if (testMode(this.env)) this.claimCalls++;
+        if (!r) continue;
+        this.set("claim", r.claim_bytes);
+        this.set("claim_dirty", 0);
+        if (cap === L) this.set("blob_cap", r.claim_bytes);
+        this.set("doc_cap", r.claim_bytes);
+        if (this.fits(need, kind)) return "ok";
+      }
+      return "full";
+    });
+  }
+
+  /**
+   * Give back what the claim holds beyond what sync uses, plus `keep`: this
+   * object's claim first, then D1's (a failure there only leaves D1 higher,
+   * room unused, until the alarm writes it).  Returns the bytes given back.
+   */
+  private releaseSlack(keep: number): Promise<number> {
+    return this.serially(async () => {
+      const target = this.syncUsed() + keep;
+      const cur = this.claim();
+      if (cur <= target && !Number(this.get("claim_dirty") ?? 0)) return 0;
+      const to = Math.min(cur, target);
+      this.set("claim", to);
+      this.set("blob_cap", Math.min(Number(this.get("blob_cap") ?? 0), to));
+      this.set("doc_cap", Math.min(Number(this.get("doc_cap") ?? 0), to));
+      this.set("claim_dirty", 1);
+      try {
+        if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
+        await this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET claim_bytes = ?3 WHERE account_hash = ?1 AND generation = ?2 AND claim_bytes > ?3")
+          .bind(this.get("account_hash"), Number(this.get("generation")), to).run();
+        if (testMode(this.env)) this.claimCalls++;
+        this.set("claim_dirty", 0);
+      } catch {}
+      return cur - to;
+    });
+  }
+
+  /** Sharing, refused for space: give back every byte of the claim sync doesn't use (§6.1). */
+  async releaseClaim(a: { account: string }): Promise<{ released: number }> {
+    if (!this.exists() || this.get("account_id") !== a.account) return { released: 0 };
+    return { released: await this.releaseSlack(0) };
+  }
+  /** What sync holds, for the account's usage breakdown (display only). */
+  async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number } | null> {
+    if (!this.exists() || this.get("account_id") !== a.account) return null;
+    return { files: this.used(), documents: this.docsBytes() + this.heldBytes(), claim: this.claim() };
+  }
+
+  /** Hold a batch's bytes against the claim, until its document answers (or can't commit any more). */
+  private hold(doc: string, bytes: number, expires: number): string {
+    const due = expires + this.settleMs() + 1;
+    const id = this.ctx.storage.transactionSync(() => {
+      if (!this.fits(bytes, "document")) throw new SyncError("busy", "try again", { retry_after: 200 });
+      const id = randomHex(16);
+      this.sql.exec("INSERT INTO batch_holds (id, doc, bytes, due) VALUES (?, ?, ?, ?)", id, doc, bytes, due);
+      this.set("held_bytes", this.heldBytes() + bytes);
+      return id;
+    });
+    return id;
+  }
+  /**
+   * Holds whose answers were lost, once their attempts can no longer commit:
+   * the document's total replaces them (§6.1).  A few documents a run; one
+   * that can't be asked waits a backoff.
+   */
+  private async settleHolds(): Promise<void> {
+    const now = Date.now();
+    for (const d of this.sql.exec("SELECT DISTINCT doc FROM batch_holds WHERE due <= ? LIMIT 20", now).toArray() as Row[]) {
+      const doc = String(d.doc);
+      try {
+        // (bounded: a document that doesn't answer never holds up the alarm's other work)
+        const info = await Promise.race([
+          this.docStub(doc).info(),
+          new Promise<never>((_, no) => setTimeout(() => no(new Error("the document didn't answer")), testMode(this.env) ? 300 : 2000)),
+        ]);
+        this.ctx.storage.transactionSync(() => {
+          this.noteHead(doc, info);
+          for (const h of this.sql.exec("SELECT id FROM batch_holds WHERE doc = ? AND due <= ?", doc, now).toArray() as Row[]) this.unhold(String(h.id));
+        });
+      } catch {
+        this.sql.exec("UPDATE batch_holds SET due = ? WHERE doc = ? AND due <= ?", Date.now() + this.backoff(1), doc, now);
+      }
+    }
+  }
+  /** The alarm's part of the budget: give back slack beyond 2 chunks, or write a release D1 missed. */
+  private async tendClaim(): Promise<void> {
+    const cached = this.get("limits");
+    if (!cached) return;
+    const C = this.chunk((JSON.parse(cached) as Limits).storage_bytes);
+    const dirty = Number(this.get("claim_dirty") ?? 0) === 1;
+    if (dirty && Number(this.get("claim_retry_at") ?? 0) > Date.now()) return;
+    if (!dirty && this.claim() - this.syncUsed() <= 2 * C) return;
+    await this.releaseSlack(C);
+    if (Number(this.get("claim_dirty") ?? 0) === 1) {
+      const tries = Number(this.get("claim_tries") ?? 0) + 1;
+      this.set("claim_tries", tries);
+      this.set("claim_retry_at", Date.now() + this.backoff(tries));
+    } else this.set("claim_tries", 0);
+  }
+  /** When the alarm next has budget work: a hold due, a release to write, or slack to give back. */
+  private claimDue(now: number): number | null {
+    const t: number[] = [];
+    const h = this.one("SELECT MIN(due) AS t FROM batch_holds")?.t;
+    if (h !== null && h !== undefined) t.push(Number(h));
+    if (Number(this.get("claim_dirty") ?? 0) === 1) t.push(Math.max(now, Number(this.get("claim_retry_at") ?? 0)));
+    const cached = this.get("limits");
+    if (cached && this.claim() - this.syncUsed() > 2 * this.chunk((JSON.parse(cached) as Limits).storage_bytes)) t.push(now + (testMode(this.env) ? 300 : 60_000));
+    return t.length ? Math.min(...t) : null;
+  }
+  private unhold(id: string) {
+    const h = this.one("SELECT bytes FROM batch_holds WHERE id = ?", id);
+    if (!h) return;
+    this.sql.exec("DELETE FROM batch_holds WHERE id = ?", id);
+    this.set("held_bytes", Math.max(0, this.heldBytes() - Number(h.bytes)));
   }
 
   /**
@@ -774,7 +1022,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (Number(this.get("limits_issued") ?? 0) >= a.issued) return { applied: false };
       this.ctx.storage.transactionSync(() => {
-        this.set("limits", JSON.stringify(l));
+        this.storeLimits(l);
         this.set("limits_issued", a.issued);
         this.set("limits_fetched", Date.now());
       });
@@ -941,9 +1189,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (testMode(this.env) && this.failRecord) throw new Error("D1 unavailable (test seam)");
       if (!db) throw new Error("no D1 bound");
       await db.batch([
-        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND generation = ?7")
+        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6, claim_bytes = 0 WHERE account_hash = ?1 AND generation = ?7")
           .bind(v.hash, v.finished, v.request_id, v.kind, v.docs, v.bytes, v.generation),
-        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation < ?3 AND state <> 'purged'")
+        db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0), claim_bytes = 0 WHERE account_hash = ?1 AND generation < ?3 AND state <> 'purged'")
           .bind(v.hash, v.finished, v.generation),
         // every CoCalc request still waiting on this account is done (CORR-1C2-1): its receipt, by its
         // own id, apart from the row; the account is fenced, so this purge is its last
@@ -977,6 +1225,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
     const l = await this.limits();
+    // room in the one budget first (§6.1), for an upload the checks below would take
+    if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) {
+      const r = await attemptAsync(async () => {
+        this.admit(a.account, true);
+        await this.room(a.size, "file");
+      });
+      if ("error" in r) return r;
+    }
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
       if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) return { have: true as const };
@@ -985,7 +1241,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (a.size > Math.min(l.max_file_bytes, MAX_PUT)) throw new SyncError("limit", "this file is too large", { limit: "max_file_bytes", max: Math.min(l.max_file_bytes, MAX_PUT) });
       const now = Date.now();
       if (Number(this.one("SELECT COUNT(*) AS n FROM reservations WHERE expires > ?", now)!.n) >= LIMITS.uploadsAtOnce) throw new SyncError("rate", "too many uploads at once", { retry_after: 1000 });
-      if (this.used() + a.size > l.sync.storage_bytes) throw new SyncError("storage_full", "this account's synced storage is full", { limit: l.sync.storage_bytes, used: this.used() });
+      // (the room was made just before, against the one budget, §6.1; taken meanwhile: try again)
+      if (!this.fits(a.size, "file")) throw new SyncError("busy", "try again", { retry_after: 200 });
       const id = randomHex(16);
       const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
       const ends = now + (testMode(this.env) ? 3000 : RESERVE_MS);
@@ -1163,6 +1420,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private failRecord = false;
   private recordCalls = 0;
+  private failClaim = false;
+  private claimCalls = 0;
+  /** Tests only: make the budget's D1 writes fail, as an unreachable D1 would (§6.1). */
+  async setFailClaim(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.failClaim = a.on;
+  }
+  /** Tests only: the budget as this object holds it. */
+  async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; alarm: number | null } | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    return { claim: this.claim(), blob_cap: this.blobCap(), files: this.used(), documents: this.docsBytes(), held: this.heldBytes(), holds: Number(this.one("SELECT COUNT(*) AS n FROM batch_holds")!.n), dirty: Number(this.get("claim_dirty") ?? 0) === 1, calls: this.claimCalls, alarm: await this.ctx.storage.getAlarm() };
+  }
   private noDb = false;
   /** Tests only: run the D1 record as if SHARE_DB weren't bound. */
   async setNoDb(a: { on: boolean }): Promise<void> {
@@ -1289,6 +1557,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
+    // (the budget: holds to settle, a release to write, slack to give back, §6.1)
+    const budget = this.claimDue(now);
+    if (budget !== null) t.push(budget);
     // (outbox keys and fences: at once if never tried, else at their own retry)
     for (const table of ["outbox", "fences_due"]) {
       const r = this.one(`SELECT MIN(COALESCE(retry_at, ?)) AS t FROM ${table}`, now + 1000)?.t;
@@ -1355,6 +1626,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const byDoc = new Map<string, PinKey[]>();
     for (const p of late) byDoc.set(String(p.doc), [...(byDoc.get(String(p.doc)) ?? []), { doc: String(p.doc), epoch: Number(p.epoch), ref: String(p.ref), sha256: String(p.sha256) }]);
     for (const [doc, keys] of byDoc) await this.decidePins(doc, keys);
+    await this.settleHolds();
+    await this.tendClaim();
     this.alarms++;
     this.arm();
   }
@@ -1368,8 +1641,9 @@ export function checkLimits(v: unknown): Limits {
   const s = o.sync;
   // (a missing or malformed sync plan is CoCalc not answering properly: an outage, which keeps the
   // last good limits, never "sync off" or zero, LIMIT-7FB-3; a plan without sync says enabled: false)
-  if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.storage_bytes) || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
-  const sync = { enabled: s.enabled, storage_bytes: s.storage_bytes, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day };
+  if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
+  // (a sync.storage_bytes CoCalc may still send is ignored: storage_bytes is the one budget, §6.1)
+  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day };
   return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
 
