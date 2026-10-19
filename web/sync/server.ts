@@ -142,6 +142,13 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (!sameSite(req)) return err(403, "cross-site request");
   const who = await sessionOf(req, env);
   if (!who) return err(401, "sign in first");
+  // the page's question, whether this account may turn sync on and how it is: it never creates or
+  // registers anything.  Off the allowlist it is answered here, before any object is asked (the page
+  // hides its switch then: the reason is for the page's logic, not to show)
+  if (p === "/api/sync/v1/status" && m === "GET") {
+    if (!allowed(env, who.id)) return json({ available: false, reason: "not_allowlisted", state: "off" });
+    return json(await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).status({ account: who.id }));
+  }
   if (!allowed(env, who.id)) return err(403, "sync isn't enabled for this account");
   const hash = await accountHash(who.id);
   const stub = env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + hash));

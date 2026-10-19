@@ -226,6 +226,33 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /**
+   * The page's question (GET /api/sync/v1/status): whether this account may
+   * turn sync on, or how it is now.  It writes nothing, here or anywhere: an
+   * account never synced is answered from CoCalc's plan, asked and stored
+   * nowhere (a plan CoCalc gave is kept in memory for a minute, so a page
+   * that asks often doesn't ask CoCalc as often); an account on answers its
+   * state and generation.
+   *   - `available: false`: `reason` is "plan_has_no_sync", "cocalc_unreachable"
+   *     or "deleted" (CoCalc deleted the account);
+   *   - `state`: "off" (never on, or its data deleted), "registering", "active",
+   *     "readonly" or "deleting".
+   */
+  async status(a: { account: string }): Promise<{ available: boolean; reason?: string; state: string; generation?: number }> {
+    if (!allowed(this.env, a.account)) return { available: false, reason: "not_allowlisted", state: "off" };
+    if (this.deleted()) return { available: false, reason: "deleted", state: "off" };
+    if (this.exists() && this.get("account_id") === a.account) return { available: true, state: this.state(), generation: Number(this.get("generation")) };
+    // (a plan CoCalc gave is remembered a minute; an unreachable CoCalc isn't, so its return is seen at once)
+    const now = Date.now();
+    const seen = this.planSeen?.account === a.account && now - this.planSeen.at <= (testMode(this.env) ? 1000 : 60_000) ? this.planSeen.plan : null;
+    const plan = seen ?? (await this.planOf(a.account));
+    if (plan && plan !== seen) this.planSeen = { account: a.account, at: now, plan };
+    if (!plan) return { available: false, reason: "cocalc_unreachable", state: "off" };
+    if (!plan.sync.enabled) return { available: false, reason: "plan_has_no_sync", state: "off" };
+    return { available: true, state: "off" };
+  }
+  private planSeen?: { account: string; at: number; plan: Limits };
+
+  /**
    * The Worker's word that D1 records `generation`, active: a registering
    * account of that generation is on.  Any other answer changes nothing; a
    * generation this object has retired says so (`retired`), and the Worker

@@ -505,6 +505,11 @@ William's decision (Oct 19): read-only, then deleted after a retention period, w
     - CoCalc unreachable, or answering without the `sync` block, gets 503 `busy` "CoCalc can't be reached to check this account's plan; try again", with nothing registered;
     - otherwise the account registers, keeping that plan.
   - An account already on refreshes its plan first, so enable answers `readonly` once the plan has ended, and `busy` while nothing is known. It never answers `active` for an account whose plan isn't known.
+  - **`GET /api/sync/v1/status`** is the page's question before it shows its switch. It answers `{available, reason?, state, generation?}` and never creates or registers anything:
+    - off the allowlist: `available: false`, reason `not_allowlisted`, answered by the Worker without asking the account object. The page hides its switch then; the reason is for the page's logic, not to show;
+    - an account never synced: answered from CoCalc's plan, asked and stored nowhere. A plan CoCalc gave is kept in the object's memory for a minute; an unreachable CoCalc isn't. The answers are `available: true` with `state: "off"`, or `available: false` with reason `plan_has_no_sync` or `cocalc_unreachable`;
+    - CoCalc deleted the account: reason `deleted`;
+    - an account on: `available: true` with its `state` (`registering`, `active`, `readonly`, `deleting`) and `generation`.
   - The confirm applies the plan enable kept (fetched again only if it's old). A plan that ends in between arrives as CoCalc's notice, and makes the account `readonly` before any write. A batch or a clear checks the account again after every wait (the room for it, which may fetch the plan), before anything is held or sent. If CoCalc can't be reached at enable, the plan is fetched before the first write that needs room.
 - **When a plan stops including sync** (a notice, or a fetch, saying `sync.enabled: false`):
   - the account becomes `readonly`, and every write is refused with `readonly`;
