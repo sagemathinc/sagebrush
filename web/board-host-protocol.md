@@ -469,10 +469,12 @@ card and the full editor decide the same way.
       edit that changes the first and the last letter (`abcde` to
       `AbcdE`) spans the whole field. This is resolution by span: it keeps
       separate typing, but it isn't dbMerge3's character-level merge;
-  - **a map** (a plain object: `was`, the new value and the current one all
-    objects, such as the pictures' sizes): merged key by key, recursively,
-    by these same rules, as dbMerge3 merges maps. A key changed only
-    elsewhere keeps that change, and a key added on both sides keeps both;
+  - **a map** (the new value and the current one both plain objects, such
+    as the pictures' sizes): merged key by key, recursively, by these same
+    rules, as dbMerge3 merges maps. If `was` isn't a map (the field wasn't
+    there), the merge is against `{}`, and the same holds at every level.
+    So a key changed only elsewhere keeps that change, and keys added on
+    both sides keep both, even for the first picture of a board;
   - **any other value** (a number, a list, a switch from one kind to
     another): takes the new value. This edit is the later side.
 - **set with `create`:** the record is made from `fields`. If one with that
@@ -533,8 +535,13 @@ edges, its page):
   - it starts from the groups the edit moved or made;
   - a visited set is shared by all of them, so each item is visited at
     most once per edit, however the groups' subtrees overlap;
-  - it ends on data that already goes round (an agent's), since nothing is
-    visited twice;
+  - it keeps its visited set by each item's whole key (page and id), so it
+    ends on data that already goes round (an agent's: A's parent is B and
+    B's is A), since nothing is visited twice. A cycle met under a moved or
+    made group refuses the edit.
+
+  Following an item's parents likewise stops at a parent seen before (a
+  cycle: refused) or after 64 levels (refused);
 - **no orphans:** a group with children isn't deleted, and an item that an
   edge names isn't deleted, unless the same edit moves or deletes those
   too;
