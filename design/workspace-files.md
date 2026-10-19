@@ -552,7 +552,8 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
    - They show where they are.
    - Everything they change is a patch credited to them, which TimeTravel shows and the person can undo.
    - Code they write doesn't run until the person says so.
-3. **Access is granted, not assumed.**
+3. **Precise, fine-grained permissions are a goal in themselves.** CoCalc has to enforce access at the level of Linux users and processes. Sagebrush runs everything in the browser, so it can say exactly which agent or person may read, write or run what, in which file. (William noted this on Oct 18.)
+4. **Access is granted, not assumed.**
    - An agent sees only what it was given: by default read-only, for a stated time, and taken back at once.
    - Nothing leaves the device without sync turned on *and* a grant made.
 
@@ -597,20 +598,26 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
 - **Attribution:**
   - every edit an agent makes is a patch credited to `agent:<name>`, and TimeTravel shows it;
   - "Undo this agent's changes" reverts them as one step, leaving other people's edits in place.
-- **Running code:**
-  - code written by an agent is marked "written by agent:<name>, not run";
-  - autorun skips it, exactly as it skips another person's edits (§7.10);
-  - when it runs, it runs in the runner.
-  - **A considered exception, off by default:** in a conversation with an agent in the page (the Ask panel, §8.5), the person may tick "Let this agent run its code here". This lasts for that conversation only.
-    - The code still runs in the person's runner, which has no storage, no network and no cookies (design/runner.md).
-    - What the code computes stays in the person's browser, apart from the outputs the agent reads.
-- **A remote agent never runs code.** The sync service has no compute. Computing is done by an open page or by cocalc.ai (§8.6).
+- **Running code: a setting on each grant, "may run code"** (William, Oct 18: "they definitely need to be able to run code. But … we can make it explicit whether or not it is allowed").
+  - **The unit is the grant** (§8.4). An Ask conversation is a grant of its own, so the setting is per conversation there, and per agent and scope elsewhere.
+  - The setting is shown plainly at the point of grant and in the Agents with access panel. It can be turned off at any moment, mid-session. A run already going is stopped, and nothing more runs.
+  - **Defaults:**
+    - **on** for the person's own Ask agent in the page. Its purpose is computing at the person's request, it runs in the person's own sandbox, and the person sees each run as it happens;
+    - **off** for every other grant: local MCP agents, remote agents, cocalc.ai, which are turned on only by choice.
+  - **Without it,** code an agent writes is marked "written by agent:<name>, not run", and nothing runs it until a person does.
+  - **With it,** the agent runs code it wrote, and a running indicator names the agent, with Stop.
+  - **Every run, either way:**
+    - it happens **in the runner** (design/runner.md): no storage, no network, no cookies, never on the page's origin;
+    - it is credited to the agent and logged: time, agent, document, cell or note, and the hash of the code.
+  - **A remote agent's runs** happen only in an open page of the person's, which shows them. The sync service has no compute. With no page open, a remote agent can't run code; cocalc.ai is the place for that (§8.6).
+- **The hard rule: code from other people never runs by itself.** This covers edits by collaborators, shared collections and Inbox items. There is no setting to change it (§7.10). An agent's "may run code" covers only code that agent wrote in that session. It never covers code that came from someone else, even when the agent passes it on.
 
 ### 8.4 Access: granted, scoped, visible
 
 - **A grant** is made by a person to one agent. It states:
   - which folders or files;
   - read, or read and write;
+  - **may run code**, or not (§8.3);
   - an expiry, and a rate limit.
 - **The token** is held by the account object, which stores only its hash. Revoking it takes effect immediately and closes the agent's sockets.
 - **Every request** is checked against the grant, and logged in the account object: time, agent, verb, path.
@@ -662,7 +669,10 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
 
 1. How are agent tokens issued? Through the cocalc.ai sign-in, which a person approves, or by the person on sagebrush.space? How is the token stored, and how is it rotated?
 2. What does an in-page agent's grant look like, given that the page holds the person's whole authority? Can a page restrict itself (an "agent mode" with only the granted paths), and is that worth it?
-3. "Let this agent run its code here": does the runner's sandbox, without network or storage, make this safe enough to offer? What should the person be told?
+3. **"May run code"** (decided: configurable per grant, §8.3). The questions for review:
+   - An agent with that permission may be steered by injected text, and then run code that reads every file its grant covers and writes its outputs back where the agent reads them, so the agent can carry data away. What should bound that? Possibilities: a run sees only the files of its own document's folder; outputs read by the agent are capped; one grant can't be both "may run code" and wider than one folder without saying so.
+   - Is the "code that agent wrote" boundary enforceable? Code pasted from a shared document into the agent's own edit would count as the agent's.
+   - How does revoking it reach a run already started in another tab?
 4. Rate limits and sizes per verb, and what an over-limit agent sees.
 5. How long the access log is kept, and who may read it.
 6. Inbox: who may send to whom, spam and size limits, and what accepting does.
