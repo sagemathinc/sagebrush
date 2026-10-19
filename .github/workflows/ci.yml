@@ -86,6 +86,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-preview.mjs
           bun web/board/test-own-names.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs

@@ -575,6 +575,150 @@ async function emptying() {
 // Undo of Move to Trash: that entry, put in Trash that time, only
 // (CORR-0B0-3); a rename asked for earlier and superseded, not made
 // (CORR-0B0-1); a rename that leaves the title to the page (CORR-0B0-2)
+// Step 2b's: what is held (versionsUsage, usage), a version by its id, and
+// the browser asked once, on the person's first own write, to keep the
+// storage (never for an agent's or the migration's).  First: the ask is
+// once per page.
+async function storageUse() {
+  let asked = 0;
+  try { Object.defineProperty(navigator.storage, "persist", { value: async () => { asked++; return true; }, configurable: true }); } catch {}
+  const w = await fresh();
+  localStorage.setItem("sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify({ title: "Kept before", nodes: [] }));
+  await W.migrate(w, localStorage);
+  await w.forAgent("agent:x").create("/by-agent.txt", { content: "a" });
+  check(asked === 0, "the migration's and an agent's writes don't ask the browser to keep the storage");
+  await w.create("/d/one.txt", { content: "1" });
+  await w.write("/d/one.txt", "11");
+  await w.write("/d/one.txt", "111");
+  check(asked === 1, "the person's first write asks it, once (" + asked + ")");
+  await w.create("/d/two.csv", { content: "a,b" });
+  await w.write("/d/two.csv", "a,b,c");
+  await w.create("/top.txt", { content: "t" });
+  await w.write("/top.txt", "tt");
+  await w.create("/n.ipynb");
+  const f1 = await w.versionsUsage("/d/one.txt"), fd = await w.versionsUsage("/d"), all = await w.versionsUsage();
+  check(f1.count === 2 && f1.bytes === 1 + 2, "versionsUsage of a file: its versions and their bytes " + JSON.stringify(f1));
+  check(fd.count === 3 && fd.bytes === 3 + 3, "…of a folder, its files' " + JSON.stringify(fd));
+  check(all.count === 4 && all.bytes === 3 + 3 + 1, "…of everything " + JSON.stringify(all));
+  check((await w.versionsUsage("/n.ipynb")).count === 0, "…of a notebook: none (its history is TimeTravel)");
+  const hist = await w.history("/d/one.txt");
+  check(dec(await w.versionById("/d/one.txt", hist[0].id)) === "1" && dec(await w.versionById("/d/one.txt", hist[1].id)) === "11", "versionById: a version's bytes by its id");
+  check(await fails(w.versionById("/top.txt", hist[0].id), "missing"), "…another file's version id is refused");
+  await w.dropVersions("/d/one.txt", { keep: 1 });
+  check(dec(await w.versionById("/d/one.txt", hist[1].id)) === "11" && await fails(w.versionById("/d/one.txt", hist[0].id), "missing"), "…an id stays its version's when older ones are dropped; a dropped one is missing");
+  await w.remove("/top.txt");
+  const u = await w.usage();
+  check(u.documents === 2 && u.files.count === 3 && u.files.bytes === 3 + 5 + 1 && u.trash.count === 1 && u.trash.bytes === 2 && u.versions.count === 3, "usage: documents, files, versions and Trash " + JSON.stringify(u));
+  check((await w.dropVersions("/")) === 2 + 3 + 1 && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "dropping all of them frees what versionsUsage said");
+  w.close();
+}
+
+// Version actions bound to what was shown (CORR-F85-1, -2), and
+// dropVersions bounded (LIMIT-F85-2): a file's or a folder's never reads
+// another file's versions; all of them, a bounded batch at a time.
+async function versionActions() {
+  const w = await fresh();
+  await w.create("/victim.txt", { content: "original" });
+  await w.write("/victim.txt", "original current");
+  const shown = await w.stat("/victim.txt"), ids = (await w.history("/victim.txt")).map((v) => v.id);
+  await w.rename("/victim.txt", "/moved.txt");
+  await w.create("/victim.txt", { content: "replacement" });
+  await w.write("/victim.txt", "replacement 2");
+  check(await fails(w.dropVersions("/victim.txt", { expect: { fid: shown.fid, ids } }), "conflict"), "dropVersions of the file shown, another file at its path now: refused");
+  check((await w.history("/moved.txt")).length === 1 && (await w.history("/victim.txt")).length === 1, "…nothing of either dropped");
+  check(await fails(w.restoreVersion("/victim.txt", ids[0], { fid: shown.fid, rev: shown.rev }), "missing"), "restoreVersion: the shown file's version, at a path now another file's: refused");
+  const moved = await w.stat("/moved.txt");
+  check(await fails(w.restoreVersion("/moved.txt", ids[0], { fid: moved.fid, rev: moved.rev - 1 }), "conflict") && dec((await w.read("/moved.txt")).content) === "original current", "restoreVersion over a revision since written: refused, nothing written");
+  const vid = (await w.history("/victim.txt"))[0].id, rep = await w.stat("/victim.txt");
+  check(await fails(w.write("/victim.txt", "x", { fid: shown.fid }), "conflict") && dec((await w.read("/victim.txt")).content) === "replacement 2", "write with another file's fid: refused");
+  check(await fails(w.restoreVersion("/victim.txt", ids[0], { fid: rep.fid, rev: rep.rev }), "missing"), "…a version id of another file: refused");
+  await w.restoreVersion("/moved.txt", ids[0], { fid: moved.fid, rev: moved.rev });
+  check(dec((await w.read("/moved.txt")).content) === "original" && (await w.history("/moved.txt")).length === 2, "restoreVersion of the file shown, as shown: written back, what it had kept");
+  // only the confirmed ids go; a folder's confirmation of another count, or another folder: refused
+  await w.write("/moved.txt", "third");
+  const h3 = await w.history("/moved.txt"), m3 = await w.stat("/moved.txt");
+  await w.dropVersions("/moved.txt", { expect: { fid: m3.fid, ids: [h3[0].id] } });
+  check((await w.history("/moved.txt")).map((v) => v.id).join() === h3.slice(1).map((v) => v.id).join(), "dropVersions with ids: only those go");
+  await w.mkdir("/f");
+  await w.create("/f/a.txt", { content: "1" });
+  await w.write("/f/a.txt", "2");
+  const fu = await w.versionsUsage("/f"), fe = await w.stat("/f");
+  await w.write("/f/a.txt", "3");
+  check(await fails(w.dropVersions("/f", { expect: { count: fu.count, bytes: fu.bytes, created: fe.created } }), "conflict") && (await w.versionsUsage("/f")).count === 2, "a folder's, its versions changed since confirmed: refused, nothing dropped");
+  check(await fails(w.dropVersions("/f", { expect: { created: fe.created + 1 } }), "conflict"), "…another folder at its path: refused");
+  const fu2 = await w.versionsUsage("/f");
+  check((await w.dropVersions("/f", { expect: { count: fu2.count, bytes: fu2.bytes, created: fe.created } })) === fu2.bytes && (await w.versionsUsage("/f")).count === 0, "…as confirmed: dropped");
+  // many small versions of other files: a file's drop reads only its own; all of them, in batches
+  const many = 2500;
+  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d" }); q.onsuccess = () => vb.put(new Uint8Array([1]), q.result); } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
+  const unbounded = [];
+  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if (q == null && (this.name === "byFile" || this.name === "versions")) unbounded.push([this.name, n]); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
+  const un1 = wrap(IDBIndex.prototype), un2 = wrap(IDBObjectStore.prototype);
+  try {
+    await w.write("/moved.txt", "fourth");
+    await w.dropVersions("/moved.txt");
+    check(unbounded.length === 0, "dropping a file's versions reads no other file's: " + JSON.stringify(unbounded));
+    const before = (await w.versionsUsage()).count;
+    const freed = await w.dropVersions("/");
+    check(unbounded.length > 1 && unbounded.every(([name, n]) => name === "versions" && n === 1000), "all of them: a batch of at most 1,000 records at a time (" + unbounded.length + " batches)");
+    check(before >= many && freed >= many && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "…all gone, the total 0 (" + before + ", " + freed + ")");
+  } finally { un1(); un2(); }
+  w.close();
+}
+
+// A bulk drop confirmed, then a version kept: it stays (CORR-AC5-1); a
+// rename bound to its entry (CORR-4B2-1); a read up to a size (LIMIT-F85-1)
+async function fences() {
+  const w = await fresh({ ...W.LIMITS, maxVersions: 3 });
+  await w.create("/r.txt", { content: "a1" });
+  for (const v of ["a2", "a3", "a4"]) await w.write("/r.txt", v);
+  const u = await w.versionsUsage();
+  check(u.count === 3 && u.maxId > 0, "versionsUsage gives the newest version's id " + JSON.stringify(u));
+  await w.write("/r.txt", "a5");
+  const u2 = await w.versionsUsage();
+  check(u2.count === u.count && u2.bytes === u.bytes && u2.maxId > u.maxId, "(retention: the same count and bytes, another version " + JSON.stringify(u2) + ")");
+  await w.dropVersions("/", { expect: { maxId: u.maxId } });
+  const left = await w.history("/r.txt");
+  check(left.length === 1 && left[0].id === u2.maxId && dec(await w.versionById("/r.txt", left[0].id)) === "a4", "everything's drop, confirmed before a version was kept: that version stays");
+  check((await w.versionsUsage()).bytes === 2, "…and the total counts it (CORR-5D2-1): " + JSON.stringify(await w.versionsUsage()));
+  await w.write("/r.txt", "a6");
+  check((await w.versionsUsage()).bytes === 4 && (await w.history("/r.txt")).length === 2, "…and keeps counting after: " + JSON.stringify(await w.versionsUsage()));
+  await w.mkdir("/f");
+  await w.create("/f/s.txt", { content: "b1" });
+  await w.write("/f/s.txt", "b2");
+  const fu = await w.versionsUsage("/f"), fe = await w.stat("/f");
+  await w.write("/f/s.txt", "b3");
+  await w.dropVersions("/f", { expect: { created: fe.created, maxId: fu.maxId } });
+  check((await w.history("/f/s.txt")).length === 1 && dec(await w.version("/f/s.txt", 0)) === "b2", "a folder's drop, confirmed before a version was kept: that version stays");
+  // a file moved into the folder after it was confirmed: refused, its history kept (CORR-5D2-2)
+  await w.mkdir("/g");
+  await w.create("/h.txt", { content: "h1" });
+  await w.write("/h.txt", "h2");
+  await w.create("/g/k.txt", { content: "k1" });
+  await w.write("/g/k.txt", "k2");
+  const gu = await w.versionsUsage("/g"), ge = await w.stat("/g");
+  await w.rename("/h.txt", "/g/h.txt");
+  check(await fails(w.dropVersions("/g", { expect: { created: ge.created, maxId: gu.maxId, seq: gu.seq } }), "conflict") && (await w.history("/g/h.txt")).length === 1 && (await w.history("/g/k.txt")).length === 1, "a folder's drop, a file moved in since it was confirmed: refused, nothing dropped");
+  await w.write("/g/k.txt", "k3");
+  const gu2 = await w.versionsUsage("/g");
+  await w.write("/g/k.txt", "k4");
+  check((await w.dropVersions("/g", { expect: { created: ge.created, maxId: gu2.maxId, seq: gu2.seq } })) === 2 + 2 + 2 && (await w.history("/g/h.txt")).length === 0 && (await w.history("/g/k.txt")).length === 1, "…confirmed again, only writes since: dropped, the version kept since stays");
+  // rename bound to its entry
+  await w.create("/rename.txt", { content: "original" });
+  const orig = await w.stat("/rename.txt");
+  await w.rename("/rename.txt", "/moved-rename.txt");
+  await w.create("/rename.txt", { content: "replacement" });
+  check(await fails(w.rename("/rename.txt", "/renamed.txt", { expect: orig }), "conflict") && (await w.stat("/renamed.txt")) === undefined && dec((await w.read("/rename.txt")).content) === "replacement", "a rename bound to an entry moved away, another at its path: refused, nothing moved");
+  const rep = await w.stat("/rename.txt");
+  check((await w.rename("/rename.txt", "/renamed.txt", { expect: rep })).path === "/renamed.txt", "…bound to the one there, made");
+  const nb = await w.create("/doc.ipynb");
+  check((await w.rename("/doc.ipynb", "/doc2.ipynb", { expect: nb })).path === "/doc2.ipynb", "…a document bound to its ref");
+  // a read up to a size
+  await w.create("/ten.txt", { content: "0123456789" });
+  check(await fails(w.readUpTo("/ten.txt", 9), "limit") && dec((await w.readUpTo("/ten.txt", 10)).content) === "0123456789", "readUpTo: refused past its size, read within it");
+  w.close();
+}
+
 async function intents() {
   const w = await fresh();
   await w.create("/undo.txt", { content: "original" });
@@ -647,7 +791,7 @@ async function intents() {
 }
 
 export async function run() {
-  for (const t of [intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

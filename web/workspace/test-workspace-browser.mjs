@@ -104,6 +104,26 @@ try {
   check(await until(`document.querySelectorAll("#wssidebar .frow").length === 1 && !!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`), "search shows what matches");
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
   await until(`!!document.querySelector("#wssidebar .frow.cur")`);
+  // a change while a name is typed in place (here, another tab, an agent)
+  // doesn't take the half-typed name away; the tree is drawn once it's done
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); const i = r.querySelector("input"); i.value = "Sylow half"; return 1; })()`);
+  await ev(`${W}.create("/meanwhile.txt", { content: "x" }).then(() => 1)`);
+  await sleep(800);
+  check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
+  await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
+  // a name typed in place for an entry moved away meanwhile, another put at
+  // its path: neither renamed (CORR-4B2-1)
+  await ev(`${W}.create("/rename.txt", { content: "original" }).then(() => 1)`);
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/rename.txt"))})`);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/rename.txt"))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); r.querySelector("input").value = "renamed.txt"; return 1; })()`);
+  await ev(`(async () => { const w = ${W}; await w.rename("/rename.txt", "/moved-rename.txt"); await w.create("/rename.txt", { content: "replacement" }); return 1; })()`);
+  await sleep(800);
+  await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return 1; })()`);
+  await sleep(800);
+  const rn = await ev(`(async () => ({ renamed: !!(await ${W}.stat("/renamed.txt")), here: await ${W}.read("/rename.txt").then((r) => new TextDecoder().decode(r.content)), moved: !!(await ${W}.stat("/moved-rename.txt")), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
+  check(!rn.renamed && rn.here === "replacement" && rn.moved && /moved or replaced meanwhile/.test(rn.said), "a name typed for a file moved away meanwhile, another put at its path: neither renamed, said: " + JSON.stringify(rn));
   // renaming the open notebook renames it on the page
   const cur = await ev(`document.querySelector("#wssidebar .frow.cur")?.dataset.path`);
   await ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);
@@ -483,6 +503,26 @@ try {
   const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
   check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
   check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
+  // the typed title's rename, its notebook moved and another put at its path
+  // while the rename waited for the lock: this notebook gets the name, the
+  // other is untouched (CORR-5D2-3)
+  const tr = await ev(`(async () => {
+    const ref = sagebrush.notebook.store.id, w = ${W};
+    const cur = (await w.list("/", { recursive: true })).find((e) => e.kind === "notebook" && e.ref === ref);
+    let entered; const ready = new Promise((r) => (entered = r));
+    const gate = new Promise((r) => (window.__releaseT = r));
+    window.__heldT = navigator.locks.request("sagebrush-workspace", async () => { entered(); await gate; });
+    await ready;
+    window.__mvT = w.rename(cur.path, "/Moved title.ipynb");
+    window.__rpT = w.create(cur.path, { content: { name: "Replacement", mode: "python", cells: [] } });
+    return { path: cur.path, ref };
+  })()`);
+  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 2)`);
+  await typeTitle("Typed title");
+  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 3)`, 8000), "(the typed title's rename waiting third for the lock)");
+  await ev(`(async () => { __releaseT(); await __heldT; await __mvT; await __rpT; await new Promise((r) => setTimeout(r, 2500)); return 1; })()`);
+  const trAfter = await ev(`(async () => { const l = await ${W}.list("/", { recursive: true }); return { typed: l.find((e) => e.path === "/Typed title.ipynb")?.ref ?? null, there: l.find((e) => e.path === ${JSON.stringify(tr.path)})?.ref ?? null }; })()`);
+  check(trAfter.typed === tr.ref && trAfter.there && trAfter.there !== tr.ref, "a typed title's rename waiting while its notebook moved and another took its path: this notebook renamed, the other untouched: " + JSON.stringify({ ...trAfter, tr }));
   // opening a board from the notebook page
   await click(rowSel("/Sylow theorems.board.json"));
   check(await until(`location.pathname.startsWith("/board/") && /doc=local:[0-9a-f]{12}/.test(location.search) && !!window.sagebrush?.board?.snapshot()`, 60000), "a board opens from the notebook page's sidebar");
