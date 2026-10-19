@@ -367,6 +367,9 @@ OUTPUT_SCHEMAS.update({name: WS.OUTPUT_SCHEMA for name in WS.NAMES})
 OUTPUT_SCHEMAS["workspace_connect"] = WS.CONNECT_OUTPUT_SCHEMA
 OUTPUT_SCHEMAS.update({t["name"]: CH.CHAT_OUTPUT_SCHEMA for t in CH.CHAT_TOOLS})
 
+#: tool calls in progress at once (each has a thread); more are refused at once
+MAX_CALLS = 16
+
 # (structuredContent and outputSchema are in the protocol from this version)
 STRUCTURED_SINCE = "2025-06-18"
 
@@ -801,7 +804,10 @@ class Server:
             t = args.get("timeout", 30)
             if not isinstance(t, (int, float)) or isinstance(t, bool) or not 0 <= t <= CH.MAX_WAIT:
                 return err("invalid", "Invalid arguments: timeout must be a number of seconds from 0 to %d" % CH.MAX_WAIT)
-            m = self.chat.next(t)
+            try:
+                m = self.chat.next(t)
+            except CH.Busy as e:
+                return err("busy", str(e))
             text = "(no message)" if m is None else "%s in %s: %s" % (m["author"], m["conversation"], m["text"])
             return [_text(text)], {"result": {"message": m}, "error": None}, False
         conv, text, irt = args.get("conversation"), args.get("text"), args.get("in_reply_to")
@@ -914,7 +920,13 @@ class Server:
                 self.reply(rid, {"tools": [{k: v for k, v in t.items() if k != "title"} for t in TOOLS]})
         elif method == "tools/call":
             with self.state:
-                self.running[rid] = True
+                busy = len(self.running) >= MAX_CALLS
+                if not busy:
+                    self.running[rid] = True
+            if busy:
+                # (each call runs in a thread of its own: at most MAX_CALLS at once; daybreak2, LIMIT-B011-1)
+                self.error(rid, -32000, "too many tool calls at once (%d): wait for one to finish" % MAX_CALLS)
+                return
             t = threading.Thread(target=self.handle_tool_call, args=(rid, params), daemon=True)
             self.threads = [x for x in self.threads if x.is_alive()] + [t]
             t.start()
