@@ -1,6 +1,6 @@
 # Capabilities: what a board's code may touch
 
-*Status: design, for review (astra audits the gate inventory, §4, against the code in all four modes; daybreak2 the limits). William, Oct 19 2026, 11:48 PDT: "Being able to do this at all is AMAZING ... Let's lean into it!" Nothing here is built yet.*
+*Status: design, for review (astra audits the gate inventory, §4, against the code in all four modes; daybreak2 the limits). William, Oct 19 2026, 11:48 PDT: "Being able to do this at all is AMAZING ... Let's lean into it!" His answers to the questions are in §11 (Oct 19, 20:04 UTC): "we should always do the work to make sagebrush safer than normal cocalc… Where a choice comes up later, choose the safer one." Nothing here is built yet, except the fallback's rule in §2, built in workspace step 3b.*
 
 ## 1. The model
 
@@ -15,9 +15,11 @@
 **Never available:**
 - **the network.** The interpreter has no network API. The runner's policy has `connect-src 'none'` (design/runner.md), so an escape from the interpreter can't reach one either;
 - **JavaScript and the page.** There is no `js` module, the worker has no DOM, and the runner's frame has an opaque origin, with no storage and no parent document;
-- **remote resources through output.** Output is sanitised, and the page's own CSP refuses remote images and scripts in it.
+- **remote resources through output.** Code's output (HTML, Markdown, SVG) is rendered by the page's sanitiser with remote resources off (`safeHtml` and `renderMarkdown` with `remote: false`), which drops any remote URL. That sanitiser is the enforcement, not the page's CSP: the page's policy (and the frame policy) allows `http:` and `https:` images, for the page's own content. Every route by which output reaches the page keeps `remote: false`, and a test checks each route.
 
 **Gated: the person's files.** The first time a board reads or writes a file of the person's workspace outside itself, the page asks, naming the file or folder, and read or write (§5). The answer is remembered for that board, scoped by folder, and can be revoked (§6).
+
+**Notebooks too** (William, §11). A notebook is gated as a board is: notebooks lose their blanket access to all the person's files. A notebook or board **made here** gets read and write on its own folder without asking (§6, "Its own folder") and asks for anything else. One brought in from elsewhere (uploaded, dropped, opened from a link) asks for everything.
 
 **Future capabilities** (the agent API of design/agent-endpoint.md, sync, a project's kernel, any network a board might one day be allowed) are each a named capability, granted through the same gate and listed in the same place. None is implied by another.
 
@@ -40,20 +42,39 @@ Neither is in interpreter or library code. A board that subverts its interpreter
 - the files of granted scopes, as a listing only;
 - nothing else of the person's.
 
-Every byte of a person's file then comes through one page-side call:
+Every byte of a person's file then comes through one page-side call, and every call is made by a **principal**:
+- **The principal is bound by the page, never claimed by the worker.** It is the document whose interpreter the worker is (its ref) and that worker's start, fixed when the page makes the worker and its broker channel. Every request on that channel is that principal's. Nothing in a request names who is asking.
+
+The calls:
 1. **Reading.** The worker's file system (web/shims/fs.ts) asks the page for the bytes, synchronously. It reuses the broker the runner already has for a shared collection's files: two SharedArrayBuffers, the worker waiting on `Atomics.wait` (design/runner.md, step 4).
-2. **The page decides in that same call.** It resolves the path to a workspace entry, checks the grant on the entry's identity, and asks the person if there is none (§5). It then sends the bytes, or an error that becomes `PermissionError` in Python.
-3. **Writing, renaming, deleting, making a folder.** The worker asks before it acts, through the same synchronous call. Then, when the bytes come back (`fsChanged`), the page checks the grant again before keeping them, on the entry's identity at that moment (§7, TOCTOU).
+2. **The page decides in that same call.** It resolves the path to a workspace entry, checks the principal's grant on the entry's identity, and asks the person if there is none (§5). It then sends the bytes, or an error that becomes `PermissionError` in Python.
+3. **Changing: writing, creating, renaming, removing, making or removing a folder.** Each is **one structured call that commits or fails as a whole, and answers before the worker goes on** (§2a). No change is kept from a one-way message: today's `fsChanged` no longer carries the person's files.
+
+### 2a. Changes: identity at use, atomic, acknowledged
+
+One page call isn't atomic by itself: another tab, the file browser or an agent can change the workspace between the call's steps. So each change is made like this:
+- **Under the workspace's lock.** The whole call (resolve, check the grant, change, record) holds the workspace's lock (`locked()`, a Web Lock, so one change at a time in all of this browser's tabs), in one transaction of its stores. Nothing is checked in one call and used in another.
+- **On the identity the worker saw.** When code opens a file, the page answers with the entry's identity (`fid`) and revision. Its change then names them:
+  - **writing an existing file** carries the expected `fid` and revision. If the file is now another one (replaced, removed and remade) or has changed since, the write fails with an error (Python `OSError`, "changed since it was opened"). It never writes over a file it didn't open;
+  - **creating** names the parent folder's identity and the new name, and fails if that name now exists (`FileExistsError`). There is no silent overwrite. `open(path, "w")` on a name that didn't exist when it was opened creates; on one that did, it writes that `fid`;
+  - **renaming and moving** are one call (`from` identity, `to` parent identity and name). It doesn't replace an existing name unless the code asked to (`os.replace`), and then only with write on what it replaces. It is not a remove and a write;
+  - **making and removing a folder** are calls of their own, with the same check and the same answer. (Today `mkdir` and `rmdir` report no change at all.)
+- **All or none.** A change touching several entries (renaming or removing a folder, which changes every path under it) is one transaction: every entry changes, or none does.
+- **Acknowledged.** The worker's file system reports success to Python only after the page's answer says the change is committed. A refusal (no grant, the identity changed, the storage full, a bound in §8) reaches the code as the error of the very call that made it: `close()`, `flush()`, `os.rename()`, `os.mkdir()`. Bytes being written cross to the page in the broker's chunks before that answer, and count against the write queue's bound (§8) while they wait.
+- **Told to the others, under their own grants.** After a change commits, other interpreters on the page hear of it only if they may read that entry (§4, the page's own paths).
 
 **Where the runner isn't there, the gate can't hold.** The page then falls back to a plain worker with the page's own origin:
-- the desktop app;
 - offline, where a service worker doesn't serve a sandboxed frame;
-- a runner that doesn't answer;
-- `?runner=0` on a loopback host, for tests.
+- a runner that doesn't answer (its frame times out, fails, or its interpreter says nothing);
+- `?runner=0` on a loopback host, for tests;
+- the desktop app, **for now**. William: the desktop app should be "faster and more memory than running in browser, but still safe", so it will host the sandboxed runner and get the same gate (§10, step 5). Until then it is a fallback like the others.
 
 Such a worker could open the browser's storage itself. So there:
-- **a board brought in from elsewhere keeps the interim rule:** its code waits for "Run this board's code";
-- **a board made here runs as it does today,** since its code is the person's own.
+- **a document brought in from elsewhere keeps the interim rule:** its code waits for "Run this board's code";
+- **a document made here runs,** since its code is the person's own. The page still gives it only what the rules above give it, but that isn't a boundary there;
+- **no grant is used** by a fallback worker. A grant is for a principal in the runner, so the page doesn't act on one for a worker that could read storage itself.
+
+**Giving up the runner never runs what was waiting for it** (astra's CORR-CAP-4). When the page gives up the runner, a run or a question already sent to it is not replayed into the fallback. A run is answered as not run, saying why and to run it again. A question is answered as skipped. Only what isn't code (the files) is given to the fallback. What runs there after that is what the person runs again. This is built in workspace step 3b (web/notebook/runner-worker.js, tested by test-runner-fallback.mjs).
 
 The page says which applies ("This board's code is paused: files can't be protected here"). "Every board runs on open" holds only where the gate does.
 
@@ -63,12 +84,12 @@ The page says which applies ("This board's code is paused: files can't be protec
 
 | Deno's lesson | How it's handled here |
 |---|---|
-| **Symlinks and path traversal.** A grant scoped to a folder escaped through a symlink inside it (deno #4437; PR #12554 then required full read and write to create symlinks; scoped symlinks are still open in #35031). | The workspace's file system has **no links** of any kind (web/workspace/api.ts; web/shims/fs.ts has no symlink, link or readlink). Paths are normalised before anything (`normPath`; the worker's `resolve` folds `..` within `/`). A grant names an **entry's identity** (a file's `fid`, a folder's entry), never a path string, and is checked after resolving. **If links are ever added:** a link is followed before the check, the grant needed is its target's, and making a link needs write on both its folder and its target. |
-| **TOCTOU.** NDSS 2025 found symlink check-then-use races that make fine-grained control ineffective. | The check is **at the use**, inside the same page-side call that reads the bytes or keeps the write, on the entry's identity at that moment. No path is checked in one call and used in another. The worker never holds a token it could replay: a grant lives on the page, keyed by the board and the entry. |
-| **Unicode normalisation mismatch** (a Deno advisory on APFS: the check and the use saw different forms of one name). | **One normalisation for all three:** check, display and use go through the workspace's `normPath` (NFC), so the name shown, the name checked and the entry used are the same string. The worker's paths are normalised by the page before lookup, never trusted as given. |
+| **Symlinks and path traversal.** A grant scoped to a folder escaped through a symlink inside it (deno #4437; PR #12554 then required full read and write to create symlinks; scoped symlinks are still open in #35031). | The workspace's file system has **no links** of any kind (web/workspace/api.ts; web/shims/fs.ts has no symlink, link or readlink). Paths are normalised before anything (`normPath`; the worker's `resolve` folds `..` within `/`). A grant names an **entry's identity** (a file's `fid`, a folder's `fid`, §6), never a path string, and is checked after resolving. **If links are ever added:** a link is followed before the check, the grant needed is its target's, and making a link needs write on both its folder and its target. |
+| **TOCTOU.** NDSS 2025 found symlink check-then-use races that make fine-grained control ineffective. | The check is **at the use**, inside the same page-side call that reads the bytes or makes the change, under the workspace's lock and on the entry's identity at that moment (§2a). No path is checked in one call and used in another, and a change names the identity the code opened. The worker never holds a token it could replay: a grant lives on the page, keyed by the principal's document and the entry. |
+| **Unicode normalisation mismatch** (a Deno advisory on APFS: the check and the use saw different forms of one name). | **Names are kept exactly, and lookalikes can't be made.** The workspace's `normPath` folds slashes and `..` but doesn't normalise Unicode (astra checked: a composed and a decomposed "é" are two names). So:<br>• **exact names everywhere:** the check, the display and the use all take the entry the index has under the exact string. The page resolves the worker's path once, to an identity, and everything after uses the identity;<br>• **no new lookalike:** making or renaming an entry is refused when its name's NFC form equals a sibling's NFC form ("a name that looks the same is already here");<br>• **existing lookalikes** (made before this rule) are found when the workspace's database is upgraded for folder identities (§6). They are listed in the Storage panel, and the prompt marks such a name, showing its code points, so the person can tell them apart. Both entries keep working. |
 | **Prompt spoofing** (CVE-2024-27936, after CVE-2023-28446: the prompt showed a stripped string but granted the raw one). | The prompt is **drawn by the host page, outside the runner's frame**, so code can't draw a fake one or draw over it. It shows the entry's **canonical path from the workspace index** at decision time (never the string the code passed), set as text (escaped by construction), with its kind and size. It grants **exactly that identity**. |
 | **Exemptions and pre-prompt loading.** Deno's URL imports bypassed the checks, and dependencies resolved before the permission system applied. | **No exemption:** imports of workspace modules, data files and images all go through the gate (§4). A worker starts with nothing of the person's, so nothing is resolved before the gate exists. |
-| **Coarse grants and prompt fatigue.** "allow-all" hollows the model out, and frequent prompts train people to say yes. | **Ask rarely, grant narrowly:** scope by folder, remember per board, batch a run's requests into one prompt, and remember a denial for the rest of the page's life without asking again. There is **no "allow everything"**: the workspace's top can't be granted, only a folder in it or a file. A revoke list (§9) shows every grant. |
+| **Coarse grants and prompt fatigue.** "allow-all" hollows the model out, and frequent prompts train people to say yes. | **Ask rarely, grant narrowly:** scope by folder, remember per document, batch a run's requests into one prompt, and remember a denial for the rest of the page's life without asking again. There is **no "allow everything"**: the workspace's top can't be granted, only a folder in it or a file. A revoke list (§9) shows every grant. |
 
 ## 4. The gate inventory: every path to the person's files
 
@@ -78,12 +99,26 @@ The page says which applies ("This board's code is paused: files can't be protec
 |---|---|---|
 | Python | `open`, `io`, `os` (stat, listdir, scandir, walk, remove, rename, mkdir, …), `pathlib`, `shutil`, `glob`, `fileinput`, `csv`, `json.load` on a file | the runtime's `fs` shim (web/shims/fs.ts: `readFileSync`, `statSync`, `readdirSync`, `writeFileSync`, `renameSync`, …) |
 | Python | `import` of a module in the workspace (`import mymodule` from a `.py` file there) | the import system reads the file through the same shim, so it is a read under the gate like any other |
-| Python libraries | NumPy `load`, `save`, `loadtxt`, `savetxt`, `genfromtxt`, `fromfile`, `tofile`; pandas `read_*` and `to_*`; PIL `Image.open` and `save`; matplotlib `savefig`; `pickle` on a file | through Python file objects, so through the shim; to verify per library that none keeps a file system of its own |
-| Sage | `load`, `attach`, `save`, `load` of `.sobj`, `open` (lib/sage_all.py) | Python file calls, so through the shim |
-| Magma | `Read`, `Write`, `PrintFile`, `load`, `Open` and the file-stream intrinsics | at master 0668b306, none of these is implemented in lib/_magma.py (`PrintFile` is only in the list of Magma's names, lib/_magma_names.py); to confirm in the audit. When they are, through Python file calls, so through the shim |
-| MATLAB | `load`, `save`, `fopen`, `fread`, `fwrite`, `fprintf` to a file, `fgetl`, `readmatrix`, `writematrix`, `csvread`, `dlmread`, `imread`, `imwrite`, `exist`, `dir`, `run` of a script (lib/_matlab.py, lib/_matlab_files.py) | Python file calls, so through the shim |
-| The page, for the code | a notebook's `.sbreplay` resume reading its recorded files; output that names a file of the person's (a picture written by code, then shown) | the page reads the workspace itself, so these calls go through the same check, with the board as the asker |
-| Wasm modules | the PNG module (src/runtime/raster.ts) and any module with its own file system | **to audit:** a module given bytes by Python is fine; one with its own file access must go through the shim |
+| Python libraries | NumPy `load`, `save`, `loadtxt`, `savetxt`, `genfromtxt`, `fromfile`, `tofile`; matplotlib `savefig` (and its PNG writer); `pickle` on a file | through Python file objects (`open`, `io`: `_fs` in src/runtime/modules.ts, which calls the shim), so through the shim. Imports read through the same `fs` (src/compile.ts; the browser bundle resolves it to the shim). Confirmed by astra's audit |
+| Python libraries, not present | pandas and PIL | **no implementation at this baseline**, so nothing to certify. When one is added, it must reach files only through Python file objects, and the audit of that addition checks it |
+| Sage | `open`; `load`, `attach`, `save` (lib/sage_all.py) | `open` is Python's, so through the shim. `load` and `attach` check that the file exists, then raise `NotImplementedError`; `save` always raises. So today they read nothing (the existence check is a `stat`, through the shim). When implemented, through Python file calls |
+| Magma | `Read`, `Write`, `PrintFile`, `load`, `Open` and the file-stream intrinsics | **absent at this baseline**: the names are only in Magma's list of names (lib/_magma_names.py), with no implementation, and src/magma.ts rejects `load` explicitly (astra confirmed). When implemented, through Python file calls |
+| MATLAB | `load`, `save`, `fopen`, `fread`, `fwrite`, `fprintf` to a file, `fgetl`, `readmatrix`, `writematrix`, `csvread`, `dlmread`, `imread`, `imwrite`, `exist`, `dir`, a function file's lookup and `run` of a script (lib/_matlab.py, `_matlab_files.load`) | Python file calls, so through the shim |
+| Wasm modules | the PNG module (src/runtime/raster.ts) | made with no imports (`{}`): it has no file system of its own and is given bytes by Python or JavaScript. Confirmed. Any later module with imports is audited the same way |
+
+**The page's own paths.** The shim isn't the only way bytes reach a worker: the page sends some itself. Each is gated **per principal**, with the same check as the broker's:
+
+| Page path (today) | With the gate |
+|---|---|
+| **Startup** (`sendFiles`, index.html): every data file sent to a notebook's interpreter when it starts | removed. A worker starts with only its own document's files and its granted scopes' listings (§2); bytes come through the broker on demand |
+| **A file put** (`filePut`): a file changed by the page (an upload, the file browser) sent to **every** live interpreter (`fsPut` broadcast) | sent only to the interpreters whose principal may read that entry. The others hear nothing |
+| **A worker's change, told to the others** (`fsChanged` fan-out in `makeKernel`: one interpreter's write sent to the page's other interpreters) | A's change to F reaches B only if B may read F. **An A-only grant never feeds B**, by this fan-out or any other broadcast |
+| **TimeTravel's journal** (`replayFiles`, `filesSent`, `fileEvent`): the files a run read, recorded and given again when it is replayed | a replay gives a worker only what its own document's journal recorded, and only while the principal can still read those entries. Otherwise the replay says the file is no longer available to it |
+| **The desktop app's disk** (`diskFiles`, `writeDisk`): files from the person's disk folder sent in, and changes written back | the same gate, on the desktop app's own index, once it hosts the runner (§10, step 5). Until then, a fallback (§2) |
+| **A shared collection's files** (the broker's `brokerFetch`, RunnerWorker's `fetchFor`): fetched for the worker by URL | unchanged, and listed for the audit: the page fetches only the engine's own files (a fixed pattern under the site's base) and the collection's files it was told to mount, per worker. No other URL |
+| **Output and file loaders**: a picture that code wrote, shown by the page; a notebook's `.sbreplay` resume reading its recorded files | the page reads the workspace for them under the principal's grant, as the broker does |
+
+Each page path gets a test, per principal: B is refused what only A may read.
 
 **Not the person's files, and not gated:**
 - the worker's scratch folder (`/tmp`), which is the board's own. Today's `fsChanged` keeps any path outside `/$pyjs`; with the gate, writes under `/tmp` stay in the worker and are never kept;
@@ -96,24 +131,31 @@ The page says which applies ("This board's code is paused: files can't be protec
 - **Drawn by the page**, in its own layer above the board, outside the runner's frame. It is modal for the board, not the page, so the person can still read the board while deciding.
 - **What it says:**
   - "**This board wants to read** `/Data/survey.csv` (12 KB)", or "…**read and change** the folder `/Data/` (34 files)";
-  - the board's name, so it's clear which board asks;
+  - the document's name, so it's clear which board or notebook asks;
   - the path is the workspace's canonical path at that moment, set as text.
 - **Choices:**
   - **Allow for this board** (remembered);
   - **Allow once** (until the page closes);
   - **Don't allow** (remembered for this page's life, without asking again).
   - Write includes read.
-- **Batched.** While a prompt is open, further requests from the same run are added to it ("…and 2 more files"), so one run asks once.
+- **Batched, but never merged across documents.** While a prompt is open, further requests are added to it ("…and 2 more files"), so one run asks once. Requests are grouped by the document asking (its name above its rows), and each document's rows have **their own choices**: allowing board A's request never allows board B's, even for the same file. A row is `(principal, entry, capability)`: A reading F and B writing F are two rows (CORR-CAP-1).
 - **The worker waits** while the prompt is open (`Atomics.wait`). Stop still works: the interrupt flag is separate. Closing the prompt counts as "Don't allow".
 - **Scope offered:** the file asked for, or its folder (a checkbox, "the whole folder `/Data/`"), never wider. A request for the workspace's top offers only its files one by one.
 
 ## 6. Grants
 
-- **What a grant is:** `{board, capability, scope, mode}`.
-  - **board:** the board's identity in the workspace (its ref), never its path. A notebook's is likewise its ref.
+- **What a grant is:** `{document, capability, scope, mode}`.
+  - **document:** the board's or notebook's identity in the workspace (its ref), never its path: the principal's document (§2).
   - **capability:** `files` for now; later `agent`, `sync`, …
-  - **scope:** a file's identity (`fid`) or a folder entry's.
+  - **scope:** a file's `fid` or a folder's `fid`.
   - **mode:** read, or read and write.
+- **Folders get an identity** (CORR-CAP-3). Today only files have a `fid`. Folders get one too: random, 64 bits like a file's, checked against the index when made, and never reused. The upgrade of the workspace's database gives every existing folder one, in the upgrade's transaction. A tab still open on the old version is closed by the upgrade (`versionchange`) and says so, as for any version.
+  - **Renaming or moving** a folder keeps its `fid`, so its grants follow it.
+  - **Removing a folder** (to Trash) ends its grants: they are deleted with it, and restoring it from Trash doesn't bring them back.
+  - **Removing a folder, then making one with the same name** makes a new `fid`: the old grants don't apply to it.
+- **Its own folder** (William, §11). A document **made here** (with no `origin`: not uploaded, dropped or opened from elsewhere) gets read and write on **the folder it is in**, without asking. It is an ordinary grant, made when the document is made (or, for documents that exist when this is built, at the upgrade), shown in the list and revocable. Moving the document later doesn't move or widen it.
+  - **At the workspace's top**, which can't be granted (§3), it gets instead what it **creates** there: making a new file at the top is allowed without asking, and the file it made is granted to it. Other files at the top it asks for. This is the safer of the two readings (William: "choose the safer one"), and new notebooks are made at the top today.
+  - **A file a document creates** in a granted folder is covered by the folder's grant. One it creates with a file grant alone isn't possible: creating needs write on the parent.
 - **A folder grant follows the folder.** It covers whatever is inside the folder at the moment of use: renaming the folder moves the grant with it, and moving a file out of it ends the grant for that file.
 - **Kept in the workspace's own store** (its `meta`), not localStorage, so that clearing a site's storage clears both together. Grants are not in an export (design/workspace-files.md §7.11) or a copy of the board: Duplicate, Save a copy and uploading the board elsewhere all start with none.
 - **Revoked** from the list (§9). A revocation applies at the next use: a run already reading keeps the bytes it has, and is refused the next one.
@@ -133,21 +175,26 @@ The broker, the prompt and the record of activity are part of the boundary: what
 
 **The broker:**
 - **A request** from the worker (`{op, path}`, and for a write its size) is at most 4 KiB. Its `op` is one of a fixed few, and its path at most 1,024 characters (the workspace's `MAX_PATH`). Anything else is refused before it is read further.
-- **One request at a time per worker.** The worker waits on each answer (`Atomics.wait`), so it can't have two in flight. The page answers its workers one request at a time each, and the number of workers is bounded by the page's interpreters (one per language per document).
+- **One request at a time per worker, enforced by the page.** The page keeps each broker's state (idle, or the one request it is answering) and answers only from idle. A request that arrives while one is being answered is misuse (below): the page doesn't rely on the worker waiting on `Atomics.wait`, since a worker that subverted its interpreter needn't.
+- **At most 8 workers per page** have a broker: a page's interpreters (a notebook's kernel, a board's language, and those of the documents shown in it). A ninth interpreter starts without one: it is told "too many interpreters running on this page" for any file it asks for, until another stops. Each broker's buffer is one SharedArrayBuffer of 4 MiB plus a 64-byte header, made when the worker starts and freed when it ends. So the brokers' buffers are at most 8 × 4 MiB = 32 MiB per page.
 - **A read:**
   - **Size first.** The size comes from the workspace's index (the entry's `size`) before any byte is read. A file over the workspace's file cap (200 MB, `maxFileBytes`) is refused unread; with the cap at 200 MB, that never happens to a stored file.
-  - **Chunked.** The bytes cross in the broker's chunks (4 MB, the SharedArrayBuffer's size), never the whole file at once. The page holds one file's bytes at a time per worker, read once from IndexedDB.
-  - **Rate.** Each worker has a read budget of 512 MB, refilled at 64 MB a second. Past it the page waits before answering, which is backpressure: the worker is already waiting.
-- **A write** (`fsChanged`):
-  - the size is checked against the file cap before the bytes are kept;
-  - it joins the page's existing write queue, bounded at 256 MiB of bytes waiting (`FILE_QUEUE_MAX`, LIMIT-12C-2). Past either bound, it is refused, said, and the write fails in the worker. Nothing is held past the bound.
+  - **Reserved before it is read.** The workspace keeps a file's bytes as one value, so reading it from IndexedDB materializes the whole file in the page. Before that read, the page reserves the file's indexed size against **one page-wide read reservation of 256 MiB**. While the reservation can't hold it, the request waits, first come first served: this is backpressure, since the worker is already waiting. A single file (at most 200 MB) always fits once the others are done. The reservation is released when the last chunk has crossed, in a `finally`, and when the worker is terminated or the page stops it. A worker that stops asking for the rest of a file for 30 seconds loses the file's bytes and its reservation; it is told the read was abandoned.
+  - **Chunked.** The bytes cross in the broker's chunks (4 MiB, the SharedArrayBuffer's size), never the whole file at once.
+  - **So reads hold at most 288 MiB on the page:** 256 MiB of reserved file bytes, plus 32 MiB of broker buffers. The interpreter's own copy of what it read is in its own memory, bounded by its WebAssembly memory, as it is today.
+  - **Later, one chunk per worker.** If the workspace comes to store large files in chunks (one row per 4 MiB), a read reserves one chunk per worker instead, and the page then holds at most 8 × 4 MiB. That change is to storage, so it isn't part of this design.
+  - **Rate.** The page has one read budget for all its workers: 512 MB, refilled at 128 MB a second. Each worker also gets at most 64 MB a second of it, so one worker can't take the whole page's rate. Past either limit, the page waits before answering, which is backpressure.
+- **A change** (§2a):
+  - a write's size is declared first and checked against the file cap before any byte crosses;
+  - its bytes cross in the broker's chunks and are staged on the page against the page's write queue, bounded at 256 MiB of bytes waiting (`FILE_QUEUE_MAX`, LIMIT-12C-2), reserved before the first chunk. Past either bound, the change is refused with that answer, and the call fails in the worker. Nothing is held past the bound, and staged bytes are released when the change commits or fails, in a `finally`, and when the worker ends;
+  - a folder's rename or removal touches at most a folder's cap of entries (10,000) per level and is one transaction.
 - **A listing** (`readdir`, a folder's `stat`) returns at most 10,000 entries (a folder's cap, `maxFolderEntries`) and 1 MiB of names. Past that it is cut, and says so.
 - **Misuse ends the worker.** More than 1,000 requests a second, or more than 1,000 refused requests in a minute, terminates it. The board says why and is shown as stopped. Each request is small and synchronous, so a run that asks within these limits never meets them.
 
 **The prompt:**
 - **One open prompt per page.** While it is open, further requests from any board are added to it, never to a new prompt.
 - **What a prompt holds is capped:**
-  - at most 100 requests, coalesced by `(entry identity, capability)`, keeping the widest mode asked (write over read);
+  - at most 100 requests, coalesced by `(principal, entry identity, capability)`, keeping the widest mode that principal asked (write over read). Requests of different documents are never coalesced (§5);
   - each path at most 1,024 characters;
   - at most 1 GB of requested bytes in all, counted from the index's sizes.
 
@@ -181,25 +228,31 @@ The pill is quiet when nothing happens, and never covers the board's content. On
 
 ## 10. Steps
 
-1. **The gate, and the worker's policy:**
-   - the read gate through the broker, and the write gate on keeping;
-   - notebooks and boards started with only their own files and granted scopes;
+0. **Done in workspace step 3b:** the fallback never runs what was waiting for the runner (§2).
+1. **Identities:** folders' `fid` and the database upgrade that gives them (§6); the refusal of lookalike names, and the list of existing ones (§3).
+2. **The gate, and the worker's policy:**
+   - the read gate through the broker, with the principal bound by the page;
+   - changes as structured, locked, acknowledged calls (§2a), replacing `fsChanged` for the person's files;
+   - the page's own paths gated per principal (§4): startup, the file-put broadcast, the change fan-out, TimeTravel's journal, output loaders;
+   - notebooks and boards started with only their own files and granted scopes; documents made here given their own folder (§6);
    - `/tmp` writes never kept;
    - the policy checked by a test that fails without it.
 
-   Until step 2 lands, there are no prompts: everything ungranted is refused, and notebooks made here keep their own folder (§11).
-2. **The prompt and grants:** the host-drawn prompt, batching, the grant store and revocation.
-3. **The pill.**
-4. **Removing the interim** (3b's paused boards) where the gate holds (§2).
+   Until step 3 lands, there are no prompts: everything ungranted is refused.
+3. **The prompt and grants:** the host-drawn prompt, batching per principal, the grant store and revocation.
+4. **The pill.**
+5. **The desktop app hosts the runner** (William, §11): a sandboxed frame with an opaque origin and no network, served by the app, cross-origin isolated, with the same broker and gate on the app's own index and disk files. Until it does, the desktop app is a fallback (§2), with the paused rule for documents from elsewhere.
+6. **Removing the interim** (3b's paused boards) where the gate holds (§2).
 
 Each step is a branch of its own with its tests, and a test-only check and mutants, as usual.
 
-## 11. Questions
+## 11. Decisions (William, Oct 19, 20:04 UTC)
 
-1. **Notebooks.** Today a notebook sees all of the person's files. Under this model, a notebook brought in from elsewhere is someone else's code, as a board is. My proposal:
-   - a notebook *made here* gets read and write on its own folder without asking, and asks for anything else;
-   - an uploaded notebook asks like a board.
+1. **Notebooks:** "we should always do the work to make sagebrush safer than normal cocalc, thus leaning into the unique advantages we get from our approach." So:
+   - a notebook made here gets read and write on its own folder without asking, and asks for anything else;
+   - an uploaded notebook asks like a board;
+   - notebooks lose their blanket access to all files.
 
-   That changes what notebooks people have now can do, so it needs William's decision before step 1.
-2. **Files written by a board into its own folder.** Should a board made here likewise get its own folder without asking? My proposal: yes, the same as notebooks.
-3. **The desktop app.** The gate needs the runner (§2). The desktop app could host the runner too, as a local sandboxed frame; until then, it keeps the paused rule for boards from elsewhere.
+   Where a choice comes up later, the safer one is chosen. One such choice is already made in §6: at the workspace's top, a document gets only what it creates there.
+2. **Boards made here:** "Yes, same as notebooks."
+3. **The desktop app:** "host the runner: my vision for the desktop app is: faster and more memory than running in browser, but still safe." So it hosts the sandboxed runner and gets the same gate (§10, step 5). The paused rule there is only interim, until it does.
