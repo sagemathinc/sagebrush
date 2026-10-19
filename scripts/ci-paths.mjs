@@ -10,6 +10,15 @@ function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
 
+function hasCommit(commit) {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function changedFiles() {
   if (event === "workflow_dispatch" || event === "schedule") return [];
   if (event === "pull_request") {
@@ -21,6 +30,13 @@ function changedFiles() {
     const before = process.env.GITHUB_EVENT_BEFORE ?? "";
     if (/^[0]+$/.test(before) || !before) {
       return git("show", "--pretty=", "--name-only", head).split("\n").filter(Boolean);
+    }
+    // A rebased/force-pushed branch can name an unreachable old SHA in
+    // `before`.  Compare the whole branch with master rather than failing or
+    // accidentally certifying a partial path set.
+    if (!hasCommit(before)) {
+      const mergeBase = git("merge-base", "origin/master", head);
+      return git("diff", "--name-only", `${mergeBase}...${head}`).split("\n").filter(Boolean);
     }
     return git("diff", "--name-only", before, head).split("\n").filter(Boolean);
   }
