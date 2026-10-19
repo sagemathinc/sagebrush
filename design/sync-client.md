@@ -12,7 +12,7 @@
   - data files' bytes go up by SHA-256, once each.
 - **On a second browser or device signed in to the same account,** with the switch on, the same tree appears.
   - Data files arrive, are listed, and open.
-  - **Notebooks and boards are listed, but their content is slice 2.** Until then, opening one that this device doesn't have says "This notebook's content is synced in the next step: open it on the device that made it".
+  - **Notebooks and boards are listed, but their content is slice 2.** Until then, opening one that this device doesn't have shows it read-only, empty, with "This notebook's content is synced in the next step: open it on the device that made it". It can't be typed into (§6).
 - **The file browser's foot** says "Synced · 2 min ago", "Syncing 3 files…", "Offline: 5 changes wait" or "Paused: …".
   - A row shows ↑ while it is waiting to go up, and ⚠ on a conflict copy.
 - **"Delete my synced data"** is in the Storage panel, and is confirmed first. This device's own copy stays.
@@ -85,20 +85,207 @@ Its test vectors are JSON, so the server's adoption of it (@sagebrush-auth, late
 
 **Reads and writes on the workspace go through its own verbs,** under its lock, so 1a's guarantees hold: one transaction per change, identity at use, the old-store fallback.
 
+## 3a. Contracts (astra's CORR-8E7-1 to 5, daybreak2's LIMIT-SC1-1 to 4)
+
+Each is an invariant the code must keep, and the schedules its tests must run. Two facts to confirm with @sagebrush-auth before step 3: that `index` ops carry their `device` and `dseq` (to recognize this device's echo), and that a folder's ops may carry its `fid` (from capabilities 1b).
+
+**Storage** (one more schema-only upgrade, version 3: no data moved):
+- `outbox`, keyed by `[ns, dseq]`;
+- `syncIndex`, the confirmed index, per `ns`;
+- a `pins` count on `versions` records.
+
+`ns` is the namespace: `account_hash : generation : device`, from `welcome`.
+
+### C1. The outbox: durable, immutable, one sender (CORR-8E7-1, LIMIT-SC1-4)
+
+**Immutable items.** An outgoing op is an `outbox` record `{ns, dseq, op}`.
+- Its `op` (with `ref`, `fid`, `sha256`, `size`, `base`) is fixed when the record is made, and never changes.
+- A `dseq` is never reused in its `ns`.
+
+**One mechanism for enqueueing and for overflow: the scan watermark.**
+- Every local change already records its op in `ops`, in the change's own transaction, with the contents' identity added there (step 2: the hash is computed before the transaction).
+- The sender turns ops after the watermark `sync:<ns>:scanned` into outbox records, a page at a time. In one transaction, a page:
+  - reads at most 500 ops past the watermark;
+  - makes records with the next `dseq`s;
+  - pins their bytes (C2);
+  - and advances the watermark.
+- The outbox is bounded by count (10,000) and by actual encoded bytes (1 MiB, measured as each record's JSON with its keys), checked in that transaction. When it is full, the scan stops and the watermark stays: that is the overflow checkpoint.
+- A crash leaves either the whole page or none. Ops made while the outbox is full are found by the next scan, from the watermark, in pages.
+- **Ops this device applied from the server** (C3) are recorded with the server's device, so the scan skips them.
+
+**One sender per device.**
+- The tab holding the Web Lock `sagebrush-sync:<ns>` is the only one with the account socket, the only allocator of `dseq`, and the only sender.
+- Other tabs see the workspace change through its BroadcastChannel, as today.
+- The lock passes on when the tab closes, and the new holder resumes from the durable state.
+
+**Lost acks.**
+- After a reconnect, `welcome.next_dseq` says how far the server has decided. Records below it are resent unchanged, and the server answers with its stored decision (§5.2).
+- A record is removed only when its decision is known:
+  - accepted: removed once its `seq` is in the confirmed index (C3);
+  - refused (a per-op code): removed at once, and the index rebuilt from the confirmed state.
+- **A top-level** `order`, `rate`, `busy`, `invalid "rebuild"` or a transport failure never removes an undecided record.
+
+**Namespaces.**
+- Signing in as another account, or a `welcome` with another generation (after "Delete my synced data" and enabling again), starts a new `ns`. The old one's outbox is never sent into it.
+- Local changes still reach the new `ns` through its first sync (C3), which records the whole local tree.
+- Turning sync off keeps the `ns` state; turning it on again resumes it if `welcome` says the same generation.
+
+**Tests:**
+- a crash after a local change, before the scan;
+- a crash mid-scan;
+- two tabs of one device (only one connects; the lock handed over on close);
+- a lost ack, then a reload (the same `dseq` resent with the same payload; the server's decision adopted);
+- account switch, and generation change after a delete;
+- outbox full: more edits, crash, reload, drain, and every local edit represented exactly once;
+- each scan page within its count and byte bounds.
+
+### C2. Queued bytes are pinned (CORR-8E7-2)
+
+- An outbox record names bytes by `sha256`. Those bytes stay readable until the record is decided.
+- **While the record's hash is the file's current one,** they are fileBytes[fid].
+- **When a later write replaces them,** the write keeps them as a version, in its own transaction, as writes already do. It does so even where it otherwise wouldn't keep one (empty bytes, `keepEmpty: false`). The version's `pins` count is the number of undecided records naming that hash.
+- Pruning (20 versions, 30 days, the bytes bound) skips a pinned version. **Pinned versions count toward the bytes bound**, which can then be exceeded only by pinned versions.
+- A decision decrements the pin; pruning may take it after that.
+- **An upload reads exactly the bytes its record names:** the current file if its hash still matches, else the pinned version. Current bytes are never sent under an older hash. A record whose bytes are missing anyway (a cleared site) is refused locally, said, and its file re-sent as a new write.
+- **Tests:**
+  - offline A then B writes to one file, then reconnect (A and B both uploaded, in order);
+  - the same with a reload between;
+  - version pruning while A is queued;
+  - Trash and restore while queued.
+
+### C3. The confirmed index and the optimistic view (CORR-8E7-3)
+
+**The confirmed index (`syncIndex`).** It is the reducer applied to the server's log in `seq` order, own ops included. Its cursor `sync:<ns>:cursor` is written in the same transaction as each page applied to it.
+
+**What the person sees** is the workspace's own index. It equals the confirmed index plus the outbox's undecided and not-yet-confirmed ops, reduced in `dseq` order on top. After each confirmed page, the affected identities' views are recomputed, and the difference is applied to the workspace's entries. That happens in the same transaction as the page and the cursor: entries, `syncIndex` and meta are all in the workspace's database. A crash leaves all of it or none.
+
+**This device's own echo,** an `index` op with this `device` and a `dseq` in the outbox, is applied to the confirmed index like any other op.
+- The outbox record is marked confirmed and removed. Nothing is applied to the view twice, since the view already had it.
+- The order doesn't matter: an ack before the echo leaves the record "accepted, awaiting echo"; an echo before the ack confirms it at once.
+
+**First sync.** Before the account socket pulls anything, the sender enqueues the whole local tree as `adopt` records:
+- a page at a time, by path;
+- with a durable progress key `sync:<ns>:adopted` and the boundary op seq `W0` recorded first.
+
+Local changes after `W0` go through the scan, after the adopts. Pulling starts only once adoption is enqueued, so pulled entries are never adopted back. A reload mid-adoption resumes from its progress key.
+
+**An op that can't be applied** to the view (it fails a local check, such as a path rule or a limit) is still in the confirmed index, and the cursor passes it. The view leaves it out and lists it in the Sync panel. Nothing redefines the server's log.
+
+**Tests:**
+- a local create, then its echo (no `x (2)`);
+- an ack lost, then the echo;
+- the echo before the ack;
+- a crash between a page and its cursor (impossible by construction; tested as a crash mid-page);
+- a reload mid-adoption;
+- a remote create at the same path before this device's queued create (the confirmed order gives the remote one `/x` and this one `/x (2)`, on both devices).
+
+### C4. The reducer: identity, order, copies (CORR-8E7-4)
+
+- **Targets are identities, never paths:** a data file's or folder's `fid`, a document's `ref`. A rename, write, remove or restore applies to its identity wherever it is now. Path reuse can't misdirect it.
+- **Order is the server's `seq` only.** `t` is shown, never ordered by.
+- **Writes:**
+  - `base` equal to the current hash: applied;
+  - the same hash as the current one: nothing;
+  - another `base` (a concurrent write): the later write by `seq` becomes a conflict copy;
+  - a write to an identity in Trash brings it back (the edit wins);
+  - a write to an identity forgotten for good makes a conflict copy at its last path.
+- **A conflict copy's identity** is derived, so every device gets the same:
+  - fid' = the first 16 hex of SHA-256(`fid`, `device`, `dseq`) of the op that made it;
+  - its name is `name (conflict, <device's first 8>).ext`; if that is taken in the confirmed index at that point, ` (2)`, ` (3)`, …;
+  - later ops that target it (made on a device after it saw the copy) name fid'.
+- **Two creates at one path:** the later by `seq` becomes `name (2)` (the first free one in the confirmed index at that point), keeping its own identity.
+- **Vectors** (JSON, shared with the server later), each replayed from empty state on two simulated devices and checked for identical entries, identities and hashes:
+  - rename and a write across devices;
+  - two renames of one file;
+  - a path reused after a rename;
+  - write after Trash, and after forget;
+  - two writes from one base;
+  - a copy of a copy;
+  - creates colliding three ways.
+
+### C5. A download is installed only if it is still wanted (CORR-8E7-5)
+
+- A fetched blob is installed under the workspace's lock, by compare-and-swap in one transaction, only if:
+  - the entry's identity is the one the fetch was for;
+  - it is still `remote`;
+  - its `sha256` is the fetched one;
+  - its revision is the one the fetch began with.
+- Otherwise it is discarded (or kept as a pinned version, if an undecided record wants that hash). It never replaces newer bytes or clears a newer `remote` state.
+- **Tests, each with a GET held open:**
+  - a local overwrite;
+  - a newer remote write;
+  - a rename;
+  - Trash;
+  - a remove and a new file at the same path.
+
+### L1. Downloads against the daily read budget (LIMIT-SC1-1)
+
+**The fetch queue is durable** (`sync:<ns>:fetch:*`, one per wanted hash), so a reload resumes it.
+
+**For each item, in order:**
+1. the reservation (L2) and the quota preflight;
+2. then the signed URL is asked for. That debits the budget.
+
+A signed URL is kept, with its expiry, in memory and in meta, and reused for retries while it is valid. A reload never asks for a new one for a hash whose URL hasn't expired.
+
+**Running out of budget:** a `rate` refusal or 429 on asking for a URL pauses the whole queue, durably, until `retry_after`, or else the next daily reset.
+- The foot then says "Daily download limit: resumes at 14:00", and the files stay `remote`, listed and fetchable later.
+- Reconnects and reloads honor that pause.
+
+**Tests** (Miniflare with a small budget):
+- files totalling more than the budget: only the admitted prefix authorized, no URL asked twice for one hash, deterministic resume after the reset (a fake clock);
+- a reload mid-queue.
+
+### L2. One memory rule for every transfer (LIMIT-SC1-2)
+
+**What is reserved:** every transfer reserves `size × COPIES` from the page's reservation (reserve.ts) before anything is materialized:
+- for an upload: before reading its bytes from IndexedDB;
+- for a download: before asking for the URL.
+
+It holds that reservation until its last large reference is dropped. The same holds for hashing a write's bytes for its op when sync is on: the write's caller holds them, and `crypto.subtle` copies them.
+
+**Concurrency** (2 uploads, 4 downloads) is a secondary cap. The reservation decides, so two 95 MiB uploads wait for each other when the reservation can't hold both.
+
+**Checks on a download:** its `Content-Length` must be present and equal the expected size, or the download is aborted unread. The received length and SHA-256 are checked before it is installed (C5).
+
+**Tests:** peak memory and longest task with a 95 MiB upload and download, and with the nominal 2 + 4 schedule. The longest task must stay under 1 s, as the migrator's does.
+
+### L3. Pace and backoff (LIMIT-SC1-3)
+
+- **Pace.** The sender paces itself: at most 1,500 ops a minute (under the server's 2,000), a token bucket counting resends too, and at most 8 requests unanswered.
+- **Backoff, per kind of work:** ops, blob checks, uploads, URL requests, fetches, enable, and reconnect. Each has one retry timer.
+  - It honors `retry_after` when given; else exponential from 1 s to 60 s, with ±20% jitter.
+  - The timer is persisted in meta, so reconnects and reloads don't reset it.
+  - A whole message refused for `rate` is never resent before its timer.
+- **Permanent and transient are kept apart:**
+  - `limit` on an item is final for that item: "too large to sync";
+  - `storage_full` pauses uploads until the limits change (a new `welcome`) or the person acts;
+  - `rate`, `busy` and 429 are transient, under the timer.
+- **Tests (a fake clock):** a prolonged `rate` refusal, with request counts bounded and recovery without starvation; reconnect storms.
+
+### L4. Paging (LIMIT-SC1-4)
+
+- `blobs/check` takes at most 1,000 hashes per request.
+- The first sync's adoption and a rebuild page through the 100,000-entry maximum:
+  - adoption: 500 entries per transaction, by path;
+  - rebuild: the server's log at 1,000 ops or 1 MiB per page, reduced into `syncIndex` page by page, its cursor durable.
+- Neither ever holds the whole tree in memory.
+- **Tests:** 100,000 entries, with the pages' counts and bytes bounded, and a crash and reload mid-way.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |
 |---|---|---|---|
 | 0 | Before: capabilities 1a and 1b merged (fileBytes, folder ids, provenance) | board, in review | — |
-| 1 | `sync-reduce.ts` and its JSON vectors (§7.2's rules, rebuild, `name (2)`, conflict copies) | board | 1 day |
-| 2 | The ops' identity fields (`ref`, `fid`, `sha256`, `size`, `base`) recorded with each op; the outgoing queue | board | 0.5 day |
-| 3 | `sync-client.ts`: the socket, hello/welcome/index/pull_index, ops and acks, refusals and rebuild, blobs check/PUT/GET, reconnects; tested against Miniflare (web/sync/test-entry.ts, as test-sync.mjs runs it) | board | 2 days |
-| 4 | Applying what comes down to the workspace: remote entries, background fetches, `remote` marks | board | 1 day |
+| 1 | `sync-reduce.ts` and its JSON vectors (C4: identity, order, derived conflict copies, two-device replay) | board | 1.5 days |
+| 2 | The ops' identity fields (`ref`, `fid`, `sha256`, `size`, `base`) recorded with each op; version 3's stores; the outbox, the scan watermark and pins (C1, C2) | board | 1.5 days |
+| 3 | `sync-client.ts`: the sender lock, the socket, hello/welcome/index/pull_index, ops and acks, lost acks, refusals and rebuild, pace and backoff (L3), blobs check/PUT with the reservation (L2, L4); tested against Miniflare (web/sync/test-entry.ts, as test-sync.mjs runs it) | board | 2.5 days |
+| 4 | The confirmed index and the view (C3), the first sync's adoption, the durable fetch queue against the read budget (L1), downloads by compare-and-swap (C5) | board | 2 days |
 | 5 | The switch, enable's refusals, the foot status, row icons, "Delete my synced data" | board | 1 day |
 | 6 | The two-browser test: two Chrome profiles, one Miniflare, the site; then the same against dev once lite4b's limits answer carries `sync` | board, with auth | 1 day |
 | — | The session and allowlist (done: the cookie, SYNC_ACCOUNTS plus `sync.enabled`), enable's refusal wording (in progress), lite4b's `sync` limits block (a cocalc-ai PR; lite4 deploys it), the dev deploy, the server importing `sync-reduce.ts` (later, for compaction) | auth | — |
 
-That is about 6½ working days for board. Each step is its own branch, reviewed and CI'd as usual. Steps 1 and 2 can start as soon as 1b is in review. Step 6 on dev waits on lite4b's limits; until then everything is tested against Miniflare.
+That is about 9½ working days for board, three more than the first draft, for the contracts in §3a. Each step is its own branch, reviewed and CI'd as usual. Steps 1 and 2 can start as soon as 1b is in review. Step 6 on dev waits on lite4b's limits; until then everything is tested against Miniflare.
 
 ## 5. Limits and checks the slice keeps
 
@@ -117,8 +304,9 @@ That is about 6½ working days for board. Each step is its own branch, reviewed 
 ## 6. Decisions (@sagebrush, Oct 19)
 
 1. **Slice 1 may list notebooks and boards without their content** ("synced in the next step"): it is dev-only and allowlisted. **Slice 2 must land before any production flag.**
-2. **The switch's visibility:**
-   - hidden when the server says the account isn't on the allowlist (403 "sync isn't enabled for this account");
-   - shown, with the server's refusal text, when the account is allowed but its plan has sync off, or CoCalc can't be reached.
+   - On the second device, such a document **opens read-only, with that notice**. It never opens as an empty document someone could type into and that would later be merged (@sagebrush-auth).
+2. **The switch's visibility comes from `GET /api/sync/v1/status`** (@sagebrush-auth's sync-enable-plan). It returns `{available, reason: not_allowlisted | plan_has_no_sync | cocalc_unreachable, state: off | active | readonly | deleting, generation}` and never changes anything.
+   - **The page never probes with `POST /enable`,** which turns sync on.
+   - **The switch is hidden** on `not_allowlisted`, and **shown disabled, with the server's text,** on `plan_has_no_sync` or `cocalc_unreachable`.
    - No pricing or upsell wording: that framing is William's, and stays out of the repository.
 3. **Process:** astra and daybreak2 review this plan. Building starts after both CLEAR, and after capabilities 1a and 1b, each step its own PR.
