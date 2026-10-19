@@ -149,18 +149,33 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Turn sync on for this account: from a session, the only way this object gets storage. */
-  async enable(a: { account: string; hash: string }): Promise<Result<{ state: string }>> {
+  /**
+   * Give this account storage, for the registration `incarnation` (CORR-A9B-1):
+   * the D1 row's, made new each time sync is turned on from nothing.  A purge
+   * leaves this object a tombstone naming the incarnation it deleted, so an
+   * enable that read the row before the purge finished can't make storage
+   * again under it; and an object still holding (or deleting) one
+   * incarnation refuses another.
+   */
+  async enable(a: { account: string; hash: string; incarnation: string }): Promise<Result<{ state: string }>> {
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
-      for (const s of SCHEMA) this.sql.exec(s);
+      if (typeof a.incarnation !== "string" || !/^[0-9a-f]{32}$/.test(a.incarnation)) throw new SyncError("invalid", "incarnation");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
+      if (this.get("tombstone") === a.incarnation) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again");
       const had = this.get("account_id");
-      if (had !== undefined && had !== a.account) throw new SyncError("forbidden", "not this account");
-      if (had === undefined) {
-        this.set("account_id", a.account);
-        this.set("account_hash", a.hash);
-        this.set("created", Date.now());
-        this.set("state", "active");
+      if (had !== undefined) {
+        if (had !== a.account) throw new SyncError("forbidden", "not this account");
+        if (this.get("incarnation") !== a.incarnation) throw new SyncError(this.state() === "deleting" ? "deleting" : "conflict", "another registration holds this account's storage");
+        return { state: this.state() };
       }
+      this.sql.exec("DELETE FROM meta WHERE k = 'tombstone'");
+      for (const s of SCHEMA) this.sql.exec(s);
+      this.set("account_id", a.account);
+      this.set("account_hash", a.hash);
+      this.set("incarnation", a.incarnation);
+      this.set("created", Date.now());
+      this.set("state", "active");
       return { state: this.state() };
     }));
   }
@@ -806,14 +821,23 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       await bucket.delete(l.objects.map((o) => o.key));
       return false;
     }
-    // done: the record keeps counts, no id; then this object holds nothing
+    // done: the record keeps counts, no id (only for this incarnation's row: a re-registration since
+    // then is left alone); then this object holds nothing but a tombstone naming the incarnation it
+    // deleted, written in the same synchronous step that drops everything else, so no enable can
+    // come between (CORR-A9B-1)
     const db = this.env.SHARE_DB;
+    const incarnation = this.get("incarnation") ?? "";
     if (db) {
-      await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1")
-        .bind(this.get("account_hash"), Math.floor(now / 1000), this.get("purge_id"), this.get("purge_kind"), Number(this.get("purge_docs") ?? 0), Number(this.get("purge_bytes") ?? 0)).run();
+      await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND incarnation = ?7")
+        .bind(this.get("account_hash"), Math.floor(now / 1000), this.get("purge_id"), this.get("purge_kind"), Number(this.get("purge_docs") ?? 0), Number(this.get("purge_bytes") ?? 0), incarnation).run();
     }
     await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
+    this.ctx.storage.transactionSync(() => {
+      const tables = (this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as Row[]).map((r) => String(r.name));
+      for (const t of tables) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
+      this.sql.exec("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)");
+      this.sql.exec("INSERT INTO meta (k, v) VALUES ('tombstone', ?)", incarnation);
+    });
     this.alarmAt = null;
     return true;
   }

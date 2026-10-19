@@ -17,7 +17,7 @@
 
 import { sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
-import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
+import { accountHash, fields, hmacHex, isNat, isSha, randomHex, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
 import { allowed, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
@@ -86,7 +86,7 @@ const sameSite = (req: Request) => {
 };
 const answer = <T>(r: Result<T>, ok: (v: T) => Response) => ("error" in r ? err(STATUS[r.error.code] ?? 400, r.error.code, { message: r.error.message, ...r.error.detail }) : ok(r.ok));
 
-const STATUS: Partial<Record<SyncError["code"], number>> = { forbidden: 403, deleting: 409, readonly: 409, invalid: 400, limit: 413, rate: 429, busy: 503, missing: 404, storage_full: 507 };
+const STATUS: Partial<Record<SyncError["code"], number>> = { conflict: 409, forbidden: 403, deleting: 409, readonly: 409, invalid: 400, limit: 413, rate: 429, busy: 503, missing: 404, storage_full: 507 };
 
 /** The sync API's response to req, or null if req is not for it. */
 export async function handleSync(req: Request, env: Env): Promise<Response | null> {
@@ -140,19 +140,23 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     // (a purge still running, or the account's record says it is being deleted: not yet)
     const rec = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
     if (rec?.state === "deleting") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
+    let reg: { state: string; incarnation: string } | null = null;
     // The account is registered in D1 first, and only then given storage (CORR-00F-1): the daily
     // inventory finds an account's objects by this row, so an account object that could take writes
     // without it would see its own files deleted.  A failure here leaves no storage at all; a row
     // whose account object then fails to start holds nothing, which is harmless.
     try {
       if (env.SYNC_TEST_FAIL_ENROLL && env.SYNC_TEST_FAIL_ENROLL === who.id) throw new Error("D1 unavailable (test seam)");
-      await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created) VALUES (?1, substr(?1, 1, 32), 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
-      const reg = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
+      // (a new incarnation for a new row, or a purged one made active again; an active row keeps its own)
+      await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, incarnation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, ?3) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, incarnation = excluded.incarnation WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000), randomHex(16)).run();
+      reg = await env.SHARE_DB.prepare("SELECT state, incarnation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; incarnation: string }>();
       if (reg?.state !== "active") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
     } catch {
       return err(503, "busy", { message: "turning sync on didn't finish; try again" });
     }
-    return answer(await stub.enable({ account: who.id, hash }), json);
+    // (the account object checks the incarnation against its own: a purge since this read has left a
+    // tombstone that refuses it)
+    return answer(await stub.enable({ account: who.id, hash, incarnation: reg.incarnation }), json);
   }
   if (p === "/api/sync/v1/delete" && m === "POST") {
     const b = (await req.json().catch(() => null)) as { confirm?: unknown } | null;
