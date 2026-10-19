@@ -136,7 +136,9 @@ function latestLocal(mode: string): string | null {
   return found;
 }
 const blankBoard = (mode: string): BoardDoc => ({ title: "Untitled board", ...(mode !== "python" ? { mode: mode as BoardDoc["mode"] } : {}), seed: hex(32), nodes: [] });
-const openLocal = (id: string) => location.assign(location.pathname + "?doc=local:" + id);
+// (?workspace=0, on a loopback host only (tests of the fallback, as ?runner=0): boards kept in localStorage as before)
+const noWorkspace = q.get("workspace") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const openLocal = (id: string) => location.assign(location.pathname + "?doc=local:" + id + (noWorkspace ? "&workspace=0" : ""));
 // This browser's workspace, what was kept before brought in (a page that
 // keeps nothing, an exported file, a frame or the benchmark: none); none,
 // where storage can't be opened in time (boards kept in localStorage as
@@ -144,7 +146,7 @@ const openLocal = (id: string) => location.assign(location.pathname + "?doc=loca
 // (one owner: a workspace that opens after the page gave up on it is closed
 // unused, and the page keeps boards as before for this visit: LIMIT-12C-3)
 let wsAbandoned = false;
-const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ? null : await within(Workspace.open().then(async (w) => {
+const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") || noWorkspace ? null : await within(Workspace.open().then(async (w) => {
   try { await migrate(w, localStorage, { proceed: () => !wsAbandoned }); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
   if (wsAbandoned) {
     w.close();
@@ -162,6 +164,8 @@ async function makeInWorkspace(w: Workspace, d: BoardDoc): Promise<string> {
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
   const e = await w.create(p, { content: d, mode: d.mode ?? "python" });
+  // (written here: its notes' remote pictures show at once, as a new board's always have, SEC-89C-3)
+  try { localStorage.setItem("sagebrush-board:local:" + e.ref + "#here", "1"); } catch {}
   return e.ref!;
 }
 const safeTitle = (t: unknown) => String(t ?? "").replace(/[\/\u0000-\u001f\u007f]/g, "-").trim().slice(0, 200).trim() || "Untitled board";
