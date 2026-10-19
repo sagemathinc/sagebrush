@@ -117,6 +117,7 @@ class Pairing:
         self.closed = False
         self.unpaired = 0
         self.session_hash = None  # the SHA-256 of the page's session secret, for reconnecting
+        self.pairings = 0
         self.session_tries = 0
 
     # ---- listening
@@ -307,6 +308,7 @@ class Pairing:
             if refused is None:
                 self.conn = c
                 self.generation += 1
+                self.pairings += 1  # (each pairing its own: chat prompts relayed to one are answered by it only)
                 page = params.get("page")
                 self.page = {"origin": page.get("origin"), "path": page.get("path")} if isinstance(page, dict) else None
         if refused:
