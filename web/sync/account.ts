@@ -13,7 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { allowed, type SyncEnv } from "./env.ts";
@@ -67,6 +67,11 @@ export interface Limits { storage_bytes: number; max_file_bytes: number; sync: {
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, storage_bytes: 1 << 30, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
+/** Tickets issued a minute, per session and per account (LIMIT-6D6-3). */
+const TICKETS_PER_MINUTE_SESSION = 60;
+const TICKETS_PER_MINUTE_ACCOUNT = 240;
+/** Fences a revoke sends before it answers; the rest go from the alarm, paged (LIMIT-6D6-4). */
+const FENCES_AT_ONCE = 100;
 /** A document socket's lease (§2, LIMIT-D817-4): renewed at each recheck while the socket is used. */
 const LEASE_MS = 15 * 60_000;
 /** An unused holding is dropped a day after its upload (§3). */
@@ -85,6 +90,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private batches = new Bucket(LIMITS.batchBurst, LIMITS.batchRate);
   private opsRate = new Bucket(LIMITS.opsPerMinute, LIMITS.opsPerMinute / 60);
   private urls = new Bucket(LIMITS.urlsPerMinute, LIMITS.urlsPerMinute / 60);
+  private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
+  private ticketsBySession = new Map<string, Bucket>();
+  private ticketBucket(session: string): Bucket {
+    let b = this.ticketsBySession.get(session);
+    if (!b) {
+      if (this.ticketsBySession.size >= 1000) this.ticketsBySession.delete(this.ticketsBySession.keys().next().value!);
+      b = new Bucket(TICKETS_PER_MINUTE_SESSION, TICKETS_PER_MINUTE_SESSION / 60);
+      this.ticketsBySession.set(session, b);
+    }
+    return b;
+  }
   private inflight = new WeakMap<WebSocket, number>();
   /** The alarm as last set (read at start): so it can be set earlier without an await (CORR-321-3). */
   private alarmAt: number | null = null;
@@ -387,10 +403,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           const k = { doc, epoch, ref: patchRef(e), sha256: sha };
           const had = this.one("SELECT state FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", doc, epoch, k.ref, sha);
           if (!had) {
-            this.sql.exec("INSERT INTO pins (doc, epoch, ref, sha256, state, inflight, lapse, gen) VALUES (?, ?, ?, ?, 'pending', 1, ?, 1)", doc, epoch, k.ref, sha, expires);
+            this.sql.exec("INSERT INTO pins (doc, epoch, ref, sha256, state, inflight, lapse, gen) VALUES (?, ?, ?, ?, 'pending', 1, ?, ?)", doc, epoch, k.ref, sha, expires, this.nextGen());
             this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", sha);
           } else if (had.state === "pending") {
-            this.sql.exec("UPDATE pins SET inflight = inflight + 1, lapse = max(lapse, ?), gen = gen + 1 WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", expires, doc, epoch, k.ref, sha);
+            this.sql.exec("UPDATE pins SET inflight = inflight + 1, lapse = max(lapse, ?), gen = ? WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", expires, this.nextGen(), doc, epoch, k.ref, sha);
           } else continue; // held: nothing this attempt does can change it
           keys.push(k);
         }
@@ -398,6 +414,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
     if (keys.length) this.wakeBy(expires + this.settleMs() + 1);
     return keys;
+  }
+  /**
+   * The next pin generation: one counter for the whole account, never
+   * reused, so a pin dropped and made again can't take an old generation
+   * that a stale answer still names (CORR-6D6-1).
+   */
+  private nextGen(): number {
+    const g = Number(this.get("pin_gen") ?? 0) + 1;
+    this.set("pin_gen", g);
+    return g;
   }
   /** How long after a pin's forward lapses its answer is asked for: then the forward can't commit any more (§4.3). */
   private settleMs(): number {
@@ -513,12 +539,31 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   // ---- document sockets (§2)
 
+  /**
+   * A batch from one of this account's document sockets: decided exactly
+   * as one from the account socket (the session not revoked, the rates,
+   * blobs pinned, the head recorded here), so a document socket is no way
+   * around any of them (LIMIT-6D6-1, CORR-6D6-2, CORR-6D6-3).
+   */
+  async socketBatch(a: { account: string; session: string; device: string; batch: Record<string, unknown> }): Promise<Result<BatchOut>> {
+    return attemptAsync(async () => {
+      if (this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", a.session)) throw new SyncError("forbidden", "this session was ended");
+      const b = checkBatch(a.batch);
+      const out = await this.batch({ account: a.account, session: a.session, expires: Infinity, checked: Date.now() }, a.device, b);
+      if (out.new > 0) this.changed(null, b.doc, out.head, a.device);
+      return out;
+    });
+  }
+
   private leaseMs(): number {
     return this.env.SYNC_TEST_PIN_MS ? 1000 : LEASE_MS;
   }
   /** A ticket for a document socket: used once, within TICKET_MS, by this session only. */
   private ticket(att: Attachment, device: string, doc: unknown): { ticket: string; expires: number } {
     this.admit(att.account, false);
+    // (issued at a rate, per session and per account, whether or not they are used: LIMIT-6D6-3)
+    const wait = Math.max(this.ticketsAll.take(), this.ticketBucket(att.session).take());
+    if (wait) throw new SyncError("rate", "too many tickets", { retry_after: wait });
     if (!isDocId(doc) || !this.one("SELECT 1 AS x FROM docs WHERE doc = ? AND deleted IS NULL", doc)) throw new SyncError("unknown_doc", "no such document");
     const now = Date.now();
     return this.ctx.storage.transactionSync(() => {
@@ -594,7 +639,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tell the account's other sockets that a document changed (§5.2). */
-  private changed(from: WebSocket, doc: string, head: Head, device: string) {
+  private changed(from: WebSocket | null, doc: string, head: Head, device: string) {
     for (const ws of this.ctx.getWebSockets()) if (ws !== from) send(ws, { t: "changed", owner: this.get("account_hash"), doc, head, by_device: device });
   }
 
@@ -858,15 +903,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
-  /** A document socket's batch moved a document (§5.3): its head and bytes, forward only, and the other devices told. */
-  async docChanged(a: { doc: string; head: Head; total: number; device: string }): Promise<void> {
-    if (!this.exists()) return;
-    this.noteHead(a.doc, a);
-    for (const ws of this.ctx.getWebSockets()) send(ws, { t: "changed", owner: this.get("account_hash"), doc: a.doc, head: a.head, by_device: a.device });
-  }
+
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
-  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
+  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
     if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
@@ -874,6 +914,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       pins: a.sha256 ? (this.sql.exec("SELECT doc, epoch, ref, state, inflight, gen, tries FROM pins WHERE sha256 = ? ORDER BY epoch, ref", a.sha256).toArray() as Row[]) : [],
       used: this.used(),
       alarms: this.alarms,
+      fences_due: Number(this.one("SELECT COUNT(*) AS n FROM fences_due")!.n),
       leases: Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE expires > ?", Date.now())!.n),
       outbox: Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n),
       ...(a.doc ? { doc: this.one("SELECT head_seq, epoch, bytes FROM docs WHERE doc = ?", a.doc) } : {}),
@@ -889,6 +930,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       await this.ctx.storage.setAlarm(this.alarmAt);
     } else this.arm();
     return Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n);
+  }
+
+  /** Tests only: make revoke fail, as an unreachable object would; and documents a session had tickets for, made up. */
+  async setFailRevoke(a: { on: boolean }): Promise<void> {
+    if (this.env.SYNC_TEST_PIN_MS) this.failRevoke = a.on;
+  }
+  private failRevoke = false;
+  async seedTicketDocs(a: { session: string; n: number }): Promise<void> {
+    if (!this.env.SYNC_TEST_PIN_MS) return;
+    for (let i = 0; i < a.n; i++) this.sql.exec("INSERT OR IGNORE INTO ticket_docs (session_hash, doc, expires) VALUES (?, ?, ?)", a.session, i.toString(16).padStart(12, "0"), Date.now() + 3600_000);
   }
 
   /** Tests only: hold a purge's steps (the account stays `deleting`) until released. */
@@ -917,7 +968,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * revoke is complete when every fence is acknowledged; those that fail
    * are retried by the alarm (fences_due).
    */
-  async revoke(a: { session: string; expires: number }): Promise<{ complete: boolean }> {
+  async revoke(a: { session: string; expires: number; testNoFence?: boolean }): Promise<{ complete: boolean }> {
+    if (this.failRevoke) throw new Error("the account object is unavailable (test seam)");
     if (!this.exists()) return { complete: true };
     const docs = this.ctx.storage.transactionSync(() => {
       this.sql.exec("INSERT INTO revoked_sessions (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO UPDATE SET expires = max(expires, excluded.expires)", a.session, a.expires);
@@ -927,17 +979,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       for (const d of docs) this.sql.exec("INSERT INTO fences_due (session_hash, doc, expires) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", a.session, d, a.expires);
       return docs;
     });
-    if (docs.length) this.wakeBy(Date.now() + 60_000);
     for (const ws of this.ctx.getWebSockets(`s:${a.session}`)) {
       send(ws, { t: "revoked" });
       ws.close(4401, "session ended");
     }
-    return { complete: await this.fenceDue(a.session) };
+    // (a test seam: the revoke recorded, its fences not yet delivered)
+    if (a.testNoFence && this.env.SYNC_TEST_PIN_MS) return { complete: false };
+    // (the first FENCES_AT_ONCE now, the rest from the alarm; complete only when none is due)
+    await this.fenceDue(a.session);
+    this.arm();
+    return { complete: !this.one("SELECT 1 AS x FROM fences_due WHERE session_hash = ?", a.session) };
   }
   /** Send the fences still due (all, or one session's); true if none is left. */
   private async fenceDue(session?: string): Promise<boolean> {
     const due = (session
-      ? this.sql.exec("SELECT session_hash, doc, expires, tries FROM fences_due WHERE session_hash = ?", session)
+      ? this.sql.exec("SELECT session_hash, doc, expires, tries FROM fences_due WHERE session_hash = ? LIMIT ?", session, FENCES_AT_ONCE)
       : this.sql.exec("SELECT session_hash, doc, expires, tries FROM fences_due WHERE retry_at IS NULL OR retry_at <= ? LIMIT 100", Date.now())).toArray() as Row[];
     let all = true;
     for (const f of due) {

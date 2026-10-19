@@ -46,7 +46,15 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (p === "/auth/logout" && req.method === "POST") {
     if (env.SYNC_ACCOUNT && env.SHARE_DB && req.headers.get("origin") === url.origin) {
       const who = await sessionOf(req, env);
-      if (who) await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).revoke({ session: who.session, expires: who.expires * 1000 }).catch(() => {});
+      if (who && (await env.SHARE_DB.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1 AND state <> 'purged'").bind(await accountHash(who.id)).first())) {
+        // the revoke is recorded before the session goes; if it can't be, the sign-out fails, and
+        // the session stays, rather than signing out while a socket could still write (CORR-6D6-2)
+        try {
+          await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).revoke({ session: who.session, expires: who.expires * 1000 });
+        } catch {
+          return err(503, "busy", { message: "signing out didn't finish; try again" });
+        }
+      }
     }
     return null;
   }

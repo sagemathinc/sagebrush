@@ -690,6 +690,27 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   const iq = await acctA.inspect({ sha256: sha(H) });
   const pinP = iq?.pins.find((p) => String(p.ref).endsWith(P));
   ok(aR?.code === "conflict" && bR?.batch?.new === 1 && pinP?.state === "held" && iq.refs === refs0 + 1, "a lookup asked for before a later attempt began never decides the pin: B's patch keeps it (CORR-B8A-1)");
+  // CORR-6D6-1: a pin dropped and made again gets a new generation, so A's stale answer can't name it
+  const docR = "3333cccc5555";
+  await q1.ask(batch(docR, 1, [[1, pid(1, "clientRSED"), [], "seed"]], { kind: "board" }));
+  const dr = docOf(docR);
+  const P2 = pid(81, "clientRRRR");
+  await dr.hold({ name: `accepted:${P2}#1` });
+  await dr.hold({ name: `accepted:${P2}#3` });
+  const refs1 = (await acctA.inspect({ sha256: sha(H) }))?.refs;
+  const aP3 = q1.ask(batch(docR, 1, [[1, P2, [], "P", [sha(H)]]], { expect_head: { epoch: 1, seq: 0 } }));
+  await new Promise((r) => setTimeout(r, 60));
+  const cR = await q2.ask(batch(docR, 1, [[1, P2, [], "P", [sha(H)]]], { expect_head: { epoch: 1, seq: 0 } }));
+  ok(cR?.code === "conflict" && !(await acctA.inspect({ sha256: sha(H) }))?.pins.some((p) => String(p.ref).endsWith(P2)), "(C is refused too, and its own answer drops the pin)");
+  // (B's answer, "yes", is held too, and A's stale "no" is given first: astra's order)
+  const bP3 = q2.ask(batch(docR, 1, [[1, P2, [], "P", [sha(H)]]]));
+  await new Promise((r) => setTimeout(r, 60));
+  await dr.open({ name: `accepted:${P2}#1` });
+  await aP3;
+  await dr.open({ name: `accepted:${P2}#3` });
+  const bR3 = await bP3;
+  const ir = await acctA.inspect({ sha256: sha(H) });
+  ok(bR3?.batch?.new === 1 && ir?.pins.find((p) => String(p.ref).endsWith(P2))?.state === "held" && ir.refs === refs1 + 1, "a pin dropped and made again has a new generation: A's stale answer doesn't take B's (CORR-6D6-1)");
   // CORR-B8A-2: the document unavailable for a while: the pin's lookups back off, and the alarm doesn't loop
   const L = "clientOUTG";
   const dl = docOf(LOSE);
@@ -738,13 +759,33 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   const lb = await live;
   ok(r?.batch?.seq === 2 && lb?.items?.[0]?.seq === 2 && payloads(lb.items[0])[0] === "live", "a batch over a document socket reaches the other at once");
   ok((await changed)?.head?.seq === 2, "and the account's other sockets hear `changed`");
+  ok(Number((await acctA.inspect({ doc: docS }))?.doc?.head_seq) === 2, "the account object records the head itself: a document socket's batch is decided through it (CORR-6D6-3)");
   r = await d1.ask(batch(docS, 1, [[2, pid(20, "clientDS02"), [pid(10, "clientDS02")], "x", [sha(big)]]]));
-  ok(r?.t === "error" && r.code === "invalid", "a batch with blobs goes over the account socket, where they are pinned");
+  ok(r?.batch?.new === 1 && (await acctA.inspect({ sha256: sha(big) }))?.pins.some((p) => String(p.ref).endsWith(pid(20, "clientDS02")) && p.state === "held"), "a batch with blobs over a document socket is pinned by the account object too");
   const pres = d2.next((m) => m.t === "presence");
   d1.send({ t: "presence", state: { cursor: [1, 2] } });
   ok((await pres)?.state?.cursor?.[1] === 2, "presence is relayed, never stored");
-  d1.send({ t: "presence", state: { big: "x".repeat(5000) } });
-  ok((await d1.next((m) => m.t === "error"))?.code === "limit", "presence is small");
+  d1.send({ t: "presence", state: { big: "é".repeat(2100) } });
+  ok((await d1.next((m) => m.t === "error"))?.code === "limit", "presence is small, in UTF-8 bytes: 2,100 two-byte characters are over 4,096 (LIMIT-6D6-2)");
+  // coalesced: 40 at once reach a peer as at most a few, the last one last
+  await new Promise((res) => setTimeout(res, 200));
+  d2.queue.length = 0;
+  for (let i = 0; i < 40; i++) d1.send({ t: "presence", state: { i } });
+  await new Promise((res) => setTimeout(res, 500));
+  const seen = d2.queue.filter((m) => m.t === "presence");
+  ok(seen.length >= 1 && seen.length <= 8 && seen[seen.length - 1].state.i === 39, `presence is coalesced per socket, the latest kept (${seen.length} of 40 relayed)`);
+  // the batch rate holds on a document socket too (LIMIT-6D6-1)
+  const rates = [];
+  for (let i = 0; i < 30; i++) rates.push((await d1.ask(batch(docS, 1, [[3 + i, pid(100 + i, "clientDS02"), [pid(i === 0 ? 20 : 99 + i, "clientDS02")], "r"]])))?.code ?? "ok");
+  ok(rates.includes("rate"), "batches over a document socket count against the account's batch rate");
+  // the per-message fence: a fenced session's socket that wasn't closed (a test seam) can't write
+  const docNsF = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  const sessA = createHash("sha256").update(decodeURIComponent(sa.split("=")[1])).digest("hex");
+  await new Promise((res) => setTimeout(res, 1100));
+  await docNsF.get(docNsF.idFromName(`doc:${hashOf(A)}:${docS}`)).fenceSession({ session: sessA, expires: Date.now() + 3600_000, keepOpen: true });
+  // (a valid batch, a new client's first patch: only the fence can refuse it)
+  const fenced = await d1.ask(batch(docS, 1, [[1, pid(500, "clientDSF1"), [], "fenced"]]));
+  ok(fenced === null && d1.queue.some((m) => m.t === "revoked"), "a socket whose session is fenced, though still open, can't write: the check on every message refuses it");
   // astra's race (CORR-D81-7): a redemption answered only after the session is revoked doesn't attach
   const s9 = await signIn(A);
   const a9 = await socket(s9);
@@ -773,6 +814,52 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   const after = await d8.ask(batch(docS, 1, [[1, pid(30, "clientDS08"), [pid(10, "clientDS02")], "after"]])).catch(() => null);
   ok(!after || after.t !== "ack", "and they can't write after it");
   ok((await socket(s8)).status === 401, "and the session is gone");
+  // a revoke recorded whose fences haven't arrived yet: the document socket still can't write, since its
+  // batches are decided by the account object, which knows (CORR-6D6-2)
+  const s4 = await signIn(A);
+  const a4 = await socket(s4);
+  await hello(a4, "device-nofence-1");
+  const d4 = await socket(s4, SITE, docPath((await a4.ask({ t: "ticket", doc: docS })).ticket));
+  const sess4 = createHash("sha256").update(decodeURIComponent(s4.split("=")[1])).digest("hex");
+  await acctA.revoke({ session: sess4, expires: Date.now() + 3600_000, testNoFence: true });
+  const w4 = await d4.ask(batch(docS, 1, [[1, pid(600, "clientDSN1"), [], "unfenced"]]));
+  ok(w4?.t === "error" && w4.code === "forbidden", "a revoked session's document socket, not yet fenced, can't write");
+  d4.ws.close();
+  // sign-out fails, keeping the session, if the revoke can't be recorded (CORR-6D6-2)
+  const s6 = await signIn(A);
+  const a6 = await socket(s6);
+  await hello(a6, "device-fail-0001");
+  await acctA.setFailRevoke({ on: true });
+  const lo = await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: s6, origin: SITE } });
+  await acctA.setFailRevoke({ on: false });
+  ok(lo.status === 503 && (await socket(s6)).status === 101, "a sign-out whose revoke fails says so, and keeps the session");
+  // a revoke with many documents: the first 100 fences now, the rest from the alarm (LIMIT-6D6-4)
+  const sess6 = createHash("sha256").update(decodeURIComponent(s6.split("=")[1])).digest("hex");
+  await acctA.seedTicketDocs({ session: sess6, n: 250 });
+  const lo2 = await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: s6, origin: SITE } });
+  // (250 made up, 100 sent at once; and the unfenced session above has one more due)
+  const due0 = (await acctA.inspect({}))?.fences_due;
+  ok(lo2.status === 200 && due0 >= 100 && due0 <= 151, `a revoke fences 100 documents at once and leaves the rest to the alarm (${due0} due)`);
+  for (let w = 0; w < 40 && (await acctA.inspect({}))?.fences_due > 0; w++) await new Promise((res) => setTimeout(res, 250));
+  ok((await acctA.inspect({}))?.fences_due === 0, "and the alarm sends the rest, a page at a time");
+  // tickets are issued at a rate, used or not (LIMIT-6D6-3)
+  const s5 = await signIn(A);
+  const a5 = await socket(s5);
+  await hello(a5, "device-tick-0001");
+  const sess5 = createHash("sha256").update(decodeURIComponent(s5.split("=")[1])).digest("hex");
+  let issued = 0, why = null;
+  for (let i = 0; i < 80 && !why; i++) {
+    const tk = await a5.ask({ t: "ticket", doc: docS });
+    if (tk?.t !== "ticket") why = tk?.code;
+    else {
+      issued++;
+      // (a socket that opens and closes at once: the ticket used, its lease given back)
+      const rd = await acctA.redeem({ nonce: tk.ticket, doc: docS, account: A, session: sess5 });
+      if (rd?.ok) await acctA.lease({ socket: rd.ok.socket, release: true });
+    }
+  }
+  ok(why === "rate" && issued >= 60 && issued <= 66, `sockets opened and closed at once still meet the ticket rate: ${issued}, then ${why}`);
+  a5.ws.close();
   // leases: at most 16 sockets per session; a lost close frees its slot when the lease ends (1 s in this test)
   const s7 = await signIn(A);
   const a7 = await socket(s7);

@@ -18,7 +18,7 @@
 //   transaction (§4.6).
 
 import { DurableObject } from "cloudflare:workers";
-import { SyncError, LIMITS, PIN_MS, RECHECK_MS, attempt, attemptAsync, checkBatch, clientOf, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
+import { SyncError, LIMITS, RECHECK_MS, attempt, attemptAsync, clientOf, enc, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
 export { unwrap, type Result } from "./protocol.ts";
 import type { SyncEnv } from "./env.ts";
 
@@ -87,8 +87,9 @@ const SCHEMA = [
 
 /** What a document socket carries across hibernation. */
 interface SocketAtt { account: string; session: string; session_expires: number; device: string; socket: string; role: string; checked: number }
-/** A presence message's largest size: never stored (§7.9). */
+/** A presence message's largest size, in UTF-8 bytes, and how many a socket relays a second: never stored (§7.9). */
 const PRESENCE_BYTES = 4096;
+const PRESENCE_RATE = 10;
 
 export class SyncDoc extends DurableObject<SyncEnv> {
   private sql: SqlStorage;
@@ -465,26 +466,37 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       if (m.t === "presence") {
         fields(m, ["t", "state"], "presence");
         const text = JSON.stringify(m.state ?? null);
-        if (text.length > PRESENCE_BYTES) throw new SyncError("limit", "presence is small", { limit: "presence_bytes", max: PRESENCE_BYTES });
-        for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, { t: "presence", device: att.device, state: m.state ?? null });
+        // (in UTF-8 bytes; and coalesced per socket, the latest wins, at most PRESENCE_RATE a second, LIMIT-6D6-2)
+        if (enc.encode(text).length > PRESENCE_BYTES) throw new SyncError("limit", "presence is small", { limit: "presence_bytes", max: PRESENCE_BYTES });
+        this.presence(ws, att.device, m.state ?? null);
         return;
       }
       if (!isNat(req)) throw new SyncError("invalid", "req");
       if (m.t === "batch") {
         if (role !== "owner" && role !== "editor") throw new SyncError("forbidden", "this document is read-only for you");
         fields(m, ["t", "req", "doc", "epoch", "expect_head", "patches", "body"], "batch");
-        const b = checkBatch(m);
-        if (b.doc !== this.get("doc")) throw new SyncError("invalid", "this socket is for another document");
-        // (blobs are pinned by the account object, so a batch naming one goes over the account socket, §4.3)
-        if (b.patches.some((e) => e.blobs)) throw new SyncError("invalid", "send a batch with blobs over the account socket");
-        const r = this.batchNow({ account: att.account, writer: `session:${att.device}`, author: "person", device: att.device, batch: b, pin_expires: Date.now() + PIN_MS });
+        if (m.doc !== this.get("doc")) throw new SyncError("invalid", "this socket is for another document");
+        // (at most `inflight` unanswered on a socket, LIMIT-6D6-1)
+        const n = this.inflight.get(ws) ?? 0;
+        if (n >= LIMITS.inflight) throw new SyncError("busy", "too many requests unanswered");
+        this.inflight.set(ws, n + 1);
+        let r: Result<BatchOut>;
+        try {
+          // the account object decides it, as for a batch from its own socket: its rate limits, the
+          // session not revoked, blobs pinned, then this object's batch(), and the head it records
+          // itself (LIMIT-6D6-1, CORR-6D6-2, CORR-6D6-3)
+          r = await this.ownerAccount().socketBatch({ account: att.account, session: att.session, device: att.device, batch: { owner: this.get("owner_hash"), ...Object.fromEntries(["doc", "epoch", "expect_head", "patches", "body"].filter((k) => Object.prototype.hasOwnProperty.call(m, k)).map((k) => [k, m[k]])) } });
+        } finally {
+          this.inflight.set(ws, (this.inflight.get(ws) ?? 1) - 1);
+        }
         if ("error" in r) throw new SyncError(r.error.code, r.error.message, r.error.detail);
         send(ws, { t: "ack", req, batch: { seq: r.ok.seq, new: r.ok.new, resent: r.ok.resent, head: r.ok.head } });
-        if (r.ok.new > 0) {
-          const item = this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE seq = ?", r.ok.seq).toArray()[0] as Row;
-          const live = { t: "batches", doc: b.doc, epoch: r.ok.head.epoch, items: [{ seq: Number(item.seq), author: String(item.author), writer: String(item.writer), device: String(item.device), patches: JSON.parse(String(item.envs)), body: toB64(new Uint8Array(item.body as ArrayBuffer)) }], more: false };
-          for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, live);
-          this.ctx.waitUntil(this.ownerAccount().docChanged({ doc: b.doc, head: r.ok.head, total: r.ok.total, device: att.device }).catch(() => {}));
+        if (r.ok.new > 0 && r.ok.seq !== undefined) {
+          const item = this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE seq = ?", r.ok.seq).toArray()[0] as Row | undefined;
+          if (item) {
+            const live = { t: "batches", doc: m.doc, epoch: r.ok.head.epoch, items: [{ seq: Number(item.seq), author: String(item.author), writer: String(item.writer), device: String(item.device), patches: JSON.parse(String(item.envs)), body: toB64(new Uint8Array(item.body as ArrayBuffer)) }], more: false };
+            for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, live);
+          }
         }
         return;
       }
@@ -494,6 +506,25 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       const x = e instanceof SyncError ? { code: e.code, detail: { message: e.message, ...e.detail } } : { code: "busy", detail: { message: "try again" } };
       send(ws, { t: "error", ...(isNat(req) ? { req } : {}), ...x });
     }
+  }
+
+  private inflight = new WeakMap<WebSocket, number>();
+  private presenceAt = new WeakMap<WebSocket, { last: number; pending?: unknown; timer?: ReturnType<typeof setTimeout> }>();
+  /** Relay a socket's presence to the others: at most PRESENCE_RATE a second, the latest kept, never stored. */
+  private presence(ws: WebSocket, device: string, state: unknown) {
+    const now = Date.now();
+    const p = this.presenceAt.get(ws) ?? { last: 0 };
+    this.presenceAt.set(ws, p);
+    const gap = 1000 / PRESENCE_RATE;
+    const flush = (st: unknown) => {
+      p.last = Date.now();
+      p.pending = undefined;
+      p.timer = undefined;
+      for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, { t: "presence", device, state: st });
+    };
+    if (now - p.last >= gap && !p.timer) return flush(state);
+    p.pending = state;
+    p.timer ??= setTimeout(() => flush(p.pending), Math.max(0, gap - (now - p.last)));
   }
 
   /** Every RECHECK_MS of use: the D1 session, and the socket's lease renewed (§2, LIMIT-D817-4). */
@@ -540,10 +571,12 @@ export class SyncDoc extends DurableObject<SyncEnv> {
    * A revoked session (§2): recorded durably, then its sockets closed.  The
    * account object's revoke completes only once this has answered.
    */
-  async fenceSession(a: { session: string; expires: number }): Promise<void> {
+  async fenceSession(a: { session: string; expires: number; keepOpen?: boolean }): Promise<void> {
     if (!this.exists()) return;
     this.sql.exec("INSERT INTO session_fences (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO UPDATE SET expires = max(expires, excluded.expires)", a.session, a.expires);
     this.sql.exec("DELETE FROM session_fences WHERE expires < ?", Date.now());
+    // (keepOpen, a test seam: the fence without its close, so the check on every message is what refuses)
+    if (a.keepOpen && this.env.SYNC_TEST_PIN_MS) return;
     for (const ws of this.ctx.getWebSockets(`s:${a.session}`)) this.end(ws, "session ended");
   }
 
