@@ -48,8 +48,10 @@ import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
-import { IdbPatchStore, openBoardHistoryDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, type Entry } from "../workspace/index";
+import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, type Entry } from "../workspace/index";
+import { uploadFiles, openableAs, convertCopy, type DocKind } from "../workspace/upload";
+import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
 import { within } from "./idb-open";
@@ -203,6 +205,39 @@ let unsaved: string | null = null;
       q.set("doc", "local:" + id);
       history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:") + location.hash);
     } else unsaved = mode;
+  }
+}
+// (what a conversion said (what it left out), for the board made from it:
+// shown when that board opens, once; this tab only)
+const CONVERTED = "sagebrush-board-converted:";
+function convertedAsBoard(w: Workspace, e: Entry, mode: string): Promise<Entry> {
+  let note = "";
+  return convertCopy(w, e, "board", { maxBytes: LIMITS.maxBoardBytes, mode, asBoard: (name, text) => boardFromText(text, name, (md) => { note = md; }) }).then((made) => {
+    if (note) try { sessionStorage.setItem(CONVERTED + made.ref, note); } catch {}
+    return made;
+  });
+}
+function takeConverted(id: string): string {
+  try { const md = sessionStorage.getItem(CONVERTED + id) ?? ""; sessionStorage.removeItem(CONVERTED + id); return md; } catch { return ""; }
+}
+// ?openas=PATH&fid=FID: a data file opened as a board from the notebook
+// page or the file browser (design §3, workspace/upload.ts): its converted
+// copy, made beside it, opened, the file left as it is; one replaced
+// meanwhile (another fid), or that isn't a board, said, nothing made
+let openAsFailed = "";
+{
+  const at = q.get("openas"), fid = q.get("fid");
+  if (at !== null && !embedded()) {
+    q.delete("openas");
+    q.delete("fid");
+    try {
+      if (!ws) throw new Error("your files aren't open in this browser");
+      const e = await ws.stat(at);
+      if (!e || e.kind !== "file" || e.fid !== fid) throw new Error(`"${at}" isn't there any more`);
+      const made = await convertedAsBoard(ws, e, "python");
+      q.set("doc", "local:" + made.ref);
+    } catch (err) { openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`; }
+    history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
@@ -450,6 +485,48 @@ function openEntry(e: Entry, how: "here" | "tab") {
 }
 // (this board, opened: first in the File menu's Recent, both pages')
 if (local && ws) recordOpened({ kind: "board", ref: source.slice(6) });
+// Upload… and files dropped on the board (not pictures), with the workspace:
+// design §3's rule (workspace/upload.ts), never converting unasked; then one
+// document made is opened, and one file it recognises offered as what it can
+// be.  Into this board's folder, or the one given.  What to say.
+async function uploadToWorkspace(w: Workspace, files: File[], mode: string, folder?: string): Promise<string> {
+  if (folder === undefined) {
+    const at = local ? await w.pathOf("board", source.slice(6)).catch(() => undefined) : undefined;
+    folder = at ? at.slice(0, Math.max(1, at.lastIndexOf("/"))) : "/";
+  }
+  const r = await uploadFiles(w, files, folder, {
+    maxBytes: LIMITS.maxFileBytes,
+    mode,
+    replay: async (bytes) => {
+      const b = await readBundle(bytes);
+      // (the notebook page's databases, opened for this and closed after)
+      return { notebook: b.notebook, keep: async (ref) => {
+        const hdb = await openHistoryDb(), bdb = await openBlobDb();
+        try { await keepBundle(b, ref, { hdb, bdb }); } finally { hdb?.close(); bdb?.close(); }
+      } };
+    },
+  });
+  const n = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
+  const said = [r.made.length ? n(r.made.length, "document") + " made" : "", r.kept.length ? n(r.kept.length, "file") + " added" : ""].filter(Boolean).join(", ") || "Nothing added";
+  const refused = r.refused.length ? `; not added: ${r.refused.join("; ")}` : "";
+  if (r.made.length === 1 && !r.kept.length) openEntry(r.made[0], "here");
+  else if (r.kept.length === 1 && !r.made.length) {
+    const e = r.kept[0], as = openableAs(nameOf(e.path)), name = nameOf(e.path);
+    if (as && confirm(`Open "${name}" as a ${as}?\n\nA converted copy, "${splitExt(name)[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${name}" stays as it is.`)) {
+      const err = await openAsHere(w, e, as, mode);
+      if (err) return `${said}${refused}. **"${name}" couldn't be opened as a ${as}:** ${err}`;
+    }
+  }
+  return said + refused;
+}
+// (a data file opened as a document: its converted copy, made beside it, opened; the original stays; why not, if not)
+async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Promise<string | null> {
+  try {
+    const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode });
+    openEntry(made, "here");
+    return null;
+  } catch (err) { return String((err as Error)?.message ?? err); }
+}
 const host: BoardHost = {
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
@@ -469,6 +546,9 @@ const host: BoardHost = {
         // (a save the workspace hadn't taken when a page closed)
         const pend = readPending(id);
         let notice = pend === "unread" ? "**A copy of this board left by a page closed while saving couldn't be read.** It's set aside in this browser; the board as last kept is shown." : "";
+        // (made just now from a file: what its conversion said)
+        const conv = takeConverted(id);
+        if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
         if (path) {
           const rec = await ws.read(path).catch(() => null);
@@ -667,6 +747,7 @@ const host: BoardHost = {
     },
     open: () => openFilesDialog(ws!, openEntry, () => (local ? { kind: "board", ref: source.slice(6) } : undefined)),
     recent: async () => (await recentOpened(ws!, local ? { kind: "board", ref: source.slice(6) } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e, "here") })),
+    upload: (files: File[], mode: string) => uploadToWorkspace(ws!, files, mode),
     // (this board, by its identity, to Trash; then the latest other board, or a new one)
     delete: local ? async () => {
       const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
@@ -693,6 +774,11 @@ const host: BoardHost = {
   },
 };
 
+// (a data file that couldn't be opened as a board: said over what opens instead)
+if (openAsFailed && host.store) {
+  const load0 = host.store.load.bind(host.store);
+  host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
+}
 const mounted = mountBoard(document.getElementById("board")!, host);
 if (bench) {
   mounted.board.setItems(synthetic(Number(q.get("items") ?? 2000), Number(q.get("strokes") ?? 20000)));
@@ -736,6 +822,8 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
+      upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
+      openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
       // (this board renamed here: its title follows, saved by this page as
       // its other changes are, never written beside them: CORR-0B0-2)
