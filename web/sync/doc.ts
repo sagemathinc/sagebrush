@@ -18,7 +18,7 @@
 //   transaction (§4.6).
 
 import { DurableObject } from "cloudflare:workers";
-import { SyncError, LIMITS, attempt, attemptAsync, clientOf, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
+import { SyncError, LIMITS, PIN_MS, RECHECK_MS, attempt, attemptAsync, checkBatch, clientOf, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
 export { unwrap, type Result } from "./protocol.ts";
 import type { SyncEnv } from "./env.ts";
 
@@ -61,6 +61,11 @@ export interface PullOut {
 }
 
 type Row = Record<string, SqlStorageValue>;
+const send = (ws: WebSocket, v: unknown) => {
+  try {
+    ws.send(JSON.stringify(v));
+  } catch {}
+};
 /** A patch's pin reference (design/sync-server.md §4.3). */
 export const patchRef = (e: Env) => `patch:${clientOf(e.id)}:${e.cseq}:${e.id}`;
 type SqlStorageValue = ArrayBuffer | string | number | null;
@@ -76,7 +81,14 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS fenced (admission TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
   // (a pin's whole identity: (doc, epoch, ref, sha256), so a late release can only remove its own pin, CORR-D81-3)
   "CREATE TABLE IF NOT EXISTS releases (epoch INTEGER NOT NULL, ref TEXT NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY (epoch, ref, sha256))",
+  // (revoked sessions this document was told of: checked before an attach and on every message, CORR-D81-7)
+  "CREATE TABLE IF NOT EXISTS session_fences (session_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
 ];
+
+/** What a document socket carries across hibernation. */
+interface SocketAtt { account: string; session: string; session_expires: number; device: string; socket: string; role: string; checked: number }
+/** A presence message's largest size: never stored (§7.9). */
+const PRESENCE_BYTES = 4096;
 
 export class SyncDoc extends DurableObject<SyncEnv> {
   private sql: SqlStorage;
@@ -376,6 +388,166 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const c = this.one("SELECT next_cseq FROM clients WHERE client = ?", a.client);
     const r = a.admission ? this.one("SELECT seq FROM batches WHERE admission = ?", a.admission) : undefined;
     return { next_cseq: c ? Number(c.next_cseq) : 1, ...(r ? { committed: Number(r.seq) } : {}), head: this.head() };
+  }
+
+  // ---- document sockets (§2, §5.1)
+
+  private ownerAccount() {
+    const ns = this.env.SYNC_ACCOUNT!;
+    return ns.get(ns.idFromName("acct:" + this.get("owner_hash")));
+  }
+  private fencedSession(session: string): boolean {
+    return this.one("SELECT 1 AS x FROM session_fences WHERE session_hash = ? AND expires > ?", session, Date.now()) !== undefined;
+  }
+
+  /**
+   * The upgrade, from the Worker, which authenticated the session: the
+   * ticket is redeemed once from the account object, then the session's
+   * fence and the access list are checked and the socket accepted, with
+   * no await between those checks and the accept (CORR-D81-7).
+   */
+  async fetch(req: Request): Promise<Response> {
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("upgrade required", { status: 426 });
+    const account = req.headers.get("x-sync-account") ?? "";
+    const session = req.headers.get("x-sync-session") ?? "";
+    const nonce = new URL(req.url).searchParams.get("ticket") ?? "";
+    const no = (status: number, error: string) => Response.json({ error }, { status });
+    if (!this.exists() || this.get("deleted")) return no(404, "unknown_doc");
+    const r = await this.ownerAccount().redeem({ nonce, doc: this.get("doc")!, account, session });
+    if ("error" in r) return no(403, r.error.code);
+    // ---- from here to acceptWebSocket, nothing awaits
+    if (this.fencedSession(session)) {
+      this.ctx.waitUntil(this.ownerAccount().lease({ socket: r.ok.socket, release: true }));
+      return no(403, "forbidden");
+    }
+    const role = this.one("SELECT role FROM acl WHERE account = ?", account)?.role as string | undefined;
+    if (!role || this.ctx.getWebSockets().length >= LIMITS.docSocketsPerDoc) {
+      this.ctx.waitUntil(this.ownerAccount().lease({ socket: r.ok.socket, release: true }));
+      return no(role ? 503 : 404, role ? "busy" : "unknown_doc");
+    }
+    const pair = new WebSocketPair();
+    this.ctx.acceptWebSocket(pair[1], [`s:${session}`, `a:${account}`]);
+    pair[1].serializeAttachment({ account, session, session_expires: r.ok.session_expires, device: r.ok.device, socket: r.ok.socket, role, checked: Date.now() } satisfies SocketAtt);
+    const n = this.ctx.getWebSockets().length;
+    for (const ws of this.ctx.getWebSockets()) send(ws, { t: "watching", doc: this.get("doc"), n });
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    const att = ws.deserializeAttachment() as SocketAtt;
+    let req: unknown;
+    try {
+      // (the fence and the access list, on every message, before anything else)
+      if (this.fencedSession(att.session) || Date.now() >= att.session_expires) return this.end(ws, "session ended");
+      const role = this.one("SELECT role FROM acl WHERE account = ?", att.account)?.role as string | undefined;
+      if (!role) return this.end(ws, "no access");
+      const m = parseMessage(raw);
+      req = m.req;
+      if (Date.now() - att.checked >= RECHECK_MS) {
+        if (!(await this.recheck(ws, att))) return;
+      }
+      if (m.t === "presence") {
+        fields(m, ["t", "state"], "presence");
+        const text = JSON.stringify(m.state ?? null);
+        if (text.length > PRESENCE_BYTES) throw new SyncError("limit", "presence is small", { limit: "presence_bytes", max: PRESENCE_BYTES });
+        for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, { t: "presence", device: att.device, state: m.state ?? null });
+        return;
+      }
+      if (!isNat(req)) throw new SyncError("invalid", "req");
+      if (m.t === "batch") {
+        if (role !== "owner" && role !== "editor") throw new SyncError("forbidden", "this document is read-only for you");
+        fields(m, ["t", "req", "doc", "epoch", "expect_head", "patches", "body"], "batch");
+        const b = checkBatch(m);
+        if (b.doc !== this.get("doc")) throw new SyncError("invalid", "this socket is for another document");
+        // (blobs are pinned by the account object, so a batch naming one goes over the account socket, §4.3)
+        if (b.patches.some((e) => e.blobs)) throw new SyncError("invalid", "send a batch with blobs over the account socket");
+        const r = this.batchNow({ account: att.account, writer: `session:${att.device}`, author: "person", device: att.device, batch: b, pin_expires: Date.now() + PIN_MS });
+        if ("error" in r) throw new SyncError(r.error.code, r.error.message, r.error.detail);
+        send(ws, { t: "ack", req, batch: { seq: r.ok.seq, new: r.ok.new, resent: r.ok.resent, head: r.ok.head } });
+        if (r.ok.new > 0) {
+          const item = this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE seq = ?", r.ok.seq).toArray()[0] as Row;
+          const live = { t: "batches", doc: b.doc, epoch: r.ok.head.epoch, items: [{ seq: Number(item.seq), author: String(item.author), writer: String(item.writer), device: String(item.device), patches: JSON.parse(String(item.envs)), body: toB64(new Uint8Array(item.body as ArrayBuffer)) }], more: false };
+          for (const o of this.ctx.getWebSockets()) if (o !== ws) send(o, live);
+          this.ctx.waitUntil(this.ownerAccount().docChanged({ doc: b.doc, head: r.ok.head, total: r.ok.total, device: att.device }).catch(() => {}));
+        }
+        return;
+      }
+      throw new SyncError("invalid", "unknown message");
+    } catch (e) {
+      if (e instanceof SyncError && e.code === "limit" && e.detail?.limit === "message_bytes") return ws.close(1009, "message too large");
+      const x = e instanceof SyncError ? { code: e.code, detail: { message: e.message, ...e.detail } } : { code: "busy", detail: { message: "try again" } };
+      send(ws, { t: "error", ...(isNat(req) ? { req } : {}), ...x });
+    }
+  }
+
+  /** Every RECHECK_MS of use: the D1 session, and the socket's lease renewed (§2, LIMIT-D817-4). */
+  private async recheck(ws: WebSocket, att: SocketAtt): Promise<boolean> {
+    const now = Date.now();
+    const db = this.env.SHARE_DB;
+    const row = db
+      ? await db.prepare("SELECT s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.account_id = ?2 AND s.expires > ?3 AND a.deleting IS NULL").bind(att.session, att.account, Math.floor(now / 1000)).first<{ expires: number }>()
+      : null;
+    if (!row) {
+      this.end(ws, "session ended");
+      return false;
+    }
+    const l = await this.ownerAccount().lease({ socket: att.socket });
+    if ("error" in l) {
+      this.end(ws, "this socket's lease ended");
+      return false;
+    }
+    // (after the awaits: the fence again, since a revoke may have landed meanwhile)
+    if (this.fencedSession(att.session)) {
+      this.end(ws, "session ended");
+      return false;
+    }
+    ws.serializeAttachment({ ...att, checked: now, session_expires: row.expires * 1000 } satisfies SocketAtt);
+    return true;
+  }
+
+  private end(ws: WebSocket, why: string) {
+    send(ws, { t: "revoked" });
+    try {
+      ws.close(4401, why);
+    } catch {}
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    const att = ws.deserializeAttachment() as SocketAtt | null;
+    if (att?.socket) this.ctx.waitUntil(this.ownerAccount().lease({ socket: att.socket, release: true }).catch(() => {}));
+    try {
+      ws.close(code, "closed");
+    } catch {}
+  }
+
+  /**
+   * A revoked session (§2): recorded durably, then its sockets closed.  The
+   * account object's revoke completes only once this has answered.
+   */
+  async fenceSession(a: { session: string; expires: number }): Promise<void> {
+    if (!this.exists()) return;
+    this.sql.exec("INSERT INTO session_fences (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO UPDATE SET expires = max(expires, excluded.expires)", a.session, a.expires);
+    this.sql.exec("DELETE FROM session_fences WHERE expires < ?", Date.now());
+    for (const ws of this.ctx.getWebSockets(`s:${a.session}`)) this.end(ws, "session ended");
+  }
+
+  /**
+   * Change an account's access (§7.9; from the owner's account object): in
+   * the same request, the sockets of an account that lost access close, and
+   * those whose role changed carry the new role.  The owner can't be removed.
+   */
+  async setAccess(a: { account: string; role: "editor" | "viewer" | null }): Promise<Result<null>> {
+    return attempt(() => {
+      if (!this.exists()) throw new SyncError("unknown_doc", "no such document");
+      if (a.account === this.get("owner_account")) throw new SyncError("forbidden", "the owner's access can't change");
+      if (a.role === null) this.sql.exec("DELETE FROM acl WHERE account = ?", a.account);
+      else this.sql.exec("INSERT INTO acl (account, role) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET role = excluded.role", a.account, a.role);
+      for (const ws of this.ctx.getWebSockets(`a:${a.account}`)) {
+        if (a.role === null) this.end(ws, "no access");
+        else ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketAtt), role: a.role } satisfies SocketAtt);
+      }
+      return null;
+    });
   }
 
   /** The alarm: hands released blobs back to the owner's account object until it acknowledges (§4.3). */

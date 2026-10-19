@@ -13,7 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, randomHex, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { allowed, type SyncEnv } from "./env.ts";
@@ -46,6 +46,12 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS pins (doc TEXT NOT NULL, epoch INTEGER NOT NULL, ref TEXT NOT NULL, sha256 TEXT NOT NULL, state TEXT NOT NULL, inflight INTEGER NOT NULL DEFAULT 0, lapse INTEGER, PRIMARY KEY (doc, epoch, ref, sha256))",
   "CREATE INDEX IF NOT EXISTS pins_pending ON pins (lapse) WHERE state = 'pending'",
   "CREATE TABLE IF NOT EXISTS revoked_sessions (session_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
+  // document sockets (§2): a ticket is used once; ticket_docs says which documents a revoke must
+  // fence; a socket's slot is a lease that ends by itself if its close is never reported
+  "CREATE TABLE IF NOT EXISTS tickets (nonce TEXT PRIMARY KEY, session_hash TEXT NOT NULL, device TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS ticket_docs (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY (session_hash, doc))",
+  "CREATE TABLE IF NOT EXISTS doc_sockets (socket TEXT PRIMARY KEY, doc TEXT NOT NULL, session_hash TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY (session_hash, doc))",
   "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER)",
   "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
@@ -59,6 +65,8 @@ export interface Limits { storage_bytes: number; max_file_bytes: number; sync: {
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, storage_bytes: 1 << 30, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
+/** A document socket's lease (§2, LIMIT-D817-4): renewed at each recheck while the socket is used. */
+const LEASE_MS = 15 * 60_000;
 /** An unused holding is dropped a day after its upload (§3). */
 const IDLE_HOLDING_MS = 86400_000;
 
@@ -241,6 +249,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.admit(att.account, false);
       const out = unwrap(await this.docStub(m.doc).pull({ account: att.account, epoch: m.epoch, after: m.after, limit: m.limit as number | undefined }));
       send(ws, { t: "batches", req, owner: this.get("account_hash"), doc: m.doc, ...out });
+    } else if (t === "ticket") {
+      fields(m, ["t", "req", "owner", "doc"], "ticket");
+      send(ws, { t: "ticket", req, ...this.ticket(att, dev, m.doc) });
     } else if (t === "clear") {
       fields(m, ["t", "req", "owner", "doc", "expect_head", "root"], "clear");
       const out = await this.clear(att, dev, m);
@@ -483,6 +494,88 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return out;
   }
 
+  // ---- document sockets (§2)
+
+  private leaseMs(): number {
+    return this.env.SYNC_TEST_PIN_MS ? 1000 : LEASE_MS;
+  }
+  /** A ticket for a document socket: used once, within TICKET_MS, by this session only. */
+  private ticket(att: Attachment, device: string, doc: unknown): { ticket: string; expires: number } {
+    this.admit(att.account, false);
+    if (!isDocId(doc) || !this.one("SELECT 1 AS x FROM docs WHERE doc = ? AND deleted IS NULL", doc)) throw new SyncError("unknown_doc", "no such document");
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM tickets WHERE expires < ?", now);
+      if (Number(this.one("SELECT COUNT(*) AS n FROM tickets WHERE session_hash = ?", att.session)!.n) >= LIMITS.ticketsPerSession) throw new SyncError("busy", "too many tickets unused");
+      const nonce = randomHex(16);
+      const expires = now + TICKET_MS;
+      this.sql.exec("INSERT INTO tickets (nonce, session_hash, device, doc, expires) VALUES (?, ?, ?, ?, ?)", nonce, att.session, device, doc, expires);
+      // (where a revoke of this session must reach, until the session itself would have ended)
+      this.sql.exec("INSERT INTO ticket_docs (session_hash, doc, expires) VALUES (?, ?, ?) ON CONFLICT(session_hash, doc) DO UPDATE SET expires = max(expires, excluded.expires)", att.session, doc, att.expires);
+      return { ticket: nonce, expires };
+    });
+  }
+
+  /**
+   * Redeem a ticket (from the document object, at its socket's upgrade), in
+   * one transaction: it exists, is for this document, account and session,
+   * hasn't expired, and its session isn't revoked; it is used up; and the
+   * socket takes a lease within the account's and the session's limits.
+   */
+  async redeem(a: { nonce: string; doc: string; account: string; session: string }): Promise<Result<{ socket: string; device: string; session_expires: number }>> {
+    const r = this.redeemNow(a);
+    // (the test seam: an answer held after the redemption commits, for astra's revoke race)
+    if (this.redeemGate) {
+      const g = this.redeemGate;
+      this.redeemGate = null;
+      await g.wait;
+    }
+    return r;
+  }
+  private redeemGate: { wait: Promise<void>; open: () => void } | null = null;
+  /** Tests only: hold the next redemption's answer until released. */
+  async holdRedeem(a: { release?: boolean }): Promise<void> {
+    if (!this.env.SYNC_TEST_PIN_MS) return;
+    if (a.release) return void this.heldRedeem?.open();
+    let open!: () => void;
+    const wait = new Promise<void>((r) => (open = r));
+    this.redeemGate = { wait, open };
+    this.heldRedeem = this.redeemGate;
+  }
+  private heldRedeem: { wait: Promise<void>; open: () => void } | null = null;
+  private redeemNow(a: { nonce: string; doc: string; account: string; session: string }): Result<{ socket: string; device: string; session_expires: number }> {
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      this.admit(a.account, false);
+      const t = typeof a.nonce === "string" && /^[0-9a-f]{32}$/.test(a.nonce) ? this.one("SELECT session_hash, device, doc, expires FROM tickets WHERE nonce = ?", a.nonce) : undefined;
+      if (!t || t.doc !== a.doc || t.session_hash !== a.session || Number(t.expires) < now) throw new SyncError("forbidden", "not a valid ticket");
+      this.sql.exec("DELETE FROM tickets WHERE nonce = ?", a.nonce);
+      if (this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", a.session)) throw new SyncError("forbidden", "this session was ended");
+      if (Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE expires > ?", now)!.n) >= LIMITS.docSocketsPerAccount) throw new SyncError("busy", "too many document sockets for this account");
+      if (Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE session_hash = ? AND expires > ?", a.session, now)!.n) >= LIMITS.docSocketsPerSession) throw new SyncError("busy", "too many document sockets for this session");
+      const socket = randomHex(16);
+      this.sql.exec("INSERT INTO doc_sockets (socket, doc, session_hash, expires) VALUES (?, ?, ?, ?)", socket, a.doc, a.session, now + this.leaseMs());
+      const te = this.one("SELECT expires FROM ticket_docs WHERE session_hash = ? AND doc = ?", a.session, a.doc);
+      return { socket, device: String(t.device), session_expires: Number(te?.expires ?? now) };
+    }));
+  }
+
+  /** Renew a document socket's lease, or release it (LIMIT-D817-4); a lease that has ended can't be renewed. */
+  async lease(a: { socket: string; release?: boolean }): Promise<Result<null>> {
+    return attempt(() => {
+      if (!this.exists()) throw new SyncError("forbidden", "no account");
+      if (a.release) {
+        this.sql.exec("DELETE FROM doc_sockets WHERE socket = ?", a.socket);
+        return null;
+      }
+      const now = Date.now();
+      const r = this.one("SELECT session_hash FROM doc_sockets WHERE socket = ? AND expires > ?", a.socket, now);
+      if (!r || this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", r.session_hash)) throw new SyncError("forbidden", "this socket's lease ended");
+      this.sql.exec("UPDATE doc_sockets SET expires = ? WHERE socket = ?", now + this.leaseMs(), a.socket);
+      return null;
+    });
+  }
+
   /** Tell the account's other sockets that a document changed (§5.2). */
   private changed(from: WebSocket, doc: string, head: Head, device: string) {
     for (const ws of this.ctx.getWebSockets()) if (ws !== from) send(ws, { t: "changed", owner: this.get("account_hash"), doc, head, by_device: device });
@@ -652,13 +745,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
-  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; outbox: number; doc?: Row; alarm: number | null } | null> {
+  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
     if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
       refs: h ? Number(h.refs) : null,
       pins: a.sha256 ? (this.sql.exec("SELECT doc, epoch, ref, state, inflight FROM pins WHERE sha256 = ? ORDER BY epoch, ref", a.sha256).toArray() as Row[]) : [],
       used: this.used(),
+      leases: Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE expires > ?", Date.now())!.n),
       outbox: Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n),
       ...(a.doc ? { doc: this.one("SELECT head_seq, epoch, bytes FROM docs WHERE doc = ?", a.doc) } : {}),
       alarm: await this.ctx.storage.getAlarm(),
@@ -686,13 +780,45 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** End a session's sockets here, and record it, so nothing it opened can write again (§2). */
-  async revoke(a: { session: string; expires: number }): Promise<void> {
-    if (!this.exists()) return;
-    this.sql.exec("INSERT INTO revoked_sessions (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO NOTHING", a.session, a.expires);
+  /**
+   * End a session (§2, CORR-D81-7): recorded as revoked, its unused tickets
+   * dropped and its leases ended, in one transaction; its account sockets
+   * closed; and each document it had a ticket for fenced, durably.  The
+   * revoke is complete when every fence is acknowledged; those that fail
+   * are retried by the alarm (fences_due).
+   */
+  async revoke(a: { session: string; expires: number }): Promise<{ complete: boolean }> {
+    if (!this.exists()) return { complete: true };
+    const docs = this.ctx.storage.transactionSync(() => {
+      this.sql.exec("INSERT INTO revoked_sessions (session_hash, expires) VALUES (?, ?) ON CONFLICT(session_hash) DO UPDATE SET expires = max(expires, excluded.expires)", a.session, a.expires);
+      this.sql.exec("DELETE FROM tickets WHERE session_hash = ?", a.session);
+      this.sql.exec("DELETE FROM doc_sockets WHERE session_hash = ?", a.session);
+      const docs = (this.sql.exec("SELECT doc FROM ticket_docs WHERE session_hash = ?", a.session).toArray() as Row[]).map((r) => String(r.doc));
+      for (const d of docs) this.sql.exec("INSERT INTO fences_due (session_hash, doc, expires) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", a.session, d, a.expires);
+      return docs;
+    });
+    if (docs.length) this.wakeBy(Date.now() + 60_000);
     for (const ws of this.ctx.getWebSockets(`s:${a.session}`)) {
       send(ws, { t: "revoked" });
       ws.close(4401, "session ended");
     }
+    return { complete: await this.fenceDue(a.session) };
+  }
+  /** Send the fences still due (all, or one session's); true if none is left. */
+  private async fenceDue(session?: string): Promise<boolean> {
+    const due = (session
+      ? this.sql.exec("SELECT session_hash, doc, expires FROM fences_due WHERE session_hash = ?", session)
+      : this.sql.exec("SELECT session_hash, doc, expires FROM fences_due LIMIT 100")).toArray() as Row[];
+    let all = true;
+    for (const f of due) {
+      try {
+        await this.docStub(String(f.doc)).fenceSession({ session: String(f.session_hash), expires: Number(f.expires) });
+        this.sql.exec("DELETE FROM fences_due WHERE session_hash = ? AND doc = ?", f.session_hash, f.doc);
+      } catch {
+        all = false;
+      }
+    }
+    return all;
   }
 
   /**
@@ -710,6 +836,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
     if (this.one("SELECT 1 AS x FROM outbox LIMIT 1")) t.push(retry ?? now + 1000);
+    if (this.one("SELECT 1 AS x FROM fences_due LIMIT 1")) t.push(retry ?? now + 1000);
     if (retry !== undefined) t.push(retry);
     if (t.length === 0) return;
     this.wakeBy(Math.min(...t));
@@ -720,6 +847,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (this alarm has fired: the next is whatever arm() sets at the end)
     this.alarmAt = null;
     if (!this.exists()) return;
+    let failed = false;
     const now = Date.now();
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
     this.ctx.storage.transactionSync(() => {
@@ -750,11 +878,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           break;
         }
       }
+    // fences a revoke couldn't deliver yet, and expired leases, tickets and records
+    if (!(await this.fenceDue())) failed = true;
+    this.sql.exec("DELETE FROM doc_sockets WHERE expires < ?", now);
+    this.sql.exec("DELETE FROM tickets WHERE expires < ?", now);
+    this.sql.exec("DELETE FROM ticket_docs WHERE expires < ?", now);
     // pins whose every attempt has lapsed (a lost answer, or a crash): decided from the document
     const late = this.sql.exec("SELECT doc, epoch, ref, sha256 FROM pins WHERE state = 'pending' AND lapse + ? < ? LIMIT 100", this.settleMs(), now).toArray() as Row[];
     const byDoc = new Map<string, PinKey[]>();
     for (const p of late) byDoc.set(String(p.doc), [...(byDoc.get(String(p.doc)) ?? []), { doc: String(p.doc), epoch: Number(p.epoch), ref: String(p.ref), sha256: String(p.sha256) }]);
-    let failed = false;
     for (const [doc, keys] of byDoc) {
       try {
         await this.decidePins(doc, keys);

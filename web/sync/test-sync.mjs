@@ -105,8 +105,8 @@ async function signIn(account_id, origin = SITE) {
 const post = (session, path, body, extra = {}) => fetchAt(SITE, path, { method: "POST", headers: { cookie: session, origin: SITE, "content-type": "application/json", ...extra }, body: JSON.stringify(body ?? {}) });
 
 /** A socket on the account object, with a queue of the messages it gets. */
-async function socket(session, origin = SITE) {
-  const r = await fetchAt(SITE, "/api/sync/v1/account", { headers: { cookie: session, origin, upgrade: "websocket" } });
+async function socket(session, origin = SITE, path = "/api/sync/v1/account") {
+  const r = await fetchAt(SITE, path, { headers: { cookie: session, origin, upgrade: "websocket" } });
   if (r.status !== 101) return { status: r.status };
   const ws = r.webSocket;
   ws.accept();
@@ -659,6 +659,88 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   s3.ws.close();
   s1.ws.close();
   s2.ws.close();
+}
+
+// ---- document sockets: single-use tickets, fences, leases, live batches (§2, §5.1)
+{
+  const docS = "2222bbbb3333";
+  const docPath = (t) => `/api/sync/v1/doc/${hashOf(A)}/${docS}?ticket=${t}`;
+  const a1 = await socket(sa);
+  await hello(a1, dev1);
+  await a1.ask(batch(docS, 1, [[1, pid(1, "clientDS01"), [], "seed"]], { kind: "board" }));
+  let t = await a1.ask({ t: "ticket", doc: docS });
+  ok(t?.t === "ticket" && /^[0-9a-f]{32}$/.test(t.ticket), "a ticket for a document socket");
+  const d1 = await socket(sa, SITE, docPath(t.ticket));
+  ok(d1.status === 101, "the document socket opens with it");
+  ok((await socket(sa, SITE, docPath(t.ticket))).status === 403, "a ticket is used once: a replay is refused");
+  ok((await socket(await signIn(A), SITE, docPath((await a1.ask({ t: "ticket", doc: docS })).ticket))).status === 403, "another session of the same account can't use this session's ticket");
+  ok((await socket(sb, SITE, `/api/sync/v1/doc/${hashOf(A)}/${docS}?ticket=${(await a1.ask({ t: "ticket", doc: docS })).ticket}`)).status === 404, "another account can't reach A's document socket");
+  const a2 = await socket(sa);
+  await hello(a2, dev2);
+  const t2 = await a2.ask({ t: "ticket", doc: docS });
+  const d2 = await socket(sa, SITE, docPath(t2.ticket));
+  ok(d2.status === 101 && (await d2.next((m) => m.t === "watching"))?.n === 2, "a second device's document socket: both hear `watching`, 2");
+  // live batches and presence
+  const live = d2.next((m) => m.t === "batches");
+  const changed = a2.next((m) => m.t === "changed" && m.doc === docS);
+  let r = await d1.ask(batch(docS, 1, [[1, pid(10, "clientDS02"), [pid(1, "clientDS01")], "live"]]));
+  const lb = await live;
+  ok(r?.batch?.seq === 2 && lb?.items?.[0]?.seq === 2 && payloads(lb.items[0])[0] === "live", "a batch over a document socket reaches the other at once");
+  ok((await changed)?.head?.seq === 2, "and the account's other sockets hear `changed`");
+  r = await d1.ask(batch(docS, 1, [[2, pid(20, "clientDS02"), [pid(10, "clientDS02")], "x", [sha(big)]]]));
+  ok(r?.t === "error" && r.code === "invalid", "a batch with blobs goes over the account socket, where they are pinned");
+  const pres = d2.next((m) => m.t === "presence");
+  d1.send({ t: "presence", state: { cursor: [1, 2] } });
+  ok((await pres)?.state?.cursor?.[1] === 2, "presence is relayed, never stored");
+  d1.send({ t: "presence", state: { big: "x".repeat(5000) } });
+  ok((await d1.next((m) => m.t === "error"))?.code === "limit", "presence is small");
+  // astra's race (CORR-D81-7): a redemption answered only after the session is revoked doesn't attach
+  const s9 = await signIn(A);
+  const a9 = await socket(s9);
+  await hello(a9, "device-race-0001");
+  const t9 = await a9.ask({ t: "ticket", doc: docS });
+  await acctA.holdRedeem({});
+  const pending = socket(s9, SITE, docPath(t9.ticket));
+  await new Promise((res) => setTimeout(res, 150));
+  await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: s9, origin: SITE } });
+  await new Promise((res) => setTimeout(res, 150));
+  await acctA.holdRedeem({ release: true });
+  const late = await pending;
+  ok(late.status === 403, "a ticket redeemed before the revoke, whose socket would attach after it, is refused at the attach");
+  ok(a9.closed === 4401, "signing out closed the session's account socket");
+  // a fence after the attach closes the socket
+  const s8 = await signIn(A);
+  const a8 = await socket(s8);
+  await hello(a8, "device-race-0002");
+  const d8 = await socket(s8, SITE, docPath((await a8.ask({ t: "ticket", doc: docS })).ticket));
+  ok(d8.status === 101, "(another session's document socket)");
+  await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: s8, origin: SITE } });
+  await new Promise((res) => setTimeout(res, 300));
+  await new Promise((res) => setTimeout(res, 300));
+  ok(d8.queue.some((m) => m.t === "revoked"), "signing out tells the session's document sockets: revoked");
+  d8.queue.length = 0;
+  const after = await d8.ask(batch(docS, 1, [[1, pid(30, "clientDS08"), [pid(10, "clientDS02")], "after"]])).catch(() => null);
+  ok(!after || after.t !== "ack", "and they can't write after it");
+  ok((await socket(s8)).status === 401, "and the session is gone");
+  // leases: at most 16 sockets per session; a lost close frees its slot when the lease ends (1 s in this test)
+  const s7 = await signIn(A);
+  const a7 = await socket(s7);
+  await hello(a7, "device-lease-001");
+  const docNs7 = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  let got = 0, refusedAt = null;
+  const sess7 = createHash("sha256").update(decodeURIComponent(s7.split("=")[1])).digest("hex");
+  for (let i = 0; i < 17; i++) {
+    const tk = (await a7.ask({ t: "ticket", doc: docS })).ticket;
+    // (redeemed straight from the account object, as the document's upgrade would, with no socket to close)
+    const rd = await acctA.redeem({ nonce: tk, doc: docS, account: A, session: sess7 });
+    if (rd?.ok) got++;
+    else refusedAt ??= rd?.error?.code;
+  }
+  ok(got === 16 && refusedAt === "busy", `16 document sockets per session, then busy (${got}, ${refusedAt})`);
+  await new Promise((res) => setTimeout(res, 1200));
+  const rd = await acctA.redeem({ nonce: (await a7.ask({ t: "ticket", doc: docS })).ticket, doc: docS, account: A, session: sess7 });
+  ok(rd?.ok?.socket, "leases whose close was never reported end by themselves, and free their slots");
+  for (const x of [a1, a2, d1, d2, a7, a8]) x.ws?.close();
 }
 
 // ---- the access list, behind the owner-qualified name (§2): a document object refuses an account not on it
