@@ -74,12 +74,30 @@ caption.
 - **The block Markdown editor:** `BlockEditor` (also used by the notebook's
   Markdown cells).
 
+## For a host: `sagebrush-board/submission`
+
+What a host needs without the board itself (web/board-host-protocol.md):
+
+- `checkSubmission` and `decideRequest`: a reader's answers, and a request to
+  decide what their own words show.
+- `editState(postedText)`: a host's side of editing in its frame. It merges
+  each `edit` into the board as it is now (`apply`), field by field as
+  CoCalc's dbMerge3 does, and checks the result before anything is kept:
+  pages, parents, cycles, orphans, edges and size. It also limits the rate
+  and the work. `remote` and `reset` take the host's own changes. Its cost
+  is linear in the edit and the records it touches, not in the board.
+  `recordProblems` holds a whole board to the same rules.
+
+Both entry points load with `import`, and with `require()` from CommonJS
+(Node 22.12 or later: no top-level await in either).
+
 ## Versions
 
 The board package has versions of its own. `sagebrush-board/submission`
 checks what the `sagebrush` CLI's `board answers --apply` writes, so each
 version names the CLI it pairs with as an optional peer dependency: 0.2.x
-pairs with `sagebrush` 0.5.x.
+and 0.3.x pair with `sagebrush` 0.5.x. 0.3.0 adds `editState` and
+`require()` from CommonJS; it is published with `sagebrush` 0.5.1.
 
 ## Build and test
 

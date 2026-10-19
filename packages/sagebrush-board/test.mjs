@@ -9,8 +9,8 @@
 // or classes, and its buttons, are left alone.
 // Build first (bun build.mjs), then
 //   node test.mjs
-import { spawn } from "node:child_process";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -180,6 +180,25 @@ try {
   check(!blank.ok && blank.id === id && /says nothing/.test(blank.message), "/submission: a request to decide with no words: refused: " + JSON.stringify(blank));
   const none = decideRequest(posted, { ...req, name: "d.board.json", revision: "r1", item: "q" });
   check(!none.ok && /nothing to decide among/.test(none.message), "/submission: a question with no decide: refused: " + JSON.stringify(none));
+  // editState: a host's merge and checks of edits made in its frame (web/board-host-protocol.md, Editing)
+  const { editState } = await import(join(here, "dist", "submission.js"));
+  const st = editState(JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "n", text: "A" }] }));
+  st.remote([{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "XA" } }]);
+  const ed = st.apply({ sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r1", changes: [{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "AB" }, was: { text: "A" } }] });
+  check(ed.ok && ed.changes[0].fields.text === "XAB", "/submission: editState merges an edit into the board as it is now: " + JSON.stringify(ed));
+  // CommonJS: require() of both entry points, as CoCalc's project host loads them (Node's
+  // require(esm), the "default" condition): it fails if top-level await ever appears in either
+  const cj = mkdtempSync(join(tmpdir(), "sb-pkg-cjs-"));
+  try {
+    mkdirSync(join(cj, "node_modules", "@sagemathinc"), { recursive: true });
+    symlinkSync(here, join(cj, "node_modules", "@sagemathinc", "sagebrush-board"), "dir");
+    writeFileSync(join(cj, "t.cjs"), `const b = require("@sagemathinc/sagebrush-board"), s = require("@sagemathinc/sagebrush-board/submission");
+const missing = (m, names) => names.filter((f) => typeof m[f] !== "function");
+console.log(JSON.stringify({ board: missing(b, ["toRecords", "fromRecords", "canonical", "cleanDoc", "formatError"]), submission: missing(s, ["editState", "checkSubmission", "decideRequest"]) }));
+`);
+    const r = spawnSync(process.execPath, [join(cj, "t.cjs")], { encoding: "utf8", cwd: cj });
+    check(r.status === 0 && r.stdout.trim() === '{"board":[],"submission":[]}', "require() of both entry points from CommonJS: " + (r.stdout + r.stderr).slice(0, 600));
+  } finally { rmSync(cj, { recursive: true, force: true }); }
 } catch (e) {
   fails.push("/submission: " + String(e?.stack ?? e));
 }

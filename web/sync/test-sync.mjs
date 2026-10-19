@@ -730,12 +730,13 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
     const ia = await acctE().inspect({ sha256: sha(HE) });
     ok(ia?.alarm !== null && ia.alarm >= t0 + 1000 && ia.alarm <= t0 + 1000 + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
     await acctE().crash().catch(() => {});
-    await new Promise((r) => setTimeout(r, 100));
-    // (the restarted object, with the document still holding the answer)
-    const ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null);
+    // (the restarted object, with the document still holding the answer: polled until it answers, since a
+    // restart under load takes longer than any fixed wait)
+    let ib = null;
+    await until(async () => (ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null)) !== null, 10_000);
     ok(ib?.alarm !== null && ib?.alarm !== undefined && ib.alarm < Date.now() + 3600_000 && ib.pins.length === 1 && ib.pins[0].state === "pending", "after a crash that lost the alarm, the restarted object arms it again for the pending pin");
     await dm.open({ name: `after:${pid(60, M)}` });
-    await until(async () => (await acctE().inspect({ sha256: sha(HE) }))?.pins[0]?.state === "held");
+    await until(async () => (await acctE().inspect({ sha256: sha(HE) }).catch(() => null))?.pins[0]?.state === "held", 30_000);
     const ic = await acctE().inspect({ sha256: sha(HE) });
     ok(ic?.pins[0]?.state === "held" && ic.refs === 1, "and the alarm decides it from the document: committed, so held (CORR-321-3)");
   }
