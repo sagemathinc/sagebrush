@@ -16,7 +16,7 @@
 // and to the remote once it has answered, in order.  A document from
 // elsewhere reaches the board through subscribe().
 
-import { canonical, cleanDoc, type BoardDoc } from "./doc";
+import { canonical, cleanDoc, getOwn, setOwn, type BoardDoc } from "./doc";
 import { fromRecords, toRecords } from "./history";
 import type { BoardStore } from "./mount";
 import { openDb } from "./idb-open";
@@ -161,26 +161,26 @@ export function merge3(base: BoardDoc, ours: BoardDoc, theirs: BoardDoc): { doc:
     else {
       r = {};
       for (const f of new Set([...Object.keys(b ?? {}), ...Object.keys(o), ...Object.keys(t)])) {
-        const fb = b?.[f], fo = o[f], ft = t[f];
+        const fb = getOwn(b, f), fo = getOwn(o, f), ft = getOwn(t, f);
         let v: unknown;
         if (f === "images" && o.type === "doc") {
           // (by name: added on either side, removed on one, changed on both differently: ours, CORR-3D2-4)
           const out: Record<string, unknown> = {};
           for (const name of new Set([...Object.keys(fb ?? {}), ...Object.keys(fo ?? {}), ...Object.keys(ft ?? {})])) {
-            const ib = fb?.[name], io = fo?.[name], it = ft?.[name];
+            const ib = getOwn(fb as Record<string, unknown> | undefined, name), io = getOwn(fo as Record<string, unknown> | undefined, name), it = getOwn(ft as Record<string, unknown> | undefined, name);
             let x: unknown;
             if (same(io, ib)) x = it;
             else if (same(it, ib) || same(io, it)) x = io;
             // (changed on both sides: ours, a removal too, CORR-891-4)
             else { x = io; conflicts.push({ type: "doc", page: "", id: "", field: "images." + name }); }
-            if (x !== undefined) out[name] = x;
+            if (x !== undefined) setOwn(out, name, x);
           }
           v = Object.keys(out).length ? out : undefined;
         }
         else if (same(fo, fb)) v = ft;
         else if (same(ft, fb) || same(fo, ft)) v = fo;
         else { v = fo; conflicts.push({ type: o.type, page: o.page, id: o.id, field: f }); }
-        if (v !== undefined) r[f] = v;
+        if (v !== undefined) setOwn(r, f, v);
       }
     }
     if (r) out.push(r);

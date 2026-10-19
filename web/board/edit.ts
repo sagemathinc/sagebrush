@@ -10,7 +10,7 @@
 import { effect, signal } from "@preact/signals-core";
 import { INK, type Board, type InkStyle, type Item } from "./board";
 import { answerProblem, ASK_LIMITS } from "./ask";
-import { inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, ITEM_GAP, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
+import { getOwn, setOwn, inkNode, isNote, pageOf, STICKER_SIZE, GROUP_PAD, ITEM_GAP, type AskAnswer, type BoardDoc, type BoardPage, type DocEdge, type DocGroup, type DocNode, type DocNote } from "./doc";
 import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
@@ -662,7 +662,7 @@ export class Editor {
       p.nodes ??= [];
       this.freeze(d, null, p.nodes);
       added.forEach((a, i) => {
-        (d.images ??= {})[a.key] = a.info;
+        setOwn((d.images ??= {}), a.key, a.info);
         p.nodes!.push({ id: a.id, image: a.key, w: a.w, x: Math.round(x - a.w / 2 + 30 * i), y: Math.round(y - (a.w * a.info.h) / a.info.w / 2 + 30 * i) });
       });
     });
@@ -713,7 +713,7 @@ export class Editor {
     const pics = new Set<string>();
     const walk = (ns: DocNode[]) => { for (const n of ns) { if (n.kind === "group") walk(n.children); else if (isNote(n) && n.image) pics.add(n.image); } };
     walk(nodes);
-    const images = Object.fromEntries([...pics].filter((k) => d.images?.[k]).map((k) => [k, d.images![k]]));
+    const images = Object.fromEntries([...pics].filter((k) => getOwn(d.images, k)).map((k) => [k, getOwn(d.images, k)!]));
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
   }
   private clip(e: ClipboardEvent, cut: boolean) {
@@ -776,7 +776,7 @@ export class Editor {
       this.freeze(d, null, p.nodes);
       p.nodes.push(...nodes);
       if (edges.length) (p.edges ??= []).push(...edges);
-      for (const [k, v] of Object.entries(data!.images ?? {})) if (v && typeof v.w === "number" && typeof v.h === "number") (d.images ??= {})[k] ??= { w: v.w, h: v.h };
+      for (const [k, v] of Object.entries(data!.images ?? {})) if (v && typeof v.w === "number" && typeof v.h === "number") { const im = (d.images ??= {}); if (!getOwn(im, k)) setOwn(im, k, { w: v.w, h: v.h }); }
     }).then(() => this.select(nodes.map((n) => n.id)));
   }
   private deleteSelected() {
