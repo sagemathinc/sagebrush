@@ -203,6 +203,17 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   const r = st.remote([{ op: "set", key: K("item", "a", ""), fields: { parent: "" } }]);
   check(!r.ok && st.records().every((x) => x.id !== "" || x.type === "doc" || x.type === "page"), "…nor made by a remote change");
   check(recordProblems([{ type: "doc", page: "", id: "" }, { type: "item", page: "", id: "", parent: "", kind: "group" }]).some((p) => /id isn't/.test(p)), "recordProblems names an empty item id");
+  // ends whose ids escape at length in JSON (NUL, quotes, backslashes): an edge between them loads, and an edge made between them reads back (astra's CORR-40A-1)
+  for (const [x, y] of [["\u0000".repeat(200), "b".repeat(200)], ['"'.repeat(200), "\\".repeat(200)], ["\u0001".repeat(200), "\u0000".repeat(200)]]) {
+    let loaded = null;
+    try { loaded = editState(board({ nodes: [{ id: x }, { id: y }], edges: [{ from: x, to: y }] })); } catch (e) { loaded = e; }
+    check(loaded && !(loaded instanceof Error), "an edge between ids that escape at length in JSON: loads: " + (loaded instanceof Error ? loaded.message : ""));
+    const two = editState(board({ nodes: [{ id: x }, { id: y }] }));
+    const made = apply(two, edit([{ op: "set", key: K("edge", "", "e"), fields: { from: x, to: y, pos: 0 }, create: true }]));
+    let back = null;
+    try { back = editState(JSON.stringify(two.board())); } catch (e) { back = e; }
+    check(made.ok && back && !(back instanceof Error) && back.records().some((r) => r.type === "edge"), "…an edge made between them reads back: " + (back instanceof Error ? back.message : made.message ?? ""));
+  }
   // (made and deleted within one edit: nothing, and no error)
   const md = apply(st, edit([{ op: "set", key: K("item", "a", "tmp"), fields: { parent: "", pos: 3 }, create: true }, { op: "delete", key: K("item", "a", "tmp"), was: { text: null } }]));
   check(md.ok && !rec(st, "item", "a", "tmp") && md.changes.length === 0, "an item made and deleted in one edit: nothing changes, no error");
@@ -279,8 +290,10 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
     for (let step = 0; step < 40; step++) {
       const recs = st.records(), items = recs.filter((r) => r.type === "item"), pages = recs.filter((r) => r.type === "page").map((r) => r.page);
       const pg = paged ? pick([...pages, "nowhere"]) : pick(["", "", "", "elsewhere"]);
-      const ids = items.map((r) => r.id), anyId = () => pick([...ids, "ghost", "", "\u0000", "x\u0000y", "__proto__", "\"", "L".repeat(200)]);
-      const newId = (p) => pick([p + Math.floor(rnd() * 1e6), "", "\u0000", "a\u0000b", "__proto__", "constructor", "\"q\"", "L".repeat(200)]);
+      // (hostile ids, among them the longest that escape the most in JSON: NUL, control characters, quotes, backslashes)
+      const HOSTILE = ["", "\u0000", "a\u0000b", "__proto__", "constructor", "\"q\"", "L".repeat(200), "\u0000".repeat(200), "\u0001".repeat(200), '"'.repeat(200), "\\".repeat(200)];
+      const ids = items.map((r) => r.id), anyId = () => pick([...ids, "ghost", ...HOSTILE]);
+      const newId = (p) => pick([p + Math.floor(rnd() * 1e6), ...HOSTILE]);
       // (a running view, as a frame has it: each change's was what the user saw then, after the edit's earlier changes)
       const view = new Map(recs.map((r) => [JSON.stringify([r.type, r.page, r.id]), { ...r }]));
       const kOf = (key) => JSON.stringify([key.type, key.page, key.id]);
