@@ -1632,6 +1632,20 @@ export function createNotebook(root, opts = {}) {
   let shown = { synced: null, remoteSeen: 0 };
   // (the page's: keeps a save of a document no longer shown that met a change made elsewhere)
   let detachedConflict = null;
+  // (such saves the page couldn't keep, the latest of each showing: tried
+  // again by saved(), which rejects while any is not kept; a save of
+  // another document doesn't make them kept, CORR-E46-1)
+  const unkept = new Map();
+  async function keepDetached(key, doc, theirs) {
+    try {
+      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
+      await detachedConflict(doc, theirs, key);
+      unkept.delete(key);
+    } catch (e) {
+      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+    }
+  }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
   const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
@@ -1686,8 +1700,7 @@ export function createNotebook(root, opts = {}) {
           // this save had is kept by the page, beside the other, never over
           // it, before saved() resolves (CORR-B54-1)
           if (mine !== shown || store !== st) {
-            if (!detachedConflict) return (lastSaveError = new Error("changed elsewhere after it was closed here: not saved"));
-            return Promise.resolve().then(() => detachedConflict(sent, t.conflict, mine)).then(() => {}, (e) => { lastSaveError = e ?? new Error("not kept"); });
+            return keepDetached(mine, sent, t.conflict);
           }
           if (lastJson === json) lastJson = null;
           applyRemote(t.conflict, true, true);
@@ -1716,6 +1729,9 @@ export function createNotebook(root, opts = {}) {
       flush();
       await saveChain;
       if (lastSaveError) throw lastSaveError;
+      // (saves of documents no longer shown that couldn't be kept: tried again)
+      for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs);
+      if (unkept.size) throw [...unkept.values()].at(-1).error;
       if (!timer && !savesPending) return;
     }
     throw new Error("changed elsewhere each time it was saved");
@@ -2165,8 +2181,9 @@ export function createNotebook(root, opts = {}) {
      * elsewhere: `f(doc, theirs, key)` keeps `doc` (what that save had)
      * somewhere of its own, never over theirs; `key` is the same for every
      * such save of one showing of a document, so a later one can go where
-     * the first went.  saved() waits for it. */
-    onDetachedConflict(f) { detachedConflict = f; },
+     * the first went.  saved() waits for it, and tries again what it failed
+     * to keep (rejecting while any isn't kept).  Returns the one it replaces. */
+    onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
     detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
