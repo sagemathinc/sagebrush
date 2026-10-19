@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sagebrush workspace: mockup</title>
+<!-- A static mockup for design/workspace-files.md: no behaviour, only the
+     layout of each screen.  ?s=nb|board|open|preview|shared|quota|phone|phonemenu -->
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f2421; --muted: #5d645f; --line: #d4d4cb; --cell: #ffffff;
+    --accent: #4a6b49; --accent2: #8aa37b; --code: #f3f2ec; --sel: #e6eedf; --warn: #fff4d6; --warnl: #e0c068; --err: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); overflow: hidden; }
+  button { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  .top { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg); position: relative; z-index: 3; }
+  .top .logo { font-weight: 650; color: var(--accent); margin-right: 4px; }
+  .top .name { font-weight: 600; }
+  .top .path { color: var(--muted); font-size: 12.5px; }
+  .top .sp { flex: 1; }
+  .btn { border: 1px solid var(--line); background: var(--cell); border-radius: 6px; padding: 4px 10px; }
+  .btn.on { background: var(--sel); border-color: var(--accent2); }
+  .btn.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .status { color: var(--muted); font-size: 12.5px; }
+  .body { display: grid; grid-template-columns: 264px 1fr; min-height: 0; }
+  .body.nofiles { grid-template-columns: 1fr; }
+  .files { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: #f6f5f0; }
+  .files .head { display: flex; gap: 6px; padding: 10px 10px 6px; align-items: center; }
+  .files .head b { flex: 1; }
+  .ib { border: 0; background: none; padding: 2px 6px; border-radius: 5px; color: var(--muted); font-size: 16px; line-height: 1; }
+  .search { margin: 0 10px 8px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; color: var(--muted); background: var(--cell); font-size: 13px; }
+  .tree { flex: 1; overflow: hidden; padding: 0 4px; }
+  .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 8px 8px 3px; }
+  .row { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+  .row .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .row .m { color: var(--muted); font-size: 11.5px; }
+  .row.cur { background: var(--sel); font-weight: 600; }
+  .ind1 { padding-left: 24px; }
+  .chev { width: 10px; color: var(--muted); font-size: 10px; }
+  .ic { width: 16px; height: 16px; flex: none; }
+  .foot { border-top: 1px solid var(--line); padding: 8px 12px; font-size: 12px; color: var(--muted); }
+  .meter { height: 5px; background: #e2e1d9; border-radius: 3px; margin: 5px 0 6px; overflow: hidden; display: flex; }
+  .meter i { display: block; height: 100%; }
+  .foot .links { display: flex; gap: 12px; }
+  .menu { position: absolute; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 5px; min-width: 230px; z-index: 10; }
+  .mi { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 5px; white-space: nowrap; }
+  .mi .k { margin-left: auto; color: var(--muted); font-size: 12px; padding-left: 18px; }
+  .mi.hov { background: var(--sel); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+  .menu .cap { font-size: 11px; color: var(--muted); padding: 4px 10px 2px; }
+  .nbmain { overflow: hidden; padding: 18px 32px; }
+  .cell { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; max-width: 860px; }
+  .cell pre { margin: 0; padding: 10px 14px; font: 13px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+  .cell .out { border-top: 1px solid var(--line); background: #fafaf6; color: #333; }
+  .md { max-width: 860px; margin: 4px 0 14px; }
+  .md h2 { margin: 0 0 4px; font-size: 20px; }
+  .kw { color: #8a3b8f; } .st { color: #975200; } .nu { color: #0b7a52; }
+  .boardmain { position: relative; overflow: hidden; background: radial-gradient(circle, #dcdcd2 1px, transparent 1.2px) 0 0/22px 22px, var(--bg); }
+  .note { position: absolute; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06); width: 230px; font-size: 13px; }
+  .note.code { font: 12.5px/1.5 ui-monospace, Menlo, monospace; white-space: pre; width: 250px; }
+  .note b { display: block; margin-bottom: 4px; }
+  svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .banner { position: absolute; left: 50%; transform: translateX(-50%); top: 12px; background: var(--warn); border: 1px solid var(--warnl); border-radius: 8px; padding: 7px 12px; display: flex; gap: 12px; align-items: center; z-index: 2; white-space: nowrap; }
+  .banner.err { background: #fde8e6; border-color: #e6a39d; }
+  .scrim { position: fixed; inset: 0; background: rgba(20,24,20,.32); z-index: 20; display: grid; place-items: center; }
+  .dlg { width: 760px; height: 520px; background: var(--cell); border-radius: 10px; box-shadow: 0 16px 48px rgba(0,0,0,.25); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+  .dlg .dh { display: flex; align-items: center; padding: 12px 16px; gap: 10px; border-bottom: 1px solid var(--line); }
+  .dlg .dh b { font-size: 15px; flex: 1; }
+  .crumbs { padding: 8px 16px; color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .crumbs .search { margin: 0 0 0 auto; width: 220px; }
+  table.list { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.list th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px 16px; border-bottom: 1px solid var(--line); }
+  table.list td { padding: 6px 16px; border-bottom: 1px solid #eeede6; white-space: nowrap; }
+  table.list td.nm .ic { vertical-align: -3px; margin-right: 8px; }
+  table.list tr.hov td { background: var(--sel); }
+  table.list tr.drop td { background: #eef4ea; }
+  table.list tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .df { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); align-items: center; }
+  .df .sp { flex: 1; }
+  .dropzone { position: absolute; inset: 0; border: 3px dashed var(--accent); border-radius: 10px; pointer-events: none; }
+  .tip { position: absolute; background: var(--accent); color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12.5px; white-space: nowrap; }
+  .ghost { position: absolute; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font-size: 12.5px; box-shadow: 0 6px 16px rgba(0,0,0,.18); display: flex; gap: 6px; align-items: center; }
+  .pv { overflow: hidden; padding: 18px 28px; }
+  .pv h3 { margin: 0; font-size: 17px; display: flex; gap: 8px; align-items: center; }
+  .pv .sub { color: var(--muted); font-size: 12.5px; margin: 2px 0 12px; }
+  .pv table { border-collapse: collapse; font: 12.5px ui-monospace, Menlo, monospace; background: var(--cell); }
+  .pv td, .pv th { border: 1px solid var(--line); padding: 3px 9px; text-align: right; }
+  .pv th { background: var(--code); font-weight: 600; }
+  .askbox { margin-top: 16px; max-width: 560px; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .phone { width: 390px; height: 844px; position: relative; overflow: hidden; background: var(--bg); }
+  .phone .top { padding: 10px 12px; }
+  .sheet { position: absolute; inset: 0; background: #f6f5f0; display: flex; flex-direction: column; z-index: 5; }
+  .sheet .row { padding: 11px 14px; font-size: 15px; gap: 12px; border-bottom: 1px solid #ebeae3; border-radius: 0; }
+  .sheet .row .m { font-size: 12px; }
+  .sheet .ic { width: 20px; height: 20px; }
+  .sheet .search { margin: 8px 12px; padding: 8px 10px; font-size: 15px; }
+  .bsheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--cell); border-radius: 14px 14px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.2); padding: 8px 6px 24px; }
+  .bsheet .mi { padding: 12px 16px; font-size: 15.5px; }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: #ccc; margin: 2px auto 8px; }
+  .fab { position: absolute; right: 16px; bottom: 70px; background: var(--accent); color: #fff; border-radius: 28px; padding: 12px 18px; font-weight: 600; box-shadow: 0 6px 16px rgba(0,0,0,.2); }
+  .scr { display: none; }
+  .label { position: fixed; right: 10px; bottom: 8px; font-size: 11px; color: #9a9f9b; z-index: 30; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-nb" viewBox="0 0 16 16"><rect x="2.5" y="1.5" width="11" height="13" rx="1.5" fill="none" stroke="#2a6fb0" stroke-width="1.4"/><path d="M5 5h6M5 8h6M5 11h4" stroke="#2a6fb0" stroke-width="1.3"/></symbol>
+  <symbol id="i-bd" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="#8a3b8f" stroke-width="1.4"/><rect x="3.5" y="5" width="4" height="3" rx=".6" fill="#8a3b8f"/><rect x="9" y="8.5" width="3.5" height="3" rx=".6" fill="#8a3b8f"/><path d="M7.5 6.5 L10.5 8.5" stroke="#8a3b8f" stroke-width="1"/></symbol>
+  <symbol id="i-tb" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="#0b7a52" stroke-width="1.4"/><path d="M1.5 6h13M1.5 9.5h13M6 2.5v11M10.5 2.5v11" stroke="#0b7a52" stroke-width="1"/></symbol>
+  <symbol id="i-im" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="#975200" stroke-width="1.4"/><circle cx="5.5" cy="6" r="1.4" fill="#975200"/><path d="M2.5 12.5l4-4 3 3 2-2 3 3" fill="none" stroke="#975200" stroke-width="1.2"/></symbol>
+  <symbol id="i-tx" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z" fill="none" stroke="#5f665f" stroke-width="1.4"/><path d="M5.5 7.5h5M5.5 10h5M5.5 12.5h3" stroke="#5f665f" stroke-width="1"/></symbol>
+  <symbol id="i-fd" viewBox="0 0 16 16"><path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="#d8cfa8" stroke="#a89a5c" stroke-width="1"/></symbol>
+  <symbol id="i-sh" viewBox="0 0 16 16"><circle cx="4" cy="8" r="2" fill="#4a6b49"/><circle cx="12" cy="4" r="2" fill="#4a6b49"/><circle cx="12" cy="12" r="2" fill="#4a6b49"/><path d="M4 8L12 4M4 8l8 4" stroke="#4a6b49" stroke-width="1.3"/></symbol>
+  <symbol id="i-tr" viewBox="0 0 16 16"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.7 9h5.6l.7-9" fill="none" stroke="#5f665f" stroke-width="1.3"/></symbol>
+</svg>
+
+<template id="tpl-files">
+  <aside class="files" aria-label="Files">
+    <div class="head"><b>Files</b><button class="ib" title="New">＋</button><button class="ib" title="Upload">⇪</button><button class="ib" title="More">⋯</button></div>
+    <div class="search">Search files</div>
+    <div class="tree">
+      <div class="grp">Recent</div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">groups.ipynb</span><span class="m">2 min</span></div>
+      <div class="row"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Sylow theorems.board.json</span><span class="m">1 h</span></div>
+      <div class="row"><svg class="ic"><use href="#i-tb"/></svg><span class="n">primes.csv</span><span class="m">Oct 17</span></div>
+      <div class="grp">This browser</div>
+      <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">Algebra</span></div>
+      <div class="row ind1" data-r="groups"><svg class="ic"><use href="#i-nb"/></svg><span class="n">groups.ipynb</span><span class="m">Sage</span></div>
+      <div class="row ind1" data-r="sylow"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Sylow theorems.board.json</span></div>
+      <div class="row ind1"><svg class="ic"><use href="#i-im"/></svg><span class="n">cayley-S4.png</span><span class="m">84 KB</span></div>
+      <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">data</span></div>
+      <div class="row ind1"><svg class="ic"><use href="#i-tb"/></svg><span class="n">primes.csv</span><span class="m">1.2 MB</span></div>
+      <div class="row ind1"><svg class="ic"><use href="#i-tx"/></svg><span class="n">orbits.json</span><span class="m">3 KB</span></div>
+      <div class="row"><span class="chev">▸</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">Edited examples</span></div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">calculus notes.ipynb</span></div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">fft.ipynb</span><span class="m">MATLAB</span></div>
+      <div class="row"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Course plan.board.json</span></div>
+      <div class="grp">Shared with you</div>
+      <div class="row"><span class="chev">▸</span><svg class="ic"><use href="#i-sh"/></svg><span class="n">Math 480 week 3</span><span class="m">read-only</span></div>
+    </div>
+    <div class="foot">
+      <div>34 MB used · kept on this device</div>
+      <div class="meter"><i style="width:9%;background:#2a6fb0"></i><i style="width:6%;background:#8a3b8f"></i><i style="width:12%;background:#0b7a52"></i><i style="width:4%;background:#b9b9ae"></i></div>
+      <div class="links"><span><svg class="ic" style="vertical-align:-3px;width:13px;height:13px"><use href="#i-tr"/></svg> Trash</span><span>Storage…</span></div>
+    </div>
+  </aside>
+</template>
+
+<template id="tpl-filemenu">
+  <div class="menu">
+    <div class="mi" data-i="new">New<span class="k">▸</span></div>
+    <div class="mi">Open…<span class="k">Ctrl+O</span></div>
+    <div class="mi" data-i="recent">Recent<span class="k">▸</span></div>
+    <div class="mi">Upload…</div>
+    <hr>
+    <div class="mi">Save a copy…</div>
+    <div class="mi">Rename…<span class="k">F2</span></div>
+    <div class="mi" data-i="download">Download<span class="k">▸</span></div>
+    <div class="mi">Print or save as PDF…</div>
+    <div class="mi">Share…</div>
+    <hr>
+    <div class="mi">Delete</div>
+  </div>
+</template>
+
+<div class="app scr" id="s-nb">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn on" data-anchor="file">File</button>
+    <span class="name">groups</span><span class="path">Algebra/groups.ipynb</span>
+    <span class="sp"></span><span class="status">Saved in this browser</span><button class="btn">Run all</button><button class="btn">Sage ▾</button><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <div data-files></div>
+    <main class="nbmain">
+      <div class="md"><h2>Groups of small order</h2><div>The groups of order 8, up to isomorphism, and their centres.</div></div>
+      <div class="cell"><pre><span class="kw">for</span> G <span class="kw">in</span> [CyclicPermutationGroup(<span class="nu">8</span>), DihedralGroup(<span class="nu">4</span>), QuaternionGroup()]:
+    print(G, G.center().order())</pre><pre class="out">Cyclic group of order 8 as a permutation group 8
+Dihedral group of order 8 as a permutation group 2
+Quaternion group of order 8 as a permutation group 2</pre></div>
+      <div class="cell"><pre>primes = [int(l) <span class="kw">for</span> l <span class="kw">in</span> open(<span class="st">"/data/primes.csv"</span>)]
+len(primes)</pre><pre class="out">78498</pre></div>
+    </main>
+  </div>
+</div>
+
+<div class="app scr" id="s-board">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn on" data-anchor="file">File</button>
+    <span class="name">Sylow theorems</span><span class="path">Algebra/Sylow theorems.board.json</span>
+    <span class="sp"></span><span class="status">Saved in this browser</span><button class="btn">?</button><button class="btn">✎</button><button class="btn">⤢</button><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <div data-files></div>
+    <main class="boardmain">
+      <svg class="edges"><path d="M330 150 C 400 150, 420 250, 480 260" stroke="#9aa39b" stroke-width="1.6" fill="none"/><path d="M330 170 C 380 200, 360 380, 420 420" stroke="#9aa39b" stroke-width="1.6" fill="none"/><path d="M730 290 C 790 290, 800 400, 840 420" stroke="#9aa39b" stroke-width="1.6" fill="none"/></svg>
+      <div class="note" style="left:90px;top:110px"><b>Sylow's theorems</b>If |G| = p<sup>a</sup>m with p ∤ m, a subgroup of order p<sup>a</sup> exists, all such are conjugate, and n<sub>p</sub> ≡ 1 (mod p).</div>
+      <div class="note code" style="left:480px;top:220px">G = SymmetricGroup(4)
+[len(G.sylow_subgroup(p)
+   .conjugacy_class())
+ for p in [2, 3]]</div>
+      <div class="note" style="left:840px;top:400px;width:180px"><b>Output</b>[3, 4]</div>
+      <div class="note" style="left:420px;top:410px;width:260px">So S<sub>4</sub> has n<sub>2</sub> = 3 and n<sub>3</sub> = 4, each ≡ 1 mod its prime.</div>
+    </main>
+  </div>
+</div>
+
+<div class="app scr" id="s-shared">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn">File</button>
+    <span class="name">Orbit counting</span><span class="path">Shared · Math 480 week 3 / Orbit counting.board.json</span>
+    <span class="sp"></span><span class="status">Read-only</span><button class="btn pri">Save a copy</button><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <aside class="files">
+      <div class="head"><b>Files</b><button class="ib">＋</button><button class="ib">⇪</button><button class="ib">⋯</button></div>
+      <div class="search">Search files</div>
+      <div class="tree">
+        <div class="grp">This browser</div>
+        <div class="row"><span class="chev">▸</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">Algebra</span></div>
+        <div class="row"><span class="chev">▸</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">data</span></div>
+        <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">calculus notes.ipynb</span></div>
+        <div class="grp">Shared with you</div>
+        <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-sh"/></svg><span class="n">Math 480 week 3</span><span class="m">read-only</span></div>
+        <div class="row ind1" style="color:var(--muted);font-size:12px">by W. Stein · version of Oct 18</div>
+        <div class="row ind1"><svg class="ic"><use href="#i-nb"/></svg><span class="n">burnside.ipynb</span></div>
+        <div class="row ind1 cur"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Orbit counting.board.json</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tb"/></svg><span class="n">necklaces.csv</span></div>
+        <div class="row ind1" style="color:var(--accent)">Copy all to my workspace</div>
+      </div>
+      <div class="foot"><div>34 MB used · kept on this device</div><div class="meter"><i style="width:31%;background:#8aa37b"></i></div></div>
+    </aside>
+    <main class="boardmain">
+      <div class="banner"><span><b>Shared, read-only.</b> Its code doesn't run until you choose to.</span><button class="btn pri">Save a copy to edit</button></div>
+      <div class="note" style="left:120px;top:110px"><b>Burnside's lemma</b>The number of orbits is the average number of fixed points, (1/|G|) Σ<sub>g</sub> |X<sup>g</sup>|.</div>
+      <div class="note code" style="left:470px;top:230px;width:320px">def necklaces(n, k):
+    return sum(euler_phi(d) * k^(n//d)
+       for d in divisors(n)) / n</div>
+    </main>
+  </div>
+</div>
+
+<div class="app scr" id="s-quota">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn">File</button>
+    <span class="name">groups</span><span class="path">Algebra/groups.ipynb</span>
+    <span class="sp"></span><span class="status" style="color:var(--err);font-weight:600">● Not saved</span><button class="btn">Run all</button><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <div data-files></div>
+    <main class="nbmain">
+      <div class="banner err" style="position:static;transform:none;margin:0 0 16px;max-width:860px;white-space:normal"><span><b>Not saved:</b> this browser's storage for this site is full. Your work is still here in the page. <u>Download it</u>, or free some space and it saves again.</span></div>
+      <div class="askbox" style="margin-top:0;max-width:860px">
+        <b>Storage on this device</b>
+        <div class="meter" style="height:8px;margin:8px 0"><i style="width:22%;background:#2a6fb0"></i><i style="width:10%;background:#8a3b8f"></i><i style="width:58%;background:#0b7a52"></i><i style="width:10%;background:#b9b9ae"></i></div>
+        <div style="font-size:13px;color:var(--muted)">2.1 GB of 2.1 GB: notebooks 460 MB · boards 210 MB · files 1.2 GB · history and caches 210 MB</div>
+        <table class="list" style="margin-top:10px">
+          <tr><th>Largest</th><th>Size</th><th></th></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-tb"/></svg>data/genomes.tsv</td><td>812 MB</td><td style="text-align:right"><button class="btn">Download</button> <button class="btn">Delete</button></td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-tb"/></svg>data/primes-1e9.csv</td><td>301 MB</td><td style="text-align:right"><button class="btn">Download</button> <button class="btn">Delete</button></td></tr>
+          <tr><td class="nm" style="color:var(--muted)">Saved outputs (a cache: recomputed when needed)</td><td>160 MB</td><td style="text-align:right"><button class="btn">Clear</button></td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-tr"/></svg>Trash (3 items)</td><td>48 MB</td><td style="text-align:right"><button class="btn">Empty…</button></td></tr>
+        </table>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:8px">Nothing of yours is ever removed without asking. Storage is <b>kept</b>: the browser won't clear it to make room.</div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="app scr" id="s-preview">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn">File</button>
+    <span class="name">groups</span><span class="path">Algebra/groups.ipynb</span>
+    <span class="sp"></span><span class="status">Saved in this browser</span><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <aside class="files">
+      <div class="head"><b>Files</b><button class="ib">＋</button><button class="ib">⇪</button><button class="ib">⋯</button></div>
+      <div class="search">Search files</div>
+      <div class="tree">
+        <div class="grp">This browser</div>
+        <div class="row"><span class="chev">▸</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">Algebra</span></div>
+        <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">data</span></div>
+        <div class="row ind1 cur"><svg class="ic"><use href="#i-tb"/></svg><span class="n">primes.csv</span><span class="m">1.2 MB</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tx"/></svg><span class="n">orbits.json</span><span class="m">3 KB</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tx"/></svg><span class="n">flow.canvas</span><span class="m">just now</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tx"/></svg><span class="n">fib.py</span><span class="m">just now</span></div>
+        <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">calculus notes.ipynb</span></div>
+      </div>
+      <div class="foot"><div>34 MB used · kept on this device</div><div class="meter"><i style="width:31%;background:#8aa37b"></i></div></div>
+    </aside>
+    <main class="pv">
+      <h3><svg class="ic"><use href="#i-tb"/></svg>primes.csv</h3>
+      <div class="sub">/data/primes.csv · 1.2 MB · 78,498 rows · changed Oct 17 · Python reads it with <code>open("/data/primes.csv")</code></div>
+      <div style="display:flex;gap:6px;margin-bottom:12px"><button class="btn">Download</button><button class="btn">Rename…</button><button class="btn">Copy path</button><button class="btn">Delete</button></div>
+      <table><tr><th></th><th>p</th><th>gap</th><th>p mod 4</th></tr>
+        <tr><th>1</th><td>2</td><td>1</td><td>2</td></tr><tr><th>2</th><td>3</td><td>2</td><td>3</td></tr><tr><th>3</th><td>5</td><td>2</td><td>1</td></tr><tr><th>4</th><td>7</td><td>4</td><td>3</td></tr><tr><th>5</th><td>11</td><td>2</td><td>3</td></tr><tr><th>6</th><td>13</td><td>4</td><td>1</td></tr><tr><th>7</th><td>17</td><td>2</td><td>1</td></tr><tr><th>8</th><td>19</td><td>4</td><td>3</td></tr></table>
+      <div class="askbox"><b>2 files uploaded to /data</b><div style="margin:6px 0 10px;color:var(--muted);font-size:13px">They are kept as they are. Sagebrush can also open them as documents, each as a new copy beside it:</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><svg class="ic"><use href="#i-tx"/></svg><span style="flex:1">flow.canvas (JSON Canvas)</span><button class="btn">Open as a board</button></div>
+        <div style="display:flex;gap:10px;align-items:center"><svg class="ic"><use href="#i-tx"/></svg><span style="flex:1">fib.py</span><button class="btn">Open as a notebook</button></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="app scr" id="s-open">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn">Files</button><button class="btn on">File</button>
+    <span class="name">Sylow theorems</span><span class="path">Algebra/Sylow theorems.board.json</span>
+    <span class="sp"></span><span class="status">Saved in this browser</span><button class="btn">⋯</button>
+  </div>
+  <div class="body nofiles"><main class="boardmain"></main></div>
+  <div class="scrim">
+    <div class="dlg" style="position:relative">
+      <div class="dh"><b>Open</b><button class="btn">Upload…</button><button class="ib">✕</button></div>
+      <div class="crumbs"><span>This browser</span>›<span style="color:var(--fg)">All files</span><span class="search">Search files</span></div>
+      <div style="overflow:hidden">
+        <table class="list">
+          <tr><th>Name</th><th>Kind</th><th>Modified</th><th>Size</th></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-fd"/></svg>Algebra</td><td>Folder</td><td>2 min ago</td><td>3 items</td></tr>
+          <tr class="drop"><td class="nm"><svg class="ic"><use href="#i-fd"/></svg>data</td><td>Folder</td><td>Oct 17</td><td>2 items</td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-fd"/></svg>Edited examples</td><td>Folder</td><td>Oct 12</td><td>4 items</td></tr>
+          <tr class="hov"><td class="nm"><svg class="ic"><use href="#i-nb"/></svg>calculus notes.ipynb</td><td>Notebook · Python</td><td>Yesterday</td><td>41 KB</td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-bd"/></svg>Course plan.board.json</td><td>Board · Python</td><td>Oct 15</td><td>12 KB</td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-nb"/></svg>fft.ipynb</td><td>Notebook · MATLAB</td><td>Oct 14</td><td>9 KB</td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-nb"/></svg>Untitled.ipynb</td><td>Notebook · Python</td><td>Oct 9</td><td>1 KB</td></tr>
+          <tr><td class="nm"><svg class="ic"><use href="#i-tr"/></svg>Trash</td><td>Folder</td><td></td><td>1 item</td></tr>
+        </table>
+      </div>
+      <div class="df"><span class="status">Drop files on a folder to upload them there.</span><span class="sp"></span><button class="btn">Cancel</button><button class="btn pri">Open</button></div>
+      <div class="dropzone"></div>
+      <div class="ghost" style="left:300px;top:150px"><svg class="ic"><use href="#i-tb"/></svg>primes-2.csv  +1</div>
+      <div class="tip" style="left:300px;top:182px">Drop to upload to /data</div>
+    </div>
+  </div>
+</div>
+
+<div class="scr" id="s-phone">
+  <div class="phone">
+    <div class="sheet">
+      <div class="top"><button class="ib" style="font-size:20px">←</button><span class="name" style="font-size:16px;flex:1">Files</span><button class="ib" style="font-size:20px">⇪</button><button class="ib" style="font-size:20px">⋯</button></div>
+      <div class="search">Search files</div>
+      <div class="grp">Recent</div>
+      <div class="row cur"><svg class="ic"><use href="#i-nb"/></svg><span class="n">groups.ipynb</span><span class="m">2 min</span></div>
+      <div class="row"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Sylow theorems.board.json</span><span class="m">1 h</span></div>
+      <div class="grp">This browser</div>
+      <div class="row"><svg class="ic"><use href="#i-fd"/></svg><span class="n">Algebra</span><span class="m">3 ›</span></div>
+      <div class="row"><svg class="ic"><use href="#i-fd"/></svg><span class="n">data</span><span class="m">2 ›</span></div>
+      <div class="row"><svg class="ic"><use href="#i-fd"/></svg><span class="n">Edited examples</span><span class="m">4 ›</span></div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">calculus notes.ipynb</span><span class="m">Yesterday</span></div>
+      <div class="row"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Course plan.board.json</span><span class="m">Oct 15</span></div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">fft.ipynb</span><span class="m">Oct 14</span></div>
+      <div class="grp">Shared with you</div>
+      <div class="row"><svg class="ic"><use href="#i-sh"/></svg><span class="n">Math 480 week 3</span><span class="m">›</span></div>
+      <div class="foot" style="margin-top:auto">34 MB used · kept on this device<div class="meter"><i style="width:31%;background:#8aa37b"></i></div></div>
+      <div class="fab">＋ New</div>
+    </div>
+  </div>
+</div>
+
+<div class="scr" id="s-phonemenu">
+  <div class="phone">
+    <div class="top"><button class="btn">Files</button><button class="btn on">File</button><span class="name" style="flex:1">groups</span><button class="btn">⋯</button></div>
+    <div style="padding:12px 14px;opacity:.55">
+      <div class="md"><h2 style="font-size:18px">Groups of small order</h2></div>
+      <div class="cell"><pre>for G in [CyclicPermutationGroup(8),
+          DihedralGroup(4)]:
+    print(G.center().order())</pre></div>
+    </div>
+    <div style="position:absolute;inset:0;background:rgba(20,24,20,.32)"></div>
+    <div class="bsheet">
+      <div class="grab"></div>
+      <div style="padding:0 16px 6px;color:var(--muted);font-size:12.5px">Algebra/groups.ipynb</div>
+      <div class="mi">New<span class="k">›</span></div>
+      <div class="mi">Open…</div>
+      <div class="mi">Recent<span class="k">›</span></div>
+      <div class="mi">Upload…</div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:4px 10px">
+      <div class="mi">Save a copy…</div>
+      <div class="mi">Rename…</div>
+      <div class="mi">Download<span class="k">›</span></div>
+      <div class="mi">Print or save as PDF…</div>
+      <div class="mi">Share…</div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:4px 10px">
+      <div class="mi" style="color:var(--err)">Delete</div>
+    </div>
+  </div>
+</div>
+
+<div class="app scr" id="s-sync">
+  <div class="top">
+    <span class="logo">Sagebrush</span>
+    <button class="btn on">Files</button>
+    <button class="btn">File</button>
+    <span class="name">groups</span><span class="path">Algebra/groups.ipynb</span>
+    <span class="sp"></span><span class="status">Saved in this browser · synced</span><button class="btn">Run all</button><button class="btn">⋯</button>
+  </div>
+  <div class="body">
+    <aside class="files">
+      <div class="head"><b>Files</b><button class="ib">＋</button><button class="ib">⇪</button><button class="ib">⋯</button></div>
+      <div class="search">Search files</div>
+      <div class="tree">
+        <div class="grp">Your workspace</div>
+        <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">Algebra</span></div>
+        <div class="row ind1 cur"><svg class="ic"><use href="#i-nb"/></svg><span class="n">groups.ipynb</span><span class="m">Sage</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Sylow theorems.board.json</span><span class="m" title="waiting to upload">↑</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-im"/></svg><span class="n">cayley-S4.png</span></div>
+        <div class="row"><span class="chev">▾</span><svg class="ic"><use href="#i-fd"/></svg><span class="n">data</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tb"/></svg><span class="n">primes.csv</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tb"/></svg><span class="n">genomes.tsv</span><span class="m" title="in the cloud only">☁ 812 MB</span></div>
+        <div class="row ind1"><svg class="ic"><use href="#i-tx"/></svg><span class="n">orbits (conflict, phone).json</span><span class="m" style="color:#975200">⚠</span></div>
+        <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">calculus notes.ipynb</span></div>
+        <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">fft.ipynb</span><span class="m">MATLAB</span></div>
+      </div>
+      <div class="foot">
+        <div style="color:var(--accent);font-weight:600">✓ Synced · 2 min ago</div>
+        <div>1 change waits to upload</div>
+        <div class="meter"><i style="width:9%;background:#2a6fb0"></i><i style="width:6%;background:#8a3b8f"></i><i style="width:12%;background:#0b7a52"></i></div>
+        <div class="links"><span>Trash</span><span>Sync…</span></div>
+      </div>
+    </aside>
+    <main class="nbmain">
+      <div class="askbox" style="margin-top:0;max-width:640px">
+        <b style="font-size:16px">Back up and sync</b>
+        <div style="color:var(--muted);font-size:13px;margin:2px 0 12px">Signed in with CoCalc as william@…</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><span style="flex:1"><b>On</b> for this workspace. Everything here is kept on sagebrush.space for your account, privately, and appears on your other signed-in devices.</span><button class="btn">Turn off…</button></div>
+        <div class="meter" style="height:8px"><i style="width:2%;background:#4a6b49"></i></div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Using 846 MB of 10 GB</div>
+        <table class="list">
+          <tr><th>Device</th><th>Last synced</th><th></th></tr>
+          <tr><td>This laptop (Firefox)</td><td>2 min ago</td><td style="text-align:right;color:var(--muted)">this device</td></tr>
+          <tr><td>iPhone (Safari)</td><td>Yesterday 21:14</td><td style="text-align:right"><button class="btn">Forget</button></td></tr>
+          <tr><td>Work desktop (Chrome)</td><td>Oct 17</td><td style="text-align:right"><button class="btn">Forget</button></td></tr>
+        </table>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn">Download all (zip)</button><button class="btn">Delete my synced data…</button></div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:10px">Edits made offline sync when you're back online. Changes on two devices at once are merged; nothing is overwritten (a file changed on both is kept twice).</div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="scr" id="s-phonesync">
+  <div class="phone">
+    <div class="sheet">
+      <div class="top"><button class="ib" style="font-size:20px">←</button><span class="name" style="font-size:16px;flex:1">Algebra</span><button class="ib" style="font-size:20px">⋯</button></div>
+      <div style="margin:6px 12px;padding:8px 10px;border-radius:8px;background:var(--sel);font-size:13.5px">✓ Synced just now · from your laptop</div>
+      <div class="search">Search files</div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">groups.ipynb</span><span class="m">edited 2 min ago on laptop</span></div>
+      <div class="row"><svg class="ic"><use href="#i-bd"/></svg><span class="n">Sylow theorems.board.json</span><span class="m">1 h</span></div>
+      <div class="row"><svg class="ic"><use href="#i-im"/></svg><span class="n">cayley-S4.png</span><span class="m">☁ 84 KB</span></div>
+      <div class="row"><svg class="ic"><use href="#i-nb"/></svg><span class="n">rings.ipynb</span><span class="m">☁ Oct 12</span></div>
+      <div style="padding:14px 14px 0;font-size:13px;color:var(--muted)">Items marked ☁ are in your account and download when you open them. Long-press › Keep on this phone.</div>
+      <div class="foot" style="margin-top:auto">On this phone: 6 MB · in your account: 846 MB</div>
+    </div>
+  </div>
+</div>
+
+<div class="label" id="label"></div>
+<script>
+  const s = new URLSearchParams(location.search).get("s") || "nb";
+  const el = document.getElementById("s-" + s);
+  el.style.display = el.classList.contains("app") ? "grid" : "block";
+  for (const slot of el.querySelectorAll("[data-files]")) slot.replaceWith(document.getElementById("tpl-files").content.cloneNode(true));
+  const cur = { nb: "groups", board: "sylow", quota: "groups" }[s];
+  if (cur) el.querySelector(`[data-r="${cur}"]`)?.classList.add("cur");
+  if (!s.startsWith("phone")) document.getElementById("label").textContent = "Mockup · " + s;
+  // the File menu, the same in both editors, with one submenu open
+  function menu(sub, html) {
+    const r = el.querySelector("[data-anchor=file]").getBoundingClientRect();
+    const m = document.getElementById("tpl-filemenu").content.firstElementChild.cloneNode(true);
+    m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px";
+    document.body.append(m);
+    const item = m.querySelector(`[data-i="${sub}"]`); item.classList.add("hov");
+    const sm = Object.assign(document.createElement("div"), { className: "menu", innerHTML: html });
+    const ir = item.getBoundingClientRect();
+    sm.style.left = ir.right + 6 + "px"; sm.style.top = ir.top - 5 + "px"; sm.style.minWidth = "200px";
+    document.body.append(sm);
+  }
+  if (s === "nb") menu("new", `<div class="mi"><svg class="ic"><use href="#i-nb"/></svg>Notebook<span class="k">Ctrl+Alt+N</span></div><div class="mi"><svg class="ic"><use href="#i-bd"/></svg>Board</div><div class="mi"><svg class="ic"><use href="#i-fd"/></svg>Folder</div><hr><div class="mi">From an example…</div>`);
+  if (s === "board") menu("download", `<div class="cap">This board</div><div class="mi">.board.json</div><div class="mi">HTML (one file)</div><div class="mi">JSON Canvas</div><hr><div class="mi">Copy JSON</div>`);
+</script>
+</body>
+</html>
