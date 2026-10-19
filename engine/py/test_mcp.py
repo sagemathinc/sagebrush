@@ -135,6 +135,10 @@ def structured():
         return sc
 
     for name, t in tools.items():
+        if name.startswith("workspace_"):
+            # (the workspace tools' results are {result, error}: test_workspace_tools.py)
+            assert t["outputSchema"]["type"] == "object" and t["outputSchema"]["required"] == ["result", "error"], name
+            continue
         assert t["outputSchema"]["type"] == "object" and "status" in t["outputSchema"]["required"], name
 
     # sage and python: the value, printed output, plots; status unknown

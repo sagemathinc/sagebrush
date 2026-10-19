@@ -17,9 +17,12 @@ port is not the guard; the code is):
 - nothing runs before the person's grant (the page's "grant.changed"),
   and the grant is the page's: this server only follows it, and can't
   widen it;
-- frames are limited (12 MiB, checked from the header, before the payload
-  is read), the client's frames must be masked (RFC 6455), and fragments
-  together are limited the same;
+- a message is at most 8 KiB until the hello has paired the connection,
+  and 12 MiB after (fragments counted together), checked from each frame's
+  header before its payload is read; payloads are read and unmasked 64 KiB
+  at a time into the one buffer of the message, so a message costs about
+  its size, twice at most while it is decoded; the client's frames must be
+  masked and use known opcodes (RFC 6455);
 - at most 8 requests are in flight to the page, and at most 8
   connections are in their handshake at once (each for at most 30 s).
 
@@ -38,7 +41,7 @@ import struct
 import threading
 import time
 
-from sagebrush.workspace_tools import NotConnected, PageError
+from sagebrush.workspace_tools import NotConnected, PageError, loads_strict, strict_json
 
 PATH = "/sagebrush"
 PROTOCOL = 1
@@ -47,6 +50,12 @@ ORIGINS = ("https://sagebrush.space",)
 #: 8 MiB of contents as base64, with the JSON around it
 MAX_FRAME = 12 * 2**20
 MAX_HEADER = 16 * 1024
+#: before the hello has paired a connection, a message is at most this big
+#: (a hello is a few hundred bytes): an unpaired connection can make the
+#: server hold no more than this (LIMIT-6DA-1)
+MAX_HELLO = 8 * 1024
+#: payloads are read and unmasked this much at a time
+CHUNK = 64 * 1024
 CODE_SECONDS = 300
 CODE_TRIES = 5
 HELLO_SECONDS = 30
@@ -83,6 +92,7 @@ class Pairing:
         self.code_until = 0.0
         self.tries = 0
         self.conn = None  # the paired page's socket
+        self.generation = 0  # a new one for each pairing and each grant: a request admitted under one runs under it
         self.page = None  # its hello's page {origin, path}
         self.grant = None  # the person's grant, from the page
         self.pending = {}  # request id -> [event, result, error]
@@ -152,7 +162,7 @@ class Pairing:
         try:
             c.settimeout(HELLO_SECONDS)
             self._handshake(c)
-            msg = self._read_message(c)
+            msg = self._read_message(c, MAX_HELLO)
             hello = self._hello(c, msg)
             with self.lock:
                 self.unpaired -= 1
@@ -161,7 +171,7 @@ class Pairing:
                 return
             c.settimeout(None)
             while True:
-                self._dispatch(self._read_message(c))
+                self._dispatch(self._read_message(c, MAX_FRAME))
         except (_Refused, OSError, ValueError, ConnectionError):
             pass
         finally:
@@ -171,6 +181,7 @@ class Pairing:
                 mine = self.conn is c
                 if mine:
                     self.conn = self.page = self.grant = None
+                    self.generation += 1
                     failed = list(self.pending.values())
                     self.pending.clear()
                 else:
@@ -258,6 +269,7 @@ class Pairing:
                 refused = None
                 self.code = None  # used once
                 self.conn = c
+                self.generation += 1
                 page = params.get("page")
                 self.page = {"origin": page.get("origin"), "path": page.get("path")} if isinstance(page, dict) else None
         if refused:
@@ -277,6 +289,7 @@ class Pairing:
             if method == "grant.changed":
                 with self.lock:
                     self.grant = params if isinstance(params, dict) and params else None
+                    self.generation += 1
             elif method in ("chat.message", "chat.permission"):
                 self.on_notify(method, params)
             return
@@ -294,30 +307,47 @@ class Pairing:
         slot[0].set()
 
     # ---- requests to the page
-    def request(self, method, params, timeout=60.0):
+    def _admit(self):
+        """(socket, generation) if a page is paired and has granted access
+        now; NotConnected otherwise.  Checked again after a request has its
+        slot (CORR-6DA-3), so a revoke or another pairing while it waited
+        stops it."""
         with self.lock:
-            c = self.conn
-            if c is None:
-                raise NotConnected("no Sagebrush page is paired with this agent: call workspace_connect for a code, and enter it in the page (Chrome or Firefox)")
-            if self.grant is None:
-                raise NotConnected("the page is paired but the person has not granted access yet: they choose what this agent may do in the page")
+            return self._admitted()
+
+    def _admitted(self):
+        """_admit, with self.lock held."""
+        if self.conn is None:
+            raise NotConnected("no Sagebrush page is paired with this agent: call workspace_connect for a code, and enter it in the page (Chrome or Firefox)")
+        if self.grant is None:
+            raise NotConnected("the page is paired but the person has not granted access (or revoked it): they choose what this agent may do in the page")
+        return self.conn, self.generation
+
+    def request(self, method, params, timeout=60.0):
+        self._admit()
         if not self.slots.acquire(timeout=timeout):
             raise PageError("limit", "%d requests are already in flight to the page" % IN_FLIGHT, retry_after_ms=250)
+        rid = None
         try:
             with self.lock:
+                c, gen = self._admitted()
                 self.ids += 1
                 rid = "s%d" % self.ids
                 slot = [threading.Event(), None, None]
                 self.pending[rid] = slot
+            with self.lock:  # (the admission holds until the frame is sent: checked again under the lock)
+                if self.conn is not c or self.generation != gen:
+                    raise NotConnected("the page's grant or pairing changed before the request was sent")
             self._send(c, {"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
             if not slot[0].wait(timeout):
-                with self.lock:
-                    self.pending.pop(rid, None)
                 raise PageError("timeout", "the page did not answer within %g s" % timeout)
             if slot[2] is not None:
                 raise slot[2]
             return slot[1]
         finally:
+            if rid is not None:
+                with self.lock:
+                    self.pending.pop(rid, None)  # on every path (CORR-6DA-4)
             self.slots.release()
 
     def notify(self, method, params):
@@ -329,7 +359,10 @@ class Pairing:
 
     # ---- frames (RFC 6455)
     def _send(self, c, msg):
-        data = json.dumps(msg, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        try:
+            data = strict_json(msg).encode("utf-8")
+        except ValueError as e:
+            raise PageError("invalid", "the message is not strict JSON: %s" % e)
         if len(data) > MAX_FRAME:
             raise PageError("limit", "the message is %d bytes; at most %d go in one frame" % (len(data), MAX_FRAME))
         self._frame(c, 0x1, data)
@@ -361,10 +394,11 @@ class Pairing:
             buf += chunk
         return bytes(buf)
 
-    def _read_message(self, c):
-        """One whole message (text, possibly fragmented), as JSON; pings
-        answered, a close ends the connection."""
-        parts, total = [], 0
+    def _read_message(self, c, limit):
+        """One whole message (text, possibly fragmented) of at most limit
+        bytes, as JSON; pings answered, a close ends the connection."""
+        msg = bytearray()
+        started = False
         while True:
             b0, b1 = self._exact(c, 2)
             fin, opcode, masked, n = b0 & 0x80, b0 & 0x0F, b1 & 0x80, b1 & 0x7F
@@ -378,43 +412,59 @@ class Pairing:
                 n = struct.unpack("!H", self._exact(c, 2))[0]
             elif n == 127:
                 n = struct.unpack("!Q", self._exact(c, 8))[0]
+            if opcode not in (0x0, 0x1, 0x2, 0x8, 0x9, 0xA):
+                self._close(c, 1002, "reserved opcode")
+                raise _Refused("reserved opcode")  # (CORR-6DA-2)
             if opcode >= 0x8 and (n > 125 or not fin):
                 self._close(c, 1002, "bad control frame")
                 raise _Refused("bad control frame")
-            if opcode < 0x8 and total + n > MAX_FRAME:
-                self._close(c, 1009, "message too big: at most %d bytes" % MAX_FRAME)
+            if opcode < 0x8 and len(msg) + n > limit:
+                self._close(c, 1009, "message too big: at most %d bytes" % limit)
                 raise _Refused("too big")
+            if opcode == 0x2:  # (before its payload is read)
+                self._close(c, 1003, "text frames only")
+                raise _Refused("binary")
+            if opcode < 0x8 and (opcode == 0x0) != started:
+                self._close(c, 1002, "bad fragmentation")
+                raise _Refused("fragmentation")
             mask = self._exact(c, 4)
-            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(self._exact(c, n))) if n < 4096 else _unmask(self._exact(c, n), mask)
+            if opcode >= 0x8:  # (a control frame: at most 125 bytes)
+                payload = bytearray()
+                self._payload(c, n, mask, payload)
+            else:
+                self._payload(c, n, mask, msg)
+                started = True
             if opcode == 0x8:
                 self._close(c, 1000, "")
                 raise ConnectionError("closed by the page")
             if opcode == 0x9:
-                self._frame(c, 0xA, payload)
+                self._frame(c, 0xA, bytes(payload))
                 continue
             if opcode == 0xA:
                 continue
-            if opcode == 0x2:
-                self._close(c, 1003, "text frames only")
-                raise _Refused("binary")
-            if (opcode == 0x0) != bool(parts):
-                self._close(c, 1002, "bad fragmentation")
-                raise _Refused("fragmentation")
-            parts.append(payload)
-            total += n
             if fin:
                 try:
-                    return json.loads(b"".join(parts).decode("utf-8"))
-                except ValueError:
-                    self._close(c, 1007, "not JSON")
+                    return loads_strict(msg)  # (decoded from the buffer itself: no copy)
+                except ValueError:  # (not UTF-8, not JSON, NaN or Infinity, a lone surrogate)
+                    self._close(c, 1007, "not strict JSON")
                     raise _Refused("not JSON")
+
+    def _payload(self, c, n, mask, out):
+        """n bytes of payload, unmasked, appended to out, CHUNK at a time."""
+        pos = 0
+        while pos < n:
+            chunk = self._exact(c, min(CHUNK, n - pos))
+            out += _unmask(chunk, mask, pos)
+            pos += len(chunk)
 
     def _reply_error(self, c, rid, code, message):
         self._send(c, {"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": message, "data": {"code": code, "message": message}}})
 
 
-def _unmask(data, mask):
-    """XOR with the 4-byte mask, fast for large payloads."""
+def _unmask(data, mask, pos=0):
+    """data (at most CHUNK bytes) XOR the 4-byte mask, data starting at
+    byte pos of the payload."""
     n = len(data)
-    m = int.from_bytes((mask * (n // 4 + 1))[:n], "big")
-    return (int.from_bytes(data, "big") ^ m).to_bytes(n, "big")
+    r = pos % 4
+    m = (mask[r:] + mask[:r]) * (n // 4 + 1)
+    return (int.from_bytes(data, "big") ^ int.from_bytes(m[:n], "big")).to_bytes(n, "big")
