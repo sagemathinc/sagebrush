@@ -164,7 +164,7 @@ def test_pair_grant_and_verbs():
     st = p.status()
     assert st["paired"] and not st["granted"] and not st["code_valid"]
     # nothing runs before the person's grant
-    content, s, err = WS.call(p, "workspace_list", {})
+    content, s, err = WS.call(p, "workspace_list", {"folder": "/"})
     assert err and s["error"]["code"] == "not_connected" and "not granted" in s["error"]["message"], s
     c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True, "run": False}})
     for _ in range(100):
@@ -195,7 +195,7 @@ def test_pair_grant_and_verbs():
     # the grant revoked: no more verbs
     c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {}})
     time.sleep(0.2)
-    _, s, err = WS.call(p, "workspace_list", {})
+    _, s, err = WS.call(p, "workspace_list", {"folder": "/"})
     assert err and s["error"]["code"] == "not_connected"
     # the page goes away: waiting requests fail at once, and the status says so
     stop.set()
@@ -344,7 +344,7 @@ def test_page_gone_while_waiting():
     out = {}
 
     def ask():
-        out["r"] = WS.call(p, "workspace_list", {}, timeout=30)
+        out["r"] = WS.call(p, "workspace_list", {"folder": "/"}, timeout=30)
 
     t = threading.Thread(target=ask)
     t.start()
@@ -462,7 +462,7 @@ def test_strict_json_frames():
     # and after pairing: a result carrying a lone surrogate ends the pairing, never a crash
     p, c = paired()
     out = {}
-    t = threading.Thread(target=lambda: out.update(r=WS.call(p, "workspace_list", {}, timeout=10)))
+    t = threading.Thread(target=lambda: out.update(r=WS.call(p, "workspace_list", {"folder": "/"}, timeout=10)))
     t.start()
     m = c.recv()
     c.send_frame(0x1, ('{"jsonrpc":"2.0","id":"%s","result":{"entries":[{"path":"/\\udc00","kind":"file"}]}}' % m["id"]).encode())

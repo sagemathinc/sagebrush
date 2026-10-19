@@ -141,7 +141,7 @@ def test_tools():
 
 
 def test_not_connected():
-    for name, args in [("workspace_list", {}), ("workspace_read", {"path": "/a.txt"})]:
+    for name, args in [("workspace_list", {"folder": "/"}), ("workspace_read", {"path": "/a.txt"})]:
         err = refused(None, name, args, "not_connected")
         assert "Chrome or Firefox" in err["message"], err
 
@@ -168,8 +168,8 @@ def test_invalid_never_reaches_the_page():
         ("workspace_create", {"path": "/a", "content": {"text": "x" * (WS.MAX_CONTENT + 1)}}),
         ("workspace_create", {"path": "/a", "content": {"base64": base64.b64encode(b"\0" * (WS.MAX_CONTENT + 1)).decode()}}),
         ("workspace_create", {"path": "/a", "content": {"json": {"k": "x" * WS.MAX_CONTENT}}}),
-        ("workspace_list", {"recursive": "yes"}),
-        ("workspace_version", {"path": "/a", "i": "0"}),
+        ("workspace_list", {"folder": "/", "recursive": "yes"}),
+        ("workspace_version", {"path": "/a", "index": "0"}),
         ("workspace_rename", {"from": "/a"}),
     ]
     for name, args in bad:
@@ -220,16 +220,16 @@ def test_page_errors_and_trash():
     refused(page, "workspace_read", {"path": "/a.txt"}, "missing")
     ok(page, "workspace_restore", {"path": "/a.txt"})
     assert ok(page, "workspace_stat", {"path": "/a.txt"})["entry"]["path"] == "/a.txt"
-    listing = ok(page, "workspace_list", {})
+    listing = ok(page, "workspace_list", {"folder": "/"})
     assert [x["path"] for x in listing["entries"]] == ["/a.txt", "/b.txt"]
-    content, _, _ = WS.call(page, "workspace_list", {})
+    content, _, _ = WS.call(page, "workspace_list", {"folder": "/"})
     assert content[0]["text"] == "/a.txt\n/b.txt"
 
     class Limited(FakePage):
         def request(self, method, params, timeout):
             raise WS.PageError("limit", "8 requests are in flight", retry_after_ms=250)
 
-    err = refused(Limited(), "workspace_list", {}, "limit")
+    err = refused(Limited(), "workspace_list", {"folder": "/"}, "limit")
     assert err["retryAfterMs"] == 250
 
 
@@ -267,15 +267,15 @@ def test_results_are_validated_whole():
         ("workspace_stat", {"path": "/a.txt"}, {"entry": {"path": "a.txt", "kind": "file"}}),
         ("workspace_stat", {"path": "/a.txt"}, {"entry": {"path": "/a.txt", "kind": "socket"}}),
         ("workspace_mkdir", {"path": "/d"}, {}),
-        ("workspace_list", {}, {"entries": ["bad"]}),
-        ("workspace_list", {}, {"entries": "bad"}),
-        ("workspace_list", {}, {}),
-        ("workspace_list", {}, {"entries": [], "more": True}),
-        ("workspace_list", {}, {"entries": [], "more": "yes"}),
+        ("workspace_list", {"folder": "/"}, {"entries": ["bad"]}),
+        ("workspace_list", {"folder": "/"}, {"entries": "bad"}),
+        ("workspace_list", {"folder": "/"}, {}),
+        ("workspace_list", {"folder": "/"}, {"entries": [], "more": True}),
+        ("workspace_list", {"folder": "/"}, {"entries": [], "more": "yes"}),
         ("workspace_history", {"path": "/a.txt"}, {"versions": ["x"]}),
         ("workspace_history", {"path": "/a.txt"}, {}),
-        ("workspace_version", {"path": "/a.txt", "i": 0}, {}),
-        ("workspace_version", {"path": "/a.txt", "i": 0}, {"content": {"json": float("nan")}}),
+        ("workspace_version", {"path": "/a.txt", "index": 0}, {}),
+        ("workspace_version", {"path": "/a.txt", "index": 0}, {"content": {"json": float("nan")}}),
     ]
     for name, args, result in bad:
         page.override = result
@@ -286,7 +286,7 @@ def test_results_are_validated_whole():
     r = ok(page, "workspace_read", {"path": "/a.txt"})
     assert set(r) == {"entry", "rev", "content"}, r
     page.override = {"entries": [entry], "more": True, "cursor": "c1"}
-    r = ok(page, "workspace_list", {})
+    r = ok(page, "workspace_list", {"folder": "/"})
     assert r == {"entries": [entry], "more": True, "cursor": "c1"}, r
     # a conflict's current version is checked too: a malformed one is left out
     class Conflict(FakePage):
@@ -304,7 +304,7 @@ def test_strict_json_and_unicode():
     page = FakePage()
     for args in [
         {"path": "/a.json", "content": {"json": {"x": float("nan")}}},
-        {"path": "/a.json", "content": {"json": [float("inf")]}},
+        {"path": "/a.json", "content": {"json": {"v": [float("inf")]}}},
         {"path": "/a.json", "content": {"json": {"k": "\ud800"}}},
         {"path": "/a.txt", "content": {"text": "lone \udc00 surrogate"}},
         {"path": "/bad\ud800.txt"},
@@ -341,6 +341,97 @@ def test_path_bounds():
         refused(page, "workspace_rename", {"from": "/a", "to": p}, "invalid")
     assert len(page.requests) == n, page.requests[n:]
     assert (WS.MAX_PATH, WS.MAX_DEPTH, WS.MAX_NAME) == (1024, 32, 255)  # (paths.ts)
+
+
+def test_tools_come_from_the_schema():
+    """The tools' parameters are web/workspace/schema.json's, the copy in the
+    package is that file (where the file exists: sync-python-package.sh
+    --check says the same), and the schema's own rules are enforced."""
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    tools = {t["name"]: t for t in WS.tools()}
+    for method, v in schema["verbs"].items():
+        params = {k: x for k, x in v["params"].items() if k != "$schema"}
+        assert tools["workspace_" + method.split(".", 1)[1]]["inputSchema"] == params, method
+    source = os.path.join(HERE, "..", "..", "web", "workspace", "schema.json")
+    if os.path.exists(source):
+        assert open(source, "rb").read() == open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), "rb").read(), \
+            "sagebrush/workspace_schema.json differs from web/workspace/schema.json: run scripts/sync-python-package.sh"
+    assert WS.MAX_CONTENT == schema["limits"]["maxContentBytes"] and WS.MAX_LIST == schema["limits"]["maxList"]
+    page = FakePage()
+    for name, args in [
+        ("workspace_list", {}),  # folder is required
+        ("workspace_stat", {"path": "relative/path"}),  # absolute only
+        ("workspace_version", {"path": "/a", "i": 0}),  # the argument is index
+        ("workspace_create", {"path": "/a.board.json", "content": {"json": [1, 2]}}),  # a document is an object
+        ("workspace_create", {"path": "/a.bin", "content": {"base64": "not*base64"}}),
+        ("workspace_create", {"path": "/a.txt", "content": {"text": "x", "json": {}}}),  # one form only
+    ]:
+        refused(page, name, args, "invalid")
+    assert page.requests == []
+    # answers bigger than the schema allows are protocol errors
+    page.override = {"entries": [{"path": "/f%d" % i, "kind": "file"} for i in range(WS.MAX_LIST + 1)]}
+    refused(page, "workspace_list", {"folder": "/"}, "protocol")
+    page.override = {"versions": [{"t": i} for i in range(WS.MAX_HISTORY + 1)]}
+    refused(page, "workspace_history", {"path": "/a"}, "protocol")
+
+
+#: paths and whether web/workspace/paths.ts normPath accepts them (LIMIT-6DA-2)
+PATH_CASES = [
+    ("/", True), ("/a", True), ("/a/b.txt", True), ("/a/", True), ("/Trash", True), ("/a b/ü/日本.txt", True),
+    ("/" + "/".join(["a" * 255] * 4), True), ("/" + "/".join(["d"] * 32), True), ("/" + "n" * 255, True),
+    ("/" + "😀" * 127, True),  # (254 UTF-16 units)
+    ("", False), ("a", False), ("a/b", False), ("./a", False), (" /a", False), ("ab", False), ("ab/c", False), ("xa/b/", False),
+    ("//", False), ("/a//b", False), ("//a", False), ("/a//", False),
+    ("/.", False), ("/..", False), ("/a/./b", False), ("/a/../b", False), ("/a/..", False), ("/a/.", False),
+    ("/a\x00b", False), ("/a\x01", False), ("/a\tb", False), ("/a\nb", False), ("/a\x1f", False), ("/a\x7f", False),
+    ("/" + "a" * 1024, False), ("/" + "/".join(["d"] * 33), False), ("/" + "n" * 256, False),
+    ("/" + "😀" * 128, False),  # (256 UTF-16 units: too long a name in JavaScript's count)
+    ("/" + "/".join(["😀" * 120] * 5), False),  # (1205 UTF-16 units, 605 code points)
+]
+
+
+def test_paths_are_refused_as_normpath_refuses_them():
+    """LIMIT-6DA-2 (daybreak2): a path argument is accepted exactly when
+    paths.ts normPath accepts it, and a refused one never reaches the page;
+    where web/workspace/paths.ts exists, normPath itself (node) gives the
+    same verdict on every case."""
+    for p, good in PATH_CASES:
+        assert (WS.path_error(p) is None) == good, (p[:40], WS.path_error(p))
+    page = FakePage()
+    for p, good in PATH_CASES:
+        if good:
+            continue
+        for name, args in [("workspace_stat", {"path": p}), ("workspace_rename", {"from": "/a", "to": p}), ("workspace_list", {"folder": p}),
+                           ("workspace_duplicate", {"path": "/a", "to": p})]:
+            refused(page, name, args, "invalid")
+    assert page.requests == [], page.requests
+    for p, good in PATH_CASES:
+        if good and p != "/":
+            s, _ = call(page, "workspace_stat", {"path": p})
+            assert s["error"]["code"] == "missing", (p[:40], s)  # (it reached the page, unchanged)
+            assert page.requests[-1][1]["path"] == p
+    paths_ts = os.environ.get("SAGEBRUSH_PATHS_TS") or os.path.join(HERE, "..", "..", "web", "workspace", "paths.ts")
+    if not os.path.exists(paths_ts):
+        print("  (normPath itself not compared: no web/workspace/paths.ts in this tree)")
+        return
+    import subprocess
+
+    # (a copy as .mts, so that node loads it as a module wherever it is; paths.ts imports nothing)
+    import shutil
+    import tempfile
+
+    tmp = tempfile.mkdtemp(prefix="normpath-")
+    shutil.copy(paths_ts, os.path.join(tmp, "paths.mts"))
+    script = ("import { normPath } from %s;\n"
+              "const cases = JSON.parse((await import('node:fs')).readFileSync(0, 'utf8'));\n" % json.dumps("file://" + os.path.join(tmp, "paths.mts")))
+    script += "process.stdout.write(JSON.stringify(cases.map((p) => { try { normPath(p); return true; } catch { return false; } })));\n"
+    r = subprocess.run(["node", "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script],
+                       input=json.dumps([p for p, _ in PATH_CASES]), capture_output=True, text=True, timeout=60)
+    shutil.rmtree(tmp)
+    assert r.returncode == 0, r.stderr
+    verdicts = json.loads(r.stdout)
+    for (p, good), js in zip(PATH_CASES, verdicts):
+        assert js == good, "normPath %s %r, the case list says %s" % ("accepts" if js else "refuses", p[:40], good)
 
 
 def test_through_the_server():
