@@ -490,6 +490,11 @@ function openEntry(e: Entry, how: "here" | "tab") {
 // read is kept too), the saves made, and, one refused, this board stays open, saying why: never left
 // behind unsaved (astra's CORR-4B3-2, CORR-BCD-1)
 async function leaveFor(url: string, what: string): Promise<boolean> {
+  // (not while a departure is under way: it owns the board until it goes or gives up, CORR-BF8-1)
+  if (departing) { alert(`"${what}" isn't opened: this board is already going elsewhere (${departing}). Wait for it to finish.`); return false; }
+  return go(url, what);
+}
+async function go(url: string, what: string): Promise<boolean> {
   if (!(await settled(what))) return false;
   location.assign(url);
   return true;
@@ -502,25 +507,38 @@ async function leaveFor(url: string, what: string): Promise<boolean> {
 // good; the work's lock request is then withdrawn, so it never runs, now or later: daybreak2's
 // LIMIT-59D-1)
 const DEPART_MS = 10_000;
+// (the one departure under way: claimed before anything is awaited, released only by the one that
+// claimed it; another asked for meanwhile is refused, saying so, so no departure's end can release
+// the board while another still waits to change it: astra's CORR-BF8-1)
+let departing: string | null = null;
 async function departFor(what: string, work: (signal: AbortSignal) => Promise<string | undefined>) {
-  if (!(await settled(what))) return;
-  mounted.freeze(true);
+  if (departing) throw new Error(`this board is already going elsewhere (${departing}): wait for it to finish`);
+  departing = what;
   let left = false;
-  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), DEPART_MS);
   try {
-    let url: string | undefined;
-    try {
-      url = await work(ctl.signal);
-    } catch (e: any) {
-      if (e?.name === "AbortError") throw new Error("your files are busy (another tab is changing them), so nothing was done. Try again in a moment");
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
-    if (url) left = await leaveFor(url, what);
+    if (!(await settled(what))) return;
+    mounted.freeze(true);
+    left = await departWork(what, work);
   } finally {
-    if (!left) mounted.freeze(false);
+    if (!left) {
+      mounted.freeze(false);
+      departing = null;
+    }
   }
+}
+/** The departure's work, its lock waited for at most DEPART_MS; then the page goes. Whether it went. */
+async function departWork(what: string, work: (signal: AbortSignal) => Promise<string | undefined>): Promise<boolean> {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), DEPART_MS);
+  let url: string | undefined;
+  try {
+    url = await work(ctl.signal);
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw new Error("your files are busy (another tab is changing them), so nothing was done. Try again in a moment");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  return url ? go(url, what) : false;
 }
 /** What is being written ended and kept, and every save made, until nothing more is being written
  * (what was typed while the last save was made, kept too); true to go: then the page goes in the

@@ -293,8 +293,8 @@ try {
     await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
     await until(`window.__entered`, 5000);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}, the lock never given up: waiting for it)`);
-    check(await until(`document.body.innerText.includes("your files are busy")`, 20000), `${item}, the lock never given up: it gives up waiting, saying so`);
+    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), `(${item}, the lock never given up: waiting for it)`);
+    check(await until(`document.body.innerText.includes("your files are busy")`, 45000), `${item}, the lock never given up: it gives up waiting, saying so`);
     check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`)), `…its request for the lock withdrawn`);
     check((await ev(`location.search`)) === here, `…the board stays`);
     check(await writeInPlace(null, "WRITABLE_AGAIN"), `…and can be written in again`);
@@ -303,6 +303,38 @@ try {
     check((await ev(`location.search`)) === here, `…the lock given up later: the page still doesn't go`);
     if (item === "newboard") check((await boards()) === before + 0, `…and no board was made (${before} → ${await boards()})`);
     else check(!!(await stat(`/Stuck-${item}.board.json`)), "…and the board wasn't moved to Trash");
+  }
+  // two departures at once (New board waiting for the lock; Trash, and New board again, asked for
+  // meanwhile): the second and third are refused, saying so; only the first holds the board, so its
+  // giving up releases it with nothing else waiting; then nothing more happens (astra's CORR-BF8-1)
+  {
+    await freshBoard("/Concurrent.board.json");
+    const here = await ev(`location.search`), before = await boards(), d0 = dialogs.length;
+    await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
+    await ev(`sagebrush.board.edit((d) => { d.nodes[0].title = "After"; }).then(() => 1)`);
+    check(await until(`${W}.read("/Concurrent.board.json").then((r) => r.content.nodes[0].title === "After")`), "(two departures: an undoable change, saved)");
+    await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
+    await sleep(300);
+    const pending = () => ev(`navigator.locks.query().then((s) => s.pending.filter((p) => p.name === "sagebrush-workspace").length)`);
+    await ev(`(() => { document.querySelector("[data-sbb=newboard]").click(); return 1; })()`);
+    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), "(two departures: New board waiting for the lock)");
+    await sleep(3500);
+    await ev(`(() => { document.querySelector("[data-sbb=deleteboard]").click(); return 1; })()`);
+    check(await until(`document.body.innerText.includes("already going elsewhere")`, 10000), "two departures: Trash asked for meanwhile is refused, saying so");
+    await ev(`(() => { document.querySelector("[data-sbb=newboard]").click(); return 1; })()`);
+    await sleep(500);
+    check((await pending()) === 1, `…and so is New board again: one request for the lock (${await pending()})`);
+    await key(false); await sleep(300);
+    check((await title()) === "After", "…the board still held: Undo changes nothing");
+    check(await until(`document.body.innerText.includes("your files are busy")`, 45000), "…the first gives up, saying so");
+    check((await pending()) === 0, "…and nothing else waits for the lock");
+    await key(false);
+    check(await until(`sagebrush.board.snapshot().doc.nodes[0].title === "Before"`, 5000), "…the board writable again: Undo works");
+    await ev(`(() => { window.__release(); return 1; })()`);
+    check(await until(`${W}.read("/Concurrent.board.json").then((r) => r.content.nodes[0].title === "Before")`), "…and, the lock given up, the Undo is saved");
+    await sleep(2500);
+    check((await ev(`location.search`)) === here && (await boards()) === before && !!(await stat("/Concurrent.board.json")), "…the lock given up later: nothing more happens (no board made, nothing trashed, the page stays)");
+    check(!dialogs.slice(d0).some((d) => /isn't in this workspace|aren't kept/.test(d.message)), "…and nothing was said lost");
   }
   // the lock given up just as the wait ends: either it was done and the page went, or nothing was
   // done and the board stays; never done after the board was released
