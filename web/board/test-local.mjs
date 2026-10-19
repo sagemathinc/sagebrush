@@ -83,6 +83,8 @@ try {
   await until(`location.search !== ${JSON.stringify(a.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
   const d = await here();
   check(LOCAL.test(d.search) && d.title === "Sage sketch (copy)" && d.items === 1 && d.mode === "sage", "Duplicate: a copy of its own: " + JSON.stringify(d));
+  const markOf = (search) => ev(`localStorage.getItem("sagebrush-board:local:" + ${JSON.stringify(search.match(/local:([0-9a-f]{12})/)[1])} + "#here")`);
+  check((await markOf(d.search)) === "1", "...a copy of a board written here, marked as one");
   // File > New board: a new blank board in the same language, in Edit; the copy stays
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until(`location.search !== ${JSON.stringify(d.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
@@ -93,6 +95,14 @@ try {
   check((await here()).items === 1, "...and the copy is as it was");
   await go(a.search);
   check((await here()).title === "Sage sketch", "...and so is the first");
+  // Duplicate of a board not written here: a copy not marked either (CORR-30D-1)
+  await ev(`(localStorage.removeItem("sagebrush-board:local:" + ${JSON.stringify(a.search.match(/local:([0-9a-f]{12})/)[1])} + "#here"), 1)`);
+  await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
+  await until(`location.search !== ${JSON.stringify(a.search)} && !!window.sagebrush?.board?.snapshot()?.doc`, 30000);
+  const d2 = await here();
+  check(d2.search !== d.search && (await markOf(d2.search)) === null, "Duplicate of a board not marked as written here: not marked: " + JSON.stringify(d2));
+  await ev(`(localStorage.setItem("sagebrush-board:local:" + ${JSON.stringify(a.search.match(/local:([0-9a-f]{12})/)[1])} + "#here", "1"), 1)`);
+  await go(a.search);
   // a board of this browser's, written and read again: as written
   await go("?new=sage");
   await ev("window.sagebrush.board.edit((d) => { d.title = 'Kept'; d.nodes = [{ id: 'k', title: 'here' }]; }).then(() => 1)");
