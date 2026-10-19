@@ -19,7 +19,7 @@
 
 **Gated: the person's files.** The first time a board reads or writes a file of the person's workspace outside itself, the page asks, naming the file or folder, and read or write (§5). The answer is remembered for that board, scoped by folder, and can be revoked (§6).
 
-**Notebooks too** (William, §11). A notebook is gated as a board is: notebooks lose their blanket access to all the person's files. A notebook or board **made here** gets read and write on its own folder without asking (§6, "Its own folder") and asks for anything else. One brought in from elsewhere (uploaded, dropped, opened from a link) asks for everything.
+**Notebooks too** (William, §11). A notebook is gated as a board is: notebooks lose their blanket access to all the person's files. A notebook or board **the person made here**, in this site's own UI, gets read and write on its own folder without asking (§6, "Provenance" and "Its own folder") and asks for anything else. Any other document (uploaded, dropped, opened from a link, made by an agent, copied from one of these, or made before this is built) asks for everything.
 
 **Future capabilities** (the agent API of design/agent-endpoint.md, sync, a project's kernel, any network a board might one day be allowed) are each a named capability, granted through the same gate and listed in the same place. None is implied by another.
 
@@ -53,7 +53,13 @@ The calls:
 ### 2a. Changes: identity at use, atomic, acknowledged
 
 One page call isn't atomic by itself: another tab, the file browser or an agent can change the workspace between the call's steps. So each change is made like this:
-- **Under the workspace's lock.** The whole call (resolve, check the grant, change, record) holds the workspace's lock (`locked()`, a Web Lock, so one change at a time in all of this browser's tabs), in one transaction of its stores. Nothing is checked in one call and used in another.
+- **Under the workspace's lock.** The whole call (resolve, check the grant, change, record) holds the workspace's lock (`locked()`, a Web Lock, so one change at a time in all of this browser's tabs). Nothing is checked in one call and used in another. The lock stops interleaving, but not a partial commit on a crash or a quota error: that is the next point.
+- **In one database, in one transaction** (astra's CORR-CAP-2). Today a data file's bytes are in the `sagebrush` database (`files`), while the index, versions and Trash are in `sagebrush-workspace`. A change spanning both can't commit or fail as one, whatever lock is held. So:
+  - **the bytes move:** data files' bytes go into `sagebrush-workspace`, in a store of their own (`fileBytes`, keyed by the entry's content key), beside the index. Every change the gate makes (bytes, index entry, version, Trash, ops record) is then **one IndexedDB transaction** of one database. A crash, a closed tab or a quota error aborts it whole: nothing of it is visible, and the answer to the worker is the error;
+  - **what code may change is only what lives there.** Code may create, write, rename, move and remove **data files** and **folders**. A board or a notebook is read-only to code: writing over one, removing one, or renaming one is refused (`PermissionError`). Removing or renaming a folder that holds a document is refused for code (the person does that in the file browser). So no change by code touches the `sagebrush` database's notebooks;
+  - **staged bytes stay in the page** until the commit: chunks crossing from the worker are held in page memory (bounded, §8), never written to the database before the commit's transaction, so there is no partial durable state to recover;
+  - **the migration is crash-safe and idempotent.** At the upgrade that adds folder identities (§6), each data file's bytes are copied into `fileBytes` in a transaction that also marks the entry migrated; only after that commits are they deleted from `sagebrush`/`files`. A read looks in `fileBytes` first, then the old store. Interrupted at any point, the next open continues: bytes are in one place or both, never neither, and the index never names bytes that aren't there.
+  - **Crash tests:** the browser killed (the process, not the page closing politely) before the commit, during the commit transaction, and during the migration, then reopened: each change is there whole or not at all, the index and bytes agree, and nothing is in both stores after the migration completes. A quota error injected into the commit transaction: nothing visible, and the worker's call fails with it.
 - **On the identity the worker saw.** When code opens a file, the page answers with the entry's identity (`fid`) and revision. Its change then names them:
   - **writing an existing file** carries the expected `fid` and revision. If the file is now another one (replaced, removed and remade) or has changed since, the write fails with an error (Python `OSError`, "changed since it was opened"). It never writes over a file it didn't open;
   - **creating** names the parent folder's identity and the new name, and fails if that name now exists (`FileExistsError`). There is no silent overwrite. `open(path, "w")` on a name that didn't exist when it was opened creates; on one that did, it writes that `fid`;
@@ -70,8 +76,8 @@ One page call isn't atomic by itself: another tab, the file browser or an agent 
 - the desktop app, **for now**. William: the desktop app should be "faster and more memory than running in browser, but still safe", so it will host the sandboxed runner and get the same gate (§10, step 5). Until then it is a fallback like the others.
 
 Such a worker could open the browser's storage itself. So there:
-- **a document brought in from elsewhere keeps the interim rule:** its code waits for "Run this board's code";
-- **a document made here runs,** since its code is the person's own. The page still gives it only what the rules above give it, but that isn't a boundary there;
+- **a document brought in from elsewhere keeps the interim rule:** its code waits for "Run this board's code" (below);
+- **a document the person made here runs** (provenance `"person"`, §6), since its code is the person's own. The page still gives it only what the rules above give it, but that isn't a boundary there. Any other document, unknown provenance included, waits for "Run";
 - **no grant is used** by a fallback worker. A grant is for a principal in the runner, so the page doesn't act on one for a worker that could read storage itself.
 
 **Giving up the runner never runs what was waiting for it** (astra's CORR-CAP-4). When the page gives up the runner, a run or a question already sent to it is not replayed into the fallback. A run is answered as not run, saying why and to run it again. A question is answered as skipped. Only what isn't code (the files) is given to the fallback. What runs there after that is what the person runs again. This is built in workspace step 3b (web/notebook/runner-worker.js, tested by test-runner-fallback.mjs).
@@ -153,7 +159,14 @@ Each page path gets a test, per principal: B is refused what only A may read.
   - **Renaming or moving** a folder keeps its `fid`, so its grants follow it.
   - **Removing a folder** (to Trash) ends its grants: they are deleted with it, and restoring it from Trash doesn't bring them back.
   - **Removing a folder, then making one with the same name** makes a new `fid`: the old grants don't apply to it.
-- **Its own folder** (William, §11). A document **made here** (with no `origin`: not uploaded, dropped or opened from elsewhere) gets read and write on **the folder it is in**, without asking. It is an ordinary grant, made when the document is made (or, for documents that exist when this is built, at the upgrade), shown in the list and revocable. Moving the document later doesn't move or widen it.
+- **Provenance: who made a document** (astra's CORR-CAP-5). "Made here" can't be inferred from a missing `origin`: an upload creates its documents with none today. So the index keeps a **host-owned provenance** on each document's entry, `made`:
+  - **`"person"`**: made by the person in this site's own UI, with File ▸ New board or New notebook (and the blank board a first visit makes). Only those paths set it, through a workspace call the page uses and nothing else: not the agent API (`forAgent`), not an upload, an import, a drop, Open as…, an example, a link or a conversion;
+  - **`"elsewhere"`**: everything else. That includes documents an agent makes (the safer choice: the person's agent still gets whatever it asks for, through the same prompt), examples, and converted copies of a file;
+  - **absent: unknown.** Every document that exists when this is built, the Welcome notebook included. Unknown is treated as elsewhere: it asks.
+  - Provenance is never read from a document's fields, a file's contents or a URL. It is not in an export or a download, and an import or upload never sets `"person"`.
+  - **Copies inherit it.** Duplicate, Save a copy, a conflict copy ("your changes, made while it changed elsewhere"), a version restored as a copy: each gets its source's provenance. A copy of an imported board is still elsewhere, so a copy can't launder imported code into an automatic grant.
+- **Its own folder** (William, §11). A document whose provenance is `"person"` gets read and write on **the folder it is in**, without asking. It is an ordinary grant, made when the document is made, shown in the list and revocable. Moving the document later doesn't move or widen it.
+  - **Grants are still never copied** (above). A copy gets its own-folder grant only because of its own provenance, at its own creation, for the folder the copy is in. So a copy of a `"person"` board in `/A`, made in `/B`, gets `/B`, not the source's grants. A copy of an `"elsewhere"` board gets nothing.
   - **At the workspace's top**, which can't be granted (§3), it gets instead what it **creates** there: making a new file at the top is allowed without asking, and the file it made is granted to it. Other files at the top it asks for. This is the safer of the two readings (William: "choose the safer one"), and new notebooks are made at the top today.
   - **A file a document creates** in a granted folder is covered by the folder's grant. One it creates with a file grant alone isn't possible: creating needs write on the parent.
 - **A folder grant follows the folder.** It covers whatever is inside the folder at the moment of use: renaming the folder moves the grant with it, and moving a file out of it ends the grant for that file.
@@ -229,14 +242,19 @@ The pill is quiet when nothing happens, and never covers the board's content. On
 ## 10. Steps
 
 0. **Done in workspace step 3b:** the fallback never runs what was waiting for the runner (§2).
-1. **Identities:** folders' `fid` and the database upgrade that gives them (§6); the refusal of lookalike names, and the list of existing ones (§3).
+1. **Identities and storage:** one database upgrade gives folders their `fid` (§6), moves data files' bytes into `sagebrush-workspace` (§2a, with its crash tests), and adds documents' provenance (`made`, §6). Also the refusal of lookalike names, and the list of existing ones (§3).
 2. **The gate, and the worker's policy:**
    - the read gate through the broker, with the principal bound by the page;
    - changes as structured, locked, acknowledged calls (§2a), replacing `fsChanged` for the person's files;
    - the page's own paths gated per principal (§4): startup, the file-put broadcast, the change fan-out, TimeTravel's journal, output loaders;
-   - notebooks and boards started with only their own files and granted scopes; documents made here given their own folder (§6);
+   - notebooks and boards started with only their own files and granted scopes; documents the person made given their own folder (§6, by provenance);
    - `/tmp` writes never kept;
-   - the policy checked by a test that fails without it.
+   - the policy checked by a test that fails without it;
+   - daybreak2's requirements for the bounds (§8):
+     - every workspace write updates the entry's indexed size in the same transaction as its bytes. After an IndexedDB read, the page checks the bytes' actual `byteLength` equals the size it reserved and is within the file cap, before any chunk crosses, so a stale or corrupt index can't take more than its reservation;
+     - a write delivers no more than its declared, reserved size: a chunk that would cross it is refused, and the worker ended, before it is accepted. Staging never grows to be reconciled afterwards;
+     - on a timeout or the worker's end, the transfer's generation is invalidated **before** its reservation is released, so a late chunk can't run on released credit. Release is idempotent: the `finally`, the timeout and the termination may each call it;
+     - measured: whether reading from IndexedDB, or transferring to the worker, makes a second full-size copy for a while. If one does, the reservation charges that multiple of the file's size, and §8's 288 MiB is restated from the measured figure.
 
    Until step 3 lands, there are no prompts: everything ungranted is refused.
 3. **The prompt and grants:** the host-drawn prompt, batching per principal, the grant store and revocation.
