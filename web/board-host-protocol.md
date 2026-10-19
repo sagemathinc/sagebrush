@@ -597,7 +597,7 @@ function openChannel(me) {
 ## Status
 
 - Editing (the section above) is specified, not built. The frame's side and
-  `applyEdit` come with CoCalc's step 2, which saves edits made in the card
+  `editState` come with CoCalc's step 2, which saves edits made in the card
   to the file.
 
 - Ask items, `sb board answers` and the controls are built in the order of
