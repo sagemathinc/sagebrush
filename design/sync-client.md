@@ -87,12 +87,16 @@ Its test vectors are JSON, so the server's adoption of it (@sagebrush-auth, late
 
 ## 3a. Contracts (astra's CORR-8E7-1 to 5, daybreak2's LIMIT-SC1-1 to 4)
 
-Each is an invariant the code must keep, and the schedules its tests must run. Two facts to confirm with @sagebrush-auth before step 3: that `index` ops carry their `device` and `dseq` (to recognize this device's echo), and that a folder's ops may carry its `fid` (from capabilities 1b).
+Each is an invariant the code must keep, and the schedules its tests must run. **Confirmed by @sagebrush-auth** (bf21f6e4):
+- every op in an `index` message carries its `seq`, `device` and `dseq`;
+- an ack maps each `dseq` to its `seq`;
+- `fid` (16 hex) is accepted and echoed on any op of any kind, folders included. Its uniqueness and stability are the reducer's to check.
 
-**Storage** (one more schema-only upgrade, version 3: no data moved):
+**Storage** (one more schema-only upgrade: no data moved):
 - `outbox`, keyed by `[ns, dseq]`;
 - `syncIndex`, the confirmed index, per `ns`;
-- a `pins` count on `versions` records.
+- `adoptJournal`, the first sync's captured tree (C3);
+- `pins`, by `sha256`: the bytes committed here and not yet decided (C2), with their total.
 
 `ns` is the namespace: `account_hash : generation : device`, from `welcome`.
 
@@ -111,7 +115,9 @@ Each is an invariant the code must keep, and the schedules its tests must run. T
   - and advances the watermark.
 - The outbox is bounded by count (10,000) and by actual encoded bytes (1 MiB, measured as each record's JSON with its keys), checked in that transaction. When it is full, the scan stops and the watermark stays: that is the overflow checkpoint.
 - A crash leaves either the whole page or none. Ops made while the outbox is full are found by the next scan, from the watermark, in pages.
-- **Ops this device applied from the server** (C3) are recorded with the server's device, so the scan skips them.
+- **Ops this device applied from the server** (C3) are recorded with `origin: "server"`, an explicit field. The scan skips them. The device id is not an origin: this device's own echo carries its own device, and is never recorded as a new op (C3).
+- **Ops not yet scanned are kept:** dropping op records (`dropOps`) never goes past the watermark.
+- **A `dseq` is never skipped locally.** A record whose bytes this device no longer has is still sent. The server decides it (`missing`), and the current state then goes as a new write (C2).
 
 **One sender per device.**
 - The tab holding the Web Lock `sagebrush-sync:<ns>` is the only one with the account socket, the only allocator of `dseq`, and the only sender.
@@ -139,35 +145,54 @@ Each is an invariant the code must keep, and the schedules its tests must run. T
 - outbox full: more edits, crash, reload, drain, and every local edit represented exactly once;
 - each scan page within its count and byte bounds.
 
-### C2. Queued bytes are pinned (CORR-8E7-2)
+### C2. Committed bytes are pinned until decided (CORR-8E7-2, LIMIT-SC1-R2)
 
-- An outbox record names bytes by `sha256`. Those bytes stay readable until the record is decided.
-- **While the record's hash is the file's current one,** they are fileBytes[fid].
-- **When a later write replaces them,** the write keeps them as a version, in its own transaction, as writes already do. It does so even where it otherwise wouldn't keep one (empty bytes, `keepEmpty: false`). The version's `pins` count is the number of undecided records naming that hash.
-- Pruning (20 versions, 30 days, the bytes bound) skips a pinned version. **Pinned versions count toward the bytes bound**, which can then be exceeded only by pinned versions.
-- A decision decrements the pin; pruning may take it after that.
-- **An upload reads exactly the bytes its record names:** the current file if its hash still matches, else the pinned version. Current bytes are never sent under an older hash. A record whose bytes are missing anyway (a cleared site) is refused locally, said, and its file re-sent as a new write.
-- **Tests:**
-  - offline A then B writes to one file, then reconnect (A and B both uploaded, in order);
-  - the same with a reload between;
-  - version pruning while A is queued;
-  - Trash and restore while queued.
+**Pinned at the local commit, not at the scan.**
+- While sync is on, every local change that commits new bytes adds their `sha256` to `pins`, in the same transaction, with the file's `fid`.
+- A later write that replaces bytes still in `pins` keeps them as a version, in its own transaction. It does so even where it otherwise wouldn't keep one (empty bytes, `keepEmpty: false`).
+- The version is then exempt from pruning, from `dropVersions`, and from emptying Trash (which removes the entry; the bytes stay until decided).
+- The scan hands the pin to the outbox record that names the hash.
+- A decision releases it: accepted once the `seq` is confirmed (C3), even when the ack came before the echo; refused at once. After that, ordinary retention applies.
+
+**An upload reads exactly the bytes its record names:** the current file if its hash matches, else the pinned version. Current bytes are never sent under an older hash.
+
+**A cap on pinned bytes, without ever refusing a local save** (LIMIT-SC1-R2). A pin on bytes that are still the file's current ones costs nothing extra; only pinned bytes kept apart, as versions, count. That total is kept in the same transactions, and capped (1 GiB, or less when the browser's quota is smaller: half the estimated free space at the time). A change that would pass the cap:
+1. **collapses unscanned intermediate writes** to the same file: they never become records. The scan sends the latest write, with `base` the last hash the server knows. Their pins go.
+2. then, if still over, **doesn't pin** the bytes it replaces. The local save always succeeds. A record already made for those bytes is still sent (C1). The server refuses it `missing`, the scan sends the file's current state as a new write, and the device and the server converge on the current bytes.
+- The Sync panel says "some intermediate versions weren't uploaded", and lists their files.
+
+**Tests:**
+- offline A then B writes to one file, then reconnect (A and B both uploaded, in order);
+- the same with the outbox full, and with the sender closed;
+- pruning, `dropVersions` and emptying Trash while A is pinned;
+- an ack accepted before the echo (still pinned until the echo);
+- overwrites with a tiny cap: saves never fail, the server converges on the current bytes;
+- a crash mid-way: no pin leaked, every pin owned by a record or a pending change.
 
 ### C3. The confirmed index and the optimistic view (CORR-8E7-3)
 
 **The confirmed index (`syncIndex`).** It is the reducer applied to the server's log in `seq` order, own ops included. Its cursor `sync:<ns>:cursor` is written in the same transaction as each page applied to it.
 
-**What the person sees** is the workspace's own index. It equals the confirmed index plus the outbox's undecided and not-yet-confirmed ops, reduced in `dseq` order on top. After each confirmed page, the affected identities' views are recomputed, and the difference is applied to the workspace's entries. That happens in the same transaction as the page and the cursor: entries, `syncIndex` and meta are all in the workspace's database. A crash leaves all of it or none.
+**What the person sees** is the workspace's own index. It equals the confirmed index plus every local op not yet confirmed, reduced on top in order:
+- the outbox's records, undecided or awaiting their echo, in `dseq` order;
+- then the local ops not yet scanned, in their `seq` order (astra: an unscanned B is part of the view, so a remote page or a rebuild never overwrites it). After each confirmed page, the affected identities' views are recomputed, and the difference is applied to the workspace's entries. That happens in the same transaction as the page and the cursor: entries, `syncIndex` and meta are all in the workspace's database. A crash leaves all of it or none.
 
 **This device's own echo,** an `index` op with this `device` and a `dseq` in the outbox, is applied to the confirmed index like any other op.
 - The outbox record is marked confirmed and removed. Nothing is applied to the view twice, since the view already had it.
 - The order doesn't matter: an ack before the echo leaves the record "accepted, awaiting echo"; an echo before the ack confirms it at once.
 
-**First sync.** Before the account socket pulls anything, the sender enqueues the whole local tree as `adopt` records:
-- a page at a time, by path;
-- with a durable progress key `sync:<ns>:adopted` and the boundary op seq `W0` recorded first.
+**First sync: the adoption journal** (CORR-8E7-3, LIMIT-SC1-R1). A device's existing tree is captured into `adoptJournal`, then sent as `adopt` records through the bounded outbox:
+1. **Start**, in one transaction: the boundary `W0`, the latest local op seq, is recorded.
+2. **Capture by path,** in pages of 500, each page one transaction with its progress key: each entry's identity, metadata and hash, its bytes pinned (C2).
+3. **Close the capture.** A path walk alone isn't a snapshot: a file renamed from behind the cursor to ahead of it, or the other way, is missed or caught twice. So, after the walk, every identity that an op with seq above `W0` touched is read again, in pages. If it exists, its current state replaces or adds its journal record; if it doesn't, its record goes. Ops are read up to `W1`, the latest seq when this step began. Repeat until a pass finds no op past the last `W1`.
+   - The journal is then exactly the tree as of `W1`.
+   - The scan watermark is set to `W1`: those ops' effects are already in the journal, so they aren't sent twice.
+4. **Connect.** The account socket is opened only now. So the `index` the server sends right after `welcome` (it doesn't wait to be asked) is applied to the confirmed index as usual. The journal is not yet sent, so nothing collides with it locally.
+5. **Drain:** the journal goes into the outbox a page at a time, as the outbox has room. It is bounded by the outbox's caps, never the tree's size, so the 100,000-entry maximum fills and drains repeatedly rather than waiting at the cap.
+   - Then ops after `W1` follow, through the scan.
+   - In the server's order, the cloud's entries come first, so this device's colliding adopts become `name (2)`.
 
-Local changes after `W0` go through the scan, after the adopts. Pulling starts only once adoption is enqueued, so pulled entries are never adopted back. A reload mid-adoption resumes from its progress key.
+A crash anywhere resumes from the journal's progress keys. A capture interrupted mid-walk resumes the walk, and step 3 covers whatever changed meanwhile.
 
 **An op that can't be applied** to the view (it fails a local check, such as a path rule or a limit) is still in the confirmed index, and the cursor passes it. The view leaves it out and lists it in the Sync panel. Nothing redefines the server's log.
 
@@ -177,6 +202,9 @@ Local changes after `W0` go through the scan, after the adopts. Pulling starts o
 - the echo before the ack;
 - a crash between a page and its cursor (impossible by construction; tested as a crash mid-page);
 - a reload mid-adoption;
+- a file renamed from behind the capture's cursor to ahead of it, and the other way, and deleted, during the capture (each captured exactly once, as of `W1`);
+- the `index` after `welcome` arriving while the journal drains;
+- 100,000 entries through repeated outbox fill and drain, with a crash and reload in each phase;
 - a remote create at the same path before this device's queued create (the confirmed order gives the remote one `/x` and this one `/x (2)`, on both devices).
 
 ### C4. The reducer: identity, order, copies (CORR-8E7-4)
@@ -267,7 +295,7 @@ It holds that reservation until its last large reference is dropped. The same ho
 
 - `blobs/check` takes at most 1,000 hashes per request.
 - The first sync's adoption and a rebuild page through the 100,000-entry maximum:
-  - adoption: 500 entries per transaction, by path;
+  - adoption: captured 500 entries per transaction, by path; drained from the journal into the outbox as it has room (C3);
   - rebuild: the server's log at 1,000 ops or 1 MiB per page, reduced into `syncIndex` page by page, its cursor durable.
 - Neither ever holds the whole tree in memory.
 - **Tests:** 100,000 entries, with the pages' counts and bytes bounded, and a crash and reload mid-way.
