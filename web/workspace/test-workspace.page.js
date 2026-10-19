@@ -1373,9 +1373,10 @@ async function lookalikes() {
   const u = await w.usage();
   const groups = u.lookalikes.map((g) => g.join()).sort();
   check(groups.length === 2 && groups.includes([composed, decomposed].sort().join()) && groups.includes(["/K2K.txt", "/K2K.txt"].sort().join()), "names that look the same, made before: listed together, ASCII ones too: " + JSON.stringify(u.lookalikes));
-  // capped: groups and their members, the rest counted
+  // capped: groups and their members, the rest counted (members: every path not listed, in the group
+  // listed (1) and in the group left out (2))
   const capped = await w.lookalikeGroups(1, 1);
-  check(capped.lookalikes.length === 1 && capped.lookalikes[0].length === 1 && capped.lookalikesMore.groups === 1 && capped.lookalikesMore.members === 1, "the list is capped, groups and members both, the rest counted: " + JSON.stringify(capped));
+  check(capped.lookalikes.length === 1 && capped.lookalikes[0].length === 1 && capped.lookalikesMore.groups === 1 && capped.lookalikesMore.members === 3, "the list is capped, groups and members both, the rest counted: " + JSON.stringify(capped));
   w.close();
 }
 
