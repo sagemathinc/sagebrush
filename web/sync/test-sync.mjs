@@ -58,6 +58,7 @@ const Y4 = "dadadada-dada-4dad-8dad-dadadadadada"; // a lapse notice issued 100 
 const X1 = "dbdbdbdb-dbdb-4dbd-8dbd-dbdbdbdbdbdb"; // a plan without sync from the start
 const X2 = "dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc"; // a plan that ends between enable and the first batch
 const Z0 = "dddddddd-0000-4ddd-8ddd-dddddddddd00"; // turned on while CoCalc is down: nothing cached
+const Z1 = "dddddddd-0001-4ddd-8ddd-dddddddddd01"; // a lapse while a claim raise is answered
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -105,6 +106,7 @@ const plan = (enabled, days = 3) => ({ storage_bytes: 1 << 20, max_file_bytes: 5
 for (const r of [R1, R2, R3, R4, W1, W2, Y1, Y2, Y3, Y4, X2]) fake.limits.set(r, plan(true));
 fake.limits.set(X1, plan(false));
 fake.limits.set(Z0, sync(1 << 20, 1 << 20));
+fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -121,7 +123,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1982,6 +1984,23 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const bgx2 = await acctX2.budget();
   ok(bx2?.code === "readonly" && ix2.head.seq === 0 && ix2.total === 0 && bgx2.holds === 0 && bgx2.held === 0, "a plan that ended since: the first batch fetches it, is refused readonly, and commits nothing, holding nothing: " + JSON.stringify({ code: bx2?.code, head: ix2.head, holds: bgx2.holds }));
   ox2.ws.close();
+  // CORR-AB4-1: a lapse while a raise's grant is on its way back (storage_bytes unchanged): the upload is
+  // refused readonly, and the grant is given back by the alarm, with no further request
+  const sz1 = await signIn(Z1);
+  const acctZ1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(Z1)));
+  ok((await post(sz1, "/api/sync/v1/enable", {})).status === 200, "(Z1: on, storage_bytes 1 MiB, retention 100 days)");
+  const gz = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  await gz("claim-raise-answer", true);
+  const prz = acctZ1.reserve({ account: Z1, sha256: sha(Buffer.from("z1 raise")), size: 40_000 });
+  ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) >= 40_000), "(the raise's statement ran in D1: its answer held)");
+  fake.limits.set(Z1, plan(false, 100));
+  // (a 100-day retention: its deadline's alarm is far off, so only the grant's own can give it back soon)
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: Z1, issued: Date.now(), limits: plan(false, 100) }))).json()).applied === true, "(meanwhile, the membership ends: sync off, storage_bytes unchanged)");
+  await gz("claim-raise-answer", false);
+  const rz = await prz;
+  const bz = await acctZ1.budget();
+  ok(rz?.error?.code === "readonly" && bz.files === 0 && bz.alarm !== null && bz.alarm < Date.now() + 60_000, "the upload is refused readonly, nothing reserved, and the alarm is armed for the unused grant, not the deadline 100 days away: " + JSON.stringify({ r: rz?.error?.code, claim: bz.claim, alarm_in: bz.alarm - Date.now() }));
+  ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) <= 16_384), "with no further request, the alarm gives the grant back, to at most a chunk (CORR-AB4-1)");
   const [g5, b5] = await retentionOf(crypto.randomUUID());
   ok(g5 === 404, "CoCalc asking about an account that never synced: 404");
 }

@@ -1067,6 +1067,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (!r) continue;
         this.set("claim", r.claim_bytes);
         this.set("claim_dirty", 0);
+        // (whatever happens to this write now, a refusal after this await included, the alarm will give
+        // back what it doesn't use: armed on every grant installed, CORR-AB4-1)
+        this.arm();
         // (new limits since the statement: the caps stay as they set them, and the next write asks again;
         // what it was granted, unusable now, is given back by the alarm, armed here, CORR-BDA-1)
         if (Number(this.get("limits_rev") ?? 0) !== rev) {
