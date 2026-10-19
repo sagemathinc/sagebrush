@@ -451,6 +451,8 @@ function openEntry(e: Entry, how: "here" | "tab") {
 // (this board, opened: first in the File menu's Recent, both pages')
 if (local && ws) recordOpened({ kind: "board", ref: source.slice(6) });
 const host: BoardHost = {
+  // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
+  fullFileMenu: true,
   store: {
     async load() {
       if (bench) return null;
@@ -668,7 +670,7 @@ const host: BoardHost = {
     // (this board, by its identity, to Trash; then the latest other board, or a new one)
     delete: local ? async () => {
       const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
-      if (!p || !e) throw new Error("this board isn't in your files");
+      if (!p || !e || e.kind !== "board" || e.ref !== id) throw new Error("this board isn't in your files");
       if (!confirm(`Move "${nameOf(p)}" to Trash? Trash keeps it until you empty it.`)) return;
       await wsFlush();
       await ws!.remove(p, { kind: "board", ref: id, fid: e.fid, created: e.created });

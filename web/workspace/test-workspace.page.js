@@ -802,8 +802,33 @@ async function intents() {
   w.close();
 }
 
+// Recent (fileopen.ts), the entry at a document's path checked to be it:
+// pathOf's answer held while the document moves away and another is put
+// at its path (CORR-FD1-2)
+async function recent() {
+  const w = await fresh();
+  const F = await import("./fileopen.js");
+  const a = await w.create("/RecentA.ipynb");
+  localStorage.setItem("sagebrush-recent-opened", JSON.stringify([{ kind: "notebook", ref: a.ref }]));
+  let entered, release, first = true;
+  const ready = new Promise((r) => (entered = r)), hold = new Promise((r) => (release = r)), old = w.pathOf.bind(w);
+  w.pathOf = async (...args) => { const p = await old(...args); if (first) { first = false; entered(); await hold; } return p; };
+  const pending = F.recentOpened(w);
+  await ready;
+  await w.rename("/RecentA.ipynb", "/MovedA.ipynb");
+  const b = await w.create("/RecentA.ipynb");
+  release();
+  const got = await pending;
+  w.pathOf = old;
+  check(got.length === 1 && got[0].ref === a.ref && got[0].ref !== b.ref && got[0].path === "/MovedA.ipynb", "Recent: a document moved while it was looked up, another at its old path: it is listed, where it is now, never the other: " + JSON.stringify(got.map((e) => [e.path, e.ref === b.ref])));
+  check((await F.recentOpened(w, { kind: "notebook", ref: a.ref })).length === 0, "…the current one left out");
+  await w.remove("/MovedA.ipynb");
+  check((await F.recentOpened(w)).length === 0, "…one in Trash isn't listed");
+  w.close();
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

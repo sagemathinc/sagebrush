@@ -111,12 +111,21 @@ try {
   check(await until(`${W}.stat("/Trash/Copied by name.ipynb").then((e) => !!e)`), "Delete: the notebook to Trash, after asking");
   check(dialogs.some((d) => d.type === "confirm" && /Move "Copied by name" to Trash/.test(d.message)), "…asked");
   check(await until(`sagebrush.notebook.store?.id && sagebrush.notebook.store.id !== ${JSON.stringify(doomed)}`), "…another notebook open");
+  // Delete of a notebook the index doesn't list (the workspace on): listed,
+  // then to Trash, its contents kept; never deleted for good (CORR-FD1-1)
+  const lost = await nbRef();
+  const unlisted = await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const db = r.result, tx = db.transaction("entries", "readwrite"), st = tx.objectStore("entries"), q = st.index("byRef").getKey(["notebook", ${JSON.stringify(lost)}]); q.onsuccess = () => { if (q.result != null) st.delete(q.result); }; tx.oncomplete = () => { db.close(); ok(q.result ?? null); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); })`);
+  const asked = dialogs.length;
+  await pick(NB, "delete");
+  check(!!unlisted && await until(`${W}.list("/Trash").then((l) => l.some((e) => e.kind === "notebook" && e.ref === ${JSON.stringify(lost)}))`), "Delete of a notebook missing from the index: listed again, then to Trash: " + JSON.stringify(unlisted));
+  check(await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const db = r.result, g = db.transaction("notebooks").objectStore("notebooks").get(${JSON.stringify(lost)}); g.onsuccess = () => { db.close(); ok(!!g.result); }; g.onerror = () => no(g.error); }; })`), "…its contents kept");
+  check(dialogs.slice(asked).every((d) => !/from this browser/.test(d.message)) && dialogs.slice(asked).some((d) => /to Trash/.test(d.message)), "…asked to move it to Trash, never to delete it for good: " + JSON.stringify(dialogs.slice(asked).map((d) => d.message)));
   // the board page: the same menu; New ▸ Notebook from there
   await go(base + "board/?new=python");
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=open]:not([disabled])")`, 60000);
   const bdLabels = await labels(BD), bdShape = await shape(BD);
   check(JSON.stringify(bdLabels) === JSON.stringify(nbLabels.filter((l) => l)), "the board page's File menu: the same items, in the same order: " + JSON.stringify([bdLabels, nbLabels]));
-  check(bdShape[7]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON]") && (await ev(`document.querySelector("[data-sbb=filemenu] [data-item=share]").disabled`)), "…its own downloads; Share… shown, disabled: " + JSON.stringify(bdShape));
+  check(bdShape[7]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
   check(await ev(`!!document.querySelector("[data-sbb=menu] [data-sbb=mermaid]") && !!document.querySelector("[data-sbb=menu] [data-sbb=revert]")`), "Import Mermaid… and Revert are in the board's ⋯");
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=new]").click(); return 1; })()`);
   check(await ev(`document.querySelector("[data-sbb=filemenu] [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0 && document.querySelector("[data-sbb=filemenu] [data-item=newBoard]").getBoundingClientRect().top > document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]").getBoundingClientRect().bottom - 1`), "the board page: a group not opened shows nothing; an open group's items one per line");

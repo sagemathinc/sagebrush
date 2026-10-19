@@ -25,9 +25,16 @@ export async function recentOpened(ws: Workspace, except?: Opened): Promise<Entr
   const out: Entry[] = [];
   for (const o of Array.isArray(l) ? l.slice(0, RECENT_MAX) : []) {
     if (!o || (except && o.kind === except.kind && o.ref === except.ref)) continue;
-    const p = await ws.pathOf(o.kind, o.ref).catch(() => undefined);
-    const e = p ? await ws.stat(p).catch(() => undefined) : undefined;
-    if (e && !e.trashed && !p!.startsWith("/Trash/")) out.push(e);
+    // (the entry at its path checked to be this document: one moved away meanwhile and another
+    // put at its path is looked up again, or left out; never another listed in its place, CORR-FD1-2)
+    for (let i = 0; i < 2; i++) {
+      const p = await ws.pathOf(o.kind, o.ref).catch(() => undefined);
+      if (!p) break;
+      const e = await ws.stat(p).catch(() => undefined);
+      if (!e || e.kind !== o.kind || e.ref !== o.ref) continue;
+      if (!e.trashed && !p.startsWith("/Trash/")) out.push(e);
+      break;
+    }
   }
   return out;
 }
