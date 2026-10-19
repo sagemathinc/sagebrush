@@ -109,6 +109,33 @@ try {
   check(await until(`${B}?.snapshot()?.doc?.title === "The agent's"`, 60000), "the record another writer moved on is shown, not the stale pending copy");
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/Left by a closed page (unsaved changes from a closed page).board.json"))`), "…the pending copy kept as a board of its own");
   check(await until(`localStorage.getItem("sagebrush-workspace-pending:${id}") === null`), "…and then dropped");
+
+  // recovery removes only the pending copy it read (CORR-2D1-1): a newer save written while it worked stays
+  const S = "9999999999999999";
+  const revA = await ev(`${W}.read("/Old board.board.json").then((r) => r.rev)`);
+  const staleS1 = `${S}:1:${revA - 1}\n` + JSON.stringify({ title: "Stale S1", nodes: [] });
+  const liveS2 = `${S}:2:${revA}\n` + JSON.stringify({ title: "Live S2", nodes: [] });
+  await ev(`localStorage.setItem("sagebrush-workspace-pending:${id}", ${JSON.stringify(staleS1)}); 1`);
+  await hold("R");
+  await ev(`(() => { window.__loadP = import("/board/board.js").then((m) => m.host.store.load()); return 1; })()`);
+  await sleep(500);
+  await ev(`localStorage.setItem("sagebrush-workspace-pending:${id}", ${JSON.stringify(liveS2)}); 1`);
+  await release("R");
+  await ev(`window.__loadP.then(() => 1)`);
+  check(await ev(`localStorage.getItem("sagebrush-workspace-pending:${id}") === ${JSON.stringify(liveS2)}`), "a recovery drops only the pending copy it read, not a newer one written meanwhile");
+  await ev(`localStorage.removeItem("sagebrush-workspace-pending:${id}"); 1`);
+  // a session's later committed save beats its own earlier pending copy (CORR-2D1-2)
+  await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("boards", "readwrite"), st = tx.objectStore("boards"); const g = st.get(${JSON.stringify(id)}); g.onsuccess = () => { const rec = g.result; st.put({ ...rec, doc: { title: "B committed", nodes: [] }, rev: rec.rev + 1, tag: "${S}:2:0" }); }; tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
+  const revB = await ev(`${W}.read("/Old board.board.json").then((r) => r.rev)`);
+  const staleA = `${S}:1:${revB - 2}\n` + JSON.stringify({ title: "A pending", nodes: [] });
+  await ev(`localStorage.setItem("sagebrush-workspace-pending:${id}", ${JSON.stringify(staleA)}); 1`);
+  await go(base + "board/?doc=local:" + id);
+  check(await until(`${B}?.snapshot()?.doc?.title === "B committed"`, 60000), "a session's later committed save is shown over its own earlier pending copy");
+  check(await until(`localStorage.getItem("sagebrush-workspace-pending:${id}") === null`), "…and the earlier pending copy is dropped");
+  check(await ev(`${W}.list("/").then((l) => !l.some((e) => e.path.startsWith("/A pending")))`), "…with no conflict copy made of it");
+  // an agent can't claim a page session's tag
+  await ev(`${W}.read("/Old board.board.json").then((r) => ${W}.write("/Old board.board.json", r.content, { base: r.rev, tag: "${S}:99:0" })).then(() => 1)`);
+  check(await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const g = r.result.transaction("boards").objectStore("boards").get(${JSON.stringify(id)}); g.onsuccess = () => { const t = g.result.tag; r.result.close(); ok(t === undefined); }; }; })`), "an agent's write carries no session tag, whatever it asks");
   // a board only a pending copy holds: brought in (CORR-12C-3)
   const lone = "fedcba987654", loneText = "dddddddddddddddd:1:0\n" + JSON.stringify({ title: "Only pending", nodes: [] });
   await ev(`localStorage.setItem("sagebrush-workspace-pending:${lone}", ${JSON.stringify(loneText)}); 1`);

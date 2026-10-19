@@ -302,7 +302,8 @@ function wsSave(id: string, d: BoardDoc) {
       let path = await w.pathOf("board", id);
       // (a board of this browser's kept before, not brought in: in the workspace now, under its own id)
       if (!path) path = await adoptBoard(w, id, d);
-      wsRev = (await w.write(path, d, { tag: SESSION })).rev;
+      // (tagged with this save's session and number: a later load orders the record against a pending copy by them, CORR-2D1-2)
+      wsRev = (await w.write(path, d, { tag: header })).rev;
       wsRefused = null;
       if (wsLatest === d) dropPending(id, header + "\n");
     } catch (e: any) {
@@ -319,13 +320,13 @@ function dropPending(id: string, prefix: string) {
   } catch {}
 }
 /** A pending copy as kept: its session and document; null if there is none; "unread" if it can't be read (too large, or not ours). */
-function readPending(id: string): { session: string; base: number; doc: BoardDoc } | null | "unread" {
+function readPending(id: string): { header: string; session: string; n: number; base: number; doc: BoardDoc } | null | "unread" {
   const raw = localStorage.getItem(PENDING + id);
   if (raw === null) return null;
-  const m = raw.length <= PENDING_MAX + 64 ? /^([0-9a-f]{16}):\d+:(\d+)\n/.exec(raw) : null;
+  const m = raw.length <= PENDING_MAX + 64 ? /^(([0-9a-f]{16}):(\d+):(\d+))\n/.exec(raw) : null;
   let doc: unknown = null;
   if (m) try { doc = JSON.parse(raw.slice(m[0].length)); } catch {}
-  if (m && isBoard(doc)) return { session: m[1], base: Number(m[2]), doc: doc as BoardDoc };
+  if (m && isBoard(doc)) return { header: m[1], session: m[2], n: Number(m[3]), base: Number(m[4]), doc: doc as BoardDoc };
   // (set aside, never parsed again, never dropped: LIMIT-12C-4)
   try { localStorage.setItem(PENDING_UNREAD + id, raw); localStorage.removeItem(PENDING + id); } catch {}
   return "unread";
@@ -370,18 +371,20 @@ const host: BoardHost = {
           const rec = await ws.read(path).catch(() => null);
           if (rec && isBoard(rec.content)) {
             if (pend && pend !== "unread") {
-              if (rec.tag === pend.session || rec.rev === pend.base) {
-                // (the record is the one the copy was made on, or was last written by the session that left it: the copy is newer)
+              // (the record's writer: a session and that session's save number)
+              const [tagSession, tagN] = String(rec.tag ?? "").split(":");
+              if (rec.rev === pend.base || (tagSession === pend.session && Number(tagN) < pend.n)) {
+                // (the record is the one the copy was made on, or an earlier save of the session that left it: the copy is newer)
                 wsRev = rec.rev;
                 wsSave(id, pend.doc);
                 return { doc: pend.doc, original: null };
               }
-              if (sameDoc(rec.content, pend.doc)) dropPending(id, pend.session + ":");
+              if (sameDoc(rec.content, pend.doc) || (tagSession === pend.session && Number(tagN) >= pend.n)) dropPending(id, pend.header + "\n");
               else {
                 // (the record moved on since, by another writer: neither is dropped; the copy kept as a board of its own: CORR-12C-2)
                 try {
                   await makeInWorkspace(ws, { ...pend.doc, title: (pend.doc.title || "Untitled board") + " (unsaved changes from a closed page)" });
-                  dropPending(id, pend.session + ":");
+                  dropPending(id, pend.header + "\n");
                   notice = "**Changes left by a page closed while saving were made after this board changed elsewhere.** They are kept as a board of their own, \"" + safeTitle(pend.doc.title) + " (unsaved changes from a closed page)\".";
                 } catch (e: any) {
                   notice = `**Changes left by a page closed while saving couldn't be kept as a board of their own** (${String(e?.message ?? e)}); they stay in this browser.`;
@@ -396,7 +399,7 @@ const host: BoardHost = {
         if (!path && pend && pend !== "unread") {
           try {
             await adoptBoard(ws, id, pend.doc);
-            dropPending(id, pend.session + ":");
+            dropPending(id, pend.header + "\n");
           } catch (e) { console.warn("workspace:", e); }
           return { doc: pend.doc, original: null };
         }
