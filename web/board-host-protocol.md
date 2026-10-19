@@ -42,7 +42,8 @@ one load of the frame:
   `refused` only from it.
 - Each board has a frame of its own. The host doesn't post a second board
   to a frame: it shows the new board in a new frame, and closes the old
-  `port1`. (A second `board` message would make the frame reload, as
+  `port1`. (A host that grants editing sends the board's changes on the
+  channel instead: see Editing.) (A second `board` message would make the frame reload, as
   design/frame.md says. The reloaded document has no nonce, so it gets no
   port.)
 
@@ -100,9 +101,10 @@ On the window (`postMessage` to `window.parent`, or to the frame's
   The bootstrap), in its first `ready` only.
 - From the frame: `{ sagebrush: "error", version: 1, message }`. A posted
   text isn't a board; the board shown stays.
-- From the host: `{ sagebrush: "board", version: 1, text, name?, revision? }`,
+- From the host: `{ sagebrush: "board", version: 1, text, name?, revision?, edit? }`,
   with the transferred port. `revision` is any string up to 200 characters,
-  which the frame only echoes back.
+  which the frame only echoes back. `edit: true` (with a `revision`) grants
+  editing (see Editing).
 
 On the channel:
 
@@ -290,6 +292,184 @@ as a turn.
   post a new board only when the agent has published one, and preferably
   not while the user is typing.
 
+## Editing: a host that saves the board
+
+A host can also let the user edit the board in the frame. CoCalc's card
+does this; its full editor (a registered `.board.json` editor) uses the
+same model. **The frame never writes the file. The host owns saving**: it
+merges each edit into its own document (in CoCalc, the syncdb, as
+design/board-cocalc-adapter.md design B describes) and decides when that
+reaches the file.
+
+### The model: records and their changes
+
+A board is records keyed by `(type, page, id)`, as in web/board/history.ts:
+
+| key | the record |
+|---|---|
+| `{type: "doc", page: "", id: ""}` | the title, language, links' base, pictures' sizes; without pages, its intro, layout and tour; `paged: true` if it has pages |
+| `{type: "page", page, id: ""}` | a page: `pos`, title, intro, layout, tour |
+| `{type: "item", page, id}` | a note or a group: `parent` (`""` at the top), `pos` among its siblings, and its fields (`x`, `y` among them) |
+| `{type: "edge", page, id}` | `from`, `to`, `pos`, `label`, `arrows`, `line` (its `id` is the JSON of its ends and which of those it is) |
+
+The string columns (`title`, `text`, `code`, `detail`, `label`, `intro`) are
+text: the host's merge keeps both people's typing in one field, as in a
+notebook. `toRecords` and `fromRecords` (web/board/history.ts) turn a board
+into its records and back, and both sides use them.
+
+**A change** is one of:
+
+- `{ op: "set", key: {type, page, id}, fields: {…} }`: these fields of that
+  record get these values, and a field set to `null` is removed. A record
+  that doesn't exist is made from them. `fields` never holds `type`, `page`
+  or `id`.
+- `{ op: "delete", key: {type, page, id} }`: the record is removed. Deleting
+  an item doesn't delete its children or edges by itself: the edit lists
+  each record it removes.
+
+A list of changes is applied in order, as one step: all of it or none of
+it.
+
+### Granting it
+
+The host grants editing in the `board` message it posts with the port:
+`{ sagebrush: "board", version: 1, text, name?, revision, edit: true }`.
+
+- `revision` is required when `edit` is given. It names the state of the
+  document posted: any string of at most 200 characters, a new one for each
+  state the host sends (see Revisions).
+- Without `edit: true` the frame shows the board as now: Edit is not
+  offered, and no `edit` message is sent.
+- A frame granted editing still sends `answers` and `decide` on the same
+  channel, as above.
+- While editing is granted, the host doesn't post a second `board` to show
+  a change. It sends the change on the channel (`remote`, `replace`).
+  "Each board has a frame of its own" still holds for a new board: another
+  document, or the agent's next published board when not editing.
+
+### Frame to host
+
+- `{ sagebrush: "edit", version: 1, id, base, changes }`
+  - `id`: `crypto.randomUUID()`, new for each edit message.
+  - `base`: the latest `revision` the frame received (see Revisions).
+  - `changes`: what the user did since the frame's last `edit`, as a list
+    of changes. The frame batches what is done within 250 ms into one
+    message, and a drag is sent once, when it ends.
+- `{ sagebrush: "resync", version: 1 }`: the frame lost track of the
+  revisions and asks for the whole board (`replace`).
+
+### Host to frame
+
+Every message that carries a `revision` also carries the `base` it follows
+from, except `replace`, which stands alone. In `saved` and `remote`,
+`base` is the last revision the host sent on this channel, which need not
+be the edit's own `base`.
+
+- `{ sagebrush: "saved", version: 1, id, base, revision, changes }`: the
+  edit `id` was merged. `revision` is the document's state now, and
+  `changes` takes the frame's host state from `base` to it. It includes the
+  edit itself as merged: merged text, or a field another change won, comes
+  back here.
+- `{ sagebrush: "remote", version: 1, base, revision, changes }`: a change
+  made elsewhere (another tab, another person, an agent writing the file)
+  since `base`.
+- `{ sagebrush: "replace", version: 1, revision, text }`: the whole board,
+  as text, at `revision`. The host sends it when the frame asks
+  (`resync`), after a refusal (below), or when a change set would pass the
+  bounds.
+- `{ sagebrush: "refused", version: 1, id, message, retryAfter? }`: the edit
+  `id` was not merged. `message` is the host's own words, at most 500
+  characters, as for submissions.
+- `{ sagebrush: "editing", version: 1, allowed: false, message }`: editing
+  ends (the file became read-only, the user lost access). The frame leaves
+  Edit, drops its unsaved changes, says `message` and shows the board as it
+  is. Answers still work if the channel does.
+
+### Revisions, ordering and conflicts
+
+- **Revisions are the host's.** They form a chain: every `saved` and
+  `remote` names the revision it follows (`base`). The frame keeps the
+  latest revision it received, and compares revisions only for equality:
+  it never orders them or makes its own.
+- **The frame keeps two things:** the host's state at the latest revision,
+  and its own changes not yet saved (the edit in flight, then those made
+  since). It shows the host's state with its own changes over it.
+  - **A `saved` or `remote` whose `base` is the frame's latest revision:**
+    applied to the host's state. The frame's own unsaved changes stay over
+    it.
+  - **`saved` for the edit in flight:** that edit's changes are dropped
+    from its own, now that the host's state has them as merged.
+  - **A `base` that isn't the latest revision:** the frame sends `resync`,
+    ignores further `saved` and `remote` until `replace` arrives, and keeps
+    its unsaved changes.
+  - **`replace`:** the host's state becomes that text at that revision. The
+    frame's unsaved changes stay over it, and go in its next `edit` with
+    that revision as `base`. Changes to records that no longer exist are
+    dropped, and the frame says so.
+- **One edit in flight.** The frame sends an `edit` only when no other
+  awaits its answer. What the user does meanwhile goes into the next one.
+  A port delivers in order, and the host answers each edit, in order, with
+  exactly one `saved` or `refused`.
+- **The host merges on the base.** It keeps the records of each revision it
+  sent on this channel that an `edit` may still name: at least the last 8.
+  It applies the edit's changes to its record of `base`, and merges the
+  result into the document as a change from `base`. In CoCalc that is
+  `from_str(edited, {base})`, so the syncdb's merge decides between
+  concurrent changes, for the card exactly as for the full editor. An edit
+  whose `base` the host no longer keeps is refused, and a `replace`
+  follows.
+- **Refusals.**
+  - **With `retryAfter`** (milliseconds; the host is busy, or the rate was
+    passed): nothing was merged. The frame keeps those changes and sends
+    them again, with what was done since, no sooner than that.
+  - **Without it** (the edit failed a check): nothing was merged, and the
+    host follows with a `replace`. The frame drops the refused changes and
+    those made after them, since they were made on top of the refused
+    ones, and shows `message`.
+- **The host checks every edit before merging anything.** It refuses the
+  whole edit if any of these fails:
+  - plain JSON data, checked as for submissions (types first, without
+    recursion), nested at most 16 deep;
+  - `id` a UUID, not already answered on this channel;
+  - `base` a revision it sent on this channel and still keeps;
+  - each change well formed:
+    - `type` one of the four;
+    - `page` and `id` strings of at most 200 characters;
+    - at most 200 fields, with names of at most 64 characters;
+  - **the board that results is one:** its records through `fromRecords`
+    pass `formatError` and `isBoard`, and are within the host's board limit
+    (Sagebrush's: 64 MiB of JSON).
+
+  Sagebrush provides this check and the application as one function,
+  `applyEdit(postedRecords, message)` in `sagebrush-board/submission`,
+  beside `checkSubmission`, so that every host checks the same way.
+- **What an edit is.** An edit is the user's, made with the frame's editor.
+  The board's own code runs in a nested frame of another origin and never
+  has the port. The host still treats an edit as untrusted data. It changes
+  only the document, never anything outside it, and nothing runs because
+  of it.
+
+### Bounds
+
+- **One message** on the channel (`edit`, `saved`, `remote`) is at most
+  **1 MiB** as UTF-8, with at most **1,000 changes**. A host change set
+  past that goes as a `replace`. A frame edit past that is split into
+  several, sent one after another. A single change that is still too
+  large (one text field of more than 1 MiB) is refused, and the frame says
+  so.
+- **A `replace`** is at most the board limit (64 MiB of text).
+- **Rate:**
+  - the frame sends at most one edit in flight, batched over 250 ms, so a
+    few a second while someone types or drags;
+  - the host accepts at most 20 edits per 10 seconds per channel (a bucket
+    of 20, refilled at 2 a second), and refuses beyond that with
+    `retryAfter`;
+  - the host sends `remote` at most 4 times a second per channel,
+    coalescing what arrives meanwhile into one change set.
+- **Ids:** the host keeps at most 100 answered edit ids per channel, as for
+  submissions. Older ones can't be repeated, because each edit's `base`
+  moves on.
+
 ## Privacy
 
 The frame posts `ready` and `error` to `"*"` because it cannot know its
@@ -361,6 +541,10 @@ function openChannel(me) {
 ```
 
 ## Status
+
+- Editing (the section above) is specified, not built. The frame's side and
+  `applyEdit` come with CoCalc's step 2, which saves edits made in the card
+  to the file.
 
 - Ask items, `sb board answers` and the controls are built in the order of
   /scratch/sagebrush-reviews/boards-both-ways-plan.md.
