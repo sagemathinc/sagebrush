@@ -239,6 +239,23 @@ try {
   await ev(`(() => { window.__open(); return 1; })()`);
   check(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Fifth"`, 30000), "a board dropped, then an item written while it is read: opened");
   check(await until(`${W}.read("/Typed.board.json").then((r) => r.content.nodes[0].title === "TYPED_WHILE_UPLOADING")`), "…what was written meanwhile kept first");
+  // the File menu's New board, Duplicate, New notebook and Trash: each makes where it goes, then
+  // goes; whatever is tried while it is made (the workspace's lock held meanwhile) is not lost:
+  // nothing can be written then, or it is kept (astra's CORR-134-1)
+  for (const [item, gone] of [["newboard", `location.search.includes("doc=local:") && !location.search.includes(REF)`], ["duplicate", `location.search.includes("doc=local:") && !location.search.includes(REF)`], ["newnotebook", `location.pathname === "/"`], ["deleteboard", `!location.search.includes(REF)`]]) {
+    const ref = await freshBoard(`/Leaving-${item}.board.json`);
+    await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
+    check(await until(`window.__entered`, 5000), `(${item}: the workspace's lock held)`);
+    await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
+    check(await until(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock to make where it goes)`);
+    const opened = await writeInPlace(null, "TYPED_WHILE_LEAVING");
+    await ev(`(() => { window.__release(); return 1; })()`);
+    check(await until(gone.replaceAll("REF", JSON.stringify(ref)), 30000), `${item}: the page goes once it is made`);
+    await until(`!!${W}`, 30000);
+    const title = await ev(`${W}.read(${JSON.stringify(`/Leaving-${item}.board.json`)}).then((r) => r.content.nodes[0].title).catch(() => null)`);
+    if (item === "deleteboard") check(!opened, "Trash: nothing can be written in the board while it is moved there");
+    else check(!opened || title === "TYPED_WHILE_LEAVING", `${item}: what was written while it was made is kept (opened: ${opened}, title: ${title})`);
+  }
   // the same, the board's own save refused (its storage full): it stays open, saying so, and what was written is not left behind
   await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
   await sleep(300);

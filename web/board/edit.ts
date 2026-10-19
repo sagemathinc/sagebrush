@@ -193,6 +193,7 @@ export class Editor {
    * Whether there is now an undo step holding it (false: merged back to
    * where its step started, so none), or null if nothing changed. */
   async commit(f: (d: BoardDoc) => void, merge = false, record = true): Promise<boolean | null> {
+    if (this.leaving) return null;
     const cur = this.doc();
     if (!cur) return null;
     const before = JSON.stringify(cur), d = JSON.parse(before) as BoardDoc;
@@ -220,6 +221,12 @@ export class Editor {
   /** Whether something is being written where it is. */
   get writing() {
     return !!this.inplace;
+  }
+  /** While the page is leaving (making where it goes, astra's CORR-134-1): nothing starts being
+   * written, and no change is made, so nothing can be written that the leaving would lose. */
+  private leaving = false;
+  holdForLeaving(on: boolean) {
+    this.leaving = on;
   }
   // (the item being written is no longer there: undone, or removed by an agent)
   private gone() {
@@ -1143,6 +1150,8 @@ export class Editor {
     if (d && find(this.pg(d), id)?.node.kind === "ask") return;
     // (already being written: a touch's tap on it selected and its double tap both say so)
     if (this.inplace?.id === id && this.inplace.active) return;
+    // (the page leaving: nothing new is written)
+    if (this.leaving) return;
     this.close();
     const s: InPlace = new InPlace(this.host, id, fresh, () => {
       if (this.inplace !== s) return;
