@@ -29,6 +29,7 @@
   "Derivative": "> P<x> := PolynomialRing(Integers());\n> Derivative(x^4 + 3*x);\n4*x^3 + 3",
   "Determinant": "> Determinant(Matrix(Integers(), 3, 3, [2, 0, 1, 1, 3, 0, 0, 1, 4]));\n25",
   "DihedralGroup": "> G := DihedralGroup(5);\n> G.1^2;\n(1, 3, 5, 2, 4)",
+  "IsIsomorphic": "> b := IsIsomorphic(QuadraticField(5), QuadraticField(45));\n> b;\ntrue",
   "VectorSpace": "> V := VectorSpace(Rationals(), 3);\n> V![1, 2, 3] + V.2;\n(1 3 3)",
   "KSpace": "> K := KSpace(Rationals(), 2);\n> K;\nFull Vector space of degree 2 over Rational Field",
   "RSpace": "> W := RSpace(Integers(), 2);\n> W.1 - 3*W.2;\n( 1 -3)",
