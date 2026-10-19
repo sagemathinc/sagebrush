@@ -15,7 +15,9 @@ export class Token {
   end_lineno: number;
   end_col_offset: number;
   metadata: string | null;
-  memo: Map<number, { node: any; mark: number }> | null = null;
+  // (the memo, flat: rule type, node, end mark, for each rule memoized at this
+  // token; a few per token, so a scan beats a Map and its entry objects)
+  memo: any[] | null = null;
   /** CPython's t->bytes (the token text). */
   get bytes(): string {
     return this.str;
@@ -226,16 +228,38 @@ export abstract class BaseParser {
 
   memoized(type: number): any {
     if (this.mark === this.fill) this.fill_token();
-    const m = this.tokens[this.mark].memo?.get(type);
-    if (m === undefined) return undefined;
-    this.mark = m.mark;
-    return m.node;
+    const m = this.tokens[this.mark].memo;
+    if (m === null) return undefined;
+    for (let i = 0; i < m.length; i += 3) {
+      if (m[i] === type) {
+        this.mark = m[i + 2];
+        return m[i + 1];
+      }
+    }
+    return undefined;
   }
 
   insert_memo(mark: number, type: number, node: any): void {
     const t = this.tokens[mark];
-    if (!t.memo) t.memo = new Map();
-    t.memo.set(type, { node, mark: this.mark });
+    const m = t.memo;
+    if (m === null) {
+      t.memo = [type, node, this.mark];
+      return;
+    }
+    for (let i = 0; i < m.length; i += 3) {
+      if (m[i] === type) {
+        m[i + 1] = node;
+        m[i + 2] = this.mark;
+        return;
+      }
+    }
+    m.push(type, node, this.mark);
+  }
+
+  /** Forget the memos of tokens from..to-1: the statements loop's, behind each
+   *  statement it has finished (gen/build.py). */
+  forget_memos(from: number, to: number): void {
+    for (let i = from; i < to; i++) this.tokens[i].memo = null;
   }
 
   update_memo(mark: number, type: number, node: any): void {

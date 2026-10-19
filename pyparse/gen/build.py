@@ -334,7 +334,17 @@ class TSParserGenerator(ParserGenerator, GrammarVisitor):
                 self.print("const _start_lineno = p.tokens[_mark].lineno, _start_col_offset = p.tokens[_mark].col_offset;")
             if is_loop:
                 self.print("const _children: any[] = [];")
+                # (the loop of statements, in a file or a block, forgets the memos of
+                # the tokens of each statement it has finished, as far back as its own
+                # start: nothing parses them again, since what encloses the loop is
+                # memoized at a token before it, and the memo is pure; without this,
+                # every token's memo lived until the end of the parse, 57 MiB of the
+                # 80 MiB peak parsing lib/_matlab.py)
+                self.forget = len(rhs.alts) == 1 and [str(i) for i in rhs.alts[0].items] == ["statement"]
+                if self.forget:
+                    self.print("let _forgot = p.mark;")
                 self.visit(rhs, is_loop=True, is_gather=is_gather, uses_extra=uses_extra)
+                self.forget = False
                 if node.name.startswith("_loop1"):
                     self.print("if (_children.length === 0) return null;")
                 if memoize:
@@ -408,6 +418,9 @@ class TSParserGenerator(ParserGenerator, GrammarVisitor):
                     if is_loop:
                         self.print(f"_children.push({action});")
                         self.print("_mark = p.mark;")
+                        if getattr(self, "forget", False):
+                            self.print("p.forget_memos(_forgot, _mark);")
+                            self.print("_forgot = _mark;")
                     else:
                         self.print(f"_res = {action};")
                         self.print("break done;")
