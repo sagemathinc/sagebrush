@@ -277,9 +277,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (while a name is being typed in place, the tree isn't drawn again: a
   // change meanwhile, here or elsewhere, would take the half-typed name
   // away; it is drawn once the name is done)
-  let renamingNow = false, drawLater = false;
+  let renamingNow = false;
   function render() {
-    if (renamingNow) { drawLater = true; return; }
+    if (renamingNow) return;
     tree.replaceChildren();
     const q = query.toLowerCase();
     if (trashView) {
@@ -409,15 +409,21 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (done) return;
       done = true;
       renamingNow = false;
-      drawLater = false;
       const v = input.value.trim();
       if (keep && v && v !== base) {
         host.renaming?.(e);
         try {
-          // (a document renamed since the row was drawn, as by its typed title: where it is now)
-          const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? (await w.pathOf(e.kind, e.ref)) ?? e.path : e.path;
-          host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e) }), from);
-        } catch (err) { fail(err); }
+          // (a document renamed since the row was drawn, as by its typed
+          // title: where it is now; gone, not renamed.  Whatever it is, only
+          // that entry: checked holding the lock, never another put at its
+          // path meanwhile, CORR-4B2-1)
+          const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
+          if (!from) say(`"${full}" was moved or deleted meanwhile: not renamed`);
+          else host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
+        } catch (err) {
+          if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
+          else fail(err);
+        }
       }
       refresh();
     };

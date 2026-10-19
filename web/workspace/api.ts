@@ -164,6 +164,21 @@ export class Workspace {
   /** An entry and its contents: a notebook's document, a board's document,
    * a data file's bytes, a folder's entries; with the revision to give
    * write() as `base`. */
+  /** A data file's bytes, only if they are at most `max` bytes: checked
+   * holding the lock (a write can't grow it between the check and the
+   * read), and by the bytes read; else a WorkspaceError("limit"), with
+   * nothing more read than the check needs (a preview, LIMIT-F85-1). */
+  async readUpTo(p: string, max: number): Promise<{ entry: Entry; content: Uint8Array }> {
+    return this.locked(async () => {
+      const e = await this.mustStat(p);
+      if (e.kind !== "file") throw new WorkspaceError("invalid", `${e.path} isn't a data file`);
+      if ((e.size ?? 0) > max) throw new WorkspaceError("limit", `${e.path} is larger than ${max} bytes`);
+      const c = await this.contents(e);
+      if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
+      if (c.byteLength > max) throw new WorkspaceError("limit", `${e.path} is larger than ${max} bytes`);
+      return { entry: e, content: c };
+    });
+  }
   async read(p: string): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
     const e = await this.mustStat(p);
     if (e.kind === "folder") return { entry: e, content: await this.list(e.path), rev: 0 };
@@ -270,16 +285,24 @@ export class Workspace {
    * `opts.retitle` false: the title left to the page that has the document
    * open, which saves it with its other changes (written here, it would be
    * a change from elsewhere to that page: CORR-0B0-2). */
-  async rename(from: string, to: string, opts?: { retitle?: boolean }): Promise<Entry>;
-  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean }): Promise<Entry | undefined>;
-  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean } = {}): Promise<Entry | undefined> {
+  /** `opts.expect`: the entry the rename was asked for, by its identity
+   * (a document's ref, a data file's fid, and when it was made): checked
+   * holding the lock, a WorkspaceError("conflict") if what is at `from` now
+   * is another (moved away meanwhile, something else put there: CORR-4B2-1). */
+  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> }): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> }): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } = {}): Promise<Entry | undefined> {
     const a = path(from), b = path(to);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
-    if (a === b) return this.mustStat(a);
     if (within(b, a)) throw new WorkspaceError("invalid", "a folder can't go inside itself");
     return this.locked(async () => {
       if (opts.still && !opts.still()) return undefined;
+      if (opts.expect) {
+        const x = opts.expect, cur = await this.stat(a);
+        if (!cur || cur.kind !== x.kind || cur.created !== x.created || cur.fid !== x.fid || (cur.kind !== "file" && cur.ref !== x.ref)) throw new WorkspaceError("conflict", `${a} was moved or replaced meanwhile`);
+      }
+      if (a === b) return this.mustStat(a);
       const moved = await this.move(a, b, "rename");
       if (opts.retitle !== false) await this.retitle(moved[0], a);
       return moved[0];
@@ -409,8 +432,11 @@ export class Workspace {
    * `ids` shown (only those go); for a folder or "/", the `count` and
    * `bytes` versionsUsage gave, and a folder's `created` (the same
    * folder): checked holding the lock, a WorkspaceError("conflict") if
-   * they changed since, nothing dropped. */
-  async dropVersions(p: string, opts: { keep?: number; expect?: { fid?: string; ids?: number[]; count?: number; bytes?: number; created?: number } } = {}): Promise<number> {
+   * they changed since, nothing dropped.  And `maxId` (versionsUsage's,
+   * when it was confirmed): no newer version goes, one kept since then
+   * not having been confirmed (CORR-AC5-1); a folder's are its files' at
+   * the drop. */
+  async dropVersions(p: string, opts: { keep?: number; expect?: { fid?: string; ids?: number[]; count?: number; bytes?: number; created?: number; maxId?: number } } = {}): Promise<number> {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0)), x = opts.expect;
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
     return this.locked(async () => {
@@ -423,7 +449,8 @@ export class Workspace {
           if ((x.count !== undefined && u.count !== x.count) || (x.bytes !== undefined && u.bytes !== x.bytes)) throw new WorkspaceError("conflict", `the old versions in ${q} changed since: see them again`);
         }
       }
-      const only = x?.ids ? new Set(x.ids) : null;
+      // (only the ids confirmed; or, bulk, none newer than the newest shown when it was confirmed: CORR-AC5-1)
+      const only = x?.ids ? new Set(x.ids) : null, upTo = x?.maxId ?? Infinity;
       // (only the versions asked about are read, a bounded batch per
       // transaction: a file's or a folder's by their files' ids, at most
       // maxVersions each; all of them, a batch of records at a time, never
@@ -455,7 +482,7 @@ export class Workspace {
               const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
               list.sort((x, y) => x.id! - y.id!);
               for (const v of list.slice(0, Math.max(0, list.length - keep))) {
-                if (only && !only.has(v.id!)) continue;
+                if ((only && !only.has(v.id!)) || v.id! > upTo) continue;
                 vs.delete(v.id!); vb.delete(v.id!); f += v.size;
               }
             }
@@ -467,7 +494,7 @@ export class Workspace {
         for (;;) {
           const [n, f] = await inTx(this.ws, stores, "readwrite", async (tx) => {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
-            const list: Version[] = await req(vs.getAll(null, DROP_RECORDS));
+            const list: Version[] = await req(vs.getAll(upTo === Infinity ? null : IDBKeyRange.upperBound(upTo), DROP_RECORDS));
             let f = 0;
             for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
             await less(tx, f, list.length < DROP_RECORDS);
@@ -489,33 +516,37 @@ export class Workspace {
    * with "/" all of them, Trash's too): how many, and their bytes; what
    * dropVersions(p) would free.  Read only: the versions' records, never
    * their bytes. */
-  async versionsUsage(p = "/"): Promise<{ count: number; bytes: number }> {
+  async versionsUsage(p = "/"): Promise<{ count: number; bytes: number; maxId: number }> {
     const q = path(p);
     let fids: Set<string> | null = null;
     if (q !== "/") {
       const e = await this.mustStat(q);
       const files = e.kind === "folder" ? (await this.list(q, { recursive: true })).filter((x) => x.kind === "file") : e.kind === "file" ? [e] : [];
       fids = new Set(files.map((x) => x.fid).filter((x): x is string => !!x));
-      if (!fids.size) return { count: 0, bytes: 0 };
+      if (!fids.size) return { count: 0, bytes: 0, maxId: 0 };
     }
     // (all of them: their count and the running total kept with them, no
     // record read; a folder's: each file's, at most maxVersions each)
     return inTx(this.ws, ["versions", "meta"], "readonly", async (tx) => {
       const vs = tx.objectStore("versions");
-      if (!fids) return { count: (await req(vs.count())) as number, bytes: (((await req(tx.objectStore("meta").get("versionBytes"))) as number | undefined) ?? 0) };
-      let count = 0, bytes = 0;
+      // (maxId: the newest version's id, the high-water mark a drop confirmed now is bound to, CORR-AC5-1)
+      if (!fids) {
+        const last = await new Promise<number>((ok, no) => { const c = vs.openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
+        return { count: (await req(vs.count())) as number, bytes: (((await req(tx.objectStore("meta").get("versionBytes"))) as number | undefined) ?? 0), maxId: last };
+      }
+      let count = 0, bytes = 0, maxId = 0;
       for (const fid of fids) {
         const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-        for (const v of list) { count++; bytes += v.size; }
+        for (const v of list) { count++; bytes += v.size; maxId = Math.max(maxId, v.id!); }
       }
-      return { count, bytes };
+      return { count, bytes, maxId };
     });
   }
 
   /** What this browser's workspace holds, for the Storage panel (§6.3):
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
-  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number }; trash: { count: number; bytes: number } }> {
+  async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number } }> {
     const all = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll())) as Entry[];
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 } };
     for (const e of all) {

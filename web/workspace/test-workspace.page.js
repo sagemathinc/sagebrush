@@ -666,6 +666,43 @@ async function versionActions() {
   w.close();
 }
 
+// A bulk drop confirmed, then a version kept: it stays (CORR-AC5-1); a
+// rename bound to its entry (CORR-4B2-1); a read up to a size (LIMIT-F85-1)
+async function fences() {
+  const w = await fresh({ ...W.LIMITS, maxVersions: 3 });
+  await w.create("/r.txt", { content: "a1" });
+  for (const v of ["a2", "a3", "a4"]) await w.write("/r.txt", v);
+  const u = await w.versionsUsage();
+  check(u.count === 3 && u.maxId > 0, "versionsUsage gives the newest version's id " + JSON.stringify(u));
+  await w.write("/r.txt", "a5");
+  const u2 = await w.versionsUsage();
+  check(u2.count === u.count && u2.bytes === u.bytes && u2.maxId > u.maxId, "(retention: the same count and bytes, another version " + JSON.stringify(u2) + ")");
+  await w.dropVersions("/", { expect: { maxId: u.maxId } });
+  const left = await w.history("/r.txt");
+  check(left.length === 1 && left[0].id === u2.maxId && dec(await w.versionById("/r.txt", left[0].id)) === "a4", "everything's drop, confirmed before a version was kept: that version stays");
+  await w.mkdir("/f");
+  await w.create("/f/s.txt", { content: "b1" });
+  await w.write("/f/s.txt", "b2");
+  const fu = await w.versionsUsage("/f"), fe = await w.stat("/f");
+  await w.write("/f/s.txt", "b3");
+  await w.dropVersions("/f", { expect: { created: fe.created, maxId: fu.maxId } });
+  check((await w.history("/f/s.txt")).length === 1 && dec(await w.version("/f/s.txt", 0)) === "b2", "a folder's drop, confirmed before a version was kept: that version stays");
+  // rename bound to its entry
+  await w.create("/rename.txt", { content: "original" });
+  const orig = await w.stat("/rename.txt");
+  await w.rename("/rename.txt", "/moved-rename.txt");
+  await w.create("/rename.txt", { content: "replacement" });
+  check(await fails(w.rename("/rename.txt", "/renamed.txt", { expect: orig }), "conflict") && (await w.stat("/renamed.txt")) === undefined && dec((await w.read("/rename.txt")).content) === "replacement", "a rename bound to an entry moved away, another at its path: refused, nothing moved");
+  const rep = await w.stat("/rename.txt");
+  check((await w.rename("/rename.txt", "/renamed.txt", { expect: rep })).path === "/renamed.txt", "…bound to the one there, made");
+  const nb = await w.create("/doc.ipynb");
+  check((await w.rename("/doc.ipynb", "/doc2.ipynb", { expect: nb })).path === "/doc2.ipynb", "…a document bound to its ref");
+  // a read up to a size
+  await w.create("/ten.txt", { content: "0123456789" });
+  check(await fails(w.readUpTo("/ten.txt", 9), "limit") && dec((await w.readUpTo("/ten.txt", 10)).content) === "0123456789", "readUpTo: refused past its size, read within it");
+  w.close();
+}
+
 async function intents() {
   const w = await fresh();
   await w.create("/undo.txt", { content: "original" });
@@ -738,7 +775,7 @@ async function intents() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

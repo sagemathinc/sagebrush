@@ -140,10 +140,13 @@ try {
   check(st["Notebooks and boards"] === String(docs) && docs >= 2 && /^4 · /.test(st["Data files"]) && /^2 · 4 B/.test(st["Earlier versions of files"]) && /^1 item · 5 B of files/.test(st["Trash"]), "…what this browser holds: " + JSON.stringify(st));
   check(await ev(`!!${P}.querySelector(".keep")`), "…and whether the browser may clear it");
   await shot("storage");
+  // (a version kept after the panel showed them: not among those freed, CORR-AC5-1)
+  await ev(`${W}.write("/data/notes.txt", "v6").then(() => 1)`);
   await panelButton(/^Free 4 B of old versions/);
-  check(await until(`${W}.history("/data/notes.txt").then((h) => h.length === 0)`), "Free N of old versions: they go, after asking");
+  check(await until(`${W}.history("/data/notes.txt").then((h) => h.length === 1)`), "Free N of old versions: those shown go, after asking; one kept since stays");
+  check(await ev(`${W}.version("/data/notes.txt", 0).then((b) => new TextDecoder().decode(b) === "v5")`), "…the one kept since: v5");
   check(/Delete all 2 earlier versions of data files/.test(dialogs.at(-1) ?? ""), "…saying how many: " + dialogs.at(-1));
-  check(await until(`/^0 · /.test([...${P}.querySelectorAll("dt")].find((d) => d.textContent === "Earlier versions of files")?.nextElementSibling.textContent ?? "")`), "…and the panel shows none left");
+  check(await until(`/^1 · /.test([...${P}.querySelectorAll("dt")].find((d) => d.textContent === "Earlier versions of files")?.nextElementSibling.textContent ?? "")`), "…and the panel shows what is left");
   await ev(`(() => { Object.defineProperty(navigator.storage, "persisted", { value: async () => window.__kept === true, configurable: true }); Object.defineProperty(navigator.storage, "persist", { value: async () => (window.__kept = true), configurable: true }); return 1; })()`);
   await closePanel();
   await click("#wssidebar .fmeter");
@@ -198,7 +201,7 @@ try {
   await until(`!!document.querySelector(${JSON.stringify(rowSel("/data"))})`);
   if (await ev(`document.querySelector(${JSON.stringify(rowSel("/data"))}).getAttribute("aria-expanded") !== "true"`)) await click(rowSel("/data"));
   await openRow("/data/notes.txt");
-  check(await until(`${P}?.querySelector("pre")?.textContent === "v5"`), "the board page's file browser previews a file the same way");
+  check(await until(`${P}?.querySelector("pre")?.textContent === "v6"`), "the board page's file browser previews a file the same way");
   await shot("board-preview");
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
