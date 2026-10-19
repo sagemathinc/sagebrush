@@ -80,6 +80,23 @@ try {
   const newId = await ev(`location.search.match(/local:([0-9a-f]{12})/)[1]`);
   check(await until(`${W}?.list("/").then((l) => l.some((e) => e.path === "/Untitled board.board.json" && e.ref === ${JSON.stringify(newId)}))`), "…listed as /Untitled board.board.json");
   check(await ev(`localStorage.getItem("sagebrush-board:local:${newId}") === null`), "…and not written to localStorage");
+  // ?recent=MODE, New board and Duplicate, in the workspace (what web/board/test-local.mjs checks for the fallback)
+  await go(base + "board/?new=sage");
+  await until(`/[?&]doc=local:[0-9a-f]{12}/.test(location.search) && !!${B}?.snapshot()`, 60000);
+  const sageId = await ev(`location.search.match(/local:([0-9a-f]{12})/)[1]`);
+  check(await until(`${W}.list("/").then((l) => l.some((e) => e.ref === ${JSON.stringify(sageId)} && e.mode === "sage"))`), "?new=sage: a Sage board of the workspace");
+  await go(base + "board/?recent=sage");
+  check(await until(`location.search.includes(${JSON.stringify("local:" + sageId)}) && !!${B}?.snapshot()`, 60000), "?recent=sage opens the latest Sage board of the workspace");
+  const countBoards = () => ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "board").length)`);
+  const before = await countBoards();
+  await ev(`(() => { document.querySelector('[data-sbb="newboard"]').click(); return 1; })()`);
+  check(await until(`!location.search.includes(${JSON.stringify("local:" + sageId)}) && /doc=local:[0-9a-f]{12}/.test(location.search) && !!${B}?.snapshot()`, 60000), "File > New board opens a new board");
+  check((await countBoards()) === before + 1 && (await ev(`localStorage.getItem("sagebrush-board:local:" + location.search.match(/local:([0-9a-f]{12})/)[1]) === null`)), "…a board of the workspace, not of localStorage");
+  check(await ev(`localStorage.getItem("sagebrush-board:local:" + location.search.match(/local:([0-9a-f]{12})/)[1] + "#here") === "1"`), "…marked as written here (its remote pictures show at once)");
+  await ev(`${B}.edit((d) => { d.title = "To copy"; }).then(() => 1)`);
+  await sleep(300);
+  await ev(`(() => { document.querySelector('[data-sbb="duplicate"]').click(); return 1; })()`);
+  check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/To copy (copy).board.json"))`, 30000), "Duplicate makes a board of the workspace: To copy (copy)");
   // an agent's change through window.sagebrush.workspace is credited to it
   await ev(`${W}.mkdir("/From the agent").then(() => 1)`);
   check(await ev(`${W}.ops().then((o) => o.at(-1).op === "mkdir" && o.at(-1).by === "agent:page")`), "an agent's change is credited to agent:page");
