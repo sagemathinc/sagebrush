@@ -2277,6 +2277,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
      * the host leaves the board, whichever way (astra's CORR-BCD-1). */
     keepWriting: () => editor.keepWriting(),
     writing: () => editor.writing,
+    /** Nothing written or changed by the person while the page makes where it goes (astra's CORR-134-1). */
+    freeze: (on: boolean) => editor.holdForLeaving(on),
     /** The board's title made `t` if it is `was` (its file renamed by the
      * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
     retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false) : Promise.resolve(null)),
