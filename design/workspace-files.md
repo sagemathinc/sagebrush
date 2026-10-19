@@ -171,6 +171,21 @@ The migration runs once per browser, on the first visit after the change, on eit
 - **Empty Trash** (in the browser's ⋯, with a confirmation) is the only thing that removes contents: the notebook, board or file, together with its history and outputs.
 - Nothing is removed from Trash by time or by quota pressure (see §6.3).
 
+### 2.5 Versions of data files
+
+Notebooks and boards keep every change (TimeTravel). Data files have had no history, so an overwrite or a delete lost the old bytes. That was the one gap in "nothing can lose your work" (§8.3), and versions close it.
+
+- **When a version is kept:** before a data file is overwritten or deleted, by Python, an agent, the API or a person, the bytes it had become a version. They go in the store `versions` of "sagebrush-workspace", keyed by the file's own id, which a rename keeps.
+- **Each version records:** when, by whom (the device, and the person or `agent:<name>`), its size and its SHA-256.
+- **Retention is bounded, and counts against storage:**
+  - the latest 20 versions of each file are kept, and none older than 30 days;
+  - all versions together take at most 1 GB, and less if the browser's quota is tighter;
+  - beyond that, the oldest versions go first, which removes nothing current;
+  - the storage meter shows versions as their own part (§6.3).
+- **If storage is too full to keep even the previous version,** the overwrite is refused and says so. Old bytes are never dropped silently.
+- **Reading versions:** `history(path)` and `version(path, i)` list and read them (§8.2). TimeTravel shows them for a file, and "Undo this agent's changes" restores them.
+- **Dropping versions:** only a person can, from the file browser.
+
 ---
 
 ## 3. One File menu, identical in both editors
@@ -548,14 +563,19 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
    - in the page;
    - to agents on the person's own computer;
    - to remote agents, once sync exists.
-2. **Agents are collaborators** (§7.9, §7.10).
+2. **A person can drive everything through their own agents, including running code** (William, Oct 18: "any model with agents that doesn't imagine the user being able to 100% drive something via agents is not sufficient").
+   - Safety comes from knowing exactly what can go wrong, and closing each of those (§8.3). Holding agents back is not the method.
+3. **Agents are collaborators** (§7.9, §7.10).
    - They show where they are.
-   - Everything they change is a patch credited to them, which TimeTravel shows and the person can undo.
-   - Code they write doesn't run until the person says so.
-3. **Precise, fine-grained permissions are a goal in themselves.** CoCalc has to enforce access at the level of Linux users and processes. Sagebrush runs everything in the browser, so it can say exactly which agent or person may read, write or run what, in which file. (William noted this on Oct 18.)
-4. **Access is granted, not assumed.**
-   - An agent sees only what it was given: by default read-only, for a stated time, and taken back at once.
+   - Everything they change is credited to them, appears in TimeTravel, and can be undone, data files included (§2.5).
+4. **Outward actions are gated; local, reversible ones aren't.**
+   - **Gated:** anything that leaves the person's workspace or spends something needs a confirmation, or a scope granted beforehand (§8.3, danger 3).
+   - **Not gated:** what stays inside it and can be undone needs neither.
+5. **Precise, fine-grained permissions are a goal in themselves.** CoCalc has to enforce access at the level of Linux users and processes. Sagebrush runs everything in the browser, so it can say exactly which agent or person may read, write or run what, in which file. (William noted this on Oct 18.)
+6. **Access is granted, not assumed.**
+   - An agent sees only what it was given, for a stated time, and the grant can be taken back at once.
    - Nothing leaves the device without sync turned on *and* a grant made.
+7. **The one hard rule: code from other people never runs by itself.** This covers collaborators, shared collections and Inbox items. No setting changes it.
 
 ### 8.2 The workspace API
 
@@ -569,8 +589,8 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
 | `write(path, content, {base})` | Replace the contents, only if the revision is still `base` (compare-and-swap, as `IdbStore` does). On a conflict, it returns the current version. A document written whole is stored as the diff from `base`, so TimeTravel shows the change and who made it. |
 | `create(path, kind, content?)`, `mkdir(path)` | A new notebook, board, file or folder. A taken path is refused, never overwritten. |
 | `rename(from, to)`, `duplicate(path, to)` | As the File menu does them |
-| `remove(path)`, `restore(path)` | To Trash, and back out (§2.4). There is no verb that empties Trash: only a person can. |
-| `history(path)`, `version(path, i)` | TimeTravel's versions, and any one of them |
+| `remove(path)`, `restore(path)` | To Trash, and back out (§2.4). No verb empties Trash, forgets a history or drops a file's versions: only a person can. |
+| `history(path)`, `version(path, i)` | TimeTravel's versions, and any one of them; for a data file, its kept versions (§2.5) |
 | `watch(path, cb)` | Changes made elsewhere: another tab, device, person or agent |
 
 - **One description of the verbs,** written as TypeScript types and a generated JSON Schema, serves all three surfaces. The MCP tools and the remote endpoint are generated from it, so they can't drift apart.
@@ -589,28 +609,52 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
    - Each verb becomes an operation on the account object or patches on a document object, credited to the agent.
    - This lets cocalc.ai agents, or Claude Code and Codex running anywhere, work in a person's workspace while every device of theirs is closed.
 
-### 8.3 Agents as collaborators
+### 8.3 What can actually go wrong, and what closes it
 
-- **Presence:**
-  - an agent appears like a person in §7.9: a name (`agent:<name>`), a colour, and its cursor or selected cell or note;
-  - a person can **follow** it, and the view moves with its edits;
-  - the file browser shows which files an agent has open.
-- **Attribution:**
-  - every edit an agent makes is a patch credited to `agent:<name>`, and TimeTravel shows it;
-  - "Undo this agent's changes" reverts them as one step, leaving other people's edits in place.
-- **Running code: a setting on each grant, "may run code"** (William, Oct 18: "they definitely need to be able to run code. But … we can make it explicit whether or not it is allowed").
-  - **The unit is the grant** (§8.4). An Ask conversation is a grant of its own, so the setting is per conversation there, and per agent and scope elsewhere.
-  - The setting is shown plainly at the point of grant and in the Agents with access panel. It can be turned off at any moment, mid-session. A run already going is stopped, and nothing more runs.
-  - **Defaults:**
-    - **on** for the person's own Ask agent in the page. Its purpose is computing at the person's request, it runs in the person's own sandbox, and the person sees each run as it happens;
-    - **off** for every other grant: local MCP agents, remote agents, cocalc.ai, which are turned on only by choice.
-  - **Without it,** code an agent writes is marked "written by agent:<name>, not run", and nothing runs it until a person does.
-  - **With it,** the agent runs code it wrote, and a running indicator names the agent, with Stop.
-  - **Every run, either way:**
-    - it happens **in the runner** (design/runner.md): no storage, no network, no cookies, never on the page's origin;
-    - it is credited to the agent and logged: time, agent, document, cell or note, and the hash of the code.
-  - **A remote agent's runs** happen only in an open page of the person's, which shows them. The sync service has no compute. With no page open, a remote agent can't run code; cocalc.ai is the place for that (§8.6).
-- **The hard rule: code from other people never runs by itself.** This covers edits by collaborators, shared collections and Inbox items. There is no setting to change it (§7.10). An agent's "may run code" covers only code that agent wrote in that session. It never covers code that came from someone else, even when the agent passes it on.
+Below are the four real dangers when agents act in a workspace, whether they run code or not. Each comes with what closes it.
+
+**1. Loss or corruption of work.**
+- Notebooks and boards are safe already. Every change is a patch in an immutable history (TimeTravel), and deleting goes to Trash.
+- **Data files are the only thing without versions today:** an overwrite or a delete by Python, by an agent or by a person loses the old bytes.
+- **Closed by versioning data files** (§2.5): the bytes a file had before each overwrite or delete are kept as a version, within bounded retention, and on top of that there is Trash.
+- Then, for everything in the workspace:
+  - **nothing an agent does can lose your work;**
+  - TimeTravel and "Undo this agent's changes" cover files too.
+- **What agents can't do,** because only a person can, from the UI: empty Trash, forget a document's history, or drop file versions. No verb of the API does any of these (§8.2).
+
+**2. Data leaving: privacy, mainly through prompt injection.**
+The real risk here isn't loss. It's private files being read and sent somewhere. The channels:
+- **Code, through the network.** The runner (design/runner.md) has **no network at all**: its CSP is `connect-src 'none'`. It has no storage and no cookies either. It sees only the files the page hands it.
+  - **The gap today:** where the runner isn't available, the page falls back to a plain worker with the page's origin, which has network and storage. That happens when the frame doesn't answer within a few seconds, offline, in Firefox and Safari until runner.md step 4, and in the desktop app.
+  - **The fix:** a run asked for by an agent never takes that fallback. It waits for the runner or is refused, with the reason given. A person running code themselves keeps the fallback as now.
+- **Outputs.** They are bounded and sanitized when shown (design/security.md rules 1-4), so an output can't load anything from the network.
+- **The agent itself.** Whatever an agent reads (files, outputs) goes to its model provider and to anywhere the agent can send. This is in the nature of using an agent, and the person chose that agent.
+  - What bounds it is **the grant's scope:** which folders an agent can read at all.
+  - It is also bounded by the gates on outward actions (danger 3), which apply to agents as much as to people.
+
+**3. Outward actions.** These leave the workspace, or spend something, and can't simply be undone:
+- publishing or sharing, or making something public (a collection, a link);
+- sending to someone else (Send to Sagebrush, the Inbox, email);
+- granting access to another agent or person;
+- turning on sync for a folder;
+- spending: AI calls beyond a budget the person set.
+
+Each needs **either an explicit confirmation from the person at the time, or a scope granted beforehand** ("this agent may share in /Public/", "may spend up to N"). Everything local and reversible (create, edit, run, rename, delete to Trash) needs neither.
+
+**4. Resource use:** CPU, memory, battery and quota.
+- These are bounded by the runner's limits (interpreter heap limits, Stop) and the quota meter (§6.3).
+- An agent's run shows a running indicator naming the agent, with Stop.
+- A run past its time or memory bounds is stopped like any other.
+
+**"May run code", and its defaults.** This is a setting on each grant (§8.4), shown at the point of grant and in the Agents with access panel, and it can be turned off mid-session.
+- **The person's own agents** (the Ask panel, and their own MCP or CLI agent with a grant): **on.** With dangers 1-4 closed as above, holding back the person's own agent only gets in their way.
+- **Third-party or remote grants:** the person chooses when granting, and is asked plainly.
+- **Every run:**
+  - happens in the runner, never on the page's origin;
+  - is credited to the agent;
+  - is logged: time, agent, document, cell or note, and the hash of the code.
+- **A remote agent's runs** happen only in an open page of the person's, which shows them. The sync service has no compute; with no page open, cocalc.ai is the place for that (§8.6).
+- **The hard rule stands:** code from other *people* (collaborators, shared collections, Inbox items) never runs by itself. An agent's permission to run code covers only code that agent wrote. It never covers code someone else wrote, even when the agent passes it on.
 
 ### 8.4 Access: granted, scoped, visible
 
@@ -669,10 +713,12 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
 
 1. How are agent tokens issued? Through the cocalc.ai sign-in, which a person approves, or by the person on sagebrush.space? How is the token stored, and how is it rotated?
 2. What does an in-page agent's grant look like, given that the page holds the person's whole authority? Can a page restrict itself (an "agent mode" with only the granted paths), and is that worth it?
-3. **"May run code"** (decided: configurable per grant, §8.3). The questions for review:
-   - An agent with that permission may be steered by injected text, and then run code that reads every file its grant covers and writes its outputs back where the agent reads them, so the agent can carry data away. What should bound that? Possibilities: a run sees only the files of its own document's folder; outputs read by the agent are capped; one grant can't be both "may run code" and wider than one folder without saying so.
-   - Is the "code that agent wrote" boundary enforceable? Code pasted from a shared document into the agent's own edit would count as the agent's.
-   - How does revoking it reach a run already started in another tab?
+3. **"May run code"** (decided: on for the person's own agents, chosen at grant time otherwise, §8.3). The questions for review:
+   - **The runner fallback:** an agent's run must never fall back to the plain worker (§8.3, danger 2). How is that enforced, and tested?
+   - **A prompt-injected agent with run permission:** its local damage can be undone (danger 1). What reaches outside is only what the agent itself sends (danger 2) and the gated outward actions (danger 3). Is anything missing from that list?
+   - **The boundary "code that agent wrote":** can it be enforced? Code pasted from a shared document into the agent's own edit would count as the agent's.
+   - **Revoking:** how does turning the setting off reach a run already started in another tab?
+   - **Retention:** do the limits on file versions (§2.5) leave a way to lose data by filling the quota on purpose? *(Proposed: no. A write that can't keep its previous version is refused.)*
 4. Rate limits and sizes per verb, and what an over-limit agent sees.
 5. How long the access log is kept, and who may read it.
 6. Inbox: who may send to whom, spam and size limits, and what accepting does.
@@ -684,7 +730,7 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
 
 Each step is a branch of its own, reviewed as usual, with pictures for William for any visible step. Each step's tests fail without it.
 
-1. **The `sagebrush-workspace` database, the index, reconcile and migration.** No UI. Tests: every kind of item in today's stores comes out as an entry, the localStorage copies are untouched, a write from an older tab is brought in as a copy, and a key that won't parse is kept.
+1. **The `sagebrush-workspace` database, the index, reconcile and migration,** with the store for data files' versions (§2.5), written by the API's own writes (1a). Then the pages wired to it (1b), which version Python's writes and the Files panel's deletes too. No UI. Tests: every kind of item in today's stores comes out as an entry, the localStorage copies are untouched, a write from an older tab is brought in as a copy, and a key that won't parse is kept.
 2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`.
 3. **The one File menu** in both editors, and Upload's rule.
 4. **`/w/` routing** in the server, the service worker and both pages, plus the redirects from the old addresses. Then the board page in the shell.
