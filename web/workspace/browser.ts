@@ -274,7 +274,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     render();
   }
 
+  // (while a name is being typed in place, the tree isn't drawn again: a
+  // change meanwhile, here or elsewhere, would take the half-typed name
+  // away; it is drawn once the name is done)
+  let renamingNow = false, drawLater = false;
   function render() {
+    if (renamingNow) { drawLater = true; return; }
     tree.replaceChildren();
     const q = query.toLowerCase();
     if (trashView) {
@@ -396,12 +401,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
     nameEl.replaceWith(input);
+    renamingNow = true;
     input.focus();
     input.select();
     let done = false;
     const finish = async (keep: boolean) => {
       if (done) return;
       done = true;
+      renamingNow = false;
+      drawLater = false;
       const v = input.value.trim();
       if (keep && v && v !== base) {
         host.renaming?.(e);
