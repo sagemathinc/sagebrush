@@ -42,6 +42,14 @@ const STATUS: Partial<Record<SyncError["code"], number>> = { forbidden: 403, del
 export async function handleSync(req: Request, env: Env): Promise<Response | null> {
   const url = new URL(req.url);
   const p = url.pathname;
+  // signing out ends the session's sync sockets too, before sharing deletes the session (§2)
+  if (p === "/auth/logout" && req.method === "POST") {
+    if (env.SYNC_ACCOUNT && env.SHARE_DB && req.headers.get("origin") === url.origin) {
+      const who = await sessionOf(req, env);
+      if (who) await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).revoke({ session: who.session, expires: who.expires * 1000 }).catch(() => {});
+    }
+    return null;
+  }
   if (!p.startsWith("/api/sync/")) return null;
   // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
@@ -67,6 +75,16 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     h.set("x-sync-session", who.session);
     h.set("x-sync-expires", String(who.expires * 1000));
     return stub.fetch(new Request(req.url, { method: "GET", headers: h }));
+  }
+  const dg = p.match(/^\/api\/sync\/v1\/doc\/([0-9a-f]{64})\/([0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
+  if (dg && m === "GET") {
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return err(426, "a WebSocket upgrade");
+    // (phase 1 and 2: the account's own documents; another owner's come with collaboration)
+    if (dg[1] !== hash) return err(404, "unknown_doc");
+    const h = new Headers(req.headers);
+    h.set("x-sync-account", who.id);
+    h.set("x-sync-session", who.session);
+    return env.SYNC_DOC.get(env.SYNC_DOC.idFromName(`doc:${dg[1]}:${dg[2]}`)).fetch(new Request(req.url, { method: "GET", headers: h }));
   }
   if (p === "/api/sync/v1/blobs/check" && m === "POST") {
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
