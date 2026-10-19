@@ -373,6 +373,16 @@ const docA = "0123456789ab";
 
 // ---- blobs: upload, reads, pins (§4.3, §5.4)
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+/** Poll `f` until it is truthy, at most `ms` (alarms run in real time, slower under load): its last value. */
+async function until(f, ms = 15_000) {
+  const end = Date.now() + ms;
+  let v = await f();
+  while (!v && Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 100));
+    v = await f();
+  }
+  return v;
+}
 const acctNs = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "sync");
 const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
 let acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
@@ -465,7 +475,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   i = await acctA.inspect({ sha256: sha(big) });
   ok(a?.code === "busy" && i?.pins.length === 1 && i.pins[0].state === "pending", "a lost answer leaves its pin pending");
   // (the account object's own alarm, set for when the forward lapses: real time, with the test's 300 ms pins)
-  await new Promise((r) => setTimeout(r, 1500));
+  await until(async () => (await acctA.inspect({ sha256: sha(big) }))?.pins[0]?.state === "held");
   i = await acctA.inspect({ sha256: sha(big) });
   ok(i?.pins.length === 1 && i.pins[0].state === "held" && i.refs === 2, "once the forward can't commit any more, the alarm asks the document: it committed, so the pin is held");
   a = await s.ask(batch(LOSE, 1, [[1, pid(30, P + "L"), [], "lost", [sha(big)]]]));
@@ -490,7 +500,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   const before = (await acctA.inspect({}))?.used;
   const r = await acctA.reserve({ account: A, sha256: "d".repeat(64), size: 1234 });
   ok(r?.ok?.id && (await acctA.inspect({}))?.used === before + 1234, "a reservation charges its bytes");
-  await new Promise((res) => setTimeout(res, 3600));
+  await until(async () => (await acctA.inspect({}))?.used === before);
   ok((await acctA.inspect({}))?.used === before, "with nothing else happening, the reservation's end gives its bytes back (the alarm was armed at reserve)");
   // signed URLs: at most 600 a minute per account, counted at issue
   const sd = await signIn(D);
@@ -543,7 +553,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   // an outbox bigger than one alarm's 100: the alarm runs again until it is empty
   const n = await acctA.seed({ outbox: 250 });
   ok(n >= 250, "(250 keys in the outbox)");
-  await new Promise((res) => setTimeout(res, 4500));
+  await until(async () => (await acctA.inspect({}))?.outbox === 0);
   ok((await acctA.inspect({}))?.outbox === 0, "an outbox of 250 is emptied by successive alarms (CORR-796-1)");
 }
 
@@ -646,7 +656,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
     const ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null);
     ok(ib?.alarm !== null && ib?.alarm !== undefined && ib.alarm < Date.now() + 3600_000 && ib.pins.length === 1 && ib.pins[0].state === "pending", "after a crash that lost the alarm, the restarted object arms it again for the pending pin");
     await dm.open({ name: `after:${pid(60, M)}` });
-    await new Promise((r) => setTimeout(r, 1500));
+    await until(async () => (await acctE().inspect({ sha256: sha(HE) }))?.pins[0]?.state === "held");
     const ic = await acctE().inspect({ sha256: sha(HE) });
     ok(ic?.pins[0]?.state === "held" && ic.refs === 1, "and the alarm decides it from the document: committed, so held (CORR-321-3)");
   }
@@ -661,7 +671,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   await acctA.seed({ alarmNow: true });
   await new Promise((r) => setTimeout(r, 100));
   ok((await acctA.inspect({ sha256: sha(H) }))?.pins.filter((p) => String(p.ref).endsWith(pid(70, N)))[0]?.state === "pending", "(the early alarm, before the lapse, leaves it pending)");
-  await new Promise((r) => setTimeout(r, 1500));
+  await until(async () => (await acctA.inspect({ sha256: sha(H) }))?.pins.find((p) => String(p.ref).endsWith(pid(70, N)))?.state === "held");
   const ie = await acctA.inspect({ sha256: sha(H) });
   ok(ie?.pins.filter((p) => String(p.ref).endsWith(pid(70, N)))[0]?.state === "held", "an alarm that fires before a pin's lapse leaves the next armed: the pin is decided");
   s3.ws.close();
@@ -1160,6 +1170,15 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const hp = await put(sh, Buffer.from("H's file"));
   ok(hp.status === 403, "and the account then takes no write: its object was never given storage (" + hp.status + ")");
   ok((await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(H)).first()) === null && (await bucket.list({ prefix: `s/${hashOf(H).slice(0, 32)}/` })).objects.length === 0, "nothing of H's is in D1 or R2");
+  // CORR-A9B-1: an enable that read E's registration before E's purge finished can't make storage under it
+  const regE = await db.prepare("SELECT state, incarnation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
+  ok(regE?.state === "purged" && /^[0-9a-f]{32}$/.test(regE.incarnation), "(E is purged; its row keeps the incarnation it had)");
+  const staleE = await acctNs.get(acctNs.idFromName("acct:" + hashOf(E))).enable({ account: E, hash: hashOf(E), incarnation: regE.incarnation });
+  const seE = await signIn(E);
+  ok(staleE?.error?.code === "forbidden" && (await put(seE, Buffer.from("E after a stale enable"))).status === 403, "a stale enable, with the purged incarnation, is refused, and no write is taken (CORR-A9B-1)");
+  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "turning sync on again makes a new incarnation, which the tombstone doesn't refuse");
+  const regE2 = await db.prepare("SELECT state, incarnation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
+  ok(regE2?.state === "active" && regE2.incarnation !== regE.incarnation && (await put(seE, Buffer.from("E after turning sync on"))).status === 201, "and the account takes writes under it");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");
