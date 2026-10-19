@@ -117,6 +117,7 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
   - `author` is `person`, `collaborator:<id>`, and so on, set by the page from its session, never from the text.
   - The server delivers only messages that arrive on the paired socket.
 - `chat.permission` `{request_id, behavior:"allow"|"deny"}`: the person's answer to a relayed prompt.
+  - It is accepted only on the pairing the prompt was relayed to. After a reconnect, the page drops the prompts it showed before and sends no answers for them.
 
 **Server to page (notifications):**
 - `chat.reply` `{conversation, id, text, in_reply_to?}`: what the agent said (its `chat_reply` tool).
@@ -126,6 +127,10 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
 - `chat.delivery` `{conversation, id, via:"channel"|"chat_next"}`: the server handed the message to the agent.
   - This doesn't prove the agent read it: Claude Code drops channel events silently when the session didn't load the server as a channel.
   - So the page shows "sent to the agent", and "read" only once a reply or an action comes back.
+- `chat.rejected` `{conversation?, id?, reason: {code, message}}`: a `chat.message` the server refused.
+  - `code` is one of `malformed`, `conversation`, `id`, `author`, `text`, `too_long`, `context`.
+  - `conversation` and `id` are echoed only when they parsed. The page marks the message "not delivered: <reason>".
+  - What the server checks: `conversation` is a workspace path ending in `.chat`; `id` matches `[A-Za-z0-9_.:-]{1,128}`; `author` is `person`, `collaborator:<id>` or `agent:<id>`; `text` is at most 256 KiB of UTF-8 (262,144 bytes), so any valid message fits the queue; `context.path` is a workspace path; `kind` is one of the four; `rev ≥ 0`; selection ids match the id pattern, at most 50 per kind.
 - `chat.dropped` `{conversation, ids}`: queued messages the server dropped.
   - Its queue holds at most 100 messages per conversation and 1 MiB in all.
   - The page marks those messages "not delivered" and offers Resend.
