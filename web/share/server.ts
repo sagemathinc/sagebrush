@@ -201,6 +201,18 @@ async function account(req: Request, env: ShareEnv): Promise<Who | null> {
   return row ? { id: row.account_id, session } : null;
 }
 
+/**
+ * The session a request carries, with its expiry (seconds), for the sync
+ * service (web/sync/server.ts), which authenticates exactly as sharing does.
+ */
+export async function sessionOf(req: Request, env: ShareEnv): Promise<{ id: string; session: string; expires: number } | null> {
+  const t = cookies(req).get(SESSION);
+  if (!t || !env.SHARE_DB) return null;
+  const session = await sha256Hex(t);
+  const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number }>();
+  return row ? { id: row.account_id, session, expires: row.expires } : null;
+}
+
 /** A session cookie, or null if the account is being deleted or was deleted in CoCalc. */
 async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }): Promise<string | null> {
   const db = env.SHARE_DB!;
