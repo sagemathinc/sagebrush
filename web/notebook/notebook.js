@@ -1619,17 +1619,21 @@ export function createNotebook(root, opts = {}) {
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
   let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
-  // the document last known to be the store's (loaded, received, or saved
-  // here): its revision and cells by id, the base of three-way merges with
-  // changes from elsewhere (stores.js: revisions)
-  let synced = null;
-  // (documents applied from elsewhere so far: a save waiting its turn, made
-  // before one, is made again from what is here then, which has that change
-  // merged in, so it never writes the change back over: CORR-0B0-2)
-  let remoteSeen = 0;
+  // The document shown, from when it is loaded until another is (or it is
+  // detached): what is known of it, which its saves keep to, even one still
+  // waiting its turn when another document is shown (CORR-989-1).
+  // - synced: the document last known to be the store's (loaded, received,
+  //   or saved here): its revision and cells by id, the base of three-way
+  //   merges with changes from elsewhere (stores.js: revisions)
+  // - remoteSeen: documents applied from elsewhere so far: a save waiting
+  //   its turn, made before one, is made again from what is here then, which
+  //   has that change merged in, so it never writes the change back over
+  //   (CORR-0B0-2); only while this document is the one shown
+  let shown = { synced: null, remoteSeen: 0 };
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
-  const setSynced = (rev, list) => { synced = { rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) }; };
+  const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
+  const setSynced = (rev, list) => { shown.synced = syncedOf(rev, list); };
   function snapshot() {
     return {
       ...meta, mode,
@@ -1655,7 +1659,7 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
-    const doc = snapshot(), json = JSON.stringify(doc), seen = remoteSeen;
+    const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
@@ -1666,22 +1670,26 @@ export function createNotebook(root, opts = {}) {
       // is made from the synced revision when it starts (stores.js)
       const st = store;
       const start = () => {
-        if (seen !== remoteSeen) sent = snapshot();
-        try { return Promise.resolve(st.save(synced?.rev !== undefined ? { ...sent, baseRev: synced.rev } : sent)); } catch (e) { return Promise.reject(e); }
+        if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
+        const base = mine.synced?.rev;
+        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent)); } catch (e) { return Promise.reject(e); }
       };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
       saveChain = p.then((t) => {
-        if (store !== st) return;
         if (t && typeof t === "object" && t.conflict) {
-          // written elsewhere first: merge that, then save the merge
+          // written elsewhere first: merge that, then save the merge (a
+          // document no longer shown: nothing to merge into here)
+          if (mine !== shown || store !== st) return;
           if (lastJson === json) lastJson = null;
           applyRemote(t.conflict, true, true);
           return;
         }
+        // (its revision kept for its next save, shown or not)
         const r = t && typeof t === "object" ? t.rev : undefined;
-        if (r === undefined || synced?.rev === undefined || r > synced.rev) setSynced(r, sent.cells);
+        if (r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev) mine.synced = syncedOf(r, sent.cells);
+        if (mine !== shown || store !== st) return;
         lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
@@ -1727,6 +1735,7 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     loading = true;
+    shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
     pixels = new PixelBudget();
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     meta = rest;
@@ -1767,10 +1776,10 @@ export function createNotebook(root, opts = {}) {
   function applyRemote(doc, keepLocal = true, fromConflict = false) {
     const { cells: list, mode: m, rev, baseRev: _b, ...rest } = doc;
     // an older revision than the synced one (a late message) changes nothing
-    if (keepLocal && rev !== undefined && synced?.rev !== undefined && rev <= synced.rev && !fromConflict) return;
-    remoteSeen++;
+    if (keepLocal && rev !== undefined && shown.synced?.rev !== undefined && rev <= shown.synced.rev && !fromConflict) return;
+    shown.remoteSeen++;
     loading = true;
-    const base = keepLocal ? synced?.cells ?? null : null;
+    const base = keepLocal ? shown.synced?.cells ?? null : null;
     let dirty = false;
     meta = { ...meta, ...rest };
     if (m && m !== mode) setMode(m, false);
@@ -2145,7 +2154,7 @@ export function createNotebook(root, opts = {}) {
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       return doc;
     },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },

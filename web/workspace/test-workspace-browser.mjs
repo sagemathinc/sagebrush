@@ -192,6 +192,45 @@ try {
   const kept2 = await ev(`${W}.read("/Own sidebar.ipynb").then((r) => ({ name: r.content.name, four: r.content.probeFour }))`);
   check(kept2.name === "Own sidebar" && kept2.four === 4, "…its saves queued before it keep the new name: " + JSON.stringify(kept2));
   await ev(`sagebrush.notebook.attach(__real).then(() => 1)`);
+  // a save still waiting its turn when another notebook is opened is made
+  // of its own notebook, from its own revision, never of the one shown now,
+  // even after that one changed elsewhere (CORR-989-1, astra's trace)
+  const cross = await ev(`(async () => {
+    const nb = sagebrush.notebook, w = sagebrush.workspace;
+    await nb.saved();
+    const ae = (await w.list("/")).find((e) => e.kind === "notebook" && e.ref === nb.store?.id) ?? (await w.list("/")).find((e) => e.kind === "notebook");
+    const ar = await w.read(ae.path);
+    const be = await w.create("/B separate.ipynb", { content: { name: "B separate", mode: "python", cells: [{ id: "bPrivate", code: "B private" }] } });
+    let br = await w.read(be.path);
+    // (B's revision past A's: a save of A made from B's would be taken)
+    while (br.rev <= ar.rev) { await w.write(be.path, br.content, { base: br.rev }); br = await w.read(be.path); }
+    const real = nb.store;
+    let n = 0, enter;
+    window.__sentA = [];
+    window.__enterA = new Promise((r) => (enter = r));
+    const hold = new Promise((r) => (window.__releaseA = r));
+    await nb.attach({ load: () => real.load(), save: async (d) => { __sentA.push({ name: d.name, code: d.cells[0].code, base: d.baseRev }); if (++n === 1) { enter(); await hold; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    await new Promise((r) => setTimeout(r, 0));
+    nb.setInput(nb.cells()[0], "A first"); nb.flush();
+    await __enterA;
+    nb.setInput(nb.cells()[0], "A second"); nb.flush();
+    window.__aPath = ae.path;
+    await sagebrush.open(be.ref);
+    return { A: ae.path, aName: ar.content.name };
+  })()`);
+  const t3 = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base)}`, { method: "PUT" })).json();
+  const ws3 = new WebSocket(t3.webSocketDebuggerUrl);
+  await new Promise((r) => (ws3.onopen = r));
+  let n3 = 0; const waiting3 = new Map();
+  ws3.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waiting3.has(d.id)) { waiting3.get(d.id)(d.result ?? d.error); waiting3.delete(d.id); } };
+  const ev3 = async (expression) => { const id = ++n3; const r = await new Promise((ok) => { waiting3.set(id, ok); ws3.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 800)); return r.result?.value; };
+  for (let i = 0; i < 600 && !(await ev3(`!!window.sagebrush?.workspace`).catch(() => false)); i++) await sleep(100);
+  await ev3(`(async () => { const w = sagebrush.workspace, r = await w.read("/B separate.ipynb"); await w.write("/B separate.ipynb", { ...r.content, cells: r.content.cells.map((c) => ({ ...c, code: "B remote private" })) }, { base: r.rev }); return 1; })()`);
+  check(await until(`sagebrush.notebook.snapshot().cells[0].code === "B remote private"`), "(B, shown here, changed in another tab)");
+  ws3.close();
+  await send("Target.closeTarget", { targetId: t3.id });
+  const crossed = await ev(`(async () => { __releaseA(); await sagebrush.notebook.saved(); await new Promise((r) => setTimeout(r, 500)); const a = await sagebrush.workspace.read(__aPath), b = await sagebrush.workspace.read("/B separate.ipynb"); return { sent: __sentA, A: { name: a.content.name, code: a.content.cells[0].code }, B: { name: b.content.name, code: b.content.cells[0].code } }; })()`);
+  check(crossed.A.name === cross.aName && crossed.A.code === "A second" && crossed.B.name === "B separate" && crossed.B.code === "B remote private" && crossed.sent.every((x) => x.name === cross.aName && x.code.startsWith("A ")), "a save of A still queued when B was opened (and changed elsewhere) writes A's second edit to A, from A's revision, nothing of B: " + JSON.stringify(crossed));
   // Undo of Move to Trash: that file, put in Trash that time; not another
   // since put there under the same name (CORR-0B0-3)
   await ev(`${W}.create("/undo.txt", { content: "original" }).then(() => 1)`);
