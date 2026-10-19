@@ -515,14 +515,17 @@ def test_through_the_server():
     tools = {t["name"]: t for t in rpc(2, "tools/list", {})["result"]["tools"]}
     assert all(("workspace_" + v) in tools for v in WS.VERBS) and "sage" in tools and "workspace_connect" in tools
     assert tools["workspace_read"]["outputSchema"] == WS.OUTPUT_SCHEMA
-    r = rpc(3, "tools/call", {"name": "workspace_list", "arguments": {}})
+    # arguments are checked first (nothing invalid reaches a page), then the link
+    r = rpc(30, "tools/call", {"name": "workspace_list", "arguments": {}})
+    assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "invalid", r
+    r = rpc(3, "tools/call", {"name": "workspace_list", "arguments": {"folder": "/"}})
     assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "not_connected", r
     # workspace_connect: a code and a port on 127.0.0.1; until a page pairs, the verbs say so
     r = rpc(31, "tools/call", {"name": "workspace_connect", "arguments": {}})["result"]
     got = r["structuredContent"]["result"]
     assert not r["isError"] and len(got["code"]) == 26 and got["port"] > 0 and got["paired"] is False, r
     assert got["code"] in r["content"][0]["text"] and srv.link.sock.getsockname()[0] == "127.0.0.1"
-    r = rpc(32, "tools/call", {"name": "workspace_list", "arguments": {}})["result"]
+    r = rpc(32, "tools/call", {"name": "workspace_list", "arguments": {"folder": "/"}})["result"]
     assert r["isError"] and r["structuredContent"]["error"]["code"] == "not_connected"
     srv.link.close()
     srv.link = FakePage()
