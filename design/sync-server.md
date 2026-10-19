@@ -661,7 +661,10 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
   - for each object older than two days, it finds the account by the key's prefix in `sync_accounts`:
     - a purged or unknown account: the object is deleted;
     - a live one: its account object is asked which keys it knows (holdings, reservations, the outbox), and the rest are deleted;
-  - this catches an R2 write whose transaction failed, and a put that commits late (CORR-5E2-2): R2 gives no bound on when a put that has sent its last byte commits, so the upload's cut-off (§5.4) bounds only the transfer, and this job stays responsible for every key, whenever its commit lands, even after the account was deleted or turned on again.
+  - this catches an R2 write whose transaction failed, and a put that commits late (CORR-5E2-2): R2 gives no bound on when a put that has sent its last byte commits, so the upload's cut-off (§5.4) bounds only the transfer, and this job stays responsible for every key, whenever its commit lands, even after the account was deleted or turned on again;
+  - its bounds (LIMIT-268-1, LIMIT-SYNC-CRON-1):
+    - at most 400 calls a run, every one counted: up to 20 for pruning purge receipts, then a page is begun only if its worst case (105 calls: cursor read, list, account lookup, 100 account calls, delete, cursor write) still fits;
+    - a whole-run deadline of 10 minutes, against Cloudflare's 15 for a cron: no call, D1, R2 or an account object's, starts after it, and none is waited for beyond it. The run then stops where it is. Every stop is safe: a page whose account calls didn't all answer deletes nothing, and a page's cursor moves only once the page is done, so the next run repeats it.
 
 ## 10. Encryption
 

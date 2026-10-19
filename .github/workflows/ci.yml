@@ -70,6 +70,7 @@ jobs:
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
           node web/sync/test-sync.mjs
+          bun web/sync/test-inventory.mjs
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs

@@ -6,8 +6,15 @@
 // the share API on (web/share/server.ts): the dev R2 bucket and D1 database,
 // shared files served by web/files on files.cocalcusercontent.dev.  The
 // production site gets the share API once it is reviewed.
-import { bindings, defineConfig, triggers } from "cf/config";
+//
+// The dev site also has sync (web/sync, design/sync-server.md): its two
+// object classes (SQLite storage), their bindings and limits, for the
+// accounts in SYNC_ACCOUNTS only (a secret: comma-separated CoCalc account
+// ids; unset or empty, nobody), from its own entry, src/dev.ts.  Production
+// has none of it: its entry neither routes sync nor exports the classes.
+import { bindings, defineConfig, exports, triggers } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
+import * as devEntrypoint from "./src/dev.ts" with { type: "cf-worker" };
 
 export default defineConfig({
   worker: ({ mode }) => {
@@ -15,7 +22,8 @@ export default defineConfig({
     return {
       name: dev ? "sagebrush-site-dev" : "sagebrush-site",
       compatibilityDate: "2026-10-01",
-      entrypoint,
+      // (the dev entry is the production one with sync on: ./src/dev.ts)
+      entrypoint: dev ? devEntrypoint : entrypoint,
       assets: { htmlHandling: "auto-trailing-slash", notFoundHandling: "404-page" },
       domains: [dev ? "dev.sagebrush.space" : "sagebrush.space"],
       env: {
@@ -34,9 +42,20 @@ export default defineConfig({
               SESSION_KEY: bindings.secret(),
               PURGE_KEY: bindings.secret(),
               DEV_AUTH_TOKEN: bindings.secret(),
+              // sync (design/sync-server.md §2, §3, §9, §11)
+              SYNC_ACCOUNT: bindings.durableObject({ worker: "sagebrush-site-dev", exportName: "SyncAccount" }),
+              SYNC_DOC: bindings.durableObject({ worker: "sagebrush-site-dev", exportName: "SyncDoc" }),
+              // (per IP: before authentication, 60 a minute (§2); CoCalc's admin calls, 120 a minute)
+              SYNC_PREAUTH: bindings.rateLimit({ namespace: "4101", simple: { limit: 60, period: 60 } }),
+              SYNC_ADMIN_LIMIT: bindings.rateLimit({ namespace: "4102", simple: { limit: 120, period: 60 } }),
+              // (a device's file URLs are signed here and served by web/files, under FILES_ORIGIN)
+              SYNC_ACCOUNTS: bindings.secret(),
+              SYNC_URL_KEY: bindings.secret(),
+              LIMITS_KEY: bindings.secret(),
             }
           : {}),
       },
+      ...(dev ? { exports: { SyncAccount: exports.durableObject({ storage: "sqlite" }), SyncDoc: exports.durableObject({ storage: "sqlite" }) } } : {}),
       triggers: dev ? [triggers.scheduled({ schedule: "17 3 * * *" })] : [],
     };
   },
