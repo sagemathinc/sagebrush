@@ -457,7 +457,9 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
 
 **How (an escrow):**
 - D1's `sync_accounts.claim_bytes` is the most sync may use. Only the account object changes it.
-  - **Raise:** one conditional statement, `claim + amount + sharing ≤ cap`, where `sharing` is sharing's own SQL for the account's bytes. It goes by whole chunks of $C = \min(64\ \text{MiB}, \max(4\ \text{MiB}, \text{storage\_bytes}/64))$ if they fit, else by exactly what is short. A file raise uses `cap = storage_bytes`; a document raise tries that first, then `storage_bytes + ceiling`.
+  - **Raise:** one conditional statement per cap. The claim grows by $\min(\text{whole chunks}, \text{cap} - \text{claim} - \text{sharing})$, where `sharing` is sharing's own SQL for the account's bytes, as long as that covers what is short. So the last part below a cap is taken in one write, never one an edit (LIMIT-97A-1). $C = \min(\text{clamp}(\text{storage\_bytes}/64,\ 4\ \text{MiB},\ 64\ \text{MiB}),\ \text{storage\_bytes})$. A file raise uses `cap = storage_bytes`; a document raise tries that first, then `storage_bytes + ceiling`.
+  - **Full:** a raise refused for space isn't asked of D1 again, for that kind, for 60 s, or until the limits change. A full budget costs at most one D1 statement a minute per kind, never one an edit.
+  - **After every await:** nothing D1 answered is installed unless the account is still the same generation, not deleting (CORR-97A-1). The caps aren't restored if the limits changed meanwhile, a revision counted with every new `storage_bytes` (CORR-97A-2). A queued raise reads the current limit when it runs, not the one it was queued with.
   - The raise names the account's generation and requires `state = 'active'`, so a dead or deleting generation can't raise.
 - **Sharing's check counts the whole claim:** its reservation is one INSERT with `sharing + claim + new ≤ storage_bytes`. Once documents have taken sync into the ceiling, `sharing + claim > storage_bytes` already, so sharing refuses even one byte. It is a plain integer comparison in SQLite, with no wrap and no clamp to zero.
 - **Sync's check is local:** `files + documents + held + new ≤ cap`.
@@ -466,6 +468,8 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
   - A new `storage_bytes` (a fetch or a notice) sets both caps to 0, so the next write has D1 check the claim against it again. A downgrade takes effect at once.
 - **Batches are held:**
   - a batch's body is exactly what its document's total can grow by (a resend grows it by less), so its bytes are held, `batch_holds`, from admission until the document answers;
+  - at most 200 holds are open per account, as many as a document's live batches. Past that, a new batch gets `busy` with `retry_after`, so a stream of lost answers can't grow the table (LIMIT-97A-2);
+  - a refusal before the forward (a blob not yet uploaded, when pinning) gives the hold back at once. Any failure after the forward began, with the hold still open, wakes the alarm for it (CORR-97A-3);
   - the answer's total then replaces the hold, in one step;
   - a lost answer's hold stays until its attempt can no longer commit (its pins' lapse). The alarm then asks the document its total (`info()`, bounded at 2 s), which replaces the hold.
 - **Ordering:** every raise and release goes through one chain in the account object, so its claim is never above D1's. A raise writes D1 first, then the object's value (from `RETURNING`). A release lowers the object's value first, then D1. A release that D1 misses is retried from the alarm with backoff; until then D1 is only higher, so room goes unused, never overshot.
@@ -480,7 +484,9 @@ where only sync's document batches ever use the ceiling. Sharing, and every file
   - sharing and files never exceed `storage_bytes`;
   - documents exceed it only into the named ceiling.
 - **Under-use:** at most about $2C$ a person, which shows as free in the breakdown. Sharing's release-and-retry recovers it at the edge.
-- **D1 writes:** one per chunk of growth, plus one per release. Never one per edit: in the tests, 20 batches of 1,000 bytes on a 1 MiB budget made at most 3.
+- **D1 writes:** one per chunk of growth, one per tail below each cap (`storage_bytes`, then the ceiling), plus one per release. When full, at most one statement per kind a minute. Never one per edit. In the tests:
+  - 20 batches of 1,000 bytes on a 1 MiB budget made at most 3;
+  - with production's chunk and less than one left, 11 edits made 2 writes, and further refused edits made none.
 
 **The breakdown** (`GET /api/share/me`): `usage` is the sum, and `usage_breakdown` has `sharing_files`, `sharing_versions`, `sync_files` and `sync_documents` (sync's versions will join them, §3). Sync's lines come from a read-only account-object call. It is for display only: enforcement is the claim.
 

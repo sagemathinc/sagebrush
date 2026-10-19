@@ -38,6 +38,11 @@ const T1 = "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1"; // a sharing upload and a syn
 const T2 = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"; // documents into the ceiling, then a downgrade
 const T3 = "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"; // sharing at the edge: release and retry; a lost answer's hold; the purge
 const T4 = "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"; // storage_bytes 1 MiB: D1 writes per growth
+const T5 = "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5"; // storage_bytes 1 MiB, production's chunk (4 MiB, so L): the tail below a cap
+const T6 = "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"; // open holds at the cap
+const U1 = "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"; // a raise's answer held across a purge and a new generation
+const U2 = "e8e8e8e8-e8e8-4e8e-8e8e-e8e8e8e8e8e8"; // a raise's answer held across a downgrade
+const U3 = "e9e9e9e9-e9e9-4e9e-8e9e-e9e9e9e9e9e9"; // a batch refused before its forward
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -78,6 +83,9 @@ fake.limits.set(O, sync(1 << 20, 1 << 20));
 fake.limits.set(Q, sync(1 << 20, 1 << 20));
 for (const t of [T1, T2, T3]) fake.limits.set(t, sync(10_000, 1 << 20));
 fake.limits.set(T4, sync(1 << 20, 1 << 20));
+fake.limits.set(T5, sync(1 << 20, 1 << 20));
+fake.limits.set(T6, sync(1 << 20, 1 << 20));
+for (const u of [U1, U2, U3]) fake.limits.set(u, sync(10_000, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -94,7 +102,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -1692,6 +1700,91 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const b4 = await acctT4.budget();
   ok(b4.documents === 20_000 && b4.calls <= 3, "20 batches, 20,000 bytes: " + b4.calls + " D1 claim writes, one a chunk, not one an edit");
   s4.ws.close();
+  // LIMIT-97A-1: production's chunk (4 MiB, so L itself), with less than a chunk left below the cap: the
+  // tail is taken in one write, and a full budget is refused without a D1 call an edit
+  const st5 = await signIn(T5);
+  const acctT5 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T5)));
+  ok((await post(st5, "/api/sync/v1/enable", {})).status === 200, "(T5: sync on, storage_bytes 1 MiB)");
+  await acctT5.setChunk({ bytes: 4 << 20 });
+  ok([200, 201].includes((await sharePut(st5, Buffer.alloc(40_000, 51))).status), "(sharing holds 40,000 first: less than a chunk is left)");
+  const s5 = await socket(st5);
+  await hello(s5, dev1);
+  const docT5 = "7575cafe7575";
+  const c5 = [];
+  for (let i = 1; i <= 14; i++) {
+    const a = await s5.ask(batch(docT5, 1, [[i, pid(i, "clientT5TL"), i > 1 ? [pid(i - 1, "clientT5TL")] : [], "t".repeat(100_000)]], i === 1 ? { kind: "board" } : {}));
+    c5.push(a?.batch?.new === 1 ? "ok" : a?.code);
+    if (a?.batch?.new !== 1) break;
+  }
+  const calls5 = (await acctT5.budget()).calls;
+  const more = [];
+  const writes5 = (await acctT5.budget()).writes;
+  // (each as large as the one refused: none fits)
+  for (let i = 0; i < 6; i++) more.push((await s5.ask(batch(docT5, 1, [[1, pid(100 + i, `clientT5M${i}`), [], "v".repeat(100_000)]])))?.code ?? "ok");
+  const b5 = await acctT5.budget();
+  const c5d = await claimOf(T5);
+  ok(c5.filter((c) => c === "ok").length >= 10 && c5.at(-1) === "storage_full" && writes5 === 2 && calls5 <= 5 && c5d + 40_000 <= (1 << 20) + Math.max(256, Math.floor((1 << 20) / 10)),
+    "with production's chunk and less than one left, 11 edits: the tail below L and the ceiling's are one D1 write each (2), with " + calls5 + " statements in all: " + JSON.stringify({ batches: c5, writes: writes5, calls: calls5, claim: c5d }));
+  ok(more.every((c) => c === "storage_full") && b5.calls - calls5 <= 2 && b5.writes === writes5, "and, full, 6 more edits are refused with at most 2 D1 statements (once refused, a while without asking), none a write: " + JSON.stringify({ more, calls: b5.calls - calls5 }));
+  s5.ws.close();
+  // LIMIT-97A-2: at most 200 open holds; a zero-byte batch takes one too
+  const st6 = await signIn(T6);
+  const acctT6 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T6)));
+  ok((await post(st6, "/api/sync/v1/enable", {})).status === 200, "(T6: sync on)");
+  const s6 = await socket(st6);
+  await hello(s6, dev1);
+  const z1 = await s6.ask(batch(LOSE, 1, [[1, pid(1, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z1?.code === "busy" && (await acctT6.budget()).holds === 1, "(a zero-byte batch whose answer is lost holds a row)");
+  ok((await acctT6.seedHolds({ n: 198 })) === 199, "(199 open holds)");
+  const z2 = await s6.ask(batch("7676cafe7676", 1, [[1, pid(2, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z2?.batch?.new === 1 && (await acctT6.budget()).holds === 199, "the 200th, answered, goes, and its hold is gone at once");
+  await acctT6.seedHolds({ n: 1 });
+  const z3 = await s6.ask(batch("7777cafe7777", 1, [[1, pid(3, "clientT6ZB"), [], ""]], { kind: "board" }));
+  ok(z3?.code === "busy" && (await acctT6.budget()).holds === 200, "with 200 open, a new batch is refused, busy with retry_after, and makes no row (LIMIT-97A-2)");
+  s6.ws.close();
+  // CORR-97A-1: a raise's D1 answer, held across a purge of its generation and a new one: never installed
+  const gs = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  const su1 = await signIn(U1);
+  const acctU1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U1)));
+  ok((await post(su1, "/api/sync/v1/enable", {})).status === 200, "(U1: sync on, generation 1)");
+  await gs("claim-raise-answer", true);
+  const pr1 = acctU1.reserve({ account: U1, sha256: sha(Buffer.from("u1 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(U1)) >= 5000), "(the raise's statement ran in D1: 5,000 granted, its answer held)");
+  ok((await del(su1, U1)).status === 202 && (await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(U1)).first())?.state === "purged")), "(meanwhile, Delete my synced data: generation 1 purged, its claim 0)");
+  const en2u = await (await post(su1, "/api/sync/v1/enable", {})).json();
+  ok(en2u.generation === 2 && en2u.state === "active", "(sync on again: generation 2)");
+  await gs("claim-raise-answer", false);
+  const rr1 = await pr1;
+  const bu1 = await acctU1.budget();
+  ok(rr1?.error && bu1.claim === 0 && bu1.files === 0 && (await claimOf(U1)) === 0, "the old raise's answer, arriving now, is not installed in generation 2: no claim, no reservation (CORR-97A-1): " + JSON.stringify({ r: rr1, claim: bu1.claim, files: bu1.files }));
+  // CORR-97A-2: a raise's answer held across a downgrade: the downgrade's zeroed caps stand
+  const su2 = await signIn(U2);
+  const acctU2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U2)));
+  ok((await post(su2, "/api/sync/v1/enable", {})).status === 200, "(U2: sync on, storage_bytes 10,000)");
+  await gs("claim-raise-answer", true);
+  const pr2 = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise")), size: 5000 });
+  ok(await until(async () => (await claimOf(U2)) >= 5000), "(the raise's statement ran: its answer held)");
+  // (and a second upload's raise queued behind it, with the limit as it was when it asked)
+  const pr2b = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise, queued")), size: 4000 });
+  await new Promise((r) => setTimeout(r, 200));
+  fake.limits.set(U2, sync(0, 1 << 20));
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: U2, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
+  await gs("claim-raise-answer", false);
+  const rr2 = await pr2;
+  const rr2b = await pr2b;
+  const bu2 = await acctU2.budget();
+  ok(rr2b?.error !== undefined, "the raise queued behind it, run after the downgrade, reads the new limit, not the one it was queued with, and admits nothing: " + JSON.stringify(rr2b));
+  ok(rr2?.error && bu2.blob_cap === 0 && bu2.files === 0 && (await put(su2, Buffer.from("u2 after"))).status !== 201, "the older raise's answer doesn't restore the caps the downgrade zeroed, and nothing is reserved or taken (CORR-97A-2): " + JSON.stringify({ r: rr2, blob_cap: bu2.blob_cap, files: bu2.files }));
+  // CORR-97A-3: a batch refused before its forward (its blob was never uploaded) gives its hold back
+  const su3 = await signIn(U3);
+  const acctU3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U3)));
+  ok((await post(su3, "/api/sync/v1/enable", {})).status === 200, "(U3: sync on)");
+  const s3u = await socket(su3);
+  await hello(s3u, dev1);
+  const nb = await s3u.ask(batch("7979cafe7979", 1, [[1, pid(1, "clientU3NB"), [], "abc", [sha(Buffer.from("never uploaded"))]]], { kind: "board" }));
+  const bu3 = await acctU3.budget();
+  ok(nb?.code && nb.code !== "busy" && bu3.holds === 0 && bu3.held === 0, "a batch refused before its forward (a blob not uploaded) leaves no hold: " + JSON.stringify({ code: nb?.code, holds: bu3.holds, held: bu3.held }));
+  s3u.ws.close();
   // the breakdown: sharing's files and versions, sync's files and documents, against the one storage_bytes
   const me = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: st2 } })).json();
   ok(me.usage_breakdown?.sync_documents === 10_500 && me.usage_breakdown.sync_files === 0 && me.usage_breakdown.sharing_files === 0 && me.usage === 10_500, "the usage breakdown shows each part, sync's documents on their own line, and their sum: " + JSON.stringify({ usage: me.usage, parts: me.usage_breakdown }));
