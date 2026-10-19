@@ -114,7 +114,11 @@ That is about 6½ working days for board. Each step is its own branch, reviewed 
   - An op that fails is skipped and listed, never applied.
 - **The workspace's own bounds** (100,000 entries, 10,000 per folder) apply to what comes down as to anything else. Past them, the Sync panel says so, and nothing is half-applied.
 
-## 6. Questions for @sagebrush
+## 6. Decisions (@sagebrush, Oct 19)
 
-1. Is listing documents without their content acceptable for slice 1? The alternative is to wait for slice 2 before showing the switch at all, which is about 3 more days for board.
-2. Is the switch for allowlisted accounts only, hidden from everyone else? Or should it be visible to everyone signed in, with the server's refusal shown? The latter is plainer, and shows what the plans include.
+1. **Slice 1 may list notebooks and boards without their content** ("synced in the next step"): it is dev-only and allowlisted. **Slice 2 must land before any production flag.**
+2. **The switch's visibility:**
+   - hidden when the server says the account isn't on the allowlist (403 "sync isn't enabled for this account");
+   - shown, with the server's refusal text, when the account is allowed but its plan has sync off, or CoCalc can't be reached.
+   - No pricing or upsell wording: that framing is William's, and stays out of the repository.
+3. **Process:** astra and daybreak2 review this plan. Building starts after both CLEAR, and after capabilities 1a and 1b, each step its own PR.
