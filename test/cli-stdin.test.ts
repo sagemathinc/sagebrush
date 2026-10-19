@@ -72,7 +72,13 @@ test("a program on stdin past 8 MiB is refused before it is kept, in each mode, 
     assert.equal(r.stdout, "");
     assert.match(r.stderr, /the program on stdin is more than 8 MiB: not supported/);
   }
-  // (one under the limit still runs, under the same heap)
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--matlab"], { input: "x = 1;\n".repeat(2000) + "disp(x)\n", encoding: "utf8", timeout: 60000 });
+  // (one under the limit still runs: a Python program under the same heap, about 19 MB
+  // live at its peak on Node 24; and a MATLAB one under 192 MiB, since MATLAB's runtime
+  // alone holds 75 to 94 MB live while it starts on Node 24, whatever the program, and
+  // fails under 88 MiB: under 96 its margin was a few MB, and GitHub's runner ran out
+  // of it on 26817895)
+  const p = spawnSync(process.execPath, ["--max-old-space-size=96", cli], { input: "x = 1\n".repeat(2000) + "print(x)\n", encoding: "utf8", timeout: 60000 });
+  assert.deepEqual([p.status, p.stdout], [0, "1\n"], `signal ${p.signal}; ${p.stderr.slice(0, 300)}`);
+  const r = spawnSync(process.execPath, ["--max-old-space-size=192", cli, "--matlab"], { input: "x = 1;\n".repeat(2000) + "disp(x)\n", encoding: "utf8", timeout: 60000 });
   assert.deepEqual([r.status, r.stdout], [0, "     1\n"], `signal ${r.signal}; ${r.stderr.slice(0, 300)}`);
 });

@@ -135,9 +135,9 @@ export interface BoardHost {
    * one's place (this one stays as it is); none: this board emptied, as an
    * edit (Undo brings it back).  Throws, saying why, if it can't be kept
    * (this board then stays) */
-  newBoard?(mode: string): void;
+  newBoard?(mode: string): void | Promise<void>;
   /** Duplicate: a copy of this board as a board of its own, opened in its place; none: no Duplicate.  Throws as newBoard does */
-  duplicate?(d: BoardDoc): void;
+  duplicate?(d: BoardDoc): void | Promise<void>;
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
   /** the function search's index of a language (web/docsearch.ts), shown
@@ -1676,11 +1676,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (one that can't be kept: not gone to, this board staying, and why said)
   // (nor while what was written here isn't kept: kept now, or this board
   // stays, HARD-933-1)
-  const elsewhereNot = (what: string, f: () => void) => {
+  const elsewhereNot = (what: string, f: () => void | Promise<void>) => {
     if (unkept && doc && host.store) {
       try { host.store.save(doc); unkept = null; } catch (e: any) { return say(`**${what}:** this board isn't kept in this browser (${String(e?.message ?? e)}), so it stays open. Download it (File) to keep it.`); }
     }
-    try { f(); } catch (e: any) { say(`**${what}:** ${String(e?.message ?? e)}.`); }
+    // (a host that makes the board elsewhere first, the workspace's: its failure said too)
+    try { void Promise.resolve(f()).catch((e: any) => say(`**${what}:** ${String(e?.message ?? e)}.`)); } catch (e: any) { say(`**${what}:** ${String(e?.message ?? e)}.`); }
   };
   $("duplicate").onclick = async () => {
     await editor.keepWriting();
@@ -2185,6 +2186,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   return {
     board,
     bench,
+    /** The board's title made `t` if it is `was` (its file renamed by the
+     * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
+    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false) : Promise.resolve(null)),
     /** Unmount: what is being written is kept first; then nothing of the
      * board is left (its listeners and effects, the code engine and its
      * interpreter, TimeTravel's history, its elements; its stylesheet with

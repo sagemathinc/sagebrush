@@ -7,7 +7,7 @@ import {
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr,
+  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -76,6 +76,7 @@ T.object = object;
 object.$dict.set("__init__", objectInit);
 object.$dict.set("__new__", objectNew);
 object.$dict.set("__setattr__", objectSetattr);
+(objectSetattr as any).__qualname__ = "object.__setattr__";
 object.$dict.set("__eq__", O.objectEq);
 object.$dict.set("__ne__", O.objectNe);
 object.$dict.set("__hash__", O.objectHash);
@@ -96,10 +97,21 @@ function exactAttrName(name: any): string {
   return raise(T.TypeError, `attribute name must be string, not '${typeName(name)}'`);
 }
 method(object, "__getattribute__", (self: any, name: any) => genericGetattr(self, exactAttrName(name), typeOf(self), undefined, false));
-method(object, "__delattr__", (self: any, name: string) => {
-  genericDelattr(self, name, typeOf(self));
-  return null;
-}).$genericDelattr = true;
+// (its arguments as a slot wrapper's: slotArgs)
+{
+  const od: any = noKeywords(pyfn(function __delattr__(self: any, name: string) {
+    slotArgs("__delattr__", "object", arguments, 1);
+    notForType(self, "__delattr__");
+    genericDelattr(self, name, typeOf(self));
+    return null;
+  }, "__delattr__"));
+  od.$builtinMethod = true;
+  od.$owner = object;
+  od.__qualname__ = "object.__delattr__";
+  od.$selfChecked = od;
+  od.$genericDelattr = true;
+  object.$dict.set("__delattr__", od);
+}
 
 const objectDir = method(object, "__dir__", (self: any) => defaultDir(self));
 
@@ -121,6 +133,14 @@ type.$customGet = true;
 // then the metaclass's other attributes), what a metaclass's
 // super().__getattribute__ reaches; never __getattr__ (the slot calls that)
 method(type, "__getattribute__", (c: any, name: any) => typeGetattr(c, exactAttrName(name)));
+// (type's own __setattr__ and __delattr__, the metaclass hooks' default)
+for (const f of [typeSetattr, typeDelattr] as any[]) {
+  f.$builtinMethod = true;
+  f.$owner = type;
+  f.__qualname__ = `type.${f.__name__}`;
+  f.$selfChecked = f; // (it checks its receiver itself, CPython's wording)
+  type.$dict.set(f.__name__, f);
+}
 getset(type, "__name__", (c) => c.$name, (c, v) => void (c.$name = v));
 getset(type, "__qualname__", (c) => c.$qualname, (c, v) => void (c.$qualname = v));
 // (a class's __module__: its dict's, but not its instances' __module__
