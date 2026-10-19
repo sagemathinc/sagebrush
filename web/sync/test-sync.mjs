@@ -64,7 +64,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -649,7 +649,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
     se1.send({ ...batch(docM, 1, [[1, pid(60, M), [], "crash", [sha(HE)]]]), req: 9999 });
     await new Promise((r) => setTimeout(r, 60));
     const ia = await acctE().inspect({ sha256: sha(HE) });
-    ok(ia?.alarm !== null && ia.alarm >= t0 + 300 && ia.alarm <= t0 + 300 + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
+    ok(ia?.alarm !== null && ia.alarm >= t0 + 1000 && ia.alarm <= t0 + 1000 + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
     await acctE().crash().catch(() => {});
     await new Promise((r) => setTimeout(r, 100));
     // (the restarted object, with the document still holding the answer)
@@ -1171,14 +1171,27 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(hp.status === 403, "and the account then takes no write: its object was never given storage (" + hp.status + ")");
   ok((await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(H)).first()) === null && (await bucket.list({ prefix: `s/${hashOf(H).slice(0, 32)}/` })).objects.length === 0, "nothing of H's is in D1 or R2");
   // CORR-A9B-1: an enable that read E's registration before E's purge finished can't make storage under it
-  const regE = await db.prepare("SELECT state, incarnation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
-  ok(regE?.state === "purged" && /^[0-9a-f]{32}$/.test(regE.incarnation), "(E is purged; its row keeps the incarnation it had)");
-  const staleE = await acctNs.get(acctNs.idFromName("acct:" + hashOf(E))).enable({ account: E, hash: hashOf(E), incarnation: regE.incarnation });
+  const regE = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
+  ok(regE?.state === "purged" && regE.generation === 1, "(E is purged; its row keeps the generation it had)");
+  const staleE = await acctNs.get(acctNs.idFromName("acct:" + hashOf(E))).enable({ account: E, hash: hashOf(E), generation: regE.generation });
   const seE = await signIn(E);
   ok(staleE?.error?.code === "forbidden" && (await put(seE, Buffer.from("E after a stale enable"))).status === 403, "a stale enable, with the purged incarnation, is refused, and no write is taken (CORR-A9B-1)");
-  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "turning sync on again makes a new incarnation, which the tombstone doesn't refuse");
-  const regE2 = await db.prepare("SELECT state, incarnation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
-  ok(regE2?.state === "active" && regE2.incarnation !== regE.incarnation && (await put(seE, Buffer.from("E after turning sync on"))).status === 201, "and the account takes writes under it");
+  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "turning sync on again makes the next generation, which the tombstone doesn't refuse");
+  const regE2 = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
+  ok(regE2?.state === "active" && regE2.generation === 2 && (await put(seE, Buffer.from("E after turning sync on"))).status === 201, "and the account takes writes under it");
+  // CORR-DE7-1: two cycles. Generation 2 is purged, 3 is turned on and purged: a stale enable of 1, 2 or 3 is refused
+  const acctE = acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
+  const purgeE = async () => {
+    ok((await post(seE, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(E: Delete my synced data)");
+    ok(await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first())?.state === "purged"), "(the purge finishes)");
+  };
+  await purgeE();
+  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "(generation 3)");
+  await purgeE();
+  const stale = [];
+  for (const g of [1, 2, 3]) stale.push((await acctE.enable({ account: E, hash: hashOf(E), generation: g }))?.error?.code ?? "admitted");
+  ok(stale.join() === "forbidden,forbidden,forbidden" && (await put(seE, Buffer.from("E after stale enables"))).status === 403, "after two cycles, a stale enable of every retired generation is refused, and no write is taken (CORR-DE7-1): " + stale.join());
+  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200 && (await put(seE, Buffer.from("E, generation 4"))).status === 201, "and turning sync on again (generation 4) takes writes");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

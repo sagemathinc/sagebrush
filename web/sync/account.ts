@@ -150,30 +150,29 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** Turn sync on for this account: from a session, the only way this object gets storage. */
   /**
-   * Give this account storage, for the registration `incarnation` (CORR-A9B-1):
-   * the D1 row's, made new each time sync is turned on from nothing.  A purge
-   * leaves this object a tombstone naming the incarnation it deleted, so an
-   * enable that read the row before the purge finished can't make storage
-   * again under it; and an object still holding (or deleting) one
-   * incarnation refuses another.
+   * Give this account storage, for the registration `generation` (CORR-A9B-1,
+   * CORR-DE7-1): the D1 row's, raised each time sync is turned on from
+   * nothing.  A purge leaves this object a tombstone holding the highest
+   * generation it has retired, a high-water mark, so an enable that read any
+   * older registration, however many purges ago, is refused; an object
+   * holding (or deleting) one generation refuses every other.
    */
-  async enable(a: { account: string; hash: string; incarnation: string }): Promise<Result<{ state: string }>> {
+  async enable(a: { account: string; hash: string; generation: number }): Promise<Result<{ state: string }>> {
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
-      if (typeof a.incarnation !== "string" || !/^[0-9a-f]{32}$/.test(a.incarnation)) throw new SyncError("invalid", "incarnation");
+      if (!Number.isSafeInteger(a.generation) || a.generation < 1) throw new SyncError("invalid", "generation");
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
-      if (this.get("tombstone") === a.incarnation) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again");
+      if (a.generation <= Number(this.get("retired") ?? 0)) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again");
       const had = this.get("account_id");
       if (had !== undefined) {
         if (had !== a.account) throw new SyncError("forbidden", "not this account");
-        if (this.get("incarnation") !== a.incarnation) throw new SyncError(this.state() === "deleting" ? "deleting" : "conflict", "another registration holds this account's storage");
+        if (Number(this.get("generation")) !== a.generation) throw new SyncError(this.state() === "deleting" ? "deleting" : "conflict", "another registration holds this account's storage");
         return { state: this.state() };
       }
-      this.sql.exec("DELETE FROM meta WHERE k = 'tombstone'");
       for (const s of SCHEMA) this.sql.exec(s);
       this.set("account_id", a.account);
       this.set("account_hash", a.hash);
-      this.set("incarnation", a.incarnation);
+      this.set("generation", a.generation);
       this.set("created", Date.now());
       this.set("state", "active");
       return { state: this.state() };
@@ -826,17 +825,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // deleted, written in the same synchronous step that drops everything else, so no enable can
     // come between (CORR-A9B-1)
     const db = this.env.SHARE_DB;
-    const incarnation = this.get("incarnation") ?? "";
+    const generation = Number(this.get("generation") ?? 0);
     if (db) {
-      await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND incarnation = ?7")
-        .bind(this.get("account_hash"), Math.floor(now / 1000), this.get("purge_id"), this.get("purge_kind"), Number(this.get("purge_docs") ?? 0), Number(this.get("purge_bytes") ?? 0), incarnation).run();
+      await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1 AND generation = ?7")
+        .bind(this.get("account_hash"), Math.floor(now / 1000), this.get("purge_id"), this.get("purge_kind"), Number(this.get("purge_docs") ?? 0), Number(this.get("purge_bytes") ?? 0), generation).run();
     }
     await this.ctx.storage.deleteAlarm();
     this.ctx.storage.transactionSync(() => {
+      // (the high-water mark only rises: a purge of an older generation can't lower it)
+      const retired = Math.max(Number(this.get("retired") ?? 0), generation);
       const tables = (this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as Row[]).map((r) => String(r.name));
       for (const t of tables) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
       this.sql.exec("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)");
-      this.sql.exec("INSERT INTO meta (k, v) VALUES ('tombstone', ?)", incarnation);
+      this.sql.exec("INSERT INTO meta (k, v) VALUES ('retired', ?)", String(retired));
     });
     this.alarmAt = null;
     return true;
