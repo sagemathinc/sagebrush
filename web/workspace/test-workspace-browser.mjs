@@ -336,9 +336,125 @@ try {
   await fill(false);
   const roomAgain = await ev(`(async () => { let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } const c = await sagebrush.workspace.read(${JSON.stringify(copyOf("F held") + ".ipynb")}).catch(() => null); return { error, copy: c?.content.cells[0].code ?? null }; })()`);
   check(roomAgain.error === null && roomAgain.copy === "F held second", "…with room again, kept: " + JSON.stringify(roomAgain));
+  // CORR-900-1: an older keeping, tried again by an earlier saved(), never
+  // lands after a newer one: H's first keeping fails, saved() (asked while
+  // H's first save was held) tries it again; H's second save is kept; then
+  // the old one, held at the page, is let go: the copy is H's second edit
+  await ev(`(async () => {
+    const nb = sagebrush.notebook, w = sagebrush.workspace;
+    await nb.saved();
+    const e = await w.create("/H held.ipynb", { content: { name: "H held", mode: "python", cells: [{ id: "x1", code: "start" }] } });
+    await sagebrush.open(e.ref);
+    await nb.saved();
+    const real = nb.store;
+    let n = 0, calls = 0;
+    window.__gate = [0, 1, 2].map(() => { let open; const p = new Promise((r) => (open = r)); return { p, open }; });
+    window.__entered = [0, 1, 2].map(() => { let hit; const p = new Promise((r) => (hit = r)); return { p, hit }; });
+    window.__retryHold = new Promise((r) => (window.__releaseRetry = r));
+    window.__origKeep = nb.onDetachedConflict(null);
+    nb.onDetachedConflict(async (doc, theirs, key) => {
+      if (++calls === 1) throw new Error("first keeping unavailable");
+      if (doc.cells[0].code === "H held first") { window.__retryIn = true; await window.__retryHold; }
+      return __origKeep(doc, theirs, key);
+    });
+    await nb.attach({ load: () => real.load(), save: async (d) => { const k = ++n; if (k <= 2) { __entered[k].hit(); await __gate[k].p; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    await new Promise((r) => setTimeout(r, 0));
+    nb.setInput(nb.cells()[0], "H held first"); nb.flush();
+    await __entered[1].p;
+    window.__earlySaved = nb.saved().then(() => ({ ok: true }), (e) => ({ error: String(e?.message ?? e) }));
+    nb.setInput(nb.cells()[0], "H held second"); nb.flush();
+    await sagebrush.open((await w.stat("/B separate.ipynb")).ref);
+    return 1;
+  })()`);
+  await writeElsewhere("/H held.ipynb", "H remote concurrent");
+  await ev(`(() => { __gate[1].open(); return 1; })()`);
+  await sleep(800);
+  await ev(`(() => { __gate[2].open(); return 1; })()`);
+  check(await until(`sagebrush.workspace.read(${JSON.stringify(copyOf("H held") + ".ipynb")}).then((r) => r.content.cells[0].code === "H held second").catch(() => false)`, 20000), "(H's second save kept as a copy)");
+  const hRes = await ev(`(async () => {
+    __releaseRetry();
+    const early = await __earlySaved;
+    let error = null;
+    try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); }
+    await new Promise((r) => setTimeout(r, 300));
+    const w = sagebrush.workspace, codes = {};
+    for (const e of (await w.list("/")).filter((e) => e.path.startsWith(${JSON.stringify(copyOf("H held"))}))) codes[e.path] = (await w.read(e.path)).content.cells[0].code;
+    sagebrush.notebook.onDetachedConflict(__origKeep);
+    return { early, error, codes, retryIn: !!window.__retryIn };
+  })()`);
+  check(hRes.error === null && hRes.codes[copyOf("H held") + ".ipynb"] === "H held second" && !Object.values(hRes.codes).includes("H held first"), "an older keeping tried again by an earlier saved() never writes over the newer one: " + JSON.stringify(hRes));
+  // LIMIT-900-2: at most 4 notebooks left with changes not kept; past it,
+  // no other opens until they are, and nothing is dropped
+  await ev(`(async () => { window.__origKeep2 = sagebrush.notebook.onDetachedConflict(async () => { throw new Error("injected: not kept"); }); return 1; })()`);
+  for (let i = 1; i <= 4; i++) {
+    await ev(`(async () => {
+      const nb = sagebrush.notebook, w = sagebrush.workspace;
+      const e = await w.create("/K${i}.ipynb", { content: { name: "K${i}", mode: "python", cells: [{ id: "k", code: "start" }] } });
+      await sagebrush.open(e.ref);
+      const real = nb.store;
+      let enter, open;
+      const entered = new Promise((r) => (enter = r)), gate = new Promise((r) => (open = r));
+      await nb.attach({ load: () => real.load(), save: async (d) => { enter(); await gate; return { conflict: { ...d, cells: [{ id: "k", code: "K elsewhere" }], rev: 1e6 } }; }, subscribe: () => () => {} });
+      await new Promise((r) => setTimeout(r, 0));
+      nb.setInput(nb.cells()[0], "K${i} edit"); nb.flush();
+      await entered;
+      await sagebrush.open((await w.stat("/B separate.ipynb")).ref);
+      open();
+      await nb.saved().catch(() => {});
+      return 1;
+    })()`);
+  }
+  const bound = await ev(`(async () => {
+    const nb = sagebrush.notebook, w = sagebrush.workspace, left = nb.leftOutstanding;
+    const e = await w.create("/K5.ipynb", { content: { name: "K5", mode: "python", cells: [{ id: "k", code: "start" }] } });
+    let refused = null;
+    try { await sagebrush.open(e.ref); } catch (err) { refused = String(err?.message ?? err); }
+    return { left, refused, after: nb.leftOutstanding, shown: nb.snapshot().name };
+  })()`);
+  check(bound.left === 4 && /4 notebooks you left/.test(bound.refused ?? "") && bound.after === 4 && bound.shown === "B separate", "4 notebooks left with changes not kept: another isn't opened, saying why, and B stays: " + JSON.stringify(bound));
+  const unbound = await ev(`(async () => {
+    const nb = sagebrush.notebook, w = sagebrush.workspace;
+    nb.onDetachedConflict(__origKeep2);
+    let error = null;
+    try { await nb.saved(); } catch (e) { error = String(e?.message ?? e); }
+    const copies = {};
+    for (let i = 1; i <= 4; i++) copies[i] = (await w.read("/K" + i + " (your changes, made while it changed elsewhere).ipynb").catch(() => null))?.content.cells[0].code ?? null;
+    await sagebrush.open((await w.stat("/K5.ipynb")).ref);
+    return { error, copies, left: nb.leftOutstanding, shown: nb.snapshot().name };
+  })()`);
+  check(unbound.error === null && [1, 2, 3, 4].every((i) => unbound.copies[i] === "K" + i + " edit") && unbound.left === 0 && unbound.shown === "K5", "…once kept (each its own copy), another opens: " + JSON.stringify(unbound));
+  // LIMIT-900-1: a copy made before the workspace is open (here: another
+  // tab holds its lock as the page loads) isn't kept as a notebook the
+  // workspace doesn't list; once it opens, saved() keeps it
+  const gIds = await ev(`(async () => { const w = sagebrush.workspace; const g = await w.create("/G held.ipynb", { content: { name: "G held", mode: "python", cells: [{ id: "g", code: "start" }] } }); return { g: g.ref, b: (await w.stat("/B separate.ipynb")).ref }; })()`);
+  await ev5(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__unlockG = r))); return 1; })()`);
+  await sleep(300);
+  await go(base + "?nb=" + encodeURIComponent(gIds.g));
+  check(await until(`sagebrush.notebook?.snapshot().name === "G held" && !window.sagebrush.workspace`, 30000), "(G open, the workspace not yet: another tab holds its lock)");
+  await ev(`(async () => {
+    const nb = sagebrush.notebook, real = nb.store;
+    let n = 0, enter, open;
+    const entered = new Promise((r) => (enter = r));
+    window.__gateG = new Promise((r) => (window.__openG = r));
+    await nb.attach({ load: () => real.load(), save: async (d) => { if (++n === 1) { enter(); await __gateG; } return real.save(d); }, subscribe: (f) => real.subscribe(f) });
+    await new Promise((r) => setTimeout(r, 0));
+    nb.setInput(nb.cells()[0], "G held first"); nb.flush();
+    await entered;
+    nb.setInput(nb.cells()[0], "G held second"); nb.flush();
+    await sagebrush.open(${JSON.stringify(gIds.b)});
+    return 1;
+  })()`);
+  await ev5(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const tx = r.result.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks"), q = st.get(${JSON.stringify(gIds.g)}); q.onsuccess = () => st.put({ ...q.result, cells: [{ id: "g", code: "G remote concurrent" }], rev: q.result.rev + 1 }); tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
+  const gBefore = await ev(nbCount);
+  const gWait = await ev(`(async () => { __openG(); let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } return { error, ws: !!window.sagebrush.workspace }; })()`);
+  const gAfter = await ev(nbCount);
+  check(/isn't open yet/.test(gWait.error ?? "") && !gWait.ws && gAfter === gBefore, "the workspace not open yet: G's copy isn't kept unlisted, and saved() says why: " + JSON.stringify({ ...gWait, gBefore, gAfter }));
+  await ev5(`(() => { window.__unlockG(); return 1; })()`);
+  check(await until(`!!window.sagebrush.workspace`, 30000), "(the workspace open once the other tab lets go)");
+  const gKept = await ev(`(async () => { let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } const w = sagebrush.workspace, c = await w.read(${JSON.stringify(copyOf("G held") + ".ipynb")}).catch(() => null); return { error, copy: c?.content.cells[0].code ?? null, theirs: (await w.read("/G held.ipynb")).content.cells[0].code }; })()`);
+  check(gKept.error === null && gKept.copy === "G held second" && gKept.theirs === "G remote concurrent", "…once it is, saved() keeps G's latest edit, listed: " + JSON.stringify(gKept));
   ws5.close();
   await send("Target.closeTarget", { targetId: t5.id });
-  await ev(`sagebrush.notebook.attach(sagebrush.notebook.store).then(() => 1)`);
   // Undo of Move to Trash: that file, put in Trash that time; not another
   // since put there under the same name (CORR-0B0-3)
   await ev(`${W}.create("/undo.txt", { content: "original" }).then(() => 1)`);
