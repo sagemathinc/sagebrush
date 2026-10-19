@@ -485,8 +485,8 @@ Turning sync on, and both kinds of deletion, are each decided in one transaction
 | **Turn sync on** | No account (or a tombstone): `generation = retired + 1`, `state = registering`, which takes nothing (no socket, op, batch or upload). Registering or on: answers its own generation. Deleting: refused, 409 `deleting`. | The row is upserted to `(generation, active)` only if its generation is lower: the row only moves forward. Then it is read back. If the read shows this generation active, the Worker calls `confirm(generation)`. |
 | **`confirm(g)`** | Registering at `g`: now `active`. Already active at `g`: unchanged. `g ≤ retired`: refused as `retired`. Any other generation, or deleting: refused. | If refused as `retired`: that generation's row, if active, is marked purged. No storage can hold it again. |
 | **Delete my synced data** `(g)` | At `g`, registering or on: `deleting`, and its sockets close. Already deleting: joins. Another generation: `stale`, nothing changes. No account: `none`. | `deleting`: the row of `g`, unless it is already purged. |
-| **CoCalc's purge** | Whatever generation is held goes, as above. No account: `none`, with `retired`. | `deleting`: as above, under CoCalc's request id. `none`: every row of a generation `≤ retired` that isn't purged yet is marked purged. |
-| **The purge finishes** (alarm) | Everything is dropped. The tombstone keeps `retired = max(retired, g)` and the D1 record still to write, one per generation, in the same transaction. | The row of `g` is marked purged, with counts, whatever its state. If D1 fails, the alarm retries from the tombstone until it succeeds. |
+| **CoCalc's purge** | First, in its own transaction, the object is marked `deleted`, for good, whether or not it has storage (CORR-B92-1). Then whatever generation is held goes, as above. No account: `none`, with `retired`. | `deleting`: as above, under CoCalc's request id. `none`: every row of a generation `≤ retired` that isn't purged yet is marked purged. |
+| **The purge finishes** (alarm) | Everything is dropped. In the same transaction, the tombstone keeps `retired = max(retired, g)`, `deleted` if it was set, and one D1 record still to write. That record replaces any earlier one not yet written, so the tombstone is three rows at most, however many purges D1 missed (LIMIT-B92-1). | One D1 batch: the row of `g` is marked purged with its counts and request id, whatever its state; the row of any older generation, all retired, that isn't purged yet is marked purged, keeping the request id its deletion wrote. If D1 fails, the record waits a capped exponential backoff with jitter (1 to 10 minutes, ×0.5-1), and the alarm is armed for that. Each alarm makes one D1 call at most (LIMIT-B92-2). |
 
 **Why this is enough.** Every D1 write names one generation, or the generations up to `retired`, and the object has already decided that generation's fate:
 - a row is marked purged only for a generation the object has retired for good;
@@ -503,15 +503,19 @@ Turning sync on, and both kinds of deletion, are each decided in one transaction
 - a deletion naming an older generation, a newer one, or none (stale, stale, 400);
 - a purge whose D1 record fails, then sync turned on again (the record, written later from the alarm, touches only its own row), or nothing more happening (the alarm stays armed through failed retries, and the record is written later);
 - two purges' records pending at once, the second for a generation that never reached D1 (both kept, each written for its own row);
-- CoCalc's purge of an account with no storage, with a stray row left active (marked purged, under CoCalc's request id).
+- CoCalc's purge of an account with no storage, with a stray row left active (marked purged, under CoCalc's request id);
+- an enable and an upload arriving after CoCalc's purge of an account that never synced, and a late enable or confirm after CoCalc's purge of one with storage (all refused, astra's probe of CORR-B92-1);
+- six cycles while D1's records fail (the tombstone stays at two rows); retries backing off with jitter up to the cap, one D1 call each, then recovering (LIMIT-B92-1/2).
 
-Staged by reasoning only, as no test seam holds them:
+Staged with D1 answers held at the Worker (test gates, after astra's staging):
 - a deletion's `deleting` write held until after the purge finished (guarded: not over `purged`);
 - a `none` answer's write held until a new generation is registered (bounded by `≤ retired`);
-- a row moving on between the Worker's read-back and its marking of a retired generation purged (that write names the generation and requires `active`);
+- a held registration refused as retired whose marking of its row lands after a newer generation is registered (that write names the generation and requires `active`).
+
+By reasoning only:
 - the Worker stopping between any two of its steps. Before D1: the object stays registering, and the next enable goes on from there. Between the upsert and `confirm`: a row is left active for a generation the object may have retired. Nothing is wrong with it: the daily job asks the object, which knows no keys, and the next enable or CoCalc purge moves the row on.
 
-**What's left.** CoCalc's purge of an account that holds nothing doesn't stop a later enable. An enable already past its session check when the purge ran can make a new, empty registration. Its session is deleted by the same purge, so it can open no socket and take no write. CoCalc account ids are never reused.
+**An account CoCalc deleted stays deleted** (CORR-B92-1). Deleting a session doesn't stop a request that already read it: an enable or an upload past its session check can arrive at the account object after the purge. So CoCalc's purge marks the object `deleted` first, in a transaction of its own, even when it holds nothing, and the tombstone keeps the mark. From then on `enable` and `confirm` are refused, and nothing else can make storage. CoCalc never reuses an account id, so the mark is permanent and costs one row.
 
 ## 8. Limits, sizes and rates
 

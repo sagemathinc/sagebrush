@@ -5,6 +5,7 @@
 import { handleShare } from "../share/server.ts";
 import { handleSync, handleSyncFiles, register, syncScheduled, type Env } from "./server.ts";
 import { accountHash } from "./protocol.ts";
+import { setGate } from "./env.ts";
 export { SyncAccount } from "./account.ts";
 export { SyncDoc } from "./doc.ts";
 
@@ -18,6 +19,11 @@ export default {
       const account = url.searchParams.get("account") ?? "";
       const hash = await accountHash(account);
       return register(env, env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)), account, hash, Number(url.searchParams.get("generation")));
+    }
+    // (tests only: hold, or open, a named step in the Worker, as a late D1 answer would)
+    if (url.pathname === "/__test/gate") {
+      setGate(env, url.searchParams.get("name") ?? "", url.searchParams.get("on") === "1");
+      return Response.json({ ok: true });
     }
     if (url.hostname.endsWith("files.test")) return (await handleSyncFiles(req, env)) ?? new Response("not found", { status: 404 });
     return (await handleSync(req, env)) ?? (await handleShare(req, env, ctx)) ?? new Response("not the API", { status: 404 });
