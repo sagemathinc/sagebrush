@@ -755,8 +755,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * from then on; its sockets close; the alarm does the rest (purgeStep).
    * Idempotent by request id; a different id while one runs joins it.
    */
-  async purge(a: { request_id: string; kind: "self" | "admin" }): Promise<{ state: string; request_id: string }> {
-    if (!this.exists()) return { state: "none", request_id: a.request_id };
+  async purge(a: { request_id: string; kind: "self" | "admin"; generation?: number; hash?: string }): Promise<{ state: string; request_id: string }> {
+    if (!this.exists()) {
+      // No storage yet (an enable may still be on its way): the registered generation is retired at
+      // once, the same high-water mark a full purge leaves, and D1's deletion of it finishes here
+      // (CORR-A62-1).  An enable of it, or of any older one, is then refused; a fresh one is not.
+      if (a.generation === undefined || !Number.isSafeInteger(a.generation) || a.generation < 1 || typeof a.hash !== "string") return { state: "none", request_id: a.request_id };
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
+        const retired = Math.max(Number(this.get("retired") ?? 0), a.generation!);
+        this.sql.exec("INSERT INTO meta (k, v) VALUES ('retired', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", String(retired));
+      });
+      await this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = 0, bytes = 0 WHERE account_hash = ?1 AND generation = ?3 AND state = 'deleting'")
+        .bind(a.hash, Math.floor(Date.now() / 1000), a.generation).run();
+      return { state: "purged", request_id: a.request_id };
+    }
     const st = this.ctx.storage.transactionSync(() => {
       if (this.state() !== "deleting") {
         this.set("state", "deleting");
