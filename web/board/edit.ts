@@ -217,6 +217,10 @@ export class Editor {
   async keepWriting() {
     await this.inplace?.end();
   }
+  /** Whether something is being written where it is. */
+  get writing() {
+    return !!this.inplace;
+  }
   // (the item being written is no longer there: undone, or removed by an agent)
   private gone() {
     if (this.inplace && !this.board.item(this.inplace.id)) this.inplace.abandon();

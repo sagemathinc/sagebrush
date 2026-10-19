@@ -206,6 +206,39 @@ try {
   await drop(".board-editing", "Other.board.json", boardJson("Other"));
   check(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Other"`, 30000), "a board dropped while an item is written: opened");
   check(await until(`${W}.read("/Edited.board.json").then((r) => r.content.nodes[0].title === "WRITTEN_BEFORE_THE_DROP")`), "…what was being written kept first");
+  // (an item's title written in place, as a person double-clicks it and types: the board at this ref)
+  const writeInPlace = async (ref, text) => {
+    await ev(`(() => { sagebrush.board.editing(true); const it = board.item("a"); board.setCamera({ x: it.x - 200, y: it.y - 200, z: 1 }); board.render(); return 1; })()`);
+    await sleep(300);
+    const r = await ev(`board.clientRect("a")`);
+    const m = (type, clickCount = 1) => send("Input.dispatchMouseEvent", { type, x: r.left + 40, y: r.top + 14, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount });
+    await m("mousePressed"); await m("mouseReleased"); await m("mousePressed", 2); await m("mouseReleased", 2);
+    if (!(await until(`!!document.querySelector(".board-editing .be-title")`, 5000))) return false;
+    await ev(`(() => { const t = document.querySelector(".board-editing .be-title"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+    return true;
+  };
+  const freshBoard = async (path) => {
+    const ref = await ev(`${W}.create(${JSON.stringify(path)}, { content: { title: "Edited board", nodes: [{ id: "a", title: "Before", text: "body", x: 0, y: 0 }] } }).then((e) => e.ref)`);
+    await go(base + "board/?doc=local:" + ref);
+    await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Edited board"`, 60000);
+    return ref;
+  };
+  // the same, the file dropped on the sidebar's file tree: every way of leaving the board keeps it (astra's CORR-BCD-1)
+  await freshBoard("/Sidebar.board.json");
+  await ev(`(() => { const b = document.querySelector("[data-sbb=files]"); if (b?.getAttribute("aria-pressed") !== "true") b?.click(); return 1; })()`);
+  check(await until(`!!document.querySelector(".ftree")`, 5000), "(the sidebar's file tree shown)");
+  check(await writeInPlace(null, "WRITTEN_BEFORE_THE_SIDEBAR_DROP"), "(an item's title being written in place, the sidebar open)");
+  await drop(".ftree", "Fourth.board.json", boardJson("Fourth"));
+  check(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Fourth"`, 30000), "a board dropped on the sidebar while an item is written: opened");
+  check(await until(`${W}.read("/Sidebar.board.json").then((r) => r.content.nodes[0].title === "WRITTEN_BEFORE_THE_SIDEBAR_DROP")`), "…what was being written kept first");
+  // typing while the dropped file is still being read: kept too, as the page goes (astra's CORR-BCD-1)
+  await freshBoard("/Typed.board.json");
+  await ev(`(() => { window.__gate = new Promise((r) => (window.__open = r)); const ab = Blob.prototype.arrayBuffer, tx = Blob.prototype.text; Blob.prototype.arrayBuffer = async function () { await window.__gate; return ab.call(this); }; Blob.prototype.text = async function () { await window.__gate; return tx.call(this); }; return 1; })()`);
+  await drop("#board", "Fifth.board.json", boardJson("Fifth"));
+  check(await writeInPlace(null, "TYPED_WHILE_UPLOADING"), "(an item's title written in place while the drop is read)");
+  await ev(`(() => { window.__open(); return 1; })()`);
+  check(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Fifth"`, 30000), "a board dropped, then an item written while it is read: opened");
+  check(await until(`${W}.read("/Typed.board.json").then((r) => r.content.nodes[0].title === "TYPED_WHILE_UPLOADING")`), "…what was written meanwhile kept first");
   // the same, the board's own save refused (its storage full): it stays open, saying so, and what was written is not left behind
   await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
   await sleep(300);

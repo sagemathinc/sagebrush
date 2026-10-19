@@ -17,6 +17,14 @@
 // frame can't load (a service worker doesn't serve a sandboxed frame), and
 // the notebook page still works with the user's own notebooks.  A page
 // running someone else's code (a shared collection) gives no fallback.
+// Nothing asked of the runner runs in the fallback by itself: what was
+// waiting for it (a run, a question) is answered as not run, saying so, and
+// only what is asked after that, as the person runs it again, runs there
+// (astra's CORR-CAP-4).  What isn't code (the files, the libraries) is
+// given to it as it was to the runner.
+
+/** What a run waiting for the runner is told when the runner is given up. */
+export const NOT_RUN = "This code wasn't run: the sandboxed runner didn't start, and code doesn't run outside it by itself. Run it again to run it in this page's own interpreter.\n";
 
 import { FILES_RUNNER } from "./files-runner.js";
 
@@ -70,8 +78,21 @@ export class RunnerWorker {
       const w = (this.inner = fallback());
       w.onmessage = (e) => this.onmessage?.(e);
       w.onerror = (e) => this.onerror?.(e);
-      for (const m of this.queue) w.postMessage(m);
+      // (what isn't code given to it; what is, answered as not run: it runs there only as it is
+      // asked again)
+      const held = [];
+      for (const m of this.queue) {
+        if (m && typeof m === "object" && m.id !== undefined) held.push(m);
+        else w.postMessage(m);
+      }
       this.queue = [];
+      for (const m of held) {
+        const say = (d) => this.onmessage?.({ data: d });
+        if (m.code !== undefined || m.interact !== undefined) {
+          say({ id: m.id, stream: "stderr", text: NOT_RUN });
+          say({ id: m.id, done: true, error: true, ms: 0 });
+        } else say({ id: m.id, skipped: true });
+      }
     };
     this.timer = fallback ? setTimeout(giveUp, 10000) : null;
     // a frame that answered but whose interpreter says nothing once it has
