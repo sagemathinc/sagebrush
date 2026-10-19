@@ -125,7 +125,10 @@ export class SyncDoc extends DurableObject<SyncEnv> {
   }
 
   /** Made by its owner's account object, once; again is a no-op. */
-  async init(a: { owner_account: string; owner_hash: string; doc: string; kind: string }): Promise<Result<Head>> {
+  async init(a: { owner_account: string; owner_hash: string; doc: string; kind: string; expires?: number }): Promise<Result<Head>> {
+    await this.gate(`init:${a.doc}`);
+    // (a call the account object has stopped waiting for can't make the document, CORR-5E2-1)
+    if (a.expires !== undefined && Date.now() > a.expires) return { error: { code: "busy", message: "this call expired; send again" } };
     // (the object's name holds the owner: anything else is a caller's mistake, never a claim)
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (this.ctx.id.name !== undefined && this.ctx.id.name !== `doc:${a.owner_hash}:${a.doc}`) throw new SyncError("forbidden", "not this document");

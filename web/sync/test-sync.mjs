@@ -19,6 +19,7 @@ const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333"; // signed in, never allowlisted
 const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are first asked for while CoCalc is down
 const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pending but what a test makes (alarms)
+const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
 
 let failures = 0;
 let count = 0;
@@ -43,9 +44,11 @@ fake.limits.set(A, sync(30_000, 60_000));
 fake.limits.set(B, sync(1 << 20, 1 << 20));
 fake.limits.set(D, sync(1 << 20, 1 << 20));
 fake.limits.set(E, sync(1 << 20, 1 << 20));
+fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 10 });
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
+    if (fake.limitsGate) await fake.limitsGate;
     if (fake.down) return new Response("down", { status: 503 });
     const l = fake.limits.get(u.searchParams.get("account_id"));
     return l ? Response.json(l) : Response.json({ error: "no_account" }, { status: 404 });
@@ -57,11 +60,11 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1005", simple: { limit: 100000, period: 60 } } },
     },
     // the user-content Worker's signed reads with a tight per-IP limit, 2 a minute; and one with none
     {
@@ -87,7 +90,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       bindings: { ...shareBindings, SYNC_ACCOUNTS: A },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["tight.test/*"],
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -483,7 +486,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   const before = (await acctA.inspect({}))?.used;
   const r = await acctA.reserve({ account: A, sha256: "d".repeat(64), size: 1234 });
   ok(r?.ok?.id && (await acctA.inspect({}))?.used === before + 1234, "a reservation charges its bytes");
-  await new Promise((res) => setTimeout(res, 2500));
+  await new Promise((res) => setTimeout(res, 3600));
   ok((await acctA.inspect({}))?.used === before, "with nothing else happening, the reservation's end gives its bytes back (the alarm was armed at reserve)");
   // signed URLs: at most 600 a minute per account, counted at issue
   const sd = await signIn(D);
@@ -926,6 +929,30 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(r.status === 200 && (await r.json()).applied === false, "for an account that never turned sync on, nothing is made");
 }
 
+// ---- the admin routes' bounds, before any body or signature work (LIMIT-5E2-1)
+{
+  const huge = "x".repeat(5000);
+  let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
+  ok(r.status === 413, "an oversized notice is refused by its Content-Length, before it is read");
+  // (a body with no Content-Length: a stream)
+  const stream = () => new ReadableStream({ start(c) { for (let i = 0; i < 10; i++) c.enqueue(new TextEncoder().encode(huge)); c.close(); } });
+  r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: stream(), duplex: "half" });
+  ok(r.status === 411, "a notice with no Content-Length is refused before it is read (" + r.status + ")");
+  r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
+  ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
+  const codes = [];
+  for (let i = 0; i < 4; i++) codes.push((await fetchAt("https://tight.test", "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.5" }, body: "{}" })).status);
+  ok(codes.join() === "401,401,429,429", "the admin routes have a per-IP limit before any signature check: " + codes.join());
+  const pc = [];
+  for (let i = 0; i < 3; i++) pc.push((await fetchAt("https://tight.test", "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.7" }, body: '{"account_id":"x","request_id":"00000000-0000-4000-8000-000000000000"}' })).status);
+  ok(pc[2] === 429, "and the purge route, before sync or sharing read the body: " + pc.join());
+  const gc = [];
+  for (let i = 0; i < 3; i++) gc.push((await mf.dispatchFetch("https://tight.test/api/admin/sync-purge/00000000-0000-4000-8000-000000000000", { headers: { "cf-connecting-ip": "192.0.2.6" } })).status);
+  ok(gc[2] === 429, "and the purge status too: " + gc.join());
+  r = await mf.dispatchFetch("https://nolimit.test/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  ok(r.status === 404, "without the admin limit bound, sync's admin routes are off");
+}
+
 // ---- deleting (§7, §9): "Delete my synced data", and CoCalc's purge
 {
   const bucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
@@ -983,6 +1010,68 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const st = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${rid}`);
   ok(st.status === 200 && (await st.json()).state === "purged", "its status, signed, by the request id");
   ok((await signedGet(LIMITS_KEY, `/api/admin/sync-purge/${rid}`)).status === 401, "the status needs the purge key");
+}
+
+// ---- astra's slice-4 findings (CORR-5E2-1..3)
+{
+  const bucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  // CORR-5E2-3: a fetch of the limits, held while a newer notice lands, doesn't undo it
+  const sf = await signIn(F);
+  await post(sf, "/api/sync/v1/enable", {});
+  ok((await put(sf, Buffer.from("f"))).status === 201, "(F's limits cached: issued 10, 1,000 bytes)");
+  await new Promise((r) => setTimeout(r, 1200)); // (the cache is old: the next upload fetches)
+  fake.limits.set(F, { ...sync(1000, 1 << 20), issued: 15 });
+  let open;
+  fake.limitsGate = new Promise((r) => (open = r));
+  const upload = put(sf, Buffer.alloc(500, 5));
+  await new Promise((r) => setTimeout(r, 200));
+  const nb = JSON.stringify({ request_id: crypto.randomUUID(), account_id: F, issued: 20, limits: sync(1, 1 << 20) });
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", nb)).json()).applied === true, "(a notice, issued 20: 1 byte, while the fetch waits)");
+  open();
+  fake.limitsGate = null;
+  ok((await upload).status === 507, "the fetch's older answer doesn't stand: the upload meets the notice's 1-byte limit (CORR-5E2-3)");
+  // CORR-5E2-1: a purge while F's first document is being made
+  const acctF = acctNs.get(acctNs.idFromName("acct:" + hashOf(F)));
+  const sxf = await socket(sf);
+  await hello(sxf, "device-f-purge01");
+  const docY = "4444dddd6666";
+  const dy = docNs.get(docNs.idFromName(`doc:${hashOf(F)}:${docY}`));
+  await dy.hold({ name: `init:${docY}` });
+  const firstY = sxf.ask(batch(docY, 1, [[1, pid(1, "clientFYFY"), [], "first"]], { kind: "board" }));
+  await new Promise((r) => setTimeout(r, 50));
+  ok((await post(sf, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(F: Delete my synced data, while its first document is being made)");
+  // (within the test's 300 ms forward: after it, the held call would be refused, and the purge go on)
+  await new Promise((r) => setTimeout(r, 120));
+  ok((await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(F)).first())?.state === "deleting", "the purge waits while a call to a document can still commit");
+  await dy.open({ name: `init:${docY}` });
+  await firstY;
+  let stF = null;
+  for (let w = 0; w < 60 && stF !== "purged"; w++) {
+    await new Promise((r) => setTimeout(r, 250));
+    stF = (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(F)).first())?.state;
+  }
+  ok(stF === "purged" && (await dy.pull({ account: F, epoch: 1, after: 0 }))?.error?.code === "unknown_doc", "and then the document made meanwhile is deleted too (CORR-5E2-1)");
+  // CORR-5E2-2: a purge while an upload is outstanding
+  const se = await signIn(E);
+  const acctE = acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
+  const late = await acctE.reserve({ account: E, sha256: sha(Buffer.from("late put")), size: 8 });
+  ok(late?.ok?.key, "(an upload reserved, its bytes not yet in R2)");
+  ok((await post(se, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(E: Delete my synced data, meanwhile)");
+  // (within the test's 3 s reservation)
+  await new Promise((r) => setTimeout(r, 300));
+  ok((await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first())?.state === "deleting", "the purge waits while an upload is outstanding");
+  await bucket.put(late.ok.key, "late put");
+  const fin = await acctE.finalize({ account: E, id: late.ok.id, size: 8 });
+  const iE = await acctE.inspect({});
+  ok(fin?.error?.code === "deleting" && (iE === null || iE.reservations === 0), "a finalize during the purge is refused, and hands its object to the purge at once");
+  let state = null;
+  for (let w = 0; w < 60 && state !== "purged"; w++) {
+    await new Promise((r) => setTimeout(r, 250));
+    state = (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first())?.state;
+  }
+  ok(state === "purged", "and then it finishes");
+  ok((await bucket.head(late.ok.key)) === null && (await bucket.list({ prefix: `s/${hashOf(E).slice(0, 32)}/` })).objects.length === 0, "with the late upload's bytes gone (CORR-5E2-2)");
 }
 
 await mf.dispose();

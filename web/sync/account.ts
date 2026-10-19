@@ -47,6 +47,8 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS pins (doc TEXT NOT NULL, epoch INTEGER NOT NULL, ref TEXT NOT NULL, sha256 TEXT NOT NULL, state TEXT NOT NULL, inflight INTEGER NOT NULL DEFAULT 0, lapse INTEGER, gen INTEGER NOT NULL DEFAULT 0, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (doc, epoch, ref, sha256))",
   "CREATE INDEX IF NOT EXISTS pins_pending ON pins (lapse) WHERE state = 'pending'",
   "CREATE TABLE IF NOT EXISTS revoked_sessions (session_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
+  // calls to a document that may still commit: until each answers or lapses, a purge waits (CORR-5E2-1)
+  "CREATE TABLE IF NOT EXISTS forwards (id TEXT PRIMARY KEY, doc TEXT NOT NULL, expires INTEGER NOT NULL)",
   // document sockets (§2): a ticket is used once; ticket_docs says which documents a revoke must
   // fence; a socket's slot is a lease that ends by itself if its close is never reported
   "CREATE TABLE IF NOT EXISTS tickets (nonce TEXT PRIMARY KEY, session_hash TEXT NOT NULL, device TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL)",
@@ -384,8 +386,23 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (this.one("SELECT 1 AS x FROM docs WHERE doc = ?", doc)) throw new SyncError("unknown_doc", "this document was deleted");
     if (!kind) throw new SyncError("unknown_doc", "a new document's first batch says its kind");
     if (Number(this.one("SELECT COUNT(*) AS n FROM docs")!.n) >= LIMITS.docsPerAccount) throw new SyncError("limit", "too many documents", { limit: "docs", max: LIMITS.docsPerAccount });
-    unwrap(await this.docStub(doc).init({ owner_account: this.get("account_id")!, owner_hash: this.get("account_hash")!, doc, kind }));
+    // (the row first, so a purge that starts while the document is being made still deletes it, CORR-5E2-1)
     this.sql.exec("INSERT OR IGNORE INTO docs (doc, kind, created) VALUES (?, ?, ?)", doc, kind, Date.now());
+    await this.forwarding(doc, Date.now() + this.pinMs(), async (stub, expires) => unwrap(await stub.init({ owner_account: this.get("account_id")!, owner_hash: this.get("account_hash")!, doc, kind, expires })));
+  }
+  /**
+   * A call to a document that may commit something: recorded in `forwards`
+   * until it answers, and given `expires`, after which the document refuses
+   * it, so a purge can wait for every one to end (CORR-5E2-1).
+   */
+  private async forwarding<T>(doc: string, expires: number, call: (stub: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<T>): Promise<T> {
+    const id = randomHex(8);
+    this.sql.exec("INSERT INTO forwards (id, doc, expires) VALUES (?, ?, ?)", id, doc, expires);
+    try {
+      return await call(this.docStub(doc), expires);
+    } finally {
+      this.sql.exec("DELETE FROM forwards WHERE id = ?", id);
+    }
   }
 
   /**
@@ -488,7 +505,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     await this.ensureDoc(b.doc, b.kind);
     const expires = Date.now() + this.pinMs();
     const keys = this.pin(b.doc, b.epoch, b, expires);
-    const out = await this.forward(b.doc, keys, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
+    const out = await this.forward(b.doc, keys, expires, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
     this.noteHead(b.doc, out);
     return out;
   }
@@ -498,10 +515,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * document; a thrown error is a lost answer, which leaves the attempt in
    * flight until its pins lapse, when the alarm decides them (§4.3).
    */
-  private async forward(doc: string, keys: PinKey[], call: (d: ReturnType<SyncAccount["docStub"]>) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+  private async forward(doc: string, keys: PinKey[], expires: number, call: (d: ReturnType<SyncAccount["docStub"]>) => Promise<Result<BatchOut>>): Promise<BatchOut> {
     let r: Result<BatchOut>;
     try {
-      r = await call(this.docStub(doc));
+      r = await this.forwarding(doc, expires, (stub) => call(stub));
     } catch (e) {
       throw new SyncError("busy", "the document didn't answer; send again");
     }
@@ -532,7 +549,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     await this.ensureDoc(m.doc);
     const expires = Date.now() + this.pinMs();
     const keys = this.pin(m.doc, expect.epoch + 1, root, expires);
-    const out = await this.forward(m.doc, keys, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
+    const out = await this.forward(m.doc, keys, expires, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
     this.noteHead(m.doc, out);
     return out;
   }
@@ -662,17 +679,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
       if (!r.ok) throw new Error(String(r.status));
       const l = checkLimits(await r.json());
-      // (a notice newer than this answer stands: never undone by a fetch, §6)
-      if (Number(this.get("limits_issued") ?? 0) > (l.issued ?? 0)) {
+      // (after the await: what is stored now, since a notice may have landed meanwhile; a newer one
+      // stands, never undone by a fetch, §6, CORR-5E2-3)
+      const now = this.get("limits");
+      if (now && Number(this.get("limits_issued") ?? 0) > (l.issued ?? 0)) {
         this.set("limits_fetched", Date.now());
-        return JSON.parse(cached!);
+        return JSON.parse(now);
       }
       this.set("limits", JSON.stringify(l));
       this.set("limits_issued", l.issued ?? 0);
       this.set("limits_fetched", Date.now());
       return l;
     } catch {
-      return cached ? JSON.parse(cached) : null;
+      // (the plan stored now, not the one read before the await)
+      const now = this.get("limits");
+      return now ? JSON.parse(now) : null;
     }
   }
   private used(): number {
@@ -745,6 +766,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    */
   private async purgeStep(): Promise<boolean> {
     const now = Date.now();
+    // first, nothing may still commit: every call to a document has answered or lapsed (CORR-5E2-1),
+    // and every upload has finalized, been abandoned, or ended (CORR-5E2-2)
+    this.sql.exec("DELETE FROM forwards WHERE expires < ?", now - this.settleMs());
+    if (this.one("SELECT 1 AS x FROM forwards LIMIT 1")) return false;
+    for (const r of this.sql.exec("SELECT id, key FROM reservations WHERE expires < ?", now).toArray() as Row[]) {
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
+      this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
+    }
+    if (this.one("SELECT 1 AS x FROM reservations LIMIT 1")) return false;
     for (const d of this.sql.exec("SELECT doc FROM docs LIMIT 50").toArray() as Row[]) {
       try {
         await this.docStub(String(d.doc)).purge();
@@ -756,9 +786,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (this.one("SELECT 1 AS x FROM docs LIMIT 1")) return false;
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings", now);
-      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM reservations", now);
       this.sql.exec("DELETE FROM holdings");
-      this.sql.exec("DELETE FROM reservations");
       this.sql.exec("DELETE FROM pins");
     });
     const bucket = this.env.SHARE_BUCKET;
@@ -805,7 +833,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (this.used() + a.size > l.sync.storage_bytes) throw new SyncError("storage_full", "this account's synced storage is full", { limit: l.sync.storage_bytes, used: this.used() });
       const id = randomHex(16);
       const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
-      const ends = now + (this.env.SYNC_TEST_PIN_MS ? 1000 : RESERVE_MS);
+      const ends = now + (this.env.SYNC_TEST_PIN_MS ? 3000 : RESERVE_MS);
       this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends);
       this.addUsed(a.size);
       // (a dead upload's bytes come back at its end, even if nothing else happens here: LIMIT-7FB-1)
@@ -821,6 +849,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * outbox instead; a reservation already reaped can't be finalized.
    */
   async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ sha256: string }>> {
+    // (during a purge: the upload's object is the purge's to delete, handed over in a transaction of its
+    // own, which a refusal can't roll back, CORR-5E2-2)
+    if (this.exists() && this.state() === "deleting") {
+      this.ctx.storage.transactionSync(() => {
+        const res = this.one("SELECT key FROM reservations WHERE id = ?", a.id);
+        if (res) {
+          this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
+          this.sql.exec("DELETE FROM reservations WHERE id = ?", a.id);
+        }
+      });
+      this.wakeBy(Date.now());
+      return { error: { code: "deleting", message: "this account's synced data is being deleted" } };
+    }
     const r = attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
       const res = this.one("SELECT sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
@@ -906,7 +947,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
-  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
+  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; reservations: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
     if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
@@ -915,6 +956,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       used: this.used(),
       alarms: this.alarms,
       fences_due: Number(this.one("SELECT COUNT(*) AS n FROM fences_due")!.n),
+      reservations: Number(this.one("SELECT COUNT(*) AS n FROM reservations")!.n),
       leases: Number(this.one("SELECT COUNT(*) AS n FROM doc_sockets WHERE expires > ?", Date.now())!.n),
       outbox: Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n),
       ...(a.doc ? { doc: this.one("SELECT head_seq, epoch, bytes FROM docs WHERE doc = ?", a.doc) } : {}),
