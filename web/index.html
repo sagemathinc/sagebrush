@@ -729,6 +729,18 @@ const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyz
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
+// Another notebook not opened while changes to ones left aren't saved or
+// kept (notebook.js mayLeave, LIMIT-900-2): said, in the status line and
+// the file browser, the one shown staying; from wherever it was asked
+// (the file browser, File's menu, Open, delete, a disk file).
+function sayNotLeft(err) {
+  const m = String(err?.message ?? err);
+  statusEl.textContent = m;
+  wsBrowser?.say(m);
+}
+addEventListener("unhandledrejection", (ev) => { if (ev.reason?.leaving) { ev.preventDefault(); sayNotLeft(ev.reason); } });
+// (closing the page while they aren't: the browser asks first; they are only here)
+addEventListener("beforeunload", (ev) => { if (nb.leftOutstanding > 0) { ev.preventDefault(); ev.returnValue = ""; } });
 // A save of a notebook no longer open here met a change made elsewhere
 // (CORR-B54-1): what it had is kept as a notebook of its own, "<name> (your
 // changes, made while it changed elsewhere)", beside the other version,
@@ -2171,9 +2183,12 @@ function wsShowFiles(on) {
         if (how === "tab") return void window.open(url, "_blank", "noopener");
         if (e.kind === "notebook") {
           saveNow();
-          openId(e.ref).then(wsTrackCurrent);
-          // (on a phone the files cover the page: out of the way of what was opened)
-          if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
+          // (on a phone the files cover the page: out of the way of what was
+          // opened; not opened, they stay, saying why: LIMIT-900-2)
+          openId(e.ref).then(() => {
+            wsTrackCurrent();
+            if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
+          }, sayNotLeft);
         }
         else { saveNow(); location.assign(url); }
       },

@@ -145,7 +145,7 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void };
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast. */ say(text: string): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
@@ -473,5 +473,6 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     el: root,
     refresh,
     destroy() { unwatch(); root.remove(); },
+    say: (text: string) => say(text),
   };
 }

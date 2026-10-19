@@ -2207,7 +2207,7 @@ export function createNotebook(root, opts = {}) {
       if (leftCount() < MAX_LEFT) return;
       await saved().catch(() => {});
       const n = leftCount();
-      if (n >= MAX_LEFT) throw new Error(`changes to ${n} notebooks you left aren't saved or kept yet${unkept.size ? ` (${[...unkept.values()].at(-1).error?.message ?? "not kept"})` : ""}: another opens once they are`);
+      if (n >= MAX_LEFT) throw Object.assign(new Error(`changes to ${n} notebooks you left aren't saved or kept yet${unkept.size ? ` (${[...unkept.values()].at(-1).error?.message ?? "not kept"})` : ""}: another opens once they are`), { leaving: true });
     },
     /** Documents left here with saves not yet made, or not kept (LIMIT-900-2). */
     get leftOutstanding() { return leftCount(); },
