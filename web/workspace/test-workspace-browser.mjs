@@ -412,6 +412,15 @@ try {
     return { left, refused, after: nb.leftOutstanding, shown: nb.snapshot().name };
   })()`);
   check(bound.left === 4 && /4 notebooks you left/.test(bound.refused ?? "") && bound.after === 4 && bound.shown === "B separate", "4 notebooks left with changes not kept: another isn't opened, saying why, and B stays: " + JSON.stringify(bound));
+  // …the same from the file browser: said there and in the status line,
+  // B staying; and closing the page now, the browser asks first
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/K5.ipynb"))})`);
+  await click(rowSel("/K5.ipynb"));
+  await sleep(1500);
+  const side = await ev(`({ status: document.querySelector("#status").textContent, toast: document.querySelector("#wssidebar .ftoast")?.textContent ?? "", shown: sagebrush.notebook.snapshot().name })`);
+  check(/4 notebooks you left/.test(side.status) && /4 notebooks you left/.test(side.toast) && side.shown === "B separate", "…opened from the file browser: not opened, said there and in the status line, B staying: " + JSON.stringify(side));
+  const unloadAsks = () => ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); dispatchEvent(e); return e.defaultPrevented; })()`);
+  check((await unloadAsks()) === true, "…and closing the page asks first, those changes only here");
   const unbound = await ev(`(async () => {
     const nb = sagebrush.notebook, w = sagebrush.workspace;
     nb.onDetachedConflict(__origKeep2);
@@ -423,6 +432,7 @@ try {
     return { error, copies, left: nb.leftOutstanding, shown: nb.snapshot().name };
   })()`);
   check(unbound.error === null && [1, 2, 3, 4].every((i) => unbound.copies[i] === "K" + i + " edit") && unbound.left === 0 && unbound.shown === "K5", "…once kept (each its own copy), another opens: " + JSON.stringify(unbound));
+  check((await unloadAsks()) === false, "…and closing the page doesn't ask once they are kept");
   // LIMIT-900-1: a copy made before the workspace is open (here: another
   // tab holds its lock as the page loads) isn't kept as a notebook the
   // workspace doesn't list; once it opens, saved() keeps it
