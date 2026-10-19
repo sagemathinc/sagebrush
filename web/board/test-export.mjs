@@ -85,7 +85,7 @@ try {
     await sleep(500);
     const s1 = await ev("(() => { const s = window.sagebrush.board.snapshot(); return { pages: s.pages, items: s.items.length, title: document.title }; })()");
     check(s1.pages === s0.pages && s1.items === s0.items, `${doc}: the file shows ${s1.items} items on ${s1.pages} pages, not ${s0.items} on ${s0.pages}`);
-    check(!(await ev("document.querySelector('[data-sbb=examples]').hidden === false")), `${doc}: Examples shown in the file`);
+    check(await ev("document.querySelector('[data-sbb=examples]').disabled === true"), `${doc}: Examples offered in the file (it is shown, disabled: nothing beside it)`);
     // code, offline, without Python in the file: it says why it can't run (only when there is code)
     const said = await until("!document.querySelector('[data-sbb=tour]').hidden && /can't run here/.test(document.querySelector('[data-sbb=say]').textContent)", s0.code ? 20000 : 1500).then(() => true, () => false);
     check(said === s0.code, s0.code ? `${doc}: offline, the file doesn't say why its code can't run` : `${doc}: the file says code can't run, with no code`);
