@@ -43,6 +43,8 @@ export interface BatchOut {
   head: Head;
   /** the bytes stored (the new patches' payloads) */
   bytes: number;
+  /** the document's bytes in all, after this batch: what the account object records (CORR-321-2) */
+  total: number;
   /** the seq of the stored batch, if any patch was new */
   seq?: number;
   new: number;
@@ -60,7 +62,7 @@ export interface PullOut {
 
 type Row = Record<string, SqlStorageValue>;
 /** A patch's pin reference (design/sync-server.md §4.3). */
-export const patchRef = (e: Env) => `patch:${clientOf(e.id)}:${e.cseq}`;
+export const patchRef = (e: Env) => `patch:${clientOf(e.id)}:${e.cseq}:${e.id}`;
 type SqlStorageValue = ArrayBuffer | string | number | null;
 
 const SCHEMA = [
@@ -136,7 +138,10 @@ export class SyncDoc extends DurableObject<SyncEnv> {
 
   /** Decide one batch (§4.1-4.5), in one transaction. */
   async batch(a: BatchIn): Promise<Result<BatchOut>> {
+    const id = a.batch.patches[0]?.id ?? "";
+    await this.gate(`before:${id}`);
     const r = this.batchNow(a);
+    await this.gate(`after:${id}`);
     if (this.lose) {
       this.lose = false;
       throw new Error("the answer was lost (test seam)");
@@ -162,6 +167,31 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     }));
   }
   private lose = false;
+
+  // ---- test seams (SYNC_TEST_PIN_MS bound, in web/sync/test-sync.mjs only): gates that hold one
+  // batch before it is decided, or after it is decided and before it answers, for interleavings
+  private gates = new Map<string, { wait: Promise<void>; open: () => void }>();
+  async hold(a: { name: string }): Promise<void> {
+    if (!this.env.SYNC_TEST_PIN_MS) return;
+    let open!: () => void;
+    const wait = new Promise<void>((r) => (open = r));
+    this.gates.set(a.name, { wait, open });
+  }
+  async open(a: { name: string }): Promise<void> {
+    const g = this.gates.get(a.name) ?? this.opened.get(a.name);
+    this.gates.delete(a.name);
+    g?.open();
+  }
+  private opened = new Map<string, { wait: Promise<void>; open: () => void }>();
+  private async gate(name: string): Promise<void> {
+    const g = this.gates.get(name);
+    if (!g) return;
+    // (each gate holds one batch: the first to reach it)
+    this.gates.delete(name);
+    this.opened.set(name, g);
+    await g.wait;
+    this.opened.delete(name);
+  }
 
   private decide(a: BatchIn, head: Head, now: number): BatchOut {
     const b = a.batch;
@@ -205,7 +235,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       c.fresh++;
       fresh.push({ env, start });
     }
-    if (fresh.length === 0) return { head, bytes: 0, new: 0, resent, blobs: [] };
+    if (fresh.length === 0) return { head, bytes: 0, total: Number(this.get("bytes") ?? 0), new: 0, resent, blobs: [] };
     // ---- compare-and-swap on the head (§4.4), only for a batch with something new
     if (b.expect_head && (b.expect_head.epoch !== head.epoch || b.expect_head.seq !== head.seq)) throw new SyncError("conflict", "the document moved on", { head });
     // ---- store: the new patches only, their payloads sliced out by size, never parsed (§4.2)
@@ -235,8 +265,9 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       );
     }
     this.set("head_seq", seq);
-    this.set("bytes", Number(this.get("bytes") ?? 0) + body.length);
-    return { head: { epoch: head.epoch, seq }, bytes: body.length, seq, new: fresh.length, resent, blobs };
+    const total = Number(this.get("bytes") ?? 0) + body.length;
+    this.set("bytes", total);
+    return { head: { epoch: head.epoch, seq }, bytes: body.length, total, seq, new: fresh.length, resent, blobs };
   }
 
   /** Whether patch `id` was accepted, exactly (§4.2): its client's range, and that range's ids. */
@@ -323,6 +354,19 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       }
       this.sql.exec("DELETE FROM fenced WHERE expires < ?", Date.now() - 60_000);
       return done;
+    });
+  }
+
+  /**
+   * Which of these patches this document holds, exactly (§4.2, §4.3): by
+   * epoch and id, answered as "epoch:id".  A patch of an epoch that isn't
+   * the current one is never held: clearing dropped it.
+   */
+  async accepted(a: { ids: { epoch: number; id: string }[] }): Promise<Result<string[]>> {
+    return attempt(() => {
+      if (!this.exists()) return [];
+      const epoch = this.head().epoch;
+      return a.ids.filter((x) => x.epoch === epoch && this.known(x.id)).map((x) => `${x.epoch}:${x.id}`);
     });
   }
 
