@@ -461,9 +461,20 @@ card and the full editor decide the same way.
     The patch is one span: what changed between `was` and the new value,
     found by the common start and end. It is placed in the field as it is
     now the same way, so it takes one linear pass over each text and never
-    searches. Where the two changed the same part, this edit's text wins
-    that part;
-  - **any other field:** takes the new value: this edit is the later side.
+    searches.
+    - Changes in separate spans are both kept. Two insertions at one place
+      are both kept, the one made elsewhere first.
+    - Where the two spans overlap, this edit's text wins over the whole
+      span it changed, and typing elsewhere inside that span is lost. An
+      edit that changes the first and the last letter (`abcde` to
+      `AbcdE`) spans the whole field. This is resolution by span: it keeps
+      separate typing, but it isn't dbMerge3's character-level merge;
+  - **a map** (a plain object: `was`, the new value and the current one all
+    objects, such as the pictures' sizes): merged key by key, recursively,
+    by these same rules, as dbMerge3 merges maps. A key changed only
+    elsewhere keeps that change, and a key added on both sides keeps both;
+  - **any other value** (a number, a list, a switch from one kind to
+    another): takes the new value. This edit is the later side.
 - **set with `create`:** the record is made from `fields`. If one with that
   key was made meanwhile elsewhere, it is merged as above, against an empty
   `was`.
@@ -476,7 +487,9 @@ card and the full editor decide the same way.
     (its key in `dropped`);
   - otherwise it is removed. A record already gone is nothing to do.
 - **Its cost** is linear in the edit plus the current size of the records
-  it touches. That can be large: a field rewritten elsewhere to megabytes
+  it touches, plus, when it moves a group, the items under that group
+  (found through the index of children, at most the board's 100,000
+  records). That can be large: a field rewritten elsewhere to megabytes
   costs a one-letter edit to it a pass over those megabytes. It never
   depends on the rest of the board. Work is limited by bytes for that
   reason (see Bounds). The host needs only its current document: it keeps
@@ -514,7 +527,9 @@ edges, its page):
     paged);
 - **parents:** an item's `parent` is `""` or the id of a group item on the
   same page. Following parents never comes back to the item, and goes at
-  most 64 levels;
+  most 64 levels. When an edit moves a group, or makes one, every item
+  under it is checked too: a move can push a distant descendant past 64
+  levels;
 - **no orphans:** a group with children isn't deleted, and an item that an
   edge names isn't deleted, unless the same edit moves or deletes those
   too;
@@ -528,7 +543,7 @@ edges, its page):
 
 The checks start from the records touched and use indexes the host keeps:
 - each page's items and their kinds;
-- each group's number of children;
+- each group's children;
 - each item's number of edges.
 
 Remote changes update the indexes and the running size as edits do.
@@ -603,7 +618,10 @@ names, and nothing outside it. Nothing runs because of it.
     refuses beyond that with `retryAfter`, the time until the bucket has
     one again;
   - and by **work**: each edit costs its own size plus the current UTF-8
-    size of the records it touches. Each channel has a budget of 32 MiB,
+    size of the records it touches. When it moves a group, it also costs
+    64 bytes for each item under it. That is charged once the merge has
+    counted them, so the budget may go below zero, and the next edits
+    wait. Each channel has a budget of 32 MiB,
     refilled at 3.2 MiB a second, so at most 32 MiB of merging at once and
     3.2 MiB a second sustained. An edit past the budget is refused with
     `retryAfter`, and nothing of it is merged. An edit whose cost is more
