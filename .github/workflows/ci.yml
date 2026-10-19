@@ -279,4 +279,5 @@ jobs:
           python3 engine/py/test_mcp.py
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_pairing.py
+          python3 engine/py/test_chat.py
           python3 sage-tests/run_cpython.py -v
