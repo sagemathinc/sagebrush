@@ -53,6 +53,8 @@ const DOC = {
     { id: "e", kind: "sticker", emoji: "🚀", x: 400, y: 0, w: 100 },
     { id: "k", kind: "sticker", icon: "star", x: 600, y: 0, w: 60 },
     { id: "u", kind: "sticker", icon: "cocalc-unknown", color: "#c0392b", x: 700, y: 0, w: 60 },
+    // (an icon named as a member every object has: no emoji close, a mark)
+    { id: "c", kind: "sticker", icon: "constructor", x: 800, y: 0, w: 60 },
     { id: "p", kind: "sticker", emoji: "👩🏽‍💻", x: 400, y: 200, w: 120 },
     // (not one emoji, or not an icon's name: no sticker)
     { id: "x1", kind: "sticker", emoji: "🚀🚀", x: 0, y: 300 },
@@ -78,18 +80,19 @@ try {
   await sleep(400);
   // only one emoji, or an icon's name: else no sticker
   const kept = (await ev(`${B}.snapshot().doc`)).nodes.map((x) => x.id).join();
-  check(kept === "n,e,k,u,p,x4", "only one emoji (a keycap is one), or an icon's name: " + kept);
+  check(kept === "n,e,k,u,c,p,x4", "only one emoji (a keycap is one), or an icon's name: " + kept);
   // drawn: no frame; the emoji as tall as the sticker; an icon as its emoji, or a mark with its name
-  const els = await ev(`Object.fromEntries(["e", "k", "u", "p"].map((id) => { const el = window.board.cache.get(id); return [id, el && { text: el.textContent, title: el.title, border: getComputedStyle(el).borderTopWidth, bg: getComputedStyle(el).backgroundColor, h: el.getBoundingClientRect().height, fs: el.querySelector(".board-sticker-glyph") && parseFloat(getComputedStyle(el.querySelector(".board-sticker-glyph")).fontSize), color: el.querySelector(".board-sticker-glyph")?.style.color, img: !!el.querySelector("img") }]; }))`);
+  const els = await ev(`Object.fromEntries(["e", "k", "u", "c", "p"].map((id) => { const el = window.board.cache.get(id); return [id, el && { text: el.textContent, title: el.title, border: getComputedStyle(el).borderTopWidth, bg: getComputedStyle(el).backgroundColor, h: el.getBoundingClientRect().height, fs: el.querySelector(".board-sticker-glyph") && parseFloat(getComputedStyle(el.querySelector(".board-sticker-glyph")).fontSize), color: el.querySelector(".board-sticker-glyph")?.style.color, img: !!el.querySelector("img") }]; }))`);
   check(els.e && els.e.text === "🚀" && els.e.border === "0px" && els.e.bg === "rgba(0, 0, 0, 0)" && Math.abs(els.e.fs - 80) < 2, "an emoji sticker: no frame, the emoji 80% of its height: " + JSON.stringify(els.e));
   check(els.k?.text === "⭐" && els.k.title === "star", "a CoCalc icon close to an emoji: the emoji, its name as its tooltip: " + JSON.stringify(els.k));
   check(els.u?.text === "●" && els.u.title === "cocalc-unknown" && els.u.color === "rgb(192, 57, 43)", "an icon with no emoji close: a mark in its color, its name as its tooltip: " + JSON.stringify(els.u));
+  check(els.c?.text === "●" && els.c.title === "constructor", "an icon named \"constructor\": a mark, not the object's constructor written out: " + JSON.stringify(els.c));
   check(els.p?.text === "👩🏽‍💻" && Math.abs(els.p.h - 120) < 1.5, "an emoji of several code points: one sticker, square: " + JSON.stringify(els.p));
   // the host draws an icon when it can
   // (the host's hook is there before the board is drawn: a board shown afresh)
   await ev(`window.board.icon = (name) => { const i = document.createElement("i"); i.className = "host-icon"; i.textContent = "[" + name + "]"; return i; }; ${B}.load({ title: "Empty", nodes: [{ id: "z", title: "Z" }] }).then(() => ${B}.load(${JSON.stringify(DOC)})).then(() => 1)`);
   await until(`!!document.querySelector(".board-sticker .host-icon")`, 5000);
-  check(await ev(`[...document.querySelectorAll(".board-sticker .host-icon")].map((i) => i.textContent).sort().join() === "[cocalc-unknown],[star]"`), "the host draws CoCalc's icons when it can");
+  check(await ev(`[...document.querySelectorAll(".board-sticker .host-icon")].map((i) => i.textContent).sort().join() === "[cocalc-unknown],[constructor],[star]"`), "the host draws CoCalc's icons when it can");
   await ev("window.board.icon = null, 1");
   // far out: the emoji drawn on the canvas
   await ev("window.board.setCamera({ x: -2000, y: -1500, z: 0.2 }), window.board.render(), 1");
@@ -100,7 +103,7 @@ try {
   await sleep(300);
   // printed
   await ev(`${B}.print({ dialog: false }).then(() => 1)`);
-  check(await ev(`(() => { const t = document.querySelector("#board-print .pr-sheet")?.textContent ?? ""; return /🚀/.test(t) && /⭐/.test(t) && document.querySelectorAll("#board-print .board-sticker").length === 5; })()`), "printed: the stickers");
+  check(await ev(`(() => { const t = document.querySelector("#board-print .pr-sheet")?.textContent ?? ""; return /🚀/.test(t) && /⭐/.test(t) && document.querySelectorAll("#board-print .board-sticker").length === 6; })()`), "printed: the stickers");
   await ev("document.getElementById('board-print')?.remove(), 1");
   // an item as a note is: dragged; held by a rectangle
   await ev("document.querySelector('[data-sbb=edit]').click(), 1");
@@ -118,7 +121,7 @@ try {
   check(/"kind": "sticker",\n\s+"emoji": "🚀"/.test(file) && /"icon": "cocalc-unknown"/.test(file), "the board's file keeps its stickers");
   const cv = await ev(`${B}.canvas()`);
   const cards = JSON.parse(cv.text).nodes.filter((x) => x.type === "text").map((x) => x.text).sort().join();
-  check(/2 stickers/.test(cv.left) && cards.includes("🚀") && cards.includes("👩🏽‍💻"), "a JSON Canvas: an emoji sticker a text card; an icon left out, said so: " + cv.left + " " + cards);
+  check(/3 stickers/.test(cv.left) && cards.includes("🚀") && cards.includes("👩🏽‍💻"), "a JSON Canvas: an emoji sticker a text card; an icon left out, said so: " + cv.left + " " + cards);
   // the picker (Edit): Sticker in ⋯, not on the toolbar; 48 emoji and Picture…
   const snap = () => ev(`${B}.snapshot().doc`);
   const picker = "document.querySelector('[data-sbb=stickers]')";

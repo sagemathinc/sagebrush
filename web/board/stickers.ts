@@ -26,4 +26,5 @@ const ICON_EMOJI: Record<string, string> = {
 };
 
 /** The emoji drawn for a CoCalc icon, or "" if none is close. */
-export const iconEmoji = (name: string) => ICON_EMOJI[name] ?? "";
+// (its own entry only: "constructor" or "toString" is an icon's name like any other, never the object's member, astra's note on board-proto-ids)
+export const iconEmoji = (name: string) => (Object.hasOwn(ICON_EMOJI, name) ? ICON_EMOJI[name] : "");
