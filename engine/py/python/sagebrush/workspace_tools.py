@@ -27,10 +27,14 @@ PREFIX = "workspace_"
 #: contents of at most this many bytes in one call, either way (§8.2 / the
 #: page's limit); larger is refused with its size, never cut short
 MAX_CONTENT = 8 * 2**20
-#: a path is at most this long (the page normalises and checks it again)
-MAX_PATH = 4096
+#: a path is at most this long, as web/workspace/paths.ts (the page normalises and checks it again)
+MAX_PATH = 1024
+#: and at most this deep, each name at most this long (paths.ts MAX_DEPTH, MAX_NAME)
+MAX_DEPTH = 32
+MAX_NAME = 255
+KINDS = ("notebook", "board", "file", "folder")
 
-_PATH = {"type": "string", "minLength": 1, "maxLength": MAX_PATH, "description": "an absolute path in the workspace, such as /Algebra/Sylow.board.json"}
+_PATH = {"type": "string", "minLength": 1, "maxLength": MAX_PATH, "format": "workspace-path", "description": "an absolute path in the workspace, such as /Algebra/Sylow.board.json"}
 _CONTENT = {
     "type": "object",
     "description": "contents: {json: ...} for a notebook's or board's document, {text: ...} for a data file of UTF-8 text, {base64: ...} for other bytes",
@@ -112,6 +116,26 @@ class PageError(Exception):
         self.code, self.message, self.current, self.retry_after_ms = code, message, current, retry_after_ms
 
 
+def strict_json(v):
+    """v as compact JSON text, strictly: no NaN or Infinity, and no lone
+    surrogates (which UTF-8 can't carry).  ValueError otherwise."""
+    text = json.dumps(v, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    text.encode("utf-8")  # (UnicodeEncodeError, a ValueError, on a lone surrogate)
+    return text
+
+
+def _no_constant(name):
+    raise ValueError("%s is not JSON" % name)
+
+
+def loads_strict(data):
+    """JSON from bytes, strictly: UTF-8, no NaN or Infinity, no lone
+    surrogates (an escaped \\ud800 included).  ValueError otherwise."""
+    v = json.loads(data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data, parse_constant=_no_constant)
+    strict_json(v)
+    return v
+
+
 def _check(value, schema, where):
     """value against the subset of JSON Schema the verbs use."""
     t = schema.get("type")
@@ -122,6 +146,16 @@ def _check(value, schema, where):
             raise Invalid("%s must be %d to %d characters long" % (where, schema.get("minLength", 0), schema.get("maxLength", 1 << 62)))
         if "\0" in value:
             raise Invalid("%s must not contain NUL" % where)
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise Invalid("%s is not valid Unicode (a lone surrogate)" % where)
+        if schema.get("format") == "workspace-path":
+            names = [x for x in value.split("/") if x]
+            if len(names) > MAX_DEPTH:
+                raise Invalid("%s is %d folders deep; at most %d" % (where, len(names), MAX_DEPTH))
+            if any(len(x) > MAX_NAME for x in names):
+                raise Invalid("%s has a name longer than %d characters" % (where, MAX_NAME))
     elif t == "integer":
         if not isinstance(value, int) or isinstance(value, bool) or value < schema.get("minimum", -(1 << 62)) or value >= 1 << 53:
             raise Invalid("%s must be an integer from %d" % (where, schema.get("minimum", 0)))
@@ -150,9 +184,12 @@ def _content_out(content):
         raise Invalid("content must have exactly one of json, text and base64")
     (form, v), = content.items()
     if form == "json":
-        size = len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        try:
+            size = len(strict_json(v).encode("utf-8"))
+        except ValueError as e:
+            raise Invalid("content.json is not strict JSON (no NaN, Infinity or lone surrogates): %s" % e)
     elif form == "text":
-        size = len(v.encode("utf-8", "surrogatepass"))
+        size = len(v.encode("utf-8"))  # (checked as Unicode already)
     else:
         try:
             size = len(base64.b64decode(v, validate=True))
@@ -170,12 +207,18 @@ def _content_in(content):
         raise PageError("protocol", "the page returned contents in an unknown form")
     (form, v), = content.items()
     if form == "json":
-        size = len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        try:
+            size = len(strict_json(v).encode("utf-8"))
+        except ValueError:
+            raise PageError("protocol", "the page returned a document that is not strict JSON")
         out = {"encoding": "json", "json": v}
     elif form == "text":
         if not isinstance(v, str):
             raise PageError("protocol", "the page returned text that is not a string")
-        size = len(v.encode("utf-8", "surrogatepass"))
+        try:
+            size = len(v.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise PageError("protocol", "the page returned text that is not valid Unicode")
         out = {"encoding": "utf-8", "text": v}
     else:
         try:
@@ -187,6 +230,67 @@ def _content_in(content):
         raise PageError("limit", "the contents are %d bytes; at most %d (8 MiB) come back in one call" % (size, MAX_CONTENT))
     out["size"] = size
     return out
+
+
+def _entry(e, where):
+    if not (isinstance(e, dict) and isinstance(e.get("path"), str) and e["path"].startswith("/") and e.get("kind") in KINDS):
+        raise PageError("protocol", "the page returned %s that is not an entry (an object with a path and a kind)" % where)
+    return e
+
+
+def _rev(r, where):
+    if not isinstance(r, int) or isinstance(r, bool) or r < 0:
+        raise PageError("protocol", "the page returned %s that is not a revision" % where)
+    return r
+
+
+def _paging(result, out):
+    if "more" in result:
+        if not isinstance(result["more"], bool):
+            raise PageError("protocol", "the page returned more that is not true or false")
+        out["more"] = result["more"]
+        if result["more"]:
+            if not isinstance(result.get("cursor"), str):
+                raise PageError("protocol", "the page said there is more but gave no cursor")
+            out["cursor"] = result["cursor"]
+    return out
+
+
+def validate_result(verb, result):
+    """The page's result for verb, checked whole against its shape, and
+    rebuilt from the checked parts only: list {entries, more?, cursor?};
+    stat and the changes {entry}; read {entry, rev, content}; write
+    {entry, rev}; history {versions, more?, cursor?}; version {content}.
+    Anything else is a protocol error, never a success."""
+    if not isinstance(result, dict):
+        raise PageError("protocol", "the page returned a result that is not an object")
+    if verb == "list":
+        entries = result.get("entries")
+        if not isinstance(entries, list):
+            raise PageError("protocol", "the page returned no list of entries")
+        return _paging(result, {"entries": [_entry(e, "an entry") for e in entries]})
+    if verb == "history":
+        versions = result.get("versions")
+        if not (isinstance(versions, list) and all(isinstance(v, dict) for v in versions)):
+            raise PageError("protocol", "the page returned no list of versions")
+        return _paging(result, {"versions": versions})
+    if verb == "version":
+        return {"content": _content_in(result.get("content"))}
+    out = {"entry": _entry(result.get("entry"), "an entry")}
+    if verb == "read":
+        out["rev"] = _rev(result.get("rev"), "a rev")
+        out["content"] = _content_in(result.get("content"))
+    elif verb == "write":
+        out["rev"] = _rev(result.get("rev"), "a rev")
+    return out
+
+
+def _current(current):
+    """A conflict's current version, checked: {entry, rev, content}, or None."""
+    try:
+        return {"entry": _entry(current.get("entry"), "an entry"), "rev": _rev(current.get("rev"), "a rev"), "content": _content_in(current.get("content"))}
+    except (PageError, AttributeError):
+        return None
 
 
 def _text(s):
@@ -211,23 +315,15 @@ def call(link, name, args, timeout=60.0):
             params["content"] = _content_out(params["content"])
         if link is None:
             raise NotConnected("no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (Chat, Connect an agent)")
-        result = link.request("workspace." + verb, params, timeout)
-        if not isinstance(result, dict):
-            raise PageError("protocol", "the page returned a result that is not an object")
-        if "content" in result:
-            result = dict(result, content=_content_in(result["content"]))
+        result = validate_result(verb, link.request("workspace." + verb, params, timeout))
     except Invalid as e:
         return _error("invalid", "Invalid arguments: %s" % e)
     except NotConnected as e:
         return _error("not_connected", str(e))
     except PageError as e:
-        current = e.current
-        if isinstance(current, dict) and "content" in current:
-            try:
-                current = dict(current, content=_content_in(current["content"]))
-            except PageError:
-                current = dict(current, content=None)
-        return _error(e.code, e.message, current=current, retry_after_ms=e.retry_after_ms)
+        current = _current(e.current) if e.code == "conflict" and e.current is not None else None
+        retry = e.retry_after_ms if isinstance(e.retry_after_ms, int) and not isinstance(e.retry_after_ms, bool) and e.retry_after_ms >= 0 else None
+        return _error(str(e.code), str(e.message), current=current, retry_after_ms=retry)
     return [_text(_summary(verb, args, result))], {"result": result, "error": None}, False
 
 
@@ -244,8 +340,8 @@ def _error(code, message, current=None, retry_after_ms=None):
 def _summary(verb, args, result):
     """The text form of a result: short; the data is in structuredContent."""
     if verb == "list":
-        entries = result.get("entries", [])
-        lines = ["%s%s" % (e.get("path", "?"), "/" if e.get("kind") == "folder" else "") for e in entries[:200]]
+        entries = result["entries"]
+        lines = ["%s%s" % (e["path"], "/" if e["kind"] == "folder" else "") for e in entries[:200]]
         more = len(entries) - len(lines)
         tail = (["... and %d more (see structuredContent)" % more] if more > 0 else []) + (["(more: continue with cursor %s)" % result["cursor"]] if result.get("more") else [])
         return "\n".join(lines + tail) or "(empty)"

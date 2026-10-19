@@ -236,15 +236,111 @@ def test_page_errors_and_trash():
 def test_what_the_page_returns_is_checked():
     page = FakePage()
     ok(page, "workspace_create", {"path": "/a.txt"})
+    e = {"entry": {"path": "/a.txt", "kind": "file"}, "rev": 1}
     for bad, code in [
         ("not an object", "protocol"),
-        ({"content": {"exe": "x"}}, "protocol"),
-        ({"content": {"text": 3}}, "protocol"),
-        ({"content": {"base64": "%%%"}}, "protocol"),
-        ({"content": {"text": "x" * (WS.MAX_CONTENT + 1)}}, "limit"),
+        (dict(e, content={"exe": "x"}), "protocol"),
+        (dict(e, content={"text": 3}), "protocol"),
+        (dict(e, content={"base64": "%%%"}), "protocol"),
+        (dict(e, content={"text": "x" * (WS.MAX_CONTENT + 1)}), "limit"),
     ]:
         page.override = bad
         refused(page, "workspace_read", {"path": "/a.txt"}, code)
+
+
+def test_results_are_validated_whole():
+    """CORR-6DA-1 (astra): every verb's result is checked whole against its
+    shape before it is summarized or returned; a malformed one is a protocol
+    error, never a success and never a crash."""
+    page = FakePage()
+    ok(page, "workspace_create", {"path": "/a.txt", "content": {"text": "x"}})
+    entry = {"path": "/a.txt", "kind": "file"}
+    bad = [
+        ("workspace_read", {"path": "/a.txt"}, {}),
+        ("workspace_read", {"path": "/a.txt"}, {"entry": entry, "rev": -1, "content": {"text": "x"}}),
+        ("workspace_read", {"path": "/a.txt"}, {"entry": entry, "rev": True, "content": {"text": "x"}}),
+        ("workspace_read", {"path": "/a.txt"}, {"entry": entry, "rev": 1}),
+        ("workspace_write", {"path": "/a.txt", "content": {"text": "y"}, "base": 1}, {}),
+        ("workspace_write", {"path": "/a.txt", "content": {"text": "y"}, "base": 1}, {"entry": entry}),
+        ("workspace_stat", {"path": "/a.txt"}, {"entry": "bad"}),
+        ("workspace_stat", {"path": "/a.txt"}, {"entry": {"path": "/a.txt"}}),
+        ("workspace_stat", {"path": "/a.txt"}, {"entry": {"path": "a.txt", "kind": "file"}}),
+        ("workspace_stat", {"path": "/a.txt"}, {"entry": {"path": "/a.txt", "kind": "socket"}}),
+        ("workspace_mkdir", {"path": "/d"}, {}),
+        ("workspace_list", {}, {"entries": ["bad"]}),
+        ("workspace_list", {}, {"entries": "bad"}),
+        ("workspace_list", {}, {}),
+        ("workspace_list", {}, {"entries": [], "more": True}),
+        ("workspace_list", {}, {"entries": [], "more": "yes"}),
+        ("workspace_history", {"path": "/a.txt"}, {"versions": ["x"]}),
+        ("workspace_history", {"path": "/a.txt"}, {}),
+        ("workspace_version", {"path": "/a.txt", "i": 0}, {}),
+        ("workspace_version", {"path": "/a.txt", "i": 0}, {"content": {"json": float("nan")}}),
+    ]
+    for name, args, result in bad:
+        page.override = result
+        refused(page, name, args, "protocol")
+    page.override = None
+    # only the checked parts are passed on
+    page.override = {"entry": dict(entry, extra=1), "rev": 3, "content": {"text": "z"}, "smuggled": "<script>"}
+    r = ok(page, "workspace_read", {"path": "/a.txt"})
+    assert set(r) == {"entry", "rev", "content"}, r
+    page.override = {"entries": [entry], "more": True, "cursor": "c1"}
+    r = ok(page, "workspace_list", {})
+    assert r == {"entries": [entry], "more": True, "cursor": "c1"}, r
+    # a conflict's current version is checked too: a malformed one is left out
+    class Conflict(FakePage):
+        def request(self, method, params, timeout):
+            raise WS.PageError("conflict", "changed", current={"entry": "bad", "rev": 2, "content": {"text": "x"}})
+
+    err = refused(Conflict(), "workspace_write", {"path": "/a.txt", "content": {"text": "y"}, "base": 1}, "conflict")
+    assert "current" not in err, err
+
+
+def test_strict_json_and_unicode():
+    """CORR-6DA-5 (astra): NaN, Infinity and lone surrogates are refused as
+    invalid arguments (or a protocol error from the page), never sent and
+    never an uncaught exception."""
+    page = FakePage()
+    for args in [
+        {"path": "/a.json", "content": {"json": {"x": float("nan")}}},
+        {"path": "/a.json", "content": {"json": [float("inf")]}},
+        {"path": "/a.json", "content": {"json": {"k": "\ud800"}}},
+        {"path": "/a.txt", "content": {"text": "lone \udc00 surrogate"}},
+        {"path": "/bad\ud800.txt"},
+    ]:
+        refused(page, "workspace_create", args, "invalid")
+    assert page.requests == []
+    page.override = {"entry": {"path": "/a.txt", "kind": "file"}, "rev": 1, "content": {"text": "\ud800"}}
+    refused(page, "workspace_read", {"path": "/a.txt"}, "protocol")
+    # the strict loader, as the pairing uses it for every frame
+    for raw in [b'{"a": NaN}', b'[Infinity]', b'[-Infinity]', b'"\\ud800"', b'{"\\udfff": 1}', b'\xff']:
+        try:
+            WS.loads_strict(raw)
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % raw)
+    assert WS.loads_strict(b'{"a": "\\ud83d\\ude00"}') == {"a": "\U0001F600"}  # (a pair is fine)
+
+
+def test_path_bounds():
+    """LIMIT-6DA-2 (daybreak2): paths are bounded as web/workspace/paths.ts
+    bounds them: 1024 characters, 32 folders deep, 255 per name; one past
+    any of them never reaches the page."""
+    page = FakePage()
+    at_limit = ["/" + "/".join(["a" * WS.MAX_NAME] * 4), "/" + "/".join(["d"] * WS.MAX_DEPTH), "/" + "n" * WS.MAX_NAME]
+    assert len(at_limit[0]) == WS.MAX_PATH
+    for p in at_limit:
+        assert len(p) <= WS.MAX_PATH
+        s, is_error = call(page, "workspace_stat", {"path": p})
+        assert s["error"]["code"] == "missing", (p[:40], s)  # (reached the page)
+    n = len(page.requests)
+    past = ["/" + "a" * WS.MAX_PATH, "/" + "/".join(["d"] * (WS.MAX_DEPTH + 1)), "/" + "n" * (WS.MAX_NAME + 1), "/ok/" + "n" * (WS.MAX_NAME + 1) + "/x"]
+    for p in past:
+        refused(page, "workspace_stat", {"path": p}, "invalid")
+        refused(page, "workspace_rename", {"from": "/a", "to": p}, "invalid")
+    assert len(page.requests) == n, page.requests[n:]
+    assert (WS.MAX_PATH, WS.MAX_DEPTH, WS.MAX_NAME) == (1024, 32, 255)  # (paths.ts)
 
 
 def test_through_the_server():

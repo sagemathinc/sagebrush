@@ -357,6 +357,175 @@ def test_page_gone_while_waiting():
     p.close()
 
 
+def paired(grant=True):
+    p, port, code = new()
+    c = Client(port)
+    assert "result" in c.hello(code)
+    if grant:
+        c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True, "run": False}})
+        for _ in range(200):
+            if p.status()["granted"]:
+                break
+            time.sleep(0.01)
+    return p, c
+
+
+def test_reserved_opcodes():
+    """CORR-6DA-2 (astra): a frame with a reserved opcode (3-7, 11-15) closes
+    the connection with 1002; a correct hello inside one pairs nothing."""
+    for op in (3, 7, 11, 15):
+        p, port, code = new()
+        c = Client(port)
+        c.send_frame(op, json.dumps({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": code}}).encode())
+        r = c.recv()
+        assert r[0] == "close" and r[1] == 1002, (op, r)
+        assert not p.status()["paired"], op
+        c.close()
+        p.close()
+
+
+def test_revoke_while_waiting_for_a_slot():
+    """CORR-6DA-3 (astra): a request waiting for one of the 8 slots is
+    admitted again when it gets one: a grant revoked meanwhile stops it, and
+    the page never receives it."""
+    p, c = paired()
+    out = []
+
+    def ask(i):
+        out.append(WS.call(p, "workspace_create", {"path": "/f%d.txt" % i}, timeout=20))
+
+    threads = [threading.Thread(target=ask, args=(i,)) for i in range(P.IN_FLIGHT)]
+    for t in threads:
+        t.start()
+    first = [c.recv() for _ in range(P.IN_FLIGHT)]  # 8 requests reach the page, unanswered
+    assert all(m["method"] == "workspace.create" for m in first)
+    late = threading.Thread(target=ask, args=(99,))
+    late.start()  # the ninth waits for a slot
+    time.sleep(0.3)
+    c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {}})  # revoked
+    time.sleep(0.3)
+    for m in first:  # the page answers the eight: slots free up
+        c.send({"jsonrpc": "2.0", "id": m["id"], "result": {"entry": {"path": m["params"]["path"], "kind": "file"}}})
+    late.join(10)
+    for t in threads:
+        t.join(10)
+    c.s.settimeout(1)
+    try:
+        extra = c.recv()
+    except socket.timeout:
+        extra = None
+    assert extra is None, "the page received a request after the revoke: %r" % (extra,)
+    lates = [s for _, s, err in out if err]
+    assert len(lates) == 1 and lates[0]["error"]["code"] == "not_connected", out
+    c.close()
+    p.close()
+
+
+def test_pending_cleared_on_every_path():
+    """CORR-6DA-4 (astra): a request whose frame can't be sent, or that times
+    out, or whose page leaves, leaves nothing pending."""
+    p, c = paired()
+    for _ in range(3):
+        try:
+            p.request("workspace.create", {"path": "/x", "content": {"text": "x" * (P.MAX_FRAME + 1)}}, 5)
+        except WS.PageError as e:
+            assert e.code == "limit", e.code
+        else:
+            raise AssertionError("an oversized frame was sent")
+    assert p.pending == {}, p.pending
+    try:
+        p.request("workspace.list", {}, 0.3)  # the page never answers
+    except WS.PageError as e:
+        assert e.code == "timeout"
+    assert p.pending == {}, p.pending
+    assert c.recv()["method"] == "workspace.list"
+    # all 8 slots are free again
+    assert all(p.slots.acquire(timeout=0) for _ in range(P.IN_FLIGHT))
+    for _ in range(P.IN_FLIGHT):
+        p.slots.release()
+    c.close()
+    p.close()
+
+
+def test_strict_json_frames():
+    """CORR-6DA-5 (astra): a frame of JSON with NaN or Infinity, a lone
+    surrogate, or bytes that aren't UTF-8 closes the connection (1007)."""
+    for body in [b'{"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": NaN}}',
+                 b'[Infinity]', b'"\\ud800"', b'\xff\xfe']:
+        p, port, code = new()
+        c = Client(port)
+        c.send_frame(0x1, body)
+        r = c.recv()
+        assert r[0] == "close" and r[1] == 1007, (body, r)
+        c.close()
+        p.close()
+    # and after pairing: a result carrying a lone surrogate ends the pairing, never a crash
+    p, c = paired()
+    out = {}
+    t = threading.Thread(target=lambda: out.update(r=WS.call(p, "workspace_list", {}, timeout=10)))
+    t.start()
+    m = c.recv()
+    c.send_frame(0x1, ('{"jsonrpc":"2.0","id":"%s","result":{"entries":[{"path":"/\\udc00","kind":"file"}]}}' % m["id"]).encode())
+    t.join(10)
+    _, s, err = out["r"]
+    assert err and s["error"]["code"] == "not_connected", s
+    c.close()
+    p.close()
+
+
+def test_unpaired_memory_is_bounded():
+    """LIMIT-6DA-1 (daybreak2): before the hello has paired a connection, a
+    message is at most 8 KiB, refused from the frame's header before its
+    payload is read; 8 attackers at once declaring 12 MiB each, then
+    streaming, make the server hold almost nothing.  After pairing, a 12
+    MiB-class message is read in chunks into one buffer: its peak is a small
+    multiple of its size, not of the frame cap times the connections."""
+    import tracemalloc
+
+    p, port, code = new()
+    tracemalloc.start()
+    tracemalloc.reset_peak()
+    attackers = []
+    for _ in range(P.UNPAIRED):
+        c = Client(port)
+        c.send_frame(0x1, b"", declared=P.MAX_FRAME)  # a 12 MiB hello, declared
+        attackers.append(c)
+    for c in attackers:
+        r = c.recv()
+        assert r[0] == "close" and r[1] == 1009 and str(P.MAX_HELLO) in r[2], r
+    # and just past the 8 KiB, really sent
+    c = Client(port)
+    c.send_frame(0x1, b" " * (P.MAX_HELLO + 1))
+    assert c.recv()[1] == 1009
+    _, peak = tracemalloc.get_traced_memory()
+    assert peak < 2 * 2**20, "unpaired connections made the server hold %d bytes" % peak
+    for x in attackers + [c]:
+        x.close()
+    # a hello within the 8 KiB still pairs
+    c = Client(port)
+    assert "result" in c.hello(code)
+    c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True}})
+    time.sleep(0.2)
+    # after pairing: a message of 10 MiB is accepted, at a peak of a few times its size
+    out = {}
+    t = threading.Thread(target=lambda: out.update(r=WS.call(p, "workspace_read", {"path": "/big.bin"}, timeout=30)))
+    t.start()
+    m = c.recv()
+    data = base64.b64encode(b"\7" * (WS.MAX_CONTENT - 64)).decode()
+    tracemalloc.reset_peak()
+    base, _ = tracemalloc.get_traced_memory()
+    c.send({"jsonrpc": "2.0", "id": m["id"], "result": {"entry": {"path": "/big.bin", "kind": "file"}, "rev": 1, "content": {"base64": data}}})
+    t.join(30)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    _, s, err = out["r"]
+    assert not err, s
+    size = len(data)
+    assert peak - base < 5 * size, "a %d-byte message peaked at %d bytes" % (size, peak - base)
+    c.close()
+    p.close()
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
