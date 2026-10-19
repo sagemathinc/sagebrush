@@ -95,7 +95,12 @@ try {
   check(await ev(`localStorage.getItem("sagebrush-board:local:" + location.search.match(/local:([0-9a-f]{12})/)[1] + "#here") === "1"`), "…marked as written here (its remote pictures show at once)");
   await ev(`${B}.edit((d) => { d.title = "To copy"; }).then(() => 1)`);
   await sleep(300);
+  // (Duplicate saves, then opens the copy: what follows waits for the copy's page,
+  // never acting on the page that is going, or on the copy's before its workspace is
+  // there, where ${W}'s optional chain would quietly give undefined)
+  const toCopy = await ev(`location.search`);
   await ev(`(() => { document.querySelector('[data-sbb="duplicate"]').click(); return 1; })()`);
+  check(await until(`location.search !== ${JSON.stringify(toCopy)} && !!window.sagebrush?.workspace && !!${B}?.snapshot()`, 60000), "Duplicate opens the copy");
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/To copy (copy).board.json"))`, 30000), "Duplicate makes a board of the workspace: To copy (copy)");
   const markOf = (path) => ev(`${W}.stat(${JSON.stringify(path)}).then((e) => localStorage.getItem("sagebrush-board:local:" + e.ref + "#here"))`);
   check((await markOf("/To copy (copy).board.json")) === "1", "…a copy of a board written here, marked as one");
@@ -124,7 +129,9 @@ try {
     check((await remotePics()) === (trusted ? 1 : 0), `…opened, its remote picture ${trusted ? "shown at once" : "waits for a click"}`);
     if (!trusted) {
       // Duplicate of a board not written here: not marked either
+      const from = await ev(`location.search`);
       await ev(`(() => { document.querySelector('[data-sbb="duplicate"]').click(); return 1; })()`);
+      check(await until(`location.search !== ${JSON.stringify(from)} && !!window.sagebrush?.workspace && !!${B}?.snapshot()`, 60000), "…Duplicate opens the copy");
       const dup = "/" + name + " (unsaved changes from a closed page) (copy).board.json";
       check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === ${JSON.stringify(dup)}))`, 30000) && (await markOf(dup)) === null, "…and its Duplicate isn't marked");
     }
