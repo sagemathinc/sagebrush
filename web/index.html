@@ -732,23 +732,36 @@ nb.on("dirty", () => (savedEl.textContent = ""));
 // A save of a notebook no longer open here met a change made elsewhere
 // (CORR-B54-1): what it had is kept as a notebook of its own, "<name> (your
 // changes, made while it changed elsewhere)", beside the other version,
-// never over it; a later save of the same opening goes to the same copy.
+// never over it; a later save of the same opening goes to the same copy,
+// written only over the revision written there here: a copy changed (or
+// deleted) since is left as it is, and the later save is a new copy
+// (CORR-E46-2, as the board page's copies, CORR-105-1).
 const nbKept = new WeakMap();
 nb.onDetachedConflict(async (doc, theirs, key) => {
   if (!db) throw new Error("this browser has no storage to keep it in");
   const { id: _i, rev: _r, updated: _u, baseRev: _b, share_id: _s, ...rest } = doc;
   const was = String(doc.name || "Untitled"), name = was + " (your changes, made while it changed elsewhere)";
-  let id = nbKept.get(key);
-  if (!id) {
-    id = newId();
-    await new IdbStore(db, id, { ...rest, id, name }).load();
-    nbKept.set(key, id);
-    await wsListNotebook(id, name, rest.mode);
-  } else {
-    const st = new IdbStore(db, id), cur = await st.load();
-    const out = await st.save({ ...rest, id, name, baseRev: cur.rev });
-    if (typeof out === "string" || out?.conflict) throw new Error(`"${name}" couldn't be updated`);
+  const copy = nbKept.get(key);
+  if (copy && (await idb(db, "notebooks", "readonly", (st) => st.get(copy.id)))) {
+    const out = await new IdbStore(db, copy.id).save({ ...rest, id: copy.id, name, baseRev: copy.rev });
+    if (typeof out === "string") throw new Error(out);
+    if (!out.conflict) {
+      copy.rev = out.rev;
+      statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
+      return;
+    }
   }
+  const id = newId(), st = new IdbStore(db, id, { ...rest, id, name });
+  await st.load();
+  const rec = await idb(db, "notebooks", "readonly", (s) => s.get(id));
+  if (!rec) throw new Error(`"${name}" couldn't be written`);
+  // (listed in the workspace, or not kept: a notebook no entry lists is
+  // never left behind; saved() says so and tries again, LIMIT-E46-1)
+  try { await wsAdoptNotebook(id, name, rest.mode); } catch (e) {
+    await idb(db, "notebooks", "readwrite", (s) => s.delete(id)).catch(() => {});
+    throw e;
+  }
+  nbKept.set(key, { id, rev: rec.rev });
   statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
 });
 nb.on("saved", (text) => (savedEl.textContent = text));
@@ -2057,15 +2070,16 @@ const wsReady = (async () => {
 // (the workspace, or null if it isn't open within a few seconds)
 const wsNow = () => Promise.race([wsReady, new Promise((r) => setTimeout(() => r(null), 5000))]);
 async function wsListNotebook(id, name, mode) {
+  try { await wsAdoptNotebook(id, name, mode); } catch (e) { console.warn("workspace:", e); }
+}
+// (the same, its failure the caller's: a full folder, no free name)
+async function wsAdoptNotebook(id, name, mode) {
   const w = await wsNow();
-  if (!w) return;
-  try {
+  if (!w || (await w.pathOf("notebook", id))) return;
+  await w.locked(async () => {
     if (await w.pathOf("notebook", id)) return;
-    await w.locked(async () => {
-      if (await w.pathOf("notebook", id)) return;
-      await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python" });
-    });
-  } catch (e) { console.warn("workspace:", e); }
+    await w.adopt("/", safeName(name || "Untitled"), ".ipynb", { kind: "notebook", ref: id, mode: mode ?? "python" });
+  });
 }
 // (each typed title a new rename, superseding the one before; a rename in
 // the file browser supersedes them all, even one already waiting for the
