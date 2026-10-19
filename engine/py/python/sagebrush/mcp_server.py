@@ -620,6 +620,7 @@ class Server:
         self.session = None  # the sage and python tools' (user code)
         self.tool_session = None  # the shortcut tools' (no user code ever)
         self.running = {}  # request id -> True from the call until its reply
+        self.calls = 0  # tool calls admitted and not yet answered (at most MAX_CALLS)
         self.work = threading.Lock()  # one computation at a time
         self.state = threading.Lock()  # guards owner and cancelled
         self.owner = None  # (request id, session) of the computation running
@@ -814,12 +815,15 @@ class Server:
         why = CH._conversation_error(conv)
         if why:
             return err("invalid", "Invalid arguments: %s" % why)
-        if not isinstance(text, str) or len(text) > CH.MAX_TEXT:
-            return err("invalid", "Invalid arguments: text must be a string of at most %d characters" % CH.MAX_TEXT)
+        if not isinstance(text, str):
+            return err("invalid", "Invalid arguments: text must be a string")
         try:
-            text.encode("utf-8")
+            size = len(text.encode("utf-8"))
         except UnicodeEncodeError:
             return err("invalid", "Invalid arguments: text is not valid Unicode")
+        if size > CH.MAX_TEXT:
+            # (bytes of UTF-8, the rule for incoming text too; astra's CORR-BF6-1)
+            return err("invalid", "Invalid arguments: text is %d bytes of UTF-8; at most %d" % (size, CH.MAX_TEXT))
         if irt is not None and not (isinstance(irt, str) and CH._ID.fullmatch(irt)):
             return err("invalid", "Invalid arguments: in_reply_to must be a message id")
         try:
@@ -879,7 +883,8 @@ class Server:
 
     def done(self, rid):
         with self.state:
-            self.running.pop(rid, None)
+            if self.running.pop(rid, None):
+                self.calls -= 1
             self.cancelled.discard(rid)
 
     # ---- dispatch
@@ -920,9 +925,16 @@ class Server:
                 self.reply(rid, {"tools": [{k: v for k, v in t.items() if k != "title"} for t in TOOLS]})
         elif method == "tools/call":
             with self.state:
-                busy = len(self.running) >= MAX_CALLS
-                if not busy:
+                # (an id already in flight is refused: otherwise one id repeated would
+                # start any number of threads under one entry; daybreak2, LIMIT-BF6-1)
+                duplicate = not isinstance(rid, (str, int)) or isinstance(rid, bool) or rid in self.running
+                busy = self.calls >= MAX_CALLS
+                if not duplicate and not busy:
                     self.running[rid] = True
+                    self.calls += 1
+            if duplicate:
+                self.error(rid, -32600, "invalid request id: one that is a string or an integer, and not already in use")
+                return
             if busy:
                 # (each call runs in a thread of its own: at most MAX_CALLS at once; daybreak2, LIMIT-B011-1)
                 self.error(rid, -32000, "too many tool calls at once (%d): wait for one to finish" % MAX_CALLS)

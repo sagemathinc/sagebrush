@@ -253,10 +253,40 @@ def test_one_chat_next_at_a_time():
     time.sleep(0.2)
     over = [json.loads(x) for x in srv2.out.getvalue().splitlines()]
     assert len(over) == 5 and all("too many tool calls" in r["error"]["message"] for r in over), over
-    assert len(srv2.running) == mcp_server.MAX_CALLS
+    assert len(srv2.running) == mcp_server.MAX_CALLS and srv2.calls == mcp_server.MAX_CALLS
     gate.set()
     for t in srv2.threads:
         t.join(10)
+    assert srv2.calls == 0 and not srv2.running
+    # LIMIT-BF6-1 (daybreak2): one id repeated while it is in flight is refused,
+    # not a thread more under the same entry; the cap is counted on its own
+    gate2 = threading.Event()
+    srv3 = mcp_server.Server(io.StringIO())
+    srv3.call_tool = lambda name, args, rid=None: (gate2.wait(10), ([{"type": "text", "text": "x"}], None, False))[1]
+    before = threading.active_count()
+    for i in range(mcp_server.MAX_CALLS + 5):
+        srv3.handle({"jsonrpc": "2.0", "id": "same", "method": "tools/call", "params": {"name": "guide", "arguments": {}}})
+    for bad in (True, 1.5, None, ["x"]):
+        srv3.handle({"jsonrpc": "2.0", "id": bad, "method": "tools/call", "params": {"name": "guide", "arguments": {}}})
+    time.sleep(0.2)
+    assert threading.active_count() - before == 1, threading.active_count() - before
+    over = [json.loads(x) for x in srv3.out.getvalue().splitlines()]
+    assert len(over) == mcp_server.MAX_CALLS + 4 + 3 and all(r["error"]["code"] == -32600 for r in over), over
+    assert srv3.calls == 1 and list(srv3.running) == ["same"]
+    # the others still fill the cap, and no more
+    for i in range(mcp_server.MAX_CALLS + 2):
+        srv3.handle({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "guide", "arguments": {}}})
+    time.sleep(0.2)
+    assert srv3.calls == mcp_server.MAX_CALLS and threading.active_count() - before == mcp_server.MAX_CALLS
+    gate2.set()
+    for t in srv3.threads:
+        t.join(10)
+    assert srv3.calls == 0 and not srv3.running
+    # (an id answered may be used again)
+    srv3.handle({"jsonrpc": "2.0", "id": "same", "method": "tools/call", "params": {"name": "guide", "arguments": {}}})
+    for t in srv3.threads:
+        t.join(10)
+    assert "error" not in json.loads(srv3.out.getvalue().splitlines()[-1])
 
 
 def test_text_cap_in_bytes():
@@ -270,6 +300,34 @@ def test_text_cap_in_bytes():
     chat.on_page("chat.message", msg(2, text=at_cap + "x"))
     (m, p), = [x for x in page.sent if x[0] == "chat.rejected"]
     assert p["reason"]["code"] == "too_long" and p["id"] == "m2"
+    # replies too (astra's CORR-BF6-1, daybreak2): bytes of UTF-8, not characters
+    chat.reply("/A.chat", at_cap)
+    assert page.sent[-1] == ("chat.reply", {"conversation": "/A.chat", "id": "r1", "text": at_cap})
+    n = len(page.sent)
+    for over in (at_cap + "x", "\u00e9" * (CH.MAX_TEXT // 2 + 1), "\U0001F600" * (CH.MAX_TEXT // 2)):
+        try:
+            chat.reply("/A.chat", over)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a reply over the cap was sent")
+    assert len(page.sent) == n
+    try:
+        from sagebrush import mcp_server
+    except Exception as e:
+        if os.environ.get("CI"):
+            raise
+        print("  (the server part skipped: %s)" % e)
+        return
+    srv = mcp_server.Server(io.StringIO())
+    srv.link = Page()
+    for text, ok in ((at_cap, True), ("\u00e9" * (CH.MAX_TEXT // 2), True), (at_cap + "x", False),
+                     ("\u00e9" * (CH.MAX_TEXT // 2) + "x", False), ("\U0001F600" * (CH.MAX_TEXT // 2), False)):
+        content, structured, is_error = srv.chat_tool("chat_reply", {"conversation": "/A.chat", "text": text})
+        assert is_error is not ok, (len(text), structured)
+        if not ok:
+            assert structured["error"]["code"] == "invalid" and "bytes of UTF-8" in structured["error"]["message"]
+    assert [p["text"] for m, p in srv.link.sent if m == "chat.reply"] == [at_cap, "\u00e9" * (CH.MAX_TEXT // 2)]
 
 
 def test_prompts_belong_to_their_pairing():

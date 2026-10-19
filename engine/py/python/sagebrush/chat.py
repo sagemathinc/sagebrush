@@ -197,6 +197,8 @@ class Chat:
         the conversation document, credited to the agent).  Its id is this
         server's, unique for its life, so that a page that reconnects writes
         it once."""
+        if len(text.encode("utf-8")) > MAX_TEXT:
+            raise ValueError("text is more than %d bytes of UTF-8" % MAX_TEXT)
         with self.lock:
             self.replies += 1
             rid = "r%d" % self.replies
