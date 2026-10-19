@@ -213,6 +213,13 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   const ta = performance.now(), ra = adv.apply(edit(many), 30_000), ms = performance.now() - ta;
   check(!ra.ok && !ra.retryAfter && /MiB of merging/.test(ra.message) && ms < 200, `500 changes to a 7.5 MB field: more than the whole budget, refused before any merge (${ms.toFixed(0)} ms: ${ra.message})`);
   check(rec(adv, "item", "", "a").text.length === 7_500_001, "…nothing merged");
+  // a record grown within the edit: tiny before, its first change ~900 KiB, then 300 tiny changes passing over it (daybreak2)
+  const grow = editState(board({ nodes: [{ id: "a", text: "A" }] }));
+  const grown = [{ op: "set", key: K("item", "", "a"), fields: { text: "A" + "w".repeat(900 * 1024) }, was: { text: "A" } }, ...Array.from({ length: 300 }, () => ({ op: "set", key: K("item", "", "a"), fields: { text: "AB" }, was: { text: "A" } }))];
+  const tg = performance.now(), rg = grow.apply(edit(grown), 40_000), msg = performance.now() - tg;
+  check(!rg.ok && !rg.retryAfter && /MiB of merging/.test(rg.message) && msg < 200 && rec(grow, "item", "", "a").text === "A", `a record grown by the edit itself, then passed over 300 times: refused before any merge (${msg.toFixed(0)} ms: ${rg.message})`);
+  // (and a few changes to one small record in an edit, as a frame's batched transactions make: fine)
+  check(grow.apply(edit([1, 2, 3].map((n) => ({ op: "set", key: K("item", "", "a"), fields: { x: n }, was: { x: n > 1 ? n - 1 : null } }))), 50_000).ok, "…a few changes to one small record in an edit: kept");
 }
 
 // ---------------------------------------------------------------- remote changes: within the bounds, all or none (LIMIT-C075-2)

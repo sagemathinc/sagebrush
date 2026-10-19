@@ -379,10 +379,19 @@ export function editState(postedText: string): EditState {
     refill(now);
     const later = (message: string, ms: number): Applied => { remember(id); return { ok: false, id, message, retryAfter: Math.max(1, Math.ceil(ms)) }; };
     if (edits < 1) return later("too many edits at once", ((1 - edits) / EDIT_LIMITS.editsPerSecond) * 1000);
-    // (each change is a pass over its record as it is: charged at that record's current size, as many
-    // times as changes name it; an edit costing more than the whole budget is never merged)
-    let cost = enc.encode(JSON.stringify(m)).length;
-    for (const c of changes) cost += sizes.get(keyOf(c.key)) ?? 0;
+    // (each change is a pass over its record as it is then, which is at most its size before the edit
+    // plus the bytes of this edit's changes to it: charged so, an upper bound, before anything is
+    // merged; a record's first pass is only its size before (daybreak2's LIMIT-C075-1).  An edit
+    // costing more than the whole budget is never merged; within it, all or none, as ever)
+    const msgBytes = enc.encode(JSON.stringify(m)).length, keyBytes = new Map<string, number>();
+    for (const c of changes) { const k = keyOf(c.key); keyBytes.set(k, (keyBytes.get(k) ?? 0) + enc.encode(JSON.stringify(c)).length); }
+    let cost = msgBytes;
+    const passed = new Set<string>();
+    for (const c of changes) {
+      const k = keyOf(c.key);
+      cost += sizes.get(k) ?? 0;
+      if (passed.has(k)) cost += keyBytes.get(k)!; else passed.add(k);
+    }
     if (cost > EDIT_LIMITS.workBurst) return no(`an edit is at most ${EDIT_LIMITS.workBurst / 2 ** 20} MiB of merging: its changes and the records each one passes over`);
     if (cost > work) return later("too much to merge at once", ((cost - work) / EDIT_LIMITS.workPerSecond) * 1000);
     edits -= 1;
