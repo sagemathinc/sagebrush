@@ -92,6 +92,7 @@ Users can always delete their data.
 - **Credentials:** read-only credentials, and no delete permission at the second copy.
 - **Encryption:** client-side, since private links mean private content.
 - **Retention:** 30 days, so deleted data leaves the backups within 30 days.
+- **The planned off-site copy** is William's office rclone mirror, which snapshots R2 and drops snapshots after about a month. It reads the sagebrush buckets with a read-only R2 token from William's side. So deleted data leaves it within about 31 days, well under the DPA's four-month bound.
 
 ## Security
 

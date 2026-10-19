@@ -44,6 +44,21 @@ const U1 = "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"; // a raise's answer held acro
 const U2 = "e8e8e8e8-e8e8-4e8e-8e8e-e8e8e8e8e8e8"; // a raise's answer held across a downgrade
 const U3 = "e9e9e9e9-e9e9-4e9e-8e9e-e9e9e9e9e9e9"; // a batch refused before its forward
 const V1 = "eaeaeaea-eaea-4eae-8eae-eaeaeaeaeaea"; // a grant made unusable by a downgrade: given back with no further request
+// (after a membership ends, §6.2: retention_days 3, and a day is a second in tests)
+const R1 = "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"; // lapses, then renews inside the window
+const R2 = "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2"; // lapses past the window
+const R3 = "d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3"; // repeated and late notices
+const R4 = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4"; // the clock at the boundary
+const W1 = "d5d5d5d5-d5d5-4d5d-8d5d-d5d5d5d5d5d5"; // a purge with more expired reservations than one step takes
+const W2 = "d6d6d6d6-d6d6-4d6d-8d6d-d6d6d6d6d6d6"; // the same, the alarm pacing the steps
+const Y1 = "d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7"; // a renewal 1 ms before the deadline
+const Y2 = "d8d8d8d8-d8d8-4d8d-8d8d-d8d8d8d8d8d8"; // a renewal at the deadline exactly, its period omitted
+const Y3 = "d9d9d9d9-d9d9-4d9d-8d9d-d9d9d9d9d9d9"; // a renewal 1 ms after the deadline, a longer period
+const Y4 = "dadadada-dada-4dad-8dad-dadadadadada"; // a lapse notice issued 100 days ago
+const X1 = "dbdbdbdb-dbdb-4dbd-8dbd-dbdbdbdbdbdb"; // a plan without sync from the start
+const X2 = "dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc"; // a plan that ends between enable and the first batch
+const Z0 = "dddddddd-0000-4ddd-8ddd-dddddddddd00"; // turned on while CoCalc is down: nothing cached
+const Z1 = "dddddddd-0001-4ddd-8ddd-dddddddddd01"; // a lapse while a claim raise is answered
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -87,6 +102,11 @@ fake.limits.set(T4, sync(1 << 20, 1 << 20));
 fake.limits.set(T5, sync(1 << 20, 1 << 20));
 fake.limits.set(T6, sync(1 << 20, 1 << 20));
 for (const u of [U1, U2, U3, V1]) fake.limits.set(u, sync(10_000, 1 << 20));
+const plan = (enabled, days = 3) => ({ storage_bytes: 1 << 20, max_file_bytes: 50_000, sync: { enabled, version_bytes: 1000, read_bytes_per_day: 1 << 20, retention_days: days } });
+for (const r of [R1, R2, R3, R4, W1, W2, Y1, Y2, Y3, Y4, X2]) fake.limits.set(r, plan(true));
+fake.limits.set(X1, plan(false));
+fake.limits.set(Z0, sync(1 << 20, 1 << 20));
+fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -103,7 +123,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -497,7 +517,8 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   fake.down = true;
   let r = await put(sa, Buffer.from("while down"));
   ok(r.status === 201, "CoCalc down: an account with cached limits still uploads");
-  const sd = await signIn(D);
+  // (a fresh account, turned on while CoCalc is down: turning sync on fetches the plan, and can't)
+  const sd = await signIn(Z0);
   await post(sd, "/api/sync/v1/enable", {});
   r = await put(sd, Buffer.from("d while down"));
   ok(r.status === 503 && (await r.json()).error === "busy", "CoCalc down and nothing cached: the upload waits, never read as zero or as no limit");
@@ -1835,6 +1856,153 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   // the breakdown: sharing's files and versions, sync's files and documents, against the one storage_bytes
   const me = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: st2 } })).json();
   ok(me.usage_breakdown?.sync_documents === 10_500 && me.usage_breakdown.sync_files === 0 && me.usage_breakdown.sharing_files === 0 && me.usage === 10_500, "the usage breakdown shows each part, sync's documents on their own line, and their sum: " + JSON.stringify({ usage: me.usage, parts: me.usage_breakdown }));
+}
+
+// ---- after a membership ends (§6.2): read-only, then the purge at sync.retention_days, unless renewed
+{
+  const notice = (account, enabled, issued) => signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: account, issued, limits: plan(enabled) }));
+  const retentionOf = async (account) => { const r = await signedGet(LIMITS_KEY, `/api/admin/sync-retention/${account}`); return [r.status, await r.json()]; };
+  const rowState = async (id) => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first())?.state;
+  const bkt = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  // R1: lapse, then renew inside the window: read-only meanwhile, no purge
+  const sr1 = await signIn(R1);
+  ok((await post(sr1, "/api/sync/v1/enable", {})).status === 200 && (await put(sr1, Buffer.from("R1's file"))).status === 201, "(R1: on, with a file)");
+  const t1 = Date.now();
+  ok((await (await notice(R1, false, t1)).json()).applied === true, "(R1's membership ends: a notice, sync off)");
+  const [g1, b1] = await retentionOf(R1);
+  ok(g1 === 200 && b1.state === "readonly" && b1.readonly_since === t1 && b1.purge_after === t1 + 3000, "the account is read-only, its clock started at the notice's issue time, the deletion due retention_days later: " + JSON.stringify(b1));
+  const x1 = await socket(sr1);
+  await hello(x1, dev1);
+  const rb = await x1.ask(batch("5151aaaa5151", 1, [[1, pid(1, "clientR1RO"), [], "edit"]], { kind: "board" }));
+  const ru = await put(sr1, Buffer.from("R1, read-only"));
+  ok(rb?.code === "readonly" && ru.status === 409, "every write is refused, readonly: a batch and an upload (" + rb?.code + ", " + ru.status + ")");
+  const me1 = await (await fetchAt(SITE, "/api/share/me", { headers: { cookie: sr1 } })).json();
+  ok(me1.sync_retention?.purge_after === t1 + 3000, "and /me says when the synced data will be deleted");
+  fake.limits.set(R1, plan(true));
+  ok((await (await notice(R1, true, t1 + 1)).json()).applied === true, "(R1 renews, inside the window)");
+  const [, b1b] = await retentionOf(R1);
+  ok(b1b.state === "active" && b1b.readonly_since === null && b1b.purge_after === null && (await put(sr1, Buffer.from("R1, renewed"))).status === 201, "renewed inside the window: the clock ends, and writes go again");
+  await new Promise((r) => setTimeout(r, 3500));
+  ok((await acctNs.get(acctNs.idFromName("acct:" + hashOf(R1))).lifecycle())?.state === "active" && (await rowState(R1)) === "active", "past the old deadline, nothing was deleted");
+  x1.ws.close();
+  // R2: lapse past the window: the same purge as Delete my synced data
+  const sr2 = await signIn(R2);
+  ok((await post(sr2, "/api/sync/v1/enable", {})).status === 200 && (await put(sr2, Buffer.from("R2's file"))).status === 201, "(R2: on, with a file)");
+  fake.limits.set(R2, plan(false));
+  ok((await (await notice(R2, false, Date.now())).json()).applied === true, "(R2's membership ends)");
+  ok(await until(async () => (await rowState(R2)) === "purged", 10_000), "past retention_days, the account object deletes its synced data, as Delete my synced data does");
+  ok((await bkt.list({ prefix: `s/${hashOf(R2).slice(0, 32)}/` })).objects.length === 0 && (await acctNs.get(acctNs.idFromName("acct:" + hashOf(R2))).lifecycle())?.state === null, "nothing of R2's is left in R2, and its account object is a tombstone");
+  // R3: repeated and late notices neither reset the clock nor end it
+  const sr3 = await signIn(R3);
+  ok((await post(sr3, "/api/sync/v1/enable", {})).status === 200, "(R3: on)");
+  const t3 = Date.now();
+  await notice(R3, false, t3);
+  const again = await (await notice(R3, false, t3 + 500)).json();
+  const [, b3] = await retentionOf(R3);
+  ok(again.applied === true && b3.readonly_since === t3 && b3.purge_after === t3 + 3000, "a repeated notice, newer, doesn't reset the clock: readonly_since stays the first");
+  const late = await (await notice(R3, true, t3 - 1000)).json();
+  const [, b3b] = await retentionOf(R3);
+  ok(late.applied === false && b3b.state === "readonly" && b3b.readonly_since === t3, "a late notice (issued before the lapse) saying sync is back is not applied: still read-only, the same clock");
+  // R4: the clock at the boundary
+  const sr4 = await signIn(R4);
+  const acctR4 = acctNs.get(acctNs.idFromName("acct:" + hashOf(R4)));
+  ok((await post(sr4, "/api/sync/v1/enable", {})).status === 200, "(R4: on)");
+  const t4 = Date.now();
+  await notice(R4, false, t4);
+  // (the purge runs at the deadline plus a delay of 0 to an hour, a 24th of a day, fixed per account: never before)
+  const pat = await acctR4.retentionPurgeAt();
+  const [, b4] = await retentionOf(R4);
+  ok(b4.purge_after === t4 + 3000 && pat >= b4.purge_after && pat < b4.purge_after + 1000 / 24, "the purge time is the deadline plus this account's delay, within an hour after it, never before; purge_after stays the deadline: " + JSON.stringify({ deadline: b4.purge_after, purge_at: pat }));
+  const atDeadline = await acctR4.retainAt({ at: b4.purge_after - 1 });
+  const before = await acctR4.retainAt({ at: pat - 1 });
+  ok(atDeadline === "keep" && before === "keep" && (await acctR4.lifecycle())?.state === "readonly", "before the deadline, and one millisecond before the purge time: kept, read-only");
+  const at = await acctR4.retainAt({ at: pat });
+  ok(at === "purge" && (await until(async () => (await acctR4.lifecycle())?.state !== "readonly")), "at the purge time exactly: the purge starts");
+  // LIMIT-445-1: a purge step takes at most 200 expired reservations; the purge still finishes
+  const sw1 = await signIn(W1);
+  const acctW1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(W1)));
+  ok((await post(sw1, "/api/sync/v1/enable", {})).status === 200, "(W1: on)");
+  ok((await acctW1.seedReservations({ n: 450 })) === 450, "(450 expired reservations, as if their uploads died and no alarm tidied them)");
+  await acctW1.holdPurge({ on: true });
+  ok((await del(sw1, W1)).status === 202, "(W1: Delete my synced data, its steps held)");
+  const steps = [];
+  for (let i = 0; i < 4; i++) steps.push((await acctW1.purgeStepOnce())?.reservations);
+  ok(steps[0] === 250 && steps[1] === 50 && steps[2] === 0, "each purge step takes at most 200 of them: " + JSON.stringify(steps));
+  await acctW1.holdPurge({ on: false });
+  ok(await until(async () => (await rowState(W1)) === "purged"), "and the purge finishes");
+  // (pacing, daybreak2: a full page goes on after 250 ms at the least, so at most 4 steps a second)
+  const sw2 = await signIn(W2);
+  const acctW2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(W2)));
+  ok((await post(sw2, "/api/sync/v1/enable", {})).status === 200 && (await acctW2.seedReservations({ n: 900 })) === 900, "(W2: on, 900 expired reservations)");
+  ok((await del(sw2, W2)).status === 202 && (await until(async () => (await rowState(W2)) === "purged", 15_000)), "(W2: Delete my synced data, run by the alarm alone, finishes)");
+  const tw = await acctW2.purgeStepTimes();
+  const gaps = tw.slice(1).map((t, i) => t - tw[i]);
+  ok(tw.length >= 5 && gaps.slice(0, 4).every((g) => g >= 250), "each step after a full page waits 250 ms at the least: " + JSON.stringify(gaps.slice(0, 6)));
+  // CORR-445-1: the deadline is fixed when the lapse is recorded; a renewal with a longer, or no, period can't move it
+  const lapseThen = async (id, renew, at) => {
+    const se = await signIn(id);
+    const a = acctNs.get(acctNs.idFromName("acct:" + hashOf(id)));
+    ok((await post(se, "/api/sync/v1/enable", {})).status === 200, `(${id.slice(0, 2)}: on)`);
+    const t = Date.now();
+    const lapsed = await a.planAt({ limits: plan(false, 100), issued: t, now: t });
+    const r = await a.planAt({ limits: renew, issued: t + 1, now: lapsed.purge_after + at });
+    return [lapsed, r];
+  };
+  const omitted = (() => { const p = plan(true, 90); delete p.sync.retention_days; return p; })();
+  const [y1a, y1b] = await lapseThen(Y1, plan(true, 90), -1);
+  ok(y1b.state === "active" && y1b.purge_after === null, "renewed 1 ms before the deadline: the clock ends");
+  const [y2a, y2b] = await lapseThen(Y2, omitted, 0);
+  ok(y2b.state === "readonly" && y2b.purge_after === y2a.purge_after, "renewed at the deadline exactly, its period omitted: the purge stands, the deadline unmoved (CORR-445-1)");
+  const [y3a, y3b] = await lapseThen(Y3, plan(true, 90), 1);
+  ok(y3b.state === "readonly" && y3b.purge_after === y3a.purge_after, "renewed 1 ms after it, with a longer period: the purge stands, the deadline unmoved");
+  // the clock rule: max(issued + retention_days, received + 14 days); a late notice never deletes without warning
+  const sy4 = await signIn(Y4);
+  ok((await post(sy4, "/api/sync/v1/enable", {})).status === 200, "(Y4: on)");
+  const recv = Date.now();
+  await notice(Y4, false, recv - 100 * 1000);
+  const [, b4b] = await retentionOf(Y4);
+  ok(b4b.state === "readonly" && b4b.readonly_since === recv - 100 * 1000 && b4b.purge_after >= recv + 1000 && b4b.purge_after < recv + 1000 + 2000, "a notice issued 100 days ago: the clock starts then, but the purge is no sooner than the floor after it arrived (14 days; 1 in tests): " + JSON.stringify(b4b));
+  // CORR-445-2: the plan is read before sync admits any write
+  const sx1 = await signIn(X1);
+  const ex1 = await (await post(sx1, "/api/sync/v1/enable", {})).json();
+  const ox1 = await socket(sx1);
+  await hello(ox1, dev1);
+  const bx1 = await ox1.ask(batch("8181cafe8181", 1, [[1, pid(1, "clientX1RO"), [], "abc"]], { kind: "board" }));
+  ok(ex1.state === "readonly" && bx1?.code === "readonly", "a plan without sync from the start: turning sync on makes it read-only at once, and the first batch is refused (CORR-445-2): " + JSON.stringify([ex1.state, bx1?.code]));
+  ox1.ws.close();
+  const sx2 = await signIn(X2);
+  const acctX2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(X2)));
+  ok((await (await post(sx2, "/api/sync/v1/enable", {})).json()).state === "active", "(X2: on)");
+  fake.limits.set(X2, plan(false));
+  await new Promise((r) => setTimeout(r, 1100)); // (its cached plan grows old: the next write that needs room fetches it)
+  const ox2 = await socket(sx2);
+  await hello(ox2, dev1);
+  const docX2 = "8282cafe8282";
+  const bx2 = await ox2.ask(batch(docX2, 1, [[1, pid(1, "clientX2RO"), [], "abc"]], { kind: "board" }));
+  const ix2 = await docNs.get(docNs.idFromName(`doc:${hashOf(X2)}:${docX2}`)).info();
+  const bgx2 = await acctX2.budget();
+  ok(bx2?.code === "readonly" && ix2.head.seq === 0 && ix2.total === 0 && bgx2.holds === 0 && bgx2.held === 0, "a plan that ended since: the first batch fetches it, is refused readonly, and commits nothing, holding nothing: " + JSON.stringify({ code: bx2?.code, head: ix2.head, holds: bgx2.holds }));
+  ox2.ws.close();
+  // CORR-AB4-1: a lapse while a raise's grant is on its way back (storage_bytes unchanged): the upload is
+  // refused readonly, and the grant is given back by the alarm, with no further request
+  const sz1 = await signIn(Z1);
+  const acctZ1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(Z1)));
+  ok((await post(sz1, "/api/sync/v1/enable", {})).status === 200, "(Z1: on, storage_bytes 1 MiB, retention 100 days)");
+  const gz = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  await gz("claim-raise-answer", true);
+  const prz = acctZ1.reserve({ account: Z1, sha256: sha(Buffer.from("z1 raise")), size: 40_000 });
+  ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) >= 40_000), "(the raise's statement ran in D1: its answer held)");
+  fake.limits.set(Z1, plan(false, 100));
+  // (a 100-day retention: its deadline's alarm is far off, so only the grant's own can give it back soon)
+  ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: Z1, issued: Date.now(), limits: plan(false, 100) }))).json()).applied === true, "(meanwhile, the membership ends: sync off, storage_bytes unchanged)");
+  await gz("claim-raise-answer", false);
+  const rz = await prz;
+  const bz = await acctZ1.budget();
+  ok(rz?.error?.code === "readonly" && bz.files === 0 && bz.alarm !== null && bz.alarm < Date.now() + 60_000, "the upload is refused readonly, nothing reserved, and the alarm is armed for the unused grant, not the deadline 100 days away: " + JSON.stringify({ r: rz?.error?.code, claim: bz.claim, alarm_in: bz.alarm - Date.now() }));
+  ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) <= 16_384), "with no further request, the alarm gives the grant back, to at most a chunk (CORR-AB4-1)");
+  const [g5, b5] = await retentionOf(crypto.randomUUID());
+  ok(g5 === 404, "CoCalc asking about an account that never synced: 404");
 }
 
 await mf.dispose();

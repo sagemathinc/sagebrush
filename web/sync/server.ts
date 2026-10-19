@@ -126,6 +126,9 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     }
     return null;
   }
+  // CoCalc's signed question, for its emails (§6.2): when an account's synced data will be deleted
+  const sr = p.match(/^\/api\/admin\/sync-retention\/([0-9a-f-]{8,100})$/i);
+  if (sr && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncRetention(req, env, sr[1]);
   const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})(?:\/([0-9a-f-]{8,100}))?$/i);
   if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1], sp[2]);
   if (!p.startsWith("/api/sync/")) return null;
@@ -345,6 +348,20 @@ async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> 
     ]);
   }
   return null;
+}
+
+/**
+ * GET /api/admin/sync-retention/<account_id> (signed with LIMITS_KEY, a plan
+ * matter): the account's sync state, when its plan stopped including sync
+ * (`readonly_since`, ms) and when its synced data will be deleted
+ * (`purge_after`, ms), both null if it isn't read-only.  CoCalc sends its
+ * emails from this (§6.2): at the start, and about 14 days before
+ * purge_after, asking again first.  404: the account never synced.
+ */
+async function adminSyncRetention(req: Request, env: Env, account: string): Promise<Response> {
+  if (!env.SYNC_ACCOUNT || !(await signedWith(req, env.LIMITS_KEY, ""))) return err(401, "bad signature");
+  const r = await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(account)))).retentionOf({ account });
+  return r ? json({ account_id: account, ...r, now: Date.now() }) : err(404, "this account never synced");
 }
 
 /**
