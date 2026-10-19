@@ -86,6 +86,7 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
           CHROME=google-chrome node web/workspace/test-workspace-preview.mjs

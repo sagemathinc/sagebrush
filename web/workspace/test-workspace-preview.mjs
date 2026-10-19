@@ -165,15 +165,17 @@ try {
   check(asked[0] === 0 && asked[1] === 1, "a page opened asks nothing; the first edit asks the browser to keep the storage, once: " + JSON.stringify(asked));
   // what a preview reads (LIMIT-F85-1): a file too large to preview, or a
   // kind with none, isn't read at all; Download reads it
-  await ev(`(() => { window.__reads = []; const g = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function (k) { if (this.name === "files") __reads.push(String(k)); return g.apply(this, arguments); }; return 1; })()`);
+  await ev(`(() => { window.__reads = []; const g = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function (k) { if (this.name === "files" || this.name === "fileBytes") __reads.push(String(k)); return g.apply(this, arguments); }; return 1; })()`);
+  // (a data file's bytes are read by its path where kept the old way, by its fid beside the index: capabilities §2a)
+  const readOf = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => __reads.includes(${JSON.stringify(p)}) || (!!e?.fid && __reads.includes(e.fid)))`;
   await ev(`(async () => { const b = new Uint8Array(5 * 2 ** 20).fill(44); await ${W}.create("/huge.csv", { content: b }); await ${W}.create("/other.bin", { content: new Uint8Array([1, 2, 3]) }); return 1; })()`);
   await openRow("/huge.csv");
-  check(await until(`/too large to preview here \\(5\\.0 MB\\)/.test(${P}?.textContent ?? "")`) && (await ev(`!__reads.includes("/huge.csv")`)), "a 5 MB table isn't read to be previewed: too large, said: " + JSON.stringify(await ev(`__reads`)));
+  check(await until(`/too large to preview here \\(5\\.0 MB\\)/.test(${P}?.textContent ?? "")`) && !(await ev(readOf("/huge.csv"))), "a 5 MB table isn't read to be previewed: too large, said: " + JSON.stringify(await ev(`__reads`)));
   await panelButton(/^Download$/);
-  check(await until(`__reads.includes("/huge.csv")`), "…Download reads it");
+  check(await until(readOf("/huge.csv")), "…Download reads it");
   await closePanel();
   await openRow("/other.bin");
-  check(await until(`/No preview/.test(${P}?.textContent ?? "")`) && (await ev(`!__reads.includes("/other.bin")`)), "a kind with no preview isn't read");
+  check(await until(`/No preview/.test(${P}?.textContent ?? "")`) && !(await ev(readOf("/other.bin"))), "a kind with no preview isn't read");
   await closePanel();
   // a stale preview's actions never touch another file put at its path (CORR-F85-1, -2)
   await ev(`(async () => { const w = ${W}; await w.create("/victim.txt", { content: "original" }); await w.write("/victim.txt", "original current"); await w.create("/v2.txt", { content: "old" }); await w.write("/v2.txt", "current"); return 1; })()`);

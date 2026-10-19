@@ -1036,6 +1036,120 @@ async function migrateOneTab() {
   w.close();
 }
 
+async function migrateUndersized() {
+  // LIMIT-CAP1A-1 / CORR-F81-2: an entry whose index says 1 byte, its old bytes 5 MiB: the read is
+  // reserved for what a value kept the old way can be, before the workspace's lock and before the read;
+  // the size corrected; the migration done in one pass, not retried for ever
+  const w = await v1([["/u/a.bin", "x"]]);
+  const big = new Uint8Array(5 * 2 ** 20).fill(7);
+  await rawPut(w.main, "files", big, "/u/a.bin");
+  const legacy = w.legacyBytes.bind(w), heldAtRead = [];
+  w.legacyBytes = async (e) => { heldAtRead.push(W.reserved().held); return legacy(e); };
+  // the workspace's lock held elsewhere: the migrator has its reservation while it waits for the lock
+  let release;
+  await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+  let batches = 0;
+  W.MIGRATE.afterBatch = () => { batches++; };
+  const run = W.startMigrator(w);
+  let reservedWaiting = false;
+  for (let i = 0; i < 100 && !reservedWaiting; i++) { await new Promise((r) => setTimeout(r, 20)); reservedWaiting = W.reserved().held === W.LEGACY_MAX * W.COPIES; }
+  check(reservedWaiting, "the reservation is taken before the workspace's lock (held while it waits): " + W.reserved().held);
+  release();
+  try { await run; } finally { W.MIGRATE.afterBatch = null; w.legacyBytes = legacy; }
+  check(heldAtRead.length > 0 && heldAtRead.every((h) => h >= W.LEGACY_MAX * W.COPIES), "…held when the old bytes are read, covering any value kept the old way: " + heldAtRead.join());
+  const e = await w.stat("/u/a.bin");
+  check(e.migrated && e.size === big.length && (await fb(w, "/u/a.bin")).length === big.length, "the index's 1 byte corrected to the bytes read, and moved");
+  check((await W.migrationState(w)).done && batches <= 3, "…and the migration done, not retried for ever: " + batches + " batches");
+  check(W.reserved().held === 0, "…its reservation released");
+  // a write to a file kept the old way reads its old bytes (as the version to keep): reserved first too
+  const x = await v1([["/wr/a.txt", "old"]]);
+  const lx = x.legacyBytes.bind(x), heldW = [];
+  x.legacyBytes = async (e) => { heldW.push(W.reserved().held); return lx(e); };
+  await x.write("/wr/a.txt", "new");
+  await x.rename("/wr", "/wr2");
+  x.legacyBytes = lx;
+  check(heldW.length > 0 && heldW.every((h) => h >= W.LEGACY_MAX * W.COPIES) && W.reserved().held === 0, "a write to a file kept the old way: its old bytes read under the reservation, released after: " + heldW.join());
+  x.close();
+  // larger than any value kept the old way can be: not moved, said, not read for it again; a move refused
+  const v = await v1([["/huge/h.bin", "y"]]);
+  await rawPut(v.main, "files", new Uint8Array(100), "/huge/h.bin");
+  const after = await v.locked(async () => v.migrateOne(await v.stat("/huge/h.bin"), 10));
+  check(!after.migrated && after.unmoved && after.size === 100, "a value larger than the bound: not moved, the entry says so, with its size");
+  await W.startMigrator(v);
+  check((await W.migrationState(v)).done && (await v.usage()).migration.left === 0 && (await v.read("/huge/h.bin")).content.length === 100, "…the migration done without it; it is still read where it is");
+  check(await fails(v.rename("/huge", "/huge2"), "limit"), "…and moving it is refused (its bytes stay where they are)");
+  w.close();
+  v.close();
+}
+
+async function staleChanged() {
+  // CORR-F81-1: an older tab's write at a moved file's old key is never deleted
+  // (a) written between the move and the old copy's deletion
+  const w = await v1([["/s/a.txt", "BEFORE"]]);
+  w.beforeStaleDelete = async () => { await rawPut(w.main, "files", enc("NEW OLD TAB EDIT"), "/s/a.txt"); };
+  await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt")));
+  w.beforeStaleDelete = null;
+  const copy = await w.stat("/s/a (from an older tab).txt");
+  check(copy && dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && dec((await w.read("/s/a.txt")).content) === "BEFORE", "an older tab's write as the old copy is cleaned up: kept as a file of its own, the moved file as it was");
+  check((await w.staleCopies(10)).length === 0, "…its mark gone");
+  await W.startMigrator(w);
+  check(dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && (await W.migrationState(w)).done && (await rawGet(w.main, "files", "/s/a.txt")) === undefined, "…then moved in turn, the migration done, nothing lost");
+  // (b) after a crash left the mark, then an older tab's write, then a reopened page's migrator
+  const v = await v1([["/s/b.txt", "BEFORE B"]]);
+  const drop = v.dropStale;
+  v.dropStale = async () => { throw new Error("crashed"); };
+  await v.locked(async () => v.migrateOne(await v.stat("/s/b.txt")));
+  v.dropStale = drop;
+  await rawPut(v.main, "files", enc("WRITTEN AFTER THE CRASH"), "/s/b.txt");
+  await W.startMigrator(v);
+  const copyB = await v.stat("/s/b (from an older tab).txt");
+  check(copyB && dec((await v.read(copyB.path)).content) === "WRITTEN AFTER THE CRASH" && dec((await v.read("/s/b.txt")).content) === "BEFORE B", "after a crash, an older tab's write at the marked key: kept, not deleted with the mark");
+  // (c) the same bytes, in both cases: deleted, no copy
+  const u = await v1([["/s/c.txt", "SAME"], ["/s/d.txt", "SAME D"]]);
+  u.beforeStaleDelete = async () => { await rawPut(u.main, "files", enc("SAME"), "/s/c.txt"); };
+  await u.locked(async () => u.migrateOne(await u.stat("/s/c.txt")));
+  u.beforeStaleDelete = null;
+  const dropU = u.dropStale;
+  u.dropStale = async () => { throw new Error("crashed"); };
+  await u.locked(async () => u.migrateOne(await u.stat("/s/d.txt")));
+  u.dropStale = dropU;
+  await W.startMigrator(u);
+  check((await u.list("/s")).length === 2 && (await rawKeys(u.main, "files")).length === 0 && (await u.staleCopies(10)).length === 0, "the old copy still the bytes moved (written again the same, or after a crash): deleted, no copy made");
+  w.close(); v.close(); u.close();
+}
+
+async function migrateQueuedAndBounded() {
+  // a migrator queued behind another tab's holds nothing: no reservation, no request for the workspace's lock
+  const files = Array.from({ length: 70 }, (_, i) => [`/b/f${String(i).padStart(2, "0")}.txt`, "x" + i]);
+  const w = await v1(files);
+  let release;
+  await new Promise((r) => navigator.locks.request("sagebrush-workspace-migrate", () => new Promise((g) => { release = g; r(); })));
+  await W.startMigrator(w);
+  const q = await navigator.locks.query();
+  check(W.reserved().held === 0 && W.reserved().waiting === 0 && !q.pending.some((p) => p.name === "sagebrush-workspace" || p.name === "sagebrush-workspace-migrate"), "a migrator queued behind another tab's: no reservation, no lock asked for");
+  release();
+  await new Promise((r) => setTimeout(r, 30));
+  // each batch reads at most MIGRATE.files entries of the index, never a list of all of them
+  const getAll = IDBObjectStore.prototype.getAll, counts = [];
+  IDBObjectStore.prototype.getAll = function (q, n) { if (this.name === "entries") counts.push(n); return getAll.call(this, q, n); };
+  try { await W.startMigrator(w); } finally { IDBObjectStore.prototype.getAll = getAll; }
+  check((await W.migrationState(w)).done && counts.length > 2 && counts.every((n) => n !== undefined && n <= W.MIGRATE.files), "each batch reads at most " + W.MIGRATE.files + " entries: " + counts.join());
+  w.close();
+}
+
+async function generationMonotonic() {
+  const w = await fresh();
+  await w.create("/g/a.txt", { content: "a" });
+  await w.create("/g/b.txt", { content: "b" });
+  const g = await w.generation();
+  check(g === (await w.lastSeq()) && g > 0, "the generation: the latest op's seq");
+  const n0 = await w.dropOps(g);
+  check(n0 > 0 && (await w.ops()).length === 0 && (await w.generation()) === g, "every op record dropped: the generation stays");
+  await w.create("/g/c.txt", { content: "c" });
+  check((await w.generation()) > g, "…and the next change raises it");
+  w.close();
+}
+
 async function closedByUpgrade() {
   const w = await fresh();
   await w.create("/k.txt", { content: "k" });
@@ -1053,7 +1167,7 @@ async function closedByUpgrade() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
