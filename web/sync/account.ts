@@ -68,12 +68,15 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS batch_holds (id TEXT PRIMARY KEY, doc TEXT NOT NULL, bytes INTEGER NOT NULL, due INTEGER NOT NULL)",
 ];
 
+/** The least time between two purge steps of one account when a step stops at a full page (§6.2). */
+const PURGE_PACE_MS = 250;
+
 /** Open batch holds an account may have at once (LIMIT-97A-2): as many as the live batches a document keeps. */
 const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
-export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number }; issued?: number }
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
@@ -209,13 +212,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * then marks that generation's row purged, as no storage will hold it again.
    */
   async confirm(a: { account: string; generation: number }): Promise<Result<{ state: string; generation: number }>> {
+    // the plan first, before any write is admitted: a plan without sync makes it read-only from the
+    // start (CORR-445-2); CoCalc unreachable, the plan is fetched again before the first write that needs it
+    if (this.exists() && this.get("account_id") === a.account && allowed(this.env, a.account)) await this.limits().catch(() => null);
     return attempt(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       if (!Number.isSafeInteger(a.generation) || a.generation < 1) throw new SyncError("invalid", "generation");
       if (a.generation <= this.retired() || (this.deleted() && !this.exists())) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again", { retired: this.retired() });
       if (!this.exists() || this.get("account_id") !== a.account || Number(this.get("generation")) !== a.generation) throw new SyncError("conflict", "another registration holds this account's storage; try again");
       if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
-      if (this.state() === "registering") this.set("state", "active");
+      if (this.state() === "registering") this.set("state", this.get("readonly_since") === undefined ? "active" : "readonly");
       return { state: this.state(), generation: a.generation };
     });
   }
@@ -565,7 +571,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
     // (the batch's bytes, exactly what its document's total can grow by, held against the budget, §6.1)
-    return this.heldForward(b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
+    return this.heldForward(att.account, b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
   }
   /**
    * Hold `bytes` against the budget, pin the batch's blobs, and forward it
@@ -574,8 +580,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * began, with the hold still open, wakes the alarm for its due time, when
    * the document's total replaces it.
    */
-  private async heldForward(doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+  private async heldForward(account: string, doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
     await this.room(bytes, "document");
+    // (after every await, before anything is held or sent: still this account, still writable; a plan
+    // fetched just now may have made it read-only, CORR-445-2)
+    this.admit(account, true);
     const expires = Date.now() + this.pinMs();
     const held = this.hold(doc, bytes, expires);
     let keys: PinKey[];
@@ -648,7 +657,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
     // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
-    return this.heldForward(m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
+    return this.heldForward(att.account, m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
   }
 
   // ---- document sockets (§2)
@@ -783,7 +792,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.set("limits_fetched", Date.now());
         return JSON.parse(now);
       }
-      this.storeLimits(l);
+      this.storeLimits(l, l.issued ?? Date.now());
       this.set("limits_issued", l.issued ?? 0);
       this.set("limits_fetched", Date.now());
       // (a lower limit can leave the claim holding more than fits: the alarm gives it back, CORR-BDA-1)
@@ -845,7 +854,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * zero, so the next write has D1 check the claim against it again, and the
    * alarm gives back what no longer fits.
    */
-  private storeLimits(l: Limits) {
+  private storeLimits(l: Limits, at: number, now = Date.now()) {
     const before = this.get("limits");
     if (!before || (JSON.parse(before) as Limits).storage_bytes !== l.storage_bytes) {
       this.set("blob_cap", 0);
@@ -855,6 +864,121 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("limits_rev", Number(this.get("limits_rev") ?? 0) + 1);
     }
     this.set("limits", JSON.stringify(l));
+    this.applyPlan(l, at, now);
+  }
+
+  // ---- after a membership ends (§6.2)
+  //
+  // A plan without sync makes the account read-only and starts a clock, once: readonly_since, the time
+  // CoCalc says the plan changed (never later than now).  A plan with sync again, before the deadline,
+  // ends it.  At readonly_since + sync.retention_days (90 if CoCalc says nothing), the alarm runs the
+  // same purge as "Delete my synced data".  Limits apply only if newer than those held (`issued`), so a
+  // late or repeated notice can neither reset the clock nor end it.
+
+  private dayMs(): number {
+    return testMode(this.env) ? 1000 : 86_400_000;
+  }
+  /** The least notice a person gets before deletion, from when sync learns of the lapse: 14 days (1 in tests). */
+  private floorDays(): number {
+    return testMode(this.env) ? 1 : 14;
+  }
+  /**
+   * When a read-only account's data is deleted, or null if it isn't
+   * read-only: fixed when the lapse is recorded, never moved by later limits
+   * (CORR-445-1).  It is max(issued + retention_days, received + 14 days):
+   * CoCalc's time is authoritative, but a late notice never deletes without
+   * the warning emails' time (§6.2).
+   */
+  private deadline(): number | null {
+    const d = this.get("purge_after");
+    return d === undefined ? null : Number(d);
+  }
+  /** `now` is the time the plan arrives (the clock, but for tests). */
+  private applyPlan(l: Limits, at: number, now = Date.now()) {
+    if (!this.exists()) return;
+    const st = this.state();
+    if (st === "deleting") return;
+    const since = this.get("readonly_since");
+    if (!l.sync.enabled) {
+      if (since === undefined) {
+        const issued = Math.min(at, now);
+        const days = l.sync.retention_days ?? 90;
+        this.set("readonly_since", issued);
+        this.set("readonly_received", now);
+        this.set("purge_after", Math.max(issued + days * this.dayMs(), now + this.floorDays() * this.dayMs()));
+      }
+      if (st === "active") this.set("state", "readonly");
+      for (const ws of this.ctx.getWebSockets()) send(ws, { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: this.deadline() } });
+      this.wakeBy(this.purgeAt()!);
+    } else if (since !== undefined && now < this.deadline()!) {
+      // (renewed in time: the clock ends, and the account takes writes again; past the deadline, the purge stands)
+      this.sql.exec("DELETE FROM meta WHERE k IN ('readonly_since', 'readonly_received', 'purge_after')");
+      if (st === "readonly") this.set("state", "active");
+    }
+  }
+  /**
+   * When the purge runs: the deadline plus a delay from 0 to an hour (a
+   * twenty-fourth of a day), fixed per account by its hash, never before it.
+   * So a mass lapse doesn't purge everyone at once; purge_after stays the
+   * deadline the person is told.
+   */
+  private purgeAt(): number | null {
+    const d = this.deadline();
+    if (d === null) return null;
+    const h = parseInt(String(this.get("account_hash") ?? "0").slice(0, 8), 16) || 0;
+    return d + Math.floor(((h % 1_000_000) / 1_000_000) * (this.dayMs() / 24));
+  }
+  /** The alarm's part: past the deadline, the account's data is deleted, as by "Delete my synced data". */
+  private retain(now: number): "keep" | "purge" | "none" {
+    const d = this.purgeAt();
+    if (d === null || this.state() !== "readonly") return "none";
+    if (now < d) return "keep";
+    this.set("purge_reason", "retention");
+    const rid = crypto.randomUUID();
+    const generation = Number(this.get("generation"));
+    this.ctx.waitUntil(this.purge({ request_id: rid, kind: "self", generation }).then((r) =>
+      this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'self' WHERE account_hash = ?1 AND generation = ?3 AND state <> 'purged'")
+        .bind(this.get("account_hash"), r.request_id, generation).run(),
+    ).catch(() => {}));
+    return "purge";
+  }
+  /** Where the account stands after a membership ended (§6.2): for /me and CoCalc's emails. */
+  private retention(): { state: string; readonly_since: number | null; purge_after: number | null } {
+    const since = this.get("readonly_since");
+    return { state: this.state(), readonly_since: since === undefined ? null : Number(since), purge_after: this.deadline() };
+  }
+  /** CoCalc's signed question (§6.2): when this account's synced data will be deleted, if it will. */
+  async retentionOf(a: { account: string }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
+    if (!this.exists() || this.get("account_id") !== a.account) return null;
+    return this.retention();
+  }
+  /** Tests only: a plan arriving as if the clock said `now` (CORR-445-1's boundaries, with the alarm far off). */
+  async planAt(a: { limits: unknown; issued: number; now: number }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    this.storeLimits(checkLimits({ ...(a.limits as object), issued: a.issued }), a.issued, a.now);
+    this.set("limits_issued", a.issued);
+    return this.retention();
+  }
+  /** Tests only: when the purge runs (the deadline plus this account's delay). */
+  async retentionPurgeAt(): Promise<number | null> {
+    return testMode(this.env) ? this.purgeAt() : null;
+  }
+  /** Tests only: expired reservations, as if their uploads had died and no alarm had tidied them. */
+  async seedReservations(a: { n: number }): Promise<number> {
+    if (!testMode(this.env) || !this.exists()) return 0;
+    for (let i = 0; i < a.n; i++) this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, 0, ?, ?)", randomHex(16), "0".repeat(64), `s/${String(this.get("account_hash")).slice(0, 32)}/seed${i}`, Date.now() - 1000);
+    return Number(this.one("SELECT COUNT(*) AS n FROM reservations")!.n);
+  }
+  /** Tests only: one purge step, with what is left of the reservations after it. */
+  async purgeStepOnce(): Promise<{ done: boolean; reservations: number } | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    const done = await this.purgeStep();
+    return { done, reservations: this.exists() ? Number(this.one("SELECT COUNT(*) AS n FROM reservations")!.n) : 0 };
+  }
+  /** Tests only: the alarm's retention decision, as if now were `at`. */
+  async retainAt(a: { at: number }): Promise<string | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    return this.retain(a.at);
   }
   /** What sync claims at a time: L / 64, between 4 and 64 MiB, never more than L (in tests, at least 64 bytes, or a seam's). */
   private chunk(L: number): number {
@@ -943,6 +1067,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (!r) continue;
         this.set("claim", r.claim_bytes);
         this.set("claim_dirty", 0);
+        // (whatever happens to this write now, a refusal after this await included, the alarm will give
+        // back what it doesn't use: armed on every grant installed, CORR-AB4-1)
+        this.arm();
         // (new limits since the statement: the caps stay as they set them, and the next write asks again;
         // what it was granted, unusable now, is given back by the alarm, armed here, CORR-BDA-1)
         if (Number(this.get("limits_rev") ?? 0) !== rev) {
@@ -991,9 +1118,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return { released: await this.releaseSlack(0) };
   }
   /** What sync holds, for the account's usage breakdown (display only). */
-  async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number } | null> {
+  async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number; retention: { state: string; readonly_since: number | null; purge_after: number | null } } | null> {
     if (!this.exists() || this.get("account_id") !== a.account) return null;
-    return { files: this.used(), documents: this.docsBytes() + this.heldBytes(), claim: this.claim() };
+    return { files: this.used(), documents: this.docsBytes() + this.heldBytes(), claim: this.claim(), retention: this.retention() };
   }
 
   /** Hold a batch's bytes against the claim, until its document answers (or can't commit any more). */
@@ -1084,7 +1211,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (Number(this.get("limits_issued") ?? 0) >= a.issued) return { applied: false };
       this.ctx.storage.transactionSync(() => {
-        this.storeLimits(l);
+        this.storeLimits(l, a.issued);
         this.set("limits_issued", a.issued);
         this.set("limits_fetched", Date.now());
       });
@@ -1171,10 +1298,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // and every upload has finalized, been abandoned, or ended (CORR-5E2-2)
     this.sql.exec("DELETE FROM forwards WHERE expires < ?", now - this.settleMs());
     if (this.one("SELECT 1 AS x FROM forwards LIMIT 1")) return false;
-    for (const r of this.sql.exec("SELECT id, key FROM reservations WHERE expires < ?", now).toArray() as Row[]) {
-      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
-      this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
-    }
+    // (each step's work is bounded, a page at a time: a full page has the alarm run again at once,
+    // LIMIT-445-1; expired reservations don't count against the uploads at once, so many can wait here)
+    this.purgeAgain = false;
+    const expired = this.sql.exec("SELECT id, key FROM reservations WHERE expires < ? LIMIT 200", now).toArray() as Row[];
+    this.ctx.storage.transactionSync(() => {
+      for (const r of expired) {
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
+        this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
+      }
+    });
+    if (expired.length === 200) this.purgeAgain = true;
     if (this.one("SELECT 1 AS x FROM reservations LIMIT 1")) return false;
     for (const d of this.sql.exec("SELECT doc FROM docs LIMIT 50").toArray() as Row[]) {
       try {
@@ -1186,10 +1320,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }
     if (this.one("SELECT 1 AS x FROM docs LIMIT 1")) return false;
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings", now);
-      this.sql.exec("DELETE FROM holdings");
-      this.sql.exec("DELETE FROM pins");
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings WHERE rowid IN (SELECT rowid FROM holdings LIMIT 500)", now);
+      this.sql.exec("DELETE FROM holdings WHERE rowid IN (SELECT rowid FROM holdings LIMIT 500)");
+      this.sql.exec("DELETE FROM pins WHERE rowid IN (SELECT rowid FROM pins LIMIT 1000)");
     });
+    if (this.one("SELECT 1 AS x FROM holdings LIMIT 1") || this.one("SELECT 1 AS x FROM pins LIMIT 1")) {
+      this.purgeAgain = true;
+      return false;
+    }
     const bucket = this.env.SHARE_BUCKET;
     if (!bucket) return false;
     for (const o of this.sql.exec("SELECT key FROM outbox LIMIT 500").toArray() as Row[]) {
@@ -1550,6 +1688,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!a.on) this.wakeBy(Date.now());
   }
   private purgeHeld = false;
+  /** A purge step that stopped at a full page: the next runs at once (LIMIT-445-1). */
+  private purgeAgain = false;
+  private purgeSteps: number[] = [];
+  /** Tests only: when the alarm ran each purge step. */
+  async purgeStepTimes(): Promise<number[]> {
+    return testMode(this.env) ? [...this.purgeSteps] : [];
+  }
 
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
   async crash(): Promise<void> {
@@ -1631,6 +1776,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
+    // (a read-only account's deadline, §6.2)
+    const d = this.state() === "readonly" ? this.purgeAt() : null;
+    if (d !== null) t.push(d);
     // (the budget: holds to settle, a release to write, slack to give back, §6.1)
     const budget = this.claimDue(now);
     if (budget !== null) t.push(budget);
@@ -1657,12 +1805,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (this.state() === "deleting") {
       let done = false;
       try {
-        if (!this.purgeHeld) done = await this.purgeStep();
+        if (!this.purgeHeld) {
+          if (testMode(this.env)) this.purgeSteps.push(Date.now());
+          done = await this.purgeStep();
+        }
       } catch {}
-      if (!done) this.wakeBy(Date.now() + (testMode(this.env) ? 200 : 30_000));
+      // (a full page goes on after PURGE_PACE_MS: at most 4 steps a second an account, daybreak2's bound)
+      if (!done) this.wakeBy(Date.now() + (this.purgeAgain ? PURGE_PACE_MS : testMode(this.env) ? 200 : 30_000));
       return;
     }
     const now = Date.now();
+    if (this.retain(now) === "purge") return;
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM finalized WHERE at < ?", now - IDLE_HOLDING_MS);
@@ -1717,7 +1870,8 @@ export function checkLimits(v: unknown): Limits {
   // last good limits, never "sync off" or zero, LIMIT-7FB-3; a plan without sync says enabled: false)
   if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
   // (a sync.storage_bytes CoCalc may still send is ignored: storage_bytes is the one budget, §6.1)
-  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day };
+  // (how long synced data is kept read-only after a membership ends, §6.2: CoCalc's, 90 days if it says nothing)
+  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}) };
   return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
 
