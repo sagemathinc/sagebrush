@@ -566,6 +566,25 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     });
   }
 
+  /**
+   * Delete this document (§7), from its owner's account object: in one
+   * transaction it is marked deleted and its history, access list and
+   * records dropped; its sockets close; then its storage is wiped.  Its
+   * blobs are the account's, which deletes them itself.  Idempotent.
+   */
+  async purge(): Promise<{ done: true }> {
+    if (this.exists()) {
+      this.ctx.storage.transactionSync(() => {
+        this.set("deleted", Date.now());
+        for (const t of ["batches", "clients", "ranges", "fenced", "releases", "acl", "session_fences"]) this.sql.exec(`DELETE FROM ${t}`);
+      });
+      for (const ws of this.ctx.getWebSockets()) this.end(ws, "this document was deleted");
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    return { done: true };
+  }
+
   /** The alarm: hands released blobs back to the owner's account object until it acknowledges (§4.3). */
   async alarm(): Promise<void> {
     if (!this.exists()) return;

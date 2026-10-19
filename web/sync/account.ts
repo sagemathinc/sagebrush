@@ -637,6 +637,110 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.set("used_bytes", Math.max(0, this.used() + n));
   }
 
+  /**
+   * CoCalc's signed plan notice (§6), already verified by the Worker:
+   * applied only if `issued` is newer than what this account holds, so a
+   * replay or a late notice can never undo a newer one.  An account that
+   * never turned sync on gets nothing made for it.
+   */
+  async notice(a: { account: string; issued: number; limits: unknown }): Promise<Result<{ applied: boolean }>> {
+    return attempt(() => {
+      if (!this.exists() || this.get("account_id") !== a.account) return { applied: false };
+      let l: Limits;
+      try {
+        l = checkLimits({ ...(a.limits as object), issued: a.issued });
+      } catch {
+        throw new SyncError("invalid", "these limits aren't well-formed");
+      }
+      if (Number(this.get("limits_issued") ?? 0) >= a.issued) return { applied: false };
+      this.ctx.storage.transactionSync(() => {
+        this.set("limits", JSON.stringify(l));
+        this.set("limits_issued", a.issued);
+        this.set("limits_fetched", Date.now());
+      });
+      return { applied: true };
+    });
+  }
+
+  // ---- deleting (§7)
+
+  /**
+   * Start deleting everything this account synced: "Delete my synced data"
+   * (kind self) or CoCalc's purge of the account (kind admin).  In one
+   * transaction the account becomes `deleting`, so every request is refused
+   * from then on; its sockets close; the alarm does the rest (purgeStep).
+   * Idempotent by request id; a different id while one runs joins it.
+   */
+  async purge(a: { request_id: string; kind: "self" | "admin" }): Promise<{ state: string; request_id: string }> {
+    if (!this.exists()) return { state: "none", request_id: a.request_id };
+    const st = this.ctx.storage.transactionSync(() => {
+      if (this.state() !== "deleting") {
+        this.set("state", "deleting");
+        this.set("purge_id", a.request_id);
+        this.set("purge_kind", a.kind);
+        this.set("purge_docs", Number(this.one("SELECT COUNT(*) AS n FROM docs")!.n));
+        this.set("purge_bytes", this.used());
+      } else if (a.kind === "admin") this.set("purge_kind", "admin");
+      return { state: "deleting", request_id: this.get("purge_id")! };
+    });
+    for (const ws of this.ctx.getWebSockets()) {
+      send(ws, { t: "error", code: "deleting", detail: { message: "this account's synced data is being deleted" } });
+      ws.close(4410, "deleting");
+    }
+    this.wakeBy(Date.now());
+    return st;
+  }
+
+  /**
+   * One step of a purge, from the alarm: each document deletes itself; every
+   * holding, reservation and export goes to the outbox; the outbox empties;
+   * the whole s/<hash>/ prefix is listed and deleted (whatever the tables
+   * missed).  When all of that is done, the D1 record keeps counts and no
+   * id, and this object's storage is wiped.  Returns true when done.
+   */
+  private async purgeStep(): Promise<boolean> {
+    const now = Date.now();
+    for (const d of this.sql.exec("SELECT doc FROM docs LIMIT 50").toArray() as Row[]) {
+      try {
+        await this.docStub(String(d.doc)).purge();
+        this.sql.exec("DELETE FROM docs WHERE doc = ?", d.doc);
+      } catch {
+        return false;
+      }
+    }
+    if (this.one("SELECT 1 AS x FROM docs LIMIT 1")) return false;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM holdings", now);
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) SELECT key, ? FROM reservations", now);
+      this.sql.exec("DELETE FROM holdings");
+      this.sql.exec("DELETE FROM reservations");
+      this.sql.exec("DELETE FROM pins");
+    });
+    const bucket = this.env.SHARE_BUCKET;
+    if (!bucket) return false;
+    for (const o of this.sql.exec("SELECT key FROM outbox LIMIT 500").toArray() as Row[]) {
+      await bucket.delete(String(o.key));
+      this.sql.exec("DELETE FROM outbox WHERE key = ?", o.key);
+    }
+    if (this.one("SELECT 1 AS x FROM outbox LIMIT 1")) return false;
+    const prefix = `s/${this.get("account_hash")!.slice(0, 32)}/`;
+    const l = await bucket.list({ prefix, limit: 1000 });
+    if (l.objects.length) {
+      await bucket.delete(l.objects.map((o) => o.key));
+      return false;
+    }
+    // done: the record keeps counts, no id; then this object holds nothing
+    const db = this.env.SHARE_DB;
+    if (db) {
+      await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = ?5, bytes = ?6 WHERE account_hash = ?1")
+        .bind(this.get("account_hash"), Math.floor(now / 1000), this.get("purge_id"), this.get("purge_kind"), Number(this.get("purge_docs") ?? 0), Number(this.get("purge_bytes") ?? 0)).run();
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.alarmAt = null;
+    return true;
+  }
+
   // ---- blobs (§5.4)
 
   /**
@@ -787,6 +891,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n);
   }
 
+  /** Tests only: hold a purge's steps (the account stays `deleting`) until released. */
+  async holdPurge(a: { on: boolean }): Promise<void> {
+    if (!this.env.SYNC_TEST_PIN_MS) return;
+    this.purgeHeld = a.on;
+    if (!a.on) this.wakeBy(Date.now());
+  }
+  private purgeHeld = false;
+
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
   async crash(): Promise<void> {
     if (!this.env.SYNC_TEST_PIN_MS) return;
@@ -869,6 +981,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (this alarm has fired: the next is whatever arm() sets at the end)
     this.alarmAt = null;
     if (!this.exists()) return;
+    if (this.state() === "deleting") {
+      let done = false;
+      try {
+        if (!this.purgeHeld) done = await this.purgeStep();
+      } catch {}
+      if (!done) this.wakeBy(Date.now() + (this.env.SYNC_TEST_PIN_MS ? 200 : 30_000));
+      return;
+    }
     const now = Date.now();
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
     this.ctx.storage.transactionSync(() => {

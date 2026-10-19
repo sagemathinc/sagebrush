@@ -32,7 +32,8 @@ function ok(cond, what) {
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
-const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
+const PURGE_KEY = "purge-key", LIMITS_KEY = "limits-key";
+const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY, LIMITS_KEY };
 const URL_KEY = "url-key";
 const LOSE = "fa17fa17fa17";
 // ---- a fake CoCalc: the limits (§6)
@@ -807,6 +808,94 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(own?.ok?.items?.length === 2, "while its owner reads it");
   const late = await doc.batch({ account: A, writer: "session:" + dev1, author: "person", device: dev1, pin_expires: Date.now() - 1, batch: { doc: docA, epoch: 2, patches: [{ cseq: 1, id: pid(5000, "clientLATE"), parents: [], size: 1 }], body: new Uint8Array([1]) } });
   ok(late?.error?.code === "busy", "a forward past its pin_expires is refused (§4.3)");
+}
+
+// ---- CoCalc's signed plan notice (§6)
+const signedPost = (key, path, body, ts = Math.floor(Date.now() / 1000)) => fetchAt(SITE, path, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": "sha256=" + createHmac("sha256", key).update(`${ts}\nPOST\n${path}\n${body}`).digest("hex") },
+  body,
+});
+const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SITE, path, { headers: { "x-sagebrush-timestamp": String(ts), "x-sagebrush-signature": "sha256=" + createHmac("sha256", key).update(`${ts}\nGET\n${path}\n`).digest("hex") } });
+{
+  const tiny = { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: 5, version_bytes: 0, read_bytes_per_day: 0 } };
+  const body = (issued, limits = tiny, account_id = D) => JSON.stringify({ request_id: crypto.randomUUID(), account_id, issued, limits });
+  let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: body(100) });
+  ok(r.status === 401, "a plan notice that isn't signed is refused");
+  r = await signedPost(PURGE_KEY, "/api/admin/limits", body(100));
+  ok(r.status === 401, "nor one signed with the purge key: the notice has its own key");
+  r = await signedPost(LIMITS_KEY, "/api/admin/limits", body(100), Math.floor(Date.now() / 1000) - 600);
+  ok(r.status === 401, "nor one older than 5 minutes");
+  const issued = Date.now();
+  r = await signedPost(LIMITS_KEY, "/api/admin/limits", body(issued));
+  ok(r.status === 200 && (await r.json()).applied === true, "a signed notice is applied");
+  const sd = await signIn(D);
+  ok((await put(sd, Buffer.from("over the new limit"))).status === 507, "at once: the new, smaller limit holds");
+  r = await signedPost(LIMITS_KEY, "/api/admin/limits", body(issued - 1, sync(1 << 20, 1 << 20)));
+  ok(r.status === 200 && (await r.json()).applied === false, "an older notice, arriving late, is not applied");
+  r = await signedPost(LIMITS_KEY, "/api/admin/limits", body(issued + 1, { storage_bytes: 1 }));
+  ok(r.status === 400, "a malformed one is refused");
+  r = await signedPost(LIMITS_KEY, "/api/admin/limits", body(issued + 1, tiny, C));
+  ok(r.status === 200 && (await r.json()).applied === false, "for an account that never turned sync on, nothing is made");
+}
+
+// ---- deleting (§7, §9): "Delete my synced data", and CoCalc's purge
+{
+  const bucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  const listed = async (prefix) => (await bucket.list({ prefix })).objects.length;
+  const sP = (id) => `s/${hashOf(id).slice(0, 32)}/`;
+  // A shares a file too: sharing's data must survive the deletion of synced data
+  const shared = Buffer.from("A's shared file");
+  const up = await fetchAt(SITE, `/api/share/blob/${sha(shared)}`, { method: "PUT", headers: { cookie: sa, origin: SITE, "content-type": "application/octet-stream" }, body: shared });
+  ok(up.status === 201 || up.status === 200, "(A uploads a file to share)");
+  const aShared = await listed(`a/${hashOf(A).slice(0, 32)}/`);
+  ok((await listed(sP(A))) > 0 && aShared > 0, "(A has synced and shared bytes in R2)");
+  const s = await socket(sa);
+  await hello(s, dev1);
+  let r = await post(sa, "/api/sync/v1/delete", { confirm: "yes" });
+  ok(r.status === 400, "deleting synced data needs {confirm: \"delete\"}");
+  const acctA2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
+  await acctA2.holdPurge({ on: true });
+  r = await post(sa, "/api/sync/v1/delete", { confirm: "delete" });
+  ok(r.status === 202, "Delete my synced data");
+  for (let w = 0; w < 40 && s.closed === null; w++) await new Promise((res) => setTimeout(res, 50));
+  ok(s.closed === 4410, "the account's sockets close at once");
+  ok((await post(sa, "/api/sync/v1/enable", {})).status === 409, "turning sync on again waits for the deletion");
+  await acctA2.holdPurge({ on: false });
+  let state = null;
+  for (let w = 0; w < 60 && state !== "purged"; w++) {
+    await new Promise((res) => setTimeout(res, 250));
+    state = (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(A)).first())?.state;
+  }
+  ok(state === "purged", "the deletion finishes, from the account object's alarm");
+  ok((await listed(sP(A))) === 0, "no synced byte of A's is left in R2");
+  ok((await listed(`a/${hashOf(A).slice(0, 32)}/`)) === aShared, "and sharing's bytes are untouched");
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  const gone = await docNs.get(docNs.idFromName(`doc:${hashOf(A)}:${docA}`)).pull({ account: A, epoch: 2, after: 0 });
+  ok(gone?.error?.code === "unknown_doc", "A's documents are gone");
+  ok((await acctNs.get(acctNs.idFromName("acct:" + hashOf(A))).inspect({})) === null, "and the account object holds nothing");
+  const rec = await db.prepare("SELECT * FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(A)).first();
+  ok(rec && !JSON.stringify(rec).includes(A) && rec.kind === "self", "the record keeps counts and no account id");
+  r = await post(sa, "/api/sync/v1/enable", {});
+  ok(r.status === 200, "afterwards, sync can be turned on again");
+  const s2 = await socket(sa);
+  const h2 = await hello(s2, dev1);
+  ok(h2.welcome?.next_dseq === 1 && h2.index?.ops?.length === 0, "and starts empty");
+  s2.ws.close();
+  // CoCalc's purge of a deleted account: sharing's and sync's parts
+  const rid = crypto.randomUUID();
+  const pb = JSON.stringify({ account_id: B, request_id: rid });
+  r = await signedPost(PURGE_KEY, "/api/admin/purge", pb);
+  ok(r.status === 202, "CoCalc's signed purge is accepted (sharing's part answers)");
+  state = null;
+  for (let w = 0; w < 60 && state !== "purged"; w++) {
+    await new Promise((res) => setTimeout(res, 250));
+    state = (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(B)).first())?.state;
+  }
+  ok(state === "purged" && (await listed(sP(B))) === 0, "and sync's part deletes B's synced data");
+  const st = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${rid}`);
+  ok(st.status === 200 && (await st.json()).state === "purged", "its status, signed, by the request id");
+  ok((await signedGet(LIMITS_KEY, `/api/admin/sync-purge/${rid}`)).status === 401, "the status needs the purge key");
 }
 
 await mf.dispose();

@@ -15,13 +15,13 @@
 // the bindings are the flag (§11).  Before authentication, an IP limit
 // (SYNC_PREAUTH, Cloudflare's rate-limiting binding) comes first (§2).
 
-import { sessionOf, type ShareEnv } from "../share/server.ts";
+import { sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
 import { allowed, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
-export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string };
+export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => json({ error, ...extra }, status);
@@ -50,6 +50,15 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     }
     return null;
   }
+  // CoCalc's signed calls (§6, §9): a plan notice, and its purge of a deleted account, which
+  // sharing then handles too (sync's part runs from the account object's alarm)
+  if (p === "/api/admin/limits" && req.method === "POST") return adminLimits(req, env);
+  if (p === "/api/admin/purge" && req.method === "POST") {
+    if (env.SYNC_ACCOUNT && env.SHARE_DB) await adminSyncPurge(req.clone(), env);
+    return null;
+  }
+  const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})$/i);
+  if (sp && req.method === "GET") return adminSyncPurgeStatus(req, env, sp[1]);
   if (!p.startsWith("/api/sync/")) return null;
   // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
@@ -65,7 +74,19 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   const hash = await accountHash(who.id);
   const stub = env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + hash));
   if (p === "/api/sync/v1/enable" && m === "POST") {
-    return answer(await stub.enable({ account: who.id, hash }), json);
+    // (a purge still running, or the account's record says it is being deleted: not yet)
+    const rec = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
+    if (rec?.state === "deleting") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
+    const r = await stub.enable({ account: who.id, hash });
+    if ("ok" in r) await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, state, created) VALUES (?1, 'active', ?2) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
+    return answer(r, json);
+  }
+  if (p === "/api/sync/v1/delete" && m === "POST") {
+    const b = (await req.json().catch(() => null)) as { confirm?: unknown } | null;
+    if (b?.confirm !== "delete") return err(400, "invalid", { message: 'send {"confirm": "delete"}' });
+    const rid = crypto.randomUUID();
+    await env.SHARE_DB.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'self' WHERE account_hash = ?1 AND state = 'active'").bind(hash, rid).run();
+    return json(await stub.purge({ request_id: rid, kind: "self" }), 202);
   }
   if (p === "/api/sync/v1/account" && m === "GET") {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return err(426, "a WebSocket upgrade");
@@ -118,6 +139,47 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     return new Response(null, { status: 303, headers: { location: to.toString(), "cache-control": "no-store" } });
   }
   return err(404, "not found");
+}
+
+/** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
+async function adminLimits(req: Request, env: Env): Promise<Response> {
+  if (!env.SYNC_ACCOUNT || !env.LIMITS_KEY) return err(404, "sync is not enabled here");
+  const body = await req.text();
+  if (body.length > 4096 || !(await signedWith(req, env.LIMITS_KEY, body))) return err(401, "bad signature");
+  let v: { request_id?: unknown; account_id?: unknown; issued?: unknown; limits?: unknown };
+  try {
+    v = JSON.parse(body);
+  } catch {
+    return err(400, "bad request");
+  }
+  if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !Number.isSafeInteger(v.issued) || !v.limits || typeof v.limits !== "object") return err(400, "bad request");
+  const stub = env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(v.account_id))));
+  return answer(await stub.notice({ account: v.account_id, issued: v.issued as number, limits: v.limits }), json);
+}
+
+/** Sync's part of CoCalc's signed purge (§9): the account object deletes everything it holds. */
+async function adminSyncPurge(req: Request, env: Env): Promise<void> {
+  const body = await req.text();
+  if (body.length > 4096 || !(await signedWith(req, env.PURGE_KEY, body))) return;
+  let v: { request_id?: unknown; account_id?: unknown };
+  try {
+    v = JSON.parse(body);
+  } catch {
+    return;
+  }
+  if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return;
+  const hash = await accountHash(v.account_id);
+  const rec = await env.SHARE_DB!.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
+  if (!rec) return; // (never synced: nothing to delete)
+  await env.SHARE_DB!.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'admin' WHERE account_hash = ?1 AND state <> 'purged'").bind(hash, v.request_id).run();
+  await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
+}
+
+/** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */
+async function adminSyncPurgeStatus(req: Request, env: Env, rid: string): Promise<Response> {
+  if (!env.SHARE_DB || !(await signedWith(req, env.PURGE_KEY, ""))) return err(401, "bad signature");
+  const r = await env.SHARE_DB.prepare("SELECT state, docs, bytes FROM sync_accounts WHERE request_id = ?1").bind(rid).first();
+  return r ? json({ request_id: rid, ...r }) : err(404, "no such request");
 }
 
 /**
