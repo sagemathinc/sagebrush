@@ -386,6 +386,12 @@ def validate_result(verb, result):
         return _paging(result, {"versions": versions})
     if verb == "version":
         return {"content": _content_in(result.get("content"))}
+    if verb == "stat":
+        # (schema.json: "One entry, or null": null, given explicitly, is no
+        # entry at that path; an omitted or malformed entry is not)
+        if "entry" not in result:
+            raise PageError("protocol", "the page returned no entry, and no null for none")
+        return {"entry": None if result["entry"] is None else _entry(result["entry"], "an entry")}
     out = {"entry": _entry(result.get("entry"), "an entry")}
     if verb == "read":
         out["rev"] = _rev(result.get("rev"), "a rev")
@@ -465,6 +471,8 @@ def _summary(verb, args, result):
     if verb == "history":
         return "\n".join("%d: %s" % (i, json.dumps(v, ensure_ascii=False)) for i, v in enumerate(result.get("versions", []))) or "(no versions)"
     e = result.get("entry")
+    if verb == "stat" and e is None:
+        return "no entry at %s" % args["path"]
     if isinstance(e, dict):
         return "%s: %s" % (verb, json.dumps(e, ensure_ascii=False))
     return json.dumps(result, ensure_ascii=False)
