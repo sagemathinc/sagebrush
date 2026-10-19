@@ -71,6 +71,8 @@ export const BOARD_KEYS = {
 };
 // (dropVersions: files' versions dropped per transaction, and records per transaction when all go)
 const DROP_FILES = 200, DROP_RECORDS = 1000;
+// (a folder's drop: at most this many operations since it was confirmed are looked at; more, it is asked again)
+const SEQ_SCAN = 10_000;
 // The first time the person saves something of their own here (not on a
 // first visit): the browser asked to keep this site's storage when space
 // runs short (§6.3), once per page.  The workspace's own writes call it;
@@ -374,6 +376,10 @@ export class Workspace {
   }
 
   /** The operation log, oldest first, from `after` (a seq). */
+  /** The operation log's latest seq (0 if none). */
+  async lastSeq(): Promise<number> {
+    return inTx(this.ws, "ops", "readonly", (tx) => new Promise<number>((ok, no) => { const c = tx.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); }));
+  }
   async ops(after = 0): Promise<Op[]> {
     return inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(after, true))));
   }
@@ -436,7 +442,7 @@ export class Workspace {
    * when it was confirmed): no newer version goes, one kept since then
    * not having been confirmed (CORR-AC5-1); a folder's are its files' at
    * the drop. */
-  async dropVersions(p: string, opts: { keep?: number; expect?: { fid?: string; ids?: number[]; count?: number; bytes?: number; created?: number; maxId?: number } } = {}): Promise<number> {
+  async dropVersions(p: string, opts: { keep?: number; expect?: { fid?: string; ids?: number[]; count?: number; bytes?: number; created?: number; maxId?: number; seq?: number } } = {}): Promise<number> {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0)), x = opts.expect;
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
     return this.locked(async () => {
@@ -444,6 +450,14 @@ export class Workspace {
         const e = q === "/" ? undefined : await this.mustStat(q);
         if (x.fid !== undefined && e?.fid !== x.fid) throw new WorkspaceError("conflict", `${q} is another file now`);
         if (x.created !== undefined && e?.created !== x.created) throw new WorkspaceError("conflict", `${q} is another folder now`);
+        // (a folder's: nothing moved, made, restored or removed in it since
+        // it was confirmed, by the operation log after `seq` (writes only
+        // add versions, which maxId fences); else asked again, CORR-5D2-2)
+        if (x.seq !== undefined && q !== "/") {
+          const later = (await inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(x.seq!, true), SEQ_SCAN + 1)))) as Op[];
+          const touched = (o: Op) => o.op !== "write" && o.op !== "dropVersions" && (within(o.path, q) || within(q, o.path) || (o.to !== undefined && (within(o.to, q) || within(q, o.to))));
+          if (later.length > SEQ_SCAN || later.some(touched)) throw new WorkspaceError("conflict", `${q} changed since: see its old versions again`);
+        }
         if (x.count !== undefined || x.bytes !== undefined) {
           const u = await this.versionsUsage(q);
           if ((x.count !== undefined && u.count !== x.count) || (x.bytes !== undefined && u.bytes !== x.bytes)) throw new WorkspaceError("conflict", `the old versions in ${q} changed since: see them again`);
@@ -497,7 +511,8 @@ export class Workspace {
             const list: Version[] = await req(vs.getAll(upTo === Infinity ? null : IDBKeyRange.upperBound(upTo), DROP_RECORDS));
             let f = 0;
             for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
-            await less(tx, f, list.length < DROP_RECORDS);
+            // (the total set to 0 only when no version is left at all: a drop fenced by maxId leaves newer ones, CORR-5D2-1)
+            await less(tx, f, upTo === Infinity && list.length < DROP_RECORDS);
             return [list.length, f] as const;
           });
           freed += f;
@@ -516,14 +531,16 @@ export class Workspace {
    * with "/" all of them, Trash's too): how many, and their bytes; what
    * dropVersions(p) would free.  Read only: the versions' records, never
    * their bytes. */
-  async versionsUsage(p = "/"): Promise<{ count: number; bytes: number; maxId: number }> {
+  async versionsUsage(p = "/"): Promise<{ count: number; bytes: number; maxId: number; seq: number }> {
     const q = path(p);
+    // (seq: the operation log's latest, read first: what is in scope as of then, CORR-5D2-2)
+    const seq = await this.lastSeq();
     let fids: Set<string> | null = null;
     if (q !== "/") {
       const e = await this.mustStat(q);
       const files = e.kind === "folder" ? (await this.list(q, { recursive: true })).filter((x) => x.kind === "file") : e.kind === "file" ? [e] : [];
       fids = new Set(files.map((x) => x.fid).filter((x): x is string => !!x));
-      if (!fids.size) return { count: 0, bytes: 0, maxId: 0 };
+      if (!fids.size) return { count: 0, bytes: 0, maxId: 0, seq };
     }
     // (all of them: their count and the running total kept with them, no
     // record read; a folder's: each file's, at most maxVersions each)
@@ -532,14 +549,14 @@ export class Workspace {
       // (maxId: the newest version's id, the high-water mark a drop confirmed now is bound to, CORR-AC5-1)
       if (!fids) {
         const last = await new Promise<number>((ok, no) => { const c = vs.openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
-        return { count: (await req(vs.count())) as number, bytes: (((await req(tx.objectStore("meta").get("versionBytes"))) as number | undefined) ?? 0), maxId: last };
+        return { count: (await req(vs.count())) as number, bytes: (((await req(tx.objectStore("meta").get("versionBytes"))) as number | undefined) ?? 0), maxId: last, seq };
       }
       let count = 0, bytes = 0, maxId = 0;
       for (const fid of fids) {
         const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
         for (const v of list) { count++; bytes += v.size; maxId = Math.max(maxId, v.id!); }
       }
-      return { count, bytes, maxId };
+      return { count, bytes, maxId, seq };
     });
   }
 

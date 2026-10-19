@@ -300,9 +300,12 @@ export async function dropFolderVersions(w: Workspace, folder: string, host: Pre
     if (!confirm(`Delete the ${u.count} earlier version${u.count === 1 ? "" : "s"} of the files in ${folder} (${fmtSize(u.bytes)})? The files as they are now stay. This can't be undone.`)) return;
     // (only what was confirmed: the same folder, and no version newer than
     // the newest then, kept since: CORR-F85-1, CORR-AC5-1)
-    const freed = await w.dropVersions(folder, { expect: { created: f?.created, maxId: u.maxId } });
+    const freed = await w.dropVersions(folder, { expect: { created: f?.created, maxId: u.maxId, seq: u.seq } });
     host.say(`${fmtSize(freed)} of old versions deleted in ${folder}`);
-  } catch (err) { host.fail(err); }
+  } catch (err) {
+    if (err instanceof WorkspaceError && err.code === "conflict") host.say(`${folder} changed since you confirmed: nothing was deleted; ask again`);
+    else host.fail(err);
+  }
 }
 
 export type StorageHost = PreviewHost & { showTrash(): void; emptyTrash(): Promise<void> };
