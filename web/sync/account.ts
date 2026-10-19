@@ -73,7 +73,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
-export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number }; issued?: number }
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
@@ -215,7 +215,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (a.generation <= this.retired() || (this.deleted() && !this.exists())) throw new SyncError("forbidden", "this registration's synced data was deleted; turn sync on again", { retired: this.retired() });
       if (!this.exists() || this.get("account_id") !== a.account || Number(this.get("generation")) !== a.generation) throw new SyncError("conflict", "another registration holds this account's storage; try again");
       if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
-      if (this.state() === "registering") this.set("state", "active");
+      if (this.state() === "registering") this.set("state", this.get("readonly_since") === undefined ? "active" : "readonly");
       return { state: this.state(), generation: a.generation };
     });
   }
@@ -783,7 +783,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.set("limits_fetched", Date.now());
         return JSON.parse(now);
       }
-      this.storeLimits(l);
+      this.storeLimits(l, l.issued ?? Date.now());
       this.set("limits_issued", l.issued ?? 0);
       this.set("limits_fetched", Date.now());
       // (a lower limit can leave the claim holding more than fits: the alarm gives it back, CORR-BDA-1)
@@ -845,7 +845,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * zero, so the next write has D1 check the claim against it again, and the
    * alarm gives back what no longer fits.
    */
-  private storeLimits(l: Limits) {
+  private storeLimits(l: Limits, at: number) {
     const before = this.get("limits");
     if (!before || (JSON.parse(before) as Limits).storage_bytes !== l.storage_bytes) {
       this.set("blob_cap", 0);
@@ -855,6 +855,72 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("limits_rev", Number(this.get("limits_rev") ?? 0) + 1);
     }
     this.set("limits", JSON.stringify(l));
+    this.applyPlan(l, at);
+  }
+
+  // ---- after a membership ends (§6.2)
+  //
+  // A plan without sync makes the account read-only and starts a clock, once: readonly_since, the time
+  // CoCalc says the plan changed (never later than now).  A plan with sync again, before the deadline,
+  // ends it.  At readonly_since + sync.retention_days (90 if CoCalc says nothing), the alarm runs the
+  // same purge as "Delete my synced data".  Limits apply only if newer than those held (`issued`), so a
+  // late or repeated notice can neither reset the clock nor end it.
+
+  private dayMs(): number {
+    return testMode(this.env) ? 1000 : 86_400_000;
+  }
+  /** When a read-only account's data is deleted, or null if it isn't read-only. */
+  private deadline(): number | null {
+    const since = this.get("readonly_since");
+    if (since === undefined) return null;
+    const cached = this.get("limits");
+    const days = cached ? ((JSON.parse(cached) as Limits).sync.retention_days ?? 90) : 90;
+    return Number(since) + days * this.dayMs();
+  }
+  private applyPlan(l: Limits, at: number) {
+    if (!this.exists()) return;
+    const st = this.state();
+    if (st === "deleting") return;
+    const since = this.get("readonly_since");
+    if (!l.sync.enabled) {
+      if (since === undefined) this.set("readonly_since", Math.min(at, Date.now()));
+      if (st === "active") this.set("state", "readonly");
+      for (const ws of this.ctx.getWebSockets()) send(ws, { t: "error", code: "readonly", detail: { message: "this account's plan doesn't include sync: read-only", purge_after: this.deadline() } });
+      this.wakeBy(this.deadline()!);
+    } else if (since !== undefined && Date.now() < this.deadline()!) {
+      // (renewed in time: the clock ends, and the account takes writes again; past the deadline, the purge stands)
+      this.sql.exec("DELETE FROM meta WHERE k = 'readonly_since'");
+      if (st === "readonly") this.set("state", "active");
+    }
+  }
+  /** The alarm's part: past the deadline, the account's data is deleted, as by "Delete my synced data". */
+  private retain(now: number): "keep" | "purge" | "none" {
+    const d = this.deadline();
+    if (d === null || this.state() !== "readonly") return "none";
+    if (now < d) return "keep";
+    this.set("purge_reason", "retention");
+    const rid = crypto.randomUUID();
+    const generation = Number(this.get("generation"));
+    this.ctx.waitUntil(this.purge({ request_id: rid, kind: "self", generation }).then((r) =>
+      this.env.SHARE_DB?.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'self' WHERE account_hash = ?1 AND generation = ?3 AND state <> 'purged'")
+        .bind(this.get("account_hash"), r.request_id, generation).run(),
+    ).catch(() => {}));
+    return "purge";
+  }
+  /** Where the account stands after a membership ended (§6.2): for /me and CoCalc's emails. */
+  private retention(): { state: string; readonly_since: number | null; purge_after: number | null } {
+    const since = this.get("readonly_since");
+    return { state: this.state(), readonly_since: since === undefined ? null : Number(since), purge_after: this.deadline() };
+  }
+  /** CoCalc's signed question (§6.2): when this account's synced data will be deleted, if it will. */
+  async retentionOf(a: { account: string }): Promise<{ state: string; readonly_since: number | null; purge_after: number | null } | null> {
+    if (!this.exists() || this.get("account_id") !== a.account) return null;
+    return this.retention();
+  }
+  /** Tests only: the alarm's retention decision, as if now were `at`. */
+  async retainAt(a: { at: number }): Promise<string | null> {
+    if (!testMode(this.env) || !this.exists()) return null;
+    return this.retain(a.at);
   }
   /** What sync claims at a time: L / 64, between 4 and 64 MiB, never more than L (in tests, at least 64 bytes, or a seam's). */
   private chunk(L: number): number {
@@ -991,9 +1057,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return { released: await this.releaseSlack(0) };
   }
   /** What sync holds, for the account's usage breakdown (display only). */
-  async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number } | null> {
+  async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number; retention: { state: string; readonly_since: number | null; purge_after: number | null } } | null> {
     if (!this.exists() || this.get("account_id") !== a.account) return null;
-    return { files: this.used(), documents: this.docsBytes() + this.heldBytes(), claim: this.claim() };
+    return { files: this.used(), documents: this.docsBytes() + this.heldBytes(), claim: this.claim(), retention: this.retention() };
   }
 
   /** Hold a batch's bytes against the claim, until its document answers (or can't commit any more). */
@@ -1084,7 +1150,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (Number(this.get("limits_issued") ?? 0) >= a.issued) return { applied: false };
       this.ctx.storage.transactionSync(() => {
-        this.storeLimits(l);
+        this.storeLimits(l, a.issued);
         this.set("limits_issued", a.issued);
         this.set("limits_fetched", Date.now());
       });
@@ -1631,6 +1697,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
+    // (a read-only account's deadline, §6.2)
+    const d = this.state() === "readonly" ? this.deadline() : null;
+    if (d !== null) t.push(d);
     // (the budget: holds to settle, a release to write, slack to give back, §6.1)
     const budget = this.claimDue(now);
     if (budget !== null) t.push(budget);
@@ -1663,6 +1732,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       return;
     }
     const now = Date.now();
+    if (this.retain(now) === "purge") return;
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM finalized WHERE at < ?", now - IDLE_HOLDING_MS);
@@ -1717,7 +1787,8 @@ export function checkLimits(v: unknown): Limits {
   // last good limits, never "sync off" or zero, LIMIT-7FB-3; a plan without sync says enabled: false)
   if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
   // (a sync.storage_bytes CoCalc may still send is ignored: storage_bytes is the one budget, §6.1)
-  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day };
+  // (how long synced data is kept read-only after a membership ends, §6.2: CoCalc's, 90 days if it says nothing)
+  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}) };
   return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
 
