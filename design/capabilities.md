@@ -68,7 +68,7 @@ The page says which applies ("This board's code is paused: files can't be protec
 | **Unicode normalisation mismatch** (a Deno advisory on APFS: the check and the use saw different forms of one name). | **One normalisation for all three:** check, display and use go through the workspace's `normPath` (NFC), so the name shown, the name checked and the entry used are the same string. The worker's paths are normalised by the page before lookup, never trusted as given. |
 | **Prompt spoofing** (CVE-2024-27936, after CVE-2023-28446: the prompt showed a stripped string but granted the raw one). | The prompt is **drawn by the host page, outside the runner's frame**, so code can't draw a fake one or draw over it. It shows the entry's **canonical path from the workspace index** at decision time (never the string the code passed), set as text (escaped by construction), with its kind and size. It grants **exactly that identity**. |
 | **Exemptions and pre-prompt loading.** Deno's URL imports bypassed the checks, and dependencies resolved before the permission system applied. | **No exemption:** imports of workspace modules, data files and images all go through the gate (§4). A worker starts with nothing of the person's, so nothing is resolved before the gate exists. |
-| **Coarse grants and prompt fatigue.** "allow-all" hollows the model out, and frequent prompts train people to say yes. | **Ask rarely, grant narrowly:** scope by folder, remember per board, batch a run's requests into one prompt, and remember a denial for the rest of the page's life without asking again. There is **no "allow everything"**: the workspace's top can't be granted, only a folder in it or a file. A revoke list (§8) shows every grant. |
+| **Coarse grants and prompt fatigue.** "allow-all" hollows the model out, and frequent prompts train people to say yes. | **Ask rarely, grant narrowly:** scope by folder, remember per board, batch a run's requests into one prompt, and remember a denial for the rest of the page's life without asking again. There is **no "allow everything"**: the workspace's top can't be granted, only a folder in it or a file. A revoke list (§9) shows every grant. |
 
 ## 4. The gate inventory: every path to the person's files
 
@@ -116,7 +116,7 @@ The page says which applies ("This board's code is paused: files can't be protec
   - **mode:** read, or read and write.
 - **A folder grant follows the folder.** It covers whatever is inside the folder at the moment of use: renaming the folder moves the grant with it, and moving a file out of it ends the grant for that file.
 - **Kept in the workspace's own store** (its `meta`), not localStorage, so that clearing a site's storage clears both together. Grants are not in an export (design/workspace-files.md §7.11) or a copy of the board: Duplicate, Save a copy and uploading the board elsewhere all start with none.
-- **Revoked** from the list (§8). A revocation applies at the next use: a run already reading keeps the bytes it has, and is refused the next one.
+- **Revoked** from the list (§9). A revocation applies at the next use: a run already reading keeps the bytes it has, and is refused the next one.
 - **Bounded:** at most 100 grants per board and 10,000 in all. Past that, the oldest unused ones go, and the person is told.
 
 ## 7. Defence in depth
@@ -124,10 +124,47 @@ The page says which applies ("This board's code is paused: files can't be protec
 - **The worker's network.** The runner's policy already has `connect-src 'none'` (design/runner.md). The downloaded-file runner (web/notebook/files-runner.js) allows `blob:` for its own chunks, which is not a network, and nothing else. Both are kept so: an interpreter escape still reaches no server.
 - **Hard limits on the worker:**
   - **heap:** the engine's memory is capped (a maximum on the WebAssembly memory and the interpreter's own collector limit). Past it a run fails with MemoryError, never the page;
-  - **CPU:** Stop, always (§8), and the page terminates a worker that doesn't answer Stop within a few seconds. A board that isn't in view gets no new runs started by itself.
+  - **CPU:** Stop, always (§9), and the page terminates a worker that doesn't answer Stop within a few seconds. A board that isn't in view gets no new runs started by itself.
 - **Every message from the runner is untrusted:** paths, sizes and data are checked on the page before use (design/runner.md, "Next", 1).
 
-## 8. The resource pill
+## 8. Bounds
+
+The broker, the prompt and the record of activity are part of the boundary: what a worker asks for is untrusted, so each is bounded **before** anything is allocated, copied or kept (daybreak2's LIMIT-CAP-1 and LIMIT-CAP-2).
+
+**The broker:**
+- **A request** from the worker (`{op, path}`, and for a write its size) is at most 4 KiB. Its `op` is one of a fixed few, and its path at most 1,024 characters (the workspace's `MAX_PATH`). Anything else is refused before it is read further.
+- **One request at a time per worker.** The worker waits on each answer (`Atomics.wait`), so it can't have two in flight. The page answers its workers one request at a time each, and the number of workers is bounded by the page's interpreters (one per language per document).
+- **A read:**
+  - **Size first.** The size comes from the workspace's index (the entry's `size`) before any byte is read. A file over the workspace's file cap (200 MB, `maxFileBytes`) is refused unread; with the cap at 200 MB, that never happens to a stored file.
+  - **Chunked.** The bytes cross in the broker's chunks (4 MB, the SharedArrayBuffer's size), never the whole file at once. The page holds one file's bytes at a time per worker, read once from IndexedDB.
+  - **Rate.** Each worker has a read budget of 512 MB, refilled at 64 MB a second. Past it the page waits before answering, which is backpressure: the worker is already waiting.
+- **A write** (`fsChanged`):
+  - the size is checked against the file cap before the bytes are kept;
+  - it joins the page's existing write queue, bounded at 256 MiB of bytes waiting (`FILE_QUEUE_MAX`, LIMIT-12C-2). Past either bound, it is refused, said, and the write fails in the worker. Nothing is held past the bound.
+- **A listing** (`readdir`, a folder's `stat`) returns at most 10,000 entries (a folder's cap, `maxFolderEntries`) and 1 MiB of names. Past that it is cut, and says so.
+- **Misuse ends the worker.** More than 1,000 requests a second, or more than 1,000 refused requests in a minute, terminates it. The board says why and is shown as stopped. Each request is small and synchronous, so a run that asks within these limits never meets them.
+
+**The prompt:**
+- **One open prompt per page.** While it is open, further requests from any board are added to it, never to a new prompt.
+- **What a prompt holds is capped:**
+  - at most 100 requests, coalesced by `(entry identity, capability)`, keeping the widest mode asked (write over read);
+  - each path at most 1,024 characters;
+  - at most 1 GB of requested bytes in all, counted from the index's sizes.
+
+  Past any cap, further requests are refused at once ("too many files asked for at once"), without a prompt. The run can ask again after the person has answered.
+- **A folder's size and count** in a prompt come from the index's entries (metadata, no bytes read), counted up to the folder cap: "10,000+ files" past it.
+
+**The Files pill:**
+- **A summary, not a log.** It keeps at most 1,000 entries, each `(entry identity, reads, writes, last time)`. Past that it keeps a count ("and 312 more files").
+- **Display.** It lists at most 100 rows, the most recent first, each path cut to 200 characters (the whole path in its tooltip). The summary goes when the page closes.
+
+**The grant store:**
+- **Admission and eviction are atomic.** A new grant, and the eviction it causes, are one transaction of the workspace's store, under its lock.
+- **Bounded:** at most 100 grants per board, and 10,000 in all.
+- **"Oldest unused"** is the grant with the earliest `lastUsed`. That time is written when the grant is made, and at most once a minute while it is used, so using a grant writes almost nothing. An index on it finds the oldest in one step.
+- **Told.** An eviction is said in the Files pill: "a grant this board hadn't used since … was removed: there were too many".
+
+## 9. The resource pill
 
 **A small pill at the top of the board and notebook pages, with three indicators.** It replaces the per-cell running mark as the primary signal; cells keep their own marks.
 
@@ -142,7 +179,7 @@ The page says which applies ("This board's code is paused: files can't be protec
 
 The pill is quiet when nothing happens, and never covers the board's content. On a phone it is a single dot that opens the same panel.
 
-## 9. Steps
+## 10. Steps
 
 1. **The gate, and the worker's policy:**
    - the read gate through the broker, and the write gate on keeping;
@@ -150,14 +187,14 @@ The pill is quiet when nothing happens, and never covers the board's content. On
    - `/tmp` writes never kept;
    - the policy checked by a test that fails without it.
 
-   Until step 2 lands, there are no prompts: everything ungranted is refused, and notebooks made here keep their own folder (§10).
+   Until step 2 lands, there are no prompts: everything ungranted is refused, and notebooks made here keep their own folder (§11).
 2. **The prompt and grants:** the host-drawn prompt, batching, the grant store and revocation.
 3. **The pill.**
 4. **Removing the interim** (3b's paused boards) where the gate holds (§2).
 
 Each step is a branch of its own with its tests, and a test-only check and mutants, as usual.
 
-## 10. Questions
+## 11. Questions
 
 1. **Notebooks.** Today a notebook sees all of the person's files. Under this model, a notebook brought in from elsewhere is someone else's code, as a board is. My proposal:
    - a notebook *made here* gets read and write on its own folder without asking, and asks for anything else;
