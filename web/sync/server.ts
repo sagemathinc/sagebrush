@@ -139,39 +139,25 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   const hash = await accountHash(who.id);
   const stub = env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + hash));
   if (p === "/api/sync/v1/enable" && m === "POST") {
-    // (a purge still running, or the account's record says it is being deleted: not yet)
-    const rec = await env.SHARE_DB.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
-    if (rec?.state === "deleting") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
-    let reg: { state: string; generation: number } | null = null;
-    // The account is registered in D1 first, and only then given storage (CORR-00F-1): the daily
-    // inventory finds an account's objects by this row, so an account object that could take writes
-    // without it would see its own files deleted.  A failure here leaves no storage at all; a row
-    // whose account object then fails to start holds nothing, which is harmless.
-    try {
-      if (testMode(env) && env.SYNC_TEST_FAIL_ENROLL === who.id) throw new Error("D1 unavailable (test seam)");
-      // (generation 1 for a new row; a purged one made active again gets the next; an active row keeps its own)
-      await env.SHARE_DB.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, 1) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, generation = sync_accounts.generation + 1 WHERE sync_accounts.state = 'purged'").bind(hash, Math.floor(Date.now() / 1000)).run();
-      reg = await env.SHARE_DB.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
-      if (reg?.state !== "active") return err(409, "deleting", { message: "this account's synced data is still being deleted" });
-    } catch {
-      return err(503, "busy", { message: "turning sync on didn't finish; try again" });
-    }
-    // (a test seam: the registration's answer is held here, before the account object is reached, as
-    // astra's first-enable trace holds it; the test then sends what it would, CORR-A62-1)
-    if (testMode(env) && env.SYNC_TEST_HOLD_ENABLE === who.id) return json({ held: reg.generation });
-    // (the account object checks the generation against its own, and against the highest it has
-    // retired: a purge since this read, or any number of them, refuses it)
-    return answer(await stub.enable({ account: who.id, hash, generation: reg.generation }), json);
+    // The account object decides (CORR-02C-1): it answers the generation, registering, or refuses
+    // while a deletion runs.  Nothing is taken until D1 records that generation and the object hears
+    // so (CORR-00F-1: the daily inventory finds an account's objects by its row).
+    const e = await stub.enable({ account: who.id, hash });
+    if ("error" in e) return answer(e, json);
+    // (a test seam: the registration is held here, after the account object answered and before D1,
+    // for generation 1 only; the test then sends the rest itself, through /__test/register)
+    if (testMode(env) && (env.SYNC_TEST_HOLD_ENABLE ?? "").split(",").includes(who.id) && e.ok.generation === 1) return json({ held: e.ok.generation });
+    return register(env, stub, who.id, hash, e.ok.generation);
   }
   if (p === "/api/sync/v1/delete" && m === "POST") {
-    const b = (await req.json().catch(() => null)) as { confirm?: unknown } | null;
-    if (b?.confirm !== "delete") return err(400, "invalid", { message: 'send {"confirm": "delete"}' });
+    // (the generation the device was given, by enable or the socket's welcome: a late request for an
+    // older one leaves a newer alone, CORR-3ED-1)
+    const b = (await req.json().catch(() => null)) as { confirm?: unknown; generation?: unknown } | null;
+    if (b?.confirm !== "delete" || !Number.isSafeInteger(b.generation) || (b.generation as number) < 1) return err(400, "invalid", { message: 'send {"confirm": "delete", "generation": <the account\'s generation>}' });
     const rid = crypto.randomUUID();
-    await env.SHARE_DB.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'self' WHERE account_hash = ?1 AND state = 'active'").bind(hash, rid).run();
-    // (the registered generation goes to the purge, which retires it even if the account object has
-    // no storage yet: an enable of it still on its way is then refused, CORR-A62-1)
-    const g = await env.SHARE_DB.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
-    return json(await stub.purge({ request_id: rid, kind: "self", hash, ...(g?.state === "deleting" ? { generation: g.generation } : {}) }), 202);
+    const r = await stub.purge({ request_id: rid, kind: "self", generation: b.generation as number });
+    await recordPurge(env, hash, r, "self");
+    return json(r, 202);
   }
   if (p === "/api/sync/v1/account" && m === "GET") {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return err(426, "a WebSocket upgrade");
@@ -226,6 +212,54 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   return err(404, "not found");
 }
 
+/**
+ * The rest of turning sync on, once the account object has answered
+ * `generation` (CORR-02C-1): D1 records it, then the object is told, and only
+ * then takes writes.  D1's row only moves forward: a write for an older
+ * generation than it holds changes nothing, so a registration held for any
+ * time can't take the row back.  If the object answers that the generation
+ * was retired meanwhile, its row (and only its) is marked purged, as no
+ * storage will hold it again.  Exported for the test entry, which resumes a
+ * registration held by its seam.
+ */
+export async function register(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOUNT"]>["get"]>, account: string, hash: string, generation: number): Promise<Response> {
+  const db = env.SHARE_DB!;
+  let reg: { state: string; generation: number } | null;
+  try {
+    if (testMode(env) && env.SYNC_TEST_FAIL_ENROLL === account) throw new Error("D1 unavailable (test seam)");
+    await db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, ?3) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, generation = excluded.generation WHERE sync_accounts.generation < excluded.generation")
+      .bind(hash, Math.floor(Date.now() / 1000), generation).run();
+    reg = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
+  } catch {
+    // (the object stays registering, taking nothing; turning sync on again goes on from here)
+    return err(503, "busy", { message: "turning sync on didn't finish; try again" });
+  }
+  // (the row is past this generation, or this generation's deletion has begun: nothing to confirm)
+  if (reg?.generation !== generation || reg.state !== "active") return err(409, "conflict", { message: "turning sync on met another change; try again" });
+  const c = await stub.confirm({ account, generation });
+  if ("error" in c && typeof c.error.detail?.retired === "number") {
+    await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation = ?3 AND state = 'active'")
+      .bind(hash, Math.floor(Date.now() / 1000), generation).run();
+  }
+  return answer(c, json);
+}
+
+/**
+ * D1's record of a purge the account object has answered (CORR-02C-1): what
+ * it says, for the generation it names, never more.  `deleting`: that
+ * generation's row, unless it is purged already (its deletion finished
+ * first).  `none`: every generation up to the highest retired, none of which
+ * any storage can hold again.  `stale`: nothing.
+ */
+async function recordPurge(env: Env, hash: string, r: { state: string; request_id: string; kind?: string; generation?: number; retired?: number }, kind: "self" | "admin"): Promise<void> {
+  const db = env.SHARE_DB!;
+  if (r.state === "deleting" && r.generation !== undefined)
+    await db.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = ?3 WHERE account_hash = ?1 AND generation = ?4 AND state <> 'purged'").bind(hash, r.request_id, r.kind ?? kind, r.generation).run();
+  else if (r.state === "none" && (r.retired ?? 0) > 0)
+    await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
+      .bind(hash, Math.floor(Date.now() / 1000), r.request_id, kind, r.retired).run();
+}
+
 /** POST /api/admin/limits (§6): CoCalc's signed plan notice, with LIMITS_KEY (never PURGE_KEY). */
 async function adminLimits(req: Request, env: Env): Promise<Response> {
   if (!env.SYNC_ACCOUNT || !env.LIMITS_KEY) return err(404, "sync is not enabled here");
@@ -256,11 +290,10 @@ async function adminSyncPurge(req: Request, env: Env): Promise<void> {
   }
   if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return;
   const hash = await accountHash(v.account_id);
-  const rec = await env.SHARE_DB!.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string }>();
-  if (!rec) return; // (never synced: nothing to delete)
-  await env.SHARE_DB!.prepare("UPDATE sync_accounts SET state = 'deleting', request_id = ?2, kind = 'admin' WHERE account_hash = ?1 AND state <> 'purged'").bind(hash, v.request_id).run();
-  const g = await env.SHARE_DB!.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
-  await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin", hash, ...(g?.state === "deleting" ? { generation: g.generation } : {}) });
+  // (the account object decides, whatever D1 says: an account still registering has no row yet;
+  // no generation named, as whatever it holds goes, CORR-02C-1)
+  const r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
+  await recordPurge(env, hash, r, "admin");
 }
 
 /** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */

@@ -22,7 +22,8 @@ const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pendin
 const F = "66666666-6666-4666-8666-666666666666"; // allowlisted; a fetch of its limits held while a notice lands
 const G = "77777777-7777-4777-8777-777777777777"; // allowlisted; an upload outlives its reservation
 const H = "88888888-8888-4888-8888-888888888888"; // allowlisted; its first registration in D1 fails
-const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enable's answer is held before the account object
+const I = "99999999-9999-4999-8999-999999999999"; // allowlisted; its first enable is held after the account object answers, before D1
+const K = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"; // allowlisted; its first enable is held too, while CoCalc purges it
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -70,7 +71,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: I },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}` },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -223,7 +224,7 @@ const payloads = (item) => {
   ok((await socket(sc)).status === 403, "nor open a socket");
   ok((await socket(sa)).status === 403, "a socket before sync is turned on is refused");
   const e = await post(sa, "/api/sync/v1/enable", {});
-  ok(e.status === 200 && (await e.json()).state === "active", "turning sync on");
+  ok(e.status === 200 && JSON.stringify(await e.json()) === JSON.stringify({ state: "active", generation: 1 }), "turning sync on: generation 1");
   ok((await post(sa, "/api/sync/v1/enable", {})).status === 200, "again is a no-op");
   ok((await socket(sa, "https://evil.test")).status === 403, "a socket upgrade from another origin is refused (cross-site WebSocket hijacking)");
 }
@@ -240,7 +241,7 @@ const dev2 = "device-two-0002";
   const s = await socket(sa);
   ok(s.status === 101, "the account socket opens");
   const { welcome, index } = await hello(s, dev1);
-  ok(welcome?.t === "welcome" && welcome.v === 1 && welcome.next_dseq === 1 && welcome.state === "active", "welcome");
+  ok(welcome?.t === "welcome" && welcome.v === 1 && welcome.next_dseq === 1 && welcome.state === "active" && welcome.generation === 1, "welcome, with the generation (for Delete my synced data)");
   ok(index?.t === "index" && index.ops.length === 0 && index.more === false, "an empty index");
   const nb = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const op = (dseq, o) => ({ dseq, t: 1000 + dseq, by: "person", kind: "folder", ...o });
@@ -407,6 +408,9 @@ async function until(f, ms = 15_000) {
 }
 const acctNs = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "sync");
 const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
+// "Delete my synced data", naming the generation the account's record holds (as its device was given it)
+const genOf = async (id) => (await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first())?.generation;
+const del = async (session, id) => post(session, "/api/sync/v1/delete", { confirm: "delete", generation: await genOf(id) });
 let acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
 const put = (session, bytes, h = sha(bytes)) => fetchAt(SITE, `/api/sync/v1/blob/${h}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
 const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Buffer.alloc(6000, 9);
@@ -1002,11 +1006,12 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await listed(sP(A))) > 0 && aShared > 0, "(A has synced and shared bytes in R2)");
   const s = await socket(sa);
   await hello(s, dev1);
-  let r = await post(sa, "/api/sync/v1/delete", { confirm: "yes" });
+  let r = await post(sa, "/api/sync/v1/delete", { confirm: "yes", generation: 1 });
   ok(r.status === 400, "deleting synced data needs {confirm: \"delete\"}");
+  ok((await post(sa, "/api/sync/v1/delete", { confirm: "delete" })).status === 400, "and the generation it deletes");
   const acctA2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
   await acctA2.holdPurge({ on: true });
-  r = await post(sa, "/api/sync/v1/delete", { confirm: "delete" });
+  r = await del(sa, A);
   ok(r.status === 202, "Delete my synced data");
   for (let w = 0; w < 40 && s.closed === null; w++) await new Promise((res) => setTimeout(res, 50));
   ok(s.closed === 4410, "the account's sockets close at once");
@@ -1030,7 +1035,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(r.status === 200, "afterwards, sync can be turned on again");
   const s2 = await socket(sa);
   const h2 = await hello(s2, dev1);
-  ok(h2.welcome?.next_dseq === 1 && h2.index?.ops?.length === 0, "and starts empty");
+  ok(h2.welcome?.next_dseq === 1 && h2.index?.ops?.length === 0 && h2.welcome.generation === 2, "and starts empty, as generation 2");
   s2.ws.close();
   // CoCalc's purge of a deleted account: sharing's and sync's parts
   const rid = crypto.randomUUID();
@@ -1076,7 +1081,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await dy.hold({ name: `init:${docY}` });
   const firstY = sxf.ask(batch(docY, 1, [[1, pid(1, "clientFYFY"), [], "first"]], { kind: "board" }));
   await new Promise((r) => setTimeout(r, 50));
-  ok((await post(sf, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(F: Delete my synced data, while its first document is being made)");
+  ok((await del(sf, F)).status === 202, "(F: Delete my synced data, while its first document is being made)");
   // (within the test's 300 ms forward: after it, the held call would be refused, and the purge go on)
   await new Promise((r) => setTimeout(r, 120));
   ok((await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(F)).first())?.state === "deleting", "the purge waits while a call to a document can still commit");
@@ -1093,7 +1098,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const acctE = acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
   const late = await acctE.reserve({ account: E, sha256: sha(Buffer.from("late put")), size: 8 });
   ok(late?.ok?.key, "(an upload reserved, its bytes not yet in R2)");
-  ok((await post(se, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(E: Delete my synced data, meanwhile)");
+  ok((await del(se, E)).status === 202, "(E: Delete my synced data, meanwhile)");
   // (within the test's 3 s reservation)
   await new Promise((r) => setTimeout(r, 300));
   ok((await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first())?.state === "deleting", "the purge waits while an upload is outstanding");
@@ -1130,7 +1135,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   });
   const upload = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: sg, origin: SITE, "content-type": "application/octet-stream", "content-length": "4" }, body, duplex: "half" });
   await new Promise((r) => setTimeout(r, 200));
-  ok((await post(sg, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(G: Delete my synced data, while an upload's bytes are still coming)");
+  ok((await del(sg, G)).status === 202, "(G: Delete my synced data, while an upload's bytes are still coming)");
   // (the test's reservation is 3 s and the cut-off a second before it: just after the cut-off, the
   // reservation is already given back; then, past the reservation's end, the rest of the bytes are sent)
   await new Promise((r) => setTimeout(r, 2300));
@@ -1190,52 +1195,150 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const en = await post(sh, "/api/sync/v1/enable", {});
   ok(en.status === 503, "turning sync on fails if its D1 registration does");
   const hp = await put(sh, Buffer.from("H's file"));
-  ok(hp.status === 403, "and the account then takes no write: its object was never given storage (" + hp.status + ")");
+  ok(hp.status === 403 && (await acctNs.get(acctNs.idFromName("acct:" + hashOf(H))).lifecycle())?.state === "registering", "and the account then takes no write: its object is registering, never confirmed (" + hp.status + ")");
   ok((await db.prepare("SELECT 1 AS x FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(H)).first()) === null && (await bucket.list({ prefix: `s/${hashOf(H).slice(0, 32)}/` })).objects.length === 0, "nothing of H's is in D1 or R2");
-  // CORR-A9B-1: an enable that read E's registration before E's purge finished can't make storage under it
-  const regE = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
-  ok(regE?.state === "purged" && regE.generation === 1, "(E is purged; its row keeps the generation it had)");
-  const staleE = await acctNs.get(acctNs.idFromName("acct:" + hashOf(E))).enable({ account: E, hash: hashOf(E), generation: regE.generation });
-  const seE = await signIn(E);
-  ok(staleE?.error?.code === "forbidden" && (await put(seE, Buffer.from("E after a stale enable"))).status === 403, "a stale enable, with the purged incarnation, is refused, and no write is taken (CORR-A9B-1)");
-  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "turning sync on again makes the next generation, which the tombstone doesn't refuse");
-  const regE2 = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
-  ok(regE2?.state === "active" && regE2.generation === 2 && (await put(seE, Buffer.from("E after turning sync on"))).status === 201, "and the account takes writes under it");
-  // CORR-DE7-1: two cycles. Generation 2 is purged, 3 is turned on and purged: a stale enable of 1, 2 or 3 is refused
+  // ---- the lifecycle (CORR-02C-1): the account object decides every enable and purge, one transaction
+  // each; D1 is written after, only as its answer says, and its row only moves forward
   const acctE = acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
+  const seE = await signIn(E);
+  const rowOf = async (id) => db.prepare("SELECT state, generation, request_id FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first();
+  const resume = (id, generation) => fetchAt(SITE, `/__test/register?account=${id}&generation=${generation}`, { method: "POST" });
+  // a confirm of a generation the account object never made, or for another account, changes nothing (H: registering at 1)
+  const acctH = acctNs.get(acctNs.idFromName("acct:" + hashOf(H)));
+  const ahead2 = await acctH.confirm({ account: H, generation: 2 });
+  const other = await acctH.confirm({ account: A, generation: 1 });
+  ok(ahead2?.error?.code === "conflict" && other?.error?.code === "conflict" && (await acctH.lifecycle())?.state === "registering" && (await put(sh, Buffer.from("H's file, after"))).status === 403, "a confirm naming a generation not made, or another account, is refused; H stays registering");
+  // CORR-A9B-1: a registration of E's generation 1, held past E's purge, can't make storage under it
+  const regE = await rowOf(E);
+  ok(regE?.state === "purged" && regE.generation === 1, "(E is purged; its row keeps the generation it had)");
+  const staleE = await acctE.confirm({ account: E, generation: 1 });
+  ok(staleE?.error?.code === "forbidden" && staleE.error.detail?.retired === 1 && (await put(seE, Buffer.from("E after a stale confirm"))).status === 403, "a late confirm of the purged generation is refused, as retired, and no write is taken (CORR-A9B-1)");
+  const en2 = await post(seE, "/api/sync/v1/enable", {});
+  const b2 = await en2.json();
+  ok(en2.status === 200 && b2.state === "active" && b2.generation === 2, "turning sync on again: the account object makes the next generation, 2");
+  const regE2 = await rowOf(E);
+  ok(regE2?.state === "active" && regE2.generation === 2 && (await put(seE, Buffer.from("E after turning sync on"))).status === 201, "D1 records it, and the account takes writes under it");
+  // CORR-DE7-1: two cycles. Generation 2 is purged, 3 is turned on and purged: a late confirm of 1, 2 or 3 is refused
   const purgeE = async () => {
-    ok((await post(seE, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(E: Delete my synced data)");
-    ok(await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first())?.state === "purged"), "(the purge finishes)");
+    ok((await del(seE, E)).status === 202, "(E: Delete my synced data)");
+    ok(await until(async () => (await rowOf(E))?.state === "purged" && (await acctE.lifecycle())?.record_pending === false), "(the purge finishes, and D1 records it)");
   };
   await purgeE();
-  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200, "(generation 3)");
+  ok((await (await post(seE, "/api/sync/v1/enable", {})).json()).generation === 3, "(generation 3)");
   await purgeE();
   const stale = [];
-  for (const g of [1, 2, 3]) stale.push((await acctE.enable({ account: E, hash: hashOf(E), generation: g }))?.error?.code ?? "admitted");
-  ok(stale.join() === "forbidden,forbidden,forbidden" && (await put(seE, Buffer.from("E after stale enables"))).status === 403, "after two cycles, a stale enable of every retired generation is refused, and no write is taken (CORR-DE7-1): " + stale.join());
-  ok((await post(seE, "/api/sync/v1/enable", {})).status === 200 && (await put(seE, Buffer.from("E, generation 4"))).status === 201, "and turning sync on again (generation 4) takes writes");
-  // CORR-3ED-1: a purge of generation 3, whose D1 read was held while 3 was purged and 4 turned on, arrives last
-  const latePurge = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", hash: hashOf(E), generation: 3 });
-  const noGen = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", hash: hashOf(E) });
+  for (const g of [1, 2, 3]) stale.push((await acctE.confirm({ account: E, generation: g }))?.error?.detail?.retired ?? "admitted");
+  ok(stale.join() === "3,3,3" && (await put(seE, Buffer.from("E after stale confirms"))).status === 403, "after two cycles, a late confirm of every retired generation is refused, and no write is taken (CORR-DE7-1): " + stale.join());
+  const lc3 = await acctE.lifecycle();
+  ok(lc3?.state === null && lc3.retired === 3, "(the account object is a tombstone: retired 3)");
+  const en4 = await (await post(seE, "/api/sync/v1/enable", {})).json();
+  ok(en4.generation === 4 && (await put(seE, Buffer.from("E, generation 4"))).status === 201, "and turning sync on again (generation 4) takes writes");
+  // a registration of generation 3, held past all that, resumes: D1's row is at 4, and stays there
+  const r3 = await resume(E, 3);
+  const reg4a = await rowOf(E);
+  ok(r3.status === 409 && reg4a?.state === "active" && reg4a.generation === 4, "a held registration of an older generation can't take D1's row back (" + r3.status + ")");
+  // CORR-3ED-1: a purge of generation 3, held while 3 was purged and 4 turned on, arrives last; and one of 5, which no device was given
+  const latePurge = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", generation: 3 });
+  const ahead = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", generation: 5 });
+  const noGen = await post(seE, "/api/sync/v1/delete", { confirm: "delete" });
   await new Promise((r) => setTimeout(r, 500));
-  const reg4 = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(E)).first();
-  ok(latePurge.state === "stale" && noGen.state === "stale" && reg4?.state === "active" && reg4.generation === 4, "a late purge of an older generation, or of none, does nothing to the live one (CORR-3ED-1)");
+  const reg4 = await rowOf(E);
+  ok(latePurge.state === "stale" && ahead.state === "stale" && noGen.status === 400 && reg4?.state === "active" && reg4.generation === 4, "a purge of another generation, older or newer, is stale, and one naming none is refused: the live one is untouched (CORR-3ED-1)");
   ok((await put(seE, Buffer.from("E, generation 4, after the late purge"))).status === 201 && (await acctE.inspect({}))?.used > 0, "and generation 4's storage and writes are untouched");
-  // CORR-A62-1: I's first-ever enable is registered (generation 1) and its answer held before the account object
-  // is reached; a delete then; the held enable arrives last
+  // CORR-02C-1, astra's trace: while generation 4 is being deleted, no newer generation can be made, so
+  // none can be left behind its deletion; a purge naming a newer one is stale
+  await acctE.holdPurge({ on: true });
+  ok((await del(seE, E)).status === 202, "(E: Delete my synced data, generation 4, held)");
+  const during = await post(seE, "/api/sync/v1/enable", {});
+  const duringB = await during.json();
+  const aheadDuring = await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", generation: 5 });
+  const lcDuring = await acctE.lifecycle();
+  const regDuring = await rowOf(E);
+  ok(during.status === 409 && duringB.error === "deleting" && aheadDuring.state === "stale" && lcDuring?.state === "deleting" && lcDuring.generation === 4 && regDuring?.state === "deleting" && regDuring.generation === 4,
+    "an enable while generation 4 is being deleted is refused by the account object, and makes no generation, in it or in D1 (CORR-02C-1)");
+  await acctE.holdPurge({ on: false });
+  ok(await until(async () => (await rowOf(E))?.state === "purged" && (await acctE.lifecycle())?.retired === 4), "(the deletion of 4 finishes)");
+  const en5 = await (await post(seE, "/api/sync/v1/enable", {})).json();
+  ok(en5.generation === 5 && (await rowOf(E))?.generation === 5 && (await put(seE, Buffer.from("E, generation 5"))).status === 201, "afterwards, the next generation is 5, and takes writes");
+  // a purge's D1 record that can't be written yet is written later, from the tombstone; a registration
+  // meanwhile, of the next generation, is never touched by it
+  await acctE.setFailRecord({ on: true });
+  ok((await del(seE, E)).status === 202, "(E: Delete my synced data, generation 5, with D1's record failing)");
+  ok(await until(async () => (await acctE.lifecycle())?.state === null), "(the deletion of 5 is done: a tombstone)");
+  const lcPending = await acctE.lifecycle();
+  ok(lcPending?.retired === 5 && lcPending.record_pending === true && lcPending.alarm !== null && (await rowOf(E))?.state === "deleting", "the tombstone keeps the D1 record still to write, with its alarm armed; D1 still says deleting");
+  const en6 = await (await post(seE, "/api/sync/v1/enable", {})).json();
+  ok(en6.generation === 6 && (await rowOf(E))?.state === "active" && (await rowOf(E))?.generation === 6, "turning sync on meanwhile: generation 6, recorded in D1 over 5's row");
+  await acctE.setFailRecord({ on: false });
+  ok(await until(async () => (await acctE.lifecycle())?.record_pending === false), "(5's record is written, from the alarm)");
+  const reg6 = await rowOf(E);
+  ok(reg6?.state === "active" && reg6.generation === 6 && (await put(seE, Buffer.from("E, generation 6"))).status === 201, "and it was for 5's row only: generation 6 is untouched and takes writes");
+  await acctE.setFailRecord({ on: true });
+  ok((await del(seE, E)).status === 202, "(E: Delete my synced data, generation 6, with D1's record failing)");
+  ok(await until(async () => (await acctE.lifecycle())?.state === null), "(a tombstone)");
+  await new Promise((r) => setTimeout(r, 900)); // (several retries, every one failing)
+  const lcRetry = await acctE.lifecycle();
+  ok(lcRetry?.record_pending === true && lcRetry.alarm !== null, "while D1 keeps failing, the tombstone keeps its alarm armed for the record");
+  await acctE.setFailRecord({ on: false });
+  ok(await until(async () => (await rowOf(E))?.state === "purged" && (await acctE.lifecycle())?.record_pending === false), "with nothing else happening, the tombstone writes the record later: D1 says purged");
+  // two purges' records pending at once: generation 7's fails, then 8, registered in the account object
+  // but never in D1, is purged too; each record is kept, and written, for its own generation's row
+  // (and two enables at once, for 7: one generation, both on)
+  const both = await Promise.all([post(seE, "/api/sync/v1/enable", {}), post(seE, "/api/sync/v1/enable", {})]);
+  const bothB = await Promise.all(both.map((r) => r.json()));
+  ok(both.every((r) => r.status === 200) && bothB.every((b) => b.state === "active" && b.generation === 7) && (await rowOf(E))?.generation === 7 && (await put(seE, Buffer.from("E, generation 7"))).status === 201, "two enables at once get the same generation, 7, and both answer active: " + JSON.stringify(bothB));
+  await acctE.setFailRecord({ on: true });
+  ok((await del(seE, E)).status === 202 && (await until(async () => (await acctE.lifecycle())?.state === null)), "(7 is deleted, its record failing: D1 still says deleting)");
+  const e8 = await acctE.enable({ account: E, hash: hashOf(E) });
+  ok(e8?.ok?.generation === 8 && e8.ok.state === "registering", "(the account object makes 8, registering; it never reaches D1)");
+  ok((await acctE.purge({ request_id: crypto.randomUUID(), kind: "self", generation: 8 })).state === "deleting" && (await until(async () => (await acctE.lifecycle())?.retired === 8)), "(8 is deleted too)");
+  ok((await rowOf(E))?.state === "deleting" && (await rowOf(E))?.generation === 7 && (await acctE.lifecycle())?.record_pending === true, "(D1: 7, deleting; both records wait)");
+  await acctE.setFailRecord({ on: false });
+  ok(await until(async () => (await acctE.lifecycle())?.record_pending === false), "(the records are written)");
+  ok((await rowOf(E))?.state === "purged" && (await rowOf(E))?.generation === 7, "7's record survived 8's purge: D1's row of 7 is purged");
+  // CoCalc's purge of an account with no storage: every generation the object retired is purged in D1,
+  // and nothing more (a stray row left active, as a lost write would leave it)
+  await db.prepare("UPDATE sync_accounts SET state = 'active' WHERE account_hash = ?1").bind(hashOf(E)).run();
+  const ridE = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: E, request_id: ridE }))).status === 202, "(CoCalc purges E, which holds nothing)");
+  const regE6 = await rowOf(E);
+  ok(regE6?.state === "purged" && regE6.generation === 7 && regE6.request_id === ridE, "the account object answers none, retired 8: D1's row of 7 is purged, under CoCalc's request id");
+
+  // CORR-A62-1: I's first enable is answered (generation 1, registering) and held before D1; a delete; the held registration arrives last
   const si = await signIn(I);
-  const held = await (await post(si, "/api/sync/v1/enable", {})).json();
-  ok(held.held === 1, "(I's first enable is registered, generation 1, its answer held)");
-  ok((await post(si, "/api/sync/v1/delete", { confirm: "delete" })).status === 202, "(I: Delete my synced data, before the account object has storage)");
-  const regI = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(I)).first();
-  ok(regI?.state === "purged", "the deletion completes in D1 though the account object had no storage");
   const acctI = acctNs.get(acctNs.idFromName("acct:" + hashOf(I)));
-  const lateI = await acctI.enable({ account: I, hash: hashOf(I), generation: held.held });
-  ok(lateI?.error?.code === "forbidden" && (await put(si, Buffer.from("I's file"))).status === 403, "the held enable, arriving after, is refused: the purge retired its generation, and no write is taken (CORR-A62-1)");
-  // (a fresh enable: its registration, as the Worker makes it, takes the purged row to generation 2)
-  await db.prepare("UPDATE sync_accounts SET state = 'active', generation = generation + 1 WHERE account_hash = ?1 AND state = 'purged'").bind(hashOf(I)).run();
-  ok((await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(I)).first())?.generation === 2, "(registered again: generation 2)");
-  ok((await acctI.enable({ account: I, hash: hashOf(I), generation: 2 }))?.ok?.state === "active" && (await put(si, Buffer.from("I's file, generation 2"))).status === 201, "a fresh enable (generation 2) takes writes");
+  const held = await (await post(si, "/api/sync/v1/enable", {})).json();
+  const lcI = await acctI.lifecycle();
+  ok(held.held === 1 && lcI?.state === "registering" && lcI.generation === 1 && (await rowOf(I)) === null, "(I's first enable: generation 1, registering, not yet in D1, held)");
+  ok((await put(si, Buffer.from("I's early file"))).status === 403 && (await socket(si)).status === 403, "a registering account takes no write and no socket");
+  const dI = await post(si, "/api/sync/v1/delete", { confirm: "delete", generation: held.held });
+  ok(dI.status === 202 && (await dI.json()).state === "deleting", "(I: Delete my synced data, generation 1, while registering)");
+  ok(await until(async () => (await acctI.lifecycle())?.state === null && (await acctI.lifecycle())?.retired === 1), "(the deletion finishes: a tombstone, retired 1)");
+  const lateI = await resume(I, 1);
+  const lateIB = await lateI.json();
+  const regI = await rowOf(I);
+  ok(lateI.status === 403 && lateIB.retired === 1 && regI?.state === "purged" && regI.generation === 1 && (await put(si, Buffer.from("I's file"))).status === 403,
+    "the held registration, arriving after, is refused as retired, and the row it made is marked purged; no write is taken (CORR-A62-1)");
+  const enI = await (await post(si, "/api/sync/v1/enable", {})).json();
+  ok(enI.generation === 2 && enI.state === "active" && (await rowOf(I))?.generation === 2 && (await put(si, Buffer.from("I's file, generation 2"))).status === 201, "a fresh enable makes generation 2, which takes writes");
+  // K: a registration held while CoCalc purges the account, and resumed during the purge, then again after it
+  const sk = await signIn(K);
+  const acctK = acctNs.get(acctNs.idFromName("acct:" + hashOf(K)));
+  ok((await (await post(sk, "/api/sync/v1/enable", {})).json()).held === 1, "(K's first enable: generation 1, held before D1)");
+  await acctK.holdPurge({ on: true });
+  const ridK = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: K, request_id: ridK }))).status === 202 && (await acctK.lifecycle())?.state === "deleting", "(CoCalc purges K while it registers: the account object, not D1, has it)");
+  const midK = await resume(K, 1);
+  const midKB = await midK.json();
+  const regMidK = await rowOf(K);
+  ok(midK.status === 409 && midKB.error === "deleting" && regMidK?.generation === 1, "the held registration, resumed during the purge, is refused (deleting): its row exists, and nothing is taken");
+  await acctK.holdPurge({ on: false });
+  ok(await until(async () => (await rowOf(K))?.state === "purged"), "the purge's record, from the tombstone, marks that row purged");
+  const stK = await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridK}`);
+  ok(stK.status === 200 && (await stK.json()).state === "purged", "and CoCalc's status finds it by its own request id");
+  const lastK = await resume(K, 1);
+  const regLastK = await rowOf(K);
+  ok(lastK.status === 409 && regLastK?.state === "purged" && regLastK.generation === 1 && [401, 403].includes((await put(sk, Buffer.from("K's file"))).status), "the same registration once more, after: D1 stays purged, nothing is taken (the purge signed K out too)");
   // and a fresh object is left alone, whatever its account
   const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
   await bucket.put(fresh, "fresh");

@@ -6,6 +6,7 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
+| Oct 19 | (this change, CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
 | Oct 19 | 00579315 | A batch over a document socket may now name blobs, since it is decided by the account object like any other. Presence is coalesced per socket (the latest wins, at most 10 a second), at most 4 KiB in UTF-8 bytes. Tickets are issued at a rate: 60 a minute per session, 240 per account, then `rate`. Signing out can answer 503 if the revoke couldn't be recorded; the session then stays, so try again. (§2, §5.1) |
 | Oct 19 | 7962976e | A socket message may be up to 2 MiB in UTF-8 bytes (§8). The ops rate counts each op, so a message of 500 ops uses 500 of the 2,000 a minute. Over it, the whole message is refused with `rate` and `retry_after`. |
 | Oct 19 | 050fb688 | **Clear history, for a stale device:** don't replace the root with your current value. Compute `merge3(acknowledged base, root, local)` and send root → result from a new client. If a record clashes, keep the local value as `<name> (conflict, <device>)`. Pins and releases are named `(doc, epoch, ref, sha256)` (server-side only). (§4.6) |
@@ -113,7 +114,8 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 SQLite tables (columns abridged):
 
 ```
-meta(k, v)               account_id, account_hash, state: active | readonly | deleting,
+meta(k, v)               account_id, account_hash, generation, retired,
+                          state: registering | active | readonly | deleting,
                           limits (JSON), limits_issued, limits_fetched, used_bytes, ...
 devices(device, name, created, last_seen, index_cursor, session_hash, next_dseq)
 ops(seq INTEGER PRIMARY KEY, device, dseq, t, by, op, path, "to", kind,
@@ -465,12 +467,51 @@ The account object keeps the `docs` row, marked deleted, until the document obje
 1. In one transaction, `state = deleting`, which refuses every request from then on except reads by the purge, and `revoke_all`, which closes every socket.
 2. Each owned document deletes itself, as above. The alarm retries until every one has confirmed.
 3. Every holding and export goes to the outbox, which is emptied. Then the whole `s/<hash>/` prefix is listed and deleted, which catches anything the tables missed.
-4. `deleteAll()`. The D1 row `sync_accounts` is marked `purged`, with counts and no id (as sharing's purge records are).
+4. Everything is dropped, leaving a tombstone (§7.1). The D1 row `sync_accounts` is then marked `purged`, with counts and no id (as sharing's purge records are).
 
 **What happens to sync while it is being deleted:**
 - A device that is online is told `deleting`, and stops.
 - Its local copy is left in place, as turning sync off leaves it (§7.4).
 - Turning sync on again is refused until the purge is done.
+
+### 7.1 The account's lifecycle: the account object decides, D1 follows (CORR-02C-1)
+
+Turning sync on, and both kinds of deletion, are each decided in one transaction in the account object. D1's `sync_accounts` row is an index, written afterwards and only as the object's answer says. So a D1 read or write held for any length of time can never decide anything. (Before this, D1 chose the generation, and each new interleaving of a held D1 call needed its own patch: CORR-00F/A9B/DE7/A62/3ED/02C.)
+
+**What the account object holds:** `generation`, the registration it holds now; `state`; and `retired`, the highest generation it has deleted. `retired` survives the purge as a tombstone, and only rises.
+
+| Step | Account object (one transaction) | Then D1 |
+|---|---|---|
+| **Turn sync on** | No account (or a tombstone): `generation = retired + 1`, `state = registering`, which takes nothing (no socket, op, batch or upload). Registering or on: answers its own generation. Deleting: refused, 409 `deleting`. | The row is upserted to `(generation, active)` only if its generation is lower: the row only moves forward. Then it is read back. If the read shows this generation active, the Worker calls `confirm(generation)`. |
+| **`confirm(g)`** | Registering at `g`: now `active`. Already active at `g`: unchanged. `g ≤ retired`: refused as `retired`. Any other generation, or deleting: refused. | If refused as `retired`: that generation's row, if active, is marked purged. No storage can hold it again. |
+| **Delete my synced data** `(g)` | At `g`, registering or on: `deleting`, and its sockets close. Already deleting: joins. Another generation: `stale`, nothing changes. No account: `none`. | `deleting`: the row of `g`, unless it is already purged. |
+| **CoCalc's purge** | Whatever generation is held goes, as above. No account: `none`, with `retired`. | `deleting`: as above, under CoCalc's request id. `none`: every row of a generation `≤ retired` that isn't purged yet is marked purged. |
+| **The purge finishes** (alarm) | Everything is dropped. The tombstone keeps `retired = max(retired, g)` and the D1 record still to write, one per generation, in the same transaction. | The row of `g` is marked purged, with counts, whatever its state. If D1 fails, the alarm retries from the tombstone until it succeeds. |
+
+**Why this is enough.** Every D1 write names one generation, or the generations up to `retired`, and the object has already decided that generation's fate:
+- a row is marked purged only for a generation the object has retired for good;
+- a row moves to a new generation only after the object has made that generation. While the object holds `g` (registering, on, or deleting), it makes no other generation;
+- so while the account takes writes at `g`, its row is at `g` and isn't purged, and the daily job (§9) asks the object before deleting any of its keys.
+
+**The interleavings checked**, each with a test where one can be staged (web/sync/test-sync.mjs, "the lifecycle"):
+- two enables at once (both get the same generation; the second confirm is a no-op);
+- an enable during a deletion (refused by the object, with no generation made in it or in D1: astra's 02C trace);
+- a registration held before D1, then a deletion of it, then the registration resumes (refused as retired; the row it made is marked purged);
+- a registration held before D1, CoCalc's purge, then the registration resumed during the purge (refused, `deleting`) and again after it (D1 stays purged);
+- a registration of an older generation resumed after newer ones (D1's row doesn't move back; refused);
+- a late `confirm` of every retired generation, after one or two cycles; and a `confirm` of a generation never made, or naming another account;
+- a deletion naming an older generation, a newer one, or none (stale, stale, 400);
+- a purge whose D1 record fails, then sync turned on again (the record, written later from the alarm, touches only its own row), or nothing more happening (the alarm stays armed through failed retries, and the record is written later);
+- two purges' records pending at once, the second for a generation that never reached D1 (both kept, each written for its own row);
+- CoCalc's purge of an account with no storage, with a stray row left active (marked purged, under CoCalc's request id).
+
+Staged by reasoning only, as no test seam holds them:
+- a deletion's `deleting` write held until after the purge finished (guarded: not over `purged`);
+- a `none` answer's write held until a new generation is registered (bounded by `≤ retired`);
+- a row moving on between the Worker's read-back and its marking of a retired generation purged (that write names the generation and requires `active`);
+- the Worker stopping between any two of its steps. Before D1: the object stays registering, and the next enable goes on from there. Between the upsert and `confirm`: a row is left active for a generation the object may have retired. Nothing is wrong with it: the daily job asks the object, which knows no keys, and the next enable or CoCalc purge moves the row on.
+
+**What's left.** CoCalc's purge of an account that holds nothing doesn't stop a later enable. An enable already past its session check when the purge ran can make a new, empty registration. Its session is deleted by the same purge, so it can open no socket and take no write. CoCalc account ids are never reused.
 
 ## 8. Limits, sizes and rates
 
@@ -506,8 +547,9 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 
 ## 9. D1, the scheduled job, and the purge
 
-- **`sync_accounts(account_hash PRIMARY KEY, state, created, purged, counts)`:**
-  - it is written when sync is turned on, and it is how the purge finds that an account has an account object;
+- **`sync_accounts(account_hash PRIMARY KEY, prefix, state, created, generation, request_id, kind, finished, docs, bytes)`:**
+  - it is written when sync is turned on, after the account object has made the generation, and before the object takes any write (§7.1);
+  - it is how the daily job finds an account's objects. It follows the account object, and never decides anything: CoCalc's purge goes to the account object whatever the row says, since an account still registering has no row yet;
   - the hash alone names the object, so the row needs no account id.
 - **The purge** (sharing's `purgeAccount`): if the account has a `sync_accounts` row, the purge record also waits for the account object's purge. The purge's `files` step then covers both prefixes.
 - **The daily job** (`syncScheduled`, beside sharing's `scheduled`):
