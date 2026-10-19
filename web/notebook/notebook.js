@@ -1651,9 +1651,11 @@ export function createNotebook(root, opts = {}) {
       await detachedConflict(doc, theirs, key);
       unkept.delete(key);
       leftSettled(key);
+      emit("unkept", unkept.size);
     } catch (e) {
       unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
       outstanding.add(key);
+      emit("unkept", unkept.size);
       emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
@@ -2211,6 +2213,8 @@ export function createNotebook(root, opts = {}) {
     },
     /** Documents left here with saves not yet made, or not kept (LIMIT-900-2). */
     get leftOutstanding() { return leftCount(); },
+    /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
+    get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
     detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; store = null; shown = { synced: null, remoteSeen: 0 }; },
     get store() { return store; },
