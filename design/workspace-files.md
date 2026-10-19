@@ -588,7 +588,7 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
 **Where an export is made:**
 - **In the browser,** from this device's workspace. It needs no account and works offline; it is the File menu's "Export workspace…" and the Storage panel's.
-- **On the server** (auth's half), for a synced account. It is a rate-limited export job that builds the same bundle from the account's objects and R2, then offers a private, time-limited download. Egress from R2 is free, so this costs little.
+- **On the server** (auth's half), for a synced account. It is a rate-limited export job that builds the same bundle from the account's objects and R2, then offers a private, time-limited download.
   - This is what a phone (§7.5, which holds only part of the workspace) and an account in its read-only 90 days (§7.4) use.
   - auth's design note sets the limits: one running export per account, and a few a day.
 
