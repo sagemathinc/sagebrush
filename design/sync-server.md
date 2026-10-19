@@ -6,6 +6,7 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
+| Oct 19 | (next commit) | A batch over a document socket may now name blobs, since it is decided by the account object like any other. Presence is coalesced per socket (the latest wins, at most 10 a second), at most 4 KiB in UTF-8 bytes. Tickets are issued at a rate: 60 a minute per session, 240 per account, then `rate`. Signing out can answer 503 if the revoke couldn't be recorded; the session then stays, so try again. (§2, §5.1) |
 | Oct 19 | 7962976e | A socket message may be up to 2 MiB in UTF-8 bytes (§8). The ops rate counts each op, so a message of 500 ops uses 500 of the 2,000 a minute. Over it, the whole message is refused with `rate` and `retry_after`. |
 | Oct 19 | 050fb688 | **Clear history, for a stale device:** don't replace the root with your current value. Compute `merge3(acknowledged base, root, local)` and send root → result from a new client. If a record clashes, keep the local value as `<name> (conflict, <device>)`. Pins and releases are named `(doc, epoch, ref, sha256)` (server-side only). (§4.6) |
 | Oct 19 | 2d2bd29c | `Env` is `{cseq, id, parents, size, blobs?}`: `cseq` counts each patchflow client's patches 1, 2, 3, …, and is sent in order from the server's `next_cseq`. A payload is the patchflow envelope without `time` and `parents`; a receiver builds patches from the returned `Env`. A large patch's blob is listed in `Env.blobs`. Ops are decided in `dseq` order with no gaps (`welcome.next_dseq`), and a refusal is final, so the client rebuilds from the server's log plus its queue. `clear` carries a root patch. Document sockets use a single-use ticket. `pull`, `index` and `blobs/check` are paged with `more`. (§4.1-4.6, §5.2, §5.4) |
@@ -82,9 +83,21 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
     - one whose fence arrives after the attach closes the socket itself;
     - both steps are in the one document object, so no order of the two leaves a revoked session attached;
   - a ticket can therefore be used once, and not at all after its session is revoked;
+  - tickets are issued at a rate, whether or not they are used: 60 a minute per session, 240 per account (LIMIT-6D6-3);
   - the account object then counts the socket against the account's and the session's limits (§8, LIMIT-D817-4).
     - **The counts are leases,** in `doc_sockets(doc, session_hash, socket_id, expires)`, each 15 minutes long. The document object renews a socket's lease at its 10-minute recheck while the socket is in use, and releases it on close.
     - A lease that isn't renewed (a lost close report, or an evicted object) expires by itself. So capacity is never stranded for more than 15 minutes, and the counts are always the live leases, never a counter that can drift.
+
+**A document socket's batches are decided by the account object** (LIMIT-6D6-1, CORR-6D6-2, CORR-6D6-3):
+- the document object hands each one to the account object, which checks the session isn't revoked, applies the account's rates, pins its blobs, has the document decide it, and records the head itself;
+- so a document socket is no way around any of these: a revoked session whose fence hasn't arrived yet still can't write;
+- a socket may have at most 8 unanswered.
+
+**Presence** is relayed, never stored: at most 4 KiB in UTF-8 bytes, and coalesced per socket, the latest kept, at most 10 a second (LIMIT-6D6-2).
+
+**Revoking many documents** (LIMIT-6D6-4): a revoke sends the first 100 fences before it answers, and the alarm sends the rest a page at a time with per-item backoff. `complete` is reported once none is due. Writes are refused from the revoke's own transaction on, as above.
+
+**Signing out** records the revoke before sharing deletes the session. If the revoke can't be recorded, the sign-out answers 503 and the session stays, rather than signing out while a socket could still write (CORR-6D6-2).
 
 **Access to a document is checked on every message** (CORR-D81-7):
 - The document object holds the access list itself (§4), so it checks the account's role on every batch, pull and presence message, without a call.
