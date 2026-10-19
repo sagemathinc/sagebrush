@@ -338,6 +338,10 @@ The host grants editing in the `board` message it posts with the port:
 - `revision` is required when `edit` is given. It names the state of the
   document posted: any string of at most 200 characters, a new one for each
   state the host sends (see Revisions).
+- **Only a board of at most 8 MiB** of JSON is editable in a frame. A
+  larger one is posted without `edit`, and is shown read-only, with the
+  host's own editor offered for it. 8 MiB is far more than a board an
+  agent writes for a card. It keeps every cost below bounded (see Bounds).
 - Without `edit: true` the frame shows the board as now: Edit is not
   offered, and no `edit` message is sent.
 - A frame granted editing still sends `answers` and `decide` on the same
@@ -413,14 +417,24 @@ be the edit's own `base`.
   awaits its answer. What the user does meanwhile goes into the next one.
   A port delivers in order, and the host answers each edit, in order, with
   exactly one `saved` or `refused`.
-- **The host merges on the base.** It keeps the records of each revision it
-  sent on this channel that an `edit` may still name: at least the last 8.
-  It applies the edit's changes to its record of `base`, and merges the
-  result into the document as a change from `base`. In CoCalc that is
-  `from_str(edited, {base})`, so the syncdb's merge decides between
-  concurrent changes, for the card exactly as for the full editor. An edit
-  whose `base` the host no longer keeps is refused, and a `replace`
-  follows.
+- **The host merges on the base, record by record.**
+  - **What it keeps.** The records of the latest revision it sent on this
+    channel, and for each older revision an `edit` may still name, the
+    *reverse* changes leading back to it from the next one. It keeps at
+    most 8 older revisions, and their reverse changes total at most
+    16 MiB. Past either bound, the oldest go first.
+  - **An edit whose `base` it no longer keeps** is refused, and a
+    `replace` follows.
+  - **Merging.** For each record the edit touches, the host rebuilds that
+    record at `base` (the latest records, with the reverse changes applied
+    back to `base`, for that record only). It applies the edit's changes,
+    and merges the result into the document as a change from that base
+    record. Text columns merge as text: both people's typing is kept.
+  - **In CoCalc** this is the syncdb's merge (`dbMerge3`'s rules), applied
+    to the touched records. So concurrent changes are decided the same way
+    for the card as for the full editor.
+  - **Its cost** grows with the records the edit touches (and their
+    reverse changes), not with the board.
 - **Refusals.**
   - **With `retryAfter`** (milliseconds; the host is busy, or the rate was
     passed): nothing was merged, and that `id` is answered for good. The
@@ -450,13 +464,24 @@ be the edit's own `base`.
     - `type` one of the four;
     - `page` and `id` strings of at most 200 characters;
     - at most 200 fields, with names of at most 64 characters;
-  - **the board that results is one:** its records through `fromRecords`
-    pass `formatError` and `isBoard`, and are within the host's board limit
-    (Sagebrush's: 64 MiB of JSON).
+  - **the board that results is one**, checked incrementally on what the
+    edit touches:
+    - no two items of a page share an id, and a page's id is one page's
+      (`formatError`'s rules, against an index of ids kept per page);
+    - every record is well formed for its type;
+    - the board still has items, or pages of them (`isBoard`);
+    - its size is at most 8 MiB of JSON (a running total kept per record,
+      updated by the touched records' sizes).
 
-  Sagebrush provides this check and the application as one function,
-  `applyEdit(postedRecords, message)` in `sagebrush-board/submission`,
-  beside `checkSubmission`, so that every host checks the same way.
+    Nothing re-reads or re-serializes the whole board for an edit.
+
+  Sagebrush provides this check and the application as one object,
+  `editState(postedText)` in `sagebrush-board/submission`, beside
+  `checkSubmission`. It holds the indexes, the running size and the
+  reverse changes, and has `apply(message)` and `remote(changes)`, so
+  that every host checks the same way. Its tests measure the CPU time and
+  heap of an edit against an 8 MiB board: both must stay proportional to
+  the edit, not the board.
 - **What an edit is.** An edit is the user's, made with the frame's editor.
   The board's own code runs in a nested frame of another origin and never
   has the port. The host still treats an edit as untrusted data. It changes
@@ -476,7 +501,11 @@ be the edit's own `base`.
   - **A single transaction past the bound** (a paste of more than 1 MiB,
     or a change to more than 1,000 records) is never sent: the frame
     undoes it at once and says it is too large to save here.
-- **A `replace`** is at most the board limit (64 MiB of text).
+- **A `replace`** is at most 8 MiB of text (an editable board's limit). The
+  host sends at most one every 2 seconds per channel, and at most 32 MiB
+  of `replace` text per minute. A change set that would need another
+  `replace` sooner waits, and only the latest state is sent: changes that
+  arrive meanwhile are folded into it, never queued.
 - **Rate:**
   - the frame sends at most one edit in flight, batched over 250 ms, so a
     few a second while someone types or drags;
