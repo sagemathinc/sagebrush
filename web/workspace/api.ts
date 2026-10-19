@@ -738,7 +738,8 @@ export class Workspace {
   }
 
   /** Names that look the same in one folder: at most `groups` groups of at most `members` paths each, and
-   * how many groups and members beyond those weren't listed. */
+   * how many beyond those weren't listed: `groups`, the groups left out; `members`, every path not listed,
+   * whether its group was listed or left out (daybreak2). */
   async lookalikeGroups(groups = LOOKALIKE_GROUPS, members = LOOKALIKE_MEMBERS): Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
     return inTx(this.ws, "entries", "readonly", (tx) => new Promise((ok, no) => {
       const out: string[][] = [], more = { groups: 0, members: 0 };
@@ -746,7 +747,7 @@ export class Workspace {
       const flush = () => {
         if (n > 1) {
           if (out.length < groups) { out.push(cur); more.members += n - cur.length; }
-          else { more.groups++; }
+          else { more.groups++; more.members += n; }
         }
       };
       const c = tx.objectStore("entries").index("byNfc").openKeyCursor();
