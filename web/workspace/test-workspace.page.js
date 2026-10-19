@@ -613,6 +613,59 @@ async function storageUse() {
   w.close();
 }
 
+// Version actions bound to what was shown (CORR-F85-1, -2), and
+// dropVersions bounded (LIMIT-F85-2): a file's or a folder's never reads
+// another file's versions; all of them, a bounded batch at a time.
+async function versionActions() {
+  const w = await fresh();
+  await w.create("/victim.txt", { content: "original" });
+  await w.write("/victim.txt", "original current");
+  const shown = await w.stat("/victim.txt"), ids = (await w.history("/victim.txt")).map((v) => v.id);
+  await w.rename("/victim.txt", "/moved.txt");
+  await w.create("/victim.txt", { content: "replacement" });
+  await w.write("/victim.txt", "replacement 2");
+  check(await fails(w.dropVersions("/victim.txt", { expect: { fid: shown.fid, ids } }), "conflict"), "dropVersions of the file shown, another file at its path now: refused");
+  check((await w.history("/moved.txt")).length === 1 && (await w.history("/victim.txt")).length === 1, "…nothing of either dropped");
+  check(await fails(w.restoreVersion("/victim.txt", ids[0], { fid: shown.fid, rev: shown.rev }), "missing"), "restoreVersion: the shown file's version, at a path now another file's: refused");
+  const moved = await w.stat("/moved.txt");
+  check(await fails(w.restoreVersion("/moved.txt", ids[0], { fid: moved.fid, rev: moved.rev - 1 }), "conflict") && dec((await w.read("/moved.txt")).content) === "original current", "restoreVersion over a revision since written: refused, nothing written");
+  const vid = (await w.history("/victim.txt"))[0].id, rep = await w.stat("/victim.txt");
+  check(await fails(w.write("/victim.txt", "x", { fid: shown.fid }), "conflict") && dec((await w.read("/victim.txt")).content) === "replacement 2", "write with another file's fid: refused");
+  check(await fails(w.restoreVersion("/victim.txt", ids[0], { fid: rep.fid, rev: rep.rev }), "missing"), "…a version id of another file: refused");
+  await w.restoreVersion("/moved.txt", ids[0], { fid: moved.fid, rev: moved.rev });
+  check(dec((await w.read("/moved.txt")).content) === "original" && (await w.history("/moved.txt")).length === 2, "restoreVersion of the file shown, as shown: written back, what it had kept");
+  // only the confirmed ids go; a folder's confirmation of another count, or another folder: refused
+  await w.write("/moved.txt", "third");
+  const h3 = await w.history("/moved.txt"), m3 = await w.stat("/moved.txt");
+  await w.dropVersions("/moved.txt", { expect: { fid: m3.fid, ids: [h3[0].id] } });
+  check((await w.history("/moved.txt")).map((v) => v.id).join() === h3.slice(1).map((v) => v.id).join(), "dropVersions with ids: only those go");
+  await w.mkdir("/f");
+  await w.create("/f/a.txt", { content: "1" });
+  await w.write("/f/a.txt", "2");
+  const fu = await w.versionsUsage("/f"), fe = await w.stat("/f");
+  await w.write("/f/a.txt", "3");
+  check(await fails(w.dropVersions("/f", { expect: { count: fu.count, bytes: fu.bytes, created: fe.created } }), "conflict") && (await w.versionsUsage("/f")).count === 2, "a folder's, its versions changed since confirmed: refused, nothing dropped");
+  check(await fails(w.dropVersions("/f", { expect: { created: fe.created + 1 } }), "conflict"), "…another folder at its path: refused");
+  const fu2 = await w.versionsUsage("/f");
+  check((await w.dropVersions("/f", { expect: { count: fu2.count, bytes: fu2.bytes, created: fe.created } })) === fu2.bytes && (await w.versionsUsage("/f")).count === 0, "…as confirmed: dropped");
+  // many small versions of other files: a file's drop reads only its own; all of them, in batches
+  const many = 2500;
+  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d" }); q.onsuccess = () => vb.put(new Uint8Array([1]), q.result); } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
+  const unbounded = [];
+  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if (q == null && (this.name === "byFile" || this.name === "versions")) unbounded.push([this.name, n]); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
+  const un1 = wrap(IDBIndex.prototype), un2 = wrap(IDBObjectStore.prototype);
+  try {
+    await w.write("/moved.txt", "fourth");
+    await w.dropVersions("/moved.txt");
+    check(unbounded.length === 0, "dropping a file's versions reads no other file's: " + JSON.stringify(unbounded));
+    const before = (await w.versionsUsage()).count;
+    const freed = await w.dropVersions("/");
+    check(unbounded.length > 1 && unbounded.every(([name, n]) => name === "versions" && n === 1000), "all of them: a batch of at most 1,000 records at a time (" + unbounded.length + " batches)");
+    check(before >= many && freed >= many && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "…all gone, the total 0 (" + before + ", " + freed + ")");
+  } finally { un1(); un2(); }
+  w.close();
+}
+
 async function intents() {
   const w = await fresh();
   await w.create("/undo.txt", { content: "original" });
@@ -685,7 +738,7 @@ async function intents() {
 }
 
 export async function run() {
-  for (const t of [storageUse, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
+  for (const t of [storageUse, versionActions, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

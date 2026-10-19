@@ -9,8 +9,11 @@
 import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { nameOf, splitExt } from "./paths";
 
-/** At most this much of a text is shown; of a table, this much read and these many rows and columns. */
-export const PREVIEW = { textBytes: 64 * 1024, tableBytes: 256 * 1024, rows: 50, cols: 30, imageBytes: 20 * 2 ** 20 };
+/** At most this much of a text is shown; of a table, this much read and these many rows and columns.
+ * A file is read for its preview only if it is at most readBytes (a text
+ * or a table) or imageBytes (a picture), by its size before any read: the
+ * workspace keeps a file's bytes as one value, read whole (LIMIT-F85-1). */
+export const PREVIEW = { textBytes: 64 * 1024, tableBytes: 256 * 1024, rows: 50, cols: 30, imageBytes: 20 * 2 ** 20, readBytes: 4 * 2 ** 20 };
 const IMAGES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
 const TEXTS = new Set([".txt", ".md", ".py", ".sage", ".m", ".mag", ".json", ".js", ".ts", ".html", ".css", ".xml", ".yaml", ".yml", ".toml", ".tex", ".log", ".ini", ".cfg", ".r", ".jl", ".c", ".h", ".cpp", ".rs", ".go", ".java", ".sh", ""]);
 
@@ -186,13 +189,13 @@ export function renderPreview(name: string, bytes: Uint8Array): { el: HTMLElemen
 export type PreviewHost = { say(text: string): void; fail(e: unknown): void };
 
 /** A data file's preview over the page, with Download and its versions. */
-export async function openPreview(w: Workspace, e: Entry, host: PreviewHost): Promise<void> {
-  const name = nameOf(e.path);
+export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): Promise<void> {
+  const name = nameOf(e0.path);
   const { box, close, onClose } = panel(`Preview of ${name}`);
   const meta = h("span", { className: "m" });
   const x = button("✕", close, "x");
   x.setAttribute("aria-label", "Close");
-  box.append(h("div", { className: "ph" }, h("b", { textContent: name, title: e.path }), meta, x));
+  box.append(h("div", { className: "ph" }, h("b", { textContent: name, title: e0.path }), meta, x));
   const body = h("div", { className: "pb" });
   const actions = h("div", { className: "pa" });
   const versions = h("div", { className: "pv" });
@@ -200,25 +203,50 @@ export async function openPreview(w: Workspace, e: Entry, host: PreviewHost): Pr
   x.focus();
   let shown: { dispose: () => void } | null = null;
   onClose(() => shown?.dispose());
-  let bytes: Uint8Array;
-  try {
-    const r = await w.read(e.path);
-    bytes = r.content;
-    meta.textContent = `${fmtSize(bytes.length)} · ${fmtTime(r.entry.updated)}`;
-  } catch (err) {
-    body.replaceChildren(h("p", { className: "note", textContent: err instanceof WorkspaceError ? err.message : String((err as Error)?.message ?? err) }));
-    return;
+  const note = (text: string) => body.replaceChildren(h("p", { className: "note", textContent: text }));
+  // (the file as it is now, by its index entry: its id and revision are
+  // what Restore and Delete older versions are bound to; its size decides,
+  // before any read, whether it is read at all)
+  const e = await w.stat(e0.path).catch(() => undefined);
+  if (!e || e.kind !== "file") return note("This file isn't here any more.");
+  const size = e.size ?? 0, kind = previewKind(e.path);
+  meta.textContent = `${fmtSize(size)} · ${fmtTime(e.updated)}`;
+  const download = async () => {
+    try {
+      const r = await w.read(e.path);
+      if (r.entry.fid !== e.fid) return host.say(`"${name}" is another file now: open it again`);
+      downloadBytes(r.content, name);
+    } catch (err) { host.fail(err); }
+  };
+  actions.append(button("Download", download), h("span", { className: "sp" }));
+  if (kind === "none") note("No preview for this kind of file: download it, or open it from code.");
+  else if (kind === "image" && size > PREVIEW.imageBytes) note(`This picture is too large to preview here (${fmtSize(size)}): download it.`);
+  else if (kind !== "image" && size > PREVIEW.readBytes) note(`This file is too large to preview here (${fmtSize(size)}): download it.`);
+  else {
+    try {
+      const r = await w.read(e.path);
+      if (r.entry.fid !== e.fid) return note("This file was replaced while it was opened: open it again.");
+      shown = renderPreview(name, r.content);
+      body.replaceChildren(shown.el);
+    } catch (err) { note(err instanceof WorkspaceError ? err.message : String((err as Error)?.message ?? err)); }
   }
-  const show = (b: Uint8Array) => { shown?.dispose(); shown = renderPreview(name, b); body.replaceChildren(shown.el); };
-  show(bytes);
-  actions.append(button("Download", () => downloadBytes(bytes, name)), h("span", { className: "sp" }));
   await drawVersions(w, e, versions, host, close);
 }
+
+// (a version action refused because the file changed since it was shown: said; the preview, now stale, closed)
+const stale = (err: unknown, name: string, host: PreviewHost, close: () => void) => {
+  if (err instanceof WorkspaceError && (err.code === "conflict" || err.code === "missing")) {
+    host.say(`"${name}" changed since it was shown (${err.message}): nothing was done; open it again`);
+    close();
+  } else host.fail(err);
+};
 
 async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: PreviewHost, close: () => void) {
   const name = nameOf(e.path);
   let list: Version[];
   try { list = await w.history(e.path); } catch (err) { host.fail(err); return; }
+  // (the history read is the file's shown: another put at its path since, nothing of it shown)
+  if (list.some((v) => v.fid !== e.fid)) { host.say(`"${name}" is another file now: open it again`); close(); return; }
   el.replaceChildren(h("h3", { textContent: list.length ? `Earlier versions (${list.length})` : "Earlier versions" }));
   if (!list.length) {
     el.append(h("p", { className: "note", textContent: "None yet: when this file is written over, what it had is kept here." }));
@@ -231,16 +259,15 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
     r.dataset.version = String(v.id);
     r.append(
       button("Download", async () => {
-        try { downloadBytes(await w.versionById(e.path, v.id!), `${splitExt(name)[0]} (${new Date(v.t).toISOString().slice(0, 16).replace(":", "-")})${splitExt(name)[1]}`); } catch (err) { host.fail(err); }
+        try { downloadBytes(await w.versionById(e.path, v.id!), `${splitExt(name)[0]} (${new Date(v.t).toISOString().slice(0, 16).replace(":", "-")})${splitExt(name)[1]}`); } catch (err) { stale(err, name, host, close); }
       }),
       button("Restore", async () => {
         try {
-          const old = await w.versionById(e.path, v.id!);
-          // (written as any write is: what is there now is kept as a version too)
-          await w.putFile(e.path, old);
+          // (only over the file shown, as it was shown: its id and revision, checked with the write: CORR-F85-2)
+          await w.restoreVersion(e.path, v.id!, { fid: e.fid!, rev: e.rev ?? 0 });
           host.say(`"${name}" restored to the version of ${fmtTime(v.t)}`);
           close();
-        } catch (err) { host.fail(err); }
+        } catch (err) { stale(err, name, host, close); }
       }),
     );
     el.append(r);
@@ -251,10 +278,11 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
     const del = button(`Delete older versions (${fmtSize(total)})…`, async () => {
       if (!confirm(`Delete the ${list.length} earlier version${list.length === 1 ? "" : "s"} of "${name}" (${fmtSize(total)})? The file as it is now stays. This can't be undone.`)) return;
       try {
-        const freed = await w.dropVersions(e.path);
+        // (only those shown, of the file shown: CORR-F85-1)
+        const freed = await w.dropVersions(e.path, { expect: { fid: e.fid, ids: list.map((v) => v.id!) } });
         host.say(`${fmtSize(freed)} of old versions of "${name}" deleted`);
         await drawVersions(w, e, el, host, close);
-      } catch (err) { host.fail(err); }
+      } catch (err) { stale(err, name, host, close); }
     }, "danger");
     el.append(h("div", { style: "margin-top:8px" }, del));
   }
@@ -263,10 +291,11 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
 /** "Delete older versions in this folder" (§2.5): what it frees said and confirmed; only a person. */
 export async function dropFolderVersions(w: Workspace, folder: string, host: PreviewHost): Promise<void> {
   try {
-    const u = await w.versionsUsage(folder);
+    const f = await w.stat(folder), u = await w.versionsUsage(folder);
     if (!u.count) return host.say(`No earlier versions of files in ${folder}`);
     if (!confirm(`Delete the ${u.count} earlier version${u.count === 1 ? "" : "s"} of the files in ${folder} (${fmtSize(u.bytes)})? The files as they are now stay. This can't be undone.`)) return;
-    const freed = await w.dropVersions(folder);
+    // (only what was confirmed: the same folder, the same versions, else asked again: CORR-F85-1)
+    const freed = await w.dropVersions(folder, { expect: { count: u.count, bytes: u.bytes, created: f?.created } });
     host.say(`${fmtSize(freed)} of old versions deleted in ${folder}`);
   } catch (err) { host.fail(err); }
 }
@@ -311,7 +340,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     if (use.versions.count && w.actor === "person") {
       free = button(`Free ${fmtSize(use.versions.bytes)} of old versions…`, async () => {
         if (!confirm(`Delete all ${use.versions.count} earlier versions of data files (${fmtSize(use.versions.bytes)})? The files as they are now stay. This can't be undone.`)) return;
-        try { const n = await w.dropVersions("/"); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
+        try { const n = await w.dropVersions("/", { expect: { count: use.versions.count, bytes: use.versions.bytes } }); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
         draw();
       }, "danger");
       free.className += " free";
