@@ -1190,7 +1190,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
     runs.push(await r.json());
   }
   const left = (await bucket.list({ prefix: "s/0000000000000000000000000000", limit: 1000 })).objects.length;
-  ok(runs.every((r) => r.pages <= 2 && r.calls <= 1 + 2 * (2 + 1 + 50 + 1)), "each run is bounded: one prune of old purge receipts, then at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
+  ok(runs.every((r) => r.pages <= 2 && r.calls <= 2 * 3 + 2 * (2 + 1 + 50 + 1)), "each run is bounded: the receipts' prune (2 kinds, at most 3 pages each), then at most 2 pages, and per page one list, one lookup, one call per live account, one delete");
   ok(runs[0].deleted <= 100 && runs.slice(0, 3).reduce((n, r) => n + r.deleted, 0) >= 230 && left === 0, `the cursor continues across runs until every page is done (${runs.map((r) => r.deleted).join(",")})`);
   // one account owning a whole page (LIMIT-268-2): knownKeys is set-wise
   const many = Array.from({ length: 1000 }, (_, i) => `s/${hashOf(A).slice(0, 32)}/${i.toString(16).padStart(36, "0")}`);
@@ -1447,6 +1447,37 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   await new Promise((r) => setTimeout(r, 3200)); // (times are whole seconds: 2 s past, whatever the fraction)
   const invL = await (await fetchAt(SITE, "/__test/inventory", {})).text();
   ok((await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL}`)).status === 404 && (await signedGet(PURGE_KEY, `/api/admin/sync-purge/${ridL2}`)).status === 404 && (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).first()).n === 0, "past their polling lifetime, the daily job prunes the receipts " + JSON.stringify([Math.floor(Date.now() / 1000), (await db.prepare("SELECT * FROM sync_admin_requests WHERE account_hash = ?1").bind(hashOf(L)).all()).results, await invL]));
+  // LIMIT-233-1: a hard cap on new requests a day (test: 20), refused whole, before sharing's part;
+  // a retried id is never refused
+  const nowS = () => Math.floor(Date.now() / 1000);
+  const dayCount = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE created > ?1").bind(nowS() - 86400).first()).n;
+  const ridCap = crypto.randomUUID();
+  ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridCap }))).status === 202, "(a request admitted under the cap)");
+  const fill = 20 - (await dayCount());
+  for (let i = 0; i < fill; i++) await db.prepare("INSERT INTO sync_admin_requests (request_id, account_hash, state, created, finished) VALUES (?1, 'seed', 'purged', ?2, ?2)").bind(`seed-cap-${i}`, nowS()).run();
+  const over = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: crypto.randomUUID() }));
+  const overB = await over.json();
+  const again = await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: L, request_id: ridCap }));
+  ok((await dayCount()) === 20 && over.status === 429 && overB.error === "rate" && again.status === 202, "at the day's cap a new request is refused, 429 with retry_after, and admits nothing; a retried id still goes through: " + JSON.stringify([over.status, again.status]));
+  await db.prepare("DELETE FROM sync_admin_requests WHERE account_hash = 'seed'").run();
+  // the prune drains a backlog beyond one run's capacity (test: 2 kinds x 3 pages x 50 = 300 a run)
+  await new Promise((r) => setTimeout(r, 1100));
+  await (await fetchAt(SITE, "/__test/inventory", {})).text(); // (whatever is due now goes first)
+  for (let i = 0; i < 400; i++) await db.prepare("INSERT INTO sync_admin_requests (request_id, account_hash, state, created, finished) VALUES (?1, 'seed', 'purged', ?2, ?2)").bind(`seed-done-${i}`, nowS() - 100).run();
+  for (let i = 0; i < 400; i++) await db.prepare("INSERT INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, 'seed', 'deleting', ?2)").bind(`seed-open-${i}`, nowS() - 100).run();
+  const seedLeft = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sync_admin_requests WHERE account_hash = 'seed'").first()).n;
+  const runsP = [];
+  for (let i = 0; i < 3; i++) {
+    const r = JSON.parse(await (await fetchAt(SITE, "/__test/inventory", {})).text());
+    runsP.push([r.pruned, await seedLeft()]);
+  }
+  ok(runsP.every(([n]) => n <= 300) && runsP[0][0] === 300 && runsP[2][1] === 0, "a backlog of 800 expired receipts drains in 3 runs, at most 300 each: " + JSON.stringify(runsP));
+  // each prune and the cap's count use their own index
+  const plan = async (sql, ...b) => JSON.stringify((await db.prepare("EXPLAIN QUERY PLAN " + sql).bind(...b).all()).results.map((r) => r.detail));
+  const pDone = await plan("SELECT request_id FROM sync_admin_requests WHERE state = 'purged' AND finished < ?1 LIMIT ?2", 1, 1);
+  const pOpen = await plan("SELECT request_id FROM sync_admin_requests WHERE state = 'deleting' AND created < ?1 LIMIT ?2", 1, 1);
+  const pDay = await plan("SELECT COUNT(*) FROM sync_admin_requests WHERE created > ?1", 1);
+  ok(pDone.includes("sync_admin_requests_finished") && pOpen.includes("sync_admin_requests_open") && pDay.includes("sync_admin_requests_created") && !/SCAN sync_admin_requests(?! USING)/.test(pDone + pOpen + pDay), "the query plans use the partial indexes, no table scan: " + [pDone, pOpen, pDay].join(" | "));
   // an account with no row at all: N registers in the account object only; CoCalc purges it; its
   // receipt is completed by the record, though no row ever existed
   const acctN = acctNs.get(acctNs.idFromName("acct:" + hashOf(N)));

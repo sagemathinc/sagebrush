@@ -118,7 +118,8 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
       // (gated here first: sharing then reads the same request, which has passed the same bounds)
       const no = await adminGate(req, env);
       if (no) return no;
-      await adminSyncPurge(req.clone(), env);
+      const refused = await adminSyncPurge(req.clone(), env);
+      if (refused) return refused;
     }
     return null;
   }
@@ -287,25 +288,38 @@ async function adminLimits(req: Request, env: Env): Promise<Response> {
   return answer(await stub.notice({ account: v.account_id, issued: v.issued as number, limits: v.limits }), json);
 }
 
-/** Sync's part of CoCalc's signed purge (§9): the account object deletes everything it holds. */
-async function adminSyncPurge(req: Request, env: Env): Promise<void> {
+/**
+ * Sync's part of CoCalc's signed purge (§9): the account object deletes
+ * everything it holds.  Null lets sharing's part go on; a response refuses
+ * the whole purge (CoCalc retries it), only for a correctly signed new
+ * request past the day's receipt cap (LIMIT-233-1).
+ */
+async function adminSyncPurge(req: Request, env: Env): Promise<Response | null> {
   const body = await readBounded(req, ADMIN_BODY);
-  if (body === null || !(await signedWith(req, env.PURGE_KEY, body))) return;
+  if (body === null || !(await signedWith(req, env.PURGE_KEY, body))) return null;
   let v: { request_id?: unknown; account_id?: unknown };
   try {
     v = JSON.parse(body);
   } catch {
-    return;
+    return null;
   }
-  if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return;
+  if (typeof v.account_id !== "string" || !v.account_id || v.account_id.length > 100 || typeof v.request_id !== "string" || !/^[0-9a-f-]{8,64}$/i.test(v.request_id)) return null;
   const hash = await accountHash(v.account_id);
   // CoCalc's receipt first (CORR-1C2-1), so the purge's completion, which comes after the account
   // object's answer, always finds it; a retried id keeps its receipt, and touches no other
-  await env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) VALUES (?1, ?2, 'deleting', ?3)").bind(v.request_id, hash, Math.floor(Date.now() / 1000)).run();
+  // A new id is admitted only while the last 24 hours have fewer than the cap, in the one statement,
+  // so the daily prune, twice the cap, always keeps up (LIMIT-233-1); a retried id always is.
+  const now = Math.floor(Date.now() / 1000);
+  const cap = testMode(env) ? 20 : RECEIPTS_PER_DAY;
+  await env.SHARE_DB!.prepare("INSERT OR IGNORE INTO sync_admin_requests (request_id, account_hash, state, created) SELECT ?1, ?2, 'deleting', ?3 WHERE EXISTS (SELECT 1 FROM sync_admin_requests WHERE request_id = ?1) OR (SELECT COUNT(*) FROM sync_admin_requests WHERE created > ?3 - 86400) < ?4")
+    .bind(v.request_id, hash, now, cap).run();
+  if (!(await env.SHARE_DB!.prepare("SELECT 1 AS x FROM sync_admin_requests WHERE request_id = ?1").bind(v.request_id).first()))
+    return err(429, "rate", { message: "too many purge requests today; try again later", retry_after: 3600_000 });
   // (the account object decides, whatever D1 says: an account still registering has no row yet;
   // no generation named, as whatever it holds goes, CORR-02C-1)
   const r = await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).purge({ request_id: v.request_id, kind: "admin" });
   await recordPurge(env, hash, r, "admin");
+  return null;
 }
 
 /** GET /api/admin/sync-purge/<request_id> (signed): where sync's part of a purge is. */
@@ -325,19 +339,31 @@ async function adminSyncPurgeStatus(req: Request, env: Env, rid: string): Promis
  * late commit, whenever it lands, even after its account is deleted or
  * turned on again: a live account keeps every key it knows.
  */
-export async function syncScheduled(env: Env): Promise<{ pages: number; checked: number; deleted: number; calls: number }> {
-  const out = { pages: 0, checked: 0, deleted: 0, calls: 0 };
+export async function syncScheduled(env: Env): Promise<{ pages: number; checked: number; deleted: number; calls: number; pruned: number }> {
+  const out = { pages: 0, checked: 0, deleted: 0, calls: 0, pruned: 0 };
   if (!env.SYNC_ACCOUNT || !env.SHARE_DB || !env.SHARE_BUCKET) return out;
   const db = env.SHARE_DB;
   const test = testMode(env);
   const [page, pages] = test ? [50, 2] : [INVENTORY_PAGE, INVENTORY_PAGES];
   const old = Date.now() - (test ? 1000 : INVENTORY_AGE_MS);
   // CoCalc's purge receipts past their polling lifetime (CORR-1C2-1): 30 days after they finished,
-  // 90 if they never did; at most 1,000 a run, one call
-  const ttl = Math.floor((Date.now() - (test ? 2000 : RECEIPT_TTL_MS)) / 1000);
-  await db.prepare("DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE (finished IS NOT NULL AND finished < ?1) OR created < ?2 LIMIT 1000)")
-    .bind(ttl, Math.floor((Date.now() - (test ? 6000 : 3 * RECEIPT_TTL_MS)) / 1000)).run();
-  out.calls++;
+  // 90 if they never did.  Each by its own partial index, a page at a time until none is left or
+  // PRUNE_PAGES are done: 2 x PRUNE_PAGES x PRUNE_PAGE a run, twice what a day admits, so a backlog
+  // (missed runs) drains too (LIMIT-233-1).
+  const [prunePage, prunePages] = test ? [50, 3] : [PRUNE_PAGE, PRUNE_PAGES];
+  const nowS = Math.floor(Date.now() / 1000);
+  for (const [sql, before] of [
+    ["DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE state = 'purged' AND finished < ?1 LIMIT ?2)", nowS - (test ? 2 : RECEIPT_TTL_MS / 1000)],
+    ["DELETE FROM sync_admin_requests WHERE request_id IN (SELECT request_id FROM sync_admin_requests WHERE state = 'deleting' AND created < ?1 LIMIT ?2)", nowS - (test ? 6 : (3 * RECEIPT_TTL_MS) / 1000)],
+  ] as const) {
+    for (let n = 0; n < prunePages; n++) {
+      const r = (await db.prepare(sql).bind(before, prunePage).run()) as unknown as { meta?: { changes?: number } };
+      out.calls++;
+      const changed = r?.meta?.changes ?? 0;
+      out.pruned += changed;
+      if (changed < prunePage) break;
+    }
+  }
   // (a bound on the calls a run makes, LIMIT-268-1: a page is begun only if its worst case still fits)
   const worst = 2 + 1 + page + 1;
   for (let n = 0; n < pages && out.calls + worst <= INVENTORY_CALLS; n++) {
@@ -383,6 +409,10 @@ const INVENTORY_PAGE = 100, INVENTORY_PAGES = 5, INVENTORY_CALLS = 400;
 const INVENTORY_AGE_MS = 2 * 86400_000;
 /** How long CoCalc may poll a purge's status after it finished (CORR-1C2-1). */
 const RECEIPT_TTL_MS = 30 * 86400_000;
+/** At most this many new purge requests in any 24 hours (LIMIT-233-1); far above CoCalc's deletions. */
+const RECEIPTS_PER_DAY = 5000;
+/** The prune's pages: 2 kinds x 10 pages x 1,000 = 20,000 a run, at least twice RECEIPTS_PER_DAY each kind. */
+const PRUNE_PAGE = 1000, PRUNE_PAGES = 10;
 
 /**
  * An upload (§5.4): reserve, stream to R2 with the SHA-256 for R2 to
