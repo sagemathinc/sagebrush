@@ -18,6 +18,7 @@ const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333"; // signed in, never allowlisted
 const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are first asked for while CoCalc is down
+const E = "55555555-5555-4555-8555-555555555555"; // allowlisted; nothing pending but what a test makes (alarms)
 
 let failures = 0;
 let count = 0;
@@ -40,6 +41,7 @@ const sync = (storage, reads) => ({ storage_bytes: 1 << 30, max_file_bytes: 50_0
 fake.limits.set(A, sync(30_000, 60_000));
 fake.limits.set(B, sync(1 << 20, 1 << 20));
 fake.limits.set(D, sync(1 << 20, 1 << 20));
+fake.limits.set(E, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
@@ -54,12 +56,21 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } } },
     },
+    // the user-content Worker's signed reads with a tight per-IP limit, 2 a minute; and one with none
+    {
+      ...base,
+      name: "files-tight",
+      bindings: { SYNC_URL_KEY: URL_KEY },
+      routes: ["tightfiles.test/*"],
+      ratelimits: { SYNC_FILES_LIMIT: { namespace_id: "1004", simple: { limit: 2, period: 60 } } },
+    },
+    { ...base, name: "files-open", bindings: { SYNC_URL_KEY: URL_KEY }, routes: ["openfiles.test/*"] },
     // sync's bindings, but no pre-authentication limit: off (LIMIT-321-1)
     {
       ...base,
@@ -356,7 +367,7 @@ const docA = "0123456789ab";
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const acctNs = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "sync");
 const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
-const acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
+let acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
 const put = (session, bytes, h = sha(bytes)) => fetchAt(SITE, `/api/sync/v1/blob/${h}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
 const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Buffer.alloc(6000, 9);
 {
@@ -463,6 +474,191 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   i = await acctA.inspect({ sha256: sha(other) });
   ok(i?.pins.length === 1 && i.pins[0].epoch === 2 && i.refs === 1, "the old epoch's release, late and twice, removes only the old pin");
   s.ws.close();
+}
+
+// ---- daybreak2's slice-2 limits (LIMIT-7FB-1..3)
+{
+  // a dead upload on an otherwise idle account: its reservation ends, and its bytes come back, by the alarm alone
+  const before = (await acctA.inspect({}))?.used;
+  const r = await acctA.reserve({ account: A, sha256: "d".repeat(64), size: 1234 });
+  ok(r?.ok?.id && (await acctA.inspect({}))?.used === before + 1234, "a reservation charges its bytes");
+  await new Promise((res) => setTimeout(res, 2500));
+  ok((await acctA.inspect({}))?.used === before, "with nothing else happening, the reservation's end gives its bytes back (the alarm was armed at reserve)");
+  // signed URLs: at most 600 a minute per account, counted at issue
+  const sd = await signIn(D);
+  const tiny = Buffer.from("t");
+  await put(sd, tiny);
+  let n = 0, last = 0;
+  const t1 = Date.now();
+  for (; n < 3000; n++) {
+    last = (await fetchAt(SITE, `/api/sync/v1/blob/${sha(tiny)}`, { headers: { cookie: sd, "sec-fetch-site": "same-origin" } })).status;
+    if (last !== 303) break;
+  }
+  // (600 at once, refilled at 10 a second while the loop runs)
+  const refill = Math.ceil(((Date.now() - t1) / 1000) * 10) + 1;
+  ok(last === 429 && n >= 600 && n <= 600 + refill, `urls_per_minute: 600 signed URLs at once, then 429 (${n} in ${Date.now() - t1} ms)`);
+  // the files Worker: a per-IP limit before R2, and no signed read without one
+  const bb = Buffer.from("a blob of B's for the files tests");
+  await put(sb, bb);
+  const loc = new URL((await fetchAt(SITE, `/api/sync/v1/blob/${sha(bb)}`, { headers: { cookie: sb, "sec-fetch-site": "same-origin" } })).headers.get("location") ?? "https://files.test/");
+  ok(loc.pathname.startsWith("/p/s/"), "(a signed URL for the files tests)");
+  const codes = [];
+  for (let i = 0; i < 3; i++) codes.push((await mf.dispatchFetch(`https://tightfiles.test${loc.pathname}${loc.search}`, { headers: { "cf-connecting-ip": "198.51.100.7" } })).status);
+  ok(codes[2] === 429, "a reused signed URL is limited per IP at the files Worker, before R2: " + codes.join());
+  ok((await mf.dispatchFetch(`https://openfiles.test${loc.pathname}${loc.search}`)).status === 404, "without the per-IP limit bound, the files Worker serves no signed read");
+  // a malformed plan from CoCalc is an outage: the last good limits stay
+  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000 });
+  await new Promise((res) => setTimeout(res, 1200));
+  let up = await put(sb, Buffer.from("b after a malformed plan"));
+  ok(up.status === 201, "a plan without its sync part keeps the last good limits, never sync off");
+  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: "lots", version_bytes: 1, read_bytes_per_day: 1 } });
+  await new Promise((res) => setTimeout(res, 1200));
+  up = await put(sb, Buffer.from("b after a second malformed plan"));
+  ok(up.status === 201, "nor does a malformed number");
+  fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: false, storage_bytes: 0, version_bytes: 0, read_bytes_per_day: 0 } });
+  await new Promise((res) => setTimeout(res, 1200));
+  up = await put(sb, Buffer.from("b after sync was turned off"));
+  ok(up.status === 409, "a well-formed plan without sync does make the account read-only");
+  fake.limits.set(B, sync(1 << 20, 1 << 20));
+  await new Promise((res) => setTimeout(res, 1200));
+}
+
+// ---- astra's slice-2 findings (CORR-796-1..2)
+{
+  // a finalize answered again: the same answer for the same size, a conflict for another
+  const r = await acctA.reserve({ account: A, sha256: sha(Buffer.from("fin")), size: 3 });
+  ok(r?.ok?.id, "(a reservation)");
+  const f1 = await acctA.finalize({ account: A, id: r.ok.id, size: 3 });
+  const f2 = await acctA.finalize({ account: A, id: r.ok.id, size: 3 });
+  const f3 = await acctA.finalize({ account: A, id: r.ok.id, size: 4 });
+  ok(f1?.ok?.sha256 === sha(Buffer.from("fin")) && f2?.ok?.sha256 === f1.ok.sha256 && f3?.error?.code === "conflict", "finalize repeated gives its first answer; another size is a conflict (CORR-796-2)");
+  // an outbox bigger than one alarm's 100: the alarm runs again until it is empty
+  const n = await acctA.seed({ outbox: 250 });
+  ok(n >= 250, "(250 keys in the outbox)");
+  await new Promise((res) => setTimeout(res, 4500));
+  ok((await acctA.inspect({}))?.outbox === 0, "an outbox of 250 is emptied by successive alarms (CORR-796-1)");
+}
+
+// ---- astra's slice-1 interleavings (CORR-321-1..3), with the test's gates in the document object
+{
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  const docOf = (doc) => docNs.get(docNs.idFromName(`doc:${hashOf(A)}:${doc}`));
+  const s1 = await socket(sa);
+  await hello(s1, dev1);
+  const s2 = await socket(sa);
+  await hello(s2, dev1);
+  const H = Buffer.from("blob H for the interleavings");
+  await put(sa, H);
+  const refsH = async () => (await acctA.inspect({ sha256: sha(H) }))?.refs;
+  // CORR-321-1: A (C, cseq 1, id 100) waits before the document; B (C, cseq 1, id 200) is accepted and its answer held; A is refused
+  const docI = "1111aaaa2222";
+  await s1.ask(batch(docI, 1, [[1, pid(1, "clientSEED"), [], "seed"]], { kind: "board" }));
+  const C = "clientCCCC";
+  const d = docOf(docI);
+  await d.hold({ name: `before:${pid(100, C)}` });
+  const aP = s1.ask(batch(docI, 1, [[1, pid(100, C), [], "A", [sha(H)]]]));
+  await new Promise((r) => setTimeout(r, 60));
+  await d.hold({ name: `after:${pid(200, C)}` });
+  const bP = s2.ask(batch(docI, 1, [[1, pid(200, C), [], "B", [sha(H)]]]));
+  await new Promise((r) => setTimeout(r, 60));
+  await d.open({ name: `before:${pid(100, C)}` });
+  const aR = await aP;
+  ok(aR?.t === "error" && aR.code === "conflict", "A, whose cseq B took, is refused");
+  await d.open({ name: `after:${pid(200, C)}` });
+  const bR = await bP;
+  const i1 = await acctA.inspect({ sha256: sha(H) });
+  ok(bR?.batch?.new === 1 && i1?.refs === 1 && i1.pins.length === 1 && i1.pins[0].state === "held" && String(i1.pins[0].ref).endsWith(pid(200, C)), "B's patch keeps its pin, held: A's refusal took back only A's own (CORR-321-1)");
+  // the same patch twice: A (stale expect_head) waits, B commits and its answer waits, then A is answered
+  const docJ = "1111aaaa3333";
+  await s1.ask(batch(docJ, 1, [[1, pid(1, "clientSEEE"), [], "seed"]], { kind: "board" }));
+  const dj = docOf(docJ);
+  const X = "clientXSAM";
+  await dj.hold({ name: `before:${pid(50, X)}` });
+  const aP2 = s1.ask(batch(docJ, 1, [[1, pid(50, X), [], "same", [sha(H)]]], { expect_head: { epoch: 1, seq: 0 } }));
+  await new Promise((r) => setTimeout(r, 60));
+  await dj.hold({ name: `after:${pid(50, X)}` });
+  const bP2 = s2.ask(batch(docJ, 1, [[1, pid(50, X), [], "same", [sha(H)]]]));
+  await new Promise((r) => setTimeout(r, 60));
+  await dj.open({ name: `before:${pid(50, X)}` });
+  const aR2 = await aP2;
+  let i2 = await acctA.inspect({ sha256: sha(H) });
+  ok(aR2?.t === "ack" && aR2.batch.new === 0 && i2.pins.filter((p) => String(p.ref).endsWith(pid(50, X)))[0]?.state === "pending", "the same patch: A is answered as a resend, and the pin stays pending while B's attempt is in flight");
+  await dj.open({ name: `after:${pid(50, X)}` });
+  await bP2;
+  i2 = await acctA.inspect({ sha256: sha(H) });
+  ok(i2.refs === 2 && i2.pins.filter((p) => String(p.ref).endsWith(pid(50, X)))[0]?.state === "held", "and is held, once, when B answers");
+  // CORR-321-2: seq 2's answer arrives after seq 3's; a lost answer, then a resend
+  const docK = "1111aaaa4444";
+  const K = "clientKKKK";
+  await s1.ask(batch(docK, 1, [[1, pid(1, K), [], "one"]], { kind: "board" }));
+  const dk = docOf(docK);
+  await dk.hold({ name: `after:${pid(2, K)}` });
+  const two = s1.ask(batch(docK, 1, [[2, pid(2, K), [pid(1, K)], "two"]]));
+  await new Promise((r) => setTimeout(r, 200));
+  const three = await s2.ask(batch(docK, 1, [[3, pid(3, K), [pid(2, K)], "three"]]));
+  ok(three?.batch?.seq === 3, "seq 3 is answered first");
+  await dk.open({ name: `after:${pid(2, K)}` });
+  await two;
+  let ik = await acctA.inspect({ doc: docK });
+  ok(Number(ik?.doc?.head_seq) === 3 && Number(ik.doc.bytes) === 11, "seq 2's late answer doesn't move the account's head back, and the bytes are the document's own total (CORR-321-2)");
+  const lostDoc = LOSE;
+  const before = Number((await acctA.inspect({ doc: lostDoc }))?.doc?.bytes);
+  const L = "clientLOS2";
+  const lr = await s1.ask(batch(lostDoc, 1, [[1, pid(40, L), [], "lostbytes"]]));
+  ok(lr?.code === "busy", "an answer lost after the commit");
+  const again = await s1.ask(batch(lostDoc, 1, [[1, pid(40, L), [], "lostbytes"]]));
+  ik = await acctA.inspect({ doc: lostDoc });
+  ok(again?.batch?.new === 0 && Number(ik?.doc?.bytes) === before + 9, "the resend's answer carries the document's total, so the account's bytes include the lost commit");
+  // CORR-321-3: on an account with nothing else pending, the alarm is armed by the pin itself, and
+  // again by the constructor after a crash that lost it
+  {
+    const se = await signIn(E);
+    await post(se, "/api/sync/v1/enable", {});
+    const acctE = () => acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
+    const HE = Buffer.from("E's blob");
+    await put(se, HE);
+    await new Promise((r) => setTimeout(r, 6000)); // (finalize's own wake passes, so only a pin can arm the alarm)
+    const se1 = await socket(se);
+    await hello(se1, "device-e-000001");
+    const docM = "1111aaaa5555";
+    await se1.ask(batch(docM, 1, [[1, pid(1, "clientMSED"), [], "seed"]], { kind: "board" }));
+    const dm = docNs.get(docNs.idFromName(`doc:${hashOf(E)}:${docM}`));
+    const M = "clientMMMM";
+    await dm.hold({ name: `after:${pid(60, M)}` });
+    const quiet = await acctE().inspect({});
+    ok(quiet?.alarm === null || quiet.alarm > Date.now() + 3600_000, "(account E has no alarm soon before the pin: only the unused holding's, a day away)");
+    const t0 = Date.now();
+    se1.send({ ...batch(docM, 1, [[1, pid(60, M), [], "crash", [sha(HE)]]]), req: 9999 });
+    await new Promise((r) => setTimeout(r, 60));
+    const ia = await acctE().inspect({ sha256: sha(HE) });
+    ok(ia?.alarm !== null && ia.alarm >= t0 + 300 && ia.alarm <= t0 + 300 + 200, "the pending pin arms the alarm for its lapse, before the forward answers");
+    await acctE().crash().catch(() => {});
+    await new Promise((r) => setTimeout(r, 100));
+    // (the restarted object, with the document still holding the answer)
+    const ib = await acctE().inspect({ sha256: sha(HE) }).catch(() => null);
+    ok(ib?.alarm !== null && ib?.alarm !== undefined && ib.alarm < Date.now() + 3600_000 && ib.pins.length === 1 && ib.pins[0].state === "pending", "after a crash that lost the alarm, the restarted object arms it again for the pending pin");
+    await dm.open({ name: `after:${pid(60, M)}` });
+    await new Promise((r) => setTimeout(r, 1500));
+    const ic = await acctE().inspect({ sha256: sha(HE) });
+    ok(ic?.pins[0]?.state === "held" && ic.refs === 1, "and the alarm decides it from the document: committed, so held (CORR-321-3)");
+  }
+  // CORR-796-1: an alarm earlier than a pending pin's lapse arms the next one for that lapse
+  // (a new socket: the crash above closed the old ones)
+  const s3 = await socket(sa);
+  await hello(s3, dev1);
+  // (a lost answer, so only the alarm can decide the pin; and an alarm forced before its lapse)
+  const N = "clientNNNN";
+  const lostN = await s3.ask(batch(LOSE, 1, [[1, pid(70, N), [], "early", [sha(H)]]]));
+  ok(lostN?.code === "busy", "(the answer is lost)");
+  await acctA.seed({ alarmNow: true });
+  await new Promise((r) => setTimeout(r, 100));
+  ok((await acctA.inspect({ sha256: sha(H) }))?.pins.filter((p) => String(p.ref).endsWith(pid(70, N)))[0]?.state === "pending", "(the early alarm, before the lapse, leaves it pending)");
+  await new Promise((r) => setTimeout(r, 1500));
+  const ie = await acctA.inspect({ sha256: sha(H) });
+  ok(ie?.pins.filter((p) => String(p.ref).endsWith(pid(70, N)))[0]?.state === "held", "an alarm that fires before a pin's lapse leaves the next armed: the pin is decided");
+  s3.ws.close();
+  s1.ws.close();
+  s2.ws.close();
 }
 
 // ---- the access list, behind the owner-qualified name (§2): a document object refuses an account not on it

@@ -7,7 +7,7 @@ export { SyncDoc } from "./doc.ts";
 
 export default {
   async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    if (new URL(req.url).hostname === "files.test") return (await handleSyncFiles(req, env)) ?? new Response("not found", { status: 404 });
+    if (new URL(req.url).hostname.endsWith("files.test")) return (await handleSyncFiles(req, env)) ?? new Response("not found", { status: 404 });
     return (await handleSync(req, env)) ?? (await handleShare(req, env, ctx)) ?? new Response("not the API", { status: 404 });
   },
 };

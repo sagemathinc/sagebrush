@@ -21,7 +21,7 @@ import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncE
 import { allowed, type SyncEnv } from "./env.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
-export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_SITE_ORIGIN?: string };
+export type Env = SyncEnv & ShareEnv & { SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string };
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => json({ error, ...extra }, status);
@@ -121,6 +121,8 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   } catch {
     stored = null;
   }
+  // (R2 checks the SHA-256, and the runtime ends a request whose body isn't its Content-Length, so a
+  // stored size that differs is not expected; it is still checked, a second line, LIMIT-7FB-4)
   if (!stored || stored.size !== size) {
     await stub.abandon({ id });
     return err(400, "invalid", { message: "the bytes don't match their SHA-256 or their length" });
@@ -146,7 +148,10 @@ export async function handleSyncFiles(req: Request, env: Env): Promise<Response 
     ...(env.SYNC_SITE_ORIGIN ? { "access-control-allow-origin": env.SYNC_SITE_ORIGIN, vary: "origin", "access-control-expose-headers": "content-length, content-range" } : {}),
   };
   const no = (status: number, text: string) => new Response(text, { status, headers: { ...base, "content-type": "text/plain; charset=utf-8" } });
-  if (!env.SYNC_URL_KEY || !env.SHARE_BUCKET) return no(404, "not found");
+  // (the per-IP limit is part of the flag here too: without it, no signed read is served, LIMIT-7FB-2)
+  if (!env.SYNC_URL_KEY || !env.SHARE_BUCKET || !env.SYNC_FILES_LIMIT) return no(404, "not found");
+  // before anything touches R2: one limit per IP, so a reusable URL can't be replayed without bound
+  if (!(await env.SYNC_FILES_LIMIT.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return no(429, "too many requests");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...base, "access-control-allow-methods": "GET, HEAD", "access-control-allow-headers": "range", "access-control-max-age": "600" } });
   if (req.method !== "GET" && req.method !== "HEAD") return no(405, "method not allowed");
   const exp = Number(url.searchParams.get("exp"));

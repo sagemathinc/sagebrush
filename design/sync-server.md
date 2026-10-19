@@ -465,7 +465,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 
 | What | Limit | Over it |
 |---|---|---|
-| A message on a socket | 2 MiB, in UTF-8 bytes. A batch's largest body, 1 MiB, is 1.33 MiB as base64, and its 2,000 envelopes add up to about 0.4 MiB, so the first draft's 1 MiB + 64 KiB couldn't carry a full batch (LIMIT-321-3). | close 1009 |
+| A message on a socket | 2 MiB, in UTF-8 bytes. A batch's largest body, 1 MiB, is 1.33 MiB as base64, and its 2,000 envelopes add up to about 0.4 MiB, so the first draft's 1 MiB + 64 KiB couldn't carry a full batch (LIMIT-321-3). The batch limits aren't all reachable at once: 2 MiB carries a 1 MiB body with 2,000 small envelopes, not with 2,000 envelopes each at their own maxima (8 parents and 8 blobs). | close 1009 |
 | A batch | 1 MiB of body, 2,000 patches; 8 parents per patch | `limit` |
 | One patch inline | 256 KiB (larger: a blob, §5.3) | `limit` |
 | Ops in one message | 500; a path 1,024 bytes, a name 255 | `limit` |
