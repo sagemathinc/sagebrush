@@ -42,6 +42,8 @@ export type Entry = {
   trashed?: { from: string; at: number };
   /** a board made from an edited example or a board on the web: its address */
   origin?: string;
+  /** a data file recovered from Trash bytes with no entry: from which Trash key, and their SHA-256 (CORR-DF0-1) */
+  recovered?: { from: string; sha: string };
   /** contents reconcile could not find (shown, never dropped) */
   missing?: boolean;
 };
