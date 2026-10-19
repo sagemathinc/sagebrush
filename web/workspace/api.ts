@@ -419,7 +419,10 @@ export class Workspace {
     const as: Workspace = Object.create(this);
     as.actor = actor;
     const verbs = ["list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "watch", "ops"] as const;
-    return Object.freeze(Object.fromEntries(verbs.map((v) => [v, (as as any)[v].bind(as)]))) as Pick<Workspace, (typeof verbs)[number]>;
+    const bound: Record<string, unknown> = Object.fromEntries(verbs.map((v) => [v, (as as any)[v].bind(as)]));
+    // (an agent writes with base only: a board's tag says which page session wrote it, and isn't an agent's to claim)
+    bound.write = (p: string, content: unknown, opts: { base?: number } = {}) => as.write(p, content, opts?.base !== undefined ? { base: opts.base } : {});
+    return Object.freeze(bound) as Pick<Workspace, (typeof verbs)[number]>;
   }
 
   // ------------------------------------------------------------ inside
