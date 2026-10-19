@@ -60,8 +60,25 @@ VERBS = {
 }
 
 
+CONNECT = {
+    "name": "workspace_connect",
+    "title": "Connect to the person's Sagebrush page",
+    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time code (26 letters and digits, valid 5 minutes, used once): show it to the person, who enters it in Sagebrush (Chat, Connect an agent; Chrome or Firefox), and then chooses what you may do there. Calling it again gives a new code. Also says whether a page is paired and what it granted.",
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+}
+CONNECT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result": {"description": "{code, port, expires_in_seconds, paired, granted, grant, page}: the code is null once a page is paired"},
+        "error": {"description": "null, or {code, message}"},
+    },
+    "required": ["result", "error"],
+}
+
+
 def tools():
-    """The MCP tool descriptions of the verbs."""
+    """The MCP tool descriptions of the verbs, then workspace_connect."""
     out = []
     for verb, (title, desc, props, required, read_only) in VERBS.items():
         out.append({
@@ -71,7 +88,7 @@ def tools():
             "inputSchema": {"type": "object", "properties": props, "required": required, "additionalProperties": False},
             "annotations": {"readOnlyHint": read_only, "destructiveHint": False, "idempotentHint": read_only, "openWorldHint": False},
         })
-    return out
+    return out + [CONNECT]
 
 
 NAMES = {PREFIX + v for v in VERBS}

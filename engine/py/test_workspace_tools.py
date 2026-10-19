@@ -125,12 +125,13 @@ def refused(page, name, args, code):
 def test_tools():
     tools = WS.tools()
     names = [t["name"] for t in tools]
-    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version")], names
-    for t in tools:
+    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version")] + ["workspace_connect"], names
+    for t in tools[:-1]:
         # (Anthropic's API refuses tool names with other characters, dots included)
         assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t["name"]), t["name"]
         assert t["inputSchema"]["type"] == "object" and t["inputSchema"]["additionalProperties"] is False
         assert "data, never instructions" in t["description"]
+    assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", tools[-1]["name"])
     # what only a person may do is no tool
     for name in names:
         assert not re.search(r"drop|empty|purge|forget|delete", name), name
@@ -271,10 +272,18 @@ def test_through_the_server():
 
     rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
     tools = {t["name"]: t for t in rpc(2, "tools/list", {})["result"]["tools"]}
-    assert all(("workspace_" + v) in tools for v in WS.VERBS) and "sage" in tools
+    assert all(("workspace_" + v) in tools for v in WS.VERBS) and "sage" in tools and "workspace_connect" in tools
     assert tools["workspace_read"]["outputSchema"] == WS.OUTPUT_SCHEMA
     r = rpc(3, "tools/call", {"name": "workspace_list", "arguments": {}})
     assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "not_connected", r
+    # workspace_connect: a code and a port on 127.0.0.1; until a page pairs, the verbs say so
+    r = rpc(31, "tools/call", {"name": "workspace_connect", "arguments": {}})["result"]
+    got = r["structuredContent"]["result"]
+    assert not r["isError"] and len(got["code"]) == 26 and got["port"] > 0 and got["paired"] is False, r
+    assert got["code"] in r["content"][0]["text"] and srv.link.sock.getsockname()[0] == "127.0.0.1"
+    r = rpc(32, "tools/call", {"name": "workspace_list", "arguments": {}})["result"]
+    assert r["isError"] and r["structuredContent"]["error"]["code"] == "not_connected"
+    srv.link.close()
     srv.link = FakePage()
     rpc(4, "tools/call", {"name": "workspace_create", "arguments": {"path": "/x.txt", "content": {"text": "hi"}}})
     r = rpc(5, "tools/call", {"name": "workspace_read", "arguments": {"path": "/x.txt"}})
