@@ -317,15 +317,25 @@ text: the host's merge keeps both people's typing in one field, as in a
 notebook. `toRecords` and `fromRecords` (web/board/history.ts) turn a board
 into its records and back, and both sides use them.
 
-**A change** is one of:
+**A change** says what the user changed *and what they changed it from*,
+so that the host can merge it into whatever its document has become since
+(see Merging):
 
-- `{ op: "set", key: {type, page, id}, fields: {…} }`: these fields of that
-  record get these values, and a field set to `null` is removed. A record
-  that doesn't exist is made from them. `fields` never holds `type`, `page`
-  or `id`.
-- `{ op: "delete", key: {type, page, id} }`: the record is removed. Deleting
-  an item doesn't delete its children or edges by itself: the edit lists
-  each record it removes.
+- `{ op: "set", key: {type, page, id}, fields: {…}, was: {…}, create?, record? }`
+  - `fields`: the new values of the fields changed. A field set to `null`
+    is removed. `fields` never holds `type`, `page` or `id`.
+  - `was`: for each field in `fields`, the value the user saw before the
+    change (`null` if the record didn't have it).
+  - `create: true`: the record didn't exist where the user made it. `was`
+    is then empty, and `fields` holds the whole record.
+  - `record`: the whole record after the change, given when the change
+    touches a text column of an existing record (see Merging: an edit to a
+    record deleted elsewhere).
+- `{ op: "delete", key: {type, page, id}, was: {…} }`: the record is
+  removed. `was` holds its text columns as the user saw them. Deleting an
+  item doesn't delete its children or edges by itself. The edit lists each
+  record it removes or moves, and the result must be a board (see The
+  checks).
 
 A list of changes is applied in order, as one step: all of it or none of
 it.
@@ -355,35 +365,45 @@ The host grants editing in the `board` message it posts with the port:
 
 - `{ sagebrush: "edit", version: 1, id, base, changes }`
   - `id`: `crypto.randomUUID()`, new for each edit message.
-  - `base`: the latest `revision` the frame received (see Revisions).
-  - `changes`: what the user did since the frame's last `edit`, as a list
-    of changes. It is made of whole *transactions*: one action of the
-    editor (a drag when it ends, a paste, a deletion of the selection, an
-    undo) with every record it touches. The frame batches the transactions
-    done within 250 ms into one message, as long as the message stays
-    within the bounds (see Bounds). It never splits a transaction.
+  - `base`: the latest `revision` the frame received. It tells the host
+    which state the frame showed; the merge doesn't depend on the host
+    still having that state, because each change carries its `was`.
+  - `changes`: what the user did since the frame's last `edit`. It is made
+    of whole *transactions*: one action of the editor (a drag when it ends,
+    a paste, a deletion of the selection, an undo) with every record it
+    touches, each change with its `was` as the user saw it when they made
+    it. The frame batches the transactions done within 250 ms into one
+    message, as long as the message stays within the bounds (see Bounds).
+    It never splits a transaction.
 - `{ sagebrush: "resync", version: 1 }`: the frame lost track of the
   revisions and asks for the whole board (`replace`).
 
 ### Host to frame
 
 Every message that carries a `revision` also carries the `base` it follows
-from, except `replace`, which stands alone. In `saved` and `remote`,
-`base` is the last revision the host sent on this channel, which need not
-be the edit's own `base`.
+from, except `replace`, which stands alone. `base` is the last revision the
+host sent on this channel, which need not be an edit's own `base`.
 
-- `{ sagebrush: "saved", version: 1, id, base, revision, changes }`: the
-  edit `id` was merged. `revision` is the document's state now, and
-  `changes` takes the frame's host state from `base` to it. It includes the
-  edit itself as merged: merged text, or a field another change won, comes
-  back here.
+- `{ sagebrush: "saved", version: 1, id, base, revision, changes, dropped }`:
+  the edit `id` was merged.
+  - `revision` is the document's state now.
+  - `changes` takes the frame's host state from `base` to it, the edit
+    itself as merged included. Merged text, or a field a later change won,
+    comes back here.
+  - `dropped` lists the keys of the edit's changes that had no effect,
+    because the record was deleted elsewhere, or a delete was kept back
+    because its text was changed elsewhere (see Merging), so that the frame
+    can say so. It is often `[]`.
 - `{ sagebrush: "remote", version: 1, base, revision, changes }`: a change
   made elsewhere (another tab, another person, an agent writing the file)
   since `base`.
-- `{ sagebrush: "replace", version: 1, revision, text }`: the whole board,
-  as text, at `revision`. The host sends it when the frame asks
-  (`resync`), after a refusal (below), or when a change set would pass the
-  bounds.
+- `{ sagebrush: "replace", version: 1, revision, text, answered }`: the whole
+  board, as text, at `revision`. The host sends it when the frame asks
+  (`resync`), after a refusal without `retryAfter`, or when a `saved` or
+  `remote` would pass the bounds. `answered` lists the edits this message
+  answers, as `[{ id, outcome: "saved" | "refused", dropped?, message? }]`:
+  - an edit merged whose `saved` would have passed the bounds;
+  - any other edit not answered by its own `saved` or `refused`.
 - `{ sagebrush: "refused", version: 1, id, message, retryAfter? }`: the edit
   `id` was not merged. `message` is the host's own words, at most 500
   characters, as for submissions.
@@ -392,120 +412,173 @@ be the edit's own `base`.
   Edit, drops its unsaved changes, says `message` and shows the board as it
   is. Answers still work if the channel does.
 
-### Revisions, ordering and conflicts
+**Every edit is answered exactly once:** by its `saved`, by its `refused`,
+or by an entry in a `replace`'s `answered`, never more than one of these.
+
+### Revisions, answers and the frame's view
 
 - **Revisions are the host's.** They form a chain: every `saved` and
   `remote` names the revision it follows (`base`). The frame keeps the
   latest revision it received, and compares revisions only for equality:
   it never orders them or makes its own.
 - **The frame keeps two things:** the host's state at the latest revision,
-  and its own changes not yet saved (the edit in flight, then those made
-  since). It shows the host's state with its own changes over it.
+  and its own transactions not yet saved (the edit in flight, then those
+  made since), each change with its `was`. It shows the host's state with
+  its own changes over it.
+- **Answers come first.** The frame applies the answer in a `saved`,
+  `refused` or `replace` whenever it arrives, even while it waits for a
+  `replace`:
+  - **saved:** that edit's changes leave its own;
+  - **refused:** see Refusals;
+  - **`dropped`:** the frame says which of its changes had no effect.
+- **Changes come in order.**
   - **A `saved` or `remote` whose `base` is the frame's latest revision:**
-    applied to the host's state. The frame's own unsaved changes stay over
-    it.
-  - **`saved` for the edit in flight:** that edit's changes are dropped
-    from its own, now that the host's state has them as merged.
-  - **A `base` that isn't the latest revision:** the frame sends `resync`,
-    ignores further `saved` and `remote` until `replace` arrives, and keeps
-    its unsaved changes.
+    its `changes` are applied to the host's state, with the frame's own
+    unsaved changes still over it.
+  - **A `base` that isn't the latest revision:** the frame applies the
+    message's answer (above), not its `changes`. It sends `resync`, and
+    ignores further `changes` until a `replace` arrives.
   - **`replace`:** the host's state becomes that text at that revision. The
-    frame's unsaved changes stay over it, and go in its next `edit` with
-    that revision as `base`. Changes to records that no longer exist are
-    dropped, and the frame says so.
+    frame's unsaved changes stay over it, with these exceptions:
+    - a change to a record that isn't there now: kept if it is a creation
+      (`create`) or touches a text column (its `record` restores it), and
+      otherwise dropped, said;
+    - every other change: kept, `was` and all, for the next edit.
 - **One edit in flight.** The frame sends an `edit` only when no other
-  awaits its answer. What the user does meanwhile goes into the next one.
-  A port delivers in order, and the host answers each edit, in order, with
-  exactly one `saved` or `refused`.
-- **The host merges on the base, record by record.**
-  - **What it keeps.** The records of the latest revision it sent on this
-    channel, and for each older revision an `edit` may still name, the
-    *reverse* changes leading back to it from the next one. It keeps at
-    most 8 older revisions, and their reverse changes total at most
-    16 MiB. Past either bound, the oldest go first.
-  - **An edit whose `base` it no longer keeps** is refused, and a
-    `replace` follows.
-  - **Merging.** For each record the edit touches, the host rebuilds that
-    record at `base` (the latest records, with the reverse changes applied
-    back to `base`, for that record only). It applies the edit's changes,
-    and merges the result into the document as a change from that base
-    record. Text columns merge as text: both people's typing is kept.
-  - **In CoCalc** this is the syncdb's merge (`dbMerge3`'s rules), applied
-    to the touched records. So concurrent changes are decided the same way
-    for the card as for the full editor.
-  - **Its cost** grows with the records the edit touches (and their
-    reverse changes), not with the board.
-- **Refusals.**
-  - **With `retryAfter`** (milliseconds; the host is busy, or the rate was
-    passed): nothing was merged, and that `id` is answered for good. The
-    frame keeps those changes in its own, and no sooner than that sends
-    them, with what was done since, as a **new edit**:
-    - a new `id`;
-    - `base` the latest revision it received, which may be newer than the
-      refused edit's;
-    - the changes it has kept, checked by the host as any edit's.
+  awaits its answer. What the user does meanwhile goes into the next one,
+  each change still carrying the `was` the user saw. A port delivers in
+  order, and the host answers edits in the order they came.
 
-    The old `id` is never sent again. A `saved` or `remote` that arrives
-    meanwhile is applied as usual, with the kept changes over it.
-  - **Without it** (the edit failed a check): nothing was merged, and the
-    host follows with a `replace`. The frame drops the refused changes and
-    those made after them, since they were made on top of the refused
-    ones, and shows `message`.
-- **The host checks every edit before merging anything.** It refuses the
-  whole edit if any of these fails:
-  - plain JSON data, checked as for submissions (types first, without
-    recursion), nested at most 16 deep;
-  - `id` a UUID. An `edit` whose `id` the host has already answered (one
-    of the last 100, below) is ignored: nothing is merged and nothing is
-    answered. The frame never sends an `id` twice, so only a misbehaving
-    frame meets this;
-  - `base` a revision it sent on this channel and still keeps;
-  - each change well formed:
-    - `type` one of the four;
-    - `page` and `id` strings of at most 200 characters;
-    - at most 200 fields, with names of at most 64 characters;
-  - **the board that results is one**, checked incrementally on what the
-    edit touches:
-    - no two items of a page share an id, and a page's id is one page's
-      (`formatError`'s rules, against an index of ids kept per page);
-    - every record is well formed for its type;
-    - the board still has items, or pages of them (`isBoard`);
-    - its size is at most 8 MiB of JSON (a running total kept per record,
-      updated by the touched records' sizes).
+### Merging
 
-    Nothing re-reads or re-serializes the whole board for an edit.
+The host merges each change into its document as it is now, field by
+field, as CoCalc's syncdb (`dbMerge3`) merges concurrent changes. So the
+card and the full editor decide the same way.
 
-  Sagebrush provides this check and the application as one object,
-  `editState(postedText)` in `sagebrush-board/submission`, beside
-  `checkSubmission`. It holds the indexes, the running size and the
-  reverse changes, and has `apply(message)` and `remote(changes)`, so
-  that every host checks the same way. Its tests measure the CPU time and
-  heap of an edit against an 8 MiB board: both must stay proportional to
-  the edit, not the board.
-- **What an edit is.** An edit is the user's, made with the frame's editor.
-  The board's own code runs in a nested frame of another origin and never
-  has the port. The host still treats an edit as untrusted data. It changes
-  only the document, never anything outside it, and nothing runs because
-  of it.
+- **set, on a record that exists:** each field in `fields`:
+  - **a text column:** the change from `was` to the new value, applied as
+    a text patch to the field as it is now. Both people's typing is kept;
+  - **any other field:** takes the new value: this edit is the later side.
+- **set with `create`:** the record is made from `fields`. If one with that
+  key was made meanwhile elsewhere, it is merged as above, against an empty
+  `was`.
+- **set on a record deleted meanwhile elsewhere:**
+  - if the change touches a text column, the record is made again from
+    `record`: an edited record is kept whole, never partly;
+  - otherwise the change has no effect, and its key is in `dropped`.
+- **delete:**
+  - if a text column was changed elsewhere since `was`, the record is kept
+    (its key in `dropped`);
+  - otherwise it is removed. A record already gone is nothing to do.
+- **Its cost** grows with the records the edit touches, not with the board.
+  The host needs only its current document: it keeps no older revisions.
+  An edit merges the same way whatever `base` it names, as must a retry.
+
+### The checks
+
+The host checks every edit, and merges nothing of one that fails any check.
+It refuses it without `retryAfter`.
+
+**The message:**
+- plain JSON data, checked as for submissions (types first, without
+  recursion), nested at most 16 deep;
+- `id` a UUID. An `edit` whose `id` the host has already answered (one of
+  the last 100, see Bounds) is ignored: nothing is merged and nothing is
+  answered. The frame never sends an `id` twice, so only a misbehaving
+  frame meets this;
+- each change well formed:
+  - `op` one of the two, and `type` one of the four;
+  - `page` and `id` strings of at most 200 characters;
+  - at most 200 fields, with names of at most 64 characters, and never
+    `__proto__`, `constructor` or `prototype`. Records are plain objects
+    whose fields are set as own properties only;
+  - `was` has exactly the fields of `fields` (none with `create`);
+  - `record`, when given, the change's record whole, with the same key.
+
+**The board that results:** after the merge, these hold for every record
+the edit touched and those beside it (its parent, its children, its
+edges, its page):
+- **the doc record** is there, and keeps its key;
+- **pages:**
+  - a paged board has at least one page record;
+  - every item and edge is on a page that has its record (`""` when not
+    paged);
+- **parents:** an item's `parent` is `""` or the id of a group item on the
+  same page. Following parents never comes back to the item, and goes at
+  most 64 levels;
+- **no orphans:** a group with children isn't deleted, and an item that an
+  edge names isn't deleted, unless the same edit moves or deletes those
+  too;
+- **edges:** `from` and `to` name items on the edge's page;
+- **ids:** within a page, two items never share an id, nor two pages, as
+  the keys guarantee. Items on different pages may share one;
+- **size:** at most 8 MiB as UTF-8 JSON. This is a running total of each
+  record's exact encoded size, updated by the records touched.
+
+The checks start from the records touched and use indexes the host keeps:
+- each page's items and their kinds;
+- each group's number of children;
+- each item's number of edges.
+
+Remote changes update the indexes and the running size as edits do.
+
+Nothing re-reads or re-serializes the whole board for an edit. A board
+that broke a rule before the edit (an agent wrote it so) doesn't make
+every edit fail: the edit is refused only for what its own records and
+their neighbours break.
+
+Sagebrush provides the merge, the checks and the indexes as one object,
+`editState(postedText)` in `sagebrush-board/submission`, beside
+`checkSubmission`. It has `apply(message)` and `remote(changes)`, so that
+every host merges and checks the same way. Its tests:
+- **compare it with a whole-board check**, on random sequences of edits:
+  anything the whole-board rules refuse, it refuses;
+- **measure the CPU time and peak heap** of a small edit, and of a remote
+  change, against an 8 MiB board. Both stay proportional to the edit, not
+  to the board.
+
+**What an edit is.** An edit is the user's, made with the frame's editor.
+The board's own code runs in a nested frame of another origin and never
+has the port. The host still treats an edit as untrusted data. It changes
+only the document the host chose for this channel, never one the message
+names, and nothing outside it. Nothing runs because of it.
+
+### Refusals
+
+- **With `retryAfter`** (milliseconds; the host is busy, or the rate was
+  passed): nothing was merged, and that `id` is answered for good. The
+  frame keeps those changes in its own, each with its `was`. No sooner than
+  that, it sends them, with what was done since, as a **new edit**: a new
+  `id`, `base` the latest revision it received, and the changes checked by
+  the host as any edit's. Because each change carries its `was`, the retry
+  merges exactly as the first try would have, whatever changed meanwhile.
+  The old `id` is never sent again.
+- **Without it** (the edit failed a check): nothing was merged. The frame
+  drops the refused changes and those made after them, since they were
+  made on top of the refused ones, and shows `message`. It keeps a copy of
+  what it dropped, which the user can download as JSON. The host follows
+  with a `replace`.
 
 ### Bounds
 
 - **One message** on the channel (`edit`, `saved`, `remote`) is at most
   **1 MiB** as UTF-8, with at most **1,000 changes**.
-  - **A host change set past that** goes as a `replace`.
+  - **A host change set past that** goes as a `replace`, with the answers
+    it carries in `answered`.
   - **The frame** batches only whole transactions. Past the bound, it sends
     them in several edits, one after another, each in flight in turn, and
     each made of whole transactions. Each edit is merged or refused as a
     whole. A refusal without `retryAfter` drops that edit and those after
-    it (see Refusals); edits already saved stay saved.
+    it; edits already saved stay saved.
   - **A single transaction past the bound** (a paste of more than 1 MiB,
-    or a change to more than 1,000 records) is never sent: the frame
-    undoes it at once and says it is too large to save here.
+    or a change to more than 1,000 records) is never sent: the frame undoes
+    it at once and says it is too large to save here.
 - **A `replace`** is at most 8 MiB of text (an editable board's limit). The
   host sends at most one every 2 seconds per channel, and at most 32 MiB
   of `replace` text per minute. A change set that would need another
-  `replace` sooner waits, and only the latest state is sent: changes that
-  arrive meanwhile are folded into it, never queued.
+  `replace` sooner waits, and only the latest state is sent. Changes that
+  arrive meanwhile are folded into it, never queued, and so are the
+  answers it carries.
 - **Rate:**
   - the frame sends at most one edit in flight, batched over 250 ms, so a
     few a second while someone types or drags;
@@ -517,12 +590,9 @@ be the edit's own `base`.
     coalescing what arrives meanwhile into one change set.
 - **Ids:** the host remembers the last 100 answered edit ids per channel,
   as for submissions. This is a bounded window, not a guarantee for the
-  channel's lifetime. A repeat of an older id is usually refused for its
-  `base`, which the host no longer keeps (it keeps 8 revisions). If its
-  base is still kept, for example after many refusals that didn't move the
-  revision, it is checked and merged as a new edit. The frame never repeats
-  an id, so this bounds only what a misbehaving frame can do: an edit
-  merged twice is still the user's change, made from that base.
+  channel's lifetime. The frame never repeats an id. If a misbehaving frame
+  repeats one older than the window, it is checked and merged as a new
+  edit: the user's own change, made again.
 
 ## Privacy
 
