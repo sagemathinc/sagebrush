@@ -353,8 +353,11 @@ The host grants editing in the `board` message it posts with the port:
   - `id`: `crypto.randomUUID()`, new for each edit message.
   - `base`: the latest `revision` the frame received (see Revisions).
   - `changes`: what the user did since the frame's last `edit`, as a list
-    of changes. The frame batches what is done within 250 ms into one
-    message, and a drag is sent once, when it ends.
+    of changes. It is made of whole *transactions*: one action of the
+    editor (a drag when it ends, a paste, a deletion of the selection, an
+    undo) with every record it touches. The frame batches the transactions
+    done within 250 ms into one message, as long as the message stays
+    within the bounds (see Bounds). It never splits a transaction.
 - `{ sagebrush: "resync", version: 1 }`: the frame lost track of the
   revisions and asks for the whole board (`replace`).
 
@@ -420,8 +423,16 @@ be the edit's own `base`.
   follows.
 - **Refusals.**
   - **With `retryAfter`** (milliseconds; the host is busy, or the rate was
-    passed): nothing was merged. The frame keeps those changes and sends
-    them again, with what was done since, no sooner than that.
+    passed): nothing was merged, and that `id` is answered for good. The
+    frame keeps those changes in its own, and no sooner than that sends
+    them, with what was done since, as a **new edit**:
+    - a new `id`;
+    - `base` the latest revision it received, which may be newer than the
+      refused edit's;
+    - the changes it has kept, checked by the host as any edit's.
+
+    The old `id` is never sent again. A `saved` or `remote` that arrives
+    meanwhile is applied as usual, with the kept changes over it.
   - **Without it** (the edit failed a check): nothing was merged, and the
     host follows with a `replace`. The frame drops the refused changes and
     those made after them, since they were made on top of the refused
@@ -430,7 +441,10 @@ be the edit's own `base`.
   whole edit if any of these fails:
   - plain JSON data, checked as for submissions (types first, without
     recursion), nested at most 16 deep;
-  - `id` a UUID, not already answered on this channel;
+  - `id` a UUID. An `edit` whose `id` the host has already answered (one
+    of the last 100, below) is ignored: nothing is merged and nothing is
+    answered. The frame never sends an `id` twice, so only a misbehaving
+    frame meets this;
   - `base` a revision it sent on this channel and still keeps;
   - each change well formed:
     - `type` one of the four;
@@ -452,23 +466,34 @@ be the edit's own `base`.
 ### Bounds
 
 - **One message** on the channel (`edit`, `saved`, `remote`) is at most
-  **1 MiB** as UTF-8, with at most **1,000 changes**. A host change set
-  past that goes as a `replace`. A frame edit past that is split into
-  several, sent one after another. A single change that is still too
-  large (one text field of more than 1 MiB) is refused, and the frame says
-  so.
+  **1 MiB** as UTF-8, with at most **1,000 changes**.
+  - **A host change set past that** goes as a `replace`.
+  - **The frame** batches only whole transactions. Past the bound, it sends
+    them in several edits, one after another, each in flight in turn, and
+    each made of whole transactions. Each edit is merged or refused as a
+    whole. A refusal without `retryAfter` drops that edit and those after
+    it (see Refusals); edits already saved stay saved.
+  - **A single transaction past the bound** (a paste of more than 1 MiB,
+    or a change to more than 1,000 records) is never sent: the frame
+    undoes it at once and says it is too large to save here.
 - **A `replace`** is at most the board limit (64 MiB of text).
 - **Rate:**
   - the frame sends at most one edit in flight, batched over 250 ms, so a
     few a second while someone types or drags;
-  - the host accepts at most 20 edits per 10 seconds per channel (a bucket
-    of 20, refilled at 2 a second), and refuses beyond that with
-    `retryAfter`;
+  - the host accepts edits from a bucket of 20 per channel, refilled at 2
+    a second: a burst of up to 20 at once, then 2 a second sustained. It
+    refuses beyond that with `retryAfter`, the time until the bucket has
+    one again;
   - the host sends `remote` at most 4 times a second per channel,
     coalescing what arrives meanwhile into one change set.
-- **Ids:** the host keeps at most 100 answered edit ids per channel, as for
-  submissions. Older ones can't be repeated, because each edit's `base`
-  moves on.
+- **Ids:** the host remembers the last 100 answered edit ids per channel,
+  as for submissions. This is a bounded window, not a guarantee for the
+  channel's lifetime. A repeat of an older id is usually refused for its
+  `base`, which the host no longer keeps (it keeps 8 revisions). If its
+  base is still kept, for example after many refusals that didn't move the
+  revision, it is checked and merged as a new edit. The frame never repeats
+  an id, so this bounds only what a misbehaving frame can do: an edit
+  merged twice is still the user's change, made from that base.
 
 ## Privacy
 
