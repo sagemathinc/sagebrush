@@ -231,7 +231,7 @@ export async function register(env: Env, stub: ReturnType<NonNullable<Env["SYNC_
   let reg: { state: string; generation: number } | null;
   try {
     if (testMode(env) && env.SYNC_TEST_FAIL_ENROLL === account) throw new Error("D1 unavailable (test seam)");
-    await db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, ?3) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, generation = excluded.generation WHERE sync_accounts.generation < excluded.generation")
+    await db.prepare("INSERT INTO sync_accounts (account_hash, prefix, state, created, generation) VALUES (?1, substr(?1, 1, 32), 'active', ?2, ?3) ON CONFLICT(account_hash) DO UPDATE SET state = 'active', request_id = NULL, kind = NULL, finished = NULL, docs = NULL, bytes = NULL, claim_bytes = 0, generation = excluded.generation WHERE sync_accounts.generation < excluded.generation")
       .bind(hash, Math.floor(Date.now() / 1000), generation).run();
     reg = await db.prepare("SELECT state, generation FROM sync_accounts WHERE account_hash = ?1").bind(hash).first<{ state: string; generation: number }>();
   } catch {
@@ -243,7 +243,7 @@ export async function register(env: Env, stub: ReturnType<NonNullable<Env["SYNC_
   const c = await stub.confirm({ account, generation });
   if ("error" in c && typeof c.error.detail?.retired === "number") {
     await gate(env, "register-cleanup");
-    await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation = ?3 AND state = 'active'")
+    await db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0), claim_bytes = 0 WHERE account_hash = ?1 AND generation = ?3 AND state = 'active'")
       .bind(hash, Math.floor(Date.now() / 1000), generation).run();
   }
   return answer(c, json);
@@ -264,7 +264,7 @@ async function recordPurge(env: Env, hash: string, r: { state: string; request_i
   } else if (r.state === "none" && (r.retired ?? 0) > 0) {
     await gate(env, "record-none");
     const now = Math.floor(Date.now() / 1000);
-    const marks = [db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0) WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
+    const marks = [db.prepare("UPDATE sync_accounts SET state = 'purged', finished = ?2, request_id = ?3, kind = ?4, docs = COALESCE(docs, 0), bytes = COALESCE(bytes, 0), claim_bytes = 0 WHERE account_hash = ?1 AND generation <= ?5 AND state <> 'purged'")
       .bind(hash, now, r.request_id, kind, r.retired)];
     await db.batch(marks);
   }
