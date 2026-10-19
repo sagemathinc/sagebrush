@@ -585,10 +585,11 @@ A picture a note shows, by its name in the document's `images`.
 ## Checking a board before you hand it over
 
 1. Run every code item with the command line, in the board's language, for
-   example `npx sagebrush@0.3.2 --sage -c 'factor(2^32+1)'`. An unimplemented
-   function raises an error, so code that runs is supported. (0.3.2 has no
-   MATLAB yet.)
-2. Search before you guess: `npx sagebrush@0.3.2 --search "elliptic curve rank"`.
+   example `npx sagebrush@0.5.1 --sage -c 'factor(2^32+1)'` (or `--magma`,
+   `--matlab`). An unimplemented function raises an error, so code that runs
+   is supported. `npx sagebrush@0.5.1 board check FILE` checks the whole board
+   (the format, ids, edges, pictures, questions) and runs its code items.
+2. Search before you guess: `npx sagebrush@0.5.1 --search "elliptic curve rank"`.
 3. Open the board at https://sagebrush.space/board/ to see the layout.
 
 ## What's new
