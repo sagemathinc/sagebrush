@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { handleAtlas } from "../../atlas/server.ts";
 import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
 import { handleEngines, handleLibChunk, type EnginesEnv } from "../../engines.ts";
+import { syncScheduled, type Env as SyncSiteEnv } from "../../sync/server.ts";
 import { BUILD } from "./build-id.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
@@ -44,7 +45,13 @@ export default {
     }
     return env.ASSETS.fetch(request);
   },
+  // The daily jobs: sharing's, then sync's inventory and receipt prune (design/sync-server.md §9),
+  // each on its own, so one failing never stops the other.  Sync's returns at once where its
+  // bindings aren't (the flag, §11), so this changes nothing until sync is bound.
   async scheduled() {
-    await scheduled(env as ShareEnv);
+    const jobs = await Promise.allSettled([scheduled(env as ShareEnv), syncScheduled(env as unknown as SyncSiteEnv)]);
+    // (a failure still fails the run, as Cloudflare's cron status should show, once both have run)
+    const failed = jobs.filter((j): j is PromiseRejectedResult => j.status === "rejected");
+    if (failed.length) throw new AggregateError(failed.map((j) => j.reason), "a scheduled job failed");
   },
 } satisfies ExportedHandler;
