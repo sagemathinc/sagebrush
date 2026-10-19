@@ -113,6 +113,17 @@ try {
   check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
   await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
   check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
+  // a name typed in place for an entry moved away meanwhile, another put at
+  // its path: neither renamed (CORR-4B2-1)
+  await ev(`${W}.create("/rename.txt", { content: "original" }).then(() => 1)`);
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/rename.txt"))})`);
+  await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel("/rename.txt"))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); r.querySelector("input").value = "renamed.txt"; return 1; })()`);
+  await ev(`(async () => { const w = ${W}; await w.rename("/rename.txt", "/moved-rename.txt"); await w.create("/rename.txt", { content: "replacement" }); return 1; })()`);
+  await sleep(800);
+  await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return 1; })()`);
+  await sleep(800);
+  const rn = await ev(`(async () => ({ renamed: !!(await ${W}.stat("/renamed.txt")), here: await ${W}.read("/rename.txt").then((r) => new TextDecoder().decode(r.content)), moved: !!(await ${W}.stat("/moved-rename.txt")), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
+  check(!rn.renamed && rn.here === "replacement" && rn.moved && /moved or replaced meanwhile/.test(rn.said), "a name typed for a file moved away meanwhile, another put at its path: neither renamed, said: " + JSON.stringify(rn));
   // renaming the open notebook renames it on the page
   const cur = await ev(`document.querySelector("#wssidebar .frow.cur")?.dataset.path`);
   await ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);

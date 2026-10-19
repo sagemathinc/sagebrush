@@ -224,11 +224,15 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
   else if (kind !== "image" && size > PREVIEW.readBytes) note(`This file is too large to preview here (${fmtSize(size)}): download it.`);
   else {
     try {
-      const r = await w.read(e.path);
+      // (read only if it is still at most the limit, checked holding the lock and by the bytes read)
+      const r = await w.readUpTo(e.path, kind === "image" ? PREVIEW.imageBytes : PREVIEW.readBytes);
       if (r.entry.fid !== e.fid) return note("This file was replaced while it was opened: open it again.");
       shown = renderPreview(name, r.content);
       body.replaceChildren(shown.el);
-    } catch (err) { note(err instanceof WorkspaceError ? err.message : String((err as Error)?.message ?? err)); }
+    } catch (err) {
+      if (err instanceof WorkspaceError && err.code === "limit") note("This file grew too large to preview here: download it.");
+      else note(err instanceof WorkspaceError ? err.message : String((err as Error)?.message ?? err));
+    }
   }
   await drawVersions(w, e, versions, host, close);
 }
@@ -294,8 +298,9 @@ export async function dropFolderVersions(w: Workspace, folder: string, host: Pre
     const f = await w.stat(folder), u = await w.versionsUsage(folder);
     if (!u.count) return host.say(`No earlier versions of files in ${folder}`);
     if (!confirm(`Delete the ${u.count} earlier version${u.count === 1 ? "" : "s"} of the files in ${folder} (${fmtSize(u.bytes)})? The files as they are now stay. This can't be undone.`)) return;
-    // (only what was confirmed: the same folder, the same versions, else asked again: CORR-F85-1)
-    const freed = await w.dropVersions(folder, { expect: { count: u.count, bytes: u.bytes, created: f?.created } });
+    // (only what was confirmed: the same folder, and no version newer than
+    // the newest then, kept since: CORR-F85-1, CORR-AC5-1)
+    const freed = await w.dropVersions(folder, { expect: { created: f?.created, maxId: u.maxId } });
     host.say(`${fmtSize(freed)} of old versions deleted in ${folder}`);
   } catch (err) { host.fail(err); }
 }
@@ -340,7 +345,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     if (use.versions.count && w.actor === "person") {
       free = button(`Free ${fmtSize(use.versions.bytes)} of old versions…`, async () => {
         if (!confirm(`Delete all ${use.versions.count} earlier versions of data files (${fmtSize(use.versions.bytes)})? The files as they are now stay. This can't be undone.`)) return;
-        try { const n = await w.dropVersions("/", { expect: { count: use.versions.count, bytes: use.versions.bytes } }); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
+        // (none newer than the newest shown, kept since: CORR-AC5-1)
+        try { const n = await w.dropVersions("/", { expect: { maxId: use.versions.maxId } }); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
         draw();
       }, "danger");
       free.className += " free";
