@@ -49,11 +49,11 @@ export type Op = { seq?: number; t: number; device: string; by: string; op: stri
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
 export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string };
-export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
+export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxFolderEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
 /** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
- * workspace at most 100,000 entries.  §2.5: a data file's latest 20
+ * workspace at most 100,000 entries, a folder at most 10,000 of its own.  §2.5: a data file's latest 20
  * versions, none older than 30 days, all of them at most 1 GB. */
-export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
+export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
 export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage";
 export class WorkspaceError extends Error {
@@ -496,7 +496,7 @@ export class Workspace {
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
         await this.folders(tx, parentOf(q), ops);
-        await this.room(st, 1);
+        await this.room(st, q);
         const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid: hex(8) } : {}), ...(origin ? { origin } : {}) };
         st.put(e);
         this.log(tx, ops, { op: "create", path: q, kind });
@@ -513,10 +513,11 @@ export class Workspace {
   /** An entry for contents that are already kept (migration, reconcile):
    * at `base + ext` in `folder`, or the first free `base (2) + ext`, …
    * Hold the lock (locked()) around it. */
-  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][] } = {}): Promise<Entry> {
-    // (with the entry, in its transaction: a board's record, records in meta; or neither, nor the entry)
+  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[] } = {}): Promise<Entry> {
+    // (with the entry, in its transaction: a board's record, records put in
+    // or dropped from meta, bytes dropped from trash; all of it, or none)
     const ops: Op[] = [];
-    const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length ? ["meta"] : [])];
+    const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : [])];
     const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
       const st = tx.objectStore("entries");
       const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
@@ -525,8 +526,10 @@ export class Workspace {
       if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
       if (also.board) tx.objectStore("boards").put(also.board);
       for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
-      await this.folders(tx, folder, ops);
-      await this.room(st, 1);
+      for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
+      for (const k of also.dropTrash ?? []) tx.objectStore("trash").delete(k);
+      await this.folders(tx, parentOf(p), ops);
+      await this.room(st, p);
       const t = this.now();
       const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), path: p };
       st.put(e);
@@ -547,7 +550,7 @@ export class Workspace {
       const e: Entry | undefined = await req(st.get(at));
       if (e && e.kind !== "folder") throw new WorkspaceError("exists", `${at} is a ${e.kind}, not a folder`);
       if (!e) {
-        await this.room(st, 1);
+        await this.room(st, at);
         const t = this.now();
         st.put({ path: at, kind: "folder", ref: null, created: t, updated: t } satisfies Entry);
         this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" });
@@ -555,8 +558,23 @@ export class Workspace {
     }
   }
 
-  private async room(st: IDBObjectStore, n: number) {
-    if ((await req(st.count())) + n > this.limits.maxEntries) throw new WorkspaceError("limit", `a workspace holds at most ${this.limits.maxEntries} entries`);
+  /** Room for one more entry, `p`: in the workspace (maxEntries) and in its
+   * folder (maxFolderEntries direct entries, §6.3: LIMIT-094-1).  A folder's
+   * own entries are counted only when everything under it comes near the
+   * bound, so the usual case costs two counts. */
+  private async room(st: IDBObjectStore, p: string) {
+    const total = await req(st.count());
+    if (total + 1 > this.limits.maxEntries) throw new WorkspaceError("limit", `a workspace holds at most ${this.limits.maxEntries} entries`);
+    await this.folderRoom(st, parentOf(p), total);
+  }
+
+  private async folderRoom(st: IDBObjectStore, folder: string, total?: number) {
+    const max = this.limits.maxFolderEntries;
+    const under = folder === "/" ? (total ?? (await req(st.count()))) : await req(st.count(subtree(folder)));
+    if (under + 1 <= max) return;
+    const keys = (await req(st.getAllKeys(subtree(folder)))) as string[];
+    const direct = keys.filter((k) => k.indexOf("/", folder === "/" ? 1 : folder.length + 1) === -1).length;
+    if (direct + 1 > max) throw new WorkspaceError("limit", `a folder holds at most ${max} entries: ${folder} is full`);
   }
 
   private log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">) {
@@ -608,6 +626,8 @@ export class Workspace {
           if (!now || now.ref !== e.ref) throw new WorkspaceError("conflict", `${e.path} changed while it was moved`);
         }
         await this.folders(tx, parentOf(b), ops);
+        // (one more entry in b's folder, unless it was already there: LIMIT-094-1)
+        if (parentOf(a) !== parentOf(b)) await this.folderRoom(st, parentOf(b));
         const out: Entry[] = [];
         for (const e of old) {
           st.delete(e.path);
