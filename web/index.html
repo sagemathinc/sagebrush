@@ -2131,12 +2131,16 @@ function wsRenameSoon() {
         if (!from) return;
         const folder = parentOf(from), base = safeName(name || "Untitled");
         if (splitExt(nameOf(from))[0] === base) return;
+        const entry = await w.stat(from);
+        if (!entry || entry.ref !== id) continue;
         const taken = new Set((await w.list(folder)).map((e) => e.path));
         const to = freePath(folder, base, ".ipynb", (p) => taken.has(p) && p !== from);
-        if (to && to !== from) await w.rename(from, to, { still: () => gen === wsRenameGen });
+        // (only this notebook, checked holding the lock: another put at its path meanwhile is never renamed, CORR-5D2-3)
+        if (to && to !== from) await w.rename(from, to, { still: () => gen === wsRenameGen, expect: { kind: "notebook", ref: id, fid: entry.fid, created: entry.created } });
         return;
       } catch (e) {
-        if (e?.code !== "missing" && e?.code !== "exists") return void console.warn("workspace: rename:", e);
+        // (moved, or another put at its path: from where it is then)
+        if (e?.code !== "missing" && e?.code !== "exists" && e?.code !== "conflict") return void console.warn("workspace: rename:", e);
       }
     }
   }, 800);

@@ -503,6 +503,26 @@ try {
   const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
   check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
   check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
+  // the typed title's rename, its notebook moved and another put at its path
+  // while the rename waited for the lock: this notebook gets the name, the
+  // other is untouched (CORR-5D2-3)
+  const tr = await ev(`(async () => {
+    const ref = sagebrush.notebook.store.id, w = ${W};
+    const cur = (await w.list("/", { recursive: true })).find((e) => e.kind === "notebook" && e.ref === ref);
+    let entered; const ready = new Promise((r) => (entered = r));
+    const gate = new Promise((r) => (window.__releaseT = r));
+    window.__heldT = navigator.locks.request("sagebrush-workspace", async () => { entered(); await gate; });
+    await ready;
+    window.__mvT = w.rename(cur.path, "/Moved title.ipynb");
+    window.__rpT = w.create(cur.path, { content: { name: "Replacement", mode: "python", cells: [] } });
+    return { path: cur.path, ref };
+  })()`);
+  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 2)`);
+  await typeTitle("Typed title");
+  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 3)`, 8000), "(the typed title's rename waiting third for the lock)");
+  await ev(`(async () => { __releaseT(); await __heldT; await __mvT; await __rpT; await new Promise((r) => setTimeout(r, 2500)); return 1; })()`);
+  const trAfter = await ev(`(async () => { const l = await ${W}.list("/", { recursive: true }); return { typed: l.find((e) => e.path === "/Typed title.ipynb")?.ref ?? null, there: l.find((e) => e.path === ${JSON.stringify(tr.path)})?.ref ?? null }; })()`);
+  check(trAfter.typed === tr.ref && trAfter.there && trAfter.there !== tr.ref, "a typed title's rename waiting while its notebook moved and another took its path: this notebook renamed, the other untouched: " + JSON.stringify({ ...trAfter, tr }));
   // opening a board from the notebook page
   await click(rowSel("/Sylow theorems.board.json"));
   check(await until(`location.pathname.startsWith("/board/") && /doc=local:[0-9a-f]{12}/.test(location.search) && !!window.sagebrush?.board?.snapshot()`, 60000), "a board opens from the notebook page's sidebar");

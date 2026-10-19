@@ -680,6 +680,9 @@ async function fences() {
   await w.dropVersions("/", { expect: { maxId: u.maxId } });
   const left = await w.history("/r.txt");
   check(left.length === 1 && left[0].id === u2.maxId && dec(await w.versionById("/r.txt", left[0].id)) === "a4", "everything's drop, confirmed before a version was kept: that version stays");
+  check((await w.versionsUsage()).bytes === 2, "…and the total counts it (CORR-5D2-1): " + JSON.stringify(await w.versionsUsage()));
+  await w.write("/r.txt", "a6");
+  check((await w.versionsUsage()).bytes === 4 && (await w.history("/r.txt")).length === 2, "…and keeps counting after: " + JSON.stringify(await w.versionsUsage()));
   await w.mkdir("/f");
   await w.create("/f/s.txt", { content: "b1" });
   await w.write("/f/s.txt", "b2");
@@ -687,6 +690,19 @@ async function fences() {
   await w.write("/f/s.txt", "b3");
   await w.dropVersions("/f", { expect: { created: fe.created, maxId: fu.maxId } });
   check((await w.history("/f/s.txt")).length === 1 && dec(await w.version("/f/s.txt", 0)) === "b2", "a folder's drop, confirmed before a version was kept: that version stays");
+  // a file moved into the folder after it was confirmed: refused, its history kept (CORR-5D2-2)
+  await w.mkdir("/g");
+  await w.create("/h.txt", { content: "h1" });
+  await w.write("/h.txt", "h2");
+  await w.create("/g/k.txt", { content: "k1" });
+  await w.write("/g/k.txt", "k2");
+  const gu = await w.versionsUsage("/g"), ge = await w.stat("/g");
+  await w.rename("/h.txt", "/g/h.txt");
+  check(await fails(w.dropVersions("/g", { expect: { created: ge.created, maxId: gu.maxId, seq: gu.seq } }), "conflict") && (await w.history("/g/h.txt")).length === 1 && (await w.history("/g/k.txt")).length === 1, "a folder's drop, a file moved in since it was confirmed: refused, nothing dropped");
+  await w.write("/g/k.txt", "k3");
+  const gu2 = await w.versionsUsage("/g");
+  await w.write("/g/k.txt", "k4");
+  check((await w.dropVersions("/g", { expect: { created: ge.created, maxId: gu2.maxId, seq: gu2.seq } })) === 2 + 2 + 2 && (await w.history("/g/h.txt")).length === 0 && (await w.history("/g/k.txt")).length === 1, "…confirmed again, only writes since: dropped, the version kept since stays");
   // rename bound to its entry
   await w.create("/rename.txt", { content: "original" });
   const orig = await w.stat("/rename.txt");
