@@ -1268,6 +1268,53 @@ async function folderIdsMigrated() {
   v.close();
 }
 
+async function upgradeFromV2() {
+  // a workspace whose migration already finished (or paused, or stopped mid-pass) under version 2
+  // (astra's CORR-D01-1): the upgrade to 3 starts it again, so its old entries get their identities
+  for (const state of [{ done: true }, { paused: "storage full" }, { pass: { start: 0, at: "/zzz", work: false } }]) {
+    n++;
+    localStorage.clear();
+    const name = `ws-test-${n}`, mainName = `main-test-${n}`;
+    await new Promise((ok, no) => {
+      const r = indexedDB.open(name, 2);
+      r.onupgradeneeded = () => {
+        const db = r.result, e = db.createObjectStore("entries", { keyPath: "path" });
+        e.createIndex("byRef", ["kind", "ref"]);
+        db.createObjectStore("boards", { keyPath: "id" });
+        db.createObjectStore("trash");
+        db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+        const v = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
+        v.createIndex("byFile", ["fid", "t"]);
+        v.createIndex("byTime", "t");
+        db.createObjectStore("versionBytes");
+        db.createObjectStore("meta");
+        db.createObjectStore("fileBytes");
+        const g = db.createObjectStore("grants", { keyPath: ["doc", "scope"] });
+        g.createIndex("byDoc", "doc");
+        g.createIndex("lastUsed", "lastUsed");
+      };
+      r.onsuccess = () => {
+        const db = r.result, tx = db.transaction(["entries", "meta"], "readwrite");
+        tx.objectStore("entries").put({ path: "/\u212A", kind: "folder", ref: null, created: 1, updated: 1 });
+        tx.objectStore("entries").put({ path: "/old", kind: "folder", ref: null, created: 1, updated: 1 });
+        tx.objectStore("meta").put(state, "migration");
+        tx.oncomplete = () => { db.close(); ok(); };
+        tx.onerror = () => no(tx.error);
+      };
+      r.onerror = () => no(r.error);
+    });
+    const w = await W.Workspace.open({ name, mainName });
+    const before = await w.stat("/old");
+    await W.startMigrator(w);
+    const k = await w.stat("/\u212A"), old = await w.stat("/old");
+    const label = JSON.stringify(state);
+    check(!before.fid && before.nkey === undefined, `${label} under version 2: the upgrade itself moves no data`);
+    check(/^[0-9a-f]{16}$/.test(k.fid ?? "") && /^[0-9a-f]{16}$/.test(old.fid ?? "") && k.nkey !== undefined && old.nkey !== undefined && (await W.migrationState(w)).done, `${label} under version 2: after the upgrade the migrator runs again, giving old folders ids and nkeys, then done`);
+    check(await fails(w.mkdir("/K"), "exists"), `${label} under version 2: then a lookalike of an old folder is refused`);
+    w.close();
+  }
+}
+
 async function provenance() {
   const w = await fresh();
   const ag = w.forAgent("agent:x");
@@ -1359,7 +1406,7 @@ async function lookalikesAtScale() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, provenance, lookalikes, lookalikesAtScale]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

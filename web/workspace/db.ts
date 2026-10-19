@@ -47,7 +47,9 @@
 //   entries' index byNfc, on each entry's `nkey` (its folder and the NFC
 //            form of its name): names that look the same in one folder
 //            found by one bounded lookup.  Entries made before have no
-//            nkey until the migrator gives them one
+//            nkey until the migrator gives them one: the upgrade drops
+//            the migration's state, so a migration already done runs
+//            again (astra's CORR-D01-1)
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
@@ -74,7 +76,13 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       grants.createIndex("byDoc", "doc");
       grants.createIndex("lastUsed", "lastUsed");
     }
-    if (old < 3) tx.objectStore("entries").createIndex("byNfc", "nkey");
+    if (old < 3) {
+      tx.objectStore("entries").createIndex("byNfc", "nkey");
+      // (entries made before have no nkey, and old folders no id: the migrator gives them both, so its state
+      // from version 2, done, paused or a checkpoint, is dropped and its next run walks the whole index again;
+      // the key is web/workspace/migrator.ts's)
+      if (old >= 1) tx.objectStore("meta").delete("migration");
+    }
   }, onClose, ms);
 }
 
