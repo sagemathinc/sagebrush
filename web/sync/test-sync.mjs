@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { createHash, createHmac } from "node:crypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
@@ -16,6 +17,7 @@ const SITE = "https://sagebrush.test";
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333"; // signed in, never allowlisted
+const D = "44444444-4444-4444-8444-444444444444"; // allowlisted; its limits are first asked for while CoCalc is down
 
 let failures = 0;
 let count = 0;
@@ -29,15 +31,33 @@ function ok(cond, what) {
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
-const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token" };
+const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
+const URL_KEY = "url-key";
+const LOSE = "fa17fa17fa17";
+// ---- a fake CoCalc: the limits (§6)
+const fake = { limits: new Map(), down: false };
+const sync = (storage, reads) => ({ storage_bytes: 1 << 30, max_file_bytes: 50_000, sync: { enabled: true, storage_bytes: storage, version_bytes: 1000, read_bytes_per_day: reads } });
+fake.limits.set(A, sync(30_000, 60_000));
+fake.limits.set(B, sync(1 << 20, 1 << 20));
+fake.limits.set(D, sync(1 << 20, 1 << 20));
+async function cocalc(req) {
+  const u = new URL(req.url);
+  if (u.pathname === "/api/v2/sagebrush/limits") {
+    if (fake.down) return new Response("down", { status: 503 });
+    const l = fake.limits.get(u.searchParams.get("account_id"));
+    return l ? Response.json(l) : Response.json({ error: "no_account" }, { status: 404 });
+  }
+  return new Response("not found", { status: 404 });
+}
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B}` },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "300", SYNC_TEST_LOSE: LOSE },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-      routes: ["sagebrush.test/*"],
+      routes: ["sagebrush.test/*", "files.test/*"],
+      outboundService: cocalc,
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -274,6 +294,119 @@ const docA = "0123456789ab";
   a = await f.ask(batch(docA, 2, [[1, pid(1200, "clientNEW1"), [pid(1000, R)], "rebased"]]));
   ok(a?.batch?.seq === 6, "the new epoch takes patches on the root");
   f.ws.close();
+}
+
+// ---- blobs: upload, reads, pins (§4.3, §5.4)
+const sha = (b) => createHash("sha256").update(b).digest("hex");
+const acctNs = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "sync");
+const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
+const acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
+const put = (session, bytes, h = sha(bytes)) => fetchAt(SITE, `/api/sync/v1/blob/${h}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
+const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Buffer.alloc(6000, 9);
+{
+  let r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), size: big.length }, { sha256: sha(small), size: small.length }] });
+  ok(r.status === 200 && (await r.json()).missing.length === 2, "check: both missing");
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), size: 1, extra: 1 }] });
+  ok(r.status === 400, "check: an unknown field is refused");
+  r = await put(sa, big);
+  ok(r.status === 201 && (await r.json()).sha256 === sha(big), "an upload");
+  r = await put(sa, big);
+  ok(r.status === 200 && (await r.json()).have === true, "the same bytes again: already held, nothing stored");
+  r = await put(sa, small, sha(big).replace(/^./, "0"));
+  ok(r.status === 400, "bytes that don't match their SHA-256 are refused by R2");
+  let i = await acctA.inspect({ sha256: sha(big) });
+  ok(i?.refs === 0 && i.used === 6000, "a held blob counts in usage from its upload; the refused upload gave its reservation back");
+  r = await put(sa, Buffer.alloc(60_000, 1));
+  ok(r.status === 413, "a file over max_file_bytes is refused");
+  r = await put(sa, other);
+  ok(r.status === 201, "a second blob");
+  r = await put(sa, Buffer.alloc(20_000, 3));
+  ok(r.status === 507 && (await r.json()).error === "storage_full", "over sync.storage_bytes: storage_full");
+  // a read: debited at issue, a 303 to a signed URL on the user-content domain
+  r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "same-origin" } });
+  const loc = r.headers.get("location") ?? "";
+  ok(r.status === 303 && loc.startsWith("https://files.test/p/s/"), "a read redirects to a signed URL on the user-content domain");
+  r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "cross-site" } });
+  ok(r.status === 403, "a cross-site GET is refused");
+  r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: await signIn(B), "sec-fetch-site": "same-origin" } });
+  ok(r.status === 404, "another account can't read A's blob by its hash");
+  const f = await mf.dispatchFetch(loc);
+  const body = Buffer.from(await f.arrayBuffer());
+  ok(f.status === 200 && body.equals(big) && f.headers.get("content-disposition") === "attachment" && f.headers.get("x-content-type-options") === "nosniff" && f.headers.get("access-control-allow-origin") === SITE && /sandbox/.test(f.headers.get("content-security-policy") ?? ""), "the signed URL serves the bytes as an attachment, nosniff, sandboxed, CORS for the site only");
+  const rg = await mf.dispatchFetch(loc, { headers: { range: "bytes=10-19" } });
+  ok(rg.status === 206 && (await rg.arrayBuffer()).byteLength === 10, "a range of a device's URL");
+  const u = new URL(loc);
+  u.searchParams.set("sig", "0".repeat(64));
+  ok((await mf.dispatchFetch(u)).status === 403, "a forged signature reads nothing");
+  const key = u.pathname.slice(3);
+  const exp = Date.now() - 1000;
+  const old = new URL(loc);
+  old.searchParams.set("exp", String(exp));
+  old.searchParams.set("sig", createHmac("sha256", URL_KEY).update(`p\n${key}\n${exp}`).digest("hex"));
+  ok((await mf.dispatchFetch(old)).status === 403, "an expired URL reads nothing, though signed");
+  // the read budget: 60,000 bytes a day of bytes authorized; 6,000 already
+  let n = 1;
+  while (n < 20 && (await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "same-origin" } })).status === 303) n++;
+  ok(n === 10, "the read budget is debited at issue: the tenth 6,000-byte read is refused");
+}
+// ---- the limits when CoCalc is down (§6): the cache is kept; with nothing cached, uploads wait
+{
+  fake.down = true;
+  let r = await put(sa, Buffer.from("while down"));
+  ok(r.status === 201, "CoCalc down: an account with cached limits still uploads");
+  const sd = await signIn(D);
+  await post(sd, "/api/sync/v1/enable", {});
+  r = await put(sd, Buffer.from("d while down"));
+  ok(r.status === 503 && (await r.json()).error === "busy", "CoCalc down and nothing cached: the upload waits, never read as zero or as no limit");
+  fake.down = false;
+  r = await put(sd, Buffer.from("d while down"));
+  ok(r.status === 201, "and goes once CoCalc answers");
+}
+// ---- an op that names a data file's bytes (§3)
+{
+  const s = await socket(sa);
+  const { welcome } = await hello(s, dev1);
+  const d = welcome.next_dseq;
+  let a = await s.ask({ t: "ops", ops: [{ dseq: d, t: 1, by: "person", op: "create", path: "/data.csv", kind: "file", fid: "0123456789abcdef", sha256: sha(small), size: small.length }] });
+  ok(a?.ops?.[0]?.code === "missing", "an op naming bytes not uploaded is refused");
+  a = await s.ask({ t: "ops", ops: [{ dseq: d + 1, t: 1, by: "person", op: "create", path: "/big.bin", kind: "file", fid: "0123456789abcdee", sha256: sha(big), size: big.length }] });
+  ok(typeof a?.ops?.[0]?.seq === "number", "an op naming held bytes is accepted");
+  ok((await acctA.inspect({ sha256: sha(big) }))?.refs === 1, "and its entry holds a reference");
+  // pins: a large patch's blob (CORR-D81-3)
+  const P = "clientPINS";
+  const docP = "0123456789cd";
+  a = await s.ask(batch(docP, 1, [[1, pid(10, P), [], "big-patch", [sha(other)]]], { kind: "notebook" }));
+  let i = await acctA.inspect({ sha256: sha(other) });
+  ok(a?.batch?.seq === 1 && i?.refs === 1 && i.pins.length === 1 && i.pins[0].state === "held", "a patch's blob is pinned and held once the batch is accepted");
+  a = await s.ask(batch(docP, 1, [[1, pid(10, P), [], "big-patch", [sha(other)]]]));
+  ok((await acctA.inspect({ sha256: sha(other) }))?.refs === 1, "a resend doesn't pin twice");
+  a = await s.ask(batch(docP, 1, [[2, pid(20, P), [pid(10, P)], "x", [sha(big)]]], { expect_head: { epoch: 1, seq: 0 } }));
+  i = await acctA.inspect({ sha256: sha(big) });
+  ok(a?.code === "conflict" && i?.refs === 1 && i.pins.length === 0, "a refused batch gives back the pins it made");
+  a = await s.ask(batch(docP, 1, [[2, pid(20, P), [pid(10, P)], "x", ["e".repeat(64)]]]));
+  ok(a?.code === "missing", "a patch naming a blob that isn't held is refused");
+  // a lost answer: the batch committed, the answer never came (§4.3)
+  a = await s.ask(batch(LOSE, 1, [[1, pid(30, P + "L"), [], "lost", [sha(big)]]], { kind: "board" }));
+  i = await acctA.inspect({ sha256: sha(big) });
+  ok(a?.code === "busy" && i?.pins.length === 1 && i.pins[0].state === "pending", "a lost answer leaves its pin pending");
+  // (the account object's own alarm, set for when the forward lapses: real time, with the test's 300 ms pins)
+  await new Promise((r) => setTimeout(r, 1500));
+  i = await acctA.inspect({ sha256: sha(big) });
+  ok(i?.pins.length === 1 && i.pins[0].state === "held" && i.refs === 2, "once the forward can't commit any more, the alarm asks the document: it committed, so the pin is held");
+  a = await s.ask(batch(LOSE, 1, [[1, pid(30, P + "L"), [], "lost", [sha(big)]]]));
+  ok(a?.batch?.resent?.[pid(30, P + "L")] === 1 && (await acctA.inspect({ sha256: sha(big) }))?.refs === 2, "the client's resend is acknowledged with its seq, and pins nothing twice");
+  // a delayed release from an old epoch can't remove a new pin with the same identity but its epoch (CORR-D81-3)
+  a = await s.ask({ t: "clear", doc: docP, expect_head: { epoch: 1, seq: 1 }, root: { patches: [{ cseq: 1, id: pid(10, P), parents: [], size: 4, blobs: [sha(other)] }], body: Buffer.from("root").toString("base64") } });
+  ok(a?.batch?.head?.epoch === 2, "clear, whose root uses the same client, cseq and blob as the old epoch's first patch");
+  // (the new pin is made before the clear commits; the document's alarm then releases the old epoch's pins)
+  await new Promise((r) => setTimeout(r, 500));
+  i = await acctA.inspect({ sha256: sha(other) });
+  ok(i?.pins.length === 1 && i.pins[0].epoch === 2 && i.pins[0].state === "held" && i.refs === 1, "the document's release of the old epoch, after the new pin with the same client, cseq and blob, removed only the old pin");
+  await acctA.release({ doc: docP, pins: [{ epoch: 1, ref: `patch:${P}:1`, sha256: sha(other) }] });
+  await acctA.release({ doc: docP, pins: [{ epoch: 1, ref: `patch:${P}:1`, sha256: sha(other) }] });
+  i = await acctA.inspect({ sha256: sha(other) });
+  ok(i?.pins.length === 1 && i.pins[0].epoch === 2 && i.refs === 1, "the old epoch's release, late and twice, removes only the old pin");
+  s.ws.close();
 }
 
 // ---- the access list, behind the owner-qualified name (§2): a document object refuses an account not on it

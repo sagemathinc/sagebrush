@@ -13,10 +13,11 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, randomHex, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "./protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { allowed, type SyncEnv } from "./env.ts";
+import { MAX_PUT } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
 
@@ -42,7 +43,18 @@ const SCHEMA = [
   "CREATE INDEX IF NOT EXISTS pins_pending ON pins (expires) WHERE state = 'pending'",
   "CREATE TABLE IF NOT EXISTS revoked_sessions (session_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER)",
+  "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS reads (day INTEGER NOT NULL, who TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (day, who))",
 ];
+
+/** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; storage_bytes: number; version_bytes: number; read_bytes_per_day: number }; issued?: number }
+/** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
+const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, storage_bytes: 1 << 30, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
+/** How long an upload may take before its reservation is reaped (§5.4). */
+const RESERVE_MS = 3600_000;
+/** An unused holding is dropped a day after its upload (§3). */
+const IDLE_HOLDING_MS = 86400_000;
 
 const send = (ws: WebSocket, v: unknown) => {
   try {
@@ -266,11 +278,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           const op = checkOp(raw);
           // (a session acts for the person; "agent:<name>" from a session is an agent in the person's page, design/agent-endpoint.md §9.2)
           if (PERSON_ONLY.has(op.op) && op.by !== "person") throw new SyncError("forbidden", "only a person may " + op.op);
+          // (a data file's bytes are uploaded before the op that names them, and the entry holds them, §3)
+          if (op.kind === "file" && op.sha256 !== undefined) {
+            if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) throw new SyncError("missing", "upload the file's bytes before the op");
+          }
           this.sql.exec(
             'INSERT INTO ops (device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, recv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             device, dseq, op.t, op.by, op.op, op.path, op.to ?? null, op.kind, op.ref ?? null, op.fid ?? null, op.sha256 ?? null, op.size ?? null, op.base ?? null, Date.now(),
           );
           out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
+          // (the reference an entry holds; it is given back when the reducer replaces the entry's bytes)
+          if (op.kind === "file" && op.sha256 !== undefined) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", op.sha256);
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
@@ -336,6 +354,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       return made;
     });
   }
+  /** How long after a pin's forward lapses its answer is asked for: then the forward can't commit any more (§4.3). */
+  private settleMs(): number {
+    return this.env.SYNC_TEST_PIN_MS ? 10 : 60_000;
+  }
+  private pinMs(): number {
+    const t = Number(this.env.SYNC_TEST_PIN_MS);
+    return Number.isSafeInteger(t) && t > 0 ? t : PIN_MS;
+  }
   /** Give back pins (a refused batch, or a release): idempotent by the whole identity. */
   private unpin(doc: string, epoch: number, pins: { ref: string; sha256: string }[], onlyPending: boolean) {
     this.ctx.storage.transactionSync(() => {
@@ -354,7 +380,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const wait = this.batches.take();
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
-    const expires = Date.now() + PIN_MS;
+    const expires = Date.now() + this.pinMs();
     const made = this.pin(b.doc, b.epoch, b, expires);
     const out = await this.forward(b.doc, b.epoch, made, expires, (doc) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
     this.settle(b.doc, b.epoch, b);
@@ -371,7 +397,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     try {
       r = await call(this.docStub(doc));
     } catch (e) {
-      await this.ctx.storage.setAlarm(expires + 60_000);
+      await this.ctx.storage.setAlarm(expires + this.settleMs());
       throw new SyncError("busy", "the document didn't answer; send again");
     }
     if ("error" in r) this.unpin(doc, epoch, made, true);
@@ -390,7 +416,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const rf = fields(m.root, ["patches", "body"], "clear: root");
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
-    const expires = Date.now() + PIN_MS;
+    const expires = Date.now() + this.pinMs();
     const made = this.pin(m.doc, expect.epoch + 1, root, expires);
     const out = await this.forward(m.doc, expect.epoch + 1, made, expires, (doc) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
     this.settle(m.doc, out.head.epoch, root);
@@ -403,12 +429,151 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     for (const ws of this.ctx.getWebSockets()) if (ws !== from) send(ws, { t: "changed", owner: this.get("account_hash"), doc, head, by_device: device });
   }
 
+  // ---- limits (§6)
+
+  /**
+   * The account's limits: cached LIMITS_TTL_MS; fetched again when older,
+   * the cached value kept if CoCalc can't be reached (an outage is never
+   * read as zero, or as no limit); null if nothing is known.
+   */
+  private async limits(): Promise<Limits | null> {
+    const cached = this.get("limits");
+    const fetched = Number(this.get("limits_fetched") ?? 0);
+    if (cached && Date.now() - fetched < LIMITS_TTL_MS) return JSON.parse(cached);
+    const env = this.env;
+    if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : cached ? JSON.parse(cached) : null;
+    try {
+      const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
+      u.searchParams.set("account_id", this.get("account_id")!);
+      const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(String(r.status));
+      const l = checkLimits(await r.json());
+      // (a notice newer than this answer stands: never undone by a fetch, §6)
+      if (Number(this.get("limits_issued") ?? 0) > (l.issued ?? 0)) {
+        this.set("limits_fetched", Date.now());
+        return JSON.parse(cached!);
+      }
+      this.set("limits", JSON.stringify(l));
+      this.set("limits_issued", l.issued ?? 0);
+      this.set("limits_fetched", Date.now());
+      return l;
+    } catch {
+      return cached ? JSON.parse(cached) : null;
+    }
+  }
+  private used(): number {
+    return Number(this.get("used_bytes") ?? 0);
+  }
+  private addUsed(n: number) {
+    this.set("used_bytes", Math.max(0, this.used() + n));
+  }
+
+  // ---- blobs (§5.4)
+
+  /**
+   * Reserve the bytes of one upload: one transaction, against the limits,
+   * with at most uploadsAtOnce running.  A blob already held needs no upload.
+   */
+  async reserve(a: { account: string; sha256: string; size: number }): Promise<Result<{ have: true } | { id: string; key: string }>> {
+    const l = await this.limits();
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) return { have: true as const };
+      if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
+      if (!l.sync.enabled) throw new SyncError("readonly", "this account's plan doesn't include sync");
+      if (a.size > Math.min(l.max_file_bytes, MAX_PUT)) throw new SyncError("limit", "this file is too large", { limit: "max_file_bytes", max: Math.min(l.max_file_bytes, MAX_PUT) });
+      const now = Date.now();
+      if (Number(this.one("SELECT COUNT(*) AS n FROM reservations WHERE expires > ?", now)!.n) >= LIMITS.uploadsAtOnce) throw new SyncError("rate", "too many uploads at once", { retry_after: 1000 });
+      if (this.used() + a.size > l.sync.storage_bytes) throw new SyncError("storage_full", "this account's synced storage is full", { limit: l.sync.storage_bytes, used: this.used() });
+      const id = randomHex(16);
+      const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
+      this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, ?, ?, ?)", id, a.sha256, a.size, key, now + RESERVE_MS);
+      this.addUsed(a.size);
+      return { id, key };
+    }));
+  }
+
+  /**
+   * The upload reached R2 (which checked its SHA-256): the reservation
+   * becomes a holding.  Idempotent: if the blob is held already (two
+   * uploads of the same bytes at once), this upload's object goes to the
+   * outbox instead; a reservation already reaped can't be finalized.
+   */
+  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ sha256: string }>> {
+    const r = attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      const res = this.one("SELECT sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
+      if (!res || Number(res.expires) < Date.now()) throw new SyncError("busy", "this upload took too long; send it again");
+      this.sql.exec("DELETE FROM reservations WHERE id = ?", a.id);
+      const sha = String(res.sha256);
+      if (a.size !== Number(res.bytes) || this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) {
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
+        this.addUsed(-Number(res.bytes));
+        if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
+        return { sha256: sha };
+      }
+      this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created) VALUES (?, ?, ?, 0, ?)", sha, res.key, res.bytes, Date.now());
+      return { sha256: sha };
+    }));
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    return r;
+  }
+
+  /** An upload that failed before finalize: its object and its reservation go now. */
+  async abandon(a: { id: string }): Promise<void> {
+    if (!this.exists()) return;
+    this.ctx.storage.transactionSync(() => {
+      const res = this.one("SELECT bytes, key FROM reservations WHERE id = ?", a.id);
+      if (!res) return;
+      this.sql.exec("DELETE FROM reservations WHERE id = ?", a.id);
+      this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
+      this.addUsed(-Number(res.bytes));
+    });
+    await this.ctx.storage.setAlarm(Date.now() + 1000);
+  }
+
+  /** Which of these blobs this account must upload (advisory, §5.4). */
+  async missing(a: { account: string; blobs: string[] }): Promise<Result<string[]>> {
+    return attempt(() => {
+      this.admit(a.account, false);
+      return a.blobs.filter((sha) => !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha));
+    });
+  }
+
+  /**
+   * A read of a held blob (§5.4): its key, after the blob's whole size is
+   * debited from today's read budget of `who` (the account's devices, or a
+   * grant).  Bytes authorized, at issue.
+   */
+  async read(a: { account: string; sha256: string; who: string }): Promise<Result<{ key: string; size: number }>> {
+    const l = await this.limits();
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, false);
+      const h = this.one("SELECT key, size FROM holdings WHERE sha256 = ?", a.sha256);
+      if (!h) throw new SyncError("missing", "no such blob");
+      const day = Math.floor(Date.now() / 86400_000);
+      const budget = l?.sync.read_bytes_per_day ?? 0;
+      const used = Number(this.one("SELECT bytes FROM reads WHERE day = ? AND who = ?", day, a.who)?.bytes ?? 0);
+      if (used + Number(h.size) > budget) throw new SyncError("rate", "today's read budget is used up", { limit: "read_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - Date.now() });
+      this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, ?, ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, a.who, h.size);
+      this.sql.exec("DELETE FROM reads WHERE day < ?", day - 1);
+      return { key: String(h.key), size: Number(h.size) };
+    }));
+  }
+
   // ---- calls from the account's document objects, and from the Worker
 
   /** A document dropped history: give back its pins (§4.3), idempotently, by their whole identity. */
   async release(a: { doc: string; pins: { epoch: number; ref: string; sha256: string }[] }): Promise<void> {
     if (!this.exists()) return;
     for (const p of a.pins) this.unpin(a.doc, p.epoch, [p], false);
+  }
+
+  /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
+  async inspect(a: { sha256: string }): Promise<{ refs: number | null; pins: Row[]; used: number } | null> {
+    if (!this.env.SYNC_TEST_PIN_MS || !this.exists()) return null;
+    const h = this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256);
+    return { refs: h ? Number(h.refs) : null, pins: this.sql.exec("SELECT doc, epoch, ref, state FROM pins WHERE sha256 = ? ORDER BY epoch, ref", a.sha256).toArray() as Row[], used: this.used() };
   }
 
   /** End a session's sockets here, and record it, so nothing it opened can write again (§2). */
@@ -426,7 +591,37 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!this.exists()) return;
     const now = Date.now();
     this.sql.exec("DELETE FROM revoked_sessions WHERE expires < ?", now);
-    const late = this.sql.exec("SELECT doc, epoch, ref, sha256 FROM pins WHERE state = 'pending' AND expires < ? LIMIT 100", now - 60_000).toArray() as Row[];
+    this.ctx.storage.transactionSync(() => {
+      // reservations whose upload died: their bytes come back, and their object (if any) goes, unless a holding uses it
+      for (const r of this.sql.exec("SELECT id, bytes, key FROM reservations WHERE expires < ? LIMIT 200", now).toArray() as Row[]) {
+        this.sql.exec("DELETE FROM reservations WHERE id = ?", r.id);
+        if (!this.one("SELECT 1 AS x FROM holdings WHERE key = ?", r.key)) this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", r.key, now);
+        this.addUsed(-Number(r.bytes));
+      }
+      // holdings nothing refers to, a day after their upload
+      for (const h of this.sql.exec("SELECT sha256, key, size FROM holdings WHERE refs <= 0 AND created < ? LIMIT 200", now - IDLE_HOLDING_MS).toArray() as Row[]) {
+        this.sql.exec("DELETE FROM holdings WHERE sha256 = ?", h.sha256);
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", h.key, now);
+        this.addUsed(-Number(h.size));
+      }
+    });
+    // the outbox: R2 first, the row only once R2 has deleted it
+    const bucket = this.env.SHARE_BUCKET;
+    if (bucket)
+      for (const o of this.sql.exec("SELECT key FROM outbox LIMIT 100").toArray() as Row[]) {
+        try {
+          await bucket.delete(String(o.key));
+          this.sql.exec("DELETE FROM outbox WHERE key = ?", o.key);
+        } catch {
+          await this.ctx.storage.setAlarm(now + 60_000);
+          break;
+        }
+      }
+    const nextReap = this.one("SELECT MIN(expires) AS t FROM reservations")?.t;
+    const nextIdle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
+    const soon = [nextReap, nextIdle === null || nextIdle === undefined ? null : Number(nextIdle) + IDLE_HOLDING_MS].filter((t): t is number => t !== null && t !== undefined).map(Number);
+    if (soon.length) await this.ctx.storage.setAlarm(Math.max(now + 1000, Math.min(...soon)));
+    const late = this.sql.exec("SELECT doc, epoch, ref, sha256 FROM pins WHERE state = 'pending' AND expires < ? LIMIT 100", now - this.settleMs()).toArray() as Row[];
     for (const p of late) {
       const [kind, client, cseq] = String(p.ref).split(":");
       if (kind !== "patch") continue;
@@ -442,4 +637,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }
     if (late.length === 100) await this.ctx.storage.setAlarm(now + 1000);
   }
+}
+
+/** The limits CoCalc sent, checked: every number a safe integer, never a missing one read as zero (§6). */
+export function checkLimits(v: unknown): Limits {
+  const o = v as Record<string, any>;
+  const n = (x: unknown) => Number.isSafeInteger(x) && (x as number) >= 0;
+  if (!o || !n(o.storage_bytes) || !n(o.max_file_bytes)) throw new Error("bad limits");
+  const s = o.sync;
+  const sync = s && typeof s === "object" && n(s.storage_bytes) && n(s.version_bytes) && n(s.read_bytes_per_day)
+    ? { enabled: s.enabled === true, storage_bytes: s.storage_bytes, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day }
+    : { enabled: false, storage_bytes: 0, version_bytes: 0, read_bytes_per_day: 0 };
+  return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
