@@ -6,6 +6,7 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
+| Oct 19 | (this commit) | **Clear history, for a stale device:** don't replace the root with your current value. Compute `merge3(acknowledged base, root, local)` and send root → result from a new client. If a record clashes, keep the local value as `<name> (conflict, <device>)`. Pins and releases are named `(doc, epoch, ref, sha256)` (server-side only). (§4.6) |
 | Oct 19 | 2d2bd29c | `Env` is `{cseq, id, parents, size, blobs?}`: `cseq` counts each patchflow client's patches 1, 2, 3, …, and is sent in order from the server's `next_cseq`. A payload is the patchflow envelope without `time` and `parents`; a receiver builds patches from the returned `Env`. A large patch's blob is listed in `Env.blobs`. Ops are decided in `dseq` order with no gaps (`welcome.next_dseq`), and a refusal is final, so the client rebuilds from the server's log plus its queue. `clear` carries a root patch. Document sockets use a single-use ticket. `pull`, `index` and `blobs/check` are paged with `more`. (§4.1-4.6, §5.2, §5.4) |
 | Oct 19 | cdbf420d (rebased: 5c247c5b) | `Op` gains `ref`, `fid`, `base`, and `sha256` and `size` for a data file's create or write. The device's versions stay local. `forget` and `dropVersions` are accepted from a person's session only. (§3) |
 | Oct 19 | d817bede (rebased: cf06bf48) | First draft. |
@@ -67,14 +68,20 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 - **The session is checked again from the object,** with one D1 read, when the socket next sends after 10 minutes since its last check. The session's expiry is checked on every message, from the attachment.
 - **Ending a session closes its sockets at once:**
   - sign-out, "forget this device" and the purge all call the account object's `revoke(session_hash)` (for the purge: `revoke_all`), after the D1 change;
-  - `revoke` records the session as revoked in `revoked_sessions` (kept until the session's expiry), deletes its unredeemed tickets, closes its account sockets, and tells each document object it gave that session a ticket for, which closes those sockets;
+  - `revoke` records the session as revoked in `revoked_sessions` (kept until the session's expiry), deletes its unredeemed tickets, closes its account sockets, and sends `fence_session(session_hash, expires)` to each document object it gave that session a ticket for (`ticket_docs`, kept until the session's expiry). That document object records the fence durably in `session_fences`, and closes the session's sockets. `revoke` completes when every fence is acknowledged, and is retried by the alarm until then (CORR-D81-7);
   - if the call to `revoke` fails, the next check (within 10 minutes of activity) finds the session gone in D1. A socket that sends nothing can do nothing;
   - the purge retries `revoke_all` until it succeeds (§9).
 - **A document socket needs a ticket, which is used once** (CORR-D81-7):
   - the account object issues it over the account socket: a random 128-bit nonce, stored in `tickets(nonce, session_hash, owner, doc, expires)`, with the expiry 2 minutes away;
   - the document object redeems it at the upgrade with one call to the account object, `redeem(nonce, doc)`. In one transaction, that call checks the ticket exists, is for this document, hasn't expired, and that its session isn't revoked, and deletes it;
+  - **after `redeem` returns,** the document object checks `session_fences` again, synchronously, before it accepts the socket. It also checks on every message, from the socket's attachment:
+    - a revoke whose fence arrived while the upgrade was waiting on `redeem` is therefore seen at the attach;
+    - one whose fence arrives after the attach closes the socket itself;
+    - both steps are in the one document object, so no order of the two leaves a revoked session attached;
   - a ticket can therefore be used once, and not at all after its session is revoked;
-  - the account object then counts the socket against the account's and the session's limits (§8, LIMIT-D817-4). The document object reports each close, and an attachment that has seen no message for 10 minutes is dropped and uncounted at the next recheck.
+  - the account object then counts the socket against the account's and the session's limits (§8, LIMIT-D817-4).
+    - **The counts are leases,** in `doc_sockets(doc, session_hash, socket_id, expires)`, each 15 minutes long. The document object renews a socket's lease at its 10-minute recheck while the socket is in use, and releases it on close.
+    - A lease that isn't renewed (a lost close report, or an evicted object) expires by itself. So capacity is never stranded for more than 15 minutes, and the counts are always the live leases, never a counter that can drift.
 
 **Access to a document is checked on every message** (CORR-D81-7):
 - The document object holds the access list itself (§4), so it checks the account's role on every batch, pull and presence message, without a call.
@@ -102,13 +109,14 @@ holdings(sha256 PRIMARY KEY, key, size, refs, created)
 versions(fid, n, sha256, size, t, by, device)      PRIMARY KEY(fid, n)   (§2.5)
 refused(device, dseq, code)                         PRIMARY KEY(device, dseq)   (§5.2)
 reservations(id PRIMARY KEY, bytes, key, expires)
-pins(doc, client, cseq, sha256, state, expires)     blobs that patches and snapshots use (§4.3)
+pins(doc, epoch, ref, sha256, state, expires)      PRIMARY KEY(doc, epoch, ref, sha256): blobs that patches, snapshots and outputs use (§4.3)
 admissions(id PRIMARY KEY, grant, gen, doc, client, first_cseq, last_cseq, state, expires)  (§4.5)
 reads(day, who, bytes)                              the daily read budgets (§5.4)
 outbox(key PRIMARY KEY, created)                    (R2 objects to delete)
 tickets(nonce PRIMARY KEY, session_hash, owner, doc, expires)        used once (§2)
+ticket_docs(session_hash, doc, expires)             where a revoke must fence the session (§2)
 revoked_sessions(session_hash PRIMARY KEY, expires)
-doc_sockets(doc, session_hash, opened, seen)        counted against §8's limits
+doc_sockets(doc, session_hash, socket_id, expires) leases, counted against §8's limits (§2)
 grants(...), access_log(...)                         (design/agent-endpoint.md)
 ```
 
@@ -156,7 +164,8 @@ segments(first_seq, last_seq, key, bytes, blobs TEXT)  older batches, moved to R
 snapshots(at_seq, key, sha256, bytes, by, t)
 outputs(cell, sha256, size, by, t)          (§7.2: the latest outputs, by hash)
 fenced(admission PRIMARY KEY, expires)      grant writes cancelled before they commit (§4.5)
-releases(sha256, n)                         blobs to release in the account object, until it acknowledges
+releases(epoch, ref, sha256)                blobs to release in the account object, until it acknowledges
+session_fences(session_hash PRIMARY KEY, expires)   revoked sessions this document was told of (§2)
 outbox(key PRIMARY KEY, created)
 ```
 
@@ -189,13 +198,17 @@ A batch is a list of envelopes and a body:
 
 - **A patch over 256 KiB** goes up as a blob first. Its envelope then lists the blob in `blobs`, and its payload refers to it in whatever way the client chooses.
 - **The account object pins every listed blob before it forwards the batch:**
-  - in one transaction, it checks that each blob is held, adds a reference, and records a pin `(doc, client, cseq, sha256)` as `pending`;
+  - in one transaction, it checks that each blob is held, adds a reference, and records a pin `(doc, epoch, ref, sha256)` as `pending`;
+  - **a pin's identity can't recur** (CORR-D81-3):
+    - `ref` is `patch:<client>:<cseq>`, `snapshot:<at_seq>` or `outputs:<cell>:<seq>`, and `epoch` is the document's epoch;
+    - a clear starts a new epoch, and the server's `seq` never repeats, so no later pin has the identity of an earlier one, even for the same grant's client and `cseq`;
+    - a release names the full identity, so a late release of an old pin can only remove that pin;
   - it forwards the batch with `pin_expires`, 5 minutes away;
   - the document object refuses a batch after its `pin_expires`, so a delayed forward can't commit after its pin is given up;
   - when the document object answers, the pin is `held` (accepted, or a resend of an accepted patch) or released (refused);
   - a pin still `pending` a minute after `pin_expires` (the answer was lost) is settled by asking the document object which `cseq` it has for that client.
 - **A batch row lists its blobs,** and so does a segment made from it, so compaction and exports keep them.
-- **When history is dropped** (the epoch, or the document deleted), the dropped rows' blobs go into `releases` in the same transaction. The document object then calls the account object's `release` until it acknowledges. `release` is idempotent, by pin.
+- **When history is dropped** (the epoch, or the document deleted), the dropped rows' blobs go into `releases` in the same transaction. The document object then calls the account object's `release` until it acknowledges. `release` is idempotent, by the pin's full identity `(doc, epoch, ref, sha256)`.
 
 ### 4.4 Compare-and-swap on the head (CORR-D81-4)
 
@@ -238,7 +251,12 @@ A grant's write spans two objects: the account object holds the grant, and the d
 - **A device still in the old epoch:**
   - its batches are refused with `epoch`, giving the new epoch and head;
   - it drops its local history, and pulls the root;
-  - it makes its unsent local changes into one patch from the root to its current value, which it sends with a new patchflow client.
+  - **it rebases only its own unsent changes onto the root** (CORR-D81-6):
+    - its *acknowledged base* is the value of the patches the server accepted;
+    - its *local value* is that plus its unsent patches;
+    - it computes `merge3(base, root, local)` with patchflow's codec (`DocCodec.merge3`), and sends one patch from the root to the result, from a new patchflow client;
+    - so the root's changes (someone else's `x1`) stay, and only the device's own (`y1`) are applied over them;
+    - if `merge3` can't merge a record cleanly, the root stays as the document, and the device's local value is kept as `<name> (conflict, <device>)`, a document of its own. Nothing is reverted silently;
 - **Its old patches can't come back,** since the server refuses the old epoch.
 
 ### 4.7 Snapshots
@@ -531,13 +549,20 @@ The tests run in Miniflare, as `web/share/test-share.mjs` does, with Durable Obj
 - **Pins (§4.3):** a large patch's blob survives the one-day sweep, compaction and export; it is released by the epoch and by deleting the document; a forward delayed past `pin_expires` is refused; a lost answer settles the pin.
 - **Compare-and-swap (§4.4):** a competing append between an agent's read and its write gives `conflict`; the write's resend after a lost acknowledgement gives its original `seq`.
 - **Admission and fence (§4.5):** a revoke, a scope narrowed, and a rename out of scope while a grant's write is delayed: the write either committed before the fence (and is logged so), or is refused, never committed after the change completes; an admission past `expires` is refused.
-- **The epoch (§4.6):** clear, disconnect at once, and open from a fresh device: the document's value is the root; the old history can't be pulled or sent back; a stale `expect_head` is refused.
+- **The epoch (§4.6):**
+  - clear, disconnect at once, and open from a fresh device: the document's value is the root;
+  - the old history can't be pulled or sent back;
+  - a stale `expect_head` is refused;
+  - astra's disjoint edits: shared `{x0, y0}`; A edits `x1` and clears; B, offline, edited only `y1`; B's rebase gives `{x1, y1}`. With a clash on one record, B's value becomes a conflict copy, and the root is unchanged.
+- **Pins across epochs (§4.3):** a grant's client pins `H` at `cseq` 1, the history is cleared, and the same client pins `H` at `cseq` 1 in the new epoch. The old pin's release, delayed until after that, leaves the new pin and the holding in place.
 - **Sessions:**
   - sign-out, forget-device and the purge close the sockets they should;
   - an expired session's socket can't write;
   - a revoke whose call failed is caught by the 10-minute check;
   - a ticket can't be used for another document, account or session, after it expires, twice, or after its session is revoked (astra's replay trace);
-  - a collaborator removed, or downgraded to viewer, can't send another batch, and their sockets close at once.
+  - a collaborator removed, or downgraded to viewer, can't send another batch, and their sockets close at once;
+  - astra's race: an upgrade paused after `redeem`, the revoke completed, and then the attach resumed: the attach is refused. A fence that lands after an attach closes the socket;
+  - socket leases: a lost close report frees its slot within 15 minutes. The counts are the live leases after an object is evicted.
 - **Before authentication:** a fresh, made-up account hash on every request, and tokens with a bad tag, create no object and no row, and are cut off by the IP limit.
 - **Reading:** the debit happens at issue; a grant's URL works once and a replay is refused; parallel and overlapping range requests on a grant's URL get at most one success; a device's URL works for its 5 minutes.
 - **Limits:** every row of §8, at the limit and one over it, and a refusal changes nothing.
