@@ -29,11 +29,12 @@ The page alone decides what runs. It takes only allowlisted verbs, with argument
 
 - **Address:** `ws://127.0.0.1:<port>/sagebrush`. The server binds 127.0.0.1 only.
 - **The server checks:**
-  - `Origin` is exactly `https://sagebrush.space` (plus `http://localhost:<dev port>` behind a development flag);
+  - `Origin` is exactly `https://sagebrush.space`, plus one exact development origin when `SAGEBRUSH_MCP_DEV_ORIGIN` names it (off by default);
   - `Host` is `127.0.0.1:<port>` or `localhost:<port>` (against DNS rebinding).
 - **Framing:** JSON-RPC 2.0, one message per WebSocket text frame, string ids, in both directions.
   - A frame is at most **12 MiB**: 8 MiB of binary content is about 10.7 MiB as base64, plus the JSON around it.
   - Each side checks the cap before parsing. A frame over it closes the socket with a reason.
+- **Before pairing,** a message is at most **8 KiB** (the hello is a few hundred bytes); the 12 MiB cap applies only once the hello has paired.
 - **The code** guards the port, since any local process can reach it:
   - 128 bits, shown as base32, by the agent and on the server's stderr;
   - single use, expires in 5 minutes, compared in constant time.
@@ -51,9 +52,11 @@ The page alone decides what runs. It takes only allowlisted verbs, with argument
 4. **On refusal** the reply is error `{code:-32000, message, data:{code:"refused"|"protocol", message}}`, and the socket is closed with 1008 (refused) or 1002 (protocol).
 
 **Reconnecting** ("Remember this agent"):
-- `hello` carries `{"session":"<per-pairing secret>"}` in place of `code`.
-- The page keeps the secret, as its SHA-256, in the workspace's meta, beside the grant (§3).
-- The server keeps it only in memory for its own lifetime, so a restarted server needs a new code.
+- **Who makes the secret:** the server, as 32 random bytes in base64url. It returns the secret as `session` in the result of a successful *code* hello. A session hello doesn't rotate it.
+- **Where it is kept:**
+  - the page keeps the secret itself, in the workspace's meta beside the grant (§2.2), and only if the person ticked "Remember this agent";
+  - the server keeps only its SHA-256, in memory, for its own lifetime, so a restarted server needs a new code.
+- **Reconnecting:** `hello` then carries `{"session":"<secret>"}` in place of `code`.
 
 ### 2.2 The grant comes before anything runs
 
@@ -70,6 +73,8 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
 ## 3. The workspace verbs
 
 **Server to page:** `{"id":"s<n>","method":"workspace.<verb>","params":{…}}`.
+- **Paths** are checked on both sides against `schema.json`'s limits (`maxPath`, `maxDepth`, `maxName`). Neither side accepts NUL, lone surrogates, or NaN/Infinity in any value.
+- **Answers** over `maxList` entries or `maxHistory` versions are a protocol error on the server's side.
 - The verbs and their parameter schemas are in `web/workspace/schema.json` (written by `web/workspace/verbs.ts`): list, stat, read, write, create, mkdir, rename, duplicate, remove, restore, history, version.
 - `sagebrush-mcp` makes its tools from that file. Tool names use underscores (`workspace_list`), because model APIs refuse dots.
 
