@@ -517,9 +517,11 @@ By reasoning only:
 
 **CoCalc's status: the receipt, then the account object** (CORR-BF3-1, CORR-1C2-1, CORR-5D0-1).
 - Each CoCalc purge request gets its own row in `sync_admin_requests`, keyed by its request id.
-- **It is bound before any account object is asked** (CORR-E9C-1). One D1 batch, which D1 runs alone, evicts the account's oldest receipt beyond 8 and inserts this one only if no account holds the id. Of two requests naming one new id for two accounts at once, exactly one binds it. The other gets 409, and its account object is never touched.
-- **It is given back** if the account object can't be reached (the whole purge then answers 503, for CoCalc to send again) or never synced. Only the receipt this request made is given back; a retry's existing one stays.
-- So receipts are kept only for accounts that held sync state. The one exception is a receipt left by a Worker that stopped between binding and giving back, which the 90-day prune removes.
+- **The request id is bound to its account before any account object is asked** (CORR-E9C-1, LIMIT-5DC-1).
+  - The binding is the purge's own record, sharing's `purges` row: made at most once for the id (`ON CONFLICT DO NOTHING`), and checked against the account. Sharing's part of the same request makes that row anyway, and a pending one is finished by sharing's scheduled job whatever becomes of the request.
+  - So of two requests naming one new id for two accounts at once, exactly one binds it. The other gets 409, and its account object is never touched.
+  - Sync adds no row of its own to bind, so a Worker that stops at any point leaves no sync row behind.
+- **The receipt is written once the account object has answered,** and only for an account that held sync state. If the object can't be reached, nothing is recorded, and the whole purge answers 503 for CoCalc to send again.
 - A retried id keeps its receipt (`INSERT OR IGNORE`) and touches no other. A receipt is completed when its account's purge record reaches D1.
 - The account's D1 row is never what the status call reads, because a later request would change it.
 - **The status call**, `GET /api/admin/sync-purge/<request_id>/<account_id>` (signed; the path carries the account because the signature covers the path):
@@ -531,8 +533,8 @@ By reasoning only:
 - **Every purge is admitted.** Sharing's deletion never waits on sync's bookkeeping. The one refusal is a request id that already belongs to another account's purge: 409, before any account object is asked or any receipt changed. An id names one account for good (CORR-E0D-1).
 - **The receipts are bounded by total** (LIMIT-233-1):
   - an account keeps at most 8. A new id evicts the account's oldest, by insertion order, in the same D1 transaction as the insert;
-  - an account that never synced (the object answers `none`, nothing retired) gives its receipt back. Its status, from the object, is `never_synced`. A purge whose object can't be reached gives its receipt back too;
-  - CoCalc's purge fences an account for good. So the table never holds more than $8A$ receipts, where $A$ is the number of accounts that ever had sync state, whatever the rate of requests, plus receipts left by a Worker stopped between binding and giving back (each pruned at 90 days);
+  - an account that never synced (the object answers `none`, nothing retired) gets no receipt. Its status, from the object, is `never_synced`. Neither does a purge whose object can't be reached;
+  - CoCalc's purge fences an account for good. So the table never holds more than $8A$ receipts, where $A$ is the number of accounts that ever had sync state, whatever the rate of requests, and whatever point a Worker stops at;
   - 30 days after finishing, a receipt is pruned.
 - **The prune keeps up:** each kind (finished, never finished) uses its own partial index, a page of 1,000 at a time, until none is left or 10 pages are done. That is 10,000 a run for each kind, so any backlog, at most $8A$, drains in $\lceil 8A / 10{,}000 \rceil$ runs. The prune makes at most 20 calls, inside the run's 400-call budget.
 
