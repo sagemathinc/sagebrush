@@ -75,7 +75,7 @@ grants(
   - a request with an `Origin` header (that is, from a web page) is refused. Agents aren't browsers, and a token pasted into a hostile page can't be read back through CORS anyway.
 
 **Every request, in this order, inside the account object:**
-1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads).
+1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads). On dev, the account must also be in `SYNC_ACCOUNTS` (design/sync-server.md §11).
 2. The grant's rate limits, and then the account's (§7).
 3. The verb's paths are inside the scope, with the access the verb needs (read, or write).
 4. The verb runs. **The grant is checked again in the same transaction as any write,** so a revoke that lands while a request is running prevents its write.
