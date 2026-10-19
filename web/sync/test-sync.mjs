@@ -1115,6 +1115,32 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(state === "purged" && (await bucket.list({ prefix: `s/${hashOf(G).slice(0, 32)}/` })).objects.length === 0, "and no object of it ever appears, though the purge finished and the Worker's own delete is off (CORR-5E2-2)");
 }
 
+// ---- the daily inventory: a late commit, whenever it lands (CORR-5E2-2, §9)
+{
+  const bucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  // G's account is purged; a put that had sent its last byte commits only now, after the purge (astra's held commit)
+  const lateG = `s/${hashOf(G).slice(0, 32)}/${"a".repeat(36)}`;
+  await bucket.put(lateG, "late");
+  // A's account is live again (turned on after its deletion): one of its keys is a holding, one is unknown
+  const sa2 = await signIn(A);
+  const kept = Buffer.from("A's file after re-enabling");
+  ok((await put(sa2, kept)).status === 201, "(A uploads a file of its own)");
+  const unknownA = `s/${hashOf(A).slice(0, 32)}/${"b".repeat(36)}`;
+  await bucket.put(unknownA, "stray");
+  await new Promise((r) => setTimeout(r, 1200)); // (the test's age threshold is 1 s; in a deployment, 2 days)
+  const worker = await mf.getWorker("sync");
+  await worker.scheduled({ cron: "17 3 * * *" });
+  ok((await bucket.head(lateG)) === null, "the inventory deletes a late commit under a purged account's prefix, whenever it lands");
+  ok((await bucket.head(unknownA)) === null, "and an object a live account doesn't know");
+  const keys = (await bucket.list({ prefix: `s/${hashOf(A).slice(0, 32)}/` })).objects.map((o) => o.key);
+  ok(keys.length === 1, "while the live account keeps the object it holds, and only that");
+  // and a fresh object is left alone, whatever its account
+  const fresh = `s/${hashOf(G).slice(0, 32)}/${"c".repeat(36)}`;
+  await bucket.put(fresh, "fresh");
+  await worker.scheduled({ cron: "17 3 * * *" });
+  ok((await bucket.head(fresh)) !== null, "an object younger than the threshold is never touched (an upload may be finishing)");
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);
