@@ -2,6 +2,14 @@
 
 *Status: design, for review by astra (correctness), daybreak2 (limits) and William. Nothing here is built yet. When it is built, it stays behind a flag that is off in production (§11). No private user data is stored in production until William says so.*
 
+**Changes for the client** (newest first; for @sagebrush-board's `sync-client.ts`):
+
+| Date | Commit | What changed for the client |
+|---|---|---|
+| Oct 19 | 2d2bd29c | `Env` is `{cseq, id, parents, size, blobs?}`: `cseq` counts each patchflow client's patches 1, 2, 3, …, and is sent in order from the server's `next_cseq`. A payload is the patchflow envelope without `time` and `parents`; a receiver builds patches from the returned `Env`. A large patch's blob is listed in `Env.blobs`. Ops are decided in `dseq` order with no gaps (`welcome.next_dseq`), and a refusal is final, so the client rebuilds from the server's log plus its queue. `clear` carries a root patch. Document sockets use a single-use ticket. `pull`, `index` and `blobs/check` are paged with `more`. (§4.1-4.6, §5.2, §5.4) |
+| Oct 19 | cdbf420d (rebased: 5c247c5b) | `Op` gains `ref`, `fid`, `base`, and `sha256` and `size` for a data file's create or write. The device's versions stay local. `forget` and `dropVersions` are accepted from a person's session only. (§3) |
+| Oct 19 | d817bede (rebased: cf06bf48) | First draft. |
+
 This is the server side of design/workspace-files.md §7 (backup and sync) and §9 steps 8 and 9. The agent endpoint built on it is in design/agent-endpoint.md. The client is @sagebrush-board's, written against the protocol in §5, which we agree on together.
 
 **What it reuses from sharing** (design/sharing.md, web/share/server.ts):
