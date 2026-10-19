@@ -59,7 +59,9 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
   - A sync request is authenticated by its session cookie and D1, which gives the account.
   - An agent's request is authenticated by its token's tag (design/agent-endpoint.md §2): an HMAC the server made, checked at the Worker before the token's account hash is used to name anything.
   - A request that fails either check gets 401 from the Worker, without touching any object.
-- **An IP limit comes first,** independent of any account a request claims: Cloudflare's rate-limiting binding (`SYNC_PREAUTH`, keyed by IP), 60 requests a minute on `/api/sync/` and `/api/agent/` before authentication, and 10 a minute that fail it. Over it, 429.
+- **An IP limit comes first,** independent of any account a request claims: Cloudflare's rate-limiting binding (`SYNC_PREAUTH`, keyed by IP), 60 requests a minute on `/api/sync/` and `/api/agent/`, before authentication. Over it, 429.
+  - A sync request that fails authentication costs one D1 read, within that limit.
+  - **The binding is part of the flag** (LIMIT-321-1): with the objects bound but no `SYNC_PREAUTH`, sync is off (404).
 - **An object never creates or writes storage for a request it refuses.** A refused request reads at most the rows it needs to refuse, and an account object that doesn't exist yet is created only by "turn on sync" from a session.
 
 **Sessions:**
@@ -462,14 +464,14 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 
 | What | Limit | Over it |
 |---|---|---|
-| A message on a socket | 1 MiB + 64 KiB | close 1009 |
+| A message on a socket | 2 MiB, in UTF-8 bytes. A batch's largest body, 1 MiB, is 1.33 MiB as base64, and its 2,000 envelopes add up to about 0.4 MiB, so the first draft's 1 MiB + 64 KiB couldn't carry a full batch (LIMIT-321-3). | close 1009 |
 | A batch | 1 MiB of body, 2,000 patches; 8 parents per patch | `limit` |
 | One patch inline | 256 KiB (larger: a blob, §5.3) | `limit` |
 | Ops in one message | 500; a path 1,024 bytes, a name 255 | `limit` |
 | The index | 100,000 entries, 10,000 per folder (as the client's `LIMITS`) | `limit` |
 | Documents per account | 100,000 | `limit` |
 | Requests unanswered per socket | 8 | `busy` |
-| Before authentication (§2) | 60 requests a minute per IP on `/api/sync/` and `/api/agent/`, 10 a minute that fail | 429, at the Worker |
+| Before authentication (§2) | 60 requests a minute per IP on `/api/sync/` and `/api/agent/` | 429, at the Worker |
 | Account sockets | 20 per account (the oldest is closed) | close 4408 |
 | Document sockets | 50 per document; 64 per account; 16 per session (§2) | `busy` |
 | Tickets unredeemed | 32 per session | `busy` |
@@ -478,7 +480,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | `pull` | `limit` default 100, at most 500 batches and 4 MiB a message; one R2 segment a request | `more` |
 | `blobs/check`, `outputs.set` | 1,000 and 500 items | `limit` |
 | Batches per account | 20 a second, sustained 4 a second | `rate`, with `retry_after` |
-| Ops per account | 2,000 a minute | `rate` |
+| Ops per account | 2,000 a minute, each op counted, resent or new (LIMIT-321-2) | `rate`, the whole message |
 | Blob uploads | 4 at once per account; `max_file_bytes` each | 429, 413 |
 | Signed URLs | 600 a minute per account; each debits the blob's size from `sync.read_bytes_per_day` (§5.4) | 429, `rate` |
 | Signed URL fetches | 600 a minute per IP at the files Worker | 429 |

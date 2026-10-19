@@ -10,8 +10,12 @@ export const VERSION = 1;
 
 /** §8: the server's limits.  Each has a test in web/sync/test-sync.mjs. */
 export const LIMITS = {
-  /** a message on a socket (a batch's body is at most batchBytes of it, base64) */
-  messageBytes: 1.5 * (1 << 20),
+  /**
+   * a message on a socket, in UTF-8 bytes: a batch's largest body (1 MiB)
+   * is 1.33 MiB as base64, and its 2,000 envelopes up to about 0.4 MiB more
+   * (LIMIT-321-3: the design's 1 MiB + 64 KiB couldn't carry a full batch)
+   */
+  messageBytes: 2 << 20,
   batchBytes: 1 << 20,
   batchPatches: 2000,
   patchParents: 8,
@@ -324,14 +328,19 @@ export class Bucket {
     this.tokens = burst;
     this.at = now;
   }
-  /** Takes one if there is one, and returns 0; otherwise the ms until there is one. */
-  take(now = Date.now()): number {
+  /**
+   * Takes `n` if there are that many, and returns 0; otherwise takes none
+   * and returns the ms until there are (Infinity if `n` is over the burst,
+   * which can never fit).
+   */
+  take(n = 1, now = Date.now()): number {
     this.tokens = Math.min(this.burst, this.tokens + (Math.max(0, now - this.at) / 1000) * this.rate);
     this.at = now;
-    if (this.tokens >= 1) {
-      this.tokens -= 1;
+    if (n > this.burst) return Infinity;
+    if (this.tokens >= n) {
+      this.tokens -= n;
       return 0;
     }
-    return Math.ceil(((1 - this.tokens) / this.rate) * 1000);
+    return Math.ceil(((n - this.tokens) / this.rate) * 1000);
   }
 }

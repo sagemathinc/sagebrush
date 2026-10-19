@@ -58,6 +58,24 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } } },
+    },
+    // sync's bindings, but no pre-authentication limit: off (LIMIT-321-1)
+    {
+      ...base,
+      name: "nolimit",
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: A },
+      durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+      routes: ["nolimit.test/*"],
+    },
+    // a tight pre-authentication limit: 3 a minute
+    {
+      ...base,
+      name: "tight",
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: A },
+      durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+      routes: ["tight.test/*"],
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } } },
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -145,8 +163,17 @@ const payloads = (item) => {
 // ---- the flag and the gates (§2, §11)
 {
   const sp = await signIn(A, "https://prod.test");
-  const r = await fetchAt("https://prod.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sp, origin: "https://prod.test", "content-type": "application/json" }, body: "{}" });
+  let r = await fetchAt("https://prod.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sp, origin: "https://prod.test", "content-type": "application/json" }, body: "{}" });
   ok(r.status === 404 && (await r.json()).error === "sync is not enabled here", "without the sync bindings, sync is a 404 (the flag)");
+  const sn = await signIn(A, "https://nolimit.test");
+  r = await fetchAt("https://nolimit.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sn, origin: "https://nolimit.test", "content-type": "application/json" }, body: "{}" });
+  ok(r.status === 404, "with the objects bound but no pre-authentication limit, sync is off too");
+  // the limit comes before any session is read: requests with no session get 429, not 401, once it is used up
+  const codes = [];
+  for (let i = 0; i < 5; i++) codes.push((await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).status);
+  ok(codes.join() === "401,401,401,429,429", "the pre-authentication limit is per IP and before the session check: " + codes.join());
+  r = await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.10" }, body: "{}" });
+  ok(r.status === 401, "another IP has its own limit");
   const sa = await signIn(A);
   ok((await post(null, "/api/sync/v1/enable", {})).status === 401, "no session: 401");
   ok((await fetchAt(SITE, "/api/sync/v1/enable", { method: "POST", headers: { cookie: sa, origin: "https://evil.test" } })).status === 403, "a cross-site request is refused");
@@ -294,6 +321,35 @@ const docA = "0123456789ab";
   a = await f.ask(batch(docA, 2, [[1, pid(1200, "clientNEW1"), [pid(1000, R)], "rebased"]]));
   ok(a?.batch?.seq === 6, "the new epoch takes patches on the root");
   f.ws.close();
+}
+
+// ---- the ops rate counts ops, not messages (LIMIT-321-2); messages are bounded in UTF-8 bytes (LIMIT-321-3)
+{
+  const sd = await signIn(D);
+  await post(sd, "/api/sync/v1/enable", {});
+  const s = await socket(sd);
+  const { welcome } = await hello(s, "device-d-000001");
+  let d = welcome.next_dseq;
+  const many = (n) => Array.from({ length: n }, () => ({ dseq: d++, t: 1, by: "person", op: "mkdir", path: `/m${d}`, kind: "folder" }));
+  let a = await s.ask({ t: "ops", ops: many(500) });
+  ok(a?.ops?.length === 500, "500 ops in a message");
+  for (let i = 0; i < 3; i++) a = await s.ask({ t: "ops", ops: many(500) });
+  ok(a?.ops?.length === 500, "2,000 ops: the whole minute's budget");
+  a = await s.ask({ t: "ops", ops: many(100) });
+  ok(a?.t === "error" && a.code === "rate" && a.detail.retry_after > 0, "the next 100 ops are over the budget: rate, with retry_after");
+  const max = 2 << 20;
+  const pad = (n) => JSON.stringify({ t: "x", req: 1, pad: "a".repeat(n) });
+  const exact = pad(max - pad(0).length);
+  ok(Buffer.byteLength(exact) === max, "(a message of exactly the limit)");
+  s.send(JSON.parse(exact));
+  const e = await s.next((m) => m.t === "error");
+  ok(e?.code === "invalid" && s.closed === null, "a message of exactly 2 MiB is read (and refused only for what it says)");
+  // (UTF-16 length under the limit, UTF-8 bytes over it)
+  const wide = JSON.stringify({ t: "x", req: 2, pad: "é".repeat(max / 2) });
+  ok(wide.length < max && Buffer.byteLength(wide) > max, "(a message under the limit in characters, over it in bytes)");
+  s.ws.send(wide);
+  await new Promise((r) => setTimeout(r, 500));
+  ok(s.closed === 1009, "is closed with 1009: the limit is in UTF-8 bytes");
 }
 
 // ---- blobs: upload, reads, pins (§4.3, §5.4)
