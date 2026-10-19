@@ -191,6 +191,19 @@ Notebooks and boards keep every change (TimeTravel). Data files have had no hist
 - Each says what it will free and asks to confirm, and each is logged.
 - **Agents can't do it.** The API's `dropVersions` refuses a workspace acting for an agent, and the agent surfaces (§8.2) don't offer it.
 
+### 2.6 Long histories: local snapshots (proposed, Oct 19)
+
+**Today, opening a document replays its whole history.** `IdbPatchStore.loadInitial` reads every patch the document ever had (`hasMore: false`). A notebook used for months, whose runs also write the execution journal, gets slower to open with every session.
+
+**A local snapshot bounds that,** with the same rule as the server's (design/sync-server.md §4.7). patchflow 0.12 already reads snapshot envelopes (`isSnapshot`, `snapshot`, `stopAtSnapshots`, and `loadInitial`'s `hasMore`), so the sync protocol is unchanged.
+- **When:** after 500 patches, or 4 MB of patches, since the last snapshot. It is taken by the tab that commits, at its head, only when the head is a clean cut (`isCut`) and its value checks out (`verifyValue` isn't "mismatch"). Otherwise it waits for the next commit.
+- **Where:** a `snapshots` store beside `history` in both history databases, keyed `[doc, time]`. The latest 3 are kept, and older snapshots are removed (patches never are).
+- **Opening:** `loadInitial` returns the latest snapshot and the patches from its time on, with `hasMore` true when older patches exist. When patchflow says the loaded part isn't enough (`needsMoreHistory`, e.g. a patch from another tab made just before the snapshot), older patches are loaded until it is.
+- **A snapshot never replaces history.** Every patch stays in IndexedDB, and Clear, delete and forget remove the snapshots with the patches.
+- **TimeTravel pages older history in:** the slider covers what is loaded, and its left end offers "Older versions…", which loads the previous 500 patches (a reverse cursor) until the start, when the history is marked full. Versions are named by patch id, never by index, because indexes shift as older history loads.
+- **What needs the whole history loads it first:** sending a board's history to CoCalc (`patches()`), the export with histories (§7.11), and "Rebuild from history". The `.sbreplay` download reads IndexedDB directly, so it is unaffected.
+- **Backup (step 8)** can upload a local snapshot as the server's (§4.7), when its patch is a batch boundary.
+
 ---
 
 ## 3. One File menu, identical in both editors
@@ -224,7 +237,7 @@ Delete                     (to Trash)
 - Revert to the original moves to the board's ⋯ menu as well, and is shown only for boards that have an original.
 - Duplicate becomes Save a copy…, which asks for the name.
 - Open file… and Save as… stay in the desktop app, under Upload… and Save a copy…, where they act on disk files.
-- Install as an app… moves to the site menu (the Sagebrush logo), since it isn't about the file.
+- Install as an app… moves out of File, since it isn't about the file. The notebook page has no site menu yet, so it goes in ⋯ (step 3a); the one page (step 5) can give it a site menu.
 
 **Upload…** takes any files, by picker or by drop. The rule is that **Upload never converts behind the user's back:**
 - `.ipynb`, `.board.json` and `.sbreplay` become documents (an `.sbreplay` keeps its history, as today).
@@ -455,10 +468,12 @@ It is made of objects that each serve one account or one document, so it grows b
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
   - Signing out on a shared computer offers to remove this device's local copy, as a separate choice.
-- **When the account may no longer sync:**
-  - nothing is deleted;
-  - sync pauses and the server copy becomes read-only, so it can still be downloaded (Download all, as a zip);
-  - the person is always told before anything is removed.
+- **When the account may no longer sync** (the membership ended; decided Oct 19):
+  - sync pauses and the server copy becomes **read-only for 90 days**. It can still be opened and downloaded: Download all, and the export (§7.11);
+  - after the 90 days, the server copy is **deleted**, by the same path as "Delete my synced data";
+  - the person gets an email when the membership ends, and another about 14 days before the deletion. Renewing within the 90 days turns sync back on, with nothing lost;
+  - **each device's own copy is never touched:** it stays in that browser, as a workspace that doesn't sync;
+  - the timer and the emails are the server's (auth's). The FAQ's wording is on the Sagebrush site, and business terms aren't in this repo.
 - **Limits** come from the account's limits, as sharing's do (`storage_bytes`).
   - Over the limit, new files stop uploading and say so. Document edits (small patches) keep syncing.
   - Nothing already synced is removed.
@@ -555,6 +570,52 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 | Losing data (a bug, a bad deploy) | 30-day point-in-time recovery of every Durable Object's SQLite. Copies off Cloudflare, encrypted, as in sharing.md's Backups section. Trash. Nothing removed by quota pressure. |
 
 **The server's attack surface is small:** it stores, orders and relays, and never runs user code. All compute stays in each person's browser, inside the runner.
+
+### 7.11 Export and import (William, Oct 19)
+
+**One click exports the whole workspace as one file, and Import takes such a file back.** This is how a person keeps a copy off Sagebrush, and how they move from one Sagebrush site to another.
+
+**Two modes:**
+- **Files:** every document and data file as it is now. A notebook is its `.ipynb` and a board its `.board.json`, exactly as Download gives them, so the bundle is useful without Sagebrush.
+- **Files and histories:** the same files, plus each document's patchflow history (TimeTravel), the files its sessions read (as `.sbreplay` keeps them), and the data files' versions (§2.5).
+
+**Where an export is made:**
+- **In the browser,** from this device's workspace. It needs no account and works offline; it is the File menu's "Export workspace…" and the Storage panel's.
+- **On the server** (auth's half), for a synced account. It is a rate-limited export job that builds the same bundle from the account's objects and R2, then offers a private, time-limited download. Egress from R2 is free, so this costs little.
+  - This is what a phone (§7.5, which holds only part of the workspace) and an account in its read-only 90 days (§7.4) use.
+  - auth's design note sets the limits: one running export per account, and a few a day.
+
+**The bundle format** is documented and versioned like the board format. It is a zip, `<name>.sagebrush-workspace.zip`:
+
+```
+manifest.json            {format: "sagebrush-workspace-bundle", version: 1, mode: "files" | "history",
+                          created, site, app, entries: [...], totals: {files, bytes}}
+files/<path>             each entry's current contents (an .ipynb, a .board.json, a data file's bytes)
+history/<ref>.json       one document's envelopes, oldest first (snapshot envelopes included);
+                         the same envelopes, codec and schema as .sbreplay's "history"
+blobs/<sha256>           the bytes a history's sessions read, once each
+versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author, reason}]
+                         (each version's bytes are in blobs/)
+```
+
+- **Each manifest entry** has `{path, kind, ref?, fid, created, modified, size, sha256, mode?}`. **The manifest is authoritative:** the zip's own names are only where the bytes are, and are never used as paths.
+- **Trash isn't exported,** and neither are the device's settings or anything in localStorage.
+- **Versions:** a reader accepts its own `version` and older ones. A later version is refused with a message saying so, as a board of a later format is. Fields a reader doesn't know are ignored, and their names are listed in the import's summary.
+
+**Import:**
+- **Into an empty workspace** (a new site, a new browser), the paths are kept. Into one with documents, everything goes under `/Imported <date>/`, so nothing is replaced or merged by surprise.
+- **Every document and file gets a new identity** (fid and ref), so an import can never overwrite or join a document that is already here. The patch ids in the histories are kept, because they don't depend on the ref.
+- **Each file's bytes are checked** against the manifest's `sha256` and `size`. A file that doesn't match isn't imported, and the summary lists it; the rest go on.
+- **It is bounded before anything is written:**
+  - the manifest's counts and totals are checked against the storage left (§6.3) and against fixed caps on entries and bytes;
+  - each entry is read one at a time, never the whole zip in memory;
+  - an entry whose uncompressed size exceeds the manifest's, or whose compression ratio is absurd, stops the import;
+  - names go through the workspace's own path rules (`safeName`). An absolute path, `..`, or a name that collides after normalization is refused or renamed, never followed.
+- **Nothing imported runs by itself.** The documents are other people's code as far as this browser knows, even when the person made the bundle, so they open as an Upload's do (§3) and run only when the person runs them.
+- **Import is the person's action.** It isn't in the agents' workspace API (§8.2) in its first version.
+- **A summary at the end** says what came in, where, and what was refused and why.
+
+**Moving between sites:** export on one, import on the other. If the new site syncs, its sync uploads the imported workspace like any other. The histories keep TimeTravel intact across the move.
 
 ---
 
@@ -813,7 +874,7 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 
 1. **The `sagebrush-workspace` database, the index, reconcile and migration,** with the store for data files' versions (§2.5), written by the API's own writes (1a). Then the pages wired to it (1b), which version Python's writes and the Files panel's deletes too. No UI. Tests: every kind of item in today's stores comes out as an entry, the localStorage copies are untouched, a write from an older tab is brought in as a copy, and a key that won't parse is kept.
 2. **The file browser** (sidebar, dialog and phone sheet), shared by both pages, written once in `web/workspace/`, with a file's versions and "Delete older versions" (per file and per folder), and the Storage panel's "Free N MB of old versions" (§2.5, §6.3).
-3. **The one File menu** in both editors, and Upload's rule.
+3. **The one File menu** in both editors (3a), and Upload's rule (3b). Then **local snapshots** (3c, §2.6; proposed): a document opens from its latest snapshot, and TimeTravel pages older history in. It is independent of routing, helps every long-lived notebook now, and its snapshot writer is the one backup (step 8) needs.
 4. **`/w/` routing** in the server, the service worker and both pages, plus the redirects from the old addresses. Then the board page in the shell.
 5. **One page hosting both editors** (§5).
    - The board bundle loads into the notebook's page when the first board opens.
@@ -826,6 +887,7 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 9. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2), and the chat panel's remote adapter (§8.7).
 10. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
 11. **The cocalc.ai adapter, the Ask agent, and the handoffs with cocalc.ai** (§8.5, §8.6, §8.7). The adapter needs CoCalc's Agent Network to accept a person's page as a sender.
+12. **Export and import** (§7.11): the bundle format (documented and versioned), the browser's export in both modes, Import, and the UI. The server's export job is auth's half, from the account's objects and R2. Its tests include a round trip (export, import into an empty workspace, same files, same TimeTravel), and bundles that lie: a wrong hash, an oversized entry, a hostile path, a later version.
 
 Steps 1 to 6 don't depend on sync. Step 1 includes `window.sagebrush.workspace` (§8.2). The index's operation log (§7.2) is designed in step 1, so sync can later be added without migrating again.
 
