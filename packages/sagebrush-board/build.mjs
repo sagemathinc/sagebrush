@@ -4,8 +4,10 @@
 // - dist/index.d.ts: its types (tsc), from dist/types;
 // - dist/submission.js and .d.ts: a host's check of a board's answers, and
 //   of a request to decide what a reader's own words show
-//   (web/board/ask.ts checkSubmission, web/board-host-protocol.md), alone,
-//   so that a host takes it without the board.
+//   (web/board/ask.ts checkSubmission), and the merge and checks of edits
+//   made in its frame (web/board/edit-state.ts editState), alone
+//   (web/board/submission.ts; web/board-host-protocol.md), so that a host
+//   takes them without the board.
 // What a board loads only when it needs it (the notebook's engine for code
 // items, KaTeX, patchflow for TimeTravel) is not in it: the host gives it
 // (mount.ts BoardHost: code, math, history).
@@ -27,7 +29,7 @@ const r = await Bun.build({
   sourcemap: "linked",
 });
 const sub = await Bun.build({
-  entrypoints: [join(root, "web", "board", "ask.ts")],
+  entrypoints: [join(root, "web", "board", "submission.ts")],
   outdir: dist,
   naming: "submission.js",
   target: "browser",
@@ -42,10 +44,10 @@ for (const b of [r, sub]) if (!b.success) {
 const tsc = Bun.spawnSync([join(root, "node_modules", ".bin", "tsc"), "--ignoreConfig", "--declaration", "--emitDeclarationOnly",
   "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--lib", "dom,dom.iterable,es2023",
   "--skipLibCheck", "--allowJs", "--rootDir", join(root, "web"), "--outDir", join(dist, "types"),
-  join(root, "web", "board", "text-imports.d.ts"), join(root, "web", "board", "index.ts"), join(root, "web", "board", "ask.ts")], { stdout: "inherit", stderr: "inherit" });
+  join(root, "web", "board", "text-imports.d.ts"), join(root, "web", "board", "index.ts"), join(root, "web", "board", "submission.ts")], { stdout: "inherit", stderr: "inherit" });
 if (tsc.exitCode !== 0) process.exit(1);
 writeFileSync(join(dist, "index.d.ts"), 'export * from "./types/board/index";\n');
-writeFileSync(join(dist, "submission.d.ts"), 'export { checkSubmission, decideRequest, type Posted, type Checked, type Submission, type Deciding, type DecideRequest } from "./types/board/ask";\n');
+writeFileSync(join(dist, "submission.d.ts"), 'export * from "./types/board/submission";\n');
 
 const size = (await Bun.file(join(dist, "index.js")).arrayBuffer()).byteLength;
 const subSize = (await Bun.file(join(dist, "submission.js")).arrayBuffer()).byteLength;
