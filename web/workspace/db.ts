@@ -13,6 +13,11 @@
 //            "sagebrush"/"files", which every interpreter is sent)
 //   ops      the operation log, one record per change (keyPath "seq",
 //            counted up): what sync will send (§7.2)
+//   versions data files' earlier versions (§2.5): one record each (keyPath
+//            "id", counted up), by file id and time (index byFile [fid, t])
+//            and by time (index byTime)
+//   versionBytes  their bytes, by the version's id (apart, so listing
+//            versions reads no bytes)
 //   meta     this browser's own values: its device id, when it migrated
 import { openDb } from "../board/idb-open";
 
@@ -25,6 +30,10 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
     db.createObjectStore("boards", { keyPath: "id" });
     db.createObjectStore("trash");
     db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+    const versions = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
+    versions.createIndex("byFile", ["fid", "t"]);
+    versions.createIndex("byTime", "t");
+    db.createObjectStore("versionBytes");
     db.createObjectStore("meta");
   }, onClose, ms);
 }

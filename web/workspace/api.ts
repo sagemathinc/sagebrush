@@ -20,7 +20,7 @@
 // person does that, from the file browser (§2.4, §8.2).
 import { inTx, req, hex, openWorkspaceDb } from "./db";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, openDb as openMainDb } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 export type Entry = {
@@ -36,6 +36,8 @@ export type Entry = {
   updated: number;
   /** a data file's revision (a document's is its record's) */
   rev?: number;
+  /** a data file's own id, which a rename keeps: its versions' (§2.5) */
+  fid?: string;
   /** in Trash: where it was, and when it was put there */
   trashed?: { from: string; at: number };
   /** a board made from an edited example or a board on the web: its address */
@@ -43,11 +45,15 @@ export type Entry = {
   /** contents reconcile could not find (shown, never dropped) */
   missing?: boolean;
 };
-export type Op = { seq?: number; t: number; device: string; op: string; path: string; to?: string; kind: Kind };
+export type Op = { seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind };
+/** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
+export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string };
-export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number };
-/** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the workspace at most 100,000 entries */
-export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000 };
+export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
+/** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
+ * workspace at most 100,000 entries.  §2.5: a data file's latest 20
+ * versions, none older than 30 days, all of them at most 1 GB. */
+export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
 export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage";
 export class WorkspaceError extends Error {
@@ -76,6 +82,8 @@ export class Workspace {
   private subs = new Set<(c: Change) => void>();
   private channel: BroadcastChannel | null = null;
   private tab = hex(8);
+  /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
+  actor = "person";
 
   /** `ws`: the workspace's database; `main`: "sagebrush" (notebooks, files), or null where there is none. */
   constructor(readonly ws: IDBDatabase, readonly main: IDBDatabase | null, readonly device: string, readonly limits: Limits = LIMITS, private now: () => number = Date.now) {
@@ -86,7 +94,7 @@ export class Workspace {
   }
 
   /** The workspace of this browser (both databases opened), or a WorkspaceError("storage"). */
-  static async open(opts: { name?: string; mainName?: string; limits?: Limits } = {}): Promise<Workspace> {
+  static async open(opts: { name?: string; mainName?: string; limits?: Limits; now?: () => number } = {}): Promise<Workspace> {
     let ws: IDBDatabase;
     try { ws = await openWorkspaceDb(opts.name); } catch (e) { throw new WorkspaceError("storage", `this browser's storage can't be opened: ${(e as Error)?.message ?? e}`); }
     const main = await openMainDb(opts.mainName ?? "sagebrush");
@@ -98,7 +106,7 @@ export class Workspace {
       st.put(fresh, "device");
       return fresh;
     });
-    return new Workspace(ws, main, device, opts.limits ?? LIMITS);
+    return new Workspace(ws, main, device, opts.limits ?? LIMITS, opts.now);
   }
 
   close() {
@@ -192,7 +200,10 @@ export class Workspace {
       } else if (e.kind === "file") {
         const b = bytesOf(content);
         if (b.length > this.limits.maxFileBytes) throw new WorkspaceError("limit", `a file is at most ${this.limits.maxFileBytes} bytes`);
-        if (opts.base !== undefined && (e.rev ?? 0) !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, await this.contents(e));
+        const old = await this.contents(e);
+        if (opts.base !== undefined && (e.rev ?? 0) !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, old);
+        // (the bytes it had, kept as a version first: a write that can't keep them doesn't happen)
+        if (old !== undefined) await this.keepVersion(e, old);
         await this.mainTx("files", "readwrite", (st) => st.put(b, e.ref!));
         rev = (e.rev ?? 0) + 1;
         size = b.length;
@@ -201,7 +212,7 @@ export class Workspace {
       const entry = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         if (!cur || cur.ref !== e.ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
-        const next: Entry = { ...cur, updated: t, ...(e.kind === "file" ? { rev, size } : {}) };
+        const next: Entry = { ...cur, updated: t, ...(e.kind === "file" ? { rev, size, fid: cur.fid ?? e.fid } : {}) };
         delete next.missing;
         st.put(next);
         this.log(tx, ops, { op: "write", path: e.path, kind: e.kind });
@@ -291,7 +302,61 @@ export class Workspace {
     return inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(after, true))));
   }
 
+  /** A data file's kept versions, oldest first (§2.5); `version(p, i)` reads one's bytes.  (Notebooks' and boards' TimeTravel comes with the pages, step 1b.) */
+  async history(p: string): Promise<Version[]> {
+    const e = await this.mustStat(p);
+    if (e.kind !== "file") throw new WorkspaceError("invalid", "history() is for data files here; a document's is its TimeTravel");
+    if (!e.fid) return [];
+    return inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").index("byFile").getAll(IDBKeyRange.bound([e.fid, -Infinity], [e.fid, Infinity]))));
+  }
+
+  /** The bytes of a data file's version `i` (an index into history()). */
+  async version(p: string, i: number): Promise<Uint8Array> {
+    const v = (await this.history(p))[i];
+    if (!v) throw new WorkspaceError("missing", `${path(p)} has no version ${i}`);
+    const b = await inTx(this.ws, "versionBytes", "readonly", (tx) => req(tx.objectStore("versionBytes").get(v.id!)));
+    if (b === undefined) throw new WorkspaceError("missing", `the bytes of that version are gone`);
+    return b;
+  }
+
   // ------------------------------------------------------------ inside
+
+  /** `bytes`, what the data file `e` had, kept as its version (§2.5), and
+   * the oldest versions dropped past the bounds (never this one): the
+   * file's latest maxVersions, none older than maxVersionAgeMs, all of them
+   * within maxVersionBytes.  Bytes that can't be kept are an error. */
+  async keepVersion(e: Entry, bytes: Uint8Array) {
+    const fid = e.fid;
+    if (!fid) return;
+    if (bytes.length > this.limits.maxVersionBytes) throw new WorkspaceError("limit", `${e.path}'s present bytes are too large to keep as a version, so it isn't written over`);
+    const t = this.now(), sha256 = await bytesHash(bytes);
+    try {
+      await inTx(this.ws, ["versions", "versionBytes", "meta"], "readwrite", async (tx) => {
+        const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+        const id = (await req(vs.add({ fid, t, size: bytes.length, sha256, by: this.actor, device: this.device } satisfies Version))) as number;
+        vb.put(bytes, id);
+        let total = ((await req(meta.get("versionBytes"))) as number | undefined ?? 0) + bytes.length;
+        const drop = (v: Version) => { vs.delete(v.id!); vb.delete(v.id!); total -= v.size; };
+        // (this file's: past the count or the age)
+        const mine: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
+        mine.forEach((v, i) => { if (v.id !== id && (i < mine.length - this.limits.maxVersions || v.t < t - this.limits.maxVersionAgeMs)) drop(v); });
+        // (everyone's, oldest first, past the bytes)
+        if (total > this.limits.maxVersionBytes) {
+          const gone = new Set(mine.filter((v) => v.id !== id && (mine.indexOf(v) < mine.length - this.limits.maxVersions || v.t < t - this.limits.maxVersionAgeMs)).map((v) => v.id));
+          const old: Version[] = await req(vs.index("byTime").getAll());
+          for (const v of old) {
+            if (total <= this.limits.maxVersionBytes) break;
+            if (v.id === id || gone.has(v.id)) continue;
+            drop(v);
+          }
+        }
+        meta.put(Math.max(0, total), "versionBytes");
+      });
+    } catch (err) {
+      if (err instanceof WorkspaceError) throw err;
+      throw new WorkspaceError("storage", `${e.path}'s present bytes couldn't be kept as a version (${(err as Error)?.name ?? err}), so it isn't written over`);
+    }
+  }
 
   /** `f` holding the workspace's lock: one change at a time in all of this browser's tabs. */
   locked<T>(f: () => Promise<T>): Promise<T> {
@@ -374,7 +439,7 @@ export class Workspace {
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
         await this.folders(tx, parentOf(q), ops);
         await this.room(st, 1);
-        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(size !== undefined ? { size, rev: 0 } : {}), ...(origin ? { origin } : {}) };
+        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid: hex(8) } : {}), ...(origin ? { origin } : {}) };
         st.put(e);
         this.log(tx, ops, { op: "create", path: q, kind });
         return e;
@@ -400,7 +465,7 @@ export class Workspace {
       await this.folders(tx, folder, ops);
       await this.room(st, 1);
       const t = this.now();
-      const e: Entry = { created: t, updated: t, ...fields, path: p };
+      const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), path: p };
       st.put(e);
       this.log(tx, ops, { op: "adopt", path: p, kind: e.kind });
       return e;
@@ -431,8 +496,8 @@ export class Workspace {
     if ((await req(st.count())) + n > this.limits.maxEntries) throw new WorkspaceError("limit", `a workspace holds at most ${this.limits.maxEntries} entries`);
   }
 
-  private log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device">) {
-    const rec: Op = { ...op, t: this.now(), device: this.device };
+  private log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">) {
+    const rec: Op = { ...op, t: this.now(), device: this.device, by: this.actor };
     tx.objectStore("ops").add(rec);
     ops.push(rec);
   }

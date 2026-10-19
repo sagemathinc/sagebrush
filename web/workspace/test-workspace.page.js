@@ -284,8 +284,52 @@ async function migrationFull() {
   w.close();
 }
 
+async function versions() {
+  let clock = 1_000_000;
+  n++;
+  localStorage.clear();
+  const open = (limits) => W.Workspace.open({ name: `ws-test-${n}`, mainName: `main-test-${n}`, now: () => clock, ...(limits ? { limits } : {}) });
+  const w = await open();
+  await w.create("/v.txt", { content: "v1" });
+  clock += 10; await w.write("/v.txt", "v2");
+  clock += 10; await w.write("/v.txt", "v3");
+  let h = await w.history("/v.txt");
+  check(h.length === 2 && dec(await w.version("/v.txt", 0)) === "v1" && dec(await w.version("/v.txt", 1)) === "v2", "each overwrite keeps what the file had, oldest first");
+  check(h.every((v) => v.by === "person" && v.size === 2 && /^[0-9a-f]{64}$/.test(v.sha256)), "a version says who, how big, and its SHA-256");
+  w.actor = "agent:helper";
+  clock += 10; await w.write("/v.txt", "v4");
+  h = await w.history("/v.txt");
+  check(h.at(-1).by === "agent:helper" && (await w.ops()).at(-1).by === "agent:helper", "an agent's write is credited to it, in the version and the log");
+  w.actor = "person";
+  await w.rename("/v.txt", "/renamed.txt");
+  check((await w.history("/renamed.txt")).length === 3, "a renamed file keeps its versions");
+  await w.remove("/renamed.txt");
+  await w.restore("/Trash/renamed.txt");
+  check((await w.history("/renamed.txt")).length === 3, "…and through Trash and back");
+  const nb = await w.create("/n.ipynb");
+  check(await fails(w.history(nb.path), "invalid"), "a document's history is its TimeTravel, not this");
+  w.close();
+  // the bounds: a file's latest N; none older than the age; all within the bytes
+  const w2 = await open({ ...W.LIMITS, maxVersions: 2, maxVersionAgeMs: 1000, maxVersionBytes: 9 });
+  await w2.create("/a.txt", { content: "a1" });
+  for (const x of ["a2", "a3", "a4"]) { clock += 10; await w2.write("/a.txt", x); }
+  const ha = await w2.history("/a.txt");
+  check(ha.length === 2 && dec(await w2.version("/a.txt", 0)) === "a2" && dec(await w2.version("/a.txt", 1)) === "a3", "a file keeps its latest versions: " + ha.length);
+  clock += 5000; await w2.write("/a.txt", "a5");
+  check((await w2.history("/a.txt")).length === 1, "versions past the age go (the one just kept stays)");
+  await w2.create("/b.txt", { content: "bbbb" });
+  clock += 10; await w2.write("/b.txt", "BBBB");
+  clock += 10; await w2.write("/b.txt", "cccc");
+  const total = (await w2.history("/a.txt")).reduce((s, v) => s + v.size, 0) + (await w2.history("/b.txt")).reduce((s, v) => s + v.size, 0);
+  check(total <= 9 && (await w2.history("/b.txt")).length >= 1, "all versions together stay within their bytes, oldest dropped first: " + total);
+  await w2.create("/big.txt", { content: "0123456789" });
+  check(await fails(w2.write("/big.txt", "x"), "limit"), "a file whose present bytes can't be kept as a version isn't written over");
+  check(dec((await w2.read("/big.txt")).content) === "0123456789", "…it keeps them");
+  w2.close();
+}
+
 export async function run() {
-  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, migration, migrationFull]) {
+  for (const t of [paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationFull]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
