@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read # verify the tagged commit's full CI before publishing
   contents: write # GitHub release assets
   id-token: write # npm trusted publishing and provenance
 
@@ -28,22 +29,27 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          cache: pnpm
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - uses: oven-sh/setup-bun@v2
-      # The conformance oracle is CPython 3.14 itself, as in ci.yml; the
-      # runner's own python3 is older and evaluates annotations eagerly.
+      # The Jupyter release smoke test uses Python 3.14, as in CI.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - name: npm with trusted publishing (needs npm >= 11.5)
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
-      - name: SciPy (the reference for scipy.io's MATLAB files in test/data.test.ts)
-        run: python3 -m pip install scipy
+      - name: require green full CI for the tagged commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and .event == "push" and .head_branch == "master")] | length')
+          [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - run: pnpm run build
-      - run: node --test 'dist/test/*.test.js' 'target/*.test.js'
       - name: versions match the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
