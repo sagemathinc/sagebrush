@@ -111,7 +111,16 @@ jobs:
         run: |
           s3() { aws s3 "$@" --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" --only-show-errors; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then dest="releases/$GITHUB_REF_NAME"; else dest="dev/$GITHUB_SHA"; fi
-          s3 cp release/ "s3://sagebrush-releases/$dest/" --recursive
+          # (a rerun of a tag never replaces binaries already published for it)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && curl -fsS -o /dev/null "https://get.sagebrush.space/$dest/SHA256SUMS"; then
+            echo "$dest is already uploaded; keeping it, and the GitHub release gets those same files"
+            rm -rf release && mkdir release
+            curl -fsS -o release/SHA256SUMS "https://get.sagebrush.space/$dest/SHA256SUMS"
+            for f in $(awk '{print $2}' release/SHA256SUMS); do curl -fsS -o "release/$f" "https://get.sagebrush.space/$dest/$f"; done
+            (cd release && sha256sum -c --quiet SHA256SUMS)
+          else
+            s3 cp release/ "s3://sagebrush-releases/$dest/" --recursive
+          fi
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             printf '%s\n' "$GITHUB_REF_NAME" > latest
             s3 cp latest s3://sagebrush-releases/latest --content-type text/plain --cache-control "max-age=60"
@@ -125,8 +134,24 @@ jobs:
           # sagebrush-web: the committed engine and a fresh pyparse, smoke-tested
           node cdn/build.mjs
           node cdn/smoke.mjs
-          (cd packages/sagebrush && npm publish --provenance --access public)
-          (cd cdn && npm publish --provenance --access public)
+          # (a rerun publishes only versions npm doesn't have yet. A version npm
+          # is still holding, in its automated review or staged for approval,
+          # can't be published over: npm answers E409 "previously staged
+          # version"; that counts as published, with a warning)
+          pub() {
+            local out
+            if out=$(npm publish --provenance --access public 2>&1); then echo "$out"; return 0; fi
+            echo "$out"
+            if grep -q "Cannot publish over previously staged version" <<<"$out"; then
+              echo "::warning title=npm held::$1 is held by npm (review or staging), not yet visible"
+              return 0
+            fi
+            return 1
+          }
+          for d in packages/sagebrush cdn; do
+            n=$(node -p "require('./$d/package.json').name"); v=$(node -p "require('./$d/package.json').version")
+            if npm view "$n@$v" version >/dev/null 2>&1; then echo "$n $v is published already"; else (cd $d && pub "$n@$v"); fi
+          done
           # the board package, after sagebrush (it pairs with that CLI); its
           # version is its own, so a tag that doesn't change it publishes nothing
           cd packages/sagebrush-board
@@ -135,10 +160,13 @@ jobs:
             echo "@sagemathinc/sagebrush-board $bv is published already"
           else
             bun build.mjs
-            npm publish --provenance --access public
+            pub "@sagemathinc/sagebrush-board@$bv"
           fi
       - name: GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then echo "release $GITHUB_REF_NAME exists"; else
+            gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes
+          fi
