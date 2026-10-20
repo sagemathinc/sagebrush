@@ -16,7 +16,7 @@
 // - costs against an 8 MiB board: a small edit and a remote change, the
 //   adversarial merge (was "A", the field near 8 MiB), and the indexes of
 //   the densest board the caps allow.
-import { editState, recordProblems, mergeText, mergeValue, EDIT_LIMITS } from "./edit-state.ts";
+import { editState, recordProblems, mergeText, mergeValue, EDIT_LIMITS, sharedPreviewBudget } from "./edit-state.ts";
 
 const fails = [];
 let checks = 0;
@@ -359,18 +359,28 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
 {
   const st = editState(board({ nodes: [{ id: "a", text: "A" }] }));
   const m = (t) => edit([{ op: "set", key: K("item", "", "a"), fields: { text: t }, was: { text: "A" } }]);
-  // (the rate: previews have their own, as apply's: 20 at one instant, then busy (daybreak2's LIMIT-74B-1);
-  // apply's burst of 20 untouched by them)
+  // (the rate: previews have a meter of their own, twice apply's: 40 at once, then refused unworked,
+  // previewThrottled (daybreak2's LIMIT-74B-1, astra's CORR-722-1); apply's burst of 20 untouched by them)
   let pv = 0, pvLast;
   for (let i = 0; i < 50; i++) { pvLast = st.preview(m("P" + i), 5_000_000); if (pvLast.ok) pv++; }
   let n = 0, last;
   for (let i = 0; i < 25; i++) { last = st.apply(m("Q" + i), 5_000_000); if (last.ok) n++; else break; }
-  check(pv === 20 && pvLast.reason === "busy" && pvLast.retryAfter > 0 && n === 20 && last.reason === "busy" && last.retryAfter > 0, `previews metered by their own rate (20 of 50, then busy), apply's burst of 20 untouched by them (${pv}, ${n}, ${JSON.stringify(last)})`);
-  // (their work too: previews of an edit over a 3 MiB record, ~10 within 32 MiB, each saying what it cost)
+  check(pv === 40 && pvLast.reason === "busy" && pvLast.previewThrottled === true && pvLast.retryAfter > 0 && n === 20 && last.reason === "busy" && !last.previewThrottled && last.retryAfter > 0, `previews metered by their own rate (40 of 50, then throttled), apply's burst of 20 untouched by them (${pv}, ${n}, ${JSON.stringify(last)})`);
+  // (their work too: previews of an edit over a 3 MiB record, ~21 within 64 MiB, each saying what it cost)
   const w = editState(board({ nodes: [{ id: "a", text: "x".repeat(3 * 2 ** 20) }] }));
   let k = 0, wl;
-  for (let i = 0; i < 20; i++) { wl = w.preview(edit([{ op: "set", key: K("item", "", "a"), fields: { pos: i }, was: { pos: null } }]), 7_000_000 + i); if (wl.ok) { k++; if (!(wl.workBytes > 3 * 2 ** 20)) k = -99; } else break; }
-  check(k >= 9 && k <= 11 && wl.reason === "busy", `previews metered by their own work budget, each saying its workBytes (${k} within 32 MiB, then ${JSON.stringify({ reason: wl.reason, workBytes: wl.workBytes })})`);
+  for (let i = 0; i < 40; i++) { wl = w.preview(edit([{ op: "set", key: K("item", "", "a"), fields: { pos: i }, was: { pos: null } }]), 7_000_000 + i); if (wl.ok) { k++; if (!(wl.workBytes > 3 * 2 ** 20)) k = -99; } else break; }
+  check(k >= 19 && k <= 22 && wl.previewThrottled === true, `previews metered by their own work, each saying its workBytes (${k} within 64 MiB, then ${JSON.stringify({ reason: wl.reason, previewThrottled: wl.previewThrottled })})`);
+  // (otherwise a preview predicts apply, against apply's own budgets as they are: astra's CORR-722-1)
+  {
+    const fresh = () => editState(board({ nodes: [{ id: "a", text: "A" }] }));
+    const s1 = fresh(); for (let i = 0; i < 20; i++) s1.apply(m("A" + i), 0);
+    const p1 = s1.preview(m("after-apply"), 0), a1 = s1.apply(m("after-apply-2"), 0);
+    const s2 = fresh(); for (let i = 0; i < 20; i++) s2.preview(m("pv" + i), 0);
+    const p2 = s2.preview(m("after-preview"), 0), a2 = s2.apply(m("after-preview-2"), 0);
+    check(!p1.ok && p1.reason === "busy" && !p1.previewThrottled && p1.retryAfter === a1.retryAfter && !a1.ok, "after 20 applies: preview predicts apply's busy, retryAfter and all: " + JSON.stringify([p1, a1]));
+    check(p2.ok && a2.ok, "after 20 previews alone: preview and apply both take it: " + JSON.stringify([p2.ok || p2.message, a2.ok || a2.message]));
+  }
   // (an id previewed isn't answered: apply takes it; an id applied is answered: preview says so too)
   const one = m("Z");
   const p1 = st.preview(one, 9_000_000), a1 = st.apply(one, 9_000_000), p2 = st.preview(one, 9_000_000);
@@ -389,16 +399,87 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   const big = st.apply(edit([{ op: "set", key: K("item", "", "a"), fields: { text: "x".repeat(EDIT_LIMITS.boardBytes) }, was: { text: "A" } }]), (clock += 1000));
   const many = st.apply(edit(Array.from({ length: EDIT_LIMITS.changes + 1 }, (_, i) => ({ op: "set", key: K("item", "", "n" + i), fields: { parent: "", pos: i }, create: true }))), (clock += 1000));
   const bad = st.apply(edit([{ op: "delete", key: K("doc", "", ""), was: {} }]), (clock += 1000));
-  check(!big.ok && big.reason === "too-large", "a message past the bound: too-large: " + JSON.stringify({ ...big, message: big.message.slice(0, 80) }));
-  check(!many.ok && many.reason === "too-large" && many.limit === EDIT_LIMITS.changes && many.size === EDIT_LIMITS.changes + 1, "more changes than the bound: too-large, with limit and size: " + JSON.stringify(many));
+  check(!big.ok && big.reason === "too-large" && big.what === "edit" && big.limit === EDIT_LIMITS.messageBytes && big.size > big.limit, "a message past the bound: too-large, what edit, limit and size in bytes: " + JSON.stringify({ ...big, message: big.message.slice(0, 80) }));
+  check(!many.ok && many.reason === "too-large" && many.what === "changes" && many.limit === EDIT_LIMITS.changes && many.size === EDIT_LIMITS.changes + 1, "more changes than the bound: too-large, what changes, with limit and size: " + JSON.stringify(many));
+  // (every other bound typed too: values, work, the board's bytes, its records)
+  const vals = st.apply({ ...edit([]), changes: [{ op: "set", key: K("item", "", "a"), fields: { v: Array.from({ length: 200_001 }, () => 0) }, was: { v: null } }] }, (clock += 1000));
+  check(!vals.ok && vals.reason === "too-large" && vals.what === "values" && vals.limit === 200_000 && vals.size > 200_000, "too many values: too-large, what values: " + JSON.stringify({ ...vals, message: vals.message }));
+  const huge = editState(board({ nodes: [{ id: "a", text: "x".repeat(EDIT_LIMITS.boardBytes - 2 ** 19) }] }));
+  const grow = huge.apply(edit([{ op: "set", key: K("item", "", "b"), fields: { text: "y".repeat(2 ** 19 + 4096), parent: "", pos: 1 }, create: true }]), (clock += 1000));
+  check(!grow.ok && grow.reason === "too-large" && grow.what === "board" && grow.limit === EDIT_LIMITS.boardBytes && grow.size > grow.limit, "past the board's bytes: too-large, what board: " + JSON.stringify({ ...grow, message: grow.message }));
+  for (const r of [big, many, vals, grow]) check(typeof r.limit === "number" && typeof r.size === "number" && typeof r.what === "string", "every too-large has what, limit and size: " + r.what);
   check(!bad.ok && bad.reason === "invalid" && !bad.retryAfter, "a failed check: invalid: " + JSON.stringify(bad));
+}
+
+// ---------------------------------------------------------------- one preview budget for a host's every board
+{
+  const budget = sharedPreviewBudget();
+  const a = editState(board({ nodes: [{ id: "a", text: "A" }] }), { previewBudget: budget }), b = editState(board({ nodes: [{ id: "a", text: "A" }] }), { previewBudget: budget });
+  const m = (t) => edit([{ op: "set", key: K("item", "", "a"), fields: { text: t }, was: { text: "A" } }]);
+  let n = 0, last;
+  for (let i = 0; i < 30; i++) { last = (i % 2 ? a : b).preview(m("P" + i), 8_000_000); if (last.ok) n++; }
+  const own = editState(board({ nodes: [{ id: "a", text: "A" }] }));
+  let o = 0;
+  for (let i = 0; i < 30; i++) if (own.preview(m("O" + i), 8_000_000).ok) o++;
+  check(n === 20 && last.reason === "busy" && last.previewThrottled === true && o === 30, `a shared preview budget bounds two boards' previews together (${n} of 30), a board without one its own, of 40 (${o} of 30)`);
+  const small = sharedPreviewBudget({ editBurst: 3 }), c = editState(board({ nodes: [{ id: "a", text: "A" }] }), { previewBudget: small });
+  let k = 0;
+  for (let i = 0; i < 10; i++) if (c.preview(m("S" + i), 8_000_000).ok) k++;
+  check(k === 3, `a shared budget's limits are the host's (${k} of a burst of 3)`);
+}
+
+// ---------------------------------------------------------------- pictures by reference: shapes, names, sources, authorization (astra's CORR-74B-2/3)
+{
+  const H = "i" + "a".repeat(32), H2 = "i" + "b".repeat(32), png = "data:image/png;base64,iVBORw0KGgo=";
+  // (the host's word given for every name but H, so that each case below is refused by its own rule alone)
+  const allowed = new Set([H2, "i" + "b".repeat(16), "i" + "B".repeat(32), H2 + "b"]);
+  const mk = () => editState(board({ nodes: [{ id: "a", text: "" }] }), { pictures: "by-reference", pictureAllowed: (n) => allowed.has(n) });
+  const pic = (images) => edit([{ op: "set", key: K("doc", "", ""), fields: { images }, was: { images: null } }]);
+  const both = (images) => { const s1 = mk(), m = pic(images), p = s1.preview(m, 1), a = s1.apply(m, 1); return { p, a, kept: s1.board().images }; };
+  const cases = [
+    ["a 16-digit name", { ["i" + "b".repeat(16)]: { w: 1, h: 1 } }, false],
+    ["an uppercase name", { ["i" + "B".repeat(32)]: { w: 1, h: 1 } }, false],
+    ["33 digits", { [H2 + "b"]: { w: 1, h: 1 } }, false],
+    ["an array as the map", [{ [H2]: { w: 1, h: 1, src: png } }], false],
+    ["a string as the map", "x", false],
+    ["an array as an entry", { [H2]: [{ w: 1, h: 1, src: png }] }, false],
+    ["a number as an entry", { [H2]: 1 }, false],
+    ["an entry without its size", { [H2]: {} }, false],
+    ["an entry with another field", { [H2]: { w: 1, h: 1, data: png } }, false],
+    ["a data: source", { [H2]: { w: 1, h: 1, src: png } }, false],
+    ["a blob: source", { [H2]: { w: 1, h: 1, src: "blob:https://x.org/1" } }, false],
+    ["a javascript: source", { [H2]: { w: 1, h: 1, src: "javascript:alert(1)" } }, false],
+    ["a relative source", { [H2]: { w: 1, h: 1, src: "/p.png" } }, false],
+    ["https:// with no host", { [H2]: { w: 1, h: 1, src: "https://" } }, false],
+    ["an http: source", { [H2]: { w: 1, h: 1, src: "http://example.org/p.png" } }, false],
+    ["an https: address", { [H2]: { w: 1, h: 1, src: "https://example.org/p.png" } }, true],
+    ["HTTPS: in capitals", { [H2]: { w: 1, h: 1, src: "HTTPS://example.org/p.png" } }, true],
+    ["its size alone", { [H2]: { w: 2, h: 3 } }, true],
+    // (a known hash the host keeps for another document, never put on this channel nor on this board: refused)
+    ["another board's picture, never put here", { [H]: { w: 1, h: 1 } }, false],
+  ];
+  for (const [label, images, ok] of cases) {
+    const { p, a, kept } = both(images);
+    check(p.ok === ok && a.ok === ok && (ok || (p.reason === "invalid" && a.reason === "invalid" && kept === undefined)), `by reference, ${label}: ${ok ? "taken" : "refused, invalid, nothing kept"} at preview and apply: ` + JSON.stringify({ p: p.ok || p.message, a: a.ok || a.message, kept }));
+  }
+  // (put on this channel, verified: the host's word changes, and the same edit is taken)
+  allowed.add(H);
+  const after = both({ [H]: { w: 1, h: 1 } });
+  check(after.p.ok && after.a.ok, "…once put and verified on this channel: taken");
+  // (no host word at all: no new picture)
+  const bare = editState(board({ nodes: [{ id: "a" }] }), { pictures: "by-reference" }).apply(pic({ [H2]: { w: 1, h: 1 } }), 1);
+  check(!bare.ok && bare.reason === "invalid", "by reference, no pictureAllowed: no new picture taken: " + bare.message);
+  // (a picture the board names already needs no word; removing pictures needs none)
+  const had = editState(board({ images: { [H]: { w: 1, h: 1 } }, nodes: [{ id: "a", image: H }] }), { pictures: "by-reference", pictureAllowed: () => false });
+  const resize = had.apply(edit([{ op: "set", key: K("doc", "", ""), fields: { images: { [H]: { w: 2, h: 2 } } }, was: { images: { [H]: { w: 1, h: 1 } } } }]), 1);
+  check(resize.ok, "by reference: a picture the board names already, resized, without the host's word: taken: " + (resize.ok || resize.message));
 }
 
 // ---------------------------------------------------------------- pictures sent by reference
 {
   const name = "i" + "0123456789abcdef".repeat(2), png = "data:image/png;base64,iVBORw0KGgo=";
   const posted = board({ images: { [name]: { w: 1, h: 1 } }, nodes: [{ id: "a", image: name }] });
-  const ref = editState(posted, { pictures: "by-reference" }), inline = editState(posted);
+  const ref = editState(posted, { pictures: "by-reference", pictureAllowed: () => true }), inline = editState(posted);
   const setImages = (images, was) => edit([{ op: "set", key: K("doc", "", ""), fields: { images }, was: { images: was } }]);
   const add = (st, v, n = "i" + "fedcba9876543210".repeat(2)) => st.apply(setImages({ [name]: { w: 1, h: 1 }, [n]: v }, { [name]: { w: 1, h: 1 } }), (clock += 1000));
   const r1 = add(ref, { w: 2, h: 2, src: png }), r2 = add(ref, { w: 2, h: 2, src: "javascript:alert(1)" }), r3 = add(ref, { w: 2, h: 2 }, "not-a-hash"), r4 = add(ref, { w: 2, h: 2, src: "https://example.org/p.png" }), r5 = add(ref, { w: 3, h: 3 });
