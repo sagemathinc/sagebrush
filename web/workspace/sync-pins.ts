@@ -49,7 +49,7 @@ export const PINS = {
 /** The stores a local change's transaction takes for this, besides its own. */
 export const SYNC_STORES = ["pending", "pins", "meta"];
 /** The stores release needs: a pin kept apart has a version, an orphan has bytes, an owner has its pending record. */
-export const RELEASE_STORES = ["pending", "pins", "meta", "versions", "entries", "fileBytes"];
+export const RELEASE_STORES = ["pending", "pins", "meta", "versions", "prunable", "entries", "fileBytes"];
 
 type Storage = { fileBytes: string } | { version: number };
 export type Pin = { id: string; seq: number; path: string; sha256: string; size: number; epoch: number; storage: Storage; skey: string; orphan?: boolean; owner?: { ns: string; dseq: number } };
@@ -222,7 +222,7 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
   const left = await refs(pins, p.storage);
   if ("version" in p.storage) {
     const vs = tx.objectStore("versions"), v = (await req(vs.get(p.storage.version))) as Version | undefined;
-    if (v?.pinned && left === 0) vs.put(unpinned(v));
+    if (v?.pinned && left === 0) unpin(tx, v);
   } else if (p.orphan && left === 0) {
     // (orphaned bytes go with the last reference to them: no pin naming them, no entry (from step 4, no journal
     // record either))
@@ -238,11 +238,14 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
   if (p.owner || skipped) await noteSkipped(meta, p.path);
 }
 
-/** `v` no longer kept for sync: exempt no more, back in the prunable indexes (db.ts, version 5). */
-export function unpinned(v: Version): Version {
+/** `v` no longer kept for sync, in `tx`: exempt no more, and prunable (db.ts, version 5): two writes. */
+export function unpin(tx: IDBTransaction, v: Version) {
   const { pinned: _p, ...rest } = v;
-  return { ...rest, free: v.fid, u: 1 };
+  tx.objectStore("versions").put(rest);
+  tx.objectStore("prunable").put(prunableOf(v));
 }
+/** The prunable record of version `v`. */
+export const prunableOf = (v: Version) => ({ fid: v.fid, id: v.id!, t: v.t, size: v.size });
 
 /** Bytes not uploaded, noted for the Sync panel: "some intermediate versions weren't uploaded", with the file. */
 export async function noteSkipped(meta: IDBObjectStore, path: string) {
@@ -275,7 +278,7 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
     if ("version" in p.storage) {
       // (one pin per storage: its version no longer exempt)
       const v = (await req(vs.get(p.storage.version))) as Version | undefined;
-      if (v?.pinned) vs.put(unpinned(v));
+      if (v?.pinned) unpin(tx, v);
     } else await dropCurrent(meta, p);
   }
   if (freed) setTotal(meta, (await pinTotal(meta)) - freed);
@@ -303,10 +306,14 @@ export async function newEpoch(meta: IDBObjectStore) {
   meta.put({ epoch: e } satisfies Purge, "sync:purge");
 }
 
+/** meta: a file whose versions a save left past the count or the age, for the cleanup; versions past the bytes;
+ * the versions kept before database v5 not yet made prunable (db.ts), from the last id done */
+export const VDUE = "versions:due:", VOVER = "versions:over", BACKFILL = "versions:backfill";
+
 /** The most requests one release makes (release, above): the pin's delete; the total's read and write; the
- * pointer's read and delete; the storage count; a version's read and write, or an orphan's entry count and two
- * deletes; an owner's pending read and write; the skipped note's read and write. */
-export const RELEASE_COST = 13;
+ * pointer's read and delete; the storage count; a version's read and two writes, or an orphan's entry count and
+ * two deletes; an owner's pending read and write; the skipped note's read and write. */
+export const RELEASE_COST = 14;
 /** The most requests one orphan marker costs the sweep: the storage count, the entry count, two deletes. */
 const SWEEP_COST = 4;
 type Tag = { ns: string; epoch: number };
@@ -348,6 +355,23 @@ async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
     let left = PINS.slice.requests;
     const spend = (c: number) => { left -= c; };
     const fits = (c: number) => left >= c;
+    // (0) the versions kept before database v5 made prunable, from the last id done: a page, each one not pinned
+    // put in the prunable store (one request each; a put, so one there already is the same after); at the end,
+    // the bytes bound checked again, since until now the oldest weren't candidates (daybreak2's LIMIT-563-2).
+    // Saves go on meanwhile: a version not yet there is in no prunable record, so kept
+    spend(3);
+    const bf = (await req(meta.get(BACKFILL))) as { after: number } | undefined;
+    if (bf) {
+      const vs = tx.objectStore("versions"), pr = tx.objectStore("prunable"), want = Math.min(n, left - 2);
+      const list = (await req(vs.getAll(IDBKeyRange.lowerBound(bf.after, true), want))) as Version[];
+      for (const v of list) if (!v.pinned) { pr.put(prunableOf(v)); spend(1); }
+      if (list.length === want) meta.put({ after: list[want - 1].id! }, BACKFILL);
+      else {
+        meta.delete(BACKFILL);
+        if ((((await req(meta.get("versionBytes"))) as number | undefined) ?? 0) > w.limits.maxVersionBytes) meta.put(1, VOVER);
+      }
+      return true;
+    }
     // (1) the purge: its read, the page, the cursor's write; each pin begun only while its release fits
     spend(3);
     const purge = (await req(meta.get("sync:purge"))) as Purge | undefined;
