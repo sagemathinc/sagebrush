@@ -168,8 +168,12 @@ export interface Op {
   sha256?: string;
   size?: number;
   base?: string;
+  /** The fid of the folder this op puts something in (§3): a hint for the reducer, never checked here. */
+  parent?: string;
 }
-const OP_FIELDS = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base"] as const;
+const OP_FIELDS = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
+/** The ops that put something in a folder, and so may name it by `parent`: on rename and duplicate, the destination's. */
+const PLACES = new Set<string>(["create", "mkdir", "adopt", "write", "rename", "duplicate", "restore"]);
 
 /** One op, checked: its shape, its paths, and the identity its kind needs. */
 export function checkOp(v: unknown): Op {
@@ -197,6 +201,11 @@ export function checkOp(v: unknown): Op {
   if (has(o, "base")) {
     if (!isSha(o.base)) throw invalid("op: base");
     op.base = o.base;
+  }
+  if (has(o, "parent")) {
+    if (!isFid(o.parent)) throw invalid("op: parent is a folder's fid, 16 hex");
+    if (!PLACES.has(op.op)) throw invalid("op: parent is for an op that puts something in a folder");
+    op.parent = o.parent;
   }
   if (has(o, "size")) {
     if (!isNat(o.size)) throw invalid("op: size");
