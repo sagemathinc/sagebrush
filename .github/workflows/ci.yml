@@ -243,6 +243,8 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-detect.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-9d7.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-c05.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-896.mjs
+          bun web/notebook/test-json-text.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
