@@ -2627,6 +2627,26 @@ async function durabilityLockOrder() {
     const prx = (await rawGet(db, "history", [e.ref, "prx"]))?.env;
     check(tookProxy && gets === 0 && prx?.id === "prx", "a Proxy: what is written is the copy of what was measured, its get trap never run: " + JSON.stringify({ tookProxy, gets, prx }));
     check(took.every((t) => t === false) && polluted === false && ran === 0 && rows.filter((r) => r !== "prx").length === 0 && S.historyBacklog().entries === 0, "hooks: an own toJSON (not enumerable), an inherited one, a getter, a changing getter, a toJSON on Object.prototype: each refused, no hook run, nothing kept: " + JSON.stringify({ took, polluted, ran, rows }));
+    // (one bounded walk (daybreak2's LIMIT-896-1): an envelope past the cap is refused as soon as its text passes
+    // it, said as too large, never walked further to choose the words: a wide one (its text past the cap a third
+    // of the way in) and one of ten million elements (past it by its length alone)
+    said.length = 0;
+    const wideOver = Array.from({ length: 2_000_000 }, () => ""), longOver = new Array(10_000_000).fill(0);
+    const tw = performance.now(), tookWide = h.append({ time: "wideO", id: "w", t: wideOver }), tookLong = h.append({ time: "longO", id: "l", t: longOver }), msOver = performance.now() - tw;
+    check(tookWide === false && tookLong === false && msOver < 1000 && said.length === 2 && said.every((m) => /too large to keep in TimeTravel/.test(m)), "an envelope past the cap, wide or long: refused as soon as it passes, said as too large: " + JSON.stringify({ tookWide, tookLong, ms: Math.round(msOver), said: said.length }));
+    // (an array Proxy whose get trap throws (astra's on 89685b0c): read through descriptors alone, its length
+    // from its own "length" descriptor: copied inertly, its get trap never run, append never throwing)
+    let pgets = 0, threw = null, tookPrx2;
+    const parr = new Proxy([1], { get: () => { pgets++; throw new Error("get trap"); } });
+    try { tookPrx2 = h.append({ time: "parr", id: "parr", patch: parr }); } catch (err) { threw = String(err); }
+    await h.appending;
+    const parrKept = (await rawGet(db, "history", [e.ref, "parr"]))?.env;
+    // (a Proxy whose descriptor trap throws: refused, never thrown on)
+    let threw2 = null, tookGopd;
+    try { tookGopd = h.append(new Proxy({ time: "gopd", id: "gopd" }, { getOwnPropertyDescriptor: () => { throw new Error("descriptor trap"); } })); } catch (err) { threw2 = String(err); }
+    check(threw2 === null && tookGopd === false, "a Proxy whose descriptor trap throws: refused, nothing thrown: " + JSON.stringify({ threw2, tookGopd }));
+    check(threw === null && tookPrx2 === true && pgets === 0 && JSON.stringify(parrKept?.patch) === "[1]", "an array Proxy whose get trap throws: copied inertly, its get trap never run, nothing thrown: " + JSON.stringify({ threw, tookPrx2, pgets, parrKept }));
+    said.length = 0;
     const alone = Math.floor((S.HISTORY_BACKLOG.bytes - S.ENTRY_OVERHEAD) / 2), base = JSON.stringify({ time: "bigU", id: "big", t: "" }).length;
     const under = h.append({ time: "bigU", id: "big", t: "x".repeat(alone - base) });
     await h.appending;

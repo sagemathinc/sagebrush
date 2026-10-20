@@ -136,9 +136,7 @@ export const LOCK_WAIT = { ms: 10_000 };
 export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
 // (bytes charged for each append beside its JSON text: the queue's closure, its promise, the counters)
 export const ENTRY_OVERHEAD = 256;
-// (whether `v` would be plain JSON data at all, its size aside: to tell a refusal for size, which is said, from
-// one for its shape)
-const plainShape = (v) => inertJson(v, Infinity) !== null;
+
 // (an inert copy of `v` and the length of its JSON text, exactly, if `v` is plain JSON data whose text is at most
 // `max` characters; else null.  Plain: null, booleans, finite numbers, strings, arrays and plain objects (an
 // object's prototype Object.prototype or null); a property that is undefined too, which JSON leaves out
@@ -149,74 +147,145 @@ const plainShape = (v) => inertJson(v, Infinity) !== null;
 // once: met again on the path being walked, a cycle, refused; met again after its walk (shared, in a DAG), its
 // copy and size reused, so the walk is linear in the distinct objects and a DAG is refused before any of it is
 // written once its text would pass `max` (daybreak2's LIMIT-7865-1, astra's CORR-786-1))
+// (one walk's answer: { ok, size, snap }, or why not: too large (it stopped as soon as the text passed `max`, the
+// rest unread, so refusing costs no more than `max`: daybreak2's LIMIT-896-1), or not plain JSON data)
+const TOO_LARGE = { ok: false, reason: "too-large" }, SHAPE = { ok: false, reason: "shape" };
+// (a string as JSON text, written here rather than by JSON.stringify, so that the text and its measured length come
+// from this one code, and nothing of the page's can run while it is written (astra's CORR-C05-2): ", \\ and the
+// control characters below 0x20 escaped (\\b \\t \\n \\f \\r, else \\u00xx), a lone surrogate as \\udxxx, as
+// well-formed JSON.stringify does; everything else as it is)
+function jsonString(s) {
+  let out = '"', start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    let esc = null;
+    if (c === 0x22) esc = '\\"';
+    else if (c === 0x5c) esc = "\\\\";
+    else if (c < 0x20) esc = c === 8 ? "\\b" : c === 9 ? "\\t" : c === 10 ? "\\n" : c === 12 ? "\\f" : c === 13 ? "\\r" : "\\u" + c.toString(16).padStart(4, "0");
+    else if (c >= 0xd800 && c <= 0xdfff) {
+      if (c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { i++; continue; }
+      esc = "\\u" + c.toString(16);
+    }
+    if (esc !== null) { out += s.slice(start, i) + esc; start = i + 1; }
+  }
+  return out + s.slice(start) + '"';
+}
+// (a number as JSON text: finite only, by String, the language's own conversion, never a prototype's; -0 is "0")
+const jsonNumber = (n) => String(n);
+// (an inert copy (inertJson's: null-prototype objects, plain arrays, strings, finite numbers, booleans, null) as
+// JSON text, without recursion, by jsonString and jsonNumber: the same text inertJson measured)
+function writeJson(v) {
+  const out = [], stack = [v], RAW = Symbol("raw");
+  while (stack.length) {
+    const x = stack.pop();
+    if (x !== null && typeof x === "object" && x[RAW] !== undefined) { out.push(x[RAW]); continue; }
+    if (x === null) out.push("null");
+    else if (typeof x === "string") out.push(jsonString(x));
+    else if (typeof x === "number") out.push(jsonNumber(x));
+    else if (typeof x === "boolean") out.push(x ? "true" : "false");
+    else if (Array.isArray(x)) {
+      out.push("[");
+      stack.push({ [RAW]: "]" });
+      for (let i = x.length - 1; i >= 0; i--) { stack.push(x[i]); if (i) stack.push({ [RAW]: "," }); }
+    } else {
+      out.push("{");
+      stack.push({ [RAW]: "}" });
+      const keys = Object.keys(x);
+      for (let i = keys.length - 1; i >= 0; i--) { stack.push(x[keys[i]]); stack.push({ [RAW]: (i ? "," : "") + jsonString(keys[i]) + ":" }); }
+    }
+  }
+  return out.join("");
+}
 function inertJson(v, max) {
+  // (whatever runs while it is read (a Proxy's traps) and throws: refused, never thrown on)
+  try { return inertWalk(v, max); } catch { return SHAPE; }
+}
+function inertWalk(v, max) {
   const leaf = (x) => {
     if (x === null) return 4;
-    if (typeof x === "string") return JSON.stringify(x).length;
+    if (typeof x === "string") return jsonString(x).length;
     if (typeof x === "boolean") return x ? 4 : 5;
-    if (typeof x === "number") return Number.isFinite(x) ? String(x).length : -1;
+    if (typeof x === "number") return Number.isFinite(x) ? jsonNumber(x).length : -1;
     return typeof x === "object" ? null : -1;
   };
   const first = leaf(v);
-  if (first !== null) return first >= 0 && first <= max ? { size: first, snap: v } : null;
+  if (first !== null) return first < 0 ? SHAPE : first <= max ? { ok: true, size: first, snap: v } : TOO_LARGE;
   const done = new WeakMap(), active = new WeakSet();
-  // (a frame: the object, its entries to copy ([key, value], read from descriptors), the next, its copy, and
-  // its text's length so far; null if it can't be read inertly)
+  // (a frame: the object, read a property at a time through its descriptors, never a getter or a direct read:
+  // an array by its own "length" descriptor and its indices, an object by its own names; its copy, and its
+  // text's length so far, an array's commas and brackets counted from the start, so that one too long is refused
+  // before any of it is read: daybreak2's LIMIT-896-1, astra's on 89685b0c)
   const open = (x) => {
-    const isArray = Array.isArray(x), proto = Object.getPrototypeOf(x);
-    if (isArray ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) return null;
-    const descs = Object.getOwnPropertyDescriptors(x), entries = [];
-    for (const k of Object.getOwnPropertyNames(descs)) {
-      const d = descs[k];
-      if (d.get || d.set || typeof d.value === "function") return null;
-      if (isArray && k === "length") continue;
-      if (isArray && !/^(0|[1-9][0-9]*)$/.test(k)) return null;
-      if (!d.enumerable || (!isArray && d.value === undefined)) continue;
-      entries.push([k, d.value]);
+    if (Array.isArray(x)) {
+      if (Object.getPrototypeOf(x) !== Array.prototype || Object.getOwnPropertyDescriptor(x, "toJSON")) return SHAPE;
+      const ld = Object.getOwnPropertyDescriptor(x, "length");
+      if (!ld || !("value" in ld) || !Number.isInteger(ld.value) || ld.value < 0 || ld.value > 2 ** 32 - 1) return SHAPE;
+      const n = ld.value;
+      return { x, isArray: true, n, i: 0, copy: [], sum: 2 + Math.max(0, n - 1), least: 2 + Math.max(0, 2 * n - 1) };
     }
-    if (isArray) {
-      if (entries.length !== x.length) return null;
-      entries.sort((a, b) => a[0] - b[0]);
-    }
-    let sum = 2 + Math.max(0, entries.length - 1);
-    if (!isArray) for (const [k] of entries) sum += JSON.stringify(k).length + 1;
-    return { x, isArray, entries, i: 0, copy: isArray ? new Array(entries.length) : Object.create(null), sum };
+    const proto = Object.getPrototypeOf(x);
+    if (proto !== Object.prototype && proto !== null) return SHAPE;
+    const names = Object.getOwnPropertyNames(x);
+    return { x, isArray: false, names, n: names.length, i: 0, kept: 0, copy: Object.create(null), sum: 2, least: 2 };
   };
-  const put = (f, k, value) => { if (f.isArray) f.copy[Number(k)] = value; else Object.defineProperty(f.copy, k, { value, enumerable: true, writable: true, configurable: true }); };
+  // (the frame's next [key, value]; SKIP for a property JSON leaves out; SHAPE for one that can't be read inertly)
+  const SKIP = {};
+  const next = (f) => {
+    const k = f.isArray ? String(f.i) : f.names[f.i];
+    f.i++;
+    const d = Object.getOwnPropertyDescriptor(f.x, k);
+    if (f.isArray) {
+      if (!d || d.get || d.set || !("value" in d) || d.value === undefined || typeof d.value === "function") return SHAPE;
+      return [k, d.value];
+    }
+    if (!d || d.get || d.set || typeof d.value === "function") return SHAPE;
+    if (!d.enumerable || d.value === undefined) return SKIP;
+    f.sum += jsonString(k).length + 1 + (f.kept++ ? 1 : 0);
+    return [k, d.value];
+  };
+  const put = (f, k, value) => { if (f.isArray) f.copy.push(value); else Object.defineProperty(f.copy, k, { value, enumerable: true, writable: true, configurable: true }); };
   const root = open(v);
-  if (!root || root.sum > max) return null;
+  if (root === SHAPE) return SHAPE;
+  if (root.least > max) return TOO_LARGE;
   active.add(v);
   const stack = [root];
   while (stack.length) {
     const f = stack[stack.length - 1];
-    if (f.i === f.entries.length) {
+    if (f.i === f.n) {
       stack.pop();
       active.delete(f.x);
       done.set(f.x, f);
       if (stack.length) {
         const p = stack[stack.length - 1];
-        put(p, p.entries[p.i - 1][0], f.copy);
-        if ((p.sum += f.sum) > max) return null;
+        put(p, p.pending, f.copy);
+        if ((p.sum += f.sum) > max) return TOO_LARGE;
       }
       continue;
     }
-    const [k, c] = f.entries[f.i++];
-    if (f.isArray && c === undefined) return null;
+    const e = next(f);
+    if (e === SHAPE) return SHAPE;
+    if (e === SKIP) continue;
+    if (f.sum > max) return TOO_LARGE;
+    const [k, c] = e;
     const l = leaf(c);
-    if (l === -1) return null;
-    if (l !== null) { put(f, k, c); if ((f.sum += l) > max) return null; continue; }
-    if (active.has(c)) return null;
+    if (l === -1) return SHAPE;
+    if (l !== null) { put(f, k, c); if ((f.sum += l) > max) return TOO_LARGE; continue; }
+    if (active.has(c)) return SHAPE;
     const d = done.get(c);
-    if (d) { put(f, k, d.copy); if ((f.sum += d.sum) > max) return null; continue; }
+    if (d) { put(f, k, d.copy); if ((f.sum += d.sum) > max) return TOO_LARGE; continue; }
     const g = open(c);
-    if (!g || g.sum > max) return null;
+    if (g === SHAPE) return SHAPE;
+    if (f.sum + g.least > max) return TOO_LARGE;
+    f.pending = k;
     active.add(c);
     stack.push(g);
   }
-  return { size: root.sum, snap: root.copy };
+  return { ok: true, size: root.sum, snap: root.copy };
 }
 /** The length of `v`'s JSON text if it is plain JSON data (inertJson) of at most `max` characters, else -1: for tests. */
-export function jsonTextSize(v, max) { const r = inertJson(v, max); return r ? r.size : -1; }
+export function jsonTextSize(v, max) { const r = inertJson(v, max); return r.ok ? r.size : -1; }
+/** `v`'s JSON text as this module writes it (inertJson's copy, by writeJson), or null: for tests. */
+export function jsonText(v, max = Infinity) { const r = inertJson(v, max); return r.ok ? writeJson(r.snap) : null; }
 // (no toJSON anywhere JSON.stringify would look for one on the copy, arrays and objects alike: a page that put
 // one on Object.prototype or Array.prototype gets no history kept, rather than its hook run)
 const prototypesClean = () => !("toJSON" in Object.prototype) && !("toJSON" in Array.prototype);
@@ -226,8 +295,9 @@ const refusedSubs = new Set();
 export function onHistoryRefused(f) { refusedSubs.add(f); return () => refusedSubs.delete(f); }
 /** The appends waiting now: for tests and metrics. */
 export const historyBacklog = () => ({ ...backlog });
-export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel can't keep up: some of this document's latest history isn't kept";
-export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel: the document itself is saved, and TimeTravel goes on from its next version";
+// (a refusal pauses the document's TimeTravel until a version can be kept whole: notebook/patch-history.js)
+export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
+export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel, so TimeTravel paused for this document: it resumes from the next version that can be saved in full. The document itself is saved";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
 const BUSY_DELETE = "your files are busy (another tab is changing them)";
 // (a deadline: LOCK_WAIT from when it is made, its signal aborted then unless the lock was had first; made when a
@@ -481,19 +551,23 @@ export class IdbPatchStore {
     // as too large for TimeTravel at all, or as the files being busy)
     const alone = Math.floor((HISTORY_BACKLOG.bytes - ENTRY_OVERHEAD) / 2);
     const room = Math.floor((HISTORY_BACKLOG.bytes - backlog.bytes - ENTRY_OVERHEAD) / 2);
-    const inert = prototypesClean() ? inertJson(env, this.owned ? room : alone) : null;
-    if (!inert) {
+    // (one walk, bounded by what the backlog can take; refused too large with something waiting, a second walk,
+    // bounded by one entry's limit alone, tells "too large for TimeTravel" from "the files are busy")
+    const inert = prototypesClean() ? inertJson(env, this.owned ? room : alone) : SHAPE;
+    if (!inert.ok) {
       console.warn("history: an entry that isn't plain JSON data, or too large to wait, not kept");
-      if (prototypesClean() && plainShape(env)) {
-        const why = inertJson(env, alone) === null ? HISTORY_TOO_LARGE : HISTORY_REFUSED;
+      if (inert.reason === "too-large") {
+        const why = room >= alone || !this.owned || inertJson(env, alone).reason === "too-large" ? HISTORY_TOO_LARGE : HISTORY_REFUSED;
         for (const f of refusedSubs) try { f(why); } catch {}
       }
       return false;
     }
     // (the copy written, which no hook can change; its text as long as measured, or not kept)
-    let text;
-    try { text = JSON.stringify(inert.snap); } catch { return false; }
-    if (typeof text !== "string" || text.length !== inert.size) return false;
+    // (the copy written by this module's own writer, not JSON.stringify, so that no hook can run, whatever was put
+    // on a prototype while it was read, and the text is what was measured (astra's CORR-C05-2); the prototypes'
+    // check before the walk stays as a defence)
+    const text = writeJson(inert.snap);
+    if (text.length !== inert.size) return false;
     env = undefined;
     let size = 0;
     if (this.owned) {

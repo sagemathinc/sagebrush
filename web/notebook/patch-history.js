@@ -9,12 +9,37 @@
 import { Session, createImmerDbCodec, decodePatchId } from "patchflow";
 export { createImmerDbCodec, decodePatchId };
 
+// A patch the store refuses (too large, or too many waiting: notebook/stores.js) breaks the chain: the next patch
+// names it as a parent, and a version built on it would be wrong once the page is reloaded (astra's CORR-896-1).
+// So, the invariant: no stored patch's parents reach a refused one.  After a refusal the history is paused for
+// this document: each next version is stored only as a new root of its own (no parents; its patch the whole
+// document, from nothing), under its own id, and once one is stored, those after it chain to it as usual.  One
+// that doesn't fit is refused in turn, and the history stays paused.  The versions before the refusal stay, as
+// they were; the refused ones are never offered, here or after a reload, and the store's notice says so.
 export class PatchHistory {
   /** @param store a patchflow PatchStore, with clear(); @param codec an immer-db codec (createImmerDbCodec) */
-  constructor(store, codec) { this.store = store; this.codec = codec; this.session = null; this.listeners = new Set(); this.edits = null; }
+  constructor(store, codec) {
+    this.store = store; this.codec = codec; this.session = null; this.listeners = new Set(); this.edits = null;
+    this.refused = new Set(); this.paused = false; this.next = null;
+    // (the store as the session sees it: its append through append() below, the rest as they are)
+    this.guarded = new Proxy(store, { get: (t, k) => (k === "append" ? (env) => this.append(env) : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
+  }
+  // (a patch the session made, stored as it is, or, paused, as a new root; refused: the history paused)
+  append(env) {
+    let out = env;
+    if (this.paused) {
+      out = { ...env, parents: [], patch: this.codec.makePatch(this.codec.fromString(""), this.next ?? this.session.value({ time: env.time })) };
+      delete out.mergeParent; delete out.mergePatch; delete out.inexact;
+    }
+    const took = this.store.append(out);
+    if (took === false) { this.refused.add(env.time); this.paused = true; this.edits = null; }
+    else if (this.paused) this.paused = false;
+    return took;
+  }
   async init() {
     this.session?.close();
-    this.session = new Session({ codec: this.codec, patchStore: this.store });
+    this.refused = new Set(); this.paused = false;
+    this.session = new Session({ codec: this.codec, patchStore: this.guarded });
     await this.session.init();
     this.edits = null;
     this.session.on("change", () => { this.edits = null; this.emit(); });
@@ -29,14 +54,17 @@ export class PatchHistory {
   commit(next, meta) {
     if (!this.session || next.isEqual(this.committed())) return null;
     this.edits = null;
-    const env = meta ? this.session.commit(next, { meta }) : this.session.commit(next);
+    this.next = next;
+    let env;
+    try { env = meta ? this.session.commit(next, { meta }) : this.session.commit(next); } finally { this.next = null; }
     this.emit();
     return env;
   }
   // the patch ids that are versions (not the journal's), oldest first
   editTimes() {
     if (!this.session) return [];
-    return (this.edits ??= this.session.versions().filter((t) => !this.session.getPatch(t)?.meta?.journal));
+    // (a refused one never offered: its patch isn't kept, and a version made over it is kept as a root of its own)
+    return (this.edits ??= this.session.versions().filter((t) => !this.refused.has(t) && !this.session.getPatch(t)?.meta?.journal));
   }
   /** The versions, oldest first: {time (the patch id), ms, index}. */
   versions() {
