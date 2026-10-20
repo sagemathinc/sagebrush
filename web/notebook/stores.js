@@ -128,23 +128,28 @@ export const LOCK_WAIT = { ms: 10_000 };
 // JSON text alone and charged twice its length (UTF-16 code units, 2 bytes each) and ENTRY_OVERHEAD; parsed only at
 // its turn, one at a time in a store; one past the bounds is refused, not queued, and said to every
 // onHistoryRefused listener, so that a tab stuck holding the lock costs this page bounded memory, never more)
+// The contract (design/workspace-durability.md A.3b): the appends waiting hold at most HISTORY_BACKLOG.bytes of
+// charge (8 MiB) in at most .entries of them, unconditionally, one entry alone included: an entry larger than
+// that (its JSON text past about 4M characters, more than any board, which is at most 5 MiB) is never kept in
+// TimeTravel, said; its document is saved all the same, a separate write this never touches (daybreak2's
+// LIMIT-C05-1)
 export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
 // (bytes charged for each append beside its JSON text: the queue's closure, its promise, the counters)
 export const ENTRY_OVERHEAD = 256;
-// (one entry's JSON text at most, in characters, taken when nothing else waits: a large document's first version)
-export const HISTORY_ENTRY_MAX = 32 * 2 ** 20;
 // (whether `v` would be plain JSON data at all, its size aside: to tell a refusal for size, which is said, from
 // one for its shape)
-const plainShape = (v) => jsonTextSize(v, Infinity) >= 0;
-// (the length of `v`'s JSON text, exactly, if it is plain JSON data whose text is at most `max` characters; else
-// -1.  Plain: null, booleans, finite numbers, strings, arrays and plain objects; a property that is undefined
-// too, which JSON leaves out (patchflow's envelopes have `file: undefined`); anything else (undefined in an array,
-// a function, a buffer, a typed array, a Map, a Set, a Date, a class's object) is not.  Walked without recursion,
-// each object once: one met again on the path being walked is a cycle, refused; one met again after its walk
-// (shared, in a DAG) counts its size, remembered, without being walked again, so the walk is linear in the
-// distinct objects and a DAG costs what its text would, refused before any of it is written once that passes
-// `max` (daybreak2's LIMIT-7865-1, astra's CORR-786-1))
-function jsonTextSize(v, max) {
+const plainShape = (v) => inertJson(v, Infinity) !== null;
+// (an inert copy of `v` and the length of its JSON text, exactly, if `v` is plain JSON data whose text is at most
+// `max` characters; else null.  Plain: null, booleans, finite numbers, strings, arrays and plain objects (an
+// object's prototype Object.prototype or null); a property that is undefined too, which JSON leaves out
+// (patchflow's envelopes have `file: undefined`), and non-enumerable ones, which JSON passes over.  Read through
+// property descriptors alone, so no getter or hook ever runs: a getter or a setter, or a function among an
+// object's own values (a toJSON, enumerable or not), or a hole in an array, is refused; the copy is what is
+// measured and written, never the caller's object (astra's CORR-C05-2).  Walked without recursion, each object
+// once: met again on the path being walked, a cycle, refused; met again after its walk (shared, in a DAG), its
+// copy and size reused, so the walk is linear in the distinct objects and a DAG is refused before any of it is
+// written once its text would pass `max` (daybreak2's LIMIT-7865-1, astra's CORR-786-1))
+function inertJson(v, max) {
   const leaf = (x) => {
     if (x === null) return 4;
     if (typeof x === "string") return JSON.stringify(x).length;
@@ -153,47 +158,68 @@ function jsonTextSize(v, max) {
     return typeof x === "object" ? null : -1;
   };
   const first = leaf(v);
-  if (first !== null) return first >= 0 && first <= max ? first : -1;
+  if (first !== null) return first >= 0 && first <= max ? { size: first, snap: v } : null;
   const done = new WeakMap(), active = new WeakSet();
-  // (a frame: the object, its keys (an array's: none), the next child, and its text's length so far)
+  // (a frame: the object, its entries to copy ([key, value], read from descriptors), the next, its copy, and
+  // its text's length so far; null if it can't be read inertly)
   const open = (x) => {
-    if (Array.isArray(x)) return Object.getPrototypeOf(x) === Array.prototype ? { x, keys: null, n: x.length, i: 0, sum: 2 + Math.max(0, x.length - 1) } : null;
-    const proto = Object.getPrototypeOf(x);
-    if (proto !== Object.prototype && proto !== null) return null;
-    const keys = Object.keys(x).filter((k) => x[k] !== undefined);
-    let sum = 2 + Math.max(0, keys.length - 1);
-    for (const k of keys) sum += JSON.stringify(k).length + 1;
-    return { x, keys, n: keys.length, i: 0, sum };
+    const isArray = Array.isArray(x), proto = Object.getPrototypeOf(x);
+    if (isArray ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) return null;
+    const descs = Object.getOwnPropertyDescriptors(x), entries = [];
+    for (const k of Object.getOwnPropertyNames(descs)) {
+      const d = descs[k];
+      if (d.get || d.set || typeof d.value === "function") return null;
+      if (isArray && k === "length") continue;
+      if (isArray && !/^(0|[1-9][0-9]*)$/.test(k)) return null;
+      if (!d.enumerable || (!isArray && d.value === undefined)) continue;
+      entries.push([k, d.value]);
+    }
+    if (isArray) {
+      if (entries.length !== x.length) return null;
+      entries.sort((a, b) => a[0] - b[0]);
+    }
+    let sum = 2 + Math.max(0, entries.length - 1);
+    if (!isArray) for (const [k] of entries) sum += JSON.stringify(k).length + 1;
+    return { x, isArray, entries, i: 0, copy: isArray ? new Array(entries.length) : Object.create(null), sum };
   };
+  const put = (f, k, value) => { if (f.isArray) f.copy[Number(k)] = value; else Object.defineProperty(f.copy, k, { value, enumerable: true, writable: true, configurable: true }); };
   const root = open(v);
-  if (!root || root.sum > max) return -1;
+  if (!root || root.sum > max) return null;
   active.add(v);
   const stack = [root];
   while (stack.length) {
     const f = stack[stack.length - 1];
-    if (f.i === f.n) {
+    if (f.i === f.entries.length) {
       stack.pop();
       active.delete(f.x);
-      done.set(f.x, f.sum);
-      if (stack.length && (stack[stack.length - 1].sum += f.sum) > max) return -1;
+      done.set(f.x, f);
+      if (stack.length) {
+        const p = stack[stack.length - 1];
+        put(p, p.entries[p.i - 1][0], f.copy);
+        if ((p.sum += f.sum) > max) return null;
+      }
       continue;
     }
-    const c = f.keys ? f.x[f.keys[f.i]] : f.x[f.i];
-    f.i++;
-    if (!f.keys && c === undefined) return -1;
+    const [k, c] = f.entries[f.i++];
+    if (f.isArray && c === undefined) return null;
     const l = leaf(c);
-    if (l === -1) return -1;
-    if (l !== null) { if ((f.sum += l) > max) return -1; continue; }
-    if (active.has(c)) return -1;
+    if (l === -1) return null;
+    if (l !== null) { put(f, k, c); if ((f.sum += l) > max) return null; continue; }
+    if (active.has(c)) return null;
     const d = done.get(c);
-    if (d !== undefined) { if ((f.sum += d) > max) return -1; continue; }
+    if (d) { put(f, k, d.copy); if ((f.sum += d.sum) > max) return null; continue; }
     const g = open(c);
-    if (!g || g.sum > max) return -1;
+    if (!g || g.sum > max) return null;
     active.add(c);
     stack.push(g);
   }
-  return done.get(v);
+  return { size: root.sum, snap: root.copy };
 }
+/** The length of `v`'s JSON text if it is plain JSON data (inertJson) of at most `max` characters, else -1: for tests. */
+export function jsonTextSize(v, max) { const r = inertJson(v, max); return r ? r.size : -1; }
+// (no toJSON anywhere JSON.stringify would look for one on the copy, arrays and objects alike: a page that put
+// one on Object.prototype or Array.prototype gets no history kept, rather than its hook run)
+const prototypesClean = () => !("toJSON" in Object.prototype) && !("toJSON" in Array.prototype);
 const backlog = { entries: 0, bytes: 0 };
 const refusedSubs = new Set();
 /** `f(message)`: called when an append is refused because too many wait (a stuck tab holding the lock). */
@@ -201,6 +227,7 @@ export function onHistoryRefused(f) { refusedSubs.add(f); return () => refusedSu
 /** The appends waiting now: for tests and metrics. */
 export const historyBacklog = () => ({ ...backlog });
 export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel can't keep up: some of this document's latest history isn't kept";
+export const HISTORY_TOO_LARGE = "this version is too large to keep in TimeTravel: the document itself is saved, and TimeTravel goes on from its next version";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
 const BUSY_DELETE = "your files are busy (another tab is changing them)";
 // (a deadline: LOCK_WAIT from when it is made, its signal aborted then unless the lock was had first; made when a
@@ -450,18 +477,23 @@ export class IdbPatchStore {
     // changes the envelope later, and whatever its shape; parsed only at its turn.  Plain JSON data only: one
     // that isn't (a buffer, a Map, a class's object) would be kept as something else, or cost more than its
     // text: refused.  daybreak2's LIMIT-9D7-2 and LIMIT-5B7-1)
-    // (its text's length known first, without writing it: no larger than what the backlog can still take, or,
-    // with nothing waiting, than HISTORY_ENTRY_MAX: one entry of a large document's history is never refused for
-    // its size alone)
-    const room = backlog.entries ? Math.floor((HISTORY_BACKLOG.bytes - backlog.bytes - ENTRY_OVERHEAD) / 2) : HISTORY_ENTRY_MAX;
-    const length = jsonTextSize(env, this.owned ? room : HISTORY_ENTRY_MAX);
-    if (length < 0) {
+    // (its text's length known first, without writing it: no larger than what the backlog can still take; said,
+    // as too large for TimeTravel at all, or as the files being busy)
+    const alone = Math.floor((HISTORY_BACKLOG.bytes - ENTRY_OVERHEAD) / 2);
+    const room = Math.floor((HISTORY_BACKLOG.bytes - backlog.bytes - ENTRY_OVERHEAD) / 2);
+    const inert = prototypesClean() ? inertJson(env, this.owned ? room : alone) : null;
+    if (!inert) {
       console.warn("history: an entry that isn't plain JSON data, or too large to wait, not kept");
-      if (this.owned && plainShape(env)) for (const f of refusedSubs) try { f(HISTORY_REFUSED); } catch {}
+      if (prototypesClean() && plainShape(env)) {
+        const why = inertJson(env, alone) === null ? HISTORY_TOO_LARGE : HISTORY_REFUSED;
+        for (const f of refusedSubs) try { f(why); } catch {}
+      }
       return false;
     }
+    // (the copy written, which no hook can change; its text as long as measured, or not kept)
     let text;
-    try { text = JSON.stringify(env); } catch { return false; }
+    try { text = JSON.stringify(inert.snap); } catch { return false; }
+    if (typeof text !== "string" || text.length !== inert.size) return false;
     env = undefined;
     let size = 0;
     if (this.owned) {
