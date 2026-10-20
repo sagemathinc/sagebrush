@@ -267,10 +267,37 @@ async function reservations() {
   hold();
   await run;
   check(!during.finished && !during.listed && (await w.list("/Recovered")).some((e) => e.path.endsWith("later.bin")), "…with the reservation busy: it waits, nothing made meanwhile, then recovers them: " + J(during));
-  // (adopt given bytes read outside a reservation: refused loudly, nothing made)
+  // (adopt given bytes without the reservation they were read in: refused loudly, nothing made, even while an
+  // unrelated holder has the page's whole reservation (whose it is, not the page's total: daybreak2))
+  const unrelated = await W.reserve(W.LEGACY_MAX * W.COPIES);
   let loud = false;
-  try { await w.locked(() => w.adopt("/", "x", ".bin", { kind: "file", ref: "/x.bin", rev: 0 }, { bytes: { bytes: enc("x") } })); } catch (e) { loud = !(e instanceof W.WorkspaceError) && /reservation/.test(String(e)); }
-  check(loud && !(await w.stat("/x.bin")), "adopt given bytes with no reservation held: an error, nothing made");
+  try { await w.locked(() => w.adopt("/", "x", ".bin", { kind: "file", ref: "/x.bin", rev: 0 }, { bytes: { bytes: enc("x") } })); } catch (e) { loud = !(e instanceof W.WorkspaceError) && /reservation/.test(String(e)); } finally { unrelated(); }
+  let dead = false;
+  const gone = await W.reserve(W.LEGACY_MAX * W.COPIES);
+  gone();
+  try { await w.locked(() => w.adopt("/", "x", ".bin", { kind: "file", ref: "/x.bin", rev: 0 }, { bytes: { bytes: enc("x") }, token: gone })); } catch (e) { dead = !(e instanceof W.WorkspaceError) && /reservation/.test(String(e)); }
+  let deadDrop = false;
+  try { await w.locked(() => w.dropStale("files", "/nothing.bin", undefined, gone)); } catch (e) { deadDrop = !(e instanceof W.WorkspaceError) && /reservation/.test(String(e)); }
+  check(deadDrop, "an old copy looked at in the name of a released reservation: an error, nothing read");
+  check(loud && dead && !(await w.stat("/x.bin")) && W.reserved().held === 0, "adopt given bytes without their reservation (an unrelated one held), or with one released: an error, nothing made");
+  // (a pending Trash recovery's destination checked with the Trash bytes let go: at most two copies at once,
+  // the reservation's (daybreak2's LIMIT-AC1-1); seen by a WeakRef to the Trash bytes, a garbage collection
+  // forced as the destination's bytes are hashed)
+  if (typeof globalThis.gc === "function") {
+    const tb = enc("recover me, once"), tsha = await H(tb);
+    await new Promise((ok, no) => { const tx = w.ws.transaction(["trash", "meta"], "readwrite"); tx.objectStore("trash").put(tb, "/Trash/gc.bin"); tx.objectStore("meta").put({ dest: "/Recovered/gc.bin", sha: tsha }, "recovering:/Trash/gc.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await fput("/Recovered/gc.bin", tb);
+    let calls = 0, ref = null, aliveAtDest = null;
+    crypto.subtle.digest = function (a, d) {
+      calls++;
+      if (calls === 1) ref = new WeakRef(d);
+      else if (calls === 2) { globalThis.gc(); aliveAtDest = ref?.deref() !== undefined; }
+      return digest.call(crypto.subtle, a, d);
+    };
+    try { await W.migrate(w, localStorage); } finally { crypto.subtle.digest = digest; }
+    const gcRec = await w.stat("/Recovered/gc.bin");
+    check(aliveAtDest === false && gcRec?.sha256 === tsha && dec((await w.read(gcRec.path)).content) === "recover me, once", "Trash recovery: its bytes let go before the destination's are read and hashed (two copies at most), then read again and recovered: " + J({ aliveAtDest, calls }));
+  } else check(false, "(the test browser runs without --expose-gc)");
   // (an older tab writing at the old key ten times while it is cleaned up: each version kept, a bounded number of
   // rounds per cleanup, the rest by the next start)
   await fput("/many.bin", enc("w0"));

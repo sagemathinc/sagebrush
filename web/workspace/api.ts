@@ -29,7 +29,7 @@ import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeL
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
-import { reserve, reserved, tryReserve } from "./reserve";
+import { reserve, tryReserve, type Release } from "./reserve";
 
 export type Entry = {
   path: string;
@@ -1634,15 +1634,39 @@ export class Workspace {
    * COPIES taken before the lock, never while holding it (LIMIT-CAP1A-1).  The lock is asked for at once,
    * so changes keep the order they were asked for; only one that finds such a file, holding no
    * reservation, gives the lock back unchanged, reserves, and asks again. */
+  /** (the reservation the change now holding the lock took before it, lockedFor's; null if none) */
+  private lockToken: Release | null = null;
+  /** The reservation to read bytes whole in (LEGACY_MAX × COPIES): `t`, the caller's (else the lock holder's),
+   * which must be live and that large, or an Error, loudly (daybreak2: whose reservation it is, not the page's
+   * total); with none, one of its own taken now without waiting (the lock's holder never waits for one,
+   * LIMIT-CAP1A-1), or a WorkspaceError("storage") if it can't be had: try again.  `mine`: released by the
+   * caller, in a finally. */
+  private readToken(t?: Release | null): { t: Release; mine: boolean } {
+    t ??= this.lockToken;
+    if (t) {
+      if (!t.live() || t.n < LEGACY_MAX * COPIES) throw new Error("workspace: bytes read in the name of a reservation that isn't held, or is smaller than LEGACY_MAX × COPIES");
+      return { t, mine: false };
+    }
+    const own = tryReserve(LEGACY_MAX * COPIES);
+    if (!own) throw new WorkspaceError("storage", "a file's bytes can't be read just now (the page's memory for reading files is in use): try again");
+    return { t: own, mine: true };
+  }
+
   private async lockedFor<T>(p: string, f: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    let release: (() => void) | null = null, held = 0;
+    let release: Release | null = null, held = 0;
     try {
       for (;;) {
         let need = 0;
         const out = await this.locked(async () => {
           need = await this.readsUnder(p);
           if (need > held) return undefined as T;
-          return f();
+          // (its reservation the lock holder's, while it holds the lock: what it reads whole is read in its name)
+          this.lockToken = release;
+          try {
+            return await f();
+          } finally {
+            this.lockToken = null;
+          }
         }, signal);
         if (need <= held) return out;
         release?.();
@@ -1802,8 +1826,17 @@ export class Workspace {
    * (`unmoved`), with their size, and isn't read for this again.  A file
    * whose bytes aren't there, or that changed meanwhile, is left as it is.
    * Returns the entry as it is now. */
-  async migrateOne(e: Entry, max = LEGACY_MAX): Promise<Entry> {
+  async migrateOne(e: Entry, max = LEGACY_MAX, token?: Release): Promise<Entry> {
     if (e.kind !== "file" || e.migrated || e.unmoved || e.ref === null) return e;
+    // (its bytes read whole in a reservation: the caller's, else one of its own, readToken)
+    const { t, mine } = this.readToken(token);
+    try {
+      return await this.migrateIn(e, max, t);
+    } finally {
+      if (mine) t();
+    }
+  }
+  private async migrateIn(e: Entry, max: number, token: Release): Promise<Entry> {
     const same = (cur: Entry | undefined) => !!cur && cur.kind === "file" && !cur.migrated && cur.ref === e.ref && cur.fid === e.fid && (cur.rev ?? 0) === (e.rev ?? 0);
     const mark = async (size: number) => (await inTx(this.ws, "entries", "readwrite", async (tx) => {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
@@ -1834,7 +1867,7 @@ export class Workspace {
     if (now?.migrated && now.fid === fid) {
       const box = { bytes: old };
       old = undefined;
-      await this.dropStale(where, key, box).catch(() => {});
+      await this.dropStale(where, key, box, token).catch(() => {});
     }
     return now ?? e;
   }
@@ -1847,7 +1880,16 @@ export class Workspace {
    * written there in between (CORR-F81-1).  Bytes written there since are
    * kept, as "<name> (from an older tab)" beside where they are; then the
    * mark goes.  `moved`: the bytes just moved, if the caller has them. */
-  async dropStale(where: "files" | "trash", key: string, moved?: { bytes?: Uint8Array }) {
+  async dropStale(where: "files" | "trash", key: string, moved?: { bytes?: Uint8Array }, token?: Release) {
+    // (its bytes read whole in a reservation: the caller's, else one of its own, readToken)
+    const { t, mine } = this.readToken(token);
+    try {
+      return await this.dropStaleIn(where, key, moved, t);
+    } finally {
+      if (mine) t();
+    }
+  }
+  private async dropStaleIn(where: "files" | "trash", key: string, moved: { bytes?: Uint8Array } | undefined, token: Release) {
     const mk = staleKey(where, key);
     const forget = () => inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete(mk); });
     // (one pair of copies at a time (astra): the bytes this round compares, and those read when they differ;
@@ -1863,13 +1905,17 @@ export class Workspace {
         const cur = await this.readOld(where, key);
         if (cur === undefined) return forget();
         if (typeof mark !== "object" || cur.byteLength !== mark.size || (await bytesHash(cur)) !== mark.sha256) {
-          if (!(await this.keepOld(where, key, cur))) return;
+          if ((await this.keepOld(where, key, cur, token)) !== "moved") return;
           seen = cur;
           continue;
         }
         seen = cur;
       }
       await this.beforeStaleDelete?.();
+      // (never the storage of a file: a key an entry still names as its bytes, not moved (one adopted unmoved,
+      // or not yet moved), is never deleted, its mark dropped; we hold the lock, so no entry changes meanwhile
+      // (astra's CORR-AC1-2))
+      if (await this.storageOf(key)) return forget();
       const still = seen;
       const gone = await this.oldTx(where, "readwrite", async (st) => {
         const v = await req(st.get(key));
@@ -1882,9 +1928,15 @@ export class Workspace {
       seen = undefined;
       const cur = await this.readOld(where, key);
       if (cur === undefined) return forget();
-      if (!(await this.keepOld(where, key, cur))) return;
+      // (deleted only after a move of exactly these bytes: kept unmoved, the key is that file's storage now)
+      if ((await this.keepOld(where, key, cur, token)) !== "moved") return;
       seen = cur;
     }
+  }
+  /** Whether an entry names `key` as where its bytes are (a data file not moved: kept the old way, or unmoved). */
+  private async storageOf(key: string): Promise<boolean> {
+    const naming: Entry[] = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", key])));
+    return naming.some((e) => !e.migrated);
   }
   // (bytes written at a stale key since the move: a file of their own, its mark dropped with its entry; in
   // trash (where no page writes) the mark alone goes, and reconcile recovers them to /Recovered)
@@ -1900,6 +1952,7 @@ export class Workspace {
   async adoptOld(a: OldBytes): Promise<Entry | undefined> {
     if (!this.main) return undefined;
     const release = await reserve(LEGACY_MAX * COPIES);
+    const token = release;
     try {
       return await this.locked(async () => {
         if ((await this.staleCopies(Infinity)).some(([w, k]) => w === "files" && k === a.key)) return undefined;
@@ -1908,25 +1961,30 @@ export class Workspace {
         if (a.kind === "free" ? naming.length > 0 : mine.length > 0 || !naming.some((e) => e.migrated)) return undefined;
         const box = { bytes: await this.readOld("files", a.key) };
         if (box.bytes === undefined) return undefined;
-        return this.adopt(a.folder, a.base, a.ext, { kind: "file", ref: a.key, rev: 0 }, { bytes: box });
+        return this.adopt(a.folder, a.base, a.ext, { kind: "file", ref: a.key, rev: 0 }, { bytes: box, token });
       });
     } finally {
       release();
     }
   }
-  /** Returns whether they were kept (adopted, their own mark replacing this one, for dropStale's next round);
-   * false: the mark dropped, nothing more to do. */
-  private async keepOld(where: "files" | "trash", key: string, bytes: Uint8Array): Promise<boolean> {
+  /** Returns what happened (astra's CORR-AC1-2): "moved", adopted and moved beside the index, its own mark
+   * replacing this one (dropStale's next round compares and deletes the old copy); "unmoved", adopted but too
+   * large to move, so the old key is that file's storage now, never to be deleted (the mark dropped); "dropped",
+   * the mark dropped, nothing kept (Trash's, recovered by reconcile; or a key that isn't a path). */
+  private async keepOld(where: "files" | "trash", key: string, bytes: Uint8Array, token: Release): Promise<"moved" | "unmoved" | "dropped"> {
     const mk = staleKey(where, key);
+    const forget = () => inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete(mk); });
     if (where === "trash" || !isPath(key)) {
-      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete(mk); });
-      return false;
+      await forget();
+      return "dropped";
     }
     const [base, ext] = splitExt(nameOf(key));
     // (moved as it is adopted: its own mark replaces this one, in the adopt's transaction; its old copy is
     // dropStale's next round, not a call from the adopt)
-    await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 }, { bytes: { bytes }, leaveOld: true });
-    return true;
+    const e = await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 }, { bytes: { bytes }, token, leaveOld: true });
+    if (e.migrated) return "moved";
+    await forget();
+    return "unmoved";
   }
   private async readOld(where: "files" | "trash", key: string): Promise<Uint8Array | undefined> {
     return this.oldTx(where, "readonly", (st) => req(st.get(key))) as Promise<Uint8Array | undefined>;
@@ -1937,8 +1995,10 @@ export class Workspace {
     return inTx(this.main, "files", mode, (tx) => f(tx.objectStore("files")));
   }
   /** Old copies not yet deleted (at most `n`): [where, key]. */
-  async staleCopies(n = 100): Promise<["files" | "trash", string][]> {
-    const keys = (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").getAllKeys(IDBKeyRange.bound(STALE, STALE + "\uffff"), Number.isFinite(n) ? n : undefined)))) as string[];
+  async staleCopies(n = 100, after?: string): Promise<["files" | "trash", string][]> {
+    // (`after`: only marks after that one (a mark's "where:key"), in key order: a cleanup's cursor)
+    const range = after ? IDBKeyRange.bound(STALE + after, STALE + "\uffff", true) : IDBKeyRange.bound(STALE, STALE + "\uffff");
+    const keys = (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").getAllKeys(range, Number.isFinite(n) ? n : undefined)))) as string[];
     return keys.map((k) => { const rest = k.slice(STALE.length), i = rest.indexOf(":"); return [rest.slice(0, i) as "files" | "trash", rest.slice(i + 1)]; });
   }
   /** Whether `key` in "sagebrush"/files (or trash) is a migrated file's old copy, not yet deleted. */
@@ -2039,26 +2099,8 @@ export class Workspace {
   /** An entry for contents that are already kept (migration, reconcile):
    * at `base + ext` in `folder`, or the first free `base (2) + ext`, …
    * Hold the lock (locked()) around it. */
-  /** A data file's bytes kept the old way, about to be adopted, read holding the lock (the caller's).  Their
-   * size isn't known until read, so LEGACY_MAX × COPIES is reserved first, without waiting (tryReserve: the
-   * lock's holder never waits for a reservation, LIMIT-CAP1A-1); if it can't be had now, the adopt is refused
-   * (a WorkspaceError("storage"), nothing made) and asked for again later (reconcile's next run).  Returns the
-   * bytes and the reservation's release, which the adopt calls once it is done with them. */
-  private async oldBytesFor(f: { ref: string | null; trashed?: Entry["trashed"] }): Promise<{ bytes: Uint8Array; release: () => void }> {
-    const release = tryReserve(LEGACY_MAX * COPIES);
-    if (!release) throw new WorkspaceError("storage", "a file's bytes can't be read just now (the page's memory for reading files is in use): try again");
-    try {
-      const bytes = await this.readOld(f.trashed ? "trash" : "files", f.ref!);
-      if (bytes === undefined) throw new WorkspaceError("missing", `the bytes of ${f.ref} are not in this browser`);
-      return { bytes, release };
-    } catch (e) {
-      release();
-      throw e;
-    }
-  }
-
   /** `also.bytes`: a data file's bytes as the caller read them (its reservation held), else read here
-   * (oldBytesFor).  A data file adopted from bytes kept the old way is moved as it is adopted (astra's
+   * (readToken).  A data file adopted from bytes kept the old way is moved as it is adopted (astra's
    * CORR-12E-1; @sagebrush's decision): the bytes read (a snapshot: what IndexedDB gave), hashed, put in
    * fileBytes under its fid in the same transaction as its entry, marked migrated, and its op, with the old
    * copy marked stale (its size and hash) there too, as migrateOne does.  So the entry, its bytes and its op's
@@ -2067,11 +2109,11 @@ export class Workspace {
    * wrote there since the read) kept as a file of its own, adopted in turn with its own hash.  Bytes larger than
    * LEGACY_MAX aren't moved: adopted marked unmoved, with their hash, as the migrator marks one (larger than
    * the 200 MiB file limit, so never synced).  Never a data file's op without its hash (CORR-9C2-2). */
-  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[]; bytes?: { bytes?: Uint8Array }; leaveOld?: boolean } = {}): Promise<Entry> {
+  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[]; bytes?: { bytes?: Uint8Array }; token?: Release; leaveOld?: boolean } = {}): Promise<Entry> {
     // (with the entry, in its transaction: a board's record, records put in
     // or dropped from meta, bytes dropped from trash; all of it, or none)
     const ops: Op[] = [];
-    let move: { bytes: Uint8Array; where: "files" | "trash"; key: string; mark: StaleMark } | null = null, release: (() => void) | null = null;
+    let move: { bytes: Uint8Array; where: "files" | "trash"; key: string; mark: StaleMark } | null = null, release: (() => void) | null = null, token: Release | undefined;
     try {
       if (fields.kind === "file" && fields.ref !== null && !fields.migrated) {
         // (bytes given, in the caller's box (taken out of it: the caller keeps no reference), were read under the
@@ -2079,8 +2121,16 @@ export class Workspace {
         // future caller reads bytes whole outside one (daybreak2's LIMIT-6B7-1))
         let bytes = also.bytes?.bytes;
         if (also.bytes) also.bytes.bytes = undefined;
-        if (bytes && reserved().held < LEGACY_MAX * COPIES) throw new Error("workspace: adopt given bytes read outside a reservation of LEGACY_MAX × COPIES");
-        if (!bytes) ({ bytes, release } = await this.oldBytesFor(fields));
+        // (bytes given: read in the caller's reservation, which it names (its token: daybreak2), not merely one
+        // the page holds; else read here, in the caller's or one of this adopt's own (readToken))
+        if (bytes && !(also.token?.live() && also.token.n >= LEGACY_MAX * COPIES)) throw new Error("workspace: adopt given bytes without the live reservation of LEGACY_MAX × COPIES they were read in");
+        const got = this.readToken(also.token);
+        token = got.t;
+        if (got.mine) release = got.t;
+        if (!bytes) {
+          bytes = await this.readOld(fields.trashed ? "trash" : "files", fields.ref!);
+          if (bytes === undefined) throw new WorkspaceError("missing", `the bytes of ${fields.ref} are not in this browser`);
+        }
         const sha256 = await bytesHash(bytes);
         const where = fields.trashed ? "trash" : "files";
         if (bytes.byteLength > LEGACY_MAX) fields = { ...fields, sha256, size: bytes.byteLength, unmoved: "too large to move" };
@@ -2122,7 +2172,7 @@ export class Workspace {
       if (move && !also.leaveOld) {
         const { where, key } = move, box = { bytes: move.bytes as Uint8Array | undefined };
         move = null;
-        await this.dropStale(where, key, box).catch((err) => console.warn("workspace: an old copy:", err));
+        await this.dropStale(where, key, box, token).catch((err) => console.warn("workspace: an old copy:", err));
       }
       return entry;
     } finally {

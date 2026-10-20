@@ -27,7 +27,7 @@
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
 import { COPIES, LEGACY_MAX, WorkspaceError, type BoardRecord, type Entry, type OldBytes, type Workspace } from "./api";
-import { reserve } from "./reserve";
+import { reserve, type Release } from "./reserve";
 import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
@@ -84,7 +84,7 @@ export async function adoptOld(w: Workspace, old: OldBytes[], r: MigrateReport):
       // (Trash's bytes: their reservation before the lock, as adoptOld's (daybreak2's LIMIT-6B7-1))
       const release = await reserve(LEGACY_MAX * COPIES);
       try {
-        await w.locked(() => recoverTrash(w, a.key, r));
+        await w.locked(() => recoverTrash(w, a.key, r, release));
       } finally {
         release();
       }
@@ -281,13 +281,19 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
  * then, in one transaction, the entry naming them (the bytes moved beside the index, as any adopt's), the Trash
  * copy dropped and the record dropped.  A run that stops part way leaves the record, and the next run finishes
  * that same recovery: it knows its destination from the record, never from bytes that happen to be equal. */
-export async function recoverTrash(w: Workspace, key: string, r: MigrateReport) {
+export async function recoverTrash(w: Workspace, key: string, r: MigrateReport, token: Release) {
   if (await w.isStale("trash", key)) return;
   const naming: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", key])));
   if (naming.some((e) => e.trashed || within(e.path, TRASH))) return;
-  let bytes: Uint8Array | undefined = await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key)));
-  if (bytes === undefined) return;
-  const mark = RECOVERING + key, sha = await bytesHash(bytes);
+  // (never more than two copies at once, the reservation's (daybreak2's LIMIT-AC1-1): the Trash bytes hashed and
+  // let go; the destination checked (read, hashed, let go); then the Trash bytes read again, and moved only if
+  // they are still the ones hashed (else left for the next run))
+  const readTrash = () => inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key))) as Promise<Uint8Array | undefined>;
+  let first = await readTrash();
+  if (first === undefined) return;
+  const size = first.byteLength, sha = await bytesHash(first);
+  first = undefined;
+  const mark = RECOVERING + key;
   const rec = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mark)));
   let dest: string | undefined = rec && typeof rec.dest === "string" && rec.sha === sha ? rec.dest : undefined;
   let done = false;
@@ -319,16 +325,18 @@ export async function recoverTrash(w: Workspace, key: string, r: MigrateReport) 
     await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put({ dest: d, sha }, mark); });
   }
   const d = dest;
+  let bytes = done ? undefined : await readTrash();
+  if (!done && (bytes === undefined || bytes.byteLength !== size || (await bytesHash(bytes)) !== sha)) return;
   if (done) {
     // (completed, and proved so by the entry itself; only the Trash copy and the record were left)
     await inTx(w.ws, ["trash", "meta"], "readwrite", async (tx) => { tx.objectStore("trash").delete(key); tx.objectStore("meta").delete(mark); });
   } else {
-    await w.mainTx("files", "readwrite", (st) => st.put(bytes, d));
+    await w.mainTx("files", "readwrite", (st) => st.put(bytes!, d));
     const [base, ext] = splitExt(nameOf(d));
     // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
     const box = { bytes: bytes as Uint8Array | undefined };
     bytes = undefined;
-    await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: box.bytes!.length ?? 0, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark], bytes: box });
+    await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark], bytes: box, token });
   }
   r.recovered++;
 }

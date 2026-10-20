@@ -1149,7 +1149,7 @@ async function staleChanged() {
   // (holding a reservation of LEGACY_MAX × COPIES, as every caller of migrateOne does: the older tab's bytes are
   // read, and kept, inside it (daybreak2's LIMIT-6B7-1))
   const held = await W.reserve(W.LEGACY_MAX * W.COPIES);
-  try { await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt"))); } finally { held(); }
+  try { await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt"), undefined, held)); } finally { held(); }
   w.beforeStaleDelete = null;
   const copy = await w.stat("/s/a (from an older tab).txt");
   check(copy && dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && dec((await w.read("/s/a.txt")).content) === "BEFORE", "an older tab's write as the old copy is cleaned up: kept as a file of its own, the moved file as it was");

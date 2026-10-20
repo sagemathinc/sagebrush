@@ -131,25 +131,41 @@ async function resume(w: Workspace, opening = false): Promise<void> {
 }
 
 /** Old copies of moved files deleted, or kept as files of their own if written since (Workspace.dropStale), by
- * their marks, a page of MIGRATE.files at a time, each read with its reservation taken before the lock; at most
- * STALE_PAGES pages a run (an older tab writing all the while is caught up with by the next run). */
+ * their marks, a page of MIGRATE.files at a time, each read in its reservation taken before the lock; at most
+ * STALE_PAGES pages a run.  Each run goes on from where the last left off (a durable cursor in meta, CURSOR: the
+ * last mark looked at), wrapping round at the end, so marks that keep failing (a copy that can't be kept: its
+ * folder full) can't keep any after them from being reached (astra's CORR-AC1-1); each mark once a run. */
 const STALE_PAGES = 32;
+const CURSOR = "staleCursor";
 async function cleanStale(w: Workspace) {
-  // (each mark tried once a run: one that stays (its copy written again and again, or a failure) waits for the next)
+  const getCursor = async () => ((await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(CURSOR)))) as string | undefined) ?? "";
+  const setCursor = (c: string) => inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(c, CURSOR); });
+  let cursor = await getCursor(), wrapped = cursor === "";
   const tried = new Set<string>();
   for (let page = 0; page < STALE_PAGES && !w.closed; page++) {
-    const marks = (await w.staleCopies(MIGRATE.files + tried.size)).filter(([where, key]) => !tried.has(where + ":" + key)).slice(0, MIGRATE.files);
-    if (!marks.length) return;
+    const marks = (await w.staleCopies(MIGRATE.files, cursor || undefined)).filter(([where, key]) => !tried.has(where + ":" + key));
+    if (!marks.length) {
+      // (the end: round to the first mark, once a run)
+      if (wrapped) return;
+      wrapped = true;
+      cursor = "";
+      await setCursor(cursor);
+      continue;
+    }
     for (const [where, key] of marks) {
-      tried.add(where + ":" + key);
+      const at = where + ":" + key;
+      tried.add(at);
       const release = await reserve(LEGACY_MAX * MIGRATE.copies);
       try {
-        await w.locked(() => w.dropStale(where, key));
+        await w.locked(() => w.dropStale(where, key, undefined, release));
       } catch (e) {
         console.warn("workspace migration: an old copy:", e);
       } finally {
         release();
       }
+      // (past it, whether it went or stayed: the next run goes on after it)
+      cursor = at;
+      await setCursor(cursor);
     }
   }
 }
@@ -200,7 +216,7 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
   for (const [where, key] of await w.staleCopies(MIGRATE.files)) {
     const release = await reserve(LEGACY_MAX * MIGRATE.copies);
     try {
-      await w.locked(() => w.dropStale(where, key));
+      await w.locked(() => w.dropStale(where, key, undefined, release));
     } finally {
       release();
     }
@@ -222,7 +238,7 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
           const cur = await w.stat(e.path);
           if (!cur || cur.kind !== "file" || cur.migrated || cur.unmoved || cur.ref === null) return "none";
           try {
-            const after = await w.migrateOne(cur, LEGACY_MAX);
+            const after = await w.migrateOne(cur, LEGACY_MAX, release);
             return after.migrated ? "moved" : after.unmoved ? "unmoved" : "none";
           } catch (err) {
             if (isQuota(err)) return "quota";
