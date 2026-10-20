@@ -148,6 +148,34 @@ async function others() {
   await w.write("/v.txt", "3");
   const [wv] = await since(w, s1);
   check(wv?.base === (await H("2")) && wv.sha256 === (await H("3")), "a file whose hash wasn't kept: its write based on its old bytes' hash: " + J({ base: wv?.base }));
+  // (a data file whose hash isn't kept and whose size says less than its bytes, as a record changed by other
+  // means: the migrator's reservation trusts the size, but it hashes the bytes all the same, once, and sets
+  // the size from them (daybreak2))
+  const big = new Uint8Array(2 ** 20).map((_, i) => i & 255);
+  await w.create("/big.bin", { content: big });
+  const eb = await w.stat("/big.bin");
+  await new Promise((ok, no) => { const tx = w.ws.transaction(["entries", "meta"], "readwrite"); const { sha256: _s, ...rest } = eb; tx.objectStore("entries").put({ ...rest, size: 1 }); tx.objectStore("meta").delete("migration"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await W.startMigrator(w);
+  const fixed = await w.stat("/big.bin");
+  check(fixed.sha256 === (await H(big)) && fixed.size === big.byteLength && (await W.migrationState(w)).done, "a file whose size says less than its bytes: hashed all the same, its size set from them, the migration done: " + J({ size: fixed.size }));
+  // (a data file adopted with its bytes still kept the old way: its hash not known, so its op says nothing of
+  // what it left (never a data-file `after` without its hash, astra's CORR-9C2-2); the migrator hashes it as it
+  // moves it)
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(enc("leg"), "/leg.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const s3 = await lastSeq(w);
+  await w.locked(() => w.adopt("/", "leg", ".bin", { kind: "file", ref: "/leg.bin", size: 3, rev: 0 }));
+  const [lg] = await since(w, s3);
+  check(lg?.op === "adopt" && HEX16.test(lg.fid ?? "") && !("after" in lg) && lg.sha256 === undefined, "a data file adopted from the old store, its hash not known yet: no `after` (not one without its hash): " + J(lg));
+  // (a moved data file whose hash isn't kept: hashed first, its bytes read inside the page's reservation,
+  // taken before the lock (daybreak2's rule, as a migration's))
+  await w.create("/r.bin", { content: big });
+  const er = await w.stat("/r.bin");
+  await new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"); const { sha256: _s, ...rest } = er; tx.objectStore("entries").put(rest); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const digest = crypto.subtle.digest, seen = [];
+  crypto.subtle.digest = function (a, d) { seen.push(W.reserved().held); return digest.call(crypto.subtle, a, d); };
+  try { await w.rename("/r.bin", "/r2.bin"); } finally { crypto.subtle.digest = digest; }
+  const s4 = (await ops(w)).at(-1);
+  check(s4?.op === "rename" && s4.sha256 === (await H(big)) && s4.after?.sha256 === s4.sha256 && seen.length >= 1 && seen.every((r) => r >= big.byteLength * W.COPIES), "a moved file whose hash wasn't kept: hashed first, inside a reservation of its size × COPIES, and its op carries the hash: " + J({ seen }));
   // (a folder from before folders had ids: what is made in it has no `after`, its folder not yet nameable,
   // never one saying it is in the root)
   await new Promise((ok, no) => { const tx = w.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/old", kind: "folder", ref: null, created: 1, updated: 1, nkey: "/\u0000old" }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });

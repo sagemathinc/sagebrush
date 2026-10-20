@@ -46,7 +46,14 @@ As built (step 2a):
 - `after: null` means the op removed its identity: `forget`, `discard`, and `emptyTrash`, which records one op for each identity removed whole. What was in a folder goes with it, as the reducer's forget has it.
 - An op that changes no entry (`dropVersions`) carries no identity and no `after`. An entry or folder with no identity yet (from before ids were kept, until the migrator gives one) has no `after`.
 - In the stores, a key can't hold `null`, so the root's parent is `""` there.
-- Hashing costs one more pass over the new bytes, and one transient copy of them (WebCrypto copies its input), at most the 200 MiB file limit. The old bytes are hashed only when no hash of them is already at hand, which is a file written before this step, once.
+- **Hashing:** bytes the caller gives are copied once, at the call, before anything is awaited. The hash and the bytes kept are then the same, whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).
+  - Peak cost: that copy, plus one transient copy while hashing (WebCrypto copies its input). That is two copies of the new bytes beyond what a write held before this step, each at most the 200 MiB file limit.
+  - Time: one more pass over the new bytes, off the main thread.
+  - The old bytes are hashed only when no hash of them is already at hand: a file written before this step, once.
+- **Every data-file op that says what it left carries its hash.**
+  - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is (astra's CORR-9C2-2).
+  - A file whose hash can't be known yet has no `after`: its bytes are still kept the old way (adopted from there), and it gets its hash when the migrator moves it.
+- **Emptying Trash records at most 10,000 ops** (maxFolderEntries, Trash's own entries), whatever is in them: a bounded burst.
 
 **The queue: `dseq`.** The server decides a device's ops in `dseq` order, with no gaps.
 - The local `seq` can't serve as `dseq`: ops from before sync was on, and remote ops applied here, are in the same store.

@@ -13,13 +13,14 @@ const here = new URL(".", import.meta.url).pathname;
 const SIZES = (process.env.SIZES ?? "1,16,64,200").split(",").map(Number);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// (the new bytes' hash taken out of create and of a data file's write: the code before this step)
+// (the new bytes' hash and the copy taken at the call (astra's CORR-9C2-1) taken out of create and of a data
+// file's write: the code before this step)
 const unhash = {
   name: "unhash",
   setup(b) {
     b.onLoad({ filter: /workspace\/api\.ts$/ }, async (a) => {
       let s = readFileSync(a.path, "utf8");
-      const cuts = [["      sha256 = await bytesHash(b);\n", ""], ["    const sha256 = await bytesHash(b);\n    const base = ", "    const sha256 = undefined as unknown as string;\n    const base = "], ["(old === undefined ? undefined : sameBytes(old, b) ? sha256 : await bytesHash(old))", "undefined"]];
+      const cuts = [["      sha256 = await bytesHash(b);\n", ""], ["  if (c instanceof Uint8Array) return c.byteLength > max ? c : c.slice();\n  if (c instanceof ArrayBuffer) return c.byteLength > max ? c : new Uint8Array(c.slice(0));\n", ""], ["    const sha256 = await bytesHash(b);\n    const base = ", "    const sha256 = undefined as unknown as string;\n    const base = "], ["(old === undefined ? undefined : sameBytes(old, b) ? sha256 : await bytesHash(old))", "undefined"]];
       for (const [x, y] of cuts) {
         if (!s.includes(x)) throw new Error("bench: not found in api.ts: " + x);
         s = s.replace(x, y);
