@@ -16,11 +16,17 @@
 // (not merely requested) before the first kill; each kill takes the
 // browser's whole process group, and the browser is started again only
 // once every process of it has exited and nothing holds the profile's
-// IndexedDB locks; and a round that finds the origin's data gone (once seen
-// in a crowded run, never reproduced: the whole origin's IndexedDB fresh,
-// the old store with it, which no workspace code deletes) fails loudly with
-// what was there: the IndexedDB folder before and after the restart, the
-// killed browser's processes still alive, and Chrome's own log.
+// IndexedDB locks.
+//
+// A round that finds the origin's data gone prints what was there: the
+// IndexedDB folder before and after the restart, the killed browser's
+// processes still alive, and Chrome's own log.  If that log says Chrome
+// deleted this origin's IndexedDB as corrupt ("IndexedDB recovering from a
+// corrupted (and deleted) database": a kill can tear a LevelDB record, and
+// Chrome then deletes the whole origin's IndexedDB on its next start; about
+// 1 round in 290 in a loaded crowd, design/workspace-durability.md), it is
+// known browser behaviour: a CI warning, counted, the workspace seeded again
+// for the rounds after, not a failure.  Without that line it is a failure.
 //   CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -100,6 +106,12 @@ window.check = async () => {
   const st = await W.migrationState(w);
   w.close();
   return { problems, moved, state: st, oldLeft: oldFiles.size + oldTrash.size, stale: stale.size };
+};
+// (after Chrome deleted the origin's corrupt IndexedDB: the empty databases its next open made removed, and
+// the workspace seeded again)
+window.reseed = async () => {
+  for (const n of [NAME, MAIN]) await new Promise((ok, no) => { const r = indexedDB.deleteDatabase(n); r.onsuccess = ok; r.onerror = () => no(r.error); });
+  return window.setup();
 };
 window.migrate = async () => { const w = await W.Workspace.open({ name: NAME, mainName: MAIN }); window.mig = W.startMigrator(w).then(() => { w.close(); window.migDone = true; }); return true; };
 window.ready = true;
@@ -183,6 +195,13 @@ async function kill(t) {
     await sleep(100);
   }
 }
+/** Whether the browser now running said, in its log, that it deleted this origin's IndexedDB as corrupt: Chrome's
+ * own behaviour after a kill tore a LevelDB record (design/workspace-durability.md), not this code's. */
+function chromeDeletedCorrupt() {
+  let log = "";
+  try { log = readFileSync(join(profile, `chrome-${launches}.log`), "utf8"); } catch { return false; }
+  return log.includes("IndexedDB recovering from a corrupted (and deleted) database") && log.includes(`Got corruption for { origin: http://127.0.0.1:${server.port}`);
+}
 /** What was there, for a round that finds the origin's data gone. */
 function forensics() {
   let log = "";
@@ -194,7 +213,7 @@ let code = 1;
 try {
   let t = await start();
   check(await t.ev("window.setup()"), "(a version 1 workspace of 125 data files, 2 MB each, kept the old way)");
-  let last = -1;
+  let last = -1, wipes = 0;
   // killed while it moves them, at several points, each time started again and the whole state checked
   for (const [round, ms] of [[1, 120], [2, 200], [3, 200], [4, 250], [5, 250], [6, 300]]) {
     await t.ev("window.migrate()");
@@ -202,8 +221,19 @@ try {
     await kill(t);
     t = await start();
     const r = await t.ev("window.check()");
-    // (the origin's data gone: said loudly, with what was there)
-    if (r.problems.some((p) => p.startsWith("files listed: "))) console.error(`round ${round}: THE ORIGIN'S DATA IS GONE (${r.problems[0]}): ${forensics()}`);
+    const gone = r.problems.some((p) => p.startsWith("files listed: "));
+    // the origin's data gone because Chrome deleted it as corrupt: known browser behaviour, said loudly (a CI
+    // warning, counted, with what was there), not a failure; the workspace seeded again for the rounds after
+    if (gone && chromeDeletedCorrupt()) {
+      wipes++;
+      console.log(`round ${round}: Chrome deleted the origin's IndexedDB as corrupt after the kill (known browser behaviour, not a failure): ${forensics()}`);
+      console.log(`::warning title=workspace-crash: Chrome deleted a corrupt IndexedDB::round ${round} of ${process.pid}: Chrome's log says "IndexedDB recovering from a corrupted (and deleted) database" for this origin after a SIGKILL; counted, not failed (design/workspace-durability.md)`);
+      check(await t.ev("window.reseed()"), "(the workspace seeded again after Chrome's deletion)");
+      last = -1;
+      continue;
+    }
+    // (the origin's data gone otherwise: a failure, with what was there)
+    if (gone) console.error(`round ${round}: THE ORIGIN'S DATA IS GONE (${r.problems[0]}), and Chrome's log doesn't say it deleted it: ${forensics()}`);
     check(r.problems.length === 0, `killed ${ms} ms into a run (round ${round}): every file's bytes intact, the index and bytes agreeing: ${r.problems.slice(0, 5).join("; ")}${r.problems.some((p) => p.startsWith("files listed: ")) ? " (the origin's data gone: see the forensics above)" : ""}`);
     check(r.moved >= last, `…the files moved never fewer than before (${last} → ${r.moved})`);
     last = r.moved;
@@ -215,6 +245,8 @@ try {
   const r = await t.ev("window.check()");
   check(r.problems.length === 0 && r.moved === 125 && r.oldLeft === 0 && r.state.done === true, `finally: done, every file moved, the old stores empty: ${JSON.stringify({ moved: r.moved, oldLeft: r.oldLeft, state: r.state, problems: r.problems.slice(0, 5) })}`);
   t.ws.close();
+  // (how often Chrome deleted the origin as corrupt, to watch the rate)
+  console.log(`Chrome's corrupt-database deletions: ${wipes} of 6 rounds`);
   code = fails.length ? 1 : 0;
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
