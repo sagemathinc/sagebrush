@@ -2576,12 +2576,25 @@ async function durabilityLockOrder() {
     try {
       const refused = [["a buffer", new ArrayBuffer(1 << 20)], ["a typed array", new Uint8Array(1 << 20)], ["a Map", new Map([[1, 2]])], ["a Set", new Set([1])], ["a Date", new Date()], ["undefined in an array", [undefined]]]
         .map(([what, v]) => [what, h.append({ time: "x-" + what, id: "x", data: v })]);
+      // (cycles, an object's and an array's, and a DAG whose 40 levels each name the next twice, 2^40 paths in its
+      // text: refused at once, nothing written or queued; a child shared, acyclic, taken and kept exactly:
+      // daybreak2's LIMIT-7865-1, astra's CORR-786-1)
+      const cyc = {}; cyc.self = cyc;
+      const acyc = []; acyc.push(acyc);
+      let dag = {}; for (let i = 0; i < 40; i++) dag = { l: dag, r: dag };
+      const t0 = performance.now(), tookCycle = h.append({ time: "cyc", id: "cyc", data: cyc }), tookArray = h.append({ time: "acyc", id: "acyc", data: acyc }), tookDag = h.append({ time: "dag", id: "dag", data: dag }), ms = performance.now() - t0, q0 = S.historyBacklog().entries;
+      check(tookCycle === false && tookArray === false && tookDag === false && ms < 500 && q0 === 0, "an append with a cycle (an object's, an array's), or a DAG of 2^40 paths: refused at once, nothing queued: " + JSON.stringify({ tookCycle, tookArray, tookDag, ms: Math.round(ms), q0 }));
+      const child = { text: "shared", n: [1, 2] }, sharing = { time: "shared", id: "shared", a: child, b: child, list: [child, child] }, expect = JSON.stringify(sharing);
+      const b0s = S.historyBacklog().bytes, tookShared = h.append(sharing), chargedShared = S.historyBacklog().bytes - b0s;
+      child.text = "CHANGED";
       const wide = { time: "wide", id: "wide", file: undefined, wide: Array.from({ length: 100_000 }, () => ({})) };
       const b0 = S.historyBacklog().bytes, took = h.append(wide), charged = S.historyBacklog().bytes - b0, text = JSON.stringify(wide).length;
       wide.wide.length = 0; wide.id = "CHANGED";
       release(); release = null;
       await h.appending;
       const kept = (await rawGet(db, "history", [e.ref, "wide"]))?.env;
+      const keptShared = (await rawGet(db, "history", [e.ref, "shared"]))?.env;
+      check(tookShared && chargedShared === 2 * expect.length + S.ENTRY_OVERHEAD && JSON.stringify(keptShared) === expect, "a child shared twice, acyclic: taken, charged as its text, and kept exactly as asked: " + JSON.stringify({ tookShared, chargedShared, kept: keptShared }));
       check(refused.every(([, t]) => t === false) && S.historyBacklog().entries === 0, "an append of data that isn't plain JSON (a buffer, a typed array, a Map, a Set, a Date, undefined in an array): refused, not queued: " + JSON.stringify(refused));
       check(took && charged === 2 * text + S.ENTRY_OVERHEAD && kept?.id === "wide" && kept.wide.length === 100_000, "a wide graph of empty objects (and a property undefined, as patchflow's envelopes have): charged twice its text and ENTRY_OVERHEAD, the text being all that is held, and kept as it was asked: " + JSON.stringify({ took, charged, text, kept: kept && { id: kept.id, n: kept.wide.length } }));
     } finally { release?.(); a.close(); db.close(); }
