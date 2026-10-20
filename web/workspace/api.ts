@@ -31,6 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
+import { PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, cleanPins, capNow, liveLease, pinTotal, epochOf, type Pin } from "./sync-pins";
 
 export type Entry = {
   path: string;
@@ -103,12 +104,16 @@ export const needsHash = (e: Entry): boolean => e.kind === "file" && !!e.migrate
  * (recovered to /Recovered by migrate.ts's recoverTrash). */
 export type OldBytes = { kind: "free" | "older" | "trash"; key: string; folder: string; base: string; ext: string; count: "files" | "recovered" };
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
-export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
+/** `pinned`: kept for sync, its bytes committed here and not yet decided (design/sync-client.md C2): exempt from
+ * pruning, dropVersions and emptying Trash until its pin is released. */
+export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string; pinned?: boolean };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
 export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxFolderEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
 /** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
  * workspace at most 100,000 entries, a folder at most 10,000 of its own.  §2.5: a data file's latest 20
  * versions, none older than 30 days, all of them at most 1 GB. */
+/** The most versions one save drops (see putVersion). */
+export const PRUNE_STEP = 3;
 export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
 export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage" | "quarantined";
@@ -145,6 +150,8 @@ const CHANNEL = "sagebrush-workspace";
 const LOOKALIKE_GROUPS = 100, LOOKALIKE_MEMBERS = 10;
 // (the stores a version is kept in, with the change that keeps it)
 const VERSION_STORES = ["versions", "versionBytes", "meta"];
+// (a change's stores with sync's: its pending note and pins in its own transaction (design/sync-client.md C2))
+const withSync = (...stores: string[]) => [...new Set([...stores, ...SYNC_STORES])];
 // (an old copy of a migrated file's bytes, in "sagebrush"/files or in trash, not yet deleted: a key
 // in meta, so that reconcile never takes it for a file of its own and the migrator deletes it)
 const STALE = "stale:";
@@ -925,7 +932,7 @@ export class Workspace {
     if (within(q, TRASH)) throw new WorkspaceError("invalid", "Trash holds only what was deleted");
     return this.locked(async () => {
       const ops: Op[] = [];
-      const e = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+      const e = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         await this.folders(tx, q, ops);
         return req(tx.objectStore("entries").get(q));
       });
@@ -993,7 +1000,7 @@ export class Workspace {
         });
       } else throw new WorkspaceError("invalid", "a folder has no contents to write");
       const ops: Op[] = [];
-      const entry = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+      const entry = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         if (!cur || cur.ref !== e.ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
         const next: Entry = { ...cur, updated: t };
@@ -1032,20 +1039,43 @@ export class Workspace {
     // hash of them is at hand: design/sync-client.md §3)
     const sha256 = await bytesHash(b);
     const base = e.sha256 ?? version?.sha256 ?? oldMark?.sha256 ?? (old === undefined ? undefined : sameBytes(old, b) ? sha256 : await bytesHash(old));
-    let entry: Entry;
+    // (sync on: bytes it replaces that are pinned (committed here, not yet decided) are kept as a version even where
+    // they otherwise wouldn't be (empty, keepEmpty false), within the cap (read now: it can't be awaited in the
+    // transaction); new bytes are pinned, the same bytes again not (one pin per storage): design/sync-client.md C2)
+    const same = old !== undefined && sameBytes(old, b);
+    const on = await inTx(this.ws, "meta", "readonly", async (tx) => !!(await liveLease(tx.objectStore("meta"))));
+    const cap = on ? await capNow() : 0;
+    const pinnedVersion = on && old !== undefined && !same && !version ? await this.versionOf({ ...e, fid }, old) : null;
+    let entry: Entry, collapsed: { ns: string; epoch: number } | null = null;
     try {
-      entry = await inTx(this.ws, ["entries", "ops", "fileBytes", ...(version || oldMark ? VERSION_STORES : [])], "readwrite", async (tx) => {
+      entry = await inTx(this.ws, withSync("entries", "ops", "fileBytes", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...(on ? RELEASE_STORES : [])), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         // (still the file read, at the revision read: CORR-CAP-2's identity at use)
         if (!cur || cur.kind !== "file" || cur.ref !== e.ref || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) throw new WorkspaceError("conflict", `${e.path} changed while it was written`);
-        if (version) await this.putVersion(tx, version, old!);
+        const lease = on && !same && old !== undefined ? await liveLease(tx.objectStore("meta")) : undefined;
+        const pin = lease ? await pinOfCurrent(tx, fid, cur.sha256) : undefined;
+        let kept = false;
+        if (pin) {
+          // (past the cap: this identity's unscanned writes collapsed first; still past it, the bytes it replaces
+          // aren't kept for sync: their pin released, its record unpinned, said; C2)
+          const meta = tx.objectStore("meta"), room = async () => (await pinTotal(meta)) + pin.size <= cap;
+          if (!(await room()) && (await collapse(tx, fid, lease!.ns))) collapsed = { ns: lease!.ns, epoch: await epochOf(meta) };
+          // (the collapse may have released this very pin: an unscanned write's, not to be sent)
+          const still = collapsed ? ((await req(tx.objectStore("pins").get([pin.id, pin.seq]))) as Pin | undefined) : pin;
+          const v = version ?? pinnedVersion;
+          if (still && v && (await room())) {
+            const vid = await this.putVersion(tx, { ...v, pinned: true }, old!);
+            kept = await charge(tx, still, { version: vid }, cap, true);
+          } else if (still) await release(tx, still, true);
+        }
+        if (version && !kept) await this.putVersion(tx, version, old!);
         tx.objectStore("fileBytes").put(b, fid);
         if (oldMark) tx.objectStore("meta").put(oldMark, staleKey(where, e.ref!));
         const next: Entry = { ...cur, fid, ident: fid, migrated: true, rev, size: b.length, sha256, updated: t };
         delete next.missing;
         delete next.unmoved;
         st.put(next);
-        await this.log(tx, ops, { op: "write", path: e.path, kind: "file" }, next, undefined, base);
+        await this.log(tx, ops, { op: "write", path: e.path, kind: "file" }, next, undefined, base, !same);
         return next;
       });
     } catch (err) {
@@ -1057,6 +1087,9 @@ export class Workspace {
       old = undefined;
       await this.dropStale(where, e.ref!, box).catch(() => {});
     }
+    // (a collapse released only a few of its pins in the save: the rest now, a page at a time, after it)
+    // (begun after this save has returned, so none of its pages is part of the save's own work)
+    if (collapsed) this.pinsCleaning = new Promise((r) => setTimeout(r, 0)).then(() => PINS.cleanAfter).then(() => cleanPins(this, collapsed!)).catch((err) => console.warn("workspace: sync's pins:", err));
     this.tell({ ops });
     return { entry, rev };
   }
@@ -1307,7 +1340,7 @@ export class Workspace {
               const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
               list.sort((x, y) => x.id! - y.id!);
               for (const v of list.slice(0, Math.max(0, list.length - keep))) {
-                if ((only && !only.has(v.id!)) || v.id! > upTo) continue;
+                if ((only && !only.has(v.id!)) || v.id! > upTo || v.pinned) continue;
                 vs.delete(v.id!); vb.delete(v.id!); f += v.size;
               }
             }
@@ -1321,9 +1354,11 @@ export class Workspace {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
             const list: Version[] = await req(vs.getAll(upTo === Infinity ? null : IDBKeyRange.upperBound(upTo), DROP_RECORDS));
             let f = 0;
-            for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
+            // (versions kept for sync (pinned) stay until their pins go: design/sync-client.md C2)
+            let pinned = false;
+            for (const v of list) { if (v.pinned) { pinned = true; continue; } vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
             // (the total set to 0 only when no version is left at all: a drop fenced by maxId leaves newer ones, CORR-5D2-1)
-            await less(tx, f, upTo === Infinity && list.length < DROP_RECORDS);
+            await less(tx, f, upTo === Infinity && list.length < DROP_RECORDS && !pinned);
             return [list.length, f] as const;
           });
           freed += f;
@@ -1331,7 +1366,7 @@ export class Workspace {
         }
       }
       const ops: Op[] = [];
-      await inTx(this.ws, "ops", "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
+      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
       this.tell({ ops });
       return freed;
     });
@@ -1436,10 +1471,14 @@ export class Workspace {
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can empty Trash");
     const tops = paths?.map((p) => path(p)) ?? [TRASH];
     for (const t of tops) if (!within(t, TRASH) || (paths && t === TRASH)) throw new WorkspaceError("invalid", `${t} isn't in Trash`);
+    // (sync on: a file's present bytes, if pinned, stay until their pin is decided, charged as its own, within the
+    // cap read now (design/sync-client.md C2))
+    const cap = await capNow();
     return this.locked(async () => {
       const ops: Op[] = [];
-      const gone: Entry[] = await inTx(this.ws, ["entries", "ops", "fileBytes", "trash"], "readwrite", async (tx) => {
+      const gone: Entry[] = await inTx(this.ws, withSync(...RELEASE_STORES, "entries", "ops", "fileBytes", "trash"), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), out: Entry[] = [];
+        const lease = await liveLease(tx.objectStore("meta"));
         for (const t of tops) {
           const top: Entry | undefined = t === TRASH ? undefined : await req(st.get(t));
           if (t !== TRASH && !top) continue;
@@ -1447,7 +1486,10 @@ export class Workspace {
           for (const e of [...(top ? [top] : []), ...under]) {
             st.delete(e.path);
             // (a data file's bytes with its entry, in this one transaction: in fileBytes, or the old way in trash)
-            if (e.kind === "file" && e.migrated && e.fid) tx.objectStore("fileBytes").delete(e.fid);
+            if (e.kind === "file" && e.migrated && e.fid) {
+              const pin = lease ? await pinOfCurrent(tx, e.fid, e.sha256) : undefined;
+              if (!pin || !(await charge(tx, pin, { orphan: true }, cap))) tx.objectStore("fileBytes").delete(e.fid);
+            }
             else if (e.kind === "file" && e.ref !== null) tx.objectStore("trash").delete(e.ref);
             out.push(e);
           }
@@ -1491,7 +1533,7 @@ export class Workspace {
           let freed = 0;
           for (const fid of fids) {
             const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-            for (const v of list) { vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
+            for (const v of list) { if (v.pinned) continue; vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
           }
           const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
           meta.put(Math.max(0, total - freed), "versionBytes");
@@ -1541,7 +1583,7 @@ export class Workspace {
         else if (this.main) await this.mainTx("files", "readwrite", (st) => st.delete(e.ref!));
       }
       const ops: Op[] = [];
-      await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+      await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(q));
         if (cur && cur.fid === e.fid && cur.created === e.created) st.delete(q);
         await this.log(tx, ops, { op: "discard", path: q, kind: "file" }, null, e);
@@ -1558,7 +1600,7 @@ export class Workspace {
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only the page itself forgets entries");
     return this.locked(async () => {
       const ops: Op[] = [];
-      await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+      await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), e: Entry | undefined = await req(st.get(q));
         if (!e) return;
         if (e.kind === "folder" && (await req(st.count(subtree(q)))) > 0) throw new WorkspaceError("invalid", `${q} isn't empty`);
@@ -1607,30 +1649,43 @@ export class Workspace {
     return { fid, t: this.now(), size: bytes.length, sha256: await bytesHash(bytes), by: this.actor, device: this.device };
   }
   /** The version `v` (its `bytes`) kept in `tx` (with VERSION_STORES), and the oldest dropped past the bounds. */
-  private async putVersion(tx: IDBTransaction, v: Version, bytes: Uint8Array) {
+  private async putVersion(tx: IDBTransaction, v: Version, bytes: Uint8Array): Promise<number> {
     const { fid, t } = v;
     const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
     const id = (await req(vs.add(v))) as number;
     vb.put(bytes, id);
     let total = ((await req(meta.get("versionBytes"))) as number | undefined ?? 0) + bytes.length;
-    const drop = (v: Version) => { vs.delete(v.id!); vb.delete(v.id!); total -= v.size; };
+    // (past the count or the age, at most PRUNE_STEP of this file's dropped a save, oldest first: one is kept a
+    // save, so past the count at most one is due without sync, but versions pinned for sync (exempt) and then
+    // released fall due together, and go a few a save, as ones past the age do, so a save's cost stays
+    // constant (design/sync-client.md C2).  Past the bytes, as many as it takes: that bound is held,
+    // pinned versions aside, which sync's own cap bounds)
+    let dropped = 0;
+    const drop = (v: Version, step = true) => {
+      if (step && dropped >= PRUNE_STEP) return;
+      dropped++;
+      vs.delete(v.id!); vb.delete(v.id!); total -= v.size;
+    };
     // (this file's others, oldest first, by the order they were kept (the
     // ids count up; a clock set back doesn't reorder them): past the
     // count left beside the one just kept, or past the age.  The one just
     // kept is counted apart, so the count is always right: CORR-BEF-1)
     const others = ((await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as Version[]).filter((v) => v.id !== id).sort((x, y) => x.id! - y.id!);
     const room = Math.max(0, this.limits.maxVersions - 1);
-    others.forEach((v, i) => { if (i < others.length - room || v.t < t - this.limits.maxVersionAgeMs) drop(v); });
+    // (a version kept for sync (pinned) is exempt, counted all the same: design/sync-client.md C2)
+    const prunable = others.filter((v) => !v.pinned);
+    prunable.forEach((v, i) => { if (i < prunable.length - room || v.t < t - this.limits.maxVersionAgeMs) drop(v); });
     // (everyone's, oldest first, past the bytes; deletes made above are already out of this read)
     if (total > this.limits.maxVersionBytes) {
       const old: Version[] = await req(vs.getAll());
       for (const v of old) {
         if (total <= this.limits.maxVersionBytes) break;
-        if (v.id === id) continue;
-        drop(v);
+        if (v.id === id || v.pinned) continue;
+        drop(v, false);
       }
     }
     meta.put(Math.max(0, total), "versionBytes");
+    return id;
   }
 
   /** `f` holding the workspace's lock, as locked(), for a change to `p`: if it would read values kept
@@ -1638,6 +1693,8 @@ export class Workspace {
    * COPIES taken before the lock, never while holding it (LIMIT-CAP1A-1).  The lock is asked for at once,
    * so changes keep the order they were asked for; only one that finds such a file, holding no
    * reservation, gives the lock back unchanged, reserves, and asks again. */
+  /** (the cleanup of sync's pins a collapsing save started after it, if any: for tests to wait for) */
+  pinsCleaning: Promise<unknown> | null = null;
   /** (the reservation the change now holding the lock took before it, lockedFor's; null if none) */
   private lockToken: Release | null = null;
   /** The reservation to read bytes whole in (LEGACY_MAX × COPIES): `t`, the caller's (else the lock holder's),
@@ -1736,13 +1793,13 @@ export class Workspace {
   }
   // (a tab opened before a reset elsewhere: its workspace is no longer this one, by id or generation, A.1)
   private async sameIdentity(quarantineToo = false) {
-    const { identity: id, kept } = await this.metaState();
+    const { identity: id, kept, resetting } = await this.metaState();
     if (id && (id.workspace !== this.identity.workspace || id.generation !== this.identity.generation)) {
       this.closedElsewhere();
       throw new WorkspaceError("storage", "this workspace was reset in another tab: reload this page to use it");
     }
     // (a reset under way in another tab, stopped part way: nothing written until an open finishes it)
-    if (quarantineToo && (await this.metaState()).resetting) throw new WorkspaceError("quarantined", "this workspace is being reset: reload this page");
+    if (quarantineToo && resetting) throw new WorkspaceError("quarantined", "this workspace is being reset: reload this page");
     // (quarantined by another tab since this one opened: refused from now on, astra's probe on 2a4e53a8)
     if (quarantineToo && kept) {
       this.adoptQuarantine(kept);
@@ -2082,7 +2139,7 @@ export class Workspace {
     const ops: Op[] = [];
     try {
       const fid = kind === "file" ? hex(8) : undefined;
-      const entry = await inTx(this.ws, ["entries", "ops", ...(fileBytes ? ["fileBytes"] : [])], "readwrite", async (tx) => {
+      const entry = await inTx(this.ws, withSync("entries", "ops", ...(fileBytes ? ["fileBytes"] : [])), "readwrite", async (tx) => {
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
         await this.folders(tx, parentOf(q), ops);
@@ -2094,7 +2151,7 @@ export class Workspace {
         const ident = identOf(e);
         if (ident) e.ident = ident;
         st.put(e);
-        await this.log(tx, ops, { op: "create", path: q, kind }, e);
+        await this.log(tx, ops, { op: "create", path: q, kind }, e, undefined, undefined, kind === "file");
         return e;
       });
       this.tell({ ops });
@@ -2151,7 +2208,7 @@ export class Workspace {
         bytes = undefined;
       } else if (fields.kind === "file" && !fields.sha256) throw new WorkspaceError("invalid", "a data file is adopted with its SHA-256 (design/sync-client.md §3)");
       const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || move ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : []), ...(move ? ["fileBytes"] : [])];
-      const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
+      const entry = await inTx(this.ws, withSync(...stores), "readwrite", async (tx) => {
         const st = tx.objectStore("entries");
         const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
         const p = also.at ?? freePath(folder, base, ext, (x) => taken.has(x));
@@ -2173,7 +2230,7 @@ export class Workspace {
         const ident = identOf(e);
         if (ident) e.ident = ident;
         st.put(e);
-        await this.log(tx, ops, { op: "adopt", path: p, kind: e.kind }, e);
+        await this.log(tx, ops, { op: "adopt", path: p, kind: e.kind }, e, undefined, undefined, !!move);
         return e;
       });
       this.tell({ ops });
@@ -2242,7 +2299,7 @@ export class Workspace {
   /** The op recorded in `tx`, with its identity (design/sync-client.md §3): `now`, the entry as the op left it
    * (null: the op removed `gone`; undefined: it changed no entry), and, on a data file's write, `base`, the
    * SHA-256 it replaced.  Its parent folder read in `tx`: one lookup. */
-  private async log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">, now?: Entry | null, gone?: Entry, base?: string) {
+  private async log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">, now?: Entry | null, gone?: Entry, base?: string, pin = false) {
     // (Trash's own folder is the workspace's, not something synced: no identity, as the root has none)
     const e = (now ?? gone)?.path === TRASH ? undefined : now ?? gone, id: Partial<Op> = {};
     if (e) {
@@ -2264,8 +2321,10 @@ export class Workspace {
       }
     } else if (now === null && e && identOf(e)) id.after = null;
     const rec: Op = { ...op, ...id, t: this.now(), device: this.device, by: this.actor };
-    tx.objectStore("ops").add(rec);
+    rec.seq = (await req(tx.objectStore("ops").add(rec))) as number;
     ops.push(rec);
+    // (sync's pending note, and a pin on new bytes, in this transaction: design/sync-client.md C2)
+    await noteChange(tx, rec, pin);
   }
 
   /** What an op left of `e` (OpAfter), read in `st`'s transaction; undefined when it, or the folder it is in,
@@ -2324,7 +2383,7 @@ export class Workspace {
     const stuck = old.find((e) => e.kind === "file" && e.unmoved);
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     const ops: Op[] = [];
-    const moved = await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
+    const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
       const st = tx.objectStore("entries");
       if ((await req(st.getKey(b))) !== undefined || (await req(st.count(subtree(b)))) > 0) throw new WorkspaceError("exists", `${b} is there already`);
       for (const e of old) {

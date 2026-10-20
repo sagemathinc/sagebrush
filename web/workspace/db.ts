@@ -66,12 +66,17 @@
 //            hold null)
 //   pins     bytes committed here and not yet decided, by [id, seq]
 //   pending  what is waiting to go up for an identity, by id
-// Nothing reads or writes the last five yet (sync's next step).
+//
+// Version 5 (design/sync-client.md C2, step 2b-2):
+//
+//   pins' index byStorage, on each pin's `skey` (where its bytes are: "f:<fid>", a file's fileBytes, or
+//   "v:<version id>"): whether any other pin names a storage, one bounded count.  Schema only (the pins are
+//   empty until this step)
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 4;
+export const WS_VERSION = 5;
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -121,6 +126,8 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // state from version 3 is dropped and its next run walks the whole index again, as for version 3)
       if (old >= 1) tx.objectStore("meta").delete("migration");
     }
+    // (who names a storage, one bounded count (sync-pins.ts): the pins are empty until this step, so nothing to fill)
+    if (old < 5) tx.objectStore("pins").createIndex("byStorage", "skey");
   }, onClose, ms);
 }
 

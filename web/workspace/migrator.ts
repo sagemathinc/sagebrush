@@ -34,6 +34,7 @@ import type { Entry, Workspace } from "./api";
 import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
+import { cleanPins } from "./sync-pins";
 
 export const MIGRATE = {
   /** entries looked at per batch */
@@ -120,6 +121,9 @@ async function resume(w: Workspace, opening = false): Promise<void> {
       // passes over the index (astra's CORR-6B7-1: a tab closed between an adopt's move and its old copy's
       // deletion leaves a mark that nothing else would ever come back to))
       await cleanStale(w);
+      // (sync's pins: a lifecycle change's purge, collapsed writes' pins, orphaned bytes no pin or entry names:
+      // design/sync-client.md C2)
+      await cleanPins(w).catch((e) => console.warn("workspace: sync's pins:", e));
       const s = await readState(w).catch(() => ({}) as MigrationState);
       if (s.done || (s.paused && !opening && !(await room(0)))) return;
       if (s.paused) { delete s.paused; await writeState(w, s); }

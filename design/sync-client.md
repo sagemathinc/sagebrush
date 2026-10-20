@@ -247,45 +247,64 @@ A held write is part of the view (C3). Its bytes are the file's current ones, so
 - **a long offline tail** (50,000 ops across 1,000 files), then 200 overwrites of one file at a 1 MiB cap. Each save reads and writes at most 40 records, counted by an instrumented store, and its longest task stays under 50 ms. The cleanup then drains in pages of 500;
 - a crash mid-way, including part-way through the paged cleanup: no pin leaked, every pin owned by an op, a record or the journal, and the byte total equal to the sum of the retained pins.
 
-**As built (step 2b-2, plan):** settled with @sagebrush, astra and daybreak2 before the code (web/workspace/sync-pins.ts, with the outbox's scan and decisions).
+**As built (step 2b-2):** settled with @sagebrush, astra and daybreak2 before the code, and then as amended by astra's P1 and P2 (web/workspace/sync-pins.ts, with the outbox's scan and decisions in sync-outbox.ts; the workspace database at v5).
 - **The lease's lifecycle.** Sync is on while `sync:current` is a lease that isn't off.
-  - Off (turning sync off, signing out) writes `{ns, gen + 1, off: true}`. A switch writes `{ns', gen + 1}`.
-  - Generations only ever increase. `sync:current` is never deleted, so no old lease can come back.
-  - Either fences every older lease and stops new pins and pending notes. The namespace's resume state (watermark, sequence, outbox) is kept: re-enabling takes a fresh generation and resumes it.
-  - Off or a switch records a purge of every pin and namespace-specific pending field made before it, done a page at a time (cleanPins).
-- **Pins.** A pin is `pins[id, seq] = {path, sha256, size, storage, owner?}`.
-  - `storage` says where its bytes are: `{fileBytes: fid}` while they are the file's present bytes or orphaned, `{version: id}` once kept apart.
-  - `owner` is `{ns, gen, dseq}`, lease-specific.
-  - `sync:pinBytes` totals the bytes pins keep of their own, apart or orphaned, against the cap. Charging past the cap releases the pin instead.
+  - Off (turning sync off, signing out) writes `{ns, gen + 1, off: true}`. A switch writes `{ns', gen + 1}`. A reconnect takes a new generation of the same namespace.
+  - Generations only ever increase. `sync:current` is never deleted, so no old lease can come back. A generation only fences stale writers.
+  - **The lifecycle epoch** (`sync:epoch`) moves only on off, sign-out or a namespace switch, never on a reconnect (P1). It records a purge (`sync:purge` `{epoch, cursor}`) of every pin of an older epoch, done a page at a time by cleanPins. A reconnect keeps every pin.
+  - The namespace's resume state (watermark, sequence, outbox, its pending fields) is kept: re-enabling resumes it.
+- **Pins.** A pin is `pins[id, seq] = {path, sha256, size, epoch, storage, skey, orphan?, owner?}`.
+  - `storage` says where its bytes are: `{fileBytes: fid}` while they are the file's present bytes or orphaned (`orphan`), `{version: id}` once kept apart. `skey` (`f:<fid>`, `v:<id>`) is indexed (`byStorage`).
+  - `owner` is `{ns, dseq}`, the record a scan handed it to (P1: no generation in it, so a reconnect keeps it owned).
+  - One pin per storage: a write of the same bytes again takes no pin.
+  - `sync:pinBytes` totals the bytes pins keep of their own, apart or orphaned, against the cap: min(1 GiB, half the estimated free space). Charging past the cap releases the pin instead.
+  - Pinned versions are exempt from pruning, dropVersions and emptyTrash's version drops.
 - **Release** is one transaction with everything it implies:
   - the total goes down;
-  - a version kept apart loses its exemption;
-  - bytes in fileBytes go with the last reference to them: no pin left naming that storage, no entry, and, from step 4, no journal record;
-  - an owned pin marks its record unpinned (`allocated.pinned = false`) and notes `sync:skipped`. No owned pin is ever deleted silently.
-- **Orphans.** Emptying Trash while a file's present bytes are pinned keeps fileBytes[fid], charged as the pin's own (or released and noted if past the cap). bytesFor reads them through the pin's `storage`, verifying the hash, under the read token. cleanPins at start sweeps fileBytes that no entry and no pin names.
-- **Pending.** A pending record has `{id, latest, ns, ...}`.
+  - a version kept apart loses its exemption once no pin names it;
+  - orphaned bytes go with the last reference to them: no pin naming that storage, no entry, and, from step 4, no journal record;
+  - an owned pin marks its record unpinned (`allocated.pinned = false`) and notes `sync:skipped` `{count, files}`. No owned pin is ever deleted silently.
+- **Orphans.** Emptying Trash while a file's present bytes are pinned keeps fileBytes[fid], charged as the pin's own (or released and noted if past the cap), and marks it (`sync:orphan:<fid>`). bytesFor reads them through the pin's `storage`, verifying the hash, under the read token. cleanPins sweeps only marked fids that no pin and no entry names; a file's own bytes are never candidates (an entry not yet given its identity would look unnamed).
+- **Pending.** A pending record is `{id, latest, byNs}`.
   - `latest` {seq, by, after} is local and kept across namespaces.
-  - The namespace-specific fields are `allocated`, `acceptedTip`, `held`, `collapsed`, `cutoff` and `successor`. They count only while `ns` is the current lease's, so a new namespace's first write inherits no base, held bit or cutoff.
+  - `byNs[ns]` holds that namespace's `allocated` {dseq, sha256, pinned, state}, `acceptedTip`, `held`, `collapsed`, `cutoff` and `successor`. A new namespace's first write inherits no base, held bit or cutoff. A settled state is dropped once its identity's latest op is scanned.
+- **Decisions.** An echo before the ack counts as acceptance. `acceptedTip` goes by dseq, so a late answer for an older record never moves it back.
 - **The base.** A successor's base is:
   - `allocated.sha256` while that record is undecided or accepted;
   - else `acceptedTip` (the newest accepted, not yet confirmed);
   - else the confirmed index's (and, until C3 keeps syncIndex, the op's local base).
   - So with Z confirmed, A accepted but not echoed, B unpinned and refused `missing`, and C held, C's base is A, never Z.
-- **Held successors as durable intents** (astra's schedules 1, 2 and 5).
-  - A's decision (accepted, or refused `missing`) clears `held`. In the same transaction it records `successor: {base}`, the base from A's actual answer. It allocates nothing there, so an ack never needs room and the cap is never overrun.
-  - The next scan pages drain successors while there is room. Each becomes one write record of the identity's current state, read then: the entry by `byIdent`, its present sha and size, its path and parent. It is re-pinned on the present bytes (a pin costing nothing while they are present), with `lseq` = latest.seq.
+  - A write whose bytes equal its base is skipped.
+- **Held successors as durable intents** (astra's schedules 1, 2 and 5; P2).
+  - A's decision (accepted, or refused `missing`) clears `held`. In the same transaction it records `successor: {base}`, the base from A's actual answer, and the identity in `sync:<ns>:successors`. It allocates nothing there, so an ack never needs room and the cap is never overrun.
+  - A recorded successor gates allocation: no later write of that identity is allocated before it.
+  - The scan drains successors first, while there is room. Each becomes one write record of the identity's current state, read then: the entry by `byIdent`, its present sha and size, its path and parent. It is re-pinned on the present bytes, with `lseq` = latest.seq.
   - In that same transaction `cutoff` = latest.seq is recorded, so the scan later skips this identity's writes with seq ≤ cutoff (already represented). It does not skip its renames, removes or forgets.
   - If the current state is gone (no entry, or latest.after null: a forget or emptyTrash came first), no write is made and no identity is resurrected. The successor and held clear, its pins are released, and the deletion op goes as usual.
   - A renamed or moved current identity is allocated at its present path and parent.
 - **Collapse** (a save past the cap):
-  - `collapsed` is set to the previous latest seq, and at most 32 unowned pins with seq ≤ collapsed are released in that save's transaction; cleanPins releases the rest.
+  - `collapsed` is set to the previous latest seq, and at most PINS.collapseRelease (4) unowned pins with seq ≤ collapsed are released in that save's transaction. cleanPins releases the rest, begun after the save returns.
+  - That cleanup is tagged with the save's namespace and lifecycle epoch (P1). In each page's transaction it releases only unowned pins of that epoch or older, collapsed in that namespace. A run that starts after a later save, a reconnect, or sync turned off and on never takes an owned pin or one of a newer epoch.
   - If still over, the replaced bytes aren't kept apart: their pin is released (its record unpinned) and `sync:skipped` is noted.
   - A save that then fails for quota refuses the change whole: nothing is half-pinned.
+  - Versions released together fall due for pruning together. Pruning by count or age drops at most PRUNE_STEP (3) of a file's versions a save, so the backlog drains over the next saves. The byte bound drops as many as it takes.
 - **The scan, for a data file's write** (create, write, adopt):
   - seq ≤ collapsed or ≤ cutoff: no record, its pin released, noted skipped.
-  - held, or the allocated record unpinned and undecided: `held`, no record, its pin released.
+  - held, a successor recorded, or the allocated record unpinned and undecided: `held`, no record, its pin released.
   - Otherwise: the record with the base above, its pin handed over (`owner`), `allocated` updated.
-- **CI assertions, not a bench:** in the 50,000-op tail, each save makes at most 40 IndexedDB calls, counted by an instrumented store, and its longest task stays under 50 ms.
+- **Ownership in one lookup each** (daybreak2):
+  - "the last reference" is one count on the `byStorage` index (database v5);
+  - each file's pin on its present bytes is pointed to by `sync:cur:<fid>`;
+  - the sweep's candidates are the orphan markers.
+  - So no ownership question scans pins.
+  - A save reads the lease, the pin total and the epoch once per transaction. Every write of one goes through `metaWrite`, so a read after it in that transaction sees it. The cache is dropped when its transaction completes or aborts, so it never outlives it.
+  - cleanPins goes a page (500 pins) per transaction from durable cursors: the purge, then collapsed pins, then the orphan markers.
+- **CI assertions, not a bench** (decided with @sagebrush):
+  - In the 50,000-op tail, each plain save makes at most 40 IndexedDB calls, counted by an instrumented store, and one that collapses at most 64. Each kind's figures are the same as on a workspace with no tail.
+  - Each cleanup run a collapsing save begins makes at most 2,000 calls, with the tail and without.
+  - The longest task stays under 50 ms, as the browser's long-task observer reports it (the check requires the observer).
+  - A cleanup page and a decision on an identity with many pins stay bounded too.
+  - A backlog of 50 versions past the age drains 3 a save, never growing; past the bytes, every version needed goes in the one save.
 
 ### C3. The confirmed index and the optimistic view (CORR-8E7-3)
 
