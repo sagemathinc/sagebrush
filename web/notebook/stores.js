@@ -64,8 +64,8 @@ export const FENCE = "__sagebrush-workspace__";
 // (the rules, the same for every write (astra's CORR-2A4-2 on 0eefec71): a store is bound to the fence it found
 // when it loaded, read in the same transaction as the document; a write is allowed only if the fence now is that
 // same workspace and generation, in phase "ok"; a fence that appeared since a store found none, or went since it
-// found one, refuses it.  A fence is never deleted: one the workspace couldn't write marks its database blocked,
-// below.  Which records the workspace owns is decided by ownedByWorkspace, never by whether a fence is there)
+// found one, refuses it.  A fence is never deleted.  Which records the workspace owns is decided by
+// ownedByWorkspace, never by whether a fence is there)
 const fenceRefusal = (f, seen) => {
   if (!f) return seen ? "this browser's record of the workspace is missing: reload this page" : null;
   if (f.quarantined) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
@@ -74,21 +74,73 @@ const fenceRefusal = (f, seen) => {
   if (seen && (f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
   return null;
 };
-const fenceOf = (f) => (f && typeof f.workspace === "string" ? { workspace: f.workspace, generation: f.generation } : null);
-// (a database whose fence the workspace couldn't write: the fence there is no longer to be trusted, so every
-// write to it is refused, by this module's mark and by localStorage's, until a later write of the fence succeeds;
-// a fence is never deleted to say so: astra's CORR-2A4-2 on 28f6511b)
-const blockedDbs = new Set();
-export const BLOCKED_FLAG = "sagebrush-fence-blocked:";
-/** The workspace marks `name` blocked (its fence couldn't be written) or not. */
-export function markBlocked(name, on) {
-  if (on) blockedDbs.add(name); else blockedDbs.delete(name);
-  try { if (on) localStorage.setItem(BLOCKED_FLAG + name, "1"); else localStorage.removeItem(BLOCKED_FLAG + name); } catch {}
+const fenceOf = (f) => (f && typeof f.workspace === "string" ? { workspace: f.workspace, generation: f.generation, primary: typeof f.primary === "string" ? f.primary : undefined } : null);
+// (the authority every write to an owned record confirms, besides the fence: the workspace's own meta, in the
+// database the fence names (the workspace's, "sagebrush-workspace", where there is no fence yet), read before
+// each write.  The write goes only if meta positively says so: the same identity as the fence, nothing
+// quarantined, being reset or purged, and this database not marked blocked (its fence couldn't be written, or a
+// fence of another generation was found there).  Anything else, an error or a denial included, refuses: a store
+// in another copy of this module, another tab, or a page with nothing wired, the same (astra's CORR-2A4-2 and
+// CORR-56C-1 on 56c60932))
+const PRIMARY = "sagebrush-workspace";
+const primaries = new Map();
+// (the workspace's database, opened as it is, never made: null if there is none)
+function primaryDb(name) {
+  let p = primaries.get(name);
+  if (!p) {
+    p = new Promise((ok, no) => {
+      let absent = false;
+      const r = indexedDB.open(name);
+      r.onupgradeneeded = () => { absent = true; r.transaction.abort(); };
+      r.onsuccess = () => {
+        const db = r.result;
+        db.onversionchange = () => { db.close(); primaries.delete(name); };
+        db.onclose = () => primaries.delete(name);
+        ok(db);
+      };
+      r.onerror = (e) => { e.preventDefault?.(); absent ? ok(null) : no(r.error); };
+      r.onblocked = () => no(new Error("the workspace's database is being upgraded"));
+    });
+    primaries.set(name, p);
+    p.then((db) => { if (!db) primaries.delete(name); }, () => primaries.delete(name));
+  }
+  return p;
 }
-const isBlocked = (name) => {
-  if (blockedDbs.has(name)) return true;
-  try { return !!localStorage.getItem(BLOCKED_FLAG + name); } catch { return false; }
-};
+const readMeta = (db) => new Promise((ok, no) => {
+  const tx = db.transaction("meta", "readonly"), st = tx.objectStore("meta"), out = {};
+  for (const k of ["identity", "quarantine", "resetting", "purgeMain", "fenceBlocked"]) { const g = st.get(k); g.onsuccess = () => { out[k] = g.result; }; }
+  tx.oncomplete = () => ok(out);
+  tx.onerror = () => no(tx.error);
+  tx.onabort = () => no(tx.error ?? new Error("aborted"));
+});
+const UNREADABLE = "this browser's record of the workspace couldn't be read: reload this page";
+async function primaryRefusal(db, fence) {
+  if (!fence && !["sagebrush", "sagebrush-history", "sagebrush-board-history"].includes(db.name)) return null;
+  let m;
+  try {
+    let pdb = await primaryDb(fence?.primary ?? PRIMARY);
+    if (pdb === null) return fence ? "this browser's record of the workspace is missing: reload this page" : null;
+    if (!pdb.objectStoreNames.contains("meta")) return UNREADABLE;
+    try { m = await readMeta(pdb); }
+    catch (e) {
+      // (a connection closed under it (an upgrade, a deletion): once more, on a new one)
+      if (e?.name !== "InvalidStateError") throw e;
+      primaries.delete(fence?.primary ?? PRIMARY);
+      pdb = await primaryDb(fence?.primary ?? PRIMARY);
+      if (!pdb) return "this browser's record of the workspace is missing: reload this page";
+      m = await readMeta(pdb);
+    }
+  } catch {
+    return UNREADABLE;
+  }
+  const id = m.identity;
+  if (!fence) return id ? "the workspace was set up after this was opened: reload this page" : null;
+  if (!id || id.workspace !== fence.workspace || id.generation !== fence.generation) return "this browser's record of the workspace doesn't match its notebooks: reload this page";
+  if (m.quarantine && (m.quarantine.state === "confirmed" || m.quarantine.state === "suspected")) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
+  if (m.resetting || m.purgeMain) return "this browser's workspace is being reset: wait for it, then reload";
+  if (Array.isArray(m.fenceBlocked) && m.fenceBlocked.includes(db.name)) return "this browser's record of the workspace couldn't be written: reload this page";
+  return null;
+}
 /** Whether the record `id` of the database `name` belongs to the workspace, its fence and its gates governing it
  * (design/workspace-durability.md A.3b): every notebook and its history; of the boards' history only the
  * workspace's own boards' ("local:" and the 12-hex ref): an example's, a board in the address or another site's
@@ -97,8 +149,8 @@ export function ownedByWorkspace(name, id) {
   if (name === "sagebrush-board-history") return /^(board:)?local:[0-9a-f]{12}(:|$)/.test(String(id));
   return true;
 }
-// (why a write to `db` is refused now: the page's gate, or its fence blocked)
-const refusal = (db) => saveGate?.() || (db && isBlocked(db.name) ? "this browser's record of the workspace couldn't be written: reload this page" : null);
+// (why a write is refused now by the page: its gate)
+const refusal = () => saveGate?.() || null;
 
 function open(name, stores, onVersionChange) {
   return new Promise((resolve) => {
@@ -189,8 +241,12 @@ export class IdbStore {
   async save(doc) {
     if (!this.db) return "not saved: this browser has no storage";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
-    const gate = refusal(this.db);
+    const gate = refusal();
     if (gate) return `not saved: ${gate}`;
+    // (bound first, if it saves before it loaded; then the workspace's own word: CORR-56C-1)
+    if (this.fence === undefined) this.fence = fenceOf(await idb(this.db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined));
+    const why = await primaryRefusal(this.db, this.fence);
+    if (why) return `not saved: ${why}`;
     // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
     const out = await new Promise((resolve, reject) => {
       const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
@@ -244,7 +300,8 @@ export class IdbPatchStore {
   // (refused, said, by the page's gate or the fence; a history the workspace doesn't own, never)
   async allowed() {
     if (!this.owned) return;
-    const why = refusal(this.db) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
+    if (this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+    const why = refusal() || (await primaryRefusal(this.db, this.fence)) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
     if (why) throw new Error(`not done: ${why}`);
   }
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
@@ -261,14 +318,24 @@ export class IdbPatchStore {
   }
   append(env) {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
-    if (!this.db || (this.owned && refusal(this.db))) return;
-    const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
-    f.onsuccess = () => {
-      if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
-      if (this.owned && fenceRefusal(f.result?.fence, this.fence)) return;
-      st.put({ nb: this.id, time: env.time, env });
-    };
-    tx.onerror = () => console.warn("history:", tx.error);
+    if (!this.db || (this.owned && refusal())) return;
+    // (in order, each after the workspace's word on it, for an owned record)
+    this.appending = (this.appending ?? Promise.resolve()).then(async () => {
+      if (this.owned) {
+        if (this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+        if (await primaryRefusal(this.db, this.fence)) return;
+      }
+      await new Promise((ok) => {
+        const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
+        f.onsuccess = () => {
+          if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
+          if (this.owned && fenceRefusal(f.result?.fence, this.fence)) return;
+          st.put({ nb: this.id, time: env.time, env });
+        };
+        tx.oncomplete = () => ok();
+        tx.onerror = () => { console.warn("history:", tx.error); ok(); };
+      });
+    }).catch((e) => console.warn("history:", e));
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
   }
   subscribe(f) {
