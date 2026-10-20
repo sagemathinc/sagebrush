@@ -8,7 +8,10 @@
 //   size, record count, prototype keys, the message's shape, answered ids;
 // - the rate and the work budget, with retryAfter;
 // - a property test: on random edit sequences, editState accepts exactly what
-//   recordProblems (the whole-board rules) accepts;
+//   recordProblems (the whole-board rules) accepts; and preview, before each
+//   apply, changes nothing and decides as apply then does;
+// - preview spends neither budget nor id; reasons on refusals; pictures sent
+//   by reference (no data: URLs in an edit);
 // - costs against an 8 MiB board: a small edit and a remote change, the
 //   adversarial merge (was "A", the field near 8 MiB), and the indexes of
 //   the densest board the caps allow.
@@ -282,7 +285,9 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   let seed = 12345;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
   const pick = (a) => a[Math.floor(rnd() * a.length)];
-  let accepted = 0, refusedN = 0, disagreements = 0;
+  let accepted = 0, refusedN = 0, disagreements = 0, previewed = 0, mutated = 0, previewDiffers = 0;
+  // (the state preview must leave alone: the records, the size, the last walk, and how the next edits fare)
+  const snap = (st) => JSON.stringify([st.records(), st.bytes, st.lastWalk]);
   for (let round = 0; round < 60; round++) {
     const paged = round % 2 === 1;
     const nodes = () => [{ id: "g1", kind: "group", children: [{ id: "a" }, { id: "g2", kind: "group", children: [{ id: "b" }] }] }, { id: "c" }];
@@ -322,7 +327,13 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
       const naive = view;
       const whole = recordProblems(naive.values());
       // (a board already broken stays the whole-board rules' business only where an edit touches it: start valid, and keep it so)
-      const r = apply(st, edit(changes));
+      // (preview first: nothing of the state changes, and apply then decides the same, at the same clock)
+      const m = edit(changes), at = (clock += 1000), before = snap(st);
+      const pv = st.preview(m, at);
+      if (snap(st) !== before) { mutated++; if (mutated <= 3) fails.push(`property: preview changed the state: ${JSON.stringify(changes)}`); }
+      const r = st.apply(m, at);
+      if (pv.ok !== r.ok || (!r.ok && (pv.message !== r.message || pv.retryAfter !== r.retryAfter)) || (r.ok && (JSON.stringify(pv.changes) !== JSON.stringify(r.changes) || JSON.stringify(pv.dropped) !== JSON.stringify(r.dropped) || pv.bytes !== st.bytes))) { previewDiffers++; if (previewDiffers <= 3) fails.push(`property: preview ${JSON.stringify(pv)} but apply ${JSON.stringify(r)}`); }
+      previewed++;
       if (r.ok) accepted++; else refusedN++;
       // (a change keyed by an empty item or edge id is a malformed message, refused whatever it nets to)
       const malformed = changes.some((c) => (c.key.type === "item" || c.key.type === "edge") && c.key.id === "");
@@ -340,6 +351,58 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
     }
   }
   check(disagreements === 0 && accepted > 100 && refusedN > 100, `property: on 2,400 random edits editState and the whole-board rules agree (${accepted} accepted, ${refusedN} refused, ${disagreements} disagreements)`);
+  check(previewed === 2400 && mutated === 0 && previewDiffers === 0, `property: preview before each of the 2,400 changed nothing (${mutated}) and decided as apply did (${previewDiffers} differences)`);
+}
+
+// ---------------------------------------------------------------- preview: no budget, no id, no walk
+{
+  const st = editState(board({ nodes: [{ id: "a", text: "A" }] }));
+  const m = (t) => edit([{ op: "set", key: K("item", "", "a"), fields: { text: t }, was: { text: "A" } }]);
+  // (the rate: 50 previews at one instant spend nothing; then the burst of 20 applies as ever)
+  let pv = 0;
+  for (let i = 0; i < 50; i++) if (st.preview(m("P" + i), 5_000_000).ok) pv++;
+  let n = 0, last;
+  for (let i = 0; i < 25; i++) { last = st.apply(m("Q" + i), 5_000_000); if (last.ok) n++; else break; }
+  check(pv === 50 && n === 20 && last.reason === "busy" && last.retryAfter > 0, `preview spends no rate: 50 previews, then 20 applies and busy (${pv}, ${n}, ${JSON.stringify(last)})`);
+  // (an id previewed isn't answered: apply takes it; an id applied is answered: preview says so too)
+  const one = m("Z");
+  const p1 = st.preview(one, 9_000_000), a1 = st.apply(one, 9_000_000), p2 = st.preview(one, 9_000_000);
+  check(p1.ok && a1.ok && !p2.ok && p2.ignore === true, "preview remembers no id; after apply, preview finds it answered");
+  // (the walk: lastWalk is apply's alone)
+  const g = editState(board({ nodes: [{ id: "g", kind: "group", children: [{ id: "c" }] }, { id: "h", kind: "group", children: [] }] }));
+  const mv = edit([{ op: "set", key: K("item", "", "g"), fields: { parent: "h" }, was: { parent: "" } }]);
+  const w0 = g.lastWalk, pw = g.preview(mv, 1), w1 = g.lastWalk, aw = g.apply(mv, 1);
+  check(pw.ok && aw.ok && w0 === w1 && g.lastWalk > 0, `preview leaves lastWalk alone (${w0} → ${w1}; apply: ${g.lastWalk})`);
+}
+
+// ---------------------------------------------------------------- reasons
+{
+  const st = editState(board({ nodes: [{ id: "a", text: "A" }] }));
+  const big = st.apply(edit([{ op: "set", key: K("item", "", "a"), fields: { text: "x".repeat(EDIT_LIMITS.boardBytes) }, was: { text: "A" } }]), (clock += 1000));
+  const many = st.apply(edit(Array.from({ length: EDIT_LIMITS.changes + 1 }, (_, i) => ({ op: "set", key: K("item", "", "n" + i), fields: { parent: "", pos: i }, create: true }))), (clock += 1000));
+  const bad = st.apply(edit([{ op: "delete", key: K("doc", "", ""), was: {} }]), (clock += 1000));
+  check(!big.ok && big.reason === "too-large", "a message past the bound: too-large: " + JSON.stringify({ ...big, message: big.message.slice(0, 80) }));
+  check(!many.ok && many.reason === "too-large" && many.limit === EDIT_LIMITS.changes && many.size === EDIT_LIMITS.changes + 1, "more changes than the bound: too-large, with limit and size: " + JSON.stringify(many));
+  check(!bad.ok && bad.reason === "invalid" && !bad.retryAfter, "a failed check: invalid: " + JSON.stringify(bad));
+}
+
+// ---------------------------------------------------------------- pictures sent by reference
+{
+  const name = "i" + "0123456789abcdef".repeat(2), png = "data:image/png;base64,iVBORw0KGgo=";
+  const posted = board({ images: { [name]: { w: 1, h: 1 } }, nodes: [{ id: "a", image: name }] });
+  const ref = editState(posted, { pictures: "by-reference" }), inline = editState(posted);
+  const setImages = (images, was) => edit([{ op: "set", key: K("doc", "", ""), fields: { images }, was: { images: was } }]);
+  const add = (st, v, n = "i" + "fedcba9876543210".repeat(2)) => st.apply(setImages({ [name]: { w: 1, h: 1 }, [n]: v }, { [name]: { w: 1, h: 1 } }), (clock += 1000));
+  const r1 = add(ref, { w: 2, h: 2, src: png }), r2 = add(ref, { w: 2, h: 2, src: "javascript:alert(1)" }), r3 = add(ref, { w: 2, h: 2 }, "not-a-hash"), r4 = add(ref, { w: 2, h: 2, src: "https://example.org/p.png" }), r5 = add(ref, { w: 3, h: 3 });
+  const r6 = add(inline, { w: 2, h: 2, src: png });
+  check(!r1.ok && r1.reason === "invalid" && /imagePut/.test(r1.message), "by reference: a data: URL in an edit refused: " + JSON.stringify(r1));
+  check(!r2.ok && !r3.ok, "by reference: any other source but https:, and a name that isn't a hash, refused: " + JSON.stringify([r2.message, r3.message]));
+  check(r4.ok && r5.ok, "by reference: an https: source, and a picture with only its size, taken: " + JSON.stringify([r4.ok || r4.message, r5.ok || r5.message]));
+  check(r6.ok, "inline (the default, as before): a data: URL taken: " + JSON.stringify(r6.ok || r6.message));
+  // (a picture the board already had, with its data: URL, doesn't make another edit fail)
+  const old = editState(board({ title: "t", images: { [name]: { w: 1, h: 1, src: png } }, nodes: [{ id: "a", image: name }] }), { pictures: "by-reference" });
+  const t = old.apply(edit([{ op: "set", key: K("doc", "", ""), fields: { title: "u" }, was: { title: "t" } }]), (clock += 1000));
+  check(t.ok, "by reference: a board that had a data: URL already still takes other edits: " + JSON.stringify(t.ok || t.message));
 }
 
 // ---------------------------------------------------------------- costs against an 8 MiB board
