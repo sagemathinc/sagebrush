@@ -15,6 +15,7 @@ const fresh = async () => {
   return W.Workspace.open({ name: `ws-ops-${n}-${Math.random().toString(36).slice(2, 8)}`, mainName: `main-ops-${n}` });
 };
 const enc = (s) => new TextEncoder().encode(s);
+const dec = (b) => new TextDecoder().decode(b);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const H = async (b) => hex(await crypto.subtle.digest("SHA-256", typeof b === "string" ? enc(b) : b));
 const all = (db, store, index, key) => new Promise((ok, no) => { const st = db.transaction(store).objectStore(store), r = (index ? st.index(index) : st).getAll(key); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
@@ -203,13 +204,25 @@ async function others() {
   const s2b = await lastSeq(w);
   const direct = await w.locked(() => w.adopt("/", "leg", ".bin", { kind: "file", ref: "/leg.bin", size: 3, rev: 0 }));
   const [dg] = await since(w, s2b);
+  const oldLeft = await new Promise((ok, no) => { const r = w.main.transaction("files").objectStore("files").get("/leg.bin"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  const kept = await new Promise((ok, no) => { const r = w.ws.transaction("fileBytes").objectStore("fileBytes").get(direct.fid); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
   check(direct.sha256 === (await H("leg")) && dg?.sha256 === direct.sha256 && dg.after?.sha256 === direct.sha256 && W.reserved().held === 0, "…and once it can: adopt reads and hashes the bytes itself, its op carrying the hash: " + J(dg));
-  await w.forget(direct.path);
+  check(direct.migrated === true && kept && (await H(kept)) === direct.sha256 && oldLeft === undefined, "…and moves them as it adopts them: the bytes hashed kept beside the index, the old copy gone (astra's CORR-12E-1): " + J({ migrated: direct.migrated, oldLeft: !!oldLeft }));
+  // (an older tab writing at the old key between the adopt's move and the old copy's deletion: those bytes
+  // kept as a file of their own, adopted (and moved) in turn with their own hash; the adopted file's the ones
+  // it hashed)
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(enc("first"), "/raced.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  w.beforeStaleDelete = () => new Promise((ok, no) => { w.beforeStaleDelete = null; const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(enc("older tab"), "/raced.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const s2c = await lastSeq(w);
+  const raced = await w.locked(() => w.adopt("/", "raced", ".bin", { kind: "file", ref: "/raced.bin", rev: 0 }));
+  const copy = await w.stat("/raced (from an older tab).bin"), rops = (await since(w, s2c)).filter((o) => o.op === "adopt");
+  check(dec((await w.read(raced.path)).content) === "first" && raced.sha256 === (await H("first")) && copy && dec((await w.read(copy.path)).content) === "older tab" && copy.sha256 === (await H("older tab")) && rops.length === 2 && rops.every((o) => o.sha256 && o.after?.sha256 === o.sha256), "an older tab's write landing during the adopt: kept as a file of its own with its own hash, the adopted file the bytes it hashed: " + J(rops.map((o) => [o.path, o.sha256?.slice(0, 8)])));
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(enc("leg2"), "/leg2.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
   const s3 = await lastSeq(w);
   const lr = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
   await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, lr)), lr);
-  const lg = (await since(w, s3)).find((o) => o.op === "adopt" && o.path === "/leg.bin");
-  check(lg && lg.sha256 === (await H("leg")) && lg.after?.sha256 === lg.sha256 && lg.size === 3 && lr.files === 1, "old-way bytes with no entry, adopted by reconcile: read and hashed first, so the adopt's op carries the hash and what it left: " + J(lg));
+  const lg = (await since(w, s3)).find((o) => o.op === "adopt" && o.path === "/leg2.bin");
+  check(lg && lg.sha256 === (await H("leg2")) && lg.after?.sha256 === lg.sha256 && lg.size === 4 && lr.files === 1 && (await w.stat("/leg2.bin"))?.migrated === true, "old-way bytes with no entry, adopted by reconcile: read and hashed first, so the adopt's op carries the hash and what it left: " + J(lg));
   // (a moved data file whose hash isn't kept: hashed first, its bytes read inside the page's reservation,
   // taken before the lock (daybreak2's rule, as a migration's))
   await w.create("/r.bin", { content: big });

@@ -55,10 +55,12 @@ As built (step 2a):
 - **Every data-file op carries its hash: none is ever logged without it** (astra's CORR-9C2-2; @sagebrush's decision: no deferral).
   - Create and write compute the hash.
   - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is.
-  - An adopt hashes the bytes it adopts:
-    - Reconcile's old-way bytes are adopted after its locked pass, each one reserved (LEGACY_MAX × COPIES, before the lock), then read and hashed holding the lock (adoptOld).
-    - Any other adopt not given the hash reads and hashes the bytes itself, holding the caller's lock. It takes the reservation without waiting; if the reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
-  - Bytes larger than LEGACY_MAX are marked unmoved when adopted, as the migrator marks them.
+  - **An adopt moves the bytes it hashes** (astra's CORR-12E-1). In the one transaction that makes the entry and its op, the snapshot read is put in fileBytes, the entry is marked migrated, and the old copy is marked stale with that snapshot's size and hash. The entry, its bytes, and its op's hash and `after` then all name the same bytes.
+    - The old copy then goes as the migrator's does (dropStale): deleted if it still holds those bytes. If an older tab wrote there since the read, it is kept as a file of its own, adopted and moved in turn with its own hash.
+    - The read is reserved. Reconcile's old-way bytes are adopted after its locked pass: each one reserves LEGACY_MAX × COPIES before the lock, then reads and adopts holding it (adoptOld).
+    - Any other adopt not given the bytes reads them itself, holding the caller's lock, under a reservation taken without waiting. If that reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
+    - The move's copy is the one IndexedDB gave on read, put back once. That is within the same LEGACY_MAX × COPIES as the migrator's move.
+  - Bytes larger than LEGACY_MAX are adopted unmoved, with their hash, as the migrator marks them. They are over the 200 MiB file limit, so they are never synced.
   - Should any path reach an op without the hash, the change is refused whole.
   - A removal (forget, discard, emptyTrash) needs no hash: its identity is gone (`after: null`).
 - **Emptying Trash records at most 10,000 ops** (maxFolderEntries, Trash's own entries), whatever is in them: a bounded burst.
