@@ -85,7 +85,10 @@ A checkpoint is a snapshot plus its tail:
 - the segments keep growing only to a ceiling of 64 MiB;
 - past that, the writer stops appending and the copy is shown **stale** ("the recovery copy is from <time>: there isn't room to update it").
 
-The person's saves are never refused or slowed by the copy.
+**The person's saves and the copy:**
+- **Never refused** by it.
+- **Normally not slowed:** the copy is written asynchronously, after the commit.
+- **One exception (B.3b):** after two invalidated checkpoints in a row, the third reads its pages holding the workspace's lock, and saves made meanwhile wait for it. That wait is at most 3 s at 100,000 entries, tested.
 
 ### B.3a A group too big for the journal (LIMIT-DUR-4)
 
@@ -101,7 +104,7 @@ The person's saves are never refused or slowed by the copy.
 
 A checkpoint's pages can't be repaired by a group staged only as `{checkpoint: needed}`: it has no assignments to replay. So:
 - **Restarted.** A checkpoint under way is invalidated and started again when any such marker is staged with a seq after its S0. The same holds for a group suppressed because the copy is stale. The writer checks before reading each page, and before publication.
-- **Bounded.** The third attempt in a row holds the workspace's lock while it reads its pages: about 1 s per 100,000 entries, measured in the tests. Saves wait meanwhile, and are never refused; the page shows "saving…". Restarts are therefore bounded without needing a quiet interval.
+- **Bounded.** The third attempt in a row holds the workspace's lock while it reads its pages: at most 3 s at 100,000 entries (the test's bound, with about 1 s measured). Saves wait meanwhile, and are never refused; the page shows "saving…". Restarts are therefore bounded without needing a quiet interval.
 - **While stale.** A checkpoint that will bring a stale copy back starts staging groups again from its S0. It has its tail like any other.
 - **Never across a gap.** A slot is published only if its tail's seq runs continuously from S0 to S1. Otherwise the checkpoint is started again.
 
@@ -192,7 +195,7 @@ The copy counts in "Storage in this browser" as its own line, **recovery copy**:
 
 A kill during that checkpoint leaves unpublished parts, which are reclaimed at the next start.
 
-**A checkpoint crossed (CORR-A54-1).** An over-size move during a checkpoint's pages restarts the checkpoint. Another during the restart restarts it again. The third attempt holds the lock and publishes. While stale, a move suppressed during the checkpoint restarts it. No slot is ever published with a gap. The age shown is the authoritative point's commit time.
+**A checkpoint crossed (CORR-A54-1).** An over-size move during a checkpoint's pages restarts the checkpoint. Another during the restart restarts it again. The third attempt holds the lock and publishes. At 100,000 entries, its lock hold, and the end-to-end time of a save made during it (from the save's call to its commit), are each under 3 s. While stale, a move suppressed during the checkpoint restarts it. No slot is ever published with a gap. The age shown is the authoritative point's commit time.
 
 **The blob handoff (CORR-A54-2).** Deletion attempted between a blob's verification and the commit naming it waits for the lock, and the blob stays. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
