@@ -2443,10 +2443,13 @@ async function durabilityAuthority() {
       a.close();
     }
     {
-      const { o, a, st, doc } = await fresh();
+      // (the store on a connection of its own, so the workspace's closing doesn't close it: the save itself refused)
+      const { o, a, e } = await fresh();
+      const main = await S.openDb(o.mainName), st = new S.IdbStore(main, e.ref), doc = await st.load();
       a.close(); await dropDb(o.name);
       const save = await tryIt(st, doc, "NO WORKSPACE");
-      check(!save?.saved, "the workspace's database gone, the fence still naming it: refused: " + JSON.stringify(save));
+      check(typeof save === "string" && save.includes("record of the workspace is missing"), "the workspace's database gone, the fence still naming it: refused, saying so: " + JSON.stringify(save));
+      main.close();
     }
   }
   // a tab left behind by a reset elsewhere (its broadcast missed) writes no fence, and so blocks nothing
@@ -2470,8 +2473,73 @@ async function durabilityAuthority() {
   }
 }
 
+// astra's probes on 51106cb6, verbatim (historyOrder, purgeMarks; metaFenceRace adapted below)
+async function historyOrder(mode){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb'),db=await S.openHistoryDb(),h=new S.IdbPatchStore(db,e.ref);await h.loadInitial();
+ h.append({time:'one',id:'one'});h.append({time:'two',id:'two'});await h[mode]();await h.appending;
+ const rows=(await rawKeys(db,'history')).filter(k=>k[0]===e.ref);check(rows.length===0,'history-order-'+mode+': '+JSON.stringify({rows}));a.close();db.close();
+}
+async function purgeMarks(){
+ const o=await named(),a=await openAs(o),key=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};try{await a.reset('new')}finally{Storage.prototype.key=key}
+ const e=await a.create('/new.board.json'),prefixes=['sagebrush-board:local:'+e.ref,'sagebrush-board:local:'+e.ref+'#here','sagebrush-board:local:'+e.ref+'#outputs','sagebrush-workspace-pending:'+e.ref,'sagebrush-workspace-pending-unread:'+e.ref];
+ for(const k of prefixes)localStorage.setItem(k,'current');localStorage.setItem('sagebrush-board:local:111111111111','old');await a.cleanUp(true);
+ check(prefixes.every(k=>localStorage.getItem(k)==='current')&&!localStorage.getItem('sagebrush-board:local:111111111111'),'purge-current-marks-preserved');a.close();
+}
+
+// astra's metaFenceRace (51106cb6) under the lock: the same barrier (the write's meta read held) and the same
+// failing fence puts, for all four verbs, the puts failing and not; one change of schedule: B's open now waits
+// on the lock the write holds, so the barrier is let go once B is waiting, not after B is done (as written, the
+// probe would wait on itself).  B decides the quarantine only after the write's transaction has ended, and the
+// same verb after B is refused
+async function durabilityLockOrder() {
+  const S = await import("./stores.js"); S.setSaveGate(null);
+  for (const fails of [true, false]) for (const mode of ["save", "append", "clear", "drop"]) {
+    const o = await named(), a = await openAs(o), e = await a.create("/n.ipynb"); await a.flushOpfs(); a.channel?.close(); a.channel = null;
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial(); h.append({ time: "seed", id: "seed" }); await h.appending;
+    const witness = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...witness, seq: witness.seq + 10 });
+    let enter, release; const entered = new Promise((r) => (enter = r)), held = new Promise((r) => (release = r));
+    // (the barrier on the meta read inside the lock: for clear and drop the second, after their precheck)
+    const origTx = IDBDatabase.prototype.transaction, put = IDBObjectStore.prototype.put, desc = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete"); let armed = true, reads = 0;
+    const nth = mode === "clear" || mode === "drop" ? 2 : 1;
+    IDBDatabase.prototype.transaction = function (stores, ...args) { const tx = origTx.call(this, stores, ...args); if (armed && this.name === o.name && stores === "meta" && args[0] === "readonly" && ++reads === nth) { armed = false; Object.defineProperty(tx, "oncomplete", { set(f) { desc.set.call(tx, function (ev) { enter(); held.then(() => f.call(tx, ev)); }); }, configurable: true }); } return tx; };
+    const verb = (name) => (mode === "save" ? st.save({ ...doc, baseRev: doc.rev, name }) : mode === "append" ? (h.append({ time: name, id: name }), h.appending) : mode === "clear" ? h.clear() : h.drop());
+    const order = [];
+    let b = null, waited = false, first, second, rows, stored;
+    try {
+      const firstP = verb("first").then((v) => { order.push("write"); return v; }, (err) => { order.push("write"); return { error: String(err?.message ?? err) }; });
+      // (bounded: a write that never reads meta there is held by nothing, and fails below)
+      await Promise.race([entered, new Promise((r) => setTimeout(r, 3000))]); IDBDatabase.prototype.transaction = origTx;
+      if (fails) IDBObjectStore.prototype.put = function (v, ...args) { if (v?.id === "__sagebrush-workspace__" || v?.nb === "__sagebrush-workspace__") throw Error("fence refused"); return put.call(this, v, ...args); };
+      const bOpen = openAs(o).then((x) => { order.push("open"); b = x; });
+      for (let i = 0; i < 200 && !waited; i++) { waited = (await navigator.locks.query()).pending.some((l) => l.name === "sagebrush-workspace" && l.mode === "exclusive"); if (!waited) await new Promise((r) => setTimeout(r, 10)); }
+      release();
+      first = await firstP; await bOpen; IDBObjectStore.prototype.put = put;
+      // (after B: the same verb, refused)
+      if (mode === "save") { const rec = await rawGet(a.main, "notebooks", e.ref); second = await st.save({ ...rec, baseRev: rec.rev, name: "AFTER QUARANTINE" }); stored = (await rawGet(a.main, "notebooks", e.ref)).name; }
+      else if (mode === "append") { h.append({ time: "after", id: "after" }); await h.appending; }
+      else { await rawPut(db, "history", { nb: e.ref, time: "raw", env: {} }); second = await (mode === "clear" ? h.clear() : h.drop()).then(() => "done", (err) => String(err?.message ?? err)); }
+      rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+      const after = mode === "save" ? typeof second === "string" && stored !== "AFTER QUARANTINE" : mode === "append" ? !rows.includes("after") : second !== "done" && rows.includes("raw");
+      check(waited && order[0] === "write" && b?.quarantined && after, `the lock orders ${mode} against a quarantine, its fence puts ${fails ? "failing" : "written"}: B waited for the write, and ${mode} after B refused: ` + JSON.stringify({ waited, order, quarantined: b?.quarantined, blocked: b?.fenceBlocked, first, second, rows, stored }));
+    } finally { release(); IDBDatabase.prototype.transaction = origTx; IDBObjectStore.prototype.put = put; a.close(); b?.close(); db.close(); }
+  }
+  // append after clear: kept, after it; and the other tabs told in that order
+  {
+    const S2 = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/m.ipynb"), db = await S2.openHistoryDb(), h = new S2.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    const heard = [], bc = new BroadcastChannel("sagebrush-history"); bc.onmessage = (ev) => { if (ev.data?.id === e.ref) heard.push(ev.data.clear ? "clear" : ev.data.env?.id); };
+    h.append({ time: "one", id: "one" }); const c = h.clear(); h.append({ time: "three", id: "three" }); await c; await h.appending;
+    await new Promise((r) => setTimeout(r, 100));
+    const rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    check(rows.join() === "three" && heard.join() === "one,clear,three", "append, clear, append: the last kept, the tabs told in that order: " + JSON.stringify({ rows, heard }));
+    bc.close(); a.close(); db.close();
+  }
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+    console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

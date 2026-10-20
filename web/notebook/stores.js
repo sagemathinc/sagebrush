@@ -114,6 +114,17 @@ const readMeta = (db) => new Promise((ok, no) => {
   tx.onabort = () => no(tx.error ?? new Error("aborted"));
 });
 const UNREADABLE = "this browser's record of the workspace couldn't be read: reload this page";
+// (an owned write holds the workspace's lock, shared, from its reading of meta until its own transaction has
+// ended: what decides a quarantine, a reset or the fence's publication holds it exclusively (web/workspace/api.ts
+// locked), so none of them falls between the confirming and the write, whether or not its fence could then be
+// written (astra's CORR-2A4-2 on 51106cb6).  `lockHeld`: a caller inside the workspace that holds it already, so
+// as not to wait on itself.  Without Web Locks there is no workspace to order against: as before)
+const WORKSPACE_LOCK = "sagebrush-workspace";
+function underLock(lockHeld, f) {
+  const locks = globalThis.navigator?.locks;
+  if (lockHeld || !locks || typeof locks.request !== "function") return f();
+  return locks.request(WORKSPACE_LOCK, { mode: "shared" }, f);
+}
 async function primaryRefusal(db, fence) {
   if (!fence && !["sagebrush", "sagebrush-history", "sagebrush-board-history"].includes(db.name)) return null;
   let m;
@@ -238,17 +249,20 @@ export class IdbStore {
     await this.save(fresh);
     return fresh;
   }
-  async save(doc) {
+  /** `opts.lockHeld`: the caller holds the workspace's lock already (the workspace's own verbs). */
+  async save(doc, opts = {}) {
     if (!this.db) return "not saved: this browser has no storage";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
     const gate = refusal();
     if (gate) return `not saved: ${gate}`;
-    // (bound first, if it saves before it loaded; then the workspace's own word: CORR-56C-1)
+    // (bound first, if it saves before it loaded; then the workspace's own word: CORR-56C-1; the word and the
+    // write in one hold of the workspace's lock)
     if (this.fence === undefined) this.fence = fenceOf(await idb(this.db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined));
+    const out = await underLock(opts.lockHeld, async () => {
     const why = await primaryRefusal(this.db, this.fence);
-    if (why) return `not saved: ${why}`;
+    if (why) return { refused: why };
     // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
-    const out = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
       let result = null;
       const fence = st.get(FENCE);
@@ -270,6 +284,7 @@ export class IdbStore {
       };
       tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error);
+    });
     });
     if (out.refused) return `not saved: ${out.refused}`;
     if (out.conflict) return { conflict: out.conflict };
@@ -297,6 +312,13 @@ function getHistoryChannel() {
 }
 export class IdbPatchStore {
   constructor(db, id) { this.db = db; this.id = id; this.owned = !db || ownedByWorkspace(db.name, id); }
+  // (one queue, in the order they were asked for, for append, clear and drop: none overtakes another, and each
+  // tells the other tabs at its turn, so they hear them in that order too: astra's CORR-511-1)
+  queue(f) {
+    const p = (this.appending ?? Promise.resolve()).then(f);
+    this.appending = p.catch(() => {});
+    return p;
+  }
   // (refused, said, by the page's gate or the fence; a history the workspace doesn't own, never)
   async allowed() {
     if (!this.owned) return;
@@ -319,12 +341,13 @@ export class IdbPatchStore {
   append(env) {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
     if (!this.db || (this.owned && refusal())) return;
-    // (in order, each after the workspace's word on it, for an owned record)
-    this.appending = (this.appending ?? Promise.resolve()).then(async () => {
-      if (this.owned) {
-        if (this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
-        if (await primaryRefusal(this.db, this.fence)) return;
-      }
+    // (in order, each after the workspace's word on it, for an owned record, the word and the write in one hold
+    // of the workspace's lock)
+    this.queue(async () => {
+      getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
+      if (this.owned && this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
+      await underLock(!this.owned, async () => {
+      if (this.owned && (await primaryRefusal(this.db, this.fence))) return;
       await new Promise((ok) => {
         const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
         f.onsuccess = () => {
@@ -335,8 +358,8 @@ export class IdbPatchStore {
         tx.oncomplete = () => ok();
         tx.onerror = () => { console.warn("history:", tx.error); ok(); };
       });
+      });
     }).catch((e) => console.warn("history:", e));
-    getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
   }
   subscribe(f) {
     const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
@@ -351,15 +374,25 @@ export class IdbPatchStore {
     historySubs.add(g);
     return () => historySubs.delete(g);
   }
-  async clear() {
-    await this.allowed();
-    await this.deleteChecked();
-    getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
+  /** `opts.lockHeld`: the caller holds the workspace's lock already. */
+  clear(opts = {}) {
+    return this.queue(async () => {
+      await this.deleteAllowed(opts);
+      getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
+    });
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
-  async drop() {
+  drop(opts = {}) {
+    return this.queue(() => this.deleteAllowed(opts));
+  }
+  // (asked first, without the lock; then the workspace's word again and the deletion, in one hold of it)
+  async deleteAllowed(opts) {
     await this.allowed();
-    await this.deleteChecked();
+    await underLock(opts.lockHeld || !this.owned, async () => {
+      const why = this.owned ? await primaryRefusal(this.db, this.fence) : null;
+      if (why) throw new Error(`not done: ${why}`);
+      await this.deleteChecked();
+    });
   }
   // (the rows deleted only if the fence, read in the same transaction, still allows it)
   async deleteChecked() {
