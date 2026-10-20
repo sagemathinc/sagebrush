@@ -55,6 +55,39 @@ async function createAndWrite() {
   w.close();
 }
 
+// the caller's bytes copied by the engine, at the call: no method or getter of a subclass of Uint8Array runs,
+// so the bytes kept are the ones given then, and their hash theirs (astra's CORR-9C2-1, residual)
+async function copies() {
+  const w = await fresh();
+  const evil = {
+    slice: class extends Uint8Array { slice(a = 0, b = this.length) { return this.subarray(a, b); } },
+    set: class extends Uint8Array { set() { this.fill(7); } },
+    subarray: class extends Uint8Array { subarray() { return new Uint8Array([7, 7]); } },
+    buffer: class extends Uint8Array { get buffer() { return new Uint8Array([7, 7]).buffer; } get byteOffset() { return 0; } get length() { return 0; } get byteLength() { return 0; } },
+    species: class extends Uint8Array { static get [Symbol.species]() { return class extends Uint8Array { constructor(n) { super(n); this.fill(7); } }; } },
+  };
+  const h12 = await H(new Uint8Array([1, 2]));
+  for (const [name, C] of Object.entries(evil)) {
+    const input = new C([1, 2]);
+    const e = await w.create(`/${name}.bin`, { content: input });
+    input.fill(9);
+    const r = await w.read(e.path);
+    const s0 = await lastSeq(w), input2 = new C([1, 2]);
+    const p = w.write(e.path, input2);
+    input2.fill(9);
+    await p;
+    const r2 = await w.read(e.path), [wo] = await since(w, s0);
+    check(J([...r.content]) === "[1,2]" && r.entry.sha256 === h12 && J([...r2.content]) === "[1,2]" && r2.entry.sha256 === h12 && wo?.sha256 === h12, `a subclass of Uint8Array overriding ${name}: the bytes given at the call kept, with their hash: ` + J({ made: [...r.content], written: [...r2.content] }));
+  }
+  const dv = new DataView(new Uint8Array([1, 2]).buffer);
+  let refused = false;
+  try { await w.create("/dv.bin", { content: dv }); } catch (e) { refused = e instanceof W.WorkspaceError && e.code === "invalid"; }
+  let refused16 = false;
+  try { await w.create("/i16.bin", { content: new Int16Array([1, 2]) }); } catch (e) { refused16 = e instanceof W.WorkspaceError && e.code === "invalid"; }
+  check(refused && !(await w.stat("/dv.bin")) && refused16 && !(await w.stat("/i16.bin")), "a DataView or an Int16Array isn't bytes here: refused, nothing made");
+  w.close();
+}
+
 async function documents() {
   const w = await fresh();
   const s0 = await lastSeq(w);
@@ -158,14 +191,25 @@ async function others() {
   await W.startMigrator(w);
   const fixed = await w.stat("/big.bin");
   check(fixed.sha256 === (await H(big)) && fixed.size === big.byteLength && (await W.migrationState(w)).done, "a file whose size says less than its bytes: hashed all the same, its size set from them, the migration done: " + J({ size: fixed.size }));
-  // (a data file adopted with its bytes still kept the old way: its hash not known, so its op says nothing of
-  // what it left (never a data-file `after` without its hash, astra's CORR-9C2-2); the migrator hashes it as it
-  // moves it)
+  // (old-way bytes adopted: read and hashed first (reserved before the lock), never a data file's op without
+  // its hash (astra's CORR-9C2-2))
   await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(enc("leg"), "/leg.bin"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  // (adopted directly, its hash not given: read and hashed by adopt, under a reservation it takes without
+  // waiting; when that can't be had now (the page's whole reservation held), refused, nothing made)
+  const all256 = await W.reserve(W.RESERVE_BYTES);
+  let refused = false;
+  try { await w.locked(() => w.adopt("/", "leg", ".bin", { kind: "file", ref: "/leg.bin", size: 3, rev: 0 })); } catch (e) { refused = e instanceof W.WorkspaceError && e.code === "storage"; } finally { all256(); }
+  check(refused && !(await w.stat("/leg.bin")) && W.reserved().held === 0, "a data file adopted while its bytes can't be read (the reservation held): refused, nothing made, nothing left reserved");
+  const s2b = await lastSeq(w);
+  const direct = await w.locked(() => w.adopt("/", "leg", ".bin", { kind: "file", ref: "/leg.bin", size: 3, rev: 0 }));
+  const [dg] = await since(w, s2b);
+  check(direct.sha256 === (await H("leg")) && dg?.sha256 === direct.sha256 && dg.after?.sha256 === direct.sha256 && W.reserved().held === 0, "…and once it can: adopt reads and hashes the bytes itself, its op carrying the hash: " + J(dg));
+  await w.forget(direct.path);
   const s3 = await lastSeq(w);
-  await w.locked(() => w.adopt("/", "leg", ".bin", { kind: "file", ref: "/leg.bin", size: 3, rev: 0 }));
-  const [lg] = await since(w, s3);
-  check(lg?.op === "adopt" && HEX16.test(lg.fid ?? "") && !("after" in lg) && lg.sha256 === undefined, "a data file adopted from the old store, its hash not known yet: no `after` (not one without its hash): " + J(lg));
+  const lr = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, lr)), lr);
+  const lg = (await since(w, s3)).find((o) => o.op === "adopt" && o.path === "/leg.bin");
+  check(lg && lg.sha256 === (await H("leg")) && lg.after?.sha256 === lg.sha256 && lg.size === 3 && lr.files === 1, "old-way bytes with no entry, adopted by reconcile: read and hashed first, so the adopt's op carries the hash and what it left: " + J(lg));
   // (a moved data file whose hash isn't kept: hashed first, its bytes read inside the page's reservation,
   // taken before the lock (daybreak2's rule, as a migration's))
   await w.create("/r.bin", { content: big });
@@ -338,7 +382,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;

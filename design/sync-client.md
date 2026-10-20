@@ -47,12 +47,20 @@ As built (step 2a):
 - An op that changes no entry (`dropVersions`) carries no identity and no `after`. An entry or folder with no identity yet (from before ids were kept, until the migrator gives one) has no `after`.
 - In the stores, a key can't hold `null`, so the root's parent is `""` there.
 - **Hashing:** bytes the caller gives are copied once, at the call, before anything is awaited. The hash and the bytes kept are then the same, whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).
+  - The copy is the engine's own: buffer, offset and length come from %TypedArray%.prototype's getters, and %TypedArray%.prototype.set copies into a new Uint8Array. No method, getter or species of a caller's subclass runs.
+  - Views of other kinds (DataView, Int16Array) are refused, as before.
   - Peak cost: that copy, plus one transient copy while hashing (WebCrypto copies its input). That is two copies of the new bytes beyond what a write held before this step, each at most the 200 MiB file limit.
   - Time: one more pass over the new bytes, off the main thread.
   - The old bytes are hashed only when no hash of them is already at hand: a file written before this step, once.
-- **Every data-file op that says what it left carries its hash.**
-  - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is (astra's CORR-9C2-2).
-  - A file whose hash can't be known yet has no `after`: its bytes are still kept the old way (adopted from there), and it gets its hash when the migrator moves it.
+- **Every data-file op carries its hash: none is ever logged without it** (astra's CORR-9C2-2; @sagebrush's decision: no deferral).
+  - Create and write compute the hash.
+  - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is.
+  - An adopt hashes the bytes it adopts:
+    - Reconcile's old-way bytes are adopted after its locked pass, each one reserved (LEGACY_MAX × COPIES, before the lock), then read and hashed holding the lock (adoptOld).
+    - Any other adopt not given the hash reads and hashes the bytes itself, holding the caller's lock. It takes the reservation without waiting; if the reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
+  - Bytes larger than LEGACY_MAX are marked unmoved when adopted, as the migrator marks them.
+  - Should any path reach an op without the hash, the change is refused whole.
+  - A removal (forget, discard, emptyTrash) needs no hash: its identity is gone (`after: null`).
 - **Emptying Trash records at most 10,000 ops** (maxFolderEntries, Trash's own entries), whatever is in them: a bounded burst.
 
 **The queue: `dseq`.** The server decides a device's ops in `dseq` order, with no gaps.
