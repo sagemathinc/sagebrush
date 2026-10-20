@@ -2538,8 +2538,16 @@ async function durabilityLockOrder() {
     try {
       const t0 = performance.now(), save = await Promise.race([st.save({ ...doc, baseRev: doc.rev, name: "HELD" }).then((v) => ({ v }), (err) => ({ err: String(err?.message ?? err) })), new Promise((r) => setTimeout(() => r({ hung: true }), 5000))]), waited = performance.now() - t0;
       const clear = await h.clear().then(() => "done", (err) => String(err?.message ?? err));
-      const taken = [1, 2, 3, 4, 5].map((i) => h.append({ time: "q" + i, id: "q" + i }));
-      const queued = S.historyBacklog().entries;
+      // (q1 changed after it was asked for: kept as it was asked, charged as such: daybreak2's LIMIT-9D7-2)
+      const e1 = { time: "q1", id: "q1" };
+      const taken = [h.append(e1), ...[2, 3, 4, 5].map((i) => h.append({ time: "q" + i, id: "q" + i }))];
+      e1.id = "CHANGED AFTER ASKED"; e1.pad = "x".repeat(10_000);
+      const queued = S.historyBacklog().entries, charged = S.historyBacklog().bytes, each = 2 * JSON.stringify({ time: "q1", id: "q1" }).length + S.ENTRY_OVERHEAD;
+      // (a clear and a drop asked for behind those appends, which wait for the lock: refused within LOCK_WAIT
+      // all the same, and never deleting later: daybreak2's LIMIT-9D7-1, astra's CORR-9D7-2)
+      const t1 = performance.now();
+      const [clear2, drop2] = await Promise.all([h.clear(), h.drop()].map((p) => Promise.race([p.then(() => "done", (err) => String(err?.message ?? err)), new Promise((r) => setTimeout(() => r("still waiting"), 3000))])));
+      const late = performance.now() - t1;
       await new Promise((r) => setTimeout(r, 200));
       const before = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
       release(); release = null;
@@ -2549,6 +2557,10 @@ async function durabilityLockOrder() {
       check(stored !== "HELD" && after.includes("seed"), "…their requests withdrawn: the lock let go later, nothing written by them (the notebook as it was, the history not cleared): " + JSON.stringify({ stored, after }));
       check(taken.join() === "true,true,true,false,false" && queued === 3 && said.length === 2 && /TimeTravel/.test(said[0]) && before.join() === "seed", "…appends: three wait (the bound set to 3), the next two refused and said: " + JSON.stringify({ taken, queued, said: said.length, before }));
       check(["q1", "q2", "q3"].every((k) => after.includes(k)) && !after.includes("q4") && S.historyBacklog().entries === 0 && S.historyBacklog().bytes === 0, "…the three kept once it is let go, the backlog empty again: " + JSON.stringify({ after, backlog: S.historyBacklog() }));
+      check(/busy/.test(clear2) && /busy/.test(drop2) && late < 2000, "a clear and a drop behind waiting appends, the lock held: refused within the bound all the same: " + JSON.stringify({ clear2, drop2, late: Math.round(late) }));
+      check(["q1", "q2", "q3"].every((k) => after.includes(k)), "…and, the lock let go, they delete nothing afterwards: " + JSON.stringify(after));
+      const q1 = (await rawGet(db, "history", [e.ref, "q1"]))?.env;
+      check(q1?.id === "q1" && !("pad" in q1) && charged === 3 * each, "an append is kept as it was asked for, changed after or not, and charged twice its JSON and ENTRY_OVERHEAD: " + JSON.stringify({ q1, charged, each }));
       const rec = await rawGet(a.main, "notebooks", e.ref), later = await st.save({ ...rec, baseRev: rec.rev, name: "HELD" });
       check(!!later?.saved && (await rawGet(a.main, "notebooks", e.ref)).name === "HELD", "…and the same change, saved again once the lock is free: kept: " + JSON.stringify(later));
     } finally { release?.(); off(); S.LOCK_WAIT.ms = 10_000; S.HISTORY_BACKLOG.entries = 1000; a.close(); db.close(); }
