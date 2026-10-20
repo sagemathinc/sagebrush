@@ -382,7 +382,7 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
@@ -942,7 +942,7 @@ async function replayResumed({ plan, version }) {
     });
   } finally {
     replaying = false;
-    nb.setReadOnly(false);
+    nb.setReadOnly(!!ws?.quarantined);
     if (journal.session) journal.session.replay = false;
   }
   nb.flush();
@@ -1026,7 +1026,7 @@ async function recompute(plan, what) {
     report = await nb.runAll();
   } finally {
     replaying = false;
-    nb.setReadOnly(false);
+    nb.setReadOnly(!!ws?.quarantined);
     if (journal.session) journal.session.replay = false;
   }
   nb.flush();
@@ -2221,11 +2221,23 @@ const wsReady = (async () => {
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
     w.onClosed(() => showReloadNotice());
     if (w.closed) showReloadNotice();
-    // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written until then)
+    // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing
+    // written until then, the notebook's own saves included; said again when that changes, another tab's say)
     showLossNotice(w);
+    w.onDurability(() => showLossNotice(w));
+    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : null));
+    // (and the notebook read-only meanwhile, now and when another tab finds the loss)
+    const readOnlyIfQuarantined = () => { if (w.quarantined) nb.setReadOnly(true); };
+    readOnlyIfQuarantined();
+    w.onDurability(readOnlyIfQuarantined);
     void startMigrator(w);
     return w;
-  } catch (e) { console.warn("workspace:", e); return null; }
+  } catch (e) {
+    console.warn("workspace:", e);
+    // (the workspace can't be opened: said, never taken for a first visit)
+    showLossNotice({ durability: { state: "unknown", why: String(e?.message ?? e) } });
+    return null;
+  }
   finally { wsSettled = true; }
 })();
 // (the workspace, or null if it isn't open within a few seconds)

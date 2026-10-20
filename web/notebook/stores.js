@@ -50,6 +50,23 @@ export class MemoryStore {
 // app) would hold it.  New stores go in new databases.  A page lets go of a
 // database when a newer page needs it (onVersionChange, e.g. to ask for a
 // reload).
+// (what refuses every save to the notebooks while it says why: set by the page, design/workspace-durability.md A.3)
+let saveGate = null;
+/** `f()`: why saves are refused now (a string), or nothing to let them go. */
+export function setSaveGate(f) { saveGate = f; }
+/** The localStorage key a quarantined workspace sets for its old store (the notebooks' database, by name), so
+ * every editor and tab refuses to save there whatever its page did (astra's CORR-2A4-2). */
+export const QUARANTINE_FLAG = "sagebrush-quarantined:";
+const flagged = (name) => {
+  try {
+    if (name !== undefined) return localStorage.getItem(QUARANTINE_FLAG + name);
+    for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i)?.startsWith(QUARANTINE_FLAG)) return localStorage.getItem(localStorage.key(i));
+  } catch {}
+  return null;
+};
+// (why a save is refused now: the page's gate, or a quarantine flagged for this database (any, for history))
+const refusal = (name) => saveGate?.() || (flagged(name) ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : null);
+
 function open(name, stores, onVersionChange) {
   return new Promise((resolve) => {
     try {
@@ -131,6 +148,9 @@ export class IdbStore {
   }
   async save(doc) {
     if (!this.db) return "not saved: this browser has no storage";
+    // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
+    const gate = refusal(this.db.name);
+    if (gate) return `not saved: ${gate}`;
     // read and write in one transaction: the compare and swap is atomic
     const out = await new Promise((resolve, reject) => {
       const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
@@ -178,6 +198,8 @@ export class IdbPatchStore {
     return { patches: rows.map((r) => r.env), hasMore: false };
   }
   append(env) {
+    // (not while the page refuses saves: the workspace quarantined)
+    if (refusal()) return;
     idb(this.db, "history", "readwrite", (st) => st.put({ nb: this.id, time: env.time, env })).catch((e) => console.warn("history:", e));
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
   }
@@ -195,9 +217,13 @@ export class IdbPatchStore {
     return () => historySubs.delete(g);
   }
   async clear() {
+    if (refusal()) throw new Error(`not done: ${refusal()}`);
     await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
-  async drop() { await idb(this.db, "history", "readwrite", (st) => st.delete(this.range())); }
+  async drop() {
+    if (refusal()) throw new Error(`not done: ${refusal()}`);
+    await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
+  }
 }

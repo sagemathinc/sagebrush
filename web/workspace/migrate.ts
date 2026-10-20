@@ -51,6 +51,8 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
   if (w.quarantined) return Promise.resolve({ boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 });
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
+    // (a reset's purge not finished: finished first, so nothing it deletes is brought back in)
+    if (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("purgeMain")))) await w.purgeOld();
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {

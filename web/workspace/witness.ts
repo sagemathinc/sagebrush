@@ -120,10 +120,12 @@ export type State =
   | { state: "unknown"; why: string };
 
 /** What a reset prepared in a witness means, given what IndexedDB holds (A.3a). */
-export type ResetOutcome = "rollback" | "finish" | "interrupted-import" | "unknown";
+// (a reset is one IndexedDB transaction that never deletes the database: a new database under a prepared
+// reset is a loss, not a reset half done; astra's probe on 2a4e53a8, a refused reset then a loss)
+export type ResetOutcome = "rollback" | "finish" | "lost" | "unknown";
 export function resolveReset(w: Witness, held: Held | null): ResetOutcome {
   if (!held) return "unknown";
-  if (held.fresh || held.workspace === undefined) return w.reset!.kind === "import" ? "interrupted-import" : "finish";
+  if (held.fresh || held.workspace === undefined) return "lost";
   if (held.generation === w.reset!.to) return "finish";
   if (held.workspace === w.workspace && held.generation === w.generation) return "rollback";
   return "unknown";
