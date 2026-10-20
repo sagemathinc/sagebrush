@@ -15,6 +15,7 @@ CLI = os.path.join(os.path.dirname(HERE), "dist", "src", "cli.js")
 args = [a for a in sys.argv[1:] if not a.startswith("-")]
 verbose = "-v" in sys.argv
 files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".sage") and (not args or any(a in f for a in args)))
+workers = min(4, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "4"))))
 
 
 def run(cmd):
@@ -37,7 +38,7 @@ def one(f):
 
 
 bad = 0
-with cf.ThreadPoolExecutor(4) as ex:
+with cf.ThreadPoolExecutor(workers) as ex:
     for f, ref, got in ex.map(one, files):
         ok = got[0] == 0 and ref == got[1]
         print("%-24s %s  (%d lines)" % (f, "ok" if ok else "DIFF", ref.count("\n")))
