@@ -153,7 +153,8 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
     - the temporary file is given its final name `/sagebrush/blobs/<sha256>` (if a blob of that hash is already there, it's trusted by its immutable name and its size, and the temporary file is dropped instead);
     - then the IndexedDB commit that names it, which makes it a root.
     - Deletion needs the same lock, so it can never fall between the name and the commit. The hold is a rename and one commit, whatever the file's size.
-  - **The startup cleanup** never decides from `navigator.locks.query()`, which is only a snapshot. For each temporary file it requests that file's own lock, `sagebrush-tmp-<owner>`, with `ifAvailable: true`, and deletes the file only while holding it. When it gets null, the owner is live and the file is skipped.
+  - **The temporary-file cleanup** is background work by the recovery copy's writer, after startup. Startup never waits for it, and doesn't scan the folder (LIMIT-356-1). It goes in pages of at most 100 files, or 50 ms, whichever ends first, and yields between pages.
+  - It never decides from `navigator.locks.query()`, which is only a snapshot. For each temporary file it requests that file's own lock, `sagebrush-tmp-<owner>`, with `ifAvailable: true`, and deletes the file only while holding it. When it gets null, the owner is live and the file is skipped.
   - **Reusing an existing blob** by its name and size is sound under the invariant that every blob was published immutable and hash-verified. Name plus size is not an integrity check of a blob already corrupted on disk, or put there by something else. Such corruption is caught when it is read: a restore verifies every blob's hash (B.7), and a file's read checks its hash too.
   - A blob orphaned by a kill between the two is named by nothing, and goes at the next deletion, correctly.
   - A pending restore's `restore.json` pins its slot's blobs too.
@@ -215,6 +216,7 @@ A kill during that checkpoint leaves unpublished parts, which are reclaimed at t
   - one being written, or verified and waiting for the workspace's lock, by a live owner is never deleted by another tab's startup cleanup, which gets null for its lock and skips it;
   - cleanup racing an owner's lock acquisition: whichever gets the lock first wins, and the file is never deleted while its owner holds the lock;
   - after a reload, a new incarnation never shares an id with the old one's leftover file, which is collected.
+- **Many orphaned temporary files** (10,000, from a crash-and-reload loop): startup's work stays the same as with none. The cleanup's pages each stay within 100 files or 50 ms, and it ends with them all collected.
 - **A kill between verification and the lock:** the temporary file is left behind and collected by a later startup. Nothing names it, and the index never does.
 - **A kill between the final name and the commit:** the named blob is an orphan, and is collected correctly by a later deletion. The index never names missing bytes. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
