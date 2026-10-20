@@ -3,7 +3,7 @@ name: ci
 
 on:
   push:
-    branches: [master, ci-speed] # ci-speed is removed after the timing trial.
+    branches: [master]
   pull_request:
   workflow_dispatch:
   schedule:
