@@ -1,5 +1,6 @@
 // astra's root controls on d761fdec (/scratch/astra-detect-d76/web/workspace/astra-d76-probes.mjs, its cases
-// astra-d76-cases.js), verbatim:  CHROME=google-chrome bun web/workspace/test-workspace-d76.mjs
+// astra-d76-cases.js), verbatim but for one change (marked: the live checks wait for the rebuild, @sagebrush's
+// decision on be486fe2):  CHROME=google-chrome bun web/workspace/test-workspace-d76.mjs
 // astra's probes on 89685b0c (CORR-C05-2's array length and serialization hook, CORR-896-1), from
 // /scratch/astra-detect-896/web/workspace/astra-896-probes.mjs, with history-chain cases of mine after hers in
 // astra-d76-cases.js:  CHROME=google-chrome bun web/workspace/test-workspace-896.mjs

@@ -19,17 +19,18 @@ export { createImmerDbCodec, decodePatchId };
 //   own (no parents; its patch the whole document, from nothing), and is kept nowhere if refused;
 // - once one is stored, the edits after it are stored, until the session has caught up, as patches from the
 //   last one stored (its document the one thing remembered: `tail`), and the session is rebuilt from the store,
-//   one rebuild at a time, again until it holds the tail; one of them refused pauses the history again.
+//   one rebuild at a time, again until it holds the tail; one of them refused pauses the history again.  Until
+//   then the tail is the document as it is now (what's committed, the base of the journal's records and of the
+//   next patch: astra's CORR-BE4-1), and the versions stored by themselves are listed once the rebuild holds
+//   them, never before (a short lag, never a wrong version: @sagebrush's decision on daybreak2's LIMIT-BE4-1);
+// - a rebuild is of one generation of the session: init(), clear() and close() start the next, and a rebuild of
+//   an earlier one is let go whole, no session swapped in, nothing subscribed (astra's CORR-BE4-2).
 // The versions before the refusal stay as they were; the refused ones are never offered, here or after a reload.
-const DETACHED_MAX = 256;
 export class PatchHistory {
   /** @param store a patchflow PatchStore, with clear(); @param codec an immer-db codec (createImmerDbCodec) */
   constructor(store, codec) {
     this.store = store; this.codec = codec; this.session = null; this.listeners = new Set(); this.edits = null;
-    this.paused = false; this.refusedTime = null; this.tail = null; this.rebuilding = null; this.again = false;
-    // (the versions stored by themselves that the session hasn't yet, by their ids: their documents, so that they
-    // can be shown meanwhile; at most DETACHED_MAX, the oldest let go (then shown once the session has them))
-    this.detached = new Map();
+    this.paused = false; this.refusedTime = null; this.tail = null; this.rebuilding = null; this.again = false; this.gen = 0;
     this.clientId = makeClientId(); this.lastMs = 0; this.version = 1;
     // (the store as the session sees it: its append noting a refusal, the rest as they are)
     this.guarded = new Proxy(store, { get: (t, k) => (k === "append" ? (env) => this.appendMade(env) : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
@@ -40,16 +41,22 @@ export class PatchHistory {
     if (took === false) { this.paused = true; this.refusedTime = env.time; this.edits = null; this.rebuild(); }
     return took;
   }
+  // (the next generation of the session: any rebuild of the one before let go; one running no longer joined)
+  nextGen() { this.gen++; this.rebuilding = null; this.again = false; }
   // (the session made again from what the store keeps, after any append still waiting; one rebuild at a time,
-  // run again while asked for meanwhile or while the session lacks the tail)
+  // run again while asked for meanwhile or while the session lacks the tail; let go whole once of an earlier generation)
   rebuild() {
     if (this.rebuilding) { this.again = true; return this.rebuilding; }
-    this.rebuilding = (async () => {
+    const gen = this.gen;
+    const run = (async () => {
       do {
+        if (gen !== this.gen) return;
         this.again = false;
         await this.store.appending;
+        if (gen !== this.gen) return;
         const session = new Session({ codec: this.codec, patchStore: this.guarded });
         await session.init();
+        if (gen !== this.gen) { session.close(); return; }
         this.session?.close();
         this.session = session;
         this.session.on("change", () => { this.edits = null; this.emit(); });
@@ -57,9 +64,11 @@ export class PatchHistory {
         this.edits = null;
       } while (this.again || (this.tail && !this.session.versions().includes(this.tail.time)));
       this.tail = null;
-      this.detached.clear();
-    })().catch((e) => console.warn("history:", e)).finally(() => { this.rebuilding = null; this.emit(); });
-    return this.rebuilding;
+    })().catch((e) => console.warn("history:", e)).finally(() => {
+      if (this.rebuilding === run) this.rebuilding = null;
+      if (gen === this.gen) this.emit();
+    });
+    return (this.rebuilding = run);
   }
   // (an edit while paused, or before the session has caught up: stored by itself, a root if paused, else a patch
   // from the tail; kept, it is the tail; refused, paused (again), nothing kept)
@@ -71,8 +80,6 @@ export class PatchHistory {
     if (this.store.append(env) !== false) {
       this.paused = false;
       this.tail = { time: env.time, doc: next };
-      this.detached.set(env.time, next);
-      if (this.detached.size > DETACHED_MAX) this.detached.delete(this.detached.keys().next().value);
       this.rebuild();
     }
     else { this.paused = true; this.tail = null; }
@@ -82,19 +89,25 @@ export class PatchHistory {
   /** The pause's state, for tests: paused, a refused version still in the open session, an edit the session hasn't yet, a rebuild running. */
   pauseState() { return { paused: this.paused, refusedTime: this.refusedTime, tail: !!this.tail, rebuilding: !!this.rebuilding }; }
   async init() {
+    this.nextGen();
+    const gen = this.gen;
     this.session?.close();
-    this.paused = false; this.refusedTime = null; this.tail = null; this.detached = new Map();
-    this.session = new Session({ codec: this.codec, patchStore: this.guarded });
-    await this.session.init();
+    this.session = null;
+    this.paused = false; this.refusedTime = null; this.tail = null;
+    const session = new Session({ codec: this.codec, patchStore: this.guarded });
+    await session.init();
+    if (gen !== this.gen) { session.close(); return this; }
+    this.session = session;
     this.edits = null;
     this.session.on("change", () => { this.edits = null; this.emit(); });
+    this.unclear?.();
     this.unclear = this.store.onClear?.(() => this.init().then(() => this.emit()));
     return this;
   }
   on(f) { this.listeners.add(f); return () => this.listeners.delete(f); }
   emit() { for (const f of this.listeners) f(); }
   /** The records as they are now. */
-  committed() { return this.session.getCommittedDocument() ?? this.codec.fromString(""); }
+  committed() { return this.tail?.doc ?? this.session.getCommittedDocument() ?? this.codec.fromString(""); }
   /** Keep `next` (records) as a version, or, with `meta`, as a patch so marked; null if nothing changed. */
   commit(next, meta) {
     if (!this.session) return null;
@@ -119,14 +132,15 @@ export class PatchHistory {
   /** The newest version's id, or null. */
   head() { const e = this.editTimes(); return e[e.length - 1] ?? null; }
   /** The records at a version. */
-  valueAt(time) { return this.detached.get(time) ?? this.session.value({ time }); }
+  valueAt(time) { return this.session.value({ time }); }
   /** The patches, for sending elsewhere (CoCalc). */
   patches() { return this.session?.history() ?? []; }
   /** Forget every version. */
   async clear() {
+    this.nextGen();
     await this.store.clear();
     await this.init();
     this.emit();
   }
-  close() { this.unclear?.(); this.session?.close(); this.session = null; this.listeners.clear(); }
+  close() { this.nextGen(); this.unclear?.(); this.session?.close(); this.session = null; this.listeners.clear(); }
 }
