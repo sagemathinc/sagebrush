@@ -7,7 +7,7 @@
 //   bun web/workspace/test-sync-reduce.mjs
 import { readFileSync } from "node:fs";
 import { reduce, reduceAll, SyncIndex } from "./sync-reduce.ts";
-import { TRASH, parentOf } from "./paths.ts";
+import { TRASH, normPath, parentOf } from "./paths.ts";
 
 let checks = 0;
 const fails = [];
@@ -18,7 +18,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // the vectors: each from an empty index, in seq order
 const { vectors } = JSON.parse(readFileSync(here + "sync-vectors.json", "utf8"));
-check(vectors.length >= 20, `the vectors: ${vectors.length}`);
+check(vectors.length >= 39, `the vectors: ${vectors.length}`);
 for (const v of vectors) {
   const ix = new SyncIndex(), skipped = [];
   for (const op of v.ops) if (reduce(ix, op).skipped !== undefined) skipped.push(op.seq);
@@ -41,8 +41,10 @@ const FILES = Array.from({ length: 10 }, (_, i) => "f" + String(i + 1).padStart(
 const FOLDERS = Array.from({ length: 5 }, (_, i) => "e" + String(i + 1).padStart(15, "0"));
 const DOCS = ["b0a4d0000001", "b0a4d0000002"];
 const SHAS = "0123456789abcdef".split("").map((c) => c.repeat(64));
-const DIRS = ["/", "/a", "/b", "/a/c", "/Trash", "/a/b"];
-const NAMES = ["x.txt", "y.txt", "café.txt", "café.txt", "K.txt", "K.txt", "a", "b", "c"];
+// (names and folders long enough that a (2), a conflict copy or a move passes the workspace's bounds)
+const LONG = "l".repeat(250), DEEP = "/" + ["p", "q", "r"].map((c) => c.repeat(240)).join("/");
+const DIRS = ["/", "/a", "/b", "/a/c", "/Trash", "/a/b", DEEP, DEEP + "/a"];
+const NAMES = ["x.txt", "y.txt", "caf\u00e9.txt", "cafe\u0301.txt", "K.txt", "\u212a.txt", "a", "b", "c", LONG + ".txt", LONG];
 const path = () => { const d = pick(DIRS), n = pick(NAMES); return (d === "/" ? "" : d) + "/" + n; };
 function randomOp(seq, dseq) {
   const device = pick(DEV), r = rand(), op = { seq, device, dseq: (dseq[device] = (dseq[device] ?? 0) + 1), t: seq, by: "person" };
@@ -55,6 +57,8 @@ function randomOp(seq, dseq) {
   if (what === "rename") base.to = path();
   if (what === "remove") base.to = "/Trash/" + pick(NAMES);
   if (what === "restore" && rand() < 0.5) base.to = path();
+  // (where it goes, by a folder's identity: one there or not, a file's, or one on an op that can't have it)
+  if (rand() < 0.4) base.parent = pick([...FOLDERS, ...FOLDERS, pick(FILES)]);
   return base;
 }
 /** Why `ix`'s maps disagree with its entries, or "". */
@@ -63,6 +67,7 @@ function broken(ix) {
   let kids = 0;
   for (const [id, e] of ix.byId) {
     if (e.id !== id || ix.byKey.get(e.path.normalize("NFC")) !== id) return `${e.path}: its keys`;
+    try { if (normPath(e.path) !== e.path) return `${e.path}: not a path as it is`; } catch (err) { return `${e.path.length} characters: ${err.message}`; }
     const up = parentOf(e.path);
     if (up !== "/" && up !== TRASH && ix.at(up)?.kind !== "folder") return `${e.path}: no folder ${up}`;
     if (up === TRASH ? !e.trashed : !!e.trashed) return `${e.path}: in Trash, but trashed ${JSON.stringify(e.trashed)}`;
@@ -72,15 +77,19 @@ function broken(ix) {
   for (const s of ix.children.values()) kids += s.size;
   return kids === ix.byId.size ? "" : `${kids} children for ${ix.byId.size} entries`;
 }
-let threw = 0, bad = "", lost = "", nondet = "", applied = 0, skippedN = 0;
+let threw = 0, bad = "", lost = "", nondet = "", partial = "", applied = 0, skippedN = 0;
+const state = (ix) => JSON.stringify([view(ix), [...ix.byKey].sort(), [...ix.children].map(([k, v]) => [k, [...v].sort()]).sort(), [...ix.gone].sort()]);
 for (let run = 0; run < 400; run++) {
   const ops = [], dseq = {};
   for (let i = 1; i <= 80; i++) ops.push(randomOp(i, dseq));
   const ix = new SyncIndex();
   for (const op of ops) {
     let out;
+    const before = state(ix);
     try { out = reduce(ix, op); } catch (err) { threw++; bad ||= `run ${run}, seq ${op.seq}: threw ${err}`; break; }
     if (out.skipped === undefined) applied++; else skippedN++;
+    // (an op skipped changed nothing at all: its folders made, entries moved and identities forgotten all put back)
+    if (out.skipped !== undefined && (state(ix) !== before || out.changed.length)) partial ||= `run ${run}, seq ${op.seq}: ${out.skipped}`;
     const why = broken(ix);
     if (why && !bad) bad = `run ${run}, after ${JSON.stringify(op)}: ${why}`;
     // (an applied write's bytes are somewhere: the file itself, or a conflict copy)
@@ -89,6 +98,7 @@ for (let run = 0; run < 400; run++) {
   if (!same(view(reduceAll(ops)), view(ix))) nondet ||= `run ${run}`;
 }
 check(!threw && !bad, `random logs: the index stays consistent and nothing throws: ${bad}`);
+check(!partial, `random logs: an op skipped leaves the index exactly as it was: ${partial}`);
 check(!lost, `random logs: an applied write's bytes are never lost: ${lost}`);
 check(!nondet, `random logs: the same ops give the same index: ${nondet}`);
 check(applied > 10000 && skippedN > 1000, `random logs exercise both: ${applied} applied, ${skippedN} skipped`);

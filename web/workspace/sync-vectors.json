@@ -309,6 +309,208 @@
   {"path": "/after.txt", "id": "f000000000000006", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
   {"path": "/ok.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
 ],
-"skipped": [2, 3, 4, 5, 6, 7, 8]}
+"skipped": [2, 3, 4, 5, 6, 7, 8]},
+{"name": "a chosen fid equal to a derived folder's",
+"about": "the folder made for the create takes the next identity of its series; the file with that fid stays",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/kept.txt", "kind": "file", "fid": "54dcda8ff3804d02", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "create", "path": "/new/x.txt", "kind": "file", "fid": "f000000000000008", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/kept.txt", "id": "54dcda8ff3804d02", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/new", "id": "19e24d7ed01e61d1", "kind": "folder"},
+  {"path": "/new/x.txt", "id": "f000000000000008", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "an op's own fid equal to its derived folder's",
+"about": "the folder takes the next identity; the file keeps its own",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/a/b/x.txt", "kind": "file", "fid": "f568384ec58abf13", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/a", "id": "f7ce6c94818b52a8", "kind": "folder"},
+  {"path": "/a/b", "id": "53cf258f22b8c978", "kind": "folder"},
+  {"path": "/a/b/x.txt", "id": "f568384ec58abf13", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a conflict copy's identity taken",
+"about": "the copy takes the next identity of its series",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/w.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "create", "path": "/v.txt", "kind": "file", "fid": "73537d8d87383c81", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "write", "path": "/w.txt", "kind": "file", "fid": "f000000000000001", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1, "base": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"seq": 4, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 4000, "by": "person", "op": "write", "path": "/w.txt", "kind": "file", "fid": "f000000000000001", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1, "base": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"expect": [
+  {"path": "/v.txt", "id": "73537d8d87383c81", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/w (conflict, bbbbbbbb).txt", "id": "8b6dce2d3c22e1fa", "kind": "file", "sha256": "3333333333333333333333333333333333333333333333333333333333333333"},
+  {"path": "/w.txt", "id": "f000000000000001", "kind": "file", "sha256": "2222222222222222222222222222222222222222222222222222222222222222"}
+],
+"skipped": []},
+{"name": "a long name's (2)",
+"about": "shortened so the name stays within 255 characters",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 2000, "by": "person", "op": "create", "path": "/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", "kind": "file", "fid": "f000000000000002", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (2).txt", "id": "f000000000000002", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a long name's conflict copy",
+"about": "shortened so the copy's name stays within 255 characters",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "write", "path": "/x", "kind": "file", "fid": "f000000000000001", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1, "base": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 3000, "by": "person", "op": "write", "path": "/x", "kind": "file", "fid": "f000000000000001", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 1, "base": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"expect": [
+  {"path": "/yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy (conflict, bbbbbbbb).txt", "id": "73537d8d87383c81", "kind": "file", "sha256": "3333333333333333333333333333333333333333333333333333333333333333"},
+  {"path": "/yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.txt", "id": "f000000000000001", "kind": "file", "sha256": "2222222222222222222222222222222222222222222222222222222222222222"}
+],
+"skipped": []},
+{"name": "a move that would make a path too long",
+"about": "skipped whole: the folder and what is in it stay where they were, and the folders its path would have made aren't left behind",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/a", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "create", "path": "/a/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 3000, "by": "person", "op": "rename", "path": "/a", "to": "/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp/qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt", "kind": "folder", "fid": "f000000000000009"}
+],
+"expect": [
+  {"path": "/a", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/a/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": [3]},
+{"name": "a create whose folder can't be made",
+"about": "the folder's name is a file's, so it would be (2), and the path too long: skipped whole, no folder left behind",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 2000, "by": "person", "op": "create", "path": "/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh", "kind": "file", "fid": "f000000000000002", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": [2]},
+{"name": "a write to an unseen identity at the root or in Trash",
+"about": "skipped: nothing is made at / or in Trash",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "write", "path": "/", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1, "base": "0000000000000000000000000000000000000000000000000000000000000000"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "write", "path": "/Trash", "kind": "file", "fid": "f000000000000002", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1, "base": "0000000000000000000000000000000000000000000000000000000000000000"},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "write", "path": "/Trash/x.txt", "kind": "file", "fid": "f000000000000003", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1, "base": "0000000000000000000000000000000000000000000000000000000000000000"},
+  {"seq": 4, "device": "aaaaaaaaaaaaaaaa", "dseq": 4, "t": 4000, "by": "person", "op": "write", "path": "/ok.txt", "kind": "file", "fid": "f000000000000004", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1, "base": "0000000000000000000000000000000000000000000000000000000000000000"}
+],
+"expect": [
+  {"path": "/ok.txt", "id": "f000000000000004", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": [1, 2, 3]},
+{"name": "a create in a folder renamed meanwhile, by parent",
+"about": "the create follows its folder by identity",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "rename", "path": "/m", "to": "/n", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 3000, "by": "person", "op": "create", "path": "/m/b.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/n", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/n/b.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a create by parent, the old path reused",
+"about": "a new folder at the old path doesn't take it: the create follows its folder",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "rename", "path": "/m", "to": "/n", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000008"},
+  {"seq": 4, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 4000, "by": "person", "op": "create", "path": "/m/b.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/m", "id": "f000000000000008", "kind": "folder"},
+  {"path": "/n", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/n/b.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a create by parent, the folder forgotten",
+"about": "by its path, then: into the folder there now",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "remove", "path": "/m", "to": "/Trash/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "forget", "path": "/Trash/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 4, "device": "aaaaaaaaaaaaaaaa", "dseq": 4, "t": 4000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000008"},
+  {"seq": 5, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 5000, "by": "person", "op": "create", "path": "/m/b.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/m", "id": "f000000000000008", "kind": "folder"},
+  {"path": "/m/b.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a create by parent, the folder in Trash",
+"about": "the edit wins: the folder comes back, the file in it",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "remove", "path": "/m", "to": "/Trash/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 3000, "by": "person", "op": "create", "path": "/m/b.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/m", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/m/b.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a rename by parent into a folder renamed meanwhile",
+"about": "it lands in that folder, where it is now",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/d", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "create", "path": "/a.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 3000, "by": "person", "op": "rename", "path": "/d", "to": "/e", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 4, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 4000, "by": "person", "op": "rename", "path": "/a.txt", "to": "/d/a.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009"}
+],
+"expect": [
+  {"path": "/e", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/e/a.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "a restore by parent into a folder renamed meanwhile",
+"about": "it comes back into that folder, where it is now",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "mkdir", "path": "/d", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "create", "path": "/d/o.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "remove", "path": "/d/o.txt", "to": "/Trash/o.txt", "kind": "file", "fid": "f000000000000001"},
+  {"seq": 4, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 4000, "by": "person", "op": "rename", "path": "/d", "to": "/e", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 5, "device": "aaaaaaaaaaaaaaaa", "dseq": 4, "t": 5000, "by": "person", "op": "restore", "path": "/Trash/o.txt", "to": "/d/o.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009"}
+],
+"expect": [
+  {"path": "/e", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/e/o.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []},
+{"name": "parent naming a file, or a folder inside the one moved",
+"about": "a file's fid: by the path; a folder into its own: skipped",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/f.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "mkdir", "path": "/m", "kind": "folder", "fid": "f000000000000009"},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "mkdir", "path": "/m/sub", "kind": "folder", "fid": "f000000000000008"},
+  {"seq": 4, "device": "aaaaaaaaaaaaaaaa", "dseq": 4, "t": 4000, "by": "person", "op": "create", "path": "/m/b.txt", "kind": "file", "fid": "f000000000000002", "parent": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 5, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 5000, "by": "person", "op": "rename", "path": "/m", "to": "/x/m", "kind": "folder", "fid": "f000000000000009", "parent": "f000000000000008"}
+],
+"expect": [
+  {"path": "/f.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/m", "id": "f000000000000009", "kind": "folder"},
+  {"path": "/m/b.txt", "id": "f000000000000002", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/m/sub", "id": "f000000000000008", "kind": "folder"}
+],
+"skipped": [5]},
+{"name": "parent where it can't be",
+"about": "on a remove, or not a fid: the op is skipped",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/a.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "aaaaaaaaaaaaaaaa", "dseq": 2, "t": 2000, "by": "person", "op": "remove", "path": "/a.txt", "to": "/Trash/a.txt", "kind": "file", "fid": "f000000000000001", "parent": "f000000000000009"},
+  {"seq": 3, "device": "aaaaaaaaaaaaaaaa", "dseq": 3, "t": 3000, "by": "person", "op": "create", "path": "/b.txt", "kind": "file", "fid": "f000000000000002", "parent": "nothex", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 4, "device": "aaaaaaaaaaaaaaaa", "dseq": 4, "t": 4000, "by": "person", "op": "create", "path": "/c.txt", "kind": "file", "fid": "f000000000000003", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/a.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/c.txt", "id": "f000000000000003", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": [2, 3]}
 ]
 }
