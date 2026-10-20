@@ -407,10 +407,28 @@ host sent on this channel, which need not be an edit's own `base`.
 - `{ sagebrush: "refused", version: 1, id, message, retryAfter? }`: the edit
   `id` was not merged. `message` is the host's own words, at most 500
   characters, as for submissions.
-- `{ sagebrush: "editing", version: 1, allowed: false, message }`: editing
-  ends (the file became read-only, the user lost access). The frame leaves
-  Edit, drops its unsaved changes, says `message` and shows the board as it
-  is. Answers still work if the channel does.
+- `{ sagebrush: "editing", version: 1, allowed: false, message, reason?, keepUnsaved? }`:
+  editing ends (the file became read-only, the user lost access, the
+  history is full). The frame leaves Edit, says `message` and shows the
+  board as it is. Answers still work if the channel does.
+  - **Without `keepUnsaved`**, as before: the frame drops its unsaved
+    changes.
+  - **With `keepUnsaved: true`**, for any reason: the frame keeps them for
+    the user to download, as it keeps a refused edit's. That covers its
+    view of the board with them applied (the host's last revision with the
+    frame's unsaved changes over it) and its transactions not yet saved,
+    each change with its `was`. It says so beside `message`, offers
+    Download, and never sends them again on this channel. A host sends it
+    when the user's work can't be taken now but shouldn't be lost: the
+    history is full, the user's quota is spent, the document moved or
+    became read-only while they typed.
+  - `reason` is one of the Refusal reasons' codes (`"history-full"`,
+    `"quota"`, ...), for the frame to act on beside `message`.
+    `"history-full"` always comes with `keepUnsaved: true`.
+  - **Specified, not implemented in the frame yet:** `keepUnsaved` ships
+    with the frame's editing side (CoCalc's step 2), as does the rest of
+    Editing (see Status). A host can send it now; a frame without it acts
+    as without the flag, since a receiver drops fields it doesn't know.
 
 **Every edit is answered exactly once:** by its `saved`, by its `refused`,
 or by an entry in a `replace`'s `answered`, never more than one of these.
@@ -666,7 +684,7 @@ well as show `message`:
 |---|---|---|---|
 | `"busy"` | the rate or a work budget: nothing was done | always | sends again no sooner, as Refusals says for edits |
 | `"too-large"` | past a bound; `what` names it, `limit` and `size` give the bound and the amount | never | as a refusal without `retryAfter`; says how large |
-| `"history-full"` | the host can keep no more of the document's history | never | leaves Edit (an `editing` with `allowed: false` follows), keeping its unsaved changes for download |
+| `"history-full"` | the host can keep no more of the document's history | never | leaves Edit: an `editing` with `allowed: false, keepUnsaved: true` follows, and the frame keeps its unsaved changes for download |
 | `"quota"` | the user's or the board's pictures are past the host's quota | never | takes the picture out of its own changes, says `message` |
 | `"invalid"` | the message failed a check | never | as a refusal without `retryAfter` |
 
@@ -982,6 +1000,8 @@ function openChannel(me) {
 - Editing (the section above) is specified, not built. The frame's side and
   `editState` come with CoCalc's step 2, which saves edits made in the card
   to the file.
+- `editing`'s `keepUnsaved` (and `reason`) is specified, not implemented in
+  the frame yet. It ships with the frame's editing side (CoCalc step 2).
 - Built in `editState` (`@sagemathinc/sagebrush-board/submission`, the next
   release after 0.3.0, 0.4.0):
   - `preview`, its meter, `previewThrottled` and `sharedPreviewBudget`;
