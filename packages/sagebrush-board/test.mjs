@@ -186,6 +186,29 @@ try {
   st.remote([{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "XA" } }]);
   const ed = st.apply({ sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r1", changes: [{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "AB" }, was: { text: "A" } }] });
   check(ed.ok && ed.changes[0].fields.text === "XAB", "/submission: editState merges an edit into the board as it is now: " + JSON.stringify(ed));
+  // preview: what apply would do, nothing changed (lite2's A2B-GATE-1); pictures by reference
+  const pm = { sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r2", changes: [{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "XABC" }, was: { text: "XAB" } }] };
+  const before = JSON.stringify(st.records()), pv = st.preview(pm), same = JSON.stringify(st.records()) === before, ap = st.apply(pm);
+  check(pv.ok && same && typeof pv.boardBytes === "number" && ap.ok && pv.boardBytes === st.bytes && pv.editBytes === new TextEncoder().encode(JSON.stringify(pm)).length && pv.workBytes >= pv.editBytes, "/submission: editState.preview decides as apply, changing nothing: " + JSON.stringify(pv));
+  const refSt = editState(JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "n", text: "A" }] }), { pictures: "by-reference" });
+  const dataUrl = refSt.apply({ sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r1", changes: [{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images: { ["i" + "ab".repeat(16)]: { w: 1, h: 1, src: "data:image/png;base64,AAAA" } } }, was: { images: null } }] });
+  check(!dataUrl.ok && dataUrl.reason === "invalid" && /imagePut/.test(dataUrl.message), "/submission: editState with pictures by reference refuses a data: URL: " + JSON.stringify(dataUrl));
+  // (pictures by reference, through the built package: containers and entries that aren't maps, each a typed
+  // invalid at preview and apply, never a throw, nothing kept: astra on 7cca504a)
+  for (const [label, images] of [["[]", []], ["0", 0], ['"x"', "x"], ["true", true], ["a null entry", { ["i" + "c".repeat(32)]: null }], ["an array entry", { ["i" + "c".repeat(32)]: [] }]]) {
+    const sb = editState(JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "n" }] }), { pictures: "by-reference", pictureAllowed: () => true });
+    const mm = { sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r", changes: [{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images }, was: { images: null } }] };
+    let out;
+    try { const p = sb.preview(mm, 1), a = sb.apply(mm, 1); out = { p, a, kept: sb.board().images }; } catch (e) { out = { threw: String(e?.message ?? e) }; }
+    check(!out.threw && !out.p.ok && !out.a.ok && out.p.reason === "invalid" && out.a.reason === "invalid" && out.kept === undefined, `/submission: pictures by reference, ${label}: invalid, no throw, nothing kept: ` + JSON.stringify(out.threw ? out : [out.p.message, out.a.message]));
+  }
+  // astra's twelve contract assertions (test-contract.mjs), through the source and the built /submission, with Bun
+  const bun = spawnSync("bun", [join(here, "test-contract.mjs")], { encoding: "utf8", cwd: here });
+  const tally = (bun.stdout ?? "").trim().split("\n").pop();
+  check(bun.status === 0 && tally === '{"passed":12,"checks":12}', "astra's contract assertions on 74b4e93f, source and built: " + (tally || (bun.stderr ?? "").slice(0, 400)));
+  const bun2 = spawnSync("bun", [join(here, "test-contract-722.mjs")], { encoding: "utf8", cwd: here });
+  const tally2 = (bun2.stdout ?? "").trim().split("\n").pop();
+  check(bun2.status === 0 && tally2 === '{"checks":6,"failed":0}', "astra's budget assertions on 7222199c, source and built: " + (tally2 || (bun2.stderr ?? "").slice(0, 400)));
   // CommonJS: require() of both entry points, as CoCalc's project host loads them (Node's
   // require(esm), the "default" condition): it fails if top-level await ever appears in either
   const cj = mkdtempSync(join(tmpdir(), "sb-pkg-cjs-"));
