@@ -39,6 +39,15 @@
 
 This is the "client's log plus identity" of sync-server §3. Hashing new bytes happens before their transaction, as the 1a migration already does.
 
+As built (step 2a):
+- A data file's entry keeps its `sha256` (a write no longer drops it). The migrator gives it to a file written before, and gives every entry its identity key `ident`, the entries' `byIdent` index key. Both are filled in, a batch at a time, after the version 4 upgrade drops the migration's state.
+- `after.parent` is `null` for the root, and for something put in Trash itself, which carries `trashed: true`. Trash's own folder is the workspace's, and has no identity, as the root has none.
+- `parent` on the op is absent for the root and for anything in Trash.
+- `after: null` means the op removed its identity: `forget`, `discard`, and `emptyTrash`, which records one op for each identity removed whole. What was in a folder goes with it, as the reducer's forget has it.
+- An op that changes no entry (`dropVersions`) carries no identity and no `after`. An entry or folder with no identity yet (from before ids were kept, until the migrator gives one) has no `after`.
+- In the stores, a key can't hold `null`, so the root's parent is `""` there.
+- Hashing costs one more pass over the new bytes, and one transient copy of them (WebCrypto copies its input), at most the 200 MiB file limit. The old bytes are hashed only when no hash of them is already at hand, which is a file written before this step, once.
+
 **The queue: `dseq`.** The server decides a device's ops in `dseq` order, with no gaps.
 - The local `seq` can't serve as `dseq`: ops from before sync was on, and remote ops applied here, are in the same store.
 - So the client keeps its own outgoing queue, in `meta`, as `sync:out:<dseq>`. Each item points at a local op, with its identity filled in. The queue is bounded by the queue limits below.

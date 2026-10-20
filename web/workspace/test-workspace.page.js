@@ -874,7 +874,7 @@ const legacyLeft = async (w) => (await w.list("/", { recursive: true })).concat(
 async function migrateV1() {
   const big = "B".repeat(70000);
   const w = await v1([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]], [["/Trash/t.txt", "in trash", "/t.txt"]]);
-  check(w.ws.version === 3 && w.ws.objectStoreNames.contains("fileBytes") && w.ws.objectStoreNames.contains("grants"), "a version 1 workspace opened: upgraded to the current version, its stores added");
+  check(w.ws.version === 4 && ["fileBytes", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending"].every((x) => w.ws.objectStoreNames.contains(x)), "a version 1 workspace opened: upgraded to the current version, its stores added");
   check((await legacyLeft(w)) === 4 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing moved by the upgrade itself");
   check(dec((await w.read("/L/a.txt")).content) === "AAA" && dec((await w.read("/Trash/t.txt")).content) === "in trash", "files not yet moved are read where they are (and Trash's)");
   check((await w.dataFiles()).map(([p]) => p).sort().join() === "/L/a.txt,/L/big.bin,/top.csv", "…and given to a notebook's interpreter (dataFiles: not Trash's)");
