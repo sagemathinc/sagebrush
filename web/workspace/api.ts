@@ -29,7 +29,7 @@ import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeL
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
-import { reserve } from "./reserve";
+import { reserve, tryReserve } from "./reserve";
 
 export type Entry = {
   path: string;
@@ -97,6 +97,9 @@ export const identOf = (e: Pick<Entry, "kind" | "fid" | "ref">): string | undefi
  * was: design/sync-client.md §3): the migrator hashes it (Workspace.fillHash). */
 export const needsHash = (e: Entry): boolean => e.kind === "file" && !!e.migrated && !!e.fid && !e.sha256;
 
+/** Bytes kept the old way that reconcile found no entry for, to be adopted (Workspace.adoptOld): "free", nobody's;
+ * "older", written at a moved file's key by an older tab since it moved. */
+export type OldBytes = { kind: "free" | "older"; key: string; folder: string; base: string; ext: string; count: "files" | "recovered" };
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
 export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
@@ -208,12 +211,33 @@ const sameTrashed = (e: Entry, x: Entry) =>
   e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) && e.trashed.from === x.trashed?.from;
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
 // (bytes the caller gave, copied once, at the call, before anything is awaited: what is hashed is what is kept,
-// whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).  One copy, at most `max` bytes:
-// larger ones aren't copied, and are refused as too large)
+// whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).  The copy is the engine's own: the
+// view's buffer, offset and length read through %TypedArray%.prototype's getters, never the instance's, and
+// copied with %TypedArray%.prototype.set into a new Uint8Array, so no method or getter of the caller's (a
+// subclass's slice, set, subarray or buffer, a species) runs.  One copy, at most `max` bytes: larger is refused
+// at once, as too large.  A view of another kind (a DataView, an Int16Array) isn't bytes here: refused, as before)
+const TA = Object.getPrototypeOf(Uint8Array.prototype);
+const nativeGet = (proto: object, k: string) => Object.getOwnPropertyDescriptor(proto, k)!.get!;
+const TA_BUFFER = nativeGet(TA, "buffer"), TA_OFFSET = nativeGet(TA, "byteOffset"), TA_LENGTH = nativeGet(TA, "byteLength"), TA_TAG = Object.getOwnPropertyDescriptor(TA, Symbol.toStringTag)!.get!;
+const TA_SET = TA.set as (this: Uint8Array, src: ArrayLike<number>, at?: number) => void;
+const AB_LENGTH = nativeGet(ArrayBuffer.prototype, "byteLength");
 function owned(c: unknown, max: number): unknown {
-  if (c instanceof Uint8Array) return c.byteLength > max ? c : c.slice();
-  if (c instanceof ArrayBuffer) return c.byteLength > max ? c : new Uint8Array(c.slice(0));
-  return c;
+  let buffer: ArrayBuffer, offset: number, length: number;
+  if (ArrayBuffer.isView(c)) {
+    // (a typed array's own kind, from the engine: Uint8Array's subclasses included, nothing else)
+    if (TA_TAG.call(c) !== "Uint8Array") throw new WorkspaceError("invalid", "a file's contents are bytes or text");
+    buffer = TA_BUFFER.call(c);
+    offset = TA_OFFSET.call(c);
+    length = TA_LENGTH.call(c);
+  } else {
+    try { length = AB_LENGTH.call(c); } catch { return c; }
+    buffer = c as ArrayBuffer;
+    offset = 0;
+  }
+  if (length > max) throw new WorkspaceError("limit", `a file is at most ${max} bytes`);
+  const out = new Uint8Array(length);
+  TA_SET.call(out, new Uint8Array(buffer, offset, length));
+  return out;
 }
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
@@ -1837,11 +1861,38 @@ export class Workspace {
   }
   // (bytes written at a stale key since the move: a file of their own, its mark dropped with its entry; in
   // trash (where no page writes) the mark alone goes, and reconcile recovers them to /Recovered)
+  /** Bytes kept the old way ("sagebrush"/files, under `key`) that no entry names, adopted as a data file of
+   * their own (reconcile's, through migrate: OldBytes), with their SHA-256, so that the adopt's op carries it
+   * (never a data file's op without its hash: astra's CORR-9C2-2).  Their size isn't known until they are
+   * read, so first LEGACY_MAX × COPIES is reserved, before the lock (LIMIT-CAP1A-1, as the migrator does);
+   * then, holding it: still there, still nobody's (`a.kind` "free": no entry names the key; "older": a moved
+   * file's key, written since by an older tab, and no entry of its own yet), not a moved file's marked old copy:
+   * read, hashed, adopted at `folder`/`base``ext` (or the first free name).  Larger than LEGACY_MAX: adopted
+   * marked unmoved, as the migrator marks one, so they aren't read for that again.  Returns the entry, or
+   * undefined when they were gone or someone's meanwhile. */
+  async adoptOld(a: OldBytes): Promise<Entry | undefined> {
+    if (!this.main) return undefined;
+    const release = await reserve(LEGACY_MAX * COPIES);
+    try {
+      return await this.locked(async () => {
+        if ((await this.staleCopies(Infinity)).some(([w, k]) => w === "files" && k === a.key)) return undefined;
+        const naming: Entry[] = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", a.key])));
+        const mine = naming.filter((e) => !e.migrated && !e.trashed && !within(e.path, TRASH));
+        if (a.kind === "free" ? naming.length > 0 : mine.length > 0 || !naming.some((e) => e.migrated)) return undefined;
+        const bytes = await this.readOld("files", a.key);
+        if (bytes === undefined) return undefined;
+        const sha256 = await bytesHash(bytes);
+        return this.adopt(a.folder, a.base, a.ext, { kind: "file", ref: a.key, size: bytes.byteLength, rev: 0, sha256, ...(bytes.byteLength > LEGACY_MAX ? { unmoved: "too large to move" } : {}) });
+      });
+    } finally {
+      release();
+    }
+  }
   private async keepOld(where: "files" | "trash", key: string, bytes: Uint8Array) {
     const mk = staleKey(where, key);
     if (where === "trash" || !isPath(key)) return void (await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete(mk); }));
     const [base, ext] = splitExt(nameOf(key));
-    await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, size: bytes.byteLength, rev: 0 }, { dropMeta: [mk] });
+    await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, size: bytes.byteLength, rev: 0, sha256: await bytesHash(bytes) }, { dropMeta: [mk] });
   }
   private async readOld(where: "files" | "trash", key: string): Promise<Uint8Array | undefined> {
     return this.oldTx(where, "readonly", (st) => req(st.get(key))) as Promise<Uint8Array | undefined>;
@@ -1954,6 +2005,24 @@ export class Workspace {
   /** An entry for contents that are already kept (migration, reconcile):
    * at `base + ext` in `folder`, or the first free `base (2) + ext`, …
    * Hold the lock (locked()) around it. */
+  /** A data file's bytes, about to be adopted, read and hashed holding the lock (the caller's): from fileBytes
+   * (by its fid) if moved, else where they are kept the old way.  Their size isn't known until read, so
+   * LEGACY_MAX × COPIES is reserved first, without waiting (tryReserve: the lock's holder never waits for a
+   * reservation, LIMIT-CAP1A-1); if it can't be had now, the adopt is refused (a WorkspaceError("storage"),
+   * nothing made) and is asked for again later (reconcile's next run).  Larger than LEGACY_MAX: marked unmoved, as
+   * the migrator marks one.  Returns the fields to add: sha256, size, and maybe unmoved. */
+  private async hashOf(f: { ref: string | null; fid?: string; migrated?: boolean; trashed?: Entry["trashed"] }): Promise<Pick<Entry, "sha256" | "size" | "unmoved">> {
+    const release = tryReserve(LEGACY_MAX * COPIES);
+    if (!release) throw new WorkspaceError("storage", "a file's bytes can't be read just now (the page's memory for reading files is in use): try again");
+    try {
+      const bytes: Uint8Array | undefined = f.migrated && f.fid ? await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(f.fid!))) : await this.readOld(f.trashed ? "trash" : "files", f.ref!);
+      if (bytes === undefined) throw new WorkspaceError("missing", `the bytes of ${f.ref} are not in this browser`);
+      return { sha256: await bytesHash(bytes), size: bytes.byteLength, ...(!f.migrated && bytes.byteLength > LEGACY_MAX ? { unmoved: "too large to move" } : {}) };
+    } finally {
+      release();
+    }
+  }
+
   async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[] } = {}): Promise<Entry> {
     // (with the entry, in its transaction: a board's record, records put in
     // or dropped from meta, bytes dropped from trash; all of it, or none)
@@ -1961,6 +2030,9 @@ export class Workspace {
     // (a data file whose bytes are kept the old way: the migration, if it was done, has one more to
     // move, so it starts again (its state dropped with this entry, in this transaction: capabilities §2b))
     const oldWay = fields.kind === "file" && !fields.migrated && fields.ref !== null;
+    // (never a data file's op without its hash (astra's CORR-9C2-2): its bytes hashed first, here if the caller
+    // didn't (adoptOld, keepOld and reconcile's recovery from Trash do))
+    if (fields.kind === "file" && !fields.sha256 && fields.ref !== null) fields = { ...fields, ...(await this.hashOf(fields)) };
     const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || oldWay ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : [])];
     const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
       const st = tx.objectStore("entries");
@@ -2071,11 +2143,10 @@ export class Workspace {
   private async afterOf(st: IDBObjectStore, e: Entry): Promise<OpAfter | undefined> {
     const id = identOf(e);
     if (!id) return undefined;
-    // (a data file whose SHA-256 isn't known: its bytes still kept the old way (adopted from there), so
-    // nothing it left is said, as for an identity not yet given; its hash comes when the migrator moves it.
-    // Every other path to an op fills the hash first: create and write compute it, a move hashes a file
-    // written before (astra's CORR-9C2-2))
-    if (e.kind === "file" && !e.sha256) return undefined;
+    // (never a data file's op without its hash (astra's CORR-9C2-2): every path to one has it first: create and
+    // write compute it, adopt is given it, a move migrates the file or hashes it first.  Should one not, the
+    // change is refused whole (its transaction aborted) rather than an op left incomplete for ever)
+    if (e.kind === "file" && !e.sha256) throw new WorkspaceError("invalid", `${e.path}: a data file's op without its SHA-256 (design/sync-client.md §3)`);
     const folder = parentOf(e.path);
     let parent: string | null = null;
     if (!e.trashed && folder !== "/" && folder !== TRASH) {

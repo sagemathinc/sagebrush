@@ -41,6 +41,23 @@ export function reserve(n: number): Promise<() => void> {
   });
 }
 
+/** `n` bytes reserved now, if they can be at once (nothing waiting, and room, as reserve's rule); else null,
+ * nothing reserved.  For a holder of the workspace's lock, which may never wait for a reservation (a reader
+ * reserves before taking the lock: waiting here could wait for ever on one holding a reservation that waits
+ * for the lock). */
+export function tryReserve(n: number): (() => void) | null {
+  n = Math.max(0, Math.ceil(n));
+  if (waiting.length || !fits(n)) return null;
+  held += n;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    held -= n;
+    next();
+  };
+}
+
 /** What is reserved now, and how many wait (for tests and the Storage panel). */
 export function reserved(): { held: number; waiting: number } {
   return { held, waiting: waiting.length };

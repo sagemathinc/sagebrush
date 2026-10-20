@@ -26,7 +26,7 @@
 //   gone is marked missing, never removed.
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
-import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
+import { WorkspaceError, type BoardRecord, type Entry, type OldBytes, type Workspace } from "./api";
 import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
@@ -49,6 +49,7 @@ export type MigrateReport = { boards: number; copies: number; unreadable: string
 export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () => boolean } = {}): Promise<MigrateReport> {
   // (a quarantined workspace is written by nothing, this included, until the person decides: design/workspace-durability.md A.3)
   if (w.quarantined) return Promise.resolve({ boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 });
+  const old: OldBytes[] = [];
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     // (a reset's purge not finished: nothing brought in until it is, in the background; the next migrate brings in what's left)
@@ -58,7 +59,7 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
       await migrateBoards(w, storage, r);
-      await reconcile(w, first, r);
+      old.push(...(await reconcile(w, first, r)));
     } catch (e) {
       // (the workspace full: what fitted is in, the rest still where it was, said)
       if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
@@ -66,7 +67,20 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
     }
     if (first) await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(Date.now(), "migrated"); });
     return r;
-  });
+  }).then((r) => adoptOld(w, old, r));
+}
+
+/** The old-way bytes reconcile found no entry for (`old`), adopted one at a time, each read and hashed holding
+ * the lock with its reservation taken first (Workspace.adoptOld: never a data file's op without its hash,
+ * astra's CORR-9C2-2; a reservation is never taken holding the lock, LIMIT-CAP1A-1).  Counted in `r`. */
+export async function adoptOld(w: Workspace, old: OldBytes[], r: MigrateReport): Promise<MigrateReport> {
+  try {
+    for (const a of old) if (await w.adoptOld(a)) r[a.count]++;
+  } catch (e) {
+    if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
+    else throw e;
+  }
+  return r;
 }
 
 // (the localStorage keys, as they are now)
@@ -137,7 +151,8 @@ async function freeBoardId(w: Workspace): Promise<string> {
  * entry listed (`first`: notebooks at the top; after that in /Recovered/),
  * entries whose contents are gone marked missing (and unmarked when they
  * are back).  Counts go in `r`. */
-export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) {
+export async function reconcile(w: Workspace, first: boolean, r: MigrateReport): Promise<OldBytes[]> {
+  const old: OldBytes[] = [];
   const entries: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll()));
   const refs = { notebook: new Set<string>(), board: new Set<string>(), file: new Set<string>(), trash: new Set<string>() };
   for (const e of entries) {
@@ -204,7 +219,7 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
       await w.mainTx("files", "readwrite", (st) => st.put(bytes, d));
       const [base, ext] = splitExt(nameOf(d));
       // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
-      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark] });
+      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, sha256: sha, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark] });
       entries.push({ path: d, kind: "file", ref: d, created: 0, updated: 0 });
     }
     refs.file.add(d);
@@ -234,25 +249,23 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     const moved = typeof key === "string" ? movedByRef.get(key) : undefined;
     if (!moved || stale.has("files:" + key) || oldWay.has(key)) continue;
     const [base, ext] = splitExt(nameOf(moved.path));
-    await w.adopt(parentOf(moved.path), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 });
-    r.recovered++;
+    // (adopted after, read and hashed with its reservation: adoptOld)
+    old.push({ kind: "older", key, folder: parentOf(moved.path), base: base + " (from an older tab)", ext, count: "recovered" });
   }
   // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
   for (const key of fileKeys) {
     if (typeof key !== "string" || refs.file.has(key) || stale.has("files:" + key)) continue;
-    // (not read for its size: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1);
-    // the migrator, which reserves first, gives it its size as it moves it)
-    const size = undefined;
+    // (not read here: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1); adopted
+    // after it, by adoptOld, which reserves first, then reads and hashes them, so that the adopt's op carries
+    // their hash (astra's CORR-9C2-2))
     let p: string | null = null;
     try { p = normPath(key); } catch {}
     if (p !== null && p !== "/" && !within(p, TRASH)) {
       const [base, ext] = splitExt(nameOf(p));
-      await w.adopt(parentOf(p), base, ext, { kind: "file", ref: key, size, rev: 0 });
-      r.files++;
+      old.push({ kind: "free", key, folder: parentOf(p), base, ext, count: "files" });
     } else {
       const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
-      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: key, size, rev: 0 });
-      r.recovered++;
+      old.push({ kind: "free", key, folder: RECOVERED, base, ext, count: "recovered" });
     }
   }
   // boards with no entry
@@ -292,5 +305,5 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     });
     if (gone) r.missing++;
   }
+  return old;
 }
-
