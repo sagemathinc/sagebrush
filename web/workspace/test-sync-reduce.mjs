@@ -21,7 +21,7 @@ const state = (ix) => JSON.stringify([ix.entries(), [...ix.byKey].sort(), [...ix
 
 // the vectors: each from an empty index, in seq order
 const { vectors } = JSON.parse(readFileSync(here + "sync-vectors.json", "utf8"));
-check(vectors.length >= 41, `the vectors: ${vectors.length}`);
+check(vectors.length >= 43, `the vectors: ${vectors.length}`);
 for (const v of vectors) {
   const ix = new SyncIndex(), skipped = [];
   for (const op of v.ops) {
