@@ -145,14 +145,16 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
   Deletion runs in pages, holding the workspace's lock and the recovery lock, so no new reference appears while a page is decided.
 - **The handoff (CORR-A54-2, LIMIT-A54-1).** A new blob is written and checked before the workspace's lock is taken, and the lock is held only for the short handoff.
   - **Outside the lock:**
-    - a temporary file, `/sagebrush/tmp/<tab>-<n>`, written while the tab holds the Web Lock `sagebrush-tmp-<tab>`;
+    - a temporary file, `/sagebrush/tmp/<owner>`, where `<owner>` is a fresh incarnation id (128 random bits, never reused: not a tab id plus a counter, which a reload could repeat);
+    - the owner takes the Web Lock `sagebrush-tmp-<owner>` before creating the file, and holds it continuously through the write, the flush, the verification, the wait for the workspace's lock, and the rename or the drop (astra's CORR-D03-1);
     - flushed, and verified by its hash.
     - Temporary files are never deletion candidates.
   - **Inside the lock**, in one hold:
     - the temporary file is given its final name `/sagebrush/blobs/<sha256>` (if a blob of that hash is already there, it's trusted by its immutable name and its size, and the temporary file is dropped instead);
     - then the IndexedDB commit that names it, which makes it a root.
     - Deletion needs the same lock, so it can never fall between the name and the commit. The hold is a rename and one commit, whatever the file's size.
-  - **The startup cleanup** deletes a temporary file only when its tab's `sagebrush-tmp-<tab>` lock isn't held (`navigator.locks.query`), so no live tab's file is taken.
+  - **The startup cleanup** never decides from `navigator.locks.query()`, which is only a snapshot. For each temporary file it requests that file's own lock, `sagebrush-tmp-<owner>`, with `ifAvailable: true`, and deletes the file only while holding it. When it gets null, the owner is live and the file is skipped.
+  - **Reusing an existing blob** by its name and size is sound under the invariant that every blob was published immutable and hash-verified. Name plus size is not an integrity check of a blob already corrupted on disk, or put there by something else. Such corruption is caught when it is read: a restore verifies every blob's hash (B.7), and a file's read checks its hash too.
   - A blob orphaned by a kill between the two is named by nothing, and goes at the next deletion, correctly.
   - A pending restore's `restore.json` pins its slot's blobs too.
 - **The migration:** 1a's, again: batched, reserved, crash-tested, and the old copy dropped after the hash check.
@@ -209,7 +211,10 @@ A kill during that checkpoint leaves unpublished parts, which are reclaimed at t
 
 **The blob handoff (CORR-A54-2, LIMIT-A54-1).** Deletion attempted between a blob's naming and the commit naming it waits for the lock, and the blob stays.
 - **A maximum-size blob (200 MB) with slow I/O injected** (each write and flush delayed). The workspace's lock is held only for the handoff, at most 200 ms. A save queued meanwhile commits within 200 ms of the lock being free, measured from its call. The pre-publication time isn't the bound.
-- **A temporary file:** one being written by a live tab is never deleted at another tab's startup. One from a tab that's gone is.
+- **A temporary file:**
+  - one being written, or verified and waiting for the workspace's lock, by a live owner is never deleted by another tab's startup cleanup, which gets null for its lock and skips it;
+  - cleanup racing an owner's lock acquisition: whichever gets the lock first wins, and the file is never deleted while its owner holds the lock;
+  - after a reload, a new incarnation never shares an id with the old one's leftover file, which is collected.
 - **A kill between verification and the lock:** the temporary file is left behind and collected by a later startup. Nothing names it, and the index never does.
 - **A kill between the final name and the commit:** the named blob is an orphan, and is collected correctly by a later deletion. The index never names missing bytes. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
