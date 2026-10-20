@@ -48,11 +48,13 @@ if (!opened.success) {
   console.error(opened.logs.join("\n"));
   process.exit(1);
 }
+// (the notebooks' store on its own, as an editor loads it: astra's probe that it refuses to save while quarantined)
+await Bun.build({ entrypoints: [join(here, "../notebook/stores.js")], outdir: site, naming: "stores.js", target: "browser", format: "esm" });
 copyFileSync(join(here, "test-workspace.page.js"), join(site, "cases.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>workspace test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
-  if (!["/", "/ws.js", "/fileopen.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
+  if (!["/", "/ws.js", "/fileopen.js", "/cases.js", "/stores.js"].includes(p)) return new Response("not found", { status: 404 });
   const f = Bun.file(join(site, p === "/" ? "index.html" : p.slice(1)));
   return new Response(f, { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
 } });

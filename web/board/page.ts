@@ -159,14 +159,21 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
     return null;
   }
   return w;
-}).catch((e) => { console.warn("workspace:", e); return null; }), 5000, null);
+}).catch((e) => {
+  console.warn("workspace:", e);
+  // (the workspace can't be opened: said, never taken for a first visit)
+  showLossNotice({ durability: { state: "unknown", why: String((e as Error)?.message ?? e) } });
+  return null;
+}), 5000, null);
 if (!ws) wsAbandoned = true;
 // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
 if (ws) {
   ws.onClosed(() => showReloadNotice());
   if (ws.closed) showReloadNotice();
-  // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written until then)
+  // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written
+  // until then; said again when that changes, another tab's say)
   showLossNotice(ws);
+  ws.onDurability(() => showLossNotice(ws!));
   void startMigrator(ws);
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";

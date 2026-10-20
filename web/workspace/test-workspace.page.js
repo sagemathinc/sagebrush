@@ -1434,8 +1434,7 @@ async function durabilityDecide() {
   const p = wit({ reset: { to: 2, kind: "new", at: 1 } });
   check(W.resolveReset(p, held({})) === "rollback", "a prepared reset, IndexedDB unchanged: rolled back");
   check(W.resolveReset(p, held({ workspace: "c".repeat(16), generation: 2 })) === "finish", "…IndexedDB at the new generation: finished");
-  check(W.resolveReset(p, held({ fresh: true, workspace: undefined })) === "finish", "…the database gone during a reset to a new workspace: finished");
-  check(W.resolveReset(wit({ reset: { to: 2, kind: "import", at: 1 } }), held({ fresh: true, workspace: undefined })) === "interrupted-import", "…during an import: the import interrupted");
+  check(W.resolveReset(p, held({ fresh: true, workspace: undefined })) === "lost" && W.resolveReset(wit({ reset: { to: 2, kind: "import", at: 1 } }), held({ fresh: true, workspace: undefined })) === "lost", "…a new database under a prepared reset (a reset never deletes the database): a loss, for any kind");
   check(W.resolveReset(p, null) === "unknown" && W.resolveReset(p, held({ workspace: "d".repeat(16), generation: 7 })) === "unknown", "…storage unreadable, or another generation: unknown");
   check(!W.newer(wit({ seq: 30 }), p) && W.newer(wit({ seq: 30 }), wit({})) && !W.newer(wit({ seq: 5 }), wit({})), "a normal publication never replaces a prepared reset, nor a newer witness");
 }
@@ -1559,6 +1558,208 @@ async function durabilityTwoTabs() {
   b.close();
 }
 
+async function durabilityTabs() {
+  // astra's probe: two first opens at once install one identity
+  {
+    const o = await named();
+    const [a, b] = await Promise.all([openAs(o), openAs(o)]);
+    const ok = a.identity.workspace === b.identity.workspace && a.identity.generation === b.identity.generation;
+    check(ok && !!(await a.create("/a.txt", { content: "a" })) && !!(await b.create("/b.txt", { content: "b" })), "two first opens at once: one identity, both can write: " + JSON.stringify([a.identity, b.identity]));
+    a.close();
+    b.close();
+  }
+  // astra's probe: a tab opened before another tab found a loss: its changes refused too, by meta (its channel
+  // closed) and by the broadcast
+  for (const viaChannel of [false, true]) {
+    const o = await named();
+    const early = await openAs(o);
+    if (!viaChannel) early.channel?.close();
+    let told = 0;
+    early.onDurability(() => told++);
+    await early.create("/a.txt", { content: "a" });
+    const lw = localW(o.name);
+    W.writeLocal(W.placeOf(o.name), { ...lw, seq: lw.seq + 5 });
+    const later = await openAs(o);
+    check(later.durability.state === "suspected", "(another tab finds changes missing)");
+    if (viaChannel) for (let i = 0; i < 50 && !early.quarantined; i++) await new Promise((r) => setTimeout(r, 20));
+    check(await fails(early.create("/after-loss.txt", { content: "x" }), "quarantined") && early.quarantined && told >= 1 && !(await paths(later)).includes("/after-loss.txt"), `a tab opened before the loss was found: its changes refused, the page told (${viaChannel ? "by the broadcast" : "by meta, inside the lock"})`);
+    early.close();
+    later.close();
+  }
+}
+
+async function durabilityPurge() {
+  // astra's probe: a reset to a new workspace doesn't come back through migrate (the old store's notebooks, localStorage's boards)
+  for (const killed of [false, true]) {
+    const o = await named();
+    const w = await openAs(o);
+    await rawPut(w.main, "notebooks", { id: "nb-old", name: "notes", cells: [], rev: 1, updated: 1 });
+    localStorage.setItem("sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify({ title: "Old board", nodes: [] }));
+    await W.migrate(w, localStorage);
+    check((await paths(w)).length >= 1, "(the old notebook and board brought in)");
+    if (killed) W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+    await w.reset("new").catch(() => {});
+    W.RESET_HOOK.beforePurge = undefined;
+    let v = w;
+    if (killed) { w.close(); v = await openAs(o); }
+    await W.migrate(v, localStorage);
+    const nbs = await new Promise((ok) => { const r = v.main.transaction("notebooks").objectStore("notebooks").getAllKeys(); r.onsuccess = () => ok(r.result); });
+    check((await paths(v)).length === 0 && nbs.length === 0 && localStorage.getItem("sagebrush-board:local:aaaaaaaaaaaa") === null, `a reset to a new workspace${killed ? ", killed before its purge" : ""}, then migrate: nothing brought back`);
+    v.close();
+  }
+}
+
+async function durabilityResetBounds() {
+  // daybreak2's L2: a reset to a new workspace empties its stores a page at a time, never one transaction over all
+  // of it; killed part way, the next open finishes it
+  for (const killed of [false, true]) {
+    const o = await named();
+    const w = await openAs(o);
+    const N = 1600;
+    await new Promise((ok, no) => { const tx = w.ws.transaction(["entries", "versions", "versionBytes"], "readwrite"); for (let i = 0; i < N; i++) { tx.objectStore("entries").put({ path: `/f${i}.txt`, kind: "file", ref: `/f${i}.txt`, size: 1, rev: 0, fid: i.toString(16).padStart(16, "0"), created: 1, updated: 1, migrated: true, nkey: "/\u0000f" + i }); tx.objectStore("versionBytes").put(new Uint8Array(64), i + 1); } tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { pages.push([store, n]); if (killed && pages.length === 3) throw new Error("killed (test)"); };
+    await w.reset("new").catch(() => {});
+    W.RESET_HOOK.afterPage = undefined;
+    let v = w;
+    if (killed) {
+      check(await fails(v.create("/x.txt", { content: "x" }), "storage") || await fails(v.create("/x.txt", { content: "x" }), "quarantined"), "(killed part way: nothing written meanwhile)");
+      v.close();
+      v = await openAs(o);
+    }
+    const left = await new Promise((ok) => { const r = v.ws.transaction("entries").objectStore("entries").count(); r.onsuccess = () => ok(r.result); });
+    check(left === 0 && v.durability.state === "ok" && v.identity.generation === 2 && !!(await v.create("/new.txt", { content: "n" })), `a reset of ${N} entries${killed ? ", killed part way, finished by the next open" : ""}: emptied, writable`);
+    check(pages.every(([, n]) => n <= W.RESET_PAGE) && pages.filter(([st]) => st === "entries").length >= Math.ceil((killed ? 2 : N) / W.RESET_PAGE), `…a page of at most ${W.RESET_PAGE} records per transaction (${pages.length} pages)`);
+    v.close();
+  }
+  // daybreak2's L1: after a reset out of a quarantine, the OPFS witness is flushed when the page is hidden too
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.quarantined && !!w.onHidden, "opened quarantined: the flush on hidden installed already (daybreak2's L1)");
+  await w.reset("new");
+  check(!!w.onHidden, "a reset out of a quarantine: the flush on hidden installed");
+  w.close();
+}
+
+async function durabilityNotices() {
+  // the notebooks' own saves, gated by the page while quarantined (astra's probe: the notebook editor saved through it)
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  W.setSaveGate(() => (w.quarantined ? "quarantined (test)" : null));
+  const st = new W.IdbStore(w.main, "nb-q", { id: "nb-q", name: "n", cells: [] });
+  const saved = await st.save({ id: "nb-q", name: "CHANGED WHILE QUARANTINED", cells: [] });
+  W.setSaveGate(null);
+  check(typeof saved === "string" && /not saved/.test(saved), "the notebooks' saves refused while quarantined: " + JSON.stringify(saved));
+  // (and their history's: nothing appended, clear and drop refused, by the quarantine's flag alone)
+  const hdb = await W.openHistoryDb();
+  const hist = new W.IdbPatchStore(hdb, "nb-q-history");
+  hist.append({ time: "2026-10-20T00:00:00.000Z", id: "p1" });
+  await new Promise((r) => setTimeout(r, 200));
+  const rows = await new Promise((ok) => { const r = hdb.transaction("history").objectStore("history").count(IDBKeyRange.bound(["nb-q-history", ""], ["nb-q-history", "\uffff"])); r.onsuccess = () => ok(r.result); });
+  check(rows === 0 && !!(await hist.clear().then(() => false, () => true)), "…and the notebooks' history: nothing appended, clearing refused, while quarantined");
+  w.close();
+  // (the flag this quarantine left, dropped: later cases' notebooks aren't refused)
+  for (const k of Object.keys(localStorage)) if (k.startsWith("sagebrush-quarantined:")) localStorage.removeItem(k);
+  // shown: a loss with its choices; a detection that can't work here, closable; an open that failed
+  const box = (d, extra = {}) => { const e = W.showLossNotice({ durability: d, reset: async () => {}, ...extra }); const t = e?.textContent ?? ""; const b = [...(e?.querySelectorAll("button") ?? [])].map((x) => x.dataset.sbb); e?.remove(); return { t, b }; };
+  const c = box({ state: "confirmed", why: "x", witness: { entries: 3, sampled: 1 } });
+  check(/was lost/.test(c.t) && c.b.join() === "loss-new", "the notice for a loss: said, with Start a new workspace here");
+  check(box({ state: "suspected", why: "x" }).b.join() === "loss-keep,loss-new", "…for missing changes: Keep, or Start new");
+  const u = box({ state: "ok", unavailable: "denied" });
+  check(/can't be detected/.test(u.t) && u.b.join() === "loss-close", "unreadable witnesses: said, and closable");
+  check(/can't be detected/.test(box({ state: "ok" }, { witnessDown: { local: "quota" } }).t), "a witness that can't be written: said");
+  check(/can't be opened/.test(box({ state: "unknown", why: "this browser's storage can't be opened: x" }).t), "an open that failed: said, never taken for a first visit");
+  check(box({ state: "ok" }).t === "", "nothing to say: nothing shown");
+}
+
+// astra's eight Chromium probes on 2a4e53a8 (evidence/durability-detect-2a4-astra/probes.patch), kept as regression tests
+async function durabilityAstraProbes() {
+  const report=(name,v)=>{
+    const wanted={
+      'stale-reset':()=>v.error!==null&&v.paths.includes('/new.txt'),
+      'other-tab-quarantine':()=>v.error!==null&&!v.paths.includes('/after-loss.txt'),
+      'reset-resurrection':()=>v.afterMigration.length===0,
+      'refused-reset-then-loss':()=>v.quarantined||v.state.state==='unknown',
+      'concurrent-initial-identities':()=>v.a.workspace===v.b.workspace&&!v.ea&&!v.eb,
+      'notebook-editor-quarantine':()=>!v.save?.saved&&v.name!=='CHANGED WHILE QUARANTINED',
+      'unavailable-notice':()=>v.notice,
+      'reset-without-prepare':()=>v.error!==null&&v.paths.includes('/a.txt')
+    };check(wanted[name](),name+': '+JSON.stringify(v));
+  };
+  // Stale reset can erase the replacement workspace.
+  {
+    const o=await named(); const a=await openAs(o), b=await openAs(o);
+    b.channel?.close(); b.channel=null; await a.reset('new'); await a.create('/new.txt',{content:'NEW'});
+    let error=null;try {await b.reset('new')} catch(e){error=e.message}
+    report('stale-reset',{error,paths:await paths(a),a:a.identity,b:b.identity});a.close();b.close();
+  }
+  // A previously open writer ignores persisted quarantine.
+  {
+    const o=await named(); const a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();
+    const w=localW(o.name); W.writeLocal(W.placeOf(o.name),{...w,seq:w.seq+10});
+    const b=await openAs(o);let error=null;try{await a.create('/after-loss.txt',{content:'WRITTEN'})}catch(e){error=e.message}
+    report('other-tab-quarantine',{error,state:b.durability.state,paths:await paths(b)});a.close();b.close();
+  }
+  // New means empty only until reconcile reimports retained notebook data.
+  {
+    const o=await named();let a=await openAs(o); await a.create('/notes.ipynb');await a.reset('new');
+    const immediately=await paths(a);a.close();a=await openAs(o);await W.migrate(a,localStorage);
+    report('reset-resurrection',{immediately,afterMigration:await paths(a)});a.close();
+  }
+  // Failed preparation plus failed cleanup is treated as an actionable reset after primary loss.
+  {
+    const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();
+    W.RESET_HOOK.afterFirstWitness=()=>{throw Error('prepare refused')};W.RESET_HOOK.failCleanup=true;
+    let refused=false;try{await a.reset('new')}catch(e){refused=true}
+    W.RESET_HOOK.afterFirstWitness=undefined;W.RESET_HOOK.failCleanup=false;a.close();await dropDb(o.name);
+    a=await openAs(o);report('refused-reset-then-loss',{refused,state:a.durability,quarantined:a.quarantined});a.close();
+  }
+  // Initial opens must share one primary identity, even before the first save.
+  {
+    const o=await named();const proto=W.Workspace.prototype, orig=proto.arrive;let count=0,release,entered;
+    const wait=new Promise(r=>release=r), both=new Promise(r=>entered=r);
+    proto.arrive=async function(...args){if(++count===2)entered();await wait;return orig.apply(this,args)};
+    let a,b;try{const pa=openAs(o),pb=openAs(o);await both;release();[a,b]=await Promise.all([pa,pb])}finally{proto.arrive=orig}
+    let ea=null,eb=null;try{await a.create('/a.txt',{content:'A'})}catch(e){ea=e.message}try{await b.create('/b.txt',{content:'B'})}catch(e){eb=e.message}
+    report('concurrent-initial-identities',{a:a.identity,b:b.identity,ea,eb});a.close();b.close();
+  }
+
+  // The notebook editor's real store still saves while the Workspace is quarantined.
+  {
+    const {IdbStore}=await import('./stores.js');const o=await named();let a=await openAs(o);
+    const e=await a.create('/n.ipynb');const old=await rawGet(a.main,'notebooks',e.ref);await a.flushOpfs();a.close();
+    const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+100});
+    a=await openAs(o);const store=new IdbStore(a.main,e.ref);const loaded=await store.load();
+    const save=await store.save({...loaded,name:'CHANGED WHILE QUARANTINED',baseRev:loaded.rev});
+    report('notebook-editor-quarantine',{quarantined:a.quarantined,save,name:(await rawGet(a.main,'notebooks',e.ref)).name});a.close();
+  }
+
+  // Existing primary plus denied witnesses has no user-visible warning.
+  {
+    const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();a.close();
+    const get=Storage.prototype.getItem,dir=navigator.storage.getDirectory;
+    Storage.prototype.getItem=function(){throw Error('denied')};navigator.storage.getDirectory=async()=>{throw Error('denied')};
+    try{a=await openAs(o);report('unavailable-notice',{state:a.durability,witnessDown:a.witnessDown,notice:!!W.showLossNotice(a)});a.close()}finally{Storage.prototype.getItem=get;navigator.storage.getDirectory=dir}
+  }
+  // Known unavailable witnesses cause preparation to be silently skipped.
+  {
+    const o=await named();const a=await openAs(o);await a.create('/a.txt',{content:'A'});
+    const set=Storage.prototype.setItem,dir=navigator.storage.getDirectory;
+    Storage.prototype.setItem=function(){throw Error('denied')};navigator.storage.getDirectory=async()=>{throw Error('denied')};
+    await a.create('/marker-fails.txt',{content:'M'});await a.flushOpfs();
+    let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir}
+    report('reset-without-prepare',{error,paths:await paths(a),identity:a.identity});a.close();
+  }
+}
+
 async function durabilityDeliberate() {
   const o = await named();
   let w = await openAs(o);
@@ -1630,7 +1831,7 @@ async function durabilityReset() {
     check(v.durability.state === "ok" && v.identity.generation === 2 && ow.generation === 2 && !ow.reset, "killed after one witness's commit: finished, the other committed");
     v.close();
   }
-  // the database gone during a reset to a new workspace: finished, not a loss; during an import: interrupted
+  // the database gone under a prepared reset (a reset never deletes it, so this is a loss): confirmed, for any kind
   for (const kind of ["new", "import"]) {
     const { o, w } = await setup();
     H.afterPrepare = kill;
@@ -1639,9 +1840,44 @@ async function durabilityReset() {
     w.close();
     await dropDb(o.name);
     const v = await openAs(o);
-    if (kind === "new") check(v.durability.state === "ok" && v.identity.generation === 2, "the database gone during a reset to a new workspace: finished, not taken for a loss");
-    else check(v.durability.state === "unknown" && /import was interrupted/.test(v.durability.why), "…during an import: said interrupted: " + JSON.stringify(v.durability));
+    check(v.durability.state === "confirmed", `the database gone under a prepared reset (${kind}): a loss, confirmed: ` + JSON.stringify(v.durability));
     v.close();
+  }
+  // astra's probe: a refused reset (its cleanup failing too), then the database lost: confirmed, never the refused reset finished
+  {
+    const { o, w } = await setup();
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    H.failCleanup = true;
+    await w.reset("new").catch(() => {});
+    H.afterFirstWitness = undefined;
+    H.failCleanup = false;
+    w.close();
+    await dropDb(o.name);
+    const v = await openAs(o);
+    check(v.durability.state === "confirmed" && v.quarantined, "a refused reset, then the database lost: confirmed and quarantined, not the reset finished: " + JSON.stringify(v.durability));
+    v.close();
+  }
+  // astra's probe: a stale tab's reset resets nothing (it would have erased the newer workspace's files)
+  {
+    const { o, w } = await setup();
+    const stale = await openAs(o);
+    stale.channel?.close();
+    await w.reset("new");
+    await w.create("/newer.txt", { content: "n" });
+    check(await fails(stale.reset("new"), "storage") && (await paths(w)).join() === "/newer.txt", "a stale tab's reset: refused, the newer workspace's files kept");
+    w.close();
+    stale.close();
+  }
+  // astra's probe: witnesses noted down earlier this session don't let a reset skip its preparation
+  {
+    const { o, w } = await setup();
+    w.witnessDown = { local: "earlier (test)", opfs: "earlier (test)" };
+    let prepared = false;
+    H.afterPrepare = () => { prepared = !!localW(o.name).reset; };
+    await w.reset("new");
+    H.afterPrepare = undefined;
+    check(prepared, "witnesses noted down earlier: the reset still prepares both");
+    w.close();
   }
   // a stale tab: by the broadcast, and by identity (workspace id, and generation alone)
   for (const kind of ["new", "keep"]) {
@@ -1656,7 +1892,7 @@ async function durabilityReset() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityDeliberate, durabilityReset]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
