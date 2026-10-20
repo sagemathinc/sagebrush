@@ -61,9 +61,16 @@ export function setSaveGate(f) { saveGate = f; }
  * before a reset (or in a tab whose page knows nothing of it) can't write into the next workspace (astra's
  * CORR-2A4-2).  Every list of notebooks passes it over. */
 export const FENCE = "__sagebrush-workspace__";
+// (the rules, the same for every write (astra's CORR-2A4-2 on 0eefec71): a store is bound to the fence it found
+// when it loaded, read in the same transaction as the document; a write is allowed only if the fence now is that
+// same workspace and generation, in phase "ok"; a fence that appeared since a store found none, or went since it
+// found one (an unwritable fence is deleted, so that this fails closed), refuses it)
 const fenceRefusal = (f, seen) => {
-  if (f?.quarantined) return "this browser's copy of your workspace was lost or is missing changes, or is being reset: choose what to do first, or reload";
-  if (seen && (!f || f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
+  if (!f) return seen ? "this browser's record of the workspace is missing: reload this page" : null;
+  if (f.quarantined) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
+  if (f.phase && f.phase !== "ok") return f.phase === "quarantined" ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : "this browser's workspace is being reset: wait for it, then reload";
+  if (seen === null) return "the workspace was set up after this notebook was opened: reload this page";
+  if (seen && (f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
   return null;
 };
 const fenceOf = (f) => (f && typeof f.workspace === "string" ? { workspace: f.workspace, generation: f.generation } : null);
@@ -143,9 +150,14 @@ export class IdbStore {
   /** @param db an IndexedDB database from openDb(); @param id the notebook's id; @param initial its document if it is new */
   constructor(db, id, initial = null) { this.db = db; this.id = id; this.initial = initial; }
   async load() {
-    const doc = await idb(this.db, "notebooks", "readonly", (st) => st.get(this.id));
-    // (the workspace this store writes into: the fence as first found)
-    if (this.fence === undefined && this.db) this.fence = fenceOf(await idb(this.db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined));
+    // (the document and the fence it belongs with, read in one transaction: the workspace this store writes into)
+    const both = this.db ? await new Promise((ok, no) => {
+      const tx = this.db.transaction("notebooks", "readonly"), st = tx.objectStore("notebooks"), d = st.get(this.id), f = st.get(FENCE);
+      tx.oncomplete = () => ok({ doc: d.result, fence: f.result });
+      tx.onerror = () => no(tx.error);
+    }) : { doc: undefined, fence: undefined };
+    if (this.fence === undefined) this.fence = fenceOf(both.fence);
+    const doc = both.doc;
     if (doc) return doc;
     const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
     await this.save(fresh);
@@ -162,9 +174,10 @@ export class IdbStore {
       let result = null;
       const fence = st.get(FENCE);
       fence.onsuccess = () => {
+        // (a store saving before it loaded binds to the fence it finds now)
+        if (this.fence === undefined) this.fence = fenceOf(fence.result);
         const why = fenceRefusal(fence.result, this.fence);
         if (why) result = { refused: why };
-        else if (this.fence === undefined) this.fence = fenceOf(fence.result);
       };
       const get = st.get(this.id);
       get.onsuccess = () => {
@@ -212,8 +225,14 @@ export class IdbPatchStore {
   }
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
   async loadInitial() {
-    if (this.fence === undefined && this.db) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
-    const rows = (await idb(this.db, "history", "readonly", (st) => st.getAll(this.range()))) ?? [];
+    // (the rows and the fence they belong with, in one transaction)
+    const both = this.db ? await new Promise((ok, no) => {
+      const tx = this.db.transaction("history", "readonly"), st = tx.objectStore("history"), r = st.getAll(this.range()), f = st.get([FENCE, ""]);
+      tx.oncomplete = () => ok({ rows: r.result, fence: f.result?.fence });
+      tx.onerror = () => no(tx.error);
+    }) : { rows: [], fence: undefined };
+    if (this.fence === undefined) this.fence = fenceOf(both.fence);
+    const rows = both.rows ?? [];
     return { patches: rows.map((r) => r.env), hasMore: false };
   }
   append(env) {
@@ -221,8 +240,8 @@ export class IdbPatchStore {
     if (refusal() || !this.db) return;
     const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
     f.onsuccess = () => {
-      if (fenceRefusal(f.result?.fence, this.fence)) return;
       if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
+      if (fenceRefusal(f.result?.fence, this.fence)) return;
       st.put({ nb: this.id, time: env.time, env });
     };
     tx.onerror = () => console.warn("history:", tx.error);
@@ -243,12 +262,24 @@ export class IdbPatchStore {
   }
   async clear() {
     await this.allowed();
-    await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
+    await this.deleteChecked();
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
   async drop() {
     await this.allowed();
-    await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
+    await this.deleteChecked();
+  }
+  // (the rows deleted only if the fence, read in the same transaction, still allows it)
+  async deleteChecked() {
+    if (!this.db) return;
+    const why = await new Promise((ok, no) => {
+      const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
+      let refused = null;
+      f.onsuccess = () => { refused = fenceRefusal(f.result?.fence, this.fence); if (!refused) st.delete(this.range()); };
+      tx.oncomplete = () => ok(refused);
+      tx.onerror = () => no(tx.error);
+    });
+    if (why) throw new Error(`not done: ${why}`);
   }
 }

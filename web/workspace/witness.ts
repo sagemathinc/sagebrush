@@ -119,7 +119,9 @@ export type State =
   | { state: "suspected"; witness: Witness; why: string }
   | { state: "unknown"; why: string }
   /** a reset to a new workspace under way (resumed after a stop): every writer refused until it is done */
-  | { state: "resetting" };
+  | { state: "resetting" }
+  /** the old store's purge after a reset not finished: every writer refused until it is (astra's CORR-2A4-3) */
+  | { state: "purging" };
 
 /** What a reset prepared in a witness means, given what IndexedDB holds (A.3a). */
 // (a reset is one IndexedDB transaction that never deletes the database: a new database under a prepared
