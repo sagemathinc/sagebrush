@@ -11,9 +11,19 @@
 // kills land where the timing puts them (during a move's transaction, between
 // it and the old copy's deletion, between batches); each run checks the
 // whole state, wherever they landed.
+//
+// The harness itself: the workspace is seeded with every write committed
+// (not merely requested) before the first kill; each kill takes the
+// browser's whole process group, and the browser is started again only
+// once every process of it has exited and nothing holds the profile's
+// IndexedDB locks; and a round that finds the origin's data gone (once seen
+// in a crowded run, never reproduced: the whole origin's IndexedDB fresh,
+// the old store with it, which no workspace code deletes) fails loudly with
+// what was there: the IndexedDB folder before and after the restart, the
+// killed browser's processes still alive, and Chrome's own log.
 //   CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -32,7 +42,9 @@ window.W = W;
 const NAME = "ws-crash", MAIN = "main-crash";
 const bytes = (i) => { const b = new Uint8Array(${SIZE}); for (let j = 0; j < b.length; j++) b[j] = (i * 7 + j * 13) & 255; return b; };
 const same = (a, i) => { if (!a || a.byteLength !== ${SIZE}) return false; const b = new Uint8Array(a.buffer ?? a, a.byteOffset ?? 0, a.byteLength); for (let j = 0; j < b.length; j += 997) if (b[j] !== ((i * 7 + j * 13) & 255)) return false; return b[b.length - 1] === ((i * 7 + (b.length - 1) * 13) & 255); };
-const raw = (db, store, op, ...a) => new Promise((ok, no) => { const r = db.transaction(store, op === "put" || op === "delete" ? "readwrite" : "readonly").objectStore(store)[op](...a); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+// (a write resolves once its transaction has committed, not when its request succeeds: a kill a moment
+// later can't drop it)
+const raw = (db, store, op, ...a) => new Promise((ok, no) => { const write = op === "put" || op === "delete", tx = db.transaction(store, write ? "readwrite" : "readonly"), r = tx.objectStore(store)[op](...a); let v; r.onsuccess = () => { v = r.result; if (!write) ok(v); }; if (write) tx.oncomplete = () => ok(v); r.onerror = () => no(r.error); tx.onabort = () => no(tx.error); });
 // a workspace as version 1 made it
 window.setup = async () => {
   await new Promise((ok, no) => {
@@ -105,12 +117,43 @@ const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 
+// What of the browser is on disk and running: its process group's members still alive, the processes
+// holding the profile's IndexedDB LevelDB locks, and the IndexedDB folder (files and bytes, per folder)
+const procs = () => readdirSync("/proc").filter((d) => /^\d+$/.test(d));
+function idbLocks() {
+  const out = [], walk = (d) => { let es = []; try { es = readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (e.name === "LOCK" && p.includes("IndexedDB")) out.push(p); } };
+  walk(join(profile, "Default", "IndexedDB"));
+  return out;
+}
+function processes(pgid) {
+  const locks = new Set(idbLocks()), members = [], holders = [];
+  for (const pid of procs()) {
+    let stat;
+    try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { continue; }
+    if (Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) === pgid) members.push(Number(pid));
+    if (!locks.size) continue;
+    let fds = [];
+    try { fds = readdirSync(`/proc/${pid}/fd`); } catch { continue; }
+    for (const fd of fds) { try { if (locks.has(readlinkSync(`/proc/${pid}/fd/${fd}`))) holders.push(Number(pid)); } catch {} }
+  }
+  return { members, holders };
+}
+function idbDisk() {
+  const out = {}, walk = (d, top) => { let es = []; try { es = readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = join(d, e.name); if (e.isDirectory()) walk(p, top ?? e.name); else { const k = top ?? "."; out[k] ??= [0, 0]; out[k][0]++; try { out[k][1] += statSync(p).size; } catch {} } } };
+  walk(join(profile, "Default", "IndexedDB"), null);
+  return out;
+}
+let pgid = 0, launches = 0, before = null;
+
 /** Chrome on the profile, the test page open: its evaluate. */
 async function start() {
   let port = Number(process.env.CDP_PORT) || 0;
   // (a killed browser leaves its port file behind: not the new one's)
   rmSync(join(profile, "DevToolsActivePort"), { force: true });
-  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  before = { disk: idbDisk(), left: processes(pgid) };
+  // (its own process group, so that a kill takes all of it; its log kept, for a round that finds the data gone)
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--enable-logging=stderr", "--v=0", "about:blank"], { stdio: ["ignore", "ignore", openSync(join(profile, `chrome-${++launches}.log`), "w")], detached: true });
+  pgid = chrome.pid;
   if (!port) port = await devtoolsPort(profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); if (targets.some((t) => t.type === "page")) break; } catch {} await sleep(100); }
@@ -126,11 +169,25 @@ async function start() {
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
   return { ev, ws };
 }
+/** The browser killed (SIGKILL, its whole process group), and only once every process of it has exited and
+ * nothing holds the profile's IndexedDB locks does this return: the next browser opens the profile alone. */
 async function kill(t) {
   t.ws.close();
-  chrome.kill("SIGKILL");
+  try { process.kill(-pgid, "SIGKILL"); } catch {}
   await new Promise((r) => (chrome.exitCode !== null || chrome.signalCode !== null ? r() : chrome.once("exit", r)));
-  await sleep(300);
+  for (let i = 0; ; i++) {
+    const { members, holders } = processes(pgid);
+    if (!members.length && !holders.length) break;
+    if (i >= 300) throw new Error(`the killed browser's processes still there after 30 s: group ${JSON.stringify(members)}, holding IndexedDB's locks ${JSON.stringify(holders)}`);
+    for (const pid of members) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    await sleep(100);
+  }
+}
+/** What was there, for a round that finds the origin's data gone. */
+function forensics() {
+  let log = "";
+  try { log = readFileSync(join(profile, `chrome-${launches}.log`), "utf8").split("\n").filter((l) => l.trim()).slice(-40).join("\n    "); } catch (e) { log = String(e); }
+  return `IndexedDB before the restart ${JSON.stringify(before?.disk)}, after ${JSON.stringify(idbDisk())}; the killed browser's processes left at the restart ${JSON.stringify(before?.left)}; Chrome's log:\n    ${log}`;
 }
 
 let code = 1;
@@ -145,7 +202,9 @@ try {
     await kill(t);
     t = await start();
     const r = await t.ev("window.check()");
-    check(r.problems.length === 0, `killed ${ms} ms into a run (round ${round}): every file's bytes intact, the index and bytes agreeing: ${r.problems.slice(0, 5).join("; ")}`);
+    // (the origin's data gone: said loudly, with what was there)
+    if (r.problems.some((p) => p.startsWith("files listed: "))) console.error(`round ${round}: THE ORIGIN'S DATA IS GONE (${r.problems[0]}): ${forensics()}`);
+    check(r.problems.length === 0, `killed ${ms} ms into a run (round ${round}): every file's bytes intact, the index and bytes agreeing: ${r.problems.slice(0, 5).join("; ")}${r.problems.some((p) => p.startsWith("files listed: ")) ? " (the origin's data gone: see the forensics above)" : ""}`);
     check(r.moved >= last, `…the files moved never fewer than before (${last} → ${r.moved})`);
     last = r.moved;
     console.log(`round ${round}: killed after ${ms} ms, ${r.moved} of 125 moved, ${r.stale} old copies left marked, state ${JSON.stringify(r.state)}`);
@@ -160,7 +219,7 @@ try {
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {
-  chrome?.kill("SIGKILL");
+  try { process.kill(-pgid, "SIGKILL"); } catch {}
   server.stop(true);
   await sleep(300);
   rmSync(profile, { recursive: true, force: true });
