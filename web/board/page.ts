@@ -48,8 +48,10 @@ import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
-import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, type Entry } from "../workspace/index";
+import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, type Entry } from "../workspace/index";
+// (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
+onHistoryRefused((m: string) => showBusyNotice(m));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
@@ -159,12 +161,21 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
     return null;
   }
   return w;
-}).catch((e) => { console.warn("workspace:", e); return null; }), 5000, null);
+}).catch((e) => {
+  console.warn("workspace:", e);
+  // (the workspace can't be opened: said, never taken for a first visit)
+  showLossNotice({ durability: { state: "unknown", why: String((e as Error)?.message ?? e) } });
+  return null;
+}), 5000, null);
 if (!ws) wsAbandoned = true;
 // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
 if (ws) {
   ws.onClosed(() => showReloadNotice());
   if (ws.closed) showReloadNotice();
+  // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written
+  // until then; said again when that changes, another tab's say)
+  showLossNotice(ws);
+  ws.onDurability(() => showLossNotice(ws!));
   void startMigrator(ws);
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
@@ -363,6 +374,12 @@ const logSave = (what: string, d: BoardDoc, epoch: number, base?: number) => {
 let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = null;
 function wsSave(id: string, d: BoardDoc) {
   const w = ws!, refused = wsRefused;
+  // (the workspace quarantined, being reset, or reset or upgraded elsewhere: nothing kept, not even the pending
+  // copy in localStorage, and said: astra's CORR-2A4-2 on 0eefec71)
+  if (w.quarantined || w.closed) {
+    wsRefused = new Error(w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : "this browser's copy of your workspace was lost, is missing changes, or is being reset: nothing can be changed until that is settled");
+    throw wsRefused;
+  }
   let journaled = true;
   const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
   if (text.length > PENDING_MAX) {

@@ -24,9 +24,10 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { inTx, req, hex, openWorkspaceDb } from "./db";
+import { inTx, req, hex, openWorkspaceDb, WS_DB, type OpenInfo } from "./db";
+import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 import { reserve } from "./reserve";
 
@@ -81,7 +82,7 @@ export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: 
  * versions, none older than 30 days, all of them at most 1 GB. */
 export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
-export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage";
+export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage" | "quarantined";
 export class WorkspaceError extends Error {
   constructor(public code: WorkspaceErrorCode, message: string, public current?: unknown) { super(message); }
 }
@@ -132,6 +133,34 @@ export const nkeyOf = (p: string) => parentOf(p) + "\u0000" + nameOf(p).normaliz
 const isPath = (k: string) => { try { return normPath(k) === k && k !== "/"; } catch { return false; } };
 const LOCK = "sagebrush-workspace";
 type Change = { ops: Op[] };
+/** The workspace's identity, in meta (design/workspace-durability.md A.1): its own id, and the generation a
+ * deliberate reset bumps.  The witnesses kept outside IndexedDB are compared with it. */
+export type Identity = { workspace: string; generation: number };
+const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
+// (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
+// keys it keeps)
+const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants"];
+const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
+const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
+/** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
+ * over the whole workspace). */
+export const RESET_PAGE = 500;
+/** Records per transaction where values are files' bytes (up to 200 MB each): deleting them costs about the same
+ * whatever their size (measured on Chrome 155: 50 records of 8 MiB in 14 ms, 500 of 64 B in 7 ms; the bytes'
+ * own files are removed after), so a count bounds the page, kept smaller here (daybreak2's LIMIT-99B-1). */
+export const RESET_BYTES_PAGE = 32;
+/** Bytes per page of files' bytes whose sizes are known (the index's, the versions'): with RESET_PAGE records at
+ * most, so many small versions take few pages (daybreak2's LIMIT-0EE-2); those of unknown size, RESET_BYTES_PAGE. */
+export const RESET_PAGE_BYTES = 32 * 2 ** 20;
+/** localStorage keys removed per step of the old store's purge. */
+export const LOCAL_PAGE = 200;
+/** A reset under way, in meta: the new identity it switches to, once every store is emptied. */
+type Resetting = { to: Identity; seq: number };
+// (the OPFS witness: written at most this often, and when the page is hidden)
+const OPFS_EVERY_MS = 10_000;
+/** Test hooks at the reset's boundaries (A.3a): each is called holding the lock, and may throw, as a kill
+ * there would stop the reset; the next open then resolves it. */
+export const RESET_HOOK: { afterFirstWitness?: () => void; afterPrepare?: () => void; afterPage?: (store: string, n: number, ms?: number) => void; openBudgetMs?: number; beforePurge?: () => void; afterIdb?: () => void | Promise<void>; afterFirstCommit?: () => void; failCleanup?: boolean } = {};
 
 // (bytes compared four at a time where both are aligned: a 200 MB file in well under a second, inside one
 // transaction's callback, which can't yield; a byte at a time was 2 s there)
@@ -175,12 +204,122 @@ export class Workspace {
   private tab = hex(8);
   /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
   actor = "person";
+  /** Where this workspace's witnesses are kept, and its identity as this page knows it. */
+  private place: Place = placeOf(WS_DB);
+  identity: Identity = { workspace: "0".repeat(16), generation: 1 };
+  /** What the open decided about a lost workspace (design/workspace-durability.md A.2). Confirmed or suspected:
+   * quarantined, every change refused, until the person decides (A.3). */
+  durability: State = { state: "ok" };
+  /** The witnesses that couldn't be written in this session, and why: the Storage panel says so. */
+  witnessDown: { local?: string; opfs?: string } = {};
+  private opfsTimer: ReturnType<typeof setTimeout> | null = null;
+  private opfsDue = false;
+  private onHidden: (() => void) | null = null;
+  get quarantined(): boolean { const s = this.durability.state; return s === "confirmed" || s === "suspected" || s === "resetting" || s === "purging"; }
+  private durabilitySubs = new Set<() => void>();
+  /** `f()` whenever what this page knows of the workspace's durability changes (a quarantine learnt from
+   * another tab, a witness found unwritable): the pages show it.  Returns how to stop. */
+  onDurability(f: () => void): () => void {
+    this.durabilitySubs.add(f);
+    return () => this.durabilitySubs.delete(f);
+  }
+  private durabilityChanged() {
+    for (const f of this.durabilitySubs) try { f(); } catch (e) { console.warn("workspace onDurability:", e); }
+  }
+  // (a quarantine another tab found, persisted in meta or broadcast: this page's changes refused from now on)
+  private adoptQuarantine(q: State) {
+    // (the tab that found it wrote the fence; this one only stops writing: a closed tab, stale, does nothing)
+    if (this.quarantined || this.closed) return;
+    this.durability = q;
+    this.durabilityChanged();
+  }
+  /** The workspace's fence in the notebooks' store and their history's (notebook/stores.js FENCE): its identity,
+   * and whether it is quarantined or being reset, which every notebook and history write checks in its own
+   * transaction.  Written at every open and every change of state, so it always says what meta says. */
+  async writeFence() {
+    // (called holding the lock, which orders writes within a generation; a fence is never replaced by an earlier
+    // generation's, compared in the same transaction, so a stale tab can't put an older one back; one that can't
+    // be written is never deleted (its absence would read as a database the workspace never had): its database is
+    // marked blocked instead, every write to it refused: astra's CORR-2A4-2 on 28f6511b.  The step, counted
+    // in meta, says which write it was)
+    const s = this.durability.state;
+    const phase = s === "confirmed" || s === "suspected" ? "quarantined" : s === "resetting" ? "resetting" : s === "purging" ? "purging" : "ok";
+    // (a tab whose identity meta no longer holds (a reset elsewhere, carried on here or not) writes nothing)
+    const step = await inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta"), id = (await req(st.get("identity"))) as Identity | undefined;
+      if (id && (id.workspace !== this.identity.workspace || id.generation !== this.identity.generation)) return null;
+      const n = (((await req(st.get("fenceStep"))) as number | undefined) ?? 0) + 1;
+      st.put(n, "fenceStep");
+      return n;
+    });
+    if (step === null) return;
+    // (the workspace's database named in it: the authority each write confirms, notebook/stores.js)
+    const fence = { workspace: this.identity.workspace, generation: this.identity.generation, step, phase, primary: this.ws.name };
+    const put = (db: IDBDatabase, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => new Promise<void>((ok, no) => {
+      const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store), g = st.get(key);
+      // (never replaced by an earlier generation's: a tab left over from before a reset can't put its fence back;
+      // within a generation every write holds the workspace's lock, which orders them.  One of a later generation
+      // left there (the workspace's own database rolled back behind it) is not this fence written: the database
+      // is blocked, as if the write had failed: astra's CORR-56C-1)
+      let skipped: unknown = null;
+      g.onsuccess = () => {
+        const c = cur(g.result);
+        if (typeof c?.generation === "number" && c.generation > fence.generation) { skipped = c; return; }
+        try { st.put(rec); } catch (e) { tx.abort(); no(e); }
+      };
+      tx.oncomplete = () => (skipped ? no(new Error(`a fence of a later generation is there: ${JSON.stringify(skipped)}`)) : ok());
+      tx.onerror = () => no(tx.error);
+      tx.onabort = () => no(tx.error);
+    });
+    // (every store the editors write outside the lock, design/workspace-durability.md A.3b: the notebooks', their
+    // history's, the boards' history's; one whose fence can't be written is marked blocked in meta, which every
+    // write to it reads first (notebook/stores.js), so its writes are refused until a later write succeeds; a
+    // fence is never deleted.  meta itself refusing the mark fails the open)
+    const blocked: string[] = [];
+    const fenceIn = async (db: IDBDatabase | null, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => {
+      if (!db) return;
+      try {
+        await put(db, store, key, rec, cur);
+      } catch (e) {
+        console.warn(`workspace fence (${db.name}):`, e);
+        blocked.push(db.name);
+      }
+    };
+    await fenceIn(this.main, "notebooks", FENCE, { id: FENCE, ...fence }, (v) => v);
+    try { this.hdb ??= await openHistoryDb(); } catch {}
+    await fenceIn(this.hdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    try { this.bhdb ??= await openBoardHistoryDb(); } catch {}
+    await fenceIn(this.bhdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    this.fenceBlocked = blocked;
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { if (blocked.length) tx.objectStore("meta").put(blocked, "fenceBlocked"); else tx.objectStore("meta").delete("fenceBlocked"); });
+  }
+  /** The latest generation any of the editors' stores' fences names (0 if none). */
+  private async fencesUpTo(): Promise<number> {
+    const gen = async (db: IDBDatabase | null, store: string, key: IDBValidKey, f: (v: any) => any) => {
+      if (!db) return 0;
+      const v = f(await new Promise((ok) => { try { const r = db.transaction(store).objectStore(store).get(key); r.onsuccess = () => ok(r.result); r.onerror = () => ok(undefined); } catch { ok(undefined); } }));
+      return typeof v?.generation === "number" ? v.generation : 0;
+    };
+    try { this.hdb ??= await openHistoryDb(); } catch {}
+    try { this.bhdb ??= await openBoardHistoryDb(); } catch {}
+    return Math.max(await gen(this.main, "notebooks", FENCE, (v) => v), await gen(this.hdb, "history", [FENCE, ""], (v) => v?.fence), await gen(this.bhdb, "history", [FENCE, ""], (v) => v?.fence));
+  }
+  /** The stores whose fence couldn't be written at the latest try: their writes are refused (the pages' gates too). */
+  fenceBlocked: string[] = [];
+  private bhdb: IDBDatabase | null = null;
+  private hdb: IDBDatabase | null = null;
 
   /** `ws`: the workspace's database; `main`: "sagebrush" (notebooks, files), or null where there is none. */
   constructor(readonly ws: IDBDatabase, readonly main: IDBDatabase | null, readonly device: string, readonly limits: Limits = LIMITS, private now: () => number = Date.now) {
     if (typeof BroadcastChannel === "function") {
       this.channel = new BroadcastChannel(CHANNEL);
-      this.channel.onmessage = (ev) => { if (ev.data?.from !== this.tab && Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops }, false); };
+      this.channel.onmessage = (ev) => {
+        if (ev.data?.from === this.tab) return;
+        if (Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops }, false);
+        if (ev.data?.quarantine) this.adoptQuarantine(ev.data.quarantine);
+        // (reset in another tab: this page's workspace is no longer the workspace; reload, as after an upgrade)
+        if (ev.data?.reset && (ev.data.reset.workspace !== this.identity.workspace || ev.data.reset.generation !== this.identity.generation)) this.closedElsewhere();
+      };
     }
   }
 
@@ -205,22 +344,467 @@ export class Workspace {
   /** The workspace of this browser (both databases opened), or a WorkspaceError("storage"). */
   static async open(opts: { name?: string; mainName?: string; limits?: Limits; now?: () => number } = {}): Promise<Workspace> {
     let ws: IDBDatabase, made: Workspace | undefined, early = false;
-    try { ws = await openWorkspaceDb(opts.name, () => (made ? made.closedElsewhere() : (early = true))); } catch (e) { throw new WorkspaceError("storage", `this browser's storage can't be opened: ${(e as Error)?.message ?? e}`); }
+    const info: OpenInfo = { fresh: false };
+    try { ws = await openWorkspaceDb(opts.name, () => (made ? made.closedElsewhere() : (early = true)), undefined, info); } catch (e) { throw new WorkspaceError("storage", `this browser's storage can't be opened: ${(e as Error)?.message ?? e}`); }
     const main = await openMainDb(opts.mainName ?? "sagebrush");
     const device = await inTx(ws, "meta", "readwrite", async (tx) => {
       const st = tx.objectStore("meta");
-      const d = await req(st.get("device"));
-      if (typeof d === "string" && /^[0-9a-f]{16}$/.test(d)) return d;
-      const fresh = hex(8);
-      st.put(fresh, "device");
-      return fresh;
+      let d = await req(st.get("device"));
+      if (!(typeof d === "string" && /^[0-9a-f]{16}$/.test(d))) st.put((d = hex(8)), "device");
+      return d as string;
     });
     made = new Workspace(ws, main, device, opts.limits ?? LIMITS, opts.now);
+    made.place = placeOf(opts.name ?? WS_DB);
     if (early) made.closedElsewhere();
+    await made.arrive(info);
     return made;
+  }
+  /** meta's identity, quarantine and an unfinished purge, read together. */
+  private async metaState(): Promise<{ identity?: Identity; kept?: State; purge: boolean; purgeLocal: boolean; resetting?: Resetting }> {
+    return inTx(this.ws, "meta", "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), id = await req(st.get("identity")), q = (await req(st.get("quarantine"))) as State | undefined;
+      const r = (await req(st.get("resetting"))) as Resetting | undefined;
+      return { identity: isIdentity(id) ? id : undefined, kept: q && (q.state === "confirmed" || q.state === "suspected") ? q : undefined, purge: !!(await req(st.get("purgeMain"))), purgeLocal: !!(await req(st.get("purgeLocal"))), resetting: r && isIdentity(r.to) ? r : undefined };
+    });
+  }
+
+  /** The open's decision (design/workspace-durability.md A.2): a prepared reset resolved first (A.3a), then
+   * what IndexedDB holds compared with the witnesses; a loss quarantines the workspace, kept in meta so a
+   * reload doesn't lift it; otherwise the workspace's identity made if it had none, and the witnesses
+   * brought up to it. */
+  private async arrive(info: OpenInfo) {
+    // (decided and installed holding the lock: two tabs opening at once find one identity, the second reading
+    // what the first installed; astra's probe on 2a4e53a8.  Without Web Locks, as before them: unlocked)
+    const locks = (globalThis.navigator as any)?.locks;
+    // (the fence brought to what meta says in the same hold, at every open)
+    const decided = async () => {
+      await this.decideHere(info);
+      if (this.purgePending && !this.quarantined) this.durability = { state: "purging" };
+      await this.writeFence();
+    };
+    if (locks && typeof locks.request === "function") await this.locked(decided, undefined, { internal: true });
+    else await decided();
+    // (a reset resumed, or a purge: run here for at most a short while, then on in the background: LIMIT-99B-3)
+    if (this.durability.state === "resetting" || this.purgePending || this.localPending) await Promise.race([this.cleanUp(), new Promise((r) => setTimeout(r, RESET_HOOK.openBudgetMs ?? 250))]);
+    // (the witnesses brought up to what IndexedDB holds: IndexedDB ahead of them is harmless; a first visit gets none until its first save)
+    if (!this.quarantined && this.durability.state !== "first" && locks) await this.locked(async () => {}, undefined, { internal: true, publish: true }).catch(() => {});
+    this.watchHidden();
+  }
+  private async decideHere(info: OpenInfo) {
+    const { identity, kept, purge, purgeLocal, resetting } = await this.metaState();
+    this.localPending = purgeLocal;
+    // (a database is new only if, read now under the lock, nobody has made it a workspace yet: another tab's
+    // first open may have, since this one's indexedDB.open made it: astra's CORR-2A4-1; Chrome's dataLoss stands)
+    if (info.fresh && (identity || (await this.generation()) > 0)) info = { ...info, fresh: false };
+    // (a reset to a new workspace stopped part way through its cleanup: resumed in the background, a page per
+    // hold of the lock, the open returning at once with every writer refused meanwhile: LIMIT-99B-3)
+    if (resetting) {
+      this.identity = identity ?? this.identity;
+      this.durability = { state: "resetting" };
+      return;
+    }
+    if (kept) {
+      this.identity = identity ?? this.identity;
+      this.durability = kept;
+      return;
+    }
+    // (an old store's purge not finished: finished after the open, a page at a time; every writer refused until
+    // then, so nothing new is made that it would delete: astra's CORR-2A4-3 on 0eefec71)
+    if (purge) this.purgePending = true;
+    const reads = [readLocal(this.place), await readOpfs(this.place)];
+    const held: Held = { fresh: info.fresh, dataLoss: info.dataLoss, dataLossMessage: info.dataLossMessage, workspace: identity?.workspace, generation: identity?.generation, seq: await this.generation() };
+    const prepared = best(reads).witness;
+    if (prepared?.reset) {
+      const out = resolveReset(prepared, held);
+      if (out === "rollback") {
+        const back: Witness = { ...prepared };
+        delete back.reset;
+        await this.writeWitnesses(back, true);
+        this.identity = identity!;
+        this.durability = { state: "ok" };
+        return;
+      }
+      if (out === "finish") {
+        await this.setIdentity(identity!, null);
+        await this.writeWitnesses(await this.sample(), true);
+        this.durability = { state: "ok" };
+        return;
+      }
+      if (out === "unknown") {
+        this.identity = identity ?? this.identity;
+        this.durability = { state: "unknown", why: "a reset of this workspace was under way, and this browser's storage can't tell how far it got" };
+        return;
+      }
+      // ("lost": a new database under a prepared reset; decided as any loss, below)
+    }
+    const state = decide(held, reads);
+    if (state.state === "confirmed" || state.state === "suspected") {
+      // (quarantined: the witness's identity kept, so the next open finds the same; nothing published; other tabs told)
+      const w = state.witness;
+      const id = identity ?? (w ? { workspace: w.workspace, generation: w.generation } : { workspace: hex(8), generation: 1 });
+      await this.setIdentity(id, state);
+      this.durability = state;
+      this.channel?.postMessage({ from: this.tab, quarantine: state });
+      return;
+    }
+    await this.setIdentity(identity ?? { workspace: hex(8), generation: best(reads).witness?.generation ?? 1 }, null);
+    this.durability = state;
+    if (state.state === "ok" && state.unavailable) this.witnessDown.local ??= state.unavailable;
+  }
+  private async setIdentity(id: Identity, quarantine: State | null) {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta");
+      st.put(id, "identity");
+      if (quarantine) st.put(quarantine, "quarantine");
+      else st.delete("quarantine");
+    });
+    this.identity = id;
+  }
+  /** A witness of the workspace as it is now (its identity, its counter and its entries). */
+  private async sample(): Promise<Witness> {
+    const { seq, entries } = await inTx(this.ws, ["ops", "meta", "entries"], "readonly", async (tx) => {
+      const last = await new Promise<number>((ok, no) => { const c = tx.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
+      const floor = ((await req(tx.objectStore("meta").get("opsFloor"))) as number | undefined) ?? 0;
+      return { seq: Math.max(last, floor), entries: (await req(tx.objectStore("entries").count())) as number };
+    });
+    return { v: 1, workspace: this.identity.workspace, generation: this.identity.generation, seq, entries, sampled: this.now() };
+  }
+  /** Both witnesses written: `force` for a reset's own phases and its resolution; otherwise each only if it is
+   * newer than the one there (never over a prepared reset).  A write that fails is noted, not thrown. */
+  private async writeWitnesses(w: Witness, force = false, which: { local?: boolean; opfs?: boolean } = { local: true, opfs: true }) {
+    if (which.local) {
+      try {
+        const cur = readLocal(this.place);
+        if (force || !("witness" in cur) || newer(w, cur.witness)) writeLocal(this.place, w);
+        if (this.witnessDown.local) { delete this.witnessDown.local; this.durabilityChanged(); }
+      } catch (e) {
+        const was = this.witnessDown.local;
+        this.witnessDown.local = String((e as Error)?.message ?? e);
+        if (!was) this.durabilityChanged();
+      }
+    }
+    if (which.opfs) {
+      try {
+        const cur = await readOpfs(this.place);
+        if (force || !("witness" in cur) || newer(w, cur.witness)) await writeOpfs(this.place, w);
+        if (this.witnessDown.opfs) { delete this.witnessDown.opfs; this.durabilityChanged(); }
+      } catch (e) {
+        const was = this.witnessDown.opfs;
+        this.witnessDown.opfs = String((e as Error)?.message ?? e);
+        if (!was) this.durabilityChanged();
+      }
+    }
+  }
+  /** After a commit, holding the lock: the localStorage witness at once (the first save has one before it is
+   * reported), the OPFS one at most every OPFS_EVERY_MS. */
+  private async publish() {
+    if (this.quarantined) return;
+    const w = await this.sample();
+    await this.writeWitnesses(w, false, { local: true });
+    this.opfsDue = true;
+    if (!this.opfsTimer) this.opfsTimer = setTimeout(() => this.flushOpfs(), OPFS_EVERY_MS);
+  }
+  /** The OPFS witness brought up to date now (holding the lock), if a commit made it due. */
+  async flushOpfs() {
+    if (this.opfsTimer) clearTimeout(this.opfsTimer);
+    this.opfsTimer = null;
+    if (!this.opfsDue || this.closed || this.quarantined) return;
+    this.opfsDue = false;
+    // (only if the lock is free now: a background write never waits behind another tab's hold, which may last;
+    // otherwise due still, tried again in OPFS_EVERY_MS)
+    const done = await this.locked(async () => { await this.writeWitnesses(await this.sample(), false, { opfs: true }); return true; }, undefined, { internal: true, ifAvailable: true }).catch(() => true);
+    if (done !== true && !this.closed) {
+      this.opfsDue = true;
+      this.opfsTimer ??= setTimeout(() => this.flushOpfs(), OPFS_EVERY_MS);
+    }
+  }
+  private watchHidden() {
+    const doc = (globalThis as any).document;
+    if (!doc || this.onHidden) return;
+    this.onHidden = () => { if (doc.visibilityState === "hidden") void this.flushOpfs(); };
+    doc.addEventListener("visibilitychange", this.onHidden);
+  }
+
+  /** A deliberate reset (A.3a), prepared in both witnesses, then IndexedDB in one transaction, then the witnesses
+   * committed: "new" (a new, empty workspace here: what this browser had is deleted), "delete" (the same), or
+   * "keep" (what this browser has now accepted as the workspace, after a suspected loss: nothing deleted).
+   * A witness write that fails while preparing refuses the reset, nothing changed. */
+  async reset(kind: ResetKind): Promise<Identity> {
+    return this.locked(async () => {
+      // (a tab whose workspace was reset elsewhere resets nothing: astra's probe on 2a4e53a8; nor while a reset or
+      // its purge is under way, from here or another tab: one reset at a time, astra's CORR-28F-1)
+      await this.sameIdentity();
+      // (a reset to a new workspace already admitted, here or in another tab, is joined: carried on to the target
+      // it chose, never another; anything else meanwhile is refused as busy)
+      const now0 = await this.metaState();
+      if (now0.resetting && kind !== "keep") {
+        this.durability = { state: "resetting" };
+        return { id: now0.resetting.to, before: null };
+      }
+      if (now0.resetting || now0.purge) throw new WorkspaceError("storage", "a reset of this workspace is already under way: wait for it to finish, then reload");
+      // (past every fence left in the editors' stores too: one of a later generation, left by a rollback of this
+      // database, would otherwise block the new workspace's fence for good: CORR-56C-1)
+      const g = this.identity.generation, to = Math.max(g, await this.fencesUpTo()) + 1, now = this.now();
+      const before = await this.sample();
+      const prepared: Witness = { ...before, reset: { to, kind, at: now } };
+      // 1. prepared, in both witnesses (one already known unwritable this session is passed over)
+      // (both prepared, whatever failed earlier this session; passed over only where storage can't be read at
+      // all, which no open can take a witness from)
+      const was = readLocal(this.place), wasOpfs = await readOpfs(this.place);
+      try {
+        if (!("unreadable" in was)) writeLocal(this.place, prepared);
+        RESET_HOOK.afterFirstWitness?.();
+        if (!("unreadable" in wasOpfs)) await writeOpfs(this.place, prepared);
+      } catch (e) {
+        // (the first written, the second not: the first put back; if that fails too, the next open finds the
+        // prepared reset and rolls it back, IndexedDB being unchanged)
+        try {
+          if (RESET_HOOK.failCleanup) throw new Error("cleanup refused (test)");
+          if (!("unreadable" in was)) writeLocal(this.place, "witness" in was ? was.witness : null);
+        } catch {}
+        throw new WorkspaceError("storage", `the workspace wasn't reset: its record outside IndexedDB couldn't be written (${String((e as Error)?.message ?? e)}). Nothing was changed`);
+      }
+      RESET_HOOK.afterPrepare?.();
+      // 2. IndexedDB: this workspace kept, at generation g+1, in one small transaction; or a new workspace:
+      // the reset marked under way (every writer refused meanwhile, and a stop resumed by the next open), every
+      // store emptied a page at a time, then the new identity switched to in one small transaction
+      const id: Identity = { workspace: kind === "keep" ? this.identity.workspace : hex(8), generation: to };
+      if (kind === "keep") {
+        await inTx(this.ws, "meta", "readwrite", async (tx) => {
+          const meta = tx.objectStore("meta");
+          meta.put(id, "identity");
+          meta.delete("quarantine");
+        });
+      } else {
+        await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put({ to: id, seq: before.seq } satisfies Resetting, "resetting"); });
+        this.durability = { state: "resetting" };
+        await this.writeFence();
+      }
+      return { id, before: before as Witness | null };
+    }, undefined, { internal: true }).then(async ({ id }) => {
+      // (the cleanup: a page per hold of the lock, then the switch, each in its own hold; then the witnesses committed)
+      if (kind !== "keep") await this.cleanUp(true);
+      this.identity = id;
+      this.durability = { state: "ok" };
+      await RESET_HOOK.afterIdb?.();
+      return this.locked(async () => {
+      // (published only if the workspace is still the one this reset made: astra's CORR-28F-1)
+      const { identity: now1 } = await this.metaState();
+      if (!now1 || now1.workspace !== id.workspace || now1.generation !== id.generation) throw new WorkspaceError("storage", "the workspace was reset again meanwhile, in another tab: reload this page");
+      await this.writeFence();
+      // 3. committed, in both witnesses (a write that fails is noted: the next open finds IndexedDB ahead, and harmless)
+      const after = await this.sample();
+      await this.writeWitnesses(after, true, { local: true });
+      RESET_HOOK.afterFirstCommit?.();
+      await this.writeWitnesses(after, true, { opfs: true });
+      this.channel?.postMessage({ from: this.tab, reset: id });
+      this.watchHidden();
+      this.durabilityChanged();
+      return id;
+    }, undefined, { internal: true });
+    });
+  }
+
+  private cleaning: Promise<void> | null = null;
+  private purgePending = false;
+  private localPending = false;
+  /** Resolves when the cleanup under way here (a reset's, resumed or not, and the old store's purge) is done. */
+  settled(): Promise<void> { return this.cleaning ?? Promise.resolve(); }
+  /** A reset to a new workspace carried through, or resumed, and the old store's purge: a page per hold of the
+   * workspace's lock, yielding between, until nothing is left; then, after a reset, the witnesses committed and
+   * the page told.  (`throws`: a stop is thrown, as a reset asked for by the person waits on it; in the
+   * background it is noted, and the next open resumes.) */
+  cleanUp(throws = false): Promise<void> {
+    this.cleaning ??= (async () => {
+      let wasResetting = false;
+      this.localDoomed = null;
+      this.localChecked = false;
+      try {
+        if ((await this.metaState()).resetting) await this.learnSizes();
+        for (;;) {
+          const step = await this.locked(() => this.cleanStep(), undefined, { internal: true });
+          if (step === "reset") wasResetting = true;
+          if (step === "done") break;
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        // (resumed in the background: done, the witnesses committed here; a person's reset commits them itself)
+        if (wasResetting && !throws && this.durability.state === "resetting") {
+          const { identity } = await this.metaState();
+          if (identity) this.identity = identity;
+          this.durability = { state: "ok" };
+          await this.locked(async () => { await this.writeWitnesses(await this.sample(), true); await this.writeFence(); }, undefined, { internal: true });
+          this.durabilityChanged();
+        }
+      } catch (e) {
+        if (throws) throw e;
+        console.warn("workspace: a reset's cleanup stopped; the next open resumes it:", e);
+      } finally {
+        this.cleaning = null;
+      }
+    })();
+    return this.cleaning;
+  }
+  /** One page of the cleanup, holding the lock: a page of a store a reset empties (its files' bytes first), a
+   * page of meta's other keys, the switch to the new identity, or a page of the old store's purge. */
+  private async cleanStep(): Promise<"reset" | "purge" | "done"> {
+    const { resetting, purge, purgeLocal } = await this.metaState();
+    if (resetting) {
+      for (const name of RESET_STORES) if (await this.deletePage(this.ws, name)) return "reset";
+      // (meta's own keys, those it keeps aside: a bounded key cursor, never every key read again: LIMIT-99B-2)
+      const keys = await inTx(this.ws, "meta", "readonly", (tx) => new Promise<IDBValidKey[]>((ok, no) => {
+        const out: IDBValidKey[] = [], c = tx.objectStore("meta").openKeyCursor();
+        c.onsuccess = () => {
+          const k = c.result;
+          if (!k || out.length >= RESET_PAGE) return ok(out);
+          if (!META_KEPT.has(String(k.key))) out.push(k.key);
+          k.continue();
+        };
+        c.onerror = () => no(c.error);
+      }));
+      if (keys.length) {
+        await inTx(this.ws, "meta", "readwrite", async (tx) => { for (const k of keys) tx.objectStore("meta").delete(k); });
+        RESET_HOOK.afterPage?.("meta", keys.length);
+        return "reset";
+      }
+      await inTx(this.ws, "meta", "readwrite", async (tx) => {
+        const meta = tx.objectStore("meta");
+        meta.put(resetting.to, "identity");
+        meta.put(resetting.seq, "opsFloor");
+        meta.delete("quarantine");
+        meta.delete("resetting");
+        // (what the old store and localStorage keep is purged next, so nothing brings it back in; a stop
+        // before that finishes is finished by the next open or migrate: astra's CORR-2A4-3)
+        meta.put(true, "purgeMain");
+      });
+      this.identity = resetting.to;
+      RESET_HOOK.beforePurge?.();
+      return "reset";
+    }
+    if (purge) {
+      if (this.main) for (const st of ["files", "notebooks"]) if (await this.deletePage(this.main, st)) return "purge";
+      // (the old store emptied: writers let go; localStorage's part marked pending in the same transaction)
+      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeMain"); tx.objectStore("meta").put(true, "purgeLocal"); });
+      this.purgePending = false;
+      if (this.durability.state === "purging") { this.durability = { state: "ok" }; this.durabilityChanged(); }
+      await this.writeFence();
+      return "purge";
+    }
+    if (purgeLocal) {
+      // (localStorage's boards and pending copies: LOCAL_PAGE a step from one list (LIMIT-28F-1); its marker
+      // dropped only once a full listing finds none left.  Storage that can't be had, listed or emptied now is
+      // unknown, never empty (astra's CORR-2A4-3 on 28f6511b): the marker kept, every migrate refused meanwhile,
+      // tried again at the next open.  Writers aren't held up by it: the board page's pending copies and a board's
+      // marks of the new workspace are under the same prefixes, and each key is removed only if the board it names
+      // isn't the workspace's now (astra's CORR-2A4-3 on 56c60932))
+      let n: number | "unknown";
+      try { n = await this.purgeLocal(); } catch (e) { n = "unknown"; console.warn("workspace: localStorage's old boards couldn't be removed yet; tried again at the next open:", e); }
+      if (n === "unknown") { this.localUnknown = true; return "done"; }
+      if (n) return "purge";
+      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeLocal"); });
+      this.localUnknown = false;
+      return "purge";
+    }
+    return "done";
+  }
+  /** One page of `store` deleted (RESET_PAGE records, RESET_BYTES_PAGE where values are files' bytes): how many. */
+  private async deletePage(db: IDBDatabase, store: string): Promise<number> {
+    const t0 = performance.now();
+    const withVersions = db === this.ws && store === "versionBytes";
+    const n = await inTx(db, withVersions ? [store, "versions"] : store, "readwrite", async (tx) => {
+      // (the notebooks' fence is not a notebook: kept, and never counted)
+      const st = tx.objectStore(store), fence = store === "notebooks" ? await req(st.get(FENCE)) : undefined;
+      let keys = ((await req(st.getAllKeys(null, RESET_PAGE + 1))) as IDBValidKey[]).filter((k) => k !== FENCE).slice(0, RESET_PAGE);
+      if (keys.length && BYTE_STORES.has(store)) {
+        // (files' bytes: cut at RESET_PAGE_BYTES by the sizes recorded for them; a size not known counts so
+        // that such records go at most RESET_BYTES_PAGE a page)
+        const known = withVersions
+          ? new Map(((await req(tx.objectStore("versions").getAll(IDBKeyRange.bound(keys[0], keys[keys.length - 1])))) as Version[]).map((v) => [v.id as IDBValidKey, v.size]))
+          : this.sizes[store];
+        let total = 0, cut = 0;
+        for (const k of keys) {
+          const size = known?.get(k as any) ?? RESET_PAGE_BYTES / RESET_BYTES_PAGE;
+          if (cut > 0 && total + size > RESET_PAGE_BYTES) break;
+          total += size;
+          cut++;
+        }
+        keys = keys.slice(0, cut);
+      }
+      if (keys.length) st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1]));
+      if (fence) st.put(fence);
+      return keys.length;
+    });
+    if (n) {
+      RESET_HOOK.afterPage?.(store, n, performance.now() - t0);
+      this.resetRemoved += n;
+      if (this.durability.state === "resetting" && ++this.resetPages % 20 === 0) this.durabilityChanged();
+    }
+    return n;
+  }
+  /** Files' bytes' sizes, by their keys, from the index: read before the cleanup's pages, a page at a time
+   * (writers are refused meanwhile), so its pages can be cut by bytes. */
+  private sizes: Record<string, Map<IDBValidKey, number> | undefined> = {};
+  /** How many records a reset's cleanup has removed so far here: the resetting notice shows it. */
+  resetRemoved = 0;
+  private resetPages = 0;
+  private async learnSizes() {
+    const files = new Map<IDBValidKey, number>(), trash = new Map<IDBValidKey, number>();
+    let after: string | undefined;
+    for (;;) {
+      const page = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(after === undefined ? null : IDBKeyRange.lowerBound(after, true), RESET_PAGE)))) as Entry[];
+      if (!page.length) break;
+      for (const e of page) {
+        if (e.kind !== "file") continue;
+        if (e.migrated && e.fid) files.set(e.fid, e.size ?? 0);
+        if (e.ref && (e.trashed || within(e.path, TRASH))) trash.set(e.ref, e.size ?? 0);
+      }
+      after = page[page.length - 1].path;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    this.sizes = { fileBytes: files, trash };
+  }
+  /** localStorage's boards kept before the workspace, and their pending copies, deleted (after a reset to a new
+   * workspace: nothing to bring back in); a key of a board the workspace has now (its pending copy, its marks) kept. */
+  // (the keys to purge, listed by one pass over localStorage per cleanup run, then removed LOCAL_PAGE a step from
+  // the list: never a scan per step, nor key(i) indexes trusted across removals: daybreak2's LIMIT-28F-1)
+  private localDoomed: string[] | null = null;
+  private localChecked = false;
+  /** Whether localStorage's part of the old store's purge couldn't be done at the latest try (it is tried
+   * again at every open; until it is done no migrate brings anything in). */
+  localUnknown = false;
+  // (how many keys a step went through; a throw when localStorage can't be had, listed or emptied)
+  private async purgeLocal(): Promise<number> {
+    const doomedKey = (k: string | null) => !!k && (k.startsWith("sagebrush-board:local:") || k.startsWith(BOARD_KEYS.pending("")) || k.startsWith(BOARD_KEYS.unread("")));
+    const ls: Storage = globalThis.localStorage;
+    if (!ls) throw new Error("no localStorage");
+    if (!this.localDoomed?.length && !this.localChecked) {
+      // (a list once per run; listed again once when it runs out, to find any key it missed)
+      this.localChecked = this.localDoomed !== null;
+      const keys: string[] = [];
+      for (let i = 0, n = ls.length; i < n; i++) { const k = ls.key(i); if (k !== null) keys.push(k); }
+      this.localDoomed = keys.filter(doomedKey);
+    }
+    const page = this.localDoomed!.splice(0, LOCAL_PAGE);
+    if (!page.length) return 0;
+    // (the board each key names: "sagebrush-board:local:REF…", or the pending copy's prefix and REF)
+    const refOf = (k: string) => (k.startsWith("sagebrush-board:local:") ? k.slice(22, 34) : k.slice((k.startsWith(BOARD_KEYS.unread("")) ? BOARD_KEYS.unread("") : BOARD_KEYS.pending("")).length));
+    const ours = await inTx(this.ws, "entries", "readonly", async (tx) => {
+      const ix = tx.objectStore("entries").index("byRef");
+      const found = await Promise.all(page.map((k) => req(ix.getKey(["board", refOf(k)]))));
+      return new Set(page.filter((_, i) => found[i] !== undefined));
+    });
+    // (read just before each removal: never a key the workspace's board has; a later replacement of one listed
+    // for an old board is the same old board's, which the workspace doesn't have)
+    for (const k of page) if (!ours.has(k)) ls.removeItem(k);
+    RESET_HOOK.afterPage?.("localStorage", page.length);
+    return page.length;
   }
 
   close() {
+    this.hdb?.close();
+    this.bhdb?.close();
+    if (this.opfsTimer) clearTimeout(this.opfsTimer);
+    this.opfsTimer = null;
+    if (this.onHidden) (globalThis as any).document?.removeEventListener("visibilitychange", this.onHidden);
     this.channel?.close();
     this.ws.close();
     this.main?.close();
@@ -332,7 +916,7 @@ export class Workspace {
         const doc = content as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
         const { id: _i, rev: _r, updated: _u, ...rest } = doc;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) });
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
         if (typeof out === "string") throw new WorkspaceError("storage", out);
         if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
         rev = out.rev;
@@ -1013,12 +1597,44 @@ export class Workspace {
    * With `signal`: aborted before the lock is held, `f` never runs, now or
    * later, and this rejects (an AbortError); once held, it runs to its end
    * (daybreak2's LIMIT-59D-1). */
-  async locked<T>(f: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean } = {}): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
     this.open();
-    const g = () => { this.open(); return f(); };
+    if (!how.internal) this.unquarantined();
+    const g = async () => {
+      this.open();
+      if (!how.internal) {
+        this.unquarantined();
+        await this.sameIdentity(true);
+      }
+      const out = await f();
+      // (the witness brought up to the commit, in the same hold: design/workspace-durability.md A.1)
+      if (!how.internal || how.publish) await this.publish().catch(() => {});
+      return out;
+    };
+    // (ifAvailable: run only if the lock is free now; else nothing runs, and this resolves to undefined)
+    if (how.ifAvailable) return locks.request(LOCK, { ifAvailable: true }, (lock: unknown) => (lock ? g() : undefined));
     return signal ? locks.request(LOCK, { signal }, g) : locks.request(LOCK, g);
+  }
+  // (quarantined: every change refused until the person decides, A.3)
+  private unquarantined() {
+    if (this.quarantined) throw new WorkspaceError("quarantined", `this browser's copy of your workspace was lost or is missing changes (${(this.durability as any).why}): nothing can be changed until you decide what to do`);
+  }
+  // (a tab opened before a reset elsewhere: its workspace is no longer this one, by id or generation, A.1)
+  private async sameIdentity(quarantineToo = false) {
+    const { identity: id, kept } = await this.metaState();
+    if (id && (id.workspace !== this.identity.workspace || id.generation !== this.identity.generation)) {
+      this.closedElsewhere();
+      throw new WorkspaceError("storage", "this workspace was reset in another tab: reload this page to use it");
+    }
+    // (a reset under way in another tab, stopped part way: nothing written until an open finishes it)
+    if (quarantineToo && (await this.metaState()).resetting) throw new WorkspaceError("quarantined", "this workspace is being reset: reload this page");
+    // (quarantined by another tab since this one opened: refused from now on, astra's probe on 2a4e53a8)
+    if (quarantineToo && kept) {
+      this.adoptQuarantine(kept);
+      this.unquarantined();
+    }
   }
 
   async mustStat(p: string): Promise<Entry> {
@@ -1203,7 +1819,7 @@ export class Workspace {
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();
       mode = mode ?? doc.mode ?? "python";
-      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref });
+      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.mainTx("notebooks", "readwrite", (st) => st.delete(ref));
     } else if (kind === "board") {
@@ -1415,7 +2031,7 @@ export class Workspace {
       for (let i = 0; i < 5; i++) {
         const rec = await this.contents(e);
         if (!rec || (rec.name ?? "") !== oldName) return;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rec, name: newName, baseRev: rec.rev });
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rec, name: newName, baseRev: rec.rev }, { lockHeld: true });
         if (typeof out === "string" || !out.conflict) return;
       }
     } else if (e.kind === "board") {

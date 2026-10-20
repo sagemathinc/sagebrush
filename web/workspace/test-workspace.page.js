@@ -235,7 +235,7 @@ async function migration() {
   await rawPut(w.main, "files", enc("csv"), "/primes.csv");
   await rawPut(w.main, "files", enc("deep"), "/out/run1/result.txt");
   await rawPut(w.main, "files", enc("odd"), "relative.txt");
-  const before = JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
+  const before = JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => !k.startsWith(W.LOCAL_KEY)).sort().map((k) => [k, localStorage.getItem(k)])));
   const r = await W.migrate(w, localStorage);
   const all = await paths(w);
   check(all.includes("/My board.board.json") && all.includes("/My board (2).board.json"), "boards made here listed, same titles apart: " + all.join());
@@ -252,8 +252,9 @@ async function migration() {
   check(r.unreadable.join() === "sagebrush-board:local:cccccccccccc", "a key that isn't a board is reported");
   check(r.boards === 3 && r.notebooks === 3 && r.files === 2 && r.recovered === 1, "the report's counts: " + JSON.stringify(r));
   check(!all.some((p) => p.includes("not kept")), "a board storage refused (unsaved) isn't one to bring in");
-  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
-  check(before === after, "localStorage is left exactly as it was");
+  // (the workspace's own witness, design/workspace-durability.md A.1, aside: what was there is left as it was)
+  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => !k.startsWith(W.LOCAL_KEY)).sort().map((k) => [k, localStorage.getItem(k)])));
+  check(before === after, "localStorage is left exactly as it was (the workspace's witness aside)");
   check(localStorage.getItem("sagebrush-board:local:cccccccccccc") === "{not json", "…the unreadable key too");
   // again: nothing new
   const r2 = await W.migrate(w, localStorage);
@@ -1406,8 +1407,1294 @@ async function lookalikesAtScale() {
   w.close();
 }
 
+// ---- detecting a lost workspace (design/workspace-durability.md, part A)
+// (each case's workspace on its own: the notebooks' history database is one for the whole origin, so the fence
+// an earlier case's workspace left there is dropped first; in a browser there is only ever one workspace)
+const named = async () => {
+  n++;
+  for (const h of [await W.openHistoryDb(), await W.openBoardHistoryDb()]) if (h) { await rawDel(h, "history", ["__sagebrush-workspace__", ""]).catch(() => {}); h.close(); }
+  return { name: `ws-test-${n}`, mainName: `main-test-${n}` };
+};
+const openAs = (o) => W.Workspace.open(o);
+const dropDb = (name) => new Promise((ok, no) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = ok; r.onerror = () => no(r.error); r.onblocked = ok; });
+const localW = (name) => { const r = W.readLocal(W.placeOf(name)); return "witness" in r ? r.witness : r; };
+const opfsW = async (name) => { const r = await W.readOpfs(W.placeOf(name)); return "witness" in r ? r.witness : r; };
+const wit = (o) => ({ v: 1, workspace: "a".repeat(16), generation: 1, seq: 10, entries: 3, sampled: 1, ...o });
+
+async function durabilityDecide() {
+  const R = (w) => ({ witness: w }), none = { none: true }, bad = { unreadable: "denied" };
+  const held = (o) => ({ fresh: false, workspace: "a".repeat(16), generation: 1, seq: 10, ...o });
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [none, none]).state === "first", "decide: nothing anywhere: a first visit (or a complete clearing: indistinguishable)");
+  check(W.decide(held({}), [none, none]).state === "ok", "decide: a workspace and no witness: ok");
+  check(W.decide(held({ dataLoss: "total" }), [none, none]).state === "confirmed", "decide: Chrome's dataLoss total: confirmed");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [R(wit({})), none]).state === "confirmed", "decide: a new database and a witness: confirmed");
+  check(W.decide(held({ seq: 7 }), [R(wit({})), none]).state === "suspected", "decide: behind the witness, same workspace and generation: suspected");
+  check(W.decide(held({ seq: 12 }), [R(wit({})), none]).state === "ok", "decide: ahead of the witness: ok (IndexedDB ahead is harmless)");
+  check(W.decide(held({ generation: 1 }), [R(wit({ generation: 2, seq: 1 })), none]).state === "suspected", "decide: below a committed witness generation: suspected");
+  check(W.decide(held({ generation: 3, seq: 0 }), [R(wit({ generation: 2 })), none]).state === "ok", "decide: a higher generation than the witnesses: ok");
+  check(W.decide(held({ workspace: "b".repeat(16), seq: 0 }), [R(wit({})), none]).state === "ok", "decide: another workspace's witness: not compared");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [bad, none]).state === "unknown", "decide: a new database and an unreadable witness: unknown, never a first visit");
+  const okU = W.decide(held({}), [bad, bad]);
+  check(okU.state === "ok" && !!okU.unavailable, "decide: a workspace whose witnesses can't be read: ok, detection unavailable said");
+  check(W.decide(held({ seq: 15 }), [R(wit({ seq: 20 })), R(wit({ seq: 12 }))]).state === "suspected", "decide: two witnesses disagreeing: the newer counts");
+  const p = wit({ reset: { to: 2, kind: "new", at: 1 } });
+  check(W.resolveReset(p, held({})) === "rollback", "a prepared reset, IndexedDB unchanged: rolled back");
+  check(W.resolveReset(p, held({ workspace: "c".repeat(16), generation: 2 })) === "finish", "…IndexedDB at the new generation: finished");
+  check(W.resolveReset(p, held({ fresh: true, workspace: undefined })) === "lost" && W.resolveReset(wit({ reset: { to: 2, kind: "import", at: 1 } }), held({ fresh: true, workspace: undefined })) === "lost", "…a new database under a prepared reset (a reset never deletes the database): a loss, for any kind");
+  check(W.resolveReset(p, null) === "unknown" && W.resolveReset(p, held({ workspace: "d".repeat(16), generation: 7 })) === "unknown", "…storage unreadable, or another generation: unknown");
+  check(!W.newer(wit({ seq: 30 }), p) && W.newer(wit({ seq: 30 }), wit({})) && !W.newer(wit({ seq: 5 }), wit({})), "a normal publication never replaces a prepared reset, nor a newer witness");
+}
+
+async function durabilityFirstSave() {
+  const o = await named();
+  const w = await openAs(o);
+  check(w.durability.state === "first" && !("witness" in W.readLocal(W.placeOf(o.name))), "a first visit: no witness yet");
+  await w.create("/a.txt", { content: "a" });
+  const lw = localW(o.name);
+  check(lw.workspace === w.identity.workspace && lw.generation === 1 && lw.seq >= 1 && lw.entries === 1, "the first save has its witness in localStorage before it is reported: " + JSON.stringify(lw));
+  await w.flushOpfs();
+  const ow = await opfsW(o.name);
+  check(ow.seq === lw.seq && ow.workspace === lw.workspace, "…and in OPFS once flushed: " + JSON.stringify(ow));
+  w.close();
+}
+
+async function durabilityConfirmed() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.create("/b.txt", { content: "b" });
+  const before = localW(o.name);
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.durability.state === "confirmed" && w.durability.witness?.entries === 2, "the database gone, a witness left: confirmed, with the witness's numbers: " + JSON.stringify(w.durability));
+  check(await fails(w.create("/c.txt", { content: "c" }), "quarantined") && await fails(w.mkdir("/d"), "quarantined") && await fails(w.forAgent("agent:x").create("/e.txt", { content: "e" }), "quarantined"), "quarantined: the verbs refuse, the agents' too");
+  const mr = await W.migrate(w, { length: 0, key: () => null, getItem: () => null, setItem: () => {} });
+  await W.startMigrator(w);
+  check(mr.boards === 0 && (await W.migrationState(w)).done === undefined && (await W.migrationState(w)).pass === undefined, "…and nothing else writes: migrate and the migrator do nothing");
+  check(JSON.stringify(localW(o.name)) === JSON.stringify(before), "…the witness left as it was");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "confirmed", "a reload doesn't lift the quarantine");
+  const id = await w.reset("new");
+  check(id.generation === 2 && w.durability.state === "ok" && !!(await w.create("/c.txt", { content: "c" })), "Start a new workspace here: generation 2, writable");
+  check(localW(o.name).generation === 2 && localW(o.name).workspace === id.workspace && !localW(o.name).reset, "…the witness committed at it");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "…and the next open is ok");
+  w.close();
+}
+
+async function durabilitySuspected() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.create("/b.txt", { content: "b" });
+  const lw = localW(o.name);
+  W.writeLocal(W.placeOf(o.name), { ...lw, seq: lw.seq + 5 });
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "suspected", "changes missing (the witness ahead): suspected: " + JSON.stringify(w.durability));
+  await w.reset("keep");
+  check(w.durability.state === "ok" && (await paths(w)).join() === "/a.txt,/b.txt" && w.identity.generation === 2, "Keep what this browser has: nothing deleted, generation 2");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "…and the next open is ok");
+  w.close();
+}
+
+async function durabilityWitnesses() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.flushOpfs();
+  localStorage.setItem(W.placeOf(o.name).key, "{not json");
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.durability.state === "confirmed", "the localStorage witness corrupt, the OPFS one used: confirmed");
+  w.close();
+  const p = await named();
+  w = await openAs(p);
+  await w.create("/a.txt", { content: "a" });
+  W.writeLocal(W.placeOf(p.name), null);
+  await W.writeOpfs(W.placeOf(p.name), null);
+  w.close();
+  w = await openAs(p);
+  check(w.durability.state === "ok", "both witnesses gone, the workspace there: ok");
+  w.close();
+}
+
+async function durabilityDenied() {
+  const o = await named();
+  const get = Storage.prototype.getItem, set = Storage.prototype.setItem, dir = navigator.storage.getDirectory;
+  Storage.prototype.getItem = function () { throw new Error("denied (test)"); };
+  Storage.prototype.setItem = function () { throw new Error("denied (test)"); };
+  navigator.storage.getDirectory = async () => { throw new Error("denied (test)"); };
+  try {
+    let w = await openAs(o);
+    check(w.durability.state === "unknown", "storage denied on a first visit: unknown, never first: " + JSON.stringify(w.durability));
+    check(!!(await w.create("/a.txt", { content: "a" })) && !!w.witnessDown.local, "a save goes through when its witness can't be written, the witness noted down: " + JSON.stringify(w.witnessDown));
+    w.close();
+    w = await openAs(o);
+    check(w.durability.state === "ok" && !!w.durability.unavailable, "…and a workspace there with unreadable witnesses: ok, detection said unavailable");
+    w.close();
+  } finally {
+    Storage.prototype.getItem = get;
+    Storage.prototype.setItem = set;
+    navigator.storage.getDirectory = dir;
+  }
+}
+
+async function durabilityTwoTabs() {
+  const o = await named();
+  const a = await openAs(o), b = await openAs(o);
+  let last = 0, regressed = false;
+  for (let i = 0; i < 10; i++) {
+    await (i % 2 ? a : b).create(`/f${i}.txt`, { content: String(i) });
+    const s = localW(o.name).seq;
+    if (s < last) regressed = true;
+    last = s;
+  }
+  // (the OPFS witness, flushed late and out of order: each flush samples under the lock, so it never goes back)
+  await b.flushOpfs();
+  await a.flushOpfs();
+  check(!regressed && last === (await a.generation()) && (await opfsW(o.name)).seq === last, "two tabs committing in turn: the witnesses never go back");
+  a.close();
+  b.close();
+}
+
+async function durabilityTabs() {
+  // astra's probe: two first opens at once install one identity
+  {
+    const o = await named();
+    const [a, b] = await Promise.all([openAs(o), openAs(o)]);
+    const ok = a.identity.workspace === b.identity.workspace && a.identity.generation === b.identity.generation;
+    check(ok && !!(await a.create("/a.txt", { content: "a" })) && !!(await b.create("/b.txt", { content: "b" })), "two first opens at once: one identity, both can write: " + JSON.stringify([a.identity, b.identity]));
+    a.close();
+    b.close();
+  }
+  // astra's probe: a tab opened before another tab found a loss: its changes refused too, by meta (its channel
+  // closed) and by the broadcast
+  for (const viaChannel of [false, true]) {
+    const o = await named();
+    const early = await openAs(o);
+    if (!viaChannel) early.channel?.close();
+    let told = 0;
+    early.onDurability(() => told++);
+    await early.create("/a.txt", { content: "a" });
+    const lw = localW(o.name);
+    W.writeLocal(W.placeOf(o.name), { ...lw, seq: lw.seq + 5 });
+    const later = await openAs(o);
+    check(later.durability.state === "suspected", "(another tab finds changes missing)");
+    if (viaChannel) for (let i = 0; i < 50 && !early.quarantined; i++) await new Promise((r) => setTimeout(r, 20));
+    check(await fails(early.create("/after-loss.txt", { content: "x" }), "quarantined") && early.quarantined && told >= 1 && !(await paths(later)).includes("/after-loss.txt"), `a tab opened before the loss was found: its changes refused, the page told (${viaChannel ? "by the broadcast" : "by meta, inside the lock"})`);
+    early.close();
+    later.close();
+  }
+}
+
+async function durabilityPurge() {
+  // astra's probe: a reset to a new workspace doesn't come back through migrate (the old store's notebooks, localStorage's boards)
+  for (const killed of [false, true]) {
+    const o = await named();
+    const w = await openAs(o);
+    await rawPut(w.main, "notebooks", { id: "nb-old", name: "notes", cells: [], rev: 1, updated: 1 });
+    localStorage.setItem("sagebrush-board:local:aaaaaaaaaaaa", JSON.stringify({ title: "Old board", nodes: [] }));
+    await W.migrate(w, localStorage);
+    check((await paths(w)).length >= 1, "(the old notebook and board brought in)");
+    if (killed) W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+    await w.reset("new").catch(() => {});
+    W.RESET_HOOK.beforePurge = undefined;
+    let v = w;
+    if (killed) { w.close(); v = await openAs(o); await v.settled(); }
+    await W.migrate(v, localStorage);
+    const nbs = await new Promise((ok) => { const r = v.main.transaction("notebooks").objectStore("notebooks").getAllKeys(); r.onsuccess = () => ok(r.result.filter((k) => k !== "__sagebrush-workspace__")); });
+    check((await paths(v)).length === 0 && nbs.length === 0 && localStorage.getItem("sagebrush-board:local:aaaaaaaaaaaa") === null, `a reset to a new workspace${killed ? ", killed before its purge" : ""}, then migrate: nothing brought back`);
+    v.close();
+  }
+}
+
+async function durabilityPurgePending() {
+  // astra's CORR-2A4-3: migrate brings nothing in while a purge is pending, even with its pages under way
+  const o = await named();
+  let w = await openAs(o);
+  await new Promise((ok, no) => { const tx = w.main.transaction("notebooks", "readwrite"); for (let i = 0; i < 600; i++) tx.objectStore("notebooks").put({ id: "old-" + String(i).padStart(4, "0"), name: "n" + i, cells: [], rev: 1, updated: 1 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+  await w.reset("new").catch(() => {});
+  W.RESET_HOOK.beforePurge = undefined;
+  w.close();
+  // (the purge stopped after its first page, as a stop would leave it: 100 old notebooks left, the purge pending)
+  W.RESET_HOOK.afterPage = (store) => { if (store === "notebooks") throw new Error("stopped (test)"); };
+  w = await openAs(o);
+  await w.settled();
+  W.RESET_HOOK.afterPage = undefined;
+  await W.migrate(w, localStorage);
+  const early = await paths(w);
+  await w.cleanUp();
+  await W.migrate(w, localStorage);
+  check(early.length === 0 && (await paths(w)).length === 0, `migrate while a purge is pending, and after: nothing brought back (${early.length}, ${(await paths(w)).length})`);
+  w.close();
+}
+
+async function durabilityPurgeLocalSparse() {
+  // daybreak2's LIMIT-28F-1: 500 keys to purge among 20,000 others: listed once per run, never a scan per step
+  const o = await named();
+  let w = await openAs(o);
+  const others = [];
+  for (let i = 0; i < 20000; i++) {
+    const k = `unrelated-${i}`;
+    localStorage.setItem(k, "x");
+    others.push(k);
+    if (i % 40 === 0) localStorage.setItem(`sagebrush-board:local:${String(i).padStart(12, "0")}`, "{}");
+  }
+  W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+  await w.reset("new").catch(() => {});
+  W.RESET_HOOK.beforePurge = undefined;
+  w.close();
+  const steps = [];
+  let last = performance.now();
+  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push([n, Math.round(t - last)]); last = t; } };
+  const t0 = performance.now();
+  w = await openAs(o);
+  const openMs = performance.now() - t0;
+  await w.settled();
+  W.RESET_HOOK.afterPage = undefined;
+  const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:")).length;
+  check(left === 0 && steps.length === 3 && steps.every(([n, ms]) => n <= W.LOCAL_PAGE && ms < 200), `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step, each step bounded: ${JSON.stringify(steps)}`);
+  check(openMs < 1000 && others.every((k) => localStorage.getItem(k) === "x"), `…the open within its budget (${Math.round(openMs)} ms), the other keys untouched`);
+  for (const k of others) localStorage.removeItem(k);
+  w.close();
+}
+
+async function durabilityResetManySmall() {
+  // daybreak2's LIMIT-0EE-2: many small versions (200,000) go RESET_PAGE a page, their sizes read from the
+  // versions' own records, the whole reset timed; large ones (4 MiB) at most RESET_PAGE_BYTES a page
+  {
+    const o = await named();
+    const w = await openAs(o);
+    const N = 200000, small = new Uint8Array(64);
+    for (let start = 0; start < N; start += 20000) await new Promise((ok, no) => { const tx = w.ws.transaction(["versions", "versionBytes"], "readwrite"); for (let i = start; i < start + 20000; i++) { tx.objectStore("versions").put({ id: i + 1, fid: "0".repeat(16), t: 1, size: 64, sha256: "x", by: "person", device: "d" }); tx.objectStore("versionBytes").put(small, i + 1); } tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    let progress = 0;
+    w.onDurability(() => { if (w.durability.state === "resetting") progress = Math.max(progress, w.resetRemoved); });
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "versionBytes") pages.push(n); };
+    const t0 = performance.now();
+    await w.reset("new");
+    const ms = performance.now() - t0;
+    W.RESET_HOOK.afterPage = undefined;
+    check(pages.length === N / W.RESET_PAGE && pages.every((n) => n <= W.RESET_PAGE), `200,000 small versions: ${W.RESET_PAGE} a page (${pages.length} pages)`);
+    check(ms < 60000, `…the whole reset done in under a minute (${Math.round(ms)} ms)`);
+    check(progress > 0, `…its progress told meanwhile (${progress} records removed at a notice)`);
+    w.close();
+  }
+  {
+    const o = await named();
+    const w = await openAs(o);
+    const big = new Uint8Array(4 << 20);
+    for (let i = 0; i < 40; i++) await new Promise((ok, no) => { const tx = w.ws.transaction(["versions", "versionBytes"], "readwrite"); tx.objectStore("versions").put({ id: i + 1, fid: "0".repeat(16), t: 1, size: big.length, sha256: "x", by: "person", device: "d" }); tx.objectStore("versionBytes").put(big, i + 1); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "versionBytes") pages.push(n); };
+    await w.reset("new");
+    W.RESET_HOOK.afterPage = undefined;
+    check(pages.length === 5 && pages.every((n) => n * (4 << 20) <= W.RESET_PAGE_BYTES), `40 versions of 4 MiB: at most ${W.RESET_PAGE_BYTES / 2 ** 20} MiB a page, by their recorded sizes (${JSON.stringify(pages)})`);
+    w.close();
+  }
+  const e = W.showLossNotice({ durability: { state: "resetting" }, resetRemoved: 1234 });
+  check(/being reset: 1234 records removed/.test(e?.textContent ?? "") && !e?.querySelector("button"), "the resetting notice: its progress, no choices");
+  e?.remove();
+}
+
+async function durabilityPurgeLocal() {
+  // daybreak2's LIMIT-0EE-1: localStorage's boards and pending copies purged LOCAL_PAGE keys a step; an open
+  // resuming the purge stays within its budget however many there are
+  const o = await named();
+  let w = await openAs(o);
+  for (let i = 0; i < 1000; i++) {
+    localStorage.setItem(`sagebrush-board:local:${String(i).padStart(12, "0")}`, JSON.stringify({ title: "b" + i, nodes: [] }));
+    localStorage.setItem(`sagebrush-workspace-pending:${String(i).padStart(12, "0")}`, "{}");
+  }
+  W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+  await w.reset("new").catch(() => {});
+  W.RESET_HOOK.beforePurge = undefined;
+  w.close();
+  const steps = [];
+  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") steps.push(n); };
+  const t0 = performance.now();
+  w = await openAs(o);
+  const openMs = performance.now() - t0;
+  await w.settled();
+  W.RESET_HOOK.afterPage = undefined;
+  const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:") || k.startsWith("sagebrush-workspace-pending:")).length;
+  check(left === 0 && steps.length === 2000 / W.LOCAL_PAGE && steps.every((n) => n <= W.LOCAL_PAGE), `2,000 keys in localStorage purged ${W.LOCAL_PAGE} a step (${steps.length} steps), none left`);
+  check(openMs < 1000, `…the open resuming that purge returns within its budget (${Math.round(openMs)} ms)`);
+  w.close();
+}
+
+async function durabilityResetBounds() {
+  // daybreak2's L2: a reset to a new workspace empties its stores a page at a time, never one transaction over all
+  // of it; killed part way, the next open finishes it
+  for (const killed of [false, true]) {
+    const o = await named();
+    const w = await openAs(o);
+    const N = 1600;
+    await new Promise((ok, no) => { const tx = w.ws.transaction(["entries", "versions", "versionBytes"], "readwrite"); for (let i = 0; i < N; i++) { tx.objectStore("entries").put({ path: `/f${i}.txt`, kind: "file", ref: `/f${i}.txt`, size: 1, rev: 0, fid: i.toString(16).padStart(16, "0"), created: 1, updated: 1, migrated: true, nkey: "/\u0000f" + i }); tx.objectStore("versionBytes").put(new Uint8Array(64), i + 1); } tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { pages.push([store, n]); if (killed && pages.length === 3) throw new Error("killed (test)"); };
+    await w.reset("new").catch(() => {});
+    W.RESET_HOOK.afterPage = undefined;
+    let v = w;
+    if (killed) {
+      check(await fails(v.create("/x.txt", { content: "x" }), "storage") || await fails(v.create("/x.txt", { content: "x" }), "quarantined"), "(killed part way: nothing written meanwhile)");
+      v.close();
+      // (the open returns at once, the reset resumed in the background, writers refused until it's done: LIMIT-99B-3)
+      const t0 = performance.now();
+      W.RESET_HOOK.openBudgetMs = 0;
+      v = await openAs(o);
+      W.RESET_HOOK.openBudgetMs = undefined;
+      const openMs = performance.now() - t0;
+      check(v.durability.state === "resetting" && await fails(v.create("/y.txt", { content: "y" }), "quarantined"), "killed part way: the next open says resetting, and refuses writes meanwhile: " + JSON.stringify(v.durability));
+      check(openMs < 2000, `…and returns without waiting for the cleanup (${Math.round(openMs)} ms)`);
+      await v.settled();
+    }
+    const left = await new Promise((ok) => { const r = v.ws.transaction("entries").objectStore("entries").count(); r.onsuccess = () => ok(r.result); });
+    check(left === 0 && v.durability.state === "ok" && v.identity.generation === 2 && !!(await v.create("/new.txt", { content: "n" })), `a reset of ${N} entries${killed ? ", killed part way, finished by the next open" : ""}: emptied, writable`);
+    const bytes = new Set(["fileBytes", "versionBytes", "trash", "files"]);
+    check(pages.every(([st, n]) => n <= (bytes.has(st) ? W.RESET_BYTES_PAGE : W.RESET_PAGE)) && (killed || pages.filter(([st]) => st === "entries").length === Math.ceil(N / W.RESET_PAGE)), `…a page of at most ${W.RESET_PAGE} records per transaction, ${W.RESET_BYTES_PAGE} of files' bytes (${pages.length} pages)`);
+    v.close();
+  }
+  // daybreak2's LIMIT-99B-2: many keys in meta, deleted in pages by a bounded cursor (never all read again each page)
+  {
+    const o = await named();
+    const w = await openAs(o);
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); for (let i = 0; i < 3000; i++) tx.objectStore("meta").put({ x: i }, `stale:files:/f${i}`); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "meta") pages.push(n); };
+    await w.reset("new");
+    W.RESET_HOOK.afterPage = undefined;
+    const left = await new Promise((ok) => { const r = w.ws.transaction("meta").objectStore("meta").getAllKeys(); r.onsuccess = () => ok(r.result.filter((k) => String(k).startsWith("stale:"))); });
+    check(left.length === 0 && pages.length === 6 && pages.every((n) => n <= W.RESET_PAGE), `3,000 keys in meta: deleted, ${W.RESET_PAGE} a page (${JSON.stringify(pages)})`);
+    w.close();
+  }
+  // daybreak2's LIMIT-99B-1: files' bytes deleted RESET_BYTES_PAGE records a page, each page's time measured with large values
+  {
+    const o = await named();
+    const w = await openAs(o);
+    const big = new Uint8Array(4 << 20);
+    for (let i = 0; i < 64; i++) await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); big[0] = i; tx.objectStore("fileBytes").put(big, i.toString(16).padStart(16, "0")); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n, ms) => { if (store === "fileBytes") pages.push([n, Math.round(ms)]); };
+    await w.reset("new");
+    W.RESET_HOOK.afterPage = undefined;
+    check(pages.length === 2 && pages.every(([n, ms]) => n <= W.RESET_BYTES_PAGE && ms < 500), `256 MiB of files' bytes: ${W.RESET_BYTES_PAGE} records a page, each page under 0.5 s (${JSON.stringify(pages)})`);
+    w.close();
+  }
+  // daybreak2's L1: after a reset out of a quarantine, the OPFS witness is flushed when the page is hidden too
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.quarantined && !!w.onHidden, "opened quarantined: the flush on hidden installed already (daybreak2's L1)");
+  await w.reset("new");
+  check(!!w.onHidden, "a reset out of a quarantine: the flush on hidden installed");
+  w.close();
+}
+
+async function durabilityNotices() {
+  // the notebooks' own saves, gated by the page while quarantined (astra's probe: the notebook editor saved through it)
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  W.setSaveGate(() => (w.quarantined ? "quarantined (test)" : null));
+  const st = new W.IdbStore(w.main, "nb-q", { id: "nb-q", name: "n", cells: [] });
+  const saved = await st.save({ id: "nb-q", name: "CHANGED WHILE QUARANTINED", cells: [] });
+  W.setSaveGate(null);
+  check(typeof saved === "string" && /not saved/.test(saved), "the notebooks' saves refused while quarantined: " + JSON.stringify(saved));
+  // (and their history's: nothing appended, clear and drop refused, by the quarantine's flag alone)
+  const hdb = await W.openHistoryDb();
+  const hist = new W.IdbPatchStore(hdb, "nb-q-history");
+  hist.append({ time: "2026-10-20T00:00:00.000Z", id: "p1" });
+  await new Promise((r) => setTimeout(r, 200));
+  const rows = await new Promise((ok) => { const r = hdb.transaction("history").objectStore("history").count(IDBKeyRange.bound(["nb-q-history", ""], ["nb-q-history", "\uffff"])); r.onsuccess = () => ok(r.result); });
+  check(rows === 0 && !!(await hist.clear().then(() => false, () => true)), "…and the notebooks' history: nothing appended, clearing refused, while quarantined");
+  w.close();
+  // (the flag this quarantine left, dropped: later cases' notebooks aren't refused)
+  for (const k of Object.keys(localStorage)) if (k.startsWith("sagebrush-quarantined:")) localStorage.removeItem(k);
+  // shown: a loss with its choices; a detection that can't work here, closable; an open that failed
+  const box = (d, extra = {}) => { const e = W.showLossNotice({ durability: d, reset: async () => {}, ...extra }); const t = e?.textContent ?? ""; const b = [...(e?.querySelectorAll("button") ?? [])].map((x) => x.dataset.sbb); e?.remove(); return { t, b }; };
+  const c = box({ state: "confirmed", why: "x", witness: { entries: 3, sampled: 1 } });
+  check(/was lost/.test(c.t) && c.b.join() === "loss-new", "the notice for a loss: said, with Start a new workspace here");
+  check(box({ state: "suspected", why: "x" }).b.join() === "loss-keep,loss-new", "…for missing changes: Keep, or Start new");
+  const u = box({ state: "ok", unavailable: "denied" });
+  check(/can't be detected/.test(u.t) && u.b.join() === "loss-close", "unreadable witnesses: said, and closable");
+  check(/can't be detected/.test(box({ state: "ok" }, { witnessDown: { local: "quota" } }).t), "a witness that can't be written: said");
+  check(/can't be opened/.test(box({ state: "unknown", why: "this browser's storage can't be opened: x" }).t), "an open that failed: said, never taken for a first visit");
+  check(box({ state: "ok" }).t === "", "nothing to say: nothing shown");
+}
+
+// astra's eight Chromium probes on 2a4e53a8 (evidence/durability-detect-2a4-astra/probes.patch), kept as regression tests
+async function durabilityAstraProbes() {
+  const report=(name,v)=>{
+    const wanted={
+      'stale-reset':()=>v.error!==null&&v.paths.includes('/new.txt'),
+      'other-tab-quarantine':()=>v.error!==null&&!v.paths.includes('/after-loss.txt'),
+      'reset-resurrection':()=>v.afterMigration.length===0,
+      'refused-reset-then-loss':()=>v.quarantined||v.state.state==='unknown',
+      'concurrent-initial-identities':()=>v.a.workspace===v.b.workspace&&!v.ea&&!v.eb,
+      'notebook-editor-quarantine':()=>!v.save?.saved&&v.name!=='CHANGED WHILE QUARANTINED',
+      'unavailable-notice':()=>v.notice,
+      'reset-without-prepare':()=>v.error!==null&&v.paths.includes('/a.txt')
+    };check(wanted[name](),name+': '+JSON.stringify(v));
+  };
+  // Stale reset can erase the replacement workspace.
+  {
+    const o=await named(); const a=await openAs(o), b=await openAs(o);
+    b.channel?.close(); b.channel=null; await a.reset('new'); await a.create('/new.txt',{content:'NEW'});
+    let error=null;try {await b.reset('new')} catch(e){error=e.message}
+    report('stale-reset',{error,paths:await paths(a),a:a.identity,b:b.identity});a.close();b.close();
+  }
+  // A previously open writer ignores persisted quarantine.
+  {
+    const o=await named(); const a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();
+    const w=localW(o.name); W.writeLocal(W.placeOf(o.name),{...w,seq:w.seq+10});
+    const b=await openAs(o);let error=null;try{await a.create('/after-loss.txt',{content:'WRITTEN'})}catch(e){error=e.message}
+    report('other-tab-quarantine',{error,state:b.durability.state,paths:await paths(b)});a.close();b.close();
+  }
+  // New means empty only until reconcile reimports retained notebook data.
+  {
+    const o=await named();let a=await openAs(o); await a.create('/notes.ipynb');await a.reset('new');
+    const immediately=await paths(a);a.close();a=await openAs(o);await W.migrate(a,localStorage);
+    report('reset-resurrection',{immediately,afterMigration:await paths(a)});a.close();
+  }
+  // Failed preparation plus failed cleanup is treated as an actionable reset after primary loss.
+  {
+    const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();
+    W.RESET_HOOK.afterFirstWitness=()=>{throw Error('prepare refused')};W.RESET_HOOK.failCleanup=true;
+    let refused=false;try{await a.reset('new')}catch(e){refused=true}
+    W.RESET_HOOK.afterFirstWitness=undefined;W.RESET_HOOK.failCleanup=false;a.close();await dropDb(o.name);
+    a=await openAs(o);report('refused-reset-then-loss',{refused,state:a.durability,quarantined:a.quarantined});a.close();
+  }
+  // Initial opens must share one primary identity, even before the first save.
+  {
+    const o=await named();const proto=W.Workspace.prototype, orig=proto.arrive;let count=0,release,entered;
+    const wait=new Promise(r=>release=r), both=new Promise(r=>entered=r);
+    proto.arrive=async function(...args){if(++count===2)entered();await wait;return orig.apply(this,args)};
+    let a,b;try{const pa=openAs(o),pb=openAs(o);await both;release();[a,b]=await Promise.all([pa,pb])}finally{proto.arrive=orig}
+    let ea=null,eb=null;try{await a.create('/a.txt',{content:'A'})}catch(e){ea=e.message}try{await b.create('/b.txt',{content:'B'})}catch(e){eb=e.message}
+    report('concurrent-initial-identities',{a:a.identity,b:b.identity,ea,eb});a.close();b.close();
+  }
+
+  // The notebook editor's real store still saves while the Workspace is quarantined.
+  {
+    const {IdbStore}=await import('./stores.js');const o=await named();let a=await openAs(o);
+    const e=await a.create('/n.ipynb');const old=await rawGet(a.main,'notebooks',e.ref);await a.flushOpfs();a.close();
+    const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+100});
+    a=await openAs(o);const store=new IdbStore(a.main,e.ref);const loaded=await store.load();
+    const save=await store.save({...loaded,name:'CHANGED WHILE QUARANTINED',baseRev:loaded.rev});
+    report('notebook-editor-quarantine',{quarantined:a.quarantined,save,name:(await rawGet(a.main,'notebooks',e.ref)).name});a.close();
+  }
+
+  // Existing primary plus denied witnesses has no user-visible warning.
+  {
+    const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();a.close();
+    const get=Storage.prototype.getItem,dir=navigator.storage.getDirectory;
+    Storage.prototype.getItem=function(){throw Error('denied')};navigator.storage.getDirectory=async()=>{throw Error('denied')};
+    try{a=await openAs(o);report('unavailable-notice',{state:a.durability,witnessDown:a.witnessDown,notice:!!W.showLossNotice(a)});a.close()}finally{Storage.prototype.getItem=get;navigator.storage.getDirectory=dir}
+  }
+  // Known unavailable witnesses cause preparation to be silently skipped.
+  {
+    const o=await named();const a=await openAs(o);await a.create('/a.txt',{content:'A'});
+    const set=Storage.prototype.setItem,dir=navigator.storage.getDirectory;
+    Storage.prototype.setItem=function(){throw Error('denied')};navigator.storage.getDirectory=async()=>{throw Error('denied')};
+    await a.create('/marker-fails.txt',{content:'M'});await a.flushOpfs();
+    let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir}
+    report('reset-without-prepare',{error,paths:await paths(a),identity:a.identity});a.close();
+  }
+}
+
+// astra's six Chromium probes on 99b71e36 (evidence/durability-detect-99b-astra/probes.patch), kept as regression tests
+async function durabilityAstraProbes99(){
+ const out=(ok,name,v)=>check(ok,name+': '+JSON.stringify(v));
+ // Fresh at indexedDB.open is not fresh after a different opener initializes it.
+ {
+  const o=await named(),proto=W.Workspace.prototype,orig=proto.arrive;let release,entered;
+  const wait=new Promise(r=>release=r),ready=new Promise(r=>entered=r);
+  proto.arrive=async function(info){if(info.fresh){entered();await wait}return orig.call(this,info)};
+  let a,b;try{const pending=openAs(o);await ready;b=await openAs(o);await b.create('/real.txt',{content:'REAL'});release();a=await pending}finally{proto.arrive=orig}
+  out(!a.quarantined&&!b.quarantined,'delayed-first-open',{a:a.durability,b:b.durability,paths:await paths(a)});a.close();b.close();
+ }
+ // A main-store page fails after deleting 500 of 501 records.
+ {
+  const o=await named();let a=await openAs(o);
+  await new Promise((ok,no)=>{const tx=a.main.transaction('notebooks','readwrite'),st=tx.objectStore('notebooks');for(let i=0;i<501;i++)st.put({id:'p'+i,name:'p'+i,rev:1,cells:[]});tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});
+  let injected=false;W.RESET_HOOK.afterPage=(st)=>{if(st==='notebooks'&&!injected){injected=true;throw Error('purge page failed')}};
+  let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{W.RESET_HOOK.afterPage=undefined}
+  const pending=await rawGet(a.ws,'meta','purgeMain');a.close();a=await openAs(o);await W.migrate(a,localStorage);
+  const ps=await paths(a);out(ps.length===0,'purge-failure',{injected,error,pending,paths:ps});a.close();
+ }
+ // A stale notebook editor after reset is not fenced by workspace identity.
+ {
+  const o=await named(),a=await openAs(o),b=await openAs(o),e=await a.create('/old.ipynb');
+  const store=new W.IdbStore(b.main,e.ref),old=await store.load();W.setSaveGate(()=>b.quarantined?'quarantined':null);
+  await a.reset('new');await new Promise(r=>setTimeout(r,50));const save=await store.save({...old,baseRev:old.rev,name:'RESURRECTED'});
+  await W.migrate(a,localStorage);const ps=await paths(a);out(!save?.saved&&ps.length===0,'stale-editor-after-reset',{bClosed:b.closed,save,paths:ps});W.setSaveGate(null);a.close();b.close();
+ }
+ // Existing page gate has not learned another tab's quarantine; flag reads/writes denied.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();
+  const store=new W.IdbStore(a.main,e.ref),old=await store.load();W.setSaveGate(()=>a.quarantined?'quarantined':null);
+  a.channel?.close();a.channel=null;const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const get=Storage.prototype.getItem,set=Storage.prototype.setItem;
+  Storage.prototype.getItem=function(){throw Error('localStorage denied')};
+  Storage.prototype.setItem=function(){throw Error('localStorage denied')};
+  let b;try{b=await openAs(o);const save=await store.save({...old,baseRev:old.rev,name:'WRITTEN'});out(!save?.saved,'denied-flag-incumbent',{a:a.durability,b:b.durability,save})}finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;W.setSaveGate(null);a.close();b?.close()}
+ }
+
+ // First-visit state persists after its first save, so down notices are suppressed.
+ {
+  const o=await named(),a=await openAs(o),set=Storage.prototype.setItem,dir=navigator.storage.getDirectory;
+  Storage.prototype.setItem=function(){throw Error('denied after open')};navigator.storage.getDirectory=async()=>{throw Error('denied after open')};
+  try{await a.create('/first.txt',{content:'F'});await a.flushOpfs();out(!!W.showLossNotice(a),'first-save-failure-notice',{state:a.durability,down:a.witnessDown,notice:!!document.querySelector('#sagebrush-loss-notice')})}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir;a.close();document.querySelector('#sagebrush-loss-notice')?.remove()}
+ }
+ // Resume of a reset out of quarantine leaves the old quarantine flag behind.
+ {
+  const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();a.close();
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
+  W.RESET_HOOK.afterPage=(st)=>{if(st==='entries')throw Error('killed reset')};await a.reset('new').catch(()=>{});W.RESET_HOOK.afterPage=undefined;a.close();
+  a=await openAs(o);const save=await new W.IdbStore(a.main,'new-nb').save({id:'new-nb',name:'New',cells:[]});out(!!save?.saved,'resumed-reset-flag',{state:a.durability,flag:localStorage.getItem('sagebrush-quarantined:'+a.main.name),save});a.close();
+ }
+}
+
+// astra's eight Chromium probes on 0eefec71 (evidence/durability-detect-0ee-astra/probes.patch), kept as
+// regression tests; the board probe runs the wsSave of THIS head, extracted from board/page.ts by
+// test-workspace.mjs (WS_SAVE), where astra pasted 0eefec71's, and a refusal it throws is recorded rather than
+// thrown out of the probe
+async function durabilityAstraProbes0ee(){
+ const out=(ok,name,v)=>check(ok,name+': '+JSON.stringify(v));
+ W.setSaveGate(null);
+ // A pre-workspace editor has seen null, which currently disables identity checking forever.
+ {
+  const o=await named();const legacy=await new Promise((ok,no)=>{const r=indexedDB.open(o.mainName);r.onupgradeneeded=()=>{r.result.createObjectStore('notebooks',{keyPath:'id'});r.result.createObjectStore('files')};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+  const st=new W.IdbStore(legacy,'old',{id:'old',name:'Old',cells:[]});const doc=await st.load();
+  const a=await openAs(o);await W.migrate(a,localStorage);await a.reset('new');
+  const save=await st.save({...doc,baseRev:doc.rev,name:'LEGACY RESURRECTED'});await W.migrate(a,localStorage);
+  out(!save?.saved,'no-fence-editor',{seen:st.fence,save,paths:await paths(a)});a.close();legacy.close();
+ }
+
+ // A document read before reset is paired with a fence read after reset.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/before.ipynb'),st=new W.IdbStore(a.main,e.ref);
+  const transaction=a.main.transaction.bind(a.main),desc=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');let first=true;
+  a.main.transaction=function(...args){const tx=transaction(...args);if(first&&args[0]==='notebooks'&&args[1]==='readonly'){first=false;Object.defineProperty(tx,'oncomplete',{get(){return desc.get.call(tx)},set(fn){desc.set.call(tx,async ev=>{await a.reset('new');fn.call(tx,ev)})}})}return tx};
+  let doc;try{doc=await st.load()}finally{a.main.transaction=transaction}
+  const save=await st.save({...doc,baseRev:doc.rev,name:'TORN LOAD'});await W.migrate(a,localStorage);
+  out(!save?.saved,'split-load-fence',{seen:st.fence,identity:a.identity,save,paths:await paths(a)});a.close();
+ }
+ // History deletion checks one transaction, then deletes in another.
+ {
+  const o=await named(),a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();
+  const hdb=await W.openHistoryDb(),h=new W.IdbPatchStore(hdb,'race-history');await h.loadInitial();
+  await rawPut(hdb,'history',{nb:'race-history',time:'t1',env:{time:'t1'}});
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const allowed=h.allowed.bind(h);let b;h.allowed=async()=>{await allowed();b=await openAs(o)};
+  let error=null;try{await h.clear()}catch(e){error=e.message}
+  const rows=await rawKeys(hdb,'history');out(error!==null&&rows.some(k=>k[0]==='race-history'),'history-clear-race',{error,bState:b?.durability.state,left:rows.filter(k=>k[0]==='race-history')});a.close();b?.close();hdb.close();
+ }
+ // Fence publication failure is swallowed after the primary decided quarantine.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+  const st=new W.IdbStore(a.main,e.ref),doc=await st.load();const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence write failed');return put.call(this,v,...args)};
+  let b;try{b=await openAs(o);const save=await st.save({...doc,baseRev:doc.rev,name:'AFTER FENCE FAILURE'});out(!save?.saved,'failed-fence',{bState:b.durability.state,save})}finally{IDBObjectStore.prototype.put=put;a.close();b?.close()}
+ }
+
+ // A delayed broadcast in a closed old tab writes an old fence over the current one.
+ {
+  const o=await named(),a=await openAs(o),b=await openAs(o);await b.create('/a.txt',{content:'A'});const witness=localW(o.name);
+  await b.reset('new');await new Promise(r=>setTimeout(r,25));
+  a.channel.onmessage({data:{from:'delayed-peer',quarantine:{state:'suspected',witness,why:'old queued message'}}});
+  await new Promise(r=>setTimeout(r,30));const fence=await rawGet(b.main,'notebooks','__sagebrush-workspace__');
+  out(fence.workspace===b.identity.workspace&&fence.generation===b.identity.generation&&!fence.quarantined,'late-old-fence',{aClosed:a.closed,current:b.identity,fence});a.close();b.close();
+ }
+ // Exact wsSave function extracted and transpiled from this head's board/page.ts.
+ {
+  const o=await named();let a=await openAs(o);const e=await a.create('/b.board.json'),doc=(await a.read(e.path)).content;await a.flushOpfs();a.close();
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
+  const {WS_SAVE}=await import('./wssave.js');const result=await new Function('ws','id','d',"let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING=\"sagebrush-workspace-pending:\",SESSION=\"a\".repeat(16);const logSave=()=>{};\n"+WS_SAVE+"\n\ntry{wsSave(id,d)}catch(e){wsRefused=e}return wsWriting.then(()=>({pending:!!localStorage.getItem(PENDING+id),refused:wsRefused?.code??wsRefused?.message}));")(a,e.ref,doc);
+  out(!result.pending,'board-pending-through-quarantine',{quarantined:a.quarantined,...result});a.close();localStorage.removeItem('sagebrush-workspace-pending:'+e.ref);
+ }
+ // A purge-only resumed open sets an unquarantined fence before deleting main data.
+ {
+  const o=await named();let a=await openAs(o);await a.create('/old.ipynb');
+  W.RESET_HOOK.beforePurge=()=>{throw Error('stop before purge')};await a.reset('new').catch(()=>{});W.RESET_HOOK.beforePurge=undefined;a.close();
+  const proto=W.Workspace.prototype,orig=proto.cleanUp;let release,running;const wait=new Promise(r=>release=r);
+  proto.cleanUp=function(...args){running=(async()=>{await wait;return orig.apply(this,args)})();return running};W.RESET_HOOK.openBudgetMs=0;
+  try{a=await openAs(o)}finally{proto.cleanUp=orig;W.RESET_HOOK.openBudgetMs=undefined}
+  let createError=null,entry;try{entry=await a.create('/new-accepted.ipynb')}catch(e){createError=e.message}
+  release();await running;const content=entry?await rawGet(a.main,'notebooks',entry.ref):null;
+  out(createError!==null,'purge-admits-new-save',{state:a.durability,createError,acknowledged:!!entry,contentSurvives:!!content,paths:await paths(a)});a.close();
+ }
+ // localStorage failure still drops the purge marker, allowing board resurrection.
+ {
+  const o=await named();let a=await openAs(o);const key='sagebrush-board:local:123456789abc';localStorage.setItem(key,JSON.stringify({title:'Old local board',nodes:[]}));await W.migrate(a,localStorage);
+  const remove=Storage.prototype.removeItem;Storage.prototype.removeItem=function(k){if(k===key)throw Error('remove denied');return remove.call(this,k)};
+  let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.removeItem=remove}
+  const pending=await rawGet(a.ws,'meta','purgeMain');a.close();a=await openAs(o);await W.migrate(a,localStorage);
+  const ps=await paths(a);out(ps.length===0,'local-purge-failure',{error,pending,paths:ps});a.close();localStorage.removeItem(key);
+ }
+}
+
+async function durabilityDeliberate() {
+  const o = await named();
+  let w = await openAs(o);
+  for (let i = 0; i < 20; i++) await w.create(`/f${i}.txt`, { content: "x" });
+  for (let i = 0; i < 20; i++) await w.remove(`/f${i}.txt`);
+  await w.emptyTrash();
+  await w.dropOps(await w.lastSeq());
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "a mass delete, Trash emptied and the op log pruned: no false loss");
+  w.close();
+}
+
+async function durabilityReset() {
+  const H = W.RESET_HOOK;
+  const kill = () => { throw new Error("killed (test)"); };
+  const setup = async () => { const o = await named(); const w = await openAs(o); await w.create("/a.txt", { content: "a" }); await w.flushOpfs(); return { o, w }; };
+  // a refused reset changes nothing: the first witness written, the second not; then its cleanup failing too
+  {
+    const { o, w } = await setup();
+    const was = localW(o.name);
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    check(await fails(w.reset("new"), "storage"), "prepare failing after the first witness: refused");
+    H.afterFirstWitness = undefined;
+    check(JSON.stringify(localW(o.name)) === JSON.stringify(was) && w.identity.generation === 1 && (await paths(w)).join() === "/a.txt", "…the first witness put back, nothing changed");
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    H.failCleanup = true;
+    check(await fails(w.reset("new"), "storage"), "…and with its cleanup failing too: refused");
+    H.afterFirstWitness = undefined;
+    H.failCleanup = false;
+    check(!!localW(o.name).reset, "…the prepared witness left behind");
+    check(!!(await w.create("/b.txt", { content: "b" })) && !!localW(o.name).reset, "…a normal save meanwhile doesn't write over a prepared witness");
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && !localW(o.name).reset && v.identity.generation === 1 && (await paths(v)).join() === "/a.txt,/b.txt", "…the next open rolls it back: nothing changed");
+    v.close();
+  }
+  // killed after prepare: rolled back
+  {
+    const { o, w } = await setup();
+    H.afterPrepare = kill;
+    check(!!(await fails(w.reset("new"), "storage").catch(() => true)), "(a kill after prepare)");
+    H.afterPrepare = undefined;
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && v.identity.generation === 1 && (await paths(v)).join() === "/a.txt" && !localW(o.name).reset && !(await opfsW(o.name)).reset, "killed after prepare: rolled back, both witnesses cleared");
+    v.close();
+  }
+  // killed after the IndexedDB reset: finished
+  {
+    const { o, w } = await setup();
+    H.afterIdb = kill;
+    await w.reset("new").catch(() => {});
+    H.afterIdb = undefined;
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && v.identity.generation === 2 && (await paths(v)).length === 0 && localW(o.name).generation === 2 && !localW(o.name).reset, "killed after the IndexedDB reset: finished, the witnesses committed");
+    v.close();
+  }
+  // killed after one witness's commit: finished
+  {
+    const { o, w } = await setup();
+    H.afterFirstCommit = kill;
+    await w.reset("new").catch(() => {});
+    H.afterFirstCommit = undefined;
+    w.close();
+    const v = await openAs(o);
+    const ow = await opfsW(o.name);
+    check(v.durability.state === "ok" && v.identity.generation === 2 && ow.generation === 2 && !ow.reset, "killed after one witness's commit: finished, the other committed");
+    v.close();
+  }
+  // the database gone under a prepared reset (a reset never deletes it, so this is a loss): confirmed, for any kind
+  for (const kind of ["new", "import"]) {
+    const { o, w } = await setup();
+    H.afterPrepare = kill;
+    await w.reset(kind).catch(() => {});
+    H.afterPrepare = undefined;
+    w.close();
+    await dropDb(o.name);
+    const v = await openAs(o);
+    check(v.durability.state === "confirmed", `the database gone under a prepared reset (${kind}): a loss, confirmed: ` + JSON.stringify(v.durability));
+    v.close();
+  }
+  // astra's probe: a refused reset (its cleanup failing too), then the database lost: confirmed, never the refused reset finished
+  {
+    const { o, w } = await setup();
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    H.failCleanup = true;
+    await w.reset("new").catch(() => {});
+    H.afterFirstWitness = undefined;
+    H.failCleanup = false;
+    w.close();
+    await dropDb(o.name);
+    const v = await openAs(o);
+    check(v.durability.state === "confirmed" && v.quarantined, "a refused reset, then the database lost: confirmed and quarantined, not the reset finished: " + JSON.stringify(v.durability));
+    v.close();
+  }
+  // astra's probe: a stale tab's reset resets nothing (it would have erased the newer workspace's files)
+  {
+    const { o, w } = await setup();
+    const stale = await openAs(o);
+    stale.channel?.close();
+    await w.reset("new");
+    await w.create("/newer.txt", { content: "n" });
+    check(await fails(stale.reset("new"), "storage") && (await paths(w)).join() === "/newer.txt", "a stale tab's reset: refused, the newer workspace's files kept");
+    w.close();
+    stale.close();
+  }
+  // astra's probe: witnesses noted down earlier this session don't let a reset skip its preparation
+  {
+    const { o, w } = await setup();
+    w.witnessDown = { local: "earlier (test)", opfs: "earlier (test)" };
+    let prepared = false;
+    H.afterPrepare = () => { prepared = !!localW(o.name).reset; };
+    await w.reset("new");
+    H.afterPrepare = undefined;
+    check(prepared, "witnesses noted down earlier: the reset still prepares both");
+    w.close();
+  }
+  // a stale tab: by the broadcast, and by identity (workspace id, and generation alone)
+  for (const kind of ["new", "keep"]) {
+    const { o, w } = await setup();
+    const other = await openAs(o);
+    other.channel?.close();
+    await w.reset(kind);
+    check(await fails(other.create("/z.txt", { content: "z" }), "storage") && other.closed, `a tab opened before a reset (${kind}: ${kind === "new" ? "another workspace id" : "the same id, another generation"}): can't write, told to reload`);
+    w.close();
+    other.close();
+  }
+}
+
+// astra's CORR-28F-1, and @sagebrush's cases for it: one reset at a time; a reset to a new workspace already
+// admitted (here or in another tab) is joined, carried on to its own target, never another's; anything else
+// meanwhile refused as busy
+async function durabilityAdmission() {
+  const H = W.RESET_HOOK;
+  const two = async () => { const o = await named(), a = await openAs(o), b = await openAs(o); await a.create("/a.txt", { content: "A" }); for (const w of [a, b]) { w.channel?.close(); w.channel = null; } return { o, a, b }; };
+  const primary = (w) => rawGet(w.ws, "meta", "identity");
+  const same = (x, p) => x.workspace === p.workspace && x.generation === p.generation;
+  // new and new at once (no broadcasts): one target, both told it
+  {
+    const { a, b } = await two();
+    const r = await Promise.allSettled([a.reset("new"), b.reset("new")]);
+    const p = await primary(a);
+    check(p.generation === 2 && r.every((x) => x.status === "fulfilled" && same(x.value, p)), "two resets to a new workspace at once: the second joins the first, both told its identity: " + JSON.stringify({ r, p }));
+    check(!!(await a.create("/a2.txt", { content: "a" })) && !!(await b.create("/b2.txt", { content: "b" })), "…both tabs write to it after");
+    a.close(); b.close();
+  }
+  // new, and keep asked while it runs: keep refused, the new reset's target kept
+  {
+    const { a, b } = await two();
+    let keep = null;
+    H.afterPage = () => { keep ??= b.reset("keep").then((v) => v, (e) => ({ refused: String(e?.message ?? e) })); };
+    const ra = await a.reset("new").finally(() => { H.afterPage = undefined; });
+    const k = await keep, p = await primary(a);
+    check(!!k?.refused && same(ra, p) && p.generation === 2 && p.workspace !== (await rawGet(b.ws, "meta", "identity")).workspace + "x", "keep asked while a new reset runs: refused, the new reset's target kept: " + JSON.stringify({ ra, k, p }));
+    a.close(); b.close();
+  }
+  // keep and new at once: whichever is admitted second is refused (its tab's identity is stale), never written over
+  {
+    const { a, b } = await two();
+    const r = await Promise.allSettled([b.reset("keep"), a.reset("new")]);
+    const p = await primary(a);
+    check(r.filter((x) => x.status === "fulfilled").length === 1 && r.every((x) => x.status === "rejected" || same(x.value, p)), "keep and new at once: one admitted, the other refused, the primary the admitted one's: " + JSON.stringify({ r, p }));
+    a.close(); b.close();
+  }
+  // a tab that missed a reset's broadcast, resetting after it: refused, the reset kept
+  {
+    const { a, b } = await two();
+    const ra = await a.reset("new");
+    const err = await b.reset("new").then(() => null, (e) => String(e?.message ?? e));
+    const p = await primary(a);
+    check(!!err && same(ra, p), "a reset after another tab's, its broadcast missed: refused, the first reset's target kept: " + err);
+    a.close(); b.close();
+  }
+  // a reset stopped part way, retried here and asked from a tab that missed everything: both join its target
+  {
+    const { a, b } = await two();
+    let stopped = false;
+    H.afterPage = () => { if (!stopped) { stopped = true; throw new Error("stopped (test)"); } };
+    const first = await a.reset("new").then(() => null, (e) => String(e?.message ?? e));
+    H.afterPage = undefined;
+    const pending = await rawGet(a.ws, "meta", "resetting");
+    const kept = await b.reset("keep").then(() => null, (e) => String(e?.message ?? e));
+    const r = await Promise.allSettled([a.reset("new"), b.reset("new")]);
+    const p = await primary(a);
+    check(!!first && !!pending && !!kept && same(pending.to, p) && r.every((x) => x.status === "fulfilled" && same(x.value, p)), "a reset stopped part way: a keep refused; retried here and from a tab that missed it, both join its own target: " + JSON.stringify({ first, kept, pending, r, p }));
+    check((await paths(a)).length === 0 && (await rawGet(a.ws, "meta", "resetting")) === undefined, "…and finish it");
+    a.close(); b.close();
+  }
+  // a reset whose cleanup is done, and another reset, from a tab opened since, run to its end before the first
+  // commits: the first publishes nothing, the witnesses and fence the second's
+  {
+    const { o, a, b } = await two();
+    b.close();
+    let c = null, rc = null;
+    H.afterIdb = async () => { H.afterIdb = undefined; c = await openAs(o); c.channel?.close(); c.channel = null; rc = await c.reset("new"); };
+    const ra = await a.reset("new").then((v) => v, (e) => ({ refused: String(e?.message ?? e) }));
+    H.afterIdb = undefined;
+    const p = await primary(a), lw = localW(o.name), fence = await rawGet(a.main, "notebooks", "__sagebrush-workspace__");
+    check(!!ra.refused && same(rc, p) && p.generation === 3 && same(lw, p) && same(fence, p), "a reset overtaken before it committed: refused, the witness and fence the later reset's: " + JSON.stringify({ ra, rc, p, lw: { workspace: lw.workspace, generation: lw.generation }, fence }));
+    a.close(); c?.close();
+  }
+}
+// the ownership list (stores.js ownedByWorkspace), not whether a fence is there, decides what the workspace governs;
+// a fence that can't be written blocks its database, across copies of the stores and until written
+async function durabilityOwnership() {
+  const O = W.ownedByWorkspace;
+  check(O("sagebrush", "x") && O("sagebrush-history", "x") && O("sagebrush-board-history", "board:local:0123456789ab") && O("sagebrush-board-history", "board:local:0123456789ab:v2") && !O("sagebrush-board-history", "board:examples/sagebrush.json") && !O("sagebrush-board-history", "board:unsaved:abc") && !O("sagebrush-board-history", "board:local:0123456789abc"), "the ownership list: notebooks and their history, the workspace's own boards' history; not an example's, an unsaved one's");
+  // quarantined: the workspace's board's history refused; an example's, not the workspace's, kept
+  {
+    const o = await named(); let a = await openAs(o); const e = await a.create("/b.board.json"); await a.flushOpfs(); a.close();
+    const db = await W.openBoardHistoryDb();
+    const mine = new W.IdbPatchStore(db, "board:local:" + e.ref), example = new W.IdbPatchStore(db, "board:examples/own-test.json");
+    await mine.loadInitial(); await example.loadInitial();
+    const wit = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...wit, seq: wit.seq + 10 }); a = await openAs(o);
+    mine.append({ time: "m-time", id: "m" }); example.append({ time: "x-time", id: "x" });
+    await new Promise((r) => setTimeout(r, 50));
+    const keys = (await rawKeys(db, "history")).filter((k) => k[1] !== "");
+    check(a.quarantined && !keys.some((k) => k[0] === "board:local:" + e.ref) && keys.some((k) => k[0] === "board:examples/own-test.json"), "quarantined: the workspace's board's history refused, an example's kept: " + JSON.stringify(keys));
+    await example.drop(); a.close(); db.close();
+  }
+  // a fence that couldn't be written: its database blocked (meta says so too), a write through another copy of the
+  // stores refused; the next open writes it and lets writes through again
+  {
+    const S = await import("./stores.js");
+    const o = await named(); let a = await openAs(o); const e = await a.create("/c.board.json"); await a.flushOpfs(); a.close();
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (v, ...args) { if (this.name === "history" && v?.nb === "__sagebrush-workspace__") throw Error("fence refused (test)"); return put.call(this, v, ...args); };
+    try { a = await openAs(o); } finally { IDBObjectStore.prototype.put = put; }
+    const db = await S.openBoardHistoryDb(), key = "board:local:" + e.ref, h = new S.IdbPatchStore(db, key);
+    await h.loadInitial(); h.append({ time: "b-time", id: "b" }); await new Promise((r) => setTimeout(r, 50));
+    const meta = await rawGet(a.ws, "meta", "fenceBlocked");
+    check(a.fenceBlocked.includes("sagebrush-board-history") && !!meta?.includes("sagebrush-board-history") && !(await rawKeys(db, "history")).some((k) => k[0] === key), "a fence that couldn't be written: its database blocked, in meta too; a write through another copy of the stores refused: " + JSON.stringify({ blocked: a.fenceBlocked, meta }));
+    a.close(); a = await openAs(o);
+    const h2 = new S.IdbPatchStore(db, key); await h2.loadInitial(); h2.append({ time: "b2-time", id: "b2" }); await new Promise((r) => setTimeout(r, 50));
+    check(!a.fenceBlocked.length && (await rawGet(a.ws, "meta", "fenceBlocked")) === undefined && (await rawKeys(db, "history")).some((k) => k[0] === key), "…the next open writes it: unblocked, writes let through");
+    await h2.drop(); a.close(); db.close();
+  }
+  // localStorage that can't be had, or listed, while a reset purges it: unknown, never empty; the marker kept,
+  // migrate refused meanwhile; the next open, with it back, finishes the purge
+  for (const how of ["had", "listed"]) {
+    const H = W.RESET_HOOK, o = await named(); let a = await openAs(o);
+    const key = "sagebrush-board:local:0000000000a" + (how === "had" ? "1" : "2");
+    localStorage.setItem(key, JSON.stringify({ title: "Old board " + how, nodes: [] })); await W.migrate(a, localStorage);
+    const own = Object.getOwnPropertyDescriptor(globalThis, "localStorage"), len = Object.getOwnPropertyDescriptor(Storage.prototype, "length");
+    const deny = () => { if (how === "had") Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("denied (test)"); } }); else Object.defineProperty(Storage.prototype, "length", { configurable: true, get() { throw new Error("denied (test)"); } }); };
+    const allow = () => { if (how === "had") Object.defineProperty(globalThis, "localStorage", own); else Object.defineProperty(Storage.prototype, "length", len); };
+    H.beforePurge = deny; H.afterIdb = allow;
+    let error = null; try { await a.reset("new"); } catch (e) { error = String(e?.message ?? e); } finally { allow(); H.beforePurge = undefined; H.afterIdb = undefined; }
+    const marker = await rawGet(a.ws, "meta", "purgeLocal"), unknown = a.localUnknown;
+    const during = await W.migrate(a, localStorage);
+    check(error === null && marker === true && unknown && (await paths(a)).length === 0 && localStorage.getItem(key) !== null, `localStorage that can't be ${how} during the purge: the reset done, its purge kept pending, migrate brings nothing in: ` + JSON.stringify({ error, marker, unknown, during }));
+    a.close(); a = await openAs(o); await a.settled(); await W.migrate(a, localStorage);
+    check((await paths(a)).length === 0 && localStorage.getItem(key) === null && (await rawGet(a.ws, "meta", "purgeLocal")) === undefined && !a.localUnknown, "…the next open, with it back, finishes it: " + JSON.stringify(await paths(a)));
+    a.close(); localStorage.removeItem(key);
+  }
+}
+
+// astra's probes on 28f6511b, verbatim (only the name)
+async function durabilityAstraProbes28f(){
+ const out=(ok,name,v)=>check(ok,name+': '+JSON.stringify(v));W.setSaveGate(null);
+ // Failed fence is deleted: a NEW editor now binds null and is allowed to write.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');return put.call(this,v,...args)};
+  let b;try{b=await openAs(o);const st=new W.IdbStore(b.main,e.ref),doc=await st.load();const save=await st.save({...doc,baseRev:doc.rev,name:'NEW EDITOR THROUGH LOST FENCE'});out(!save?.saved,'new-editor-after-fence-deletion',{quarantined:b.quarantined,seen:st.fence,save})}finally{IDBObjectStore.prototype.put=put;a.close();b?.close()}
+ }
+ // Enumeration is unreadable only during reset; old local board returns afterwards.
+ {
+  const o=await named();let a=await openAs(o);const key='sagebrush-board:local:123456789abc';localStorage.setItem(key,JSON.stringify({title:'Enum old board',nodes:[]}));await W.migrate(a,localStorage);
+  const oldKey=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};let error=null;
+  try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.key=oldKey}
+  const pending=await rawGet(a.ws,'meta','purgeMain');a.close();a=await openAs(o);await W.migrate(a,localStorage);const ps=await paths(a);out(ps.length===0,'local-enumeration-failure',{error,pending,paths:ps});a.close();localStorage.removeItem(key);
+ }
+ // Two admitted resets can overwrite the same resetting metadata between cleanup pages.
+ {
+  const o=await named(),a=await openAs(o),b=await openAs(o);await a.create('/a.txt',{content:'A'});
+  a.channel?.close();a.channel=null;b.channel?.close();b.channel=null;
+  const resets=await Promise.allSettled([a.reset('new'),b.reset('new')]);const primary=await rawGet(a.ws,'meta','identity');
+  let aError=null,bError=null;try{await a.create('/a-after.txt',{content:'A'})}catch(e){aError=e.message}try{await b.create('/b-after.txt',{content:'B'})}catch(e){bError=e.message}
+  const fulfilled=resets.filter(x=>x.status==='fulfilled').map(x=>x.value), coherent=fulfilled.every(x=>x.workspace===primary.workspace&&x.generation===primary.generation);
+  out(coherent,'concurrent-resets',{resets:resets.map(x=>x.status==='fulfilled'?x.value:{error:String(x.reason)}),primary,aError,bError});a.close();b.close();
+ }
+ // Local board history is the same IdbPatchStore in a DB that never receives a workspace fence.
+ {
+  const S=await import('./stores.js');const o=await named();let a=await openAs(o);const e=await a.create('/board.board.json');await a.flushOpfs();a.close();
+  const db=await S.openBoardHistoryDb(),h=new S.IdbPatchStore(db,'local:'+e.ref);await h.loadInitial();const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
+  h.append({time:'q-time',id:'q-change'});await new Promise(r=>setTimeout(r,50));const keys=await rawKeys(db,'history');const written=keys.filter(k=>k[0]==='local:'+e.ref);
+  out(written.length===0,'local-board-history',{quarantined:a.quarantined,seen:h.fence,keys:written});a.close();db.close();
+ }
+}
+
+// astra's probes on 56c60932, verbatim
+async function deniedBundle(){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+ const witness=localW(o.name);await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+ const get=Storage.prototype.getItem,set=Storage.prototype.setItem,put=IDBObjectStore.prototype.put;
+ Storage.prototype.getItem=function(){throw Error('denied')};Storage.prototype.setItem=function(){throw Error('denied')};
+ IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');return put.call(this,v,...args)};
+ let b;try{b=await openAs(o);const st=new S.IdbStore(b.main,e.ref),doc=await st.load(),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT THROUGH BLOCKED FENCE'});
+ check(!save?.saved,'denied-separate-bundle: '+JSON.stringify({quarantined:b.quarantined,blocked:b.fenceBlocked,meta:await rawGet(b.ws,'meta','fenceBlocked'),seen:st.fence,save}));}
+ finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;IDBObjectStore.prototype.put=put;a.close();b?.close()}
+}
+async function primaryRollback(){
+ const S=await import('./stores.js'),o=await named();let a=await openAs(o);const e=await a.create('/n.ipynb'),old={...a.identity},oldStep=await rawGet(a.ws,'meta','fenceStep');await a.reset('keep');await a.flushOpfs();
+ const fence=await rawGet(a.main,'notebooks','__sagebrush-workspace__');await rawPut(a.ws,'meta',old,'identity');await rawPut(a.ws,'meta',oldStep,'fenceStep');a.close();a=await openAs(o);
+ const st=new S.IdbStore(a.main,e.ref),doc=await st.load(),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT THROUGH FUTURE FENCE'});
+ check(!save?.saved,'primary-generation-rollback: '+JSON.stringify({quarantined:a.quarantined,identity:a.identity,oldFence:fence,seen:st.fence,blocked:a.fenceBlocked,save}));a.close();
+}
+async function currentPending(){
+ const o=await named(),a=await openAs(o),key=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};
+ try{await a.reset('new')}finally{Storage.prototype.key=key}
+ const marker=await rawGet(a.ws,'meta','purgeLocal'),e=await a.create('/new.board.json');
+ const {WS_SAVE}=await import('./wssave.js');let enter,release;const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r),orig=a.write;
+ a.write=async function(...args){enter();await held;throw Error('simulated shutdown before IndexedDB commit')};
+ const save=new Function('ws','id','d',`let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING='sagebrush-workspace-pending:',SESSION='aaaaaaaaaaaaaaaa';const logSave=()=>{};const dropPending=()=>{};${WS_SAVE};wsSave(id,d);return wsWriting;`);
+ const saving=save(a,e.ref,{title:'NEW UNSAVED EDIT',nodes:[]});await entered;
+ const pendingKey='sagebrush-workspace-pending:'+e.ref,before=localStorage.getItem(pendingKey);await a.cleanUp(true);const after=localStorage.getItem(pendingKey);
+ release();await saving;a.write=orig;
+ check(!!after,'current-generation-pending: '+JSON.stringify({marker,state:a.durability,ref:e.ref,before,after,stored:(await a.read(e.path)).content.title}));a.close();
+}
+
+async function deniedMeta(){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+ const st=new S.IdbStore(a.main,e.ref),doc=await st.load();const witness=localW(o.name);await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+ const get=Storage.prototype.getItem,set=Storage.prototype.setItem,put=IDBObjectStore.prototype.put;
+ Storage.prototype.getItem=function(){throw Error('denied')};Storage.prototype.setItem=function(){throw Error('denied')};
+ IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');if(this.name==='meta'&&args[0]==='fenceBlocked')throw Error('meta refused');return put.call(this,v,...args)};
+ let err=null;try{await openAs(o)}catch(e){err=e.message}
+ try{const q=await rawGet(a.ws,'meta','quarantine'),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT AFTER FAILED OPEN'});
+ check(!save?.saved,'denied-separate-bundle-and-meta: '+JSON.stringify({openError:err,quarantine:q?.state,blockedMeta:await rawGet(a.ws,'meta','fenceBlocked'),seen:st.fence,save}));}
+ finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;IDBObjectStore.prototype.put=put;a.close()}
+}
+
+// after a rollback of the workspace's database behind the editors' fences: "keep" goes past the latest fence, and
+// the editors write again (CORR-56C-1); a board history the workspace doesn't own is written whatever the storage
+// denies; and what confirming each write with the workspace's meta costs a save (for daybreak2)
+async function durabilityAuthority() {
+  {
+    const o = await named(); let a = await openAs(o); const e = await a.create("/n.ipynb"), old = { ...a.identity }, oldStep = await rawGet(a.ws, "meta", "fenceStep");
+    await a.reset("keep"); await a.flushOpfs();
+    await rawPut(a.ws, "meta", old, "identity"); await rawPut(a.ws, "meta", oldStep, "fenceStep"); a.close(); a = await openAs(o);
+    const blocked = [...a.fenceBlocked];
+    const k = await a.reset("keep");
+    const st = new W.IdbStore(a.main, e.ref), doc = await st.load(), save = await st.save({ ...doc, baseRev: doc.rev, name: "AFTER KEEP" });
+    check(blocked.includes(a.main.name) && k.generation === 3 && !a.fenceBlocked.length && !!save?.saved, "a fence of a later generation found: blocked, not taken for written; keep goes past it, and the notebook saves again: " + JSON.stringify({ blocked, k, save }));
+    a.close();
+  }
+  {
+    const o = await named(); let a = await openAs(o); await a.create("/b.board.json"); await a.flushOpfs(); a.close();
+    const wit = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...wit, seq: wit.seq + 10 }); a = await openAs(o);
+    const db = await W.openBoardHistoryDb(), ex = new W.IdbPatchStore(db, "board:examples/authority.json");
+    await ex.loadInitial();
+    const get = Storage.prototype.getItem; Storage.prototype.getItem = function () { throw Error("denied"); };
+    try { ex.append({ time: "e-time", id: "e" }); await new Promise((r) => setTimeout(r, 50)); } finally { Storage.prototype.getItem = get; }
+    check(a.quarantined && (await rawKeys(db, "history")).some((k) => k[0] === "board:examples/authority.json"), "quarantined, storage denied: a board history the workspace doesn't own still written");
+    await ex.drop(); a.close(); db.close();
+  }
+  // each rule of the confirming, alone, through another copy of the stores with nothing wired: the workspace's
+  // meta unreadable, naming another identity, a reset under way, or its database gone: refused; a history append too
+  {
+    const S = await import("./stores.js");
+    const fresh = async () => { const o = await named(), a = await openAs(o), e = await a.create("/r.ipynb"); a.channel?.close(); a.channel = null; const st = new S.IdbStore(a.main, e.ref), doc = await st.load(); return { o, a, e, st, doc }; };
+    const tryIt = (st, doc, name) => st.save({ ...doc, baseRev: doc.rev, name });
+    {
+      const { o, a, st, doc } = await fresh();
+      const tx = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (names, ...rest) { if (this.name === o.name && names === "meta") throw new Error("denied (test)"); return tx.call(this, names, ...rest); };
+      let save; try { save = await tryIt(st, doc, "UNREADABLE"); } finally { IDBDatabase.prototype.transaction = tx; }
+      const after = await tryIt(st, doc, "READABLE");
+      check(!save?.saved && !!after?.saved, "the workspace's meta unreadable: refused; readable again: saved: " + JSON.stringify({ save, after }));
+      a.close();
+    }
+    {
+      const { a, e, st, doc } = await fresh();
+      const id = await rawGet(a.ws, "meta", "identity");
+      await rawPut(a.ws, "meta", { ...id, workspace: "b".repeat(16) }, "identity");
+      const save = await tryIt(st, doc, "OTHER IDENTITY");
+      const hdb = await S.openHistoryDb(), h = new S.IdbPatchStore(hdb, "auth-" + e.ref); await h.loadInitial(); h.append({ time: "h-time", id: "h" }); await new Promise((r) => setTimeout(r, 80));
+      const rows = (await rawKeys(hdb, "history")).filter((k) => k[0] === "auth-" + e.ref);
+      check(!save?.saved && rows.length === 0, "the workspace's meta naming another identity than the fence: a save and a history append refused: " + JSON.stringify({ save, rows }));
+      await rawPut(a.ws, "meta", id, "identity"); hdb.close(); a.close();
+    }
+    {
+      const { a, st, doc } = await fresh();
+      const id = await rawGet(a.ws, "meta", "identity");
+      await rawPut(a.ws, "meta", { to: { workspace: "c".repeat(16), generation: id.generation + 1 }, seq: 0 }, "resetting");
+      const save = await tryIt(st, doc, "DURING RESET");
+      check(!save?.saved, "a reset under way in the workspace's meta, its fence not yet saying so: refused: " + JSON.stringify(save));
+      a.close();
+    }
+    {
+      // (the store on a connection of its own, so the workspace's closing doesn't close it: the save itself refused)
+      const { o, a, e } = await fresh();
+      const main = await S.openDb(o.mainName), st = new S.IdbStore(main, e.ref), doc = await st.load();
+      a.close(); await dropDb(o.name);
+      const save = await tryIt(st, doc, "NO WORKSPACE");
+      check(typeof save === "string" && save.includes("record of the workspace is missing"), "the workspace's database gone, the fence still naming it: refused, saying so: " + JSON.stringify(save));
+      main.close();
+    }
+  }
+  // a tab left behind by a reset elsewhere (its broadcast missed) writes no fence, and so blocks nothing
+  {
+    const o = await named(), a = await openAs(o), b = await openAs(o), e = await a.create("/s.ipynb");
+    for (const w of [a, b]) { w.channel?.close(); w.channel = null; }
+    await a.reset("keep");
+    await b.writeFence();
+    const S = await import("./stores.js"), st = new S.IdbStore(a.main, e.ref), doc = await st.load(), save = await st.save({ ...doc, baseRev: doc.rev, name: "AFTER STALE" });
+    check(!!save?.saved && (await rawGet(a.ws, "meta", "fenceBlocked")) === undefined && (await rawGet(a.main, "notebooks", "__sagebrush-workspace__")).generation === 2, "a stale tab's fence: not written, nothing blocked: " + JSON.stringify(save));
+    a.close(); b.close();
+  }
+  {
+    const o = await named(), a = await openAs(o), e = await a.create("/t.ipynb");
+    const S = await import("./stores.js"), st = new S.IdbStore(a.main, e.ref), doc = await st.load();
+    const plain = await S.openDb("authority-plain"), sp = new S.IdbStore(plain, "p"), dp = await sp.load();
+    const time = async (s, d) => { const t = []; for (let i = 0; i < 100; i++) { const t0 = performance.now(); const r = await s.save({ ...d, baseRev: d.rev, name: "n" + i }); t.push(performance.now() - t0); d = { ...d, rev: r.rev }; } t.sort((x, y) => x - y); return { median: +t[50].toFixed(2), p95: +t[95].toFixed(2) }; };
+    const owned = await time(st, doc), unowned = await time(sp, dp);
+    check(owned.median < 20, `a save confirmed with the workspace's meta: ${JSON.stringify(owned)} ms, without: ${JSON.stringify(unowned)} ms (100 saves each)`);
+    a.close(); plain.close(); await dropDb("authority-plain");
+  }
+}
+
+// astra's probes on 51106cb6, verbatim (historyOrder, purgeMarks; metaFenceRace adapted below)
+async function historyOrder(mode){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb'),db=await S.openHistoryDb(),h=new S.IdbPatchStore(db,e.ref);await h.loadInitial();
+ h.append({time:'one',id:'one'});h.append({time:'two',id:'two'});await h[mode]();await h.appending;
+ const rows=(await rawKeys(db,'history')).filter(k=>k[0]===e.ref);check(rows.length===0,'history-order-'+mode+': '+JSON.stringify({rows}));a.close();db.close();
+}
+async function purgeMarks(){
+ const o=await named(),a=await openAs(o),key=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};try{await a.reset('new')}finally{Storage.prototype.key=key}
+ const e=await a.create('/new.board.json'),prefixes=['sagebrush-board:local:'+e.ref,'sagebrush-board:local:'+e.ref+'#here','sagebrush-board:local:'+e.ref+'#outputs','sagebrush-workspace-pending:'+e.ref,'sagebrush-workspace-pending-unread:'+e.ref];
+ for(const k of prefixes)localStorage.setItem(k,'current');localStorage.setItem('sagebrush-board:local:111111111111','old');await a.cleanUp(true);
+ check(prefixes.every(k=>localStorage.getItem(k)==='current')&&!localStorage.getItem('sagebrush-board:local:111111111111'),'purge-current-marks-preserved');a.close();
+}
+
+// astra's metaFenceRace (51106cb6) under the lock: the same barrier (the write's meta read held) and the same
+// failing fence puts, for all four verbs, the puts failing and not; one change of schedule: B's open now waits
+// on the lock the write holds, so the barrier is let go once B is waiting, not after B is done (as written, the
+// probe would wait on itself).  B decides the quarantine only after the write's transaction has ended, and the
+// same verb after B is refused
+async function durabilityLockOrder() {
+  const S = await import("./stores.js"); S.setSaveGate(null);
+  for (const fails of [true, false]) for (const mode of ["save", "append", "clear", "drop"]) {
+    const o = await named(), a = await openAs(o), e = await a.create("/n.ipynb"); await a.flushOpfs(); a.channel?.close(); a.channel = null;
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial(); h.append({ time: "seed", id: "seed" }); await h.appending;
+    const witness = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...witness, seq: witness.seq + 10 });
+    let enter, release; const entered = new Promise((r) => (enter = r)), held = new Promise((r) => (release = r));
+    // (the barrier on the meta read inside the lock: for clear and drop the second, after their precheck)
+    const origTx = IDBDatabase.prototype.transaction, put = IDBObjectStore.prototype.put, desc = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete"); let armed = true, reads = 0;
+    const nth = mode === "clear" || mode === "drop" ? 2 : 1;
+    IDBDatabase.prototype.transaction = function (stores, ...args) { const tx = origTx.call(this, stores, ...args); if (armed && this.name === o.name && stores === "meta" && args[0] === "readonly" && ++reads === nth) { armed = false; Object.defineProperty(tx, "oncomplete", { set(f) { desc.set.call(tx, function (ev) { enter(); held.then(() => f.call(tx, ev)); }); }, configurable: true }); } return tx; };
+    const verb = (name) => (mode === "save" ? st.save({ ...doc, baseRev: doc.rev, name }) : mode === "append" ? (h.append({ time: name, id: name }), h.appending) : mode === "clear" ? h.clear() : h.drop());
+    const order = [];
+    let b = null, waited = false, first, second, rows, stored;
+    try {
+      const firstP = verb("first").then((v) => { order.push("write"); return v; }, (err) => { order.push("write"); return { error: String(err?.message ?? err) }; });
+      // (bounded: a write that never reads meta there is held by nothing, and fails below)
+      await Promise.race([entered, new Promise((r) => setTimeout(r, 3000))]); IDBDatabase.prototype.transaction = origTx;
+      if (fails) IDBObjectStore.prototype.put = function (v, ...args) { if (v?.id === "__sagebrush-workspace__" || v?.nb === "__sagebrush-workspace__") throw Error("fence refused"); return put.call(this, v, ...args); };
+      const bOpen = openAs(o).then((x) => { order.push("open"); b = x; });
+      for (let i = 0; i < 200 && !waited; i++) { waited = (await navigator.locks.query()).pending.some((l) => l.name === "sagebrush-workspace" && l.mode === "exclusive"); if (!waited) await new Promise((r) => setTimeout(r, 10)); }
+      release();
+      first = await firstP; await bOpen; IDBObjectStore.prototype.put = put;
+      // (after B: the same verb, refused)
+      if (mode === "save") { const rec = await rawGet(a.main, "notebooks", e.ref); second = await st.save({ ...rec, baseRev: rec.rev, name: "AFTER QUARANTINE" }); stored = (await rawGet(a.main, "notebooks", e.ref)).name; }
+      else if (mode === "append") { h.append({ time: "after", id: "after" }); await h.appending; }
+      else { await rawPut(db, "history", { nb: e.ref, time: "raw", env: {} }); second = await (mode === "clear" ? h.clear() : h.drop()).then(() => "done", (err) => String(err?.message ?? err)); }
+      rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+      const after = mode === "save" ? typeof second === "string" && stored !== "AFTER QUARANTINE" : mode === "append" ? !rows.includes("after") : second !== "done" && rows.includes("raw");
+      check(waited && order[0] === "write" && b?.quarantined && after, `the lock orders ${mode} against a quarantine, its fence puts ${fails ? "failing" : "written"}: B waited for the write, and ${mode} after B refused: ` + JSON.stringify({ waited, order, quarantined: b?.quarantined, blocked: b?.fenceBlocked, first, second, rows, stored }));
+    } finally { release(); IDBDatabase.prototype.transaction = origTx; IDBObjectStore.prototype.put = put; a.close(); b?.close(); db.close(); }
+  }
+  // the lock held for good by another tab: a save and a clear give up after LOCK_WAIT, said, their requests
+  // withdrawn (the lock let go later, nothing is written by them), the editor's change kept for a later save
+  // that succeeds; appends wait in their queue, at most HISTORY_BACKLOG of them, one past it refused and said
+  // (an editor never frozen, memory bounded, by a stuck tab)
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/held.ipynb");
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial(); h.append({ time: "seed", id: "seed" }); await h.appending;
+    S.LOCK_WAIT.ms = 300; S.HISTORY_BACKLOG.entries = 3;
+    const said = [], off = S.onHistoryRefused((m) => said.push(m));
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    try {
+      const t0 = performance.now(), save = await Promise.race([st.save({ ...doc, baseRev: doc.rev, name: "HELD" }).then((v) => ({ v }), (err) => ({ err: String(err?.message ?? err) })), new Promise((r) => setTimeout(() => r({ hung: true }), 5000))]), waited = performance.now() - t0;
+      const clear = await h.clear().then(() => "done", (err) => String(err?.message ?? err));
+      // (q1 changed after it was asked for: kept as it was asked, charged as such: daybreak2's LIMIT-9D7-2)
+      const e1 = { time: "q1", id: "q1" };
+      const taken = [h.append(e1), ...[2, 3, 4, 5].map((i) => h.append({ time: "q" + i, id: "q" + i }))];
+      e1.id = "CHANGED AFTER ASKED"; e1.pad = "x".repeat(10_000);
+      const queued = S.historyBacklog().entries, charged = S.historyBacklog().bytes, each = 2 * JSON.stringify({ time: "q1", id: "q1" }).length + S.ENTRY_OVERHEAD;
+      // (a clear and a drop asked for behind those appends, which wait for the lock: refused within LOCK_WAIT
+      // all the same, and never deleting later: daybreak2's LIMIT-9D7-1, astra's CORR-9D7-2)
+      const t1 = performance.now();
+      const [clear2, drop2] = await Promise.all([h.clear(), h.drop()].map((p) => Promise.race([p.then(() => "done", (err) => String(err?.message ?? err)), new Promise((r) => setTimeout(() => r("still waiting"), 3000))])));
+      const late = performance.now() - t1;
+      await new Promise((r) => setTimeout(r, 200));
+      const before = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+      release(); release = null;
+      await h.appending; await new Promise((r) => setTimeout(r, 300));
+      const after = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]), stored = (await rawGet(a.main, "notebooks", e.ref)).name;
+      check(/busy/.test(save.err ?? "") && waited < 3000 && /busy/.test(clear), "the lock held for good elsewhere: a save (rejected) and a clear give up, saying the files are busy: " + JSON.stringify({ save, waited: Math.round(waited), clear }));
+      check(stored !== "HELD" && after.includes("seed"), "…their requests withdrawn: the lock let go later, nothing written by them (the notebook as it was, the history not cleared): " + JSON.stringify({ stored, after }));
+      check(taken.join() === "true,true,true,false,false" && queued === 3 && said.length === 2 && /TimeTravel/.test(said[0]) && before.join() === "seed", "…appends: three wait (the bound set to 3), the next two refused and said: " + JSON.stringify({ taken, queued, said: said.length, before }));
+      check(["q1", "q2", "q3"].every((k) => after.includes(k)) && !after.includes("q4") && S.historyBacklog().entries === 0 && S.historyBacklog().bytes === 0, "…the three kept once it is let go, the backlog empty again: " + JSON.stringify({ after, backlog: S.historyBacklog() }));
+      check(/busy/.test(clear2) && /busy/.test(drop2) && late < 2000, "a clear and a drop behind waiting appends, the lock held: refused within the bound all the same: " + JSON.stringify({ clear2, drop2, late: Math.round(late) }));
+      check(["q1", "q2", "q3"].every((k) => after.includes(k)), "…and, the lock let go, they delete nothing afterwards: " + JSON.stringify(after));
+      const q1 = (await rawGet(db, "history", [e.ref, "q1"]))?.env;
+      check(q1?.id === "q1" && !("pad" in q1) && charged === 3 * each, "an append is kept as it was asked for, changed after or not, and charged twice its JSON and ENTRY_OVERHEAD: " + JSON.stringify({ q1, charged, each }));
+      const rec = await rawGet(a.main, "notebooks", e.ref), later = await st.save({ ...rec, baseRev: rec.rev, name: "HELD" });
+      check(!!later?.saved && (await rawGet(a.main, "notebooks", e.ref)).name === "HELD", "…and the same change, saved again once the lock is free: kept: " + JSON.stringify(later));
+    } finally { release?.(); off(); S.LOCK_WAIT.ms = 10_000; S.HISTORY_BACKLOG.entries = 1000; a.close(); db.close(); }
+  }
+  // an append held while it waits as its JSON text alone (daybreak2's LIMIT-5B7-1): data that isn't plain JSON
+  // (a buffer, a typed array, a Map, a Set, a Date) refused, however small its JSON; a graph whose JSON is small
+  // for its heap (100,000 empty objects) charged as its text, which is all that is held; kept as it was asked for
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/plain.ipynb");
+    const db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    try {
+      const refused = [["a buffer", new ArrayBuffer(1 << 20)], ["a typed array", new Uint8Array(1 << 20)], ["a Map", new Map([[1, 2]])], ["a Set", new Set([1])], ["a Date", new Date()], ["undefined in an array", [undefined]]]
+        .map(([what, v]) => [what, h.append({ time: "x-" + what, id: "x", data: v })]);
+      // (cycles, an object's and an array's, and a DAG whose 40 levels each name the next twice, 2^40 paths in its
+      // text: refused at once, nothing written or queued; a child shared, acyclic, taken and kept exactly:
+      // daybreak2's LIMIT-7865-1, astra's CORR-786-1)
+      const cyc = {}; cyc.self = cyc;
+      const acyc = []; acyc.push(acyc);
+      let dag = {}; for (let i = 0; i < 40; i++) dag = { l: dag, r: dag };
+      const t0 = performance.now(), tookCycle = h.append({ time: "cyc", id: "cyc", data: cyc }), tookArray = h.append({ time: "acyc", id: "acyc", data: acyc }), tookDag = h.append({ time: "dag", id: "dag", data: dag }), ms = performance.now() - t0, q0 = S.historyBacklog().entries;
+      check(tookCycle === false && tookArray === false && tookDag === false && ms < 500 && q0 === 0, "an append with a cycle (an object's, an array's), or a DAG of 2^40 paths: refused at once, nothing queued: " + JSON.stringify({ tookCycle, tookArray, tookDag, ms: Math.round(ms), q0 }));
+      const child = { text: "shared", n: [1, 2] }, sharing = { time: "shared", id: "shared", a: child, b: child, list: [child, child] }, expect = JSON.stringify(sharing);
+      const b0s = S.historyBacklog().bytes, tookShared = h.append(sharing), chargedShared = S.historyBacklog().bytes - b0s;
+      child.text = "CHANGED";
+      const wide = { time: "wide", id: "wide", file: undefined, wide: Array.from({ length: 100_000 }, () => ({})) };
+      const b0 = S.historyBacklog().bytes, took = h.append(wide), charged = S.historyBacklog().bytes - b0, text = JSON.stringify(wide).length;
+      wide.wide.length = 0; wide.id = "CHANGED";
+      release(); release = null;
+      await h.appending;
+      const kept = (await rawGet(db, "history", [e.ref, "wide"]))?.env;
+      const keptShared = (await rawGet(db, "history", [e.ref, "shared"]))?.env;
+      check(tookShared && chargedShared === 2 * expect.length + S.ENTRY_OVERHEAD && JSON.stringify(keptShared) === expect, "a child shared twice, acyclic: taken, charged as its text, and kept exactly as asked: " + JSON.stringify({ tookShared, chargedShared, kept: keptShared }));
+      check(refused.every(([, t]) => t === false) && S.historyBacklog().entries === 0, "an append of data that isn't plain JSON (a buffer, a typed array, a Map, a Set, a Date, undefined in an array): refused, not queued: " + JSON.stringify(refused));
+      check(took && charged === 2 * text + S.ENTRY_OVERHEAD && kept?.id === "wide" && kept.wide.length === 100_000, "a wide graph of empty objects (and a property undefined, as patchflow's envelopes have): charged twice its text and ENTRY_OVERHEAD, the text being all that is held, and kept as it was asked: " + JSON.stringify({ took, charged, text, kept: kept && { id: kept.id, n: kept.wide.length } }));
+    } finally { release?.(); a.close(); db.close(); }
+  }
+  // hooks never run (astra's CORR-C05-2): an own toJSON (not enumerable), one inherited through a plain-looking
+  // object's prototype, a getter, a getter changing between reads, a toJSON put on Object.prototype: each refused,
+  // no hook run; and the 8 MiB bound exact and unconditional (daybreak2's LIMIT-C05-1, astra's CORR-C05-1): an
+  // entry alone just within it taken, just past it refused, said as too large for TimeTravel, its document saved
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/hooks.ipynb");
+    const db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    const said = [], off = S.onHistoryRefused((m) => said.push(m));
+    let ran = 0;
+    const own = { time: "own", id: "own" }; Object.defineProperty(own, "toJSON", { value: () => { ran++; return { time: "own", id: "HOOK" }; }, enumerable: false });
+    const inherited = Object.create(Object.create(null, { toJSON: { value: () => { ran++; return {}; } } })); inherited.time = "inh"; inherited.id = "inh";
+    const getter = { time: "get", id: "get" }; Object.defineProperty(getter, "x", { get: () => { ran++; return 1; }, enumerable: true });
+    let reads = 0; const changing = { time: "chg", id: "chg" }; Object.defineProperty(changing, "x", { get: () => (++reads, ran++, reads > 1 ? "y".repeat(1e6) : "small"), enumerable: true });
+    // (a Proxy can't be told from its object, and its descriptor traps run when it is read; but what is written is
+    // the copy made from those descriptors, so its get trap never runs, and what is kept is what was measured)
+    let gets = 0;
+    const proxied = new Proxy({ time: "prx", id: "prx" }, { get: (t, k) => (k === "id" ? (gets++, "FROM GET TRAP") : t[k]) });
+    const tookProxy = h.append(proxied);
+    const took = [own, inherited, getter, changing].map((env) => h.append(env));
+    Object.prototype.toJSON = function () { ran++; return this; };
+    let polluted;
+    try { polluted = h.append({ time: "pol", id: "pol" }); } finally { delete Object.prototype.toJSON; }
+    await h.appending;
+    const rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    const prx = (await rawGet(db, "history", [e.ref, "prx"]))?.env;
+    check(tookProxy && gets === 0 && prx?.id === "prx", "a Proxy: what is written is the copy of what was measured, its get trap never run: " + JSON.stringify({ tookProxy, gets, prx }));
+    check(took.every((t) => t === false) && polluted === false && ran === 0 && rows.filter((r) => r !== "prx").length === 0 && S.historyBacklog().entries === 0, "hooks: an own toJSON (not enumerable), an inherited one, a getter, a changing getter, a toJSON on Object.prototype: each refused, no hook run, nothing kept: " + JSON.stringify({ took, polluted, ran, rows }));
+    // (one bounded walk (daybreak2's LIMIT-896-1): an envelope past the cap is refused as soon as its text passes
+    // it, said as too large, never walked further to choose the words: a wide one (its text past the cap a third
+    // of the way in) and one of ten million elements (past it by its length alone)
+    said.length = 0;
+    const wideOver = Array.from({ length: 2_000_000 }, () => ""), longOver = new Array(10_000_000).fill(0);
+    const tw = performance.now(), tookWide = h.append({ time: "wideO", id: "w", t: wideOver }), tookLong = h.append({ time: "longO", id: "l", t: longOver }), msOver = performance.now() - tw;
+    check(tookWide === false && tookLong === false && msOver < 1000 && said.length === 2 && said.every((m) => /too large to keep in TimeTravel/.test(m)), "an envelope past the cap, wide or long: refused as soon as it passes, said as too large: " + JSON.stringify({ tookWide, tookLong, ms: Math.round(msOver), said: said.length }));
+    // (an array Proxy whose get trap throws (astra's on 89685b0c): read through descriptors alone, its length
+    // from its own "length" descriptor: copied inertly, its get trap never run, append never throwing)
+    let pgets = 0, threw = null, tookPrx2;
+    const parr = new Proxy([1], { get: () => { pgets++; throw new Error("get trap"); } });
+    try { tookPrx2 = h.append({ time: "parr", id: "parr", patch: parr }); } catch (err) { threw = String(err); }
+    await h.appending;
+    const parrKept = (await rawGet(db, "history", [e.ref, "parr"]))?.env;
+    // (a Proxy whose descriptor trap throws: refused, never thrown on)
+    let threw2 = null, tookGopd;
+    try { tookGopd = h.append(new Proxy({ time: "gopd", id: "gopd" }, { getOwnPropertyDescriptor: () => { throw new Error("descriptor trap"); } })); } catch (err) { threw2 = String(err); }
+    check(threw2 === null && tookGopd === false, "a Proxy whose descriptor trap throws: refused, nothing thrown: " + JSON.stringify({ threw2, tookGopd }));
+    check(threw === null && tookPrx2 === true && pgets === 0 && JSON.stringify(parrKept?.patch) === "[1]", "an array Proxy whose get trap throws: copied inertly, its get trap never run, nothing thrown: " + JSON.stringify({ threw, tookPrx2, pgets, parrKept }));
+    said.length = 0;
+    const alone = Math.floor((S.HISTORY_BACKLOG.bytes - S.ENTRY_OVERHEAD) / 2), base = JSON.stringify({ time: "bigU", id: "big", t: "" }).length;
+    const under = h.append({ time: "bigU", id: "big", t: "x".repeat(alone - base) });
+    await h.appending;
+    // (the backlog empty again before the next: its counters let go once the write is done)
+    for (let i = 0; i < 100 && S.historyBacklog().entries; i++) await new Promise((r) => setTimeout(r, 10));
+    const emptyBefore = S.historyBacklog().entries === 0;
+    said.length = 0;
+    const over = h.append({ time: "bigO", id: "big", t: "x".repeat(alone - base + 1) });
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), saved = await st.save({ ...doc, baseRev: doc.rev, cells: [{ id: "c", code: "x".repeat(alone - base + 1) }] });
+    await h.appending;
+    const kept = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    check(under === true && kept.includes("bigU"), "an entry alone just within 8 MiB of charge: taken: " + JSON.stringify({ under, kept }));
+    check(emptyBefore && over === false && !kept.includes("bigO") && said.length === 1 && /too large to keep in TimeTravel/.test(said[0]) && !!saved?.saved && (await rawGet(a.main, "notebooks", e.ref)).cells[0].code.length === alone - base + 1, "…one just past it: refused, said as too large for TimeTravel, its document saved all the same: " + JSON.stringify({ over, said, saved }));
+    off(); a.close(); db.close();
+  }
+  // the OPFS witness's flush in the background: the lock held elsewhere, it doesn't wait for it (no request
+  // left pending), and is done once the lock is free
+  {
+    const o = await named(), a = await openAs(o); await a.create("/flush.txt", { content: "f" });
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    let state;
+    try {
+      const raced = await Promise.race([a.flushOpfs().then(() => "returned"), new Promise((r) => setTimeout(() => r("waiting"), 1000))]);
+      const pending = (await navigator.locks.query()).pending.filter((l) => l.name === "sagebrush-workspace").length;
+      state = { raced, pending };
+    } finally { release(); }
+    const before = await opfsW(o.name);
+    await a.flushOpfs();
+    const after = await opfsW(o.name);
+    check(state.raced === "returned" && state.pending === 0 && after.seq > (before?.seq ?? 0), "the OPFS flush, the lock held elsewhere: not waiting for it, nothing pending; done once it is free: " + JSON.stringify({ ...state, before: before?.seq, after: after.seq }));
+    a.close();
+  }
+  // append after clear: kept, after it; and the other tabs told in that order
+  {
+    const S2 = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/m.ipynb"), db = await S2.openHistoryDb(), h = new S2.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    const heard = [], bc = new BroadcastChannel("sagebrush-history"); bc.onmessage = (ev) => { if (ev.data?.id === e.ref) heard.push(ev.data.clear ? "clear" : ev.data.env?.id); };
+    h.append({ time: "one", id: "one" }); const c = h.clear(); h.append({ time: "three", id: "three" }); await c; await h.appending;
+    await new Promise((r) => setTimeout(r, 100));
+    const rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    check(rows.join() === "three" && heard.join() === "one,clear,three", "append, clear, append: the last kept, the tabs told in that order: " + JSON.stringify({ rows, heard }));
+    bc.close(); a.close(); db.close();
+  }
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+    console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

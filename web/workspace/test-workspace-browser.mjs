@@ -479,6 +479,9 @@ try {
   await sleep(300);
   await go(base + "?nb=" + encodeURIComponent(gIds.g));
   check(await until(`sagebrush.notebook?.snapshot().name === "G held" && !window.sagebrush.workspace`, 30000), "(G open, the workspace not yet: another tab holds its lock)");
+  // (a save waits for the workspace's lock at most LOCK_WAIT, then gives up, saying the files are busy, its change
+  // kept to be sent again: shortened here, as the lock is held for good meanwhile)
+  await ev(`(() => { sagebrush.lockWait.ms = 500; return 1; })()`);
   await ev(`(async () => {
     const nb = sagebrush.notebook, real = nb.store;
     let n = 0, enter, open;
@@ -494,15 +497,89 @@ try {
   })()`);
   await ev5(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const tx = r.result.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks"), q = st.get(${JSON.stringify(gIds.g)}); q.onsuccess = () => st.put({ ...q.result, cells: [{ id: "g", code: "G remote concurrent" }], rev: q.result.rev + 1 }); tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
   const gBefore = await ev(nbCount);
-  const gWait = await ev(`(async () => { __openG(); let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } return { error, ws: !!window.sagebrush.workspace }; })()`);
+  const gWait = await ev(`(async () => { __openG(); let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } return { error, ws: !!window.sagebrush.workspace, said: document.querySelector("#saved")?.textContent ?? "" }; })()`);
+  check(!/files are busy/.test(gWait.error ?? "") || /not saved: your files are busy/.test(gWait.said), "…a save given up as busy is said in the notebook's status: " + JSON.stringify(gWait.said));
   const gAfter = await ev(nbCount);
-  check(/isn't open yet/.test(gWait.error ?? "") && !gWait.ws && gAfter === gBefore, "the workspace not open yet: G's copy isn't kept unlisted, and saved() says why: " + JSON.stringify({ ...gWait, gBefore, gAfter }));
+  check(/isn't open yet|files are busy/.test(gWait.error ?? "") && !gWait.ws && gAfter === gBefore, "the workspace not open yet: G's copy isn't kept unlisted, and saved() says why: " + JSON.stringify({ ...gWait, gBefore, gAfter }));
+  // (the lock let go: saves wait for it as long as ever, behind the workspace's own opening)
+  await ev(`(() => { sagebrush.lockWait.ms = 10_000; return 1; })()`);
   await ev5(`(() => { window.__unlockG(); return 1; })()`);
   check(await until(`!!window.sagebrush.workspace`, 30000), "(the workspace open once the other tab lets go)");
   const gKept = await ev(`(async () => { let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); } const w = sagebrush.workspace, c = await w.read(${JSON.stringify(copyOf("G held") + ".ipynb")}).catch(() => null); return { error, copy: c?.content.cells[0].code ?? null, theirs: (await w.read("/G held.ipynb")).content.cells[0].code }; })()`);
   check(gKept.error === null && gKept.copy === "G held second" && gKept.theirs === "G remote concurrent", "…once it is, saved() keeps G's latest edit, listed: " + JSON.stringify(gKept));
   ws5.close();
   await send("Target.closeTarget", { targetId: t5.id });
+  // a notebook left while its save was busy (the workspace's lock held, here by the page itself): counted as left
+  // with changes not kept (the page asks before closing), and its change kept, sent again by saved(), once the
+  // lock is let go (notebook.js queueSave and busy; @sagebrush's point 3)
+  {
+    const ids = await ev(`(async () => { const w = sagebrush.workspace; const x = await w.create("/Busy X.ipynb", { content: { name: "Busy X", mode: "python", cells: [{ id: "x", code: "x0" }] } }); const y = await w.create("/Busy Y.ipynb", { content: { name: "Busy Y", mode: "python", cells: [{ id: "y", code: "y0" }] } }); return { x: x.ref, y: y.ref }; })()`);
+    await ev(`sagebrush.open(${JSON.stringify(ids.x)}).then(() => 1)`);
+    check(await until(`sagebrush.notebook?.snapshot().name === "Busy X"`, 10000), "(Busy X open)");
+    const busyLeft = await ev(`(async () => {
+      const nb = sagebrush.notebook;
+      sagebrush.lockWait.ms = 300;
+      await nb.saved().catch(() => {});
+      await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { window.__unlockBusy = g; r(); })));
+      nb.setInput(nb.cells()[0], "x busy"); nb.flush();
+      // (every save of X given up before Y is shown: none still waiting for the lock, to go through once it is free)
+      await nb.saved().catch(() => {});
+      await new Promise((r) => setTimeout(r, 600));
+      const said = document.querySelector("#saved")?.textContent ?? "";
+      await sagebrush.open(${JSON.stringify(ids.y)});
+      return { said, shown: nb.snapshot().name, left: nb.leftOutstanding };
+    })()`);
+    const asks = await unloadAsks();
+    const busyKept = await ev(`(async () => {
+      window.__unlockBusy(); sagebrush.lockWait.ms = 10_000;
+      let error = null; try { await sagebrush.notebook.saved(); } catch (e) { error = String(e?.message ?? e); }
+      const w = sagebrush.workspace;
+      return { error, x: (await w.read("/Busy X.ipynb")).content.cells[0].code, left: sagebrush.notebook.leftOutstanding };
+    })()`);
+    check(/files are busy/.test(busyLeft.said) && busyLeft.shown === "Busy Y" && busyLeft.left === 1 && asks === true, "a notebook left while its save was busy: said, counted as left with changes not kept, and closing the page asks: " + JSON.stringify({ ...busyLeft, asks }));
+    check(busyKept.error === null && busyKept.x === "x busy" && busyKept.left === 0, "…once the lock is let go, saved() sends it again: kept: " + JSON.stringify(busyKept));
+  }
+  // the editor itself (notebook.js), with stores of the test's own: a save refused as busy (the error's busy flag,
+  // as notebook/stores.js gives it), the document then left for another: counted as left until it is sent again,
+  // and sent again, as it was, by saved() once the store takes it
+  {
+    const r = await ev(`(async () => {
+      const nb = sagebrush.notebook, saves = [];
+      let busy = true;
+      const mk = (name) => { let doc = { name, mode: "python", cells: [{ id: "c", code: name + "0" }] }, rev = 1; return { load: async () => ({ ...doc, rev }), save: async (d) => { if (busy) throw Object.assign(new Error("your files are busy (test)"), { busy: true }); saves.push([name, d.cells[0].code]); doc = d; rev++; return { saved: "saved", rev }; }, subscribe: () => () => {} }; };
+      const A = mk("A"), B = mk("B");
+      await nb.attach(A);
+      nb.setInput(nb.cells()[0], "A busy"); nb.flush();
+      let first = null; try { await nb.saved(); } catch (e) { first = String(e?.message ?? e); }
+      await nb.attach(B);
+      const left = nb.leftOutstanding;
+      busy = false;
+      let error = null; try { await nb.saved(); } catch (e) { error = String(e?.message ?? e); }
+      return { first, left, error, saves, after: nb.leftOutstanding };
+    })()`);
+    check(/busy/.test(r.first ?? "") && r.left === 1 && r.error === null && r.saves.some(([n, c]) => n === "A" && c === "A busy") && r.after === 0, "the editor: a busy save, its document left: counted as left, then sent again by saved() and kept: " + JSON.stringify(r));
+    // (astra's CORR-9D7-1: A1 held, then refused busy; A2, asked for meanwhile, saved; A left: A1 is never sent
+    // again over A2, and nothing is left outstanding)
+    const r2 = await ev(`(async () => {
+      const nb = sagebrush.notebook, writes = [];
+      let release, n = 0;
+      const gate = new Promise((g) => (release = g));
+      const mk = (name, gated) => { let doc = { name, mode: "python", cells: [{ id: "c", code: name + "0" }] }, rev = 1; return { load: async () => ({ ...doc, rev }), save: async (d) => { if (gated && ++n === 1) { await gate; throw Object.assign(new Error("your files are busy (test)"), { busy: true }); } if (d.baseRev !== undefined && d.baseRev !== rev) return { conflict: { ...doc, rev } }; writes.push([name, d.cells[0].code, d.baseRev]); doc = d; rev++; return { saved: "saved", rev }; }, subscribe: () => () => {} }; };
+      const A = mk("A", true), B = mk("B", false);
+      await nb.attach(A);
+      nb.setInput(nb.cells()[0], "A1"); nb.flush();
+      await new Promise((r) => setTimeout(r, 50));
+      nb.setInput(nb.cells()[0], "A2"); nb.flush();
+      await nb.attach(B);
+      release();
+      let error = null; try { await nb.saved(); } catch (e) { error = String(e?.message ?? e); }
+      await new Promise((r) => setTimeout(r, 100));
+      try { await nb.saved(); } catch (e) { error = error ?? String(e?.message ?? e); }
+      return { error, writes, left: nb.leftOutstanding };
+    })()`);
+    check(r2.error === null && JSON.stringify(r2.writes.filter((w) => w[0] === "A").map((w) => w[1])) === '["A2"]' && r2.left === 0, "the editor: an older busy save superseded by a newer one saved is never sent again over it: " + JSON.stringify(r2));
+    await ev(`sagebrush.workspace.stat("/Busy Y.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+  }
   // Undo of Move to Trash: that file, put in Trash that time; not another
   // since put there under the same name (CORR-0B0-3)
   await ev(`${W}.create("/undo.txt", { content: "original" }).then(() => 1)`);
@@ -531,9 +608,9 @@ try {
     window.__rpT = w.create(cur.path, { content: { name: "Replacement", mode: "python", cells: [] } });
     return { path: cur.path, ref };
   })()`);
-  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 2)`);
+  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace" && x.mode === "exclusive").length >= 2)`);
   await typeTitle("Typed title");
-  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 3)`, 8000), "(the typed title's rename waiting third for the lock)");
+  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace" && x.mode === "exclusive").length >= 3)`, 8000), "(the typed title's rename waiting third for the lock)");
   await ev(`(async () => { __releaseT(); await __heldT; await __mvT; await __rpT; await new Promise((r) => setTimeout(r, 2500)); return 1; })()`);
   const trAfter = await ev(`(async () => { const l = await ${W}.list("/", { recursive: true }); return { typed: l.find((e) => e.path === "/Typed title.ipynb")?.ref ?? null, there: l.find((e) => e.path === ${JSON.stringify(tr.path)})?.ref ?? null }; })()`);
   check(trAfter.typed === tr.ref && trAfter.there && trAfter.there !== tr.ref, "a typed title's rename waiting while its notebook moved and another took its path: this notebook renamed, the other untouched: " + JSON.stringify({ ...trAfter, tr }));
