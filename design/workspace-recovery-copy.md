@@ -3,7 +3,13 @@
 *Status: design note, for astra and daybreak2, then William. Docs only. @sagebrush-board, Oct 20.*
 
 - This is part B of the browser durability design, moved out of design/workspace-durability.md (revision 2, 7b167969) so that part A, detection, can clear and be built on its own.
-- **Its next revision is in progress.** It answers astra's points on 7b167969: immutable capture at commit, pending groups as GC roots, explicit document checkpoints, and the manifest pinned through a restore. It also answers daybreak2's LIMIT-DUR-4: whole-group admission against the ceiling.
+- **Revision 3** answers astra's points on 7b167969:
+  - capture staged in the commit (B.2);
+  - checkpoints, a paged snapshot with its tail (B.3);
+  - pending groups as GC roots (B.5);
+  - explicit document checkpoints and ages (B.4);
+  - the manifest pinned through a restore, and slot verification and retention (B.3, B.7).
+- It also answers daybreak2's LIMIT-DUR-4: whole-group admission, all or none (B.3a).
 - The finding and the promise are design/workspace-durability.md §1 and §2.
 
 
@@ -14,13 +20,18 @@
 **The recovery copy is a second copy in OPFS that follows it.**
 - It is written by **one writer**: the tab holding the Web Lock `sagebrush-recovery`, as the sync sender is one tab.
 - It covers a committed prefix of the workspace's transactions. Its **authoritative point** is the last transaction group whose every frame and every referenced byte is published under the current manifest (B.3).
+- **Documents' content has points of its own** (B.4). A restore reports the index's point and each document's separately.
 - It lags by at most the writer's interval (10 s) while it runs, and the Storage panel shows its point and age.
 
 ### B.2 What it holds
 
 The copy holds resulting records, never ops (astra: local ops aren't reducer inputs):
 - **Transaction groups.** Each group is the after-images, or the tombstones, of every record one committed IndexedDB transaction changed.
-- **Read from the committed state.** The writer reads each transaction's changed records from IndexedDB, after it committed. A per-store adapter turns each record into its frame, so a folder move, an emptied Trash or a discard is covered like any other change.
+- **Captured in the commit (astra, on 7b167969).** The transaction itself writes its group into an IndexedDB store, `rcStage`, keyed by its seq. That is the after-image of every index record it changed, keyed by the record's key (a path, so a move is the old keys' tombstones and the new keys' records), made by a per-store adapter.
+  - So a group is exactly that transaction's result. A later transaction can't change what it says, which reading the records again afterwards couldn't promise.
+  - The writer moves staged groups into OPFS frames in order, and deletes each from `rcStage` only once its frames are published under a manifest.
+  - Data files' bytes and documents' content are named by hash, not copied into `rcStage` (B.4, B.5).
+  - So a folder move, an emptied Trash or a discard is covered like any other change.
 - **What a frame records.** Each record's full fields: path, kind, ref, fid, sha256, size, trashed, made, mode, nkey, created, updated and rev.
 
 **Covered:**
@@ -52,9 +63,16 @@ The copy holds resulting records, never ops (astra: local ops aren't reducer inp
 
 **Reading.** Recovery reads at most 64 KiB per line. The committed prefix ends at the first frame that is torn, fails its checksum, is oversized, or has a gap in `seq`. Everything after it is ignored and reported, never applied in part.
 
-**Snapshots.** One is taken every 10,000 transactions or every 8 MiB of segments, whichever comes first.
-- It is built in pages of 500 records into a temporary file, then flushed. There is never a whole-tree `JSON.stringify`, and at most one page is in memory.
-- It is published by the manifest, then the segments it covers are deleted.
+**Checkpoints.** One is taken every 10,000 transactions or every 8 MiB of segments, whichever comes first, or when B.3a asks for one.
+
+A checkpoint is a snapshot plus its tail:
+- **Its start, S0.** The snapshot begins at seq S0, read from the workspace's counter inside one read transaction.
+- **Its pages.** It reads IndexedDB in pages of 500 records into a temporary file, flushed. A page read later may hold a later state, such as folder /a from before a move with /b/x from after it.
+- **Its end, S1.** It ends at seq S1, the counter when the last page was read.
+- **Its tail.** The checkpoint is the snapshot plus the staged groups (S0, S1]. Groups are per-key assignments, so applying the tail over any mix of states between S0 and S1 gives exactly the state at S1.
+- **Keeping the tail.** `rcStage` keeps the groups from S0 until the checkpoint is published.
+- **Bounds.** At most one page is in memory, with no whole-tree `JSON.stringify`.
+- **Publication.** A checkpoint is published by a manifest slot naming the snapshot, its S0 and S1, and the tail's frames. Then the segments it covers are deleted.
 
 **The manifest.**
 - **Two slots,** `manifest-a.json` and `manifest-b.json`. Each records the snapshot's file, its seq and checksum, the segments after it, and the blob set it needs.
@@ -68,6 +86,16 @@ The copy holds resulting records, never ops (astra: local ops aren't reducer inp
 
 The person's saves are never refused or slowed by the copy.
 
+### B.3a A group too big for the journal (LIMIT-DUR-4)
+
+**Admission.** A group is admitted whole or not at all. In the committing transaction, its encoded size is counted as its records are staged; a record is at most about 2 KiB, since a path is at most 1,024 characters.
+
+**Small groups.** A group that would take more than 4 MiB, or more than the journal's room left under its 64 MiB ceiling, isn't staged record by record. The transaction stages one constant-size record instead, `{seq, checkpoint: needed}`. The writer then makes a checkpoint (B.3) whose S1 is at or past that seq, instead of appending the group. A 100,000-entry folder move is that case.
+
+**Checkpoints without room.** The checkpoint needs room for a whole snapshot. Without that room, reserved first (B.6), nothing is appended, and the copy stays at its prior point, shown **stale**. Its later groups aren't kept either: once stale, `rcStage` holds only the `checkpoint: needed` record, so it can't grow.
+
+**Unpublished parts.** Anything in OPFS that no valid manifest slot or in-progress checkpoint names is deleted when the writer starts, in pages: temporary snapshot files, and frames past the published point.
+
 **Before building on OPFS:** feature tests in the writer's worker for OPFS, sync access handles, `flush()` and, where used, `move()`. Without them, the copy is "not available in this browser", shown, and part A still works.
 
 ### B.4 Documents' latest content
@@ -77,6 +105,10 @@ The person's saves are never refused or slowed by the copy.
 **What.** Its content goes to `/sagebrush/docs/<sha256>.json`: serialized and hashed in bounded chunks, within the document's own size cap (a board's 64 MiB). The transaction group names the snapshot by its hash.
 
 **When it is deleted.** An old document snapshot is deleted only when no manifest-retained snapshot or segment names it.
+
+**Its own checkpoint (astra).** A document's snapshot records its own point: the document's revision and the time it was taken. The manifest lists each document's latest snapshot with that point.
+- A restore brings each document back as of its own point, which may be up to a minute (or, while paused, more) older than the index's point. It names each document whose snapshot is older than its last save in the restored index.
+- A document's snapshot never stands for the global point.
 
 ### B.5 Data files' bytes, content-addressed and immutable
 
@@ -91,7 +123,13 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
 **The rules:**
 - **Never changed:** a blob is never overwritten, so an older recovery point's bytes stay as long as it does (astra's A-then-B case).
 - **Stored once:** these are the workspace's own bytes, not a duplicate.
-- **Deletion:** by reference count, over the index's entries, the versions and every manifest-retained snapshot and segment. A blob goes only when nothing retained names it.
+- **Deletion:** a blob goes only when no root names it. The roots are:
+  - the index's entries and the versions;
+  - every group still in `rcStage`, staged but not yet published (astra: a file's index and version references can go before its group is published);
+  - both valid manifest slots and everything they retain;
+  - an in-progress checkpoint.
+
+  Deletion runs in pages, holding the workspace's lock and the recovery lock, so no new reference appears while a page is decided.
 - **The migration:** 1a's, again: batched, reserved, crash-tested, and the old copy dropped after the hash check.
 
 **Until this step is built,** the copy covers the index and documents only. A restore then lists data files whose bytes it doesn't have, with "restore from sync or an export".
@@ -114,7 +152,13 @@ The copy counts in "Storage in this browser" as its own line, **recovery copy**:
 
 **Startup** reads the two markers and the two manifest slots (four small files) and IndexedDB's metadata. It never scans segments.
 
-**A restore** runs in pages of 500 records and yields between them, showing progress ("restoring 41,000 of 100,000 entries"). It writes into a new IndexedDB generation, verifies it against the manifest's counts and hashes, and only then makes it the workspace. The copy is kept until the person has the workspace back.
+**A restore** runs in pages of 500 records and yields between them, showing progress ("restoring 41,000 of 100,000 entries"). It writes into a new IndexedDB generation, verifies it against the manifest's counts and hashes, and only then makes it the workspace (part A's reset protocol, A.3a). The copy is kept until the person has the workspace back.
+
+**The manifest is pinned through a restore.**
+- The restore holds the recovery lock for its whole length, and writes `/sagebrush/restore.json` naming the slot it reads from. No writer, checkpoint or deletion runs meanwhile; the workspace is quarantined anyway (A.3).
+- A restore interrupted by a kill finds that file at the next start and goes on, or starts again, from the same slot.
+
+**Verified slots.** A slot is valid if its checksum holds and every file it names exists with its recorded size and checksum: the snapshot's pages, the tail's and segments' frames, the documents' snapshots, and the blobs. A slot that fails is never used and never deleted. The other slot is used, and the failure is reported.
 
 ### B.8 The export reminder
 
@@ -125,6 +169,22 @@ The copy counts in "Storage in this browser" as its own line, **recovery copy**:
 `navigator.storage.persist()` is asked once the workspace holds anything the person made. It guards against eviction, not corruption or clearing. The panel says whether it was granted.
 
 ### B.9 Tests
+
+**Capture at commit.** A transaction T1, then T2 overwriting, deleting and renaming T1's records before the writer runs. The copy still restores T1's state at T1's point.
+
+**Checkpoint consistency.** Moves and writes during a checkpoint's pages (folder /a before, child /b/x after). The restored state is exactly S1's.
+
+**Over-size groups.** A 100,000-entry move with near-limit paths:
+- with an empty journal and with a nearly full one, a checkpoint is made instead, all or none;
+- without room for the checkpoint, the copy goes stale at its prior point, appends nothing, and `rcStage` holds one record.
+
+A kill during that checkpoint leaves unpublished parts, which are reclaimed at the next start.
+
+**GC with pending groups.** A file deleted, and its version dropped, while its group is still staged. Its blob stays until the group is published and nothing retains it.
+
+**Restore.** A kill during a restore: it resumes from the same slot. A corrupt newer slot: the older valid one is used.
+
+**Documents.** A document's snapshot older than the index's point: reported as such, by name.
 
 **Interruption at every boundary.** Each boundary is interrupted by a kill:
 - after a blob's flush, its name, or its verification;
@@ -157,8 +217,8 @@ The copy counts in "Storage in this browser" as its own line, **recovery copy**:
 
 | # | Step | Size |
 |---|---|---|
-| B1 | The recovery copy's writer: transaction groups, framing, segments, snapshots, the manifest, room, paused and stale (B.1 to B.3, B.6) | 4 days |
+| B1 | The recovery copy's writer: capture in the commit (`rcStage`), framing, segments, checkpoints with their tails, whole-group admission, the manifest, room, paused and stale (B.1 to B.3a, B.6) | 5 days |
 | B2 | Documents' latest content (B.4) | 1 day |
-| B3 | Restore: paged, verified, sync left off (B.7) | 2 days |
+| B3 | Restore: paged, pinned, verified, sync left off (B.7) | 2.5 days |
 | B4 | Bytes in OPFS, content-addressed, with deletion by reference and the migration (B.5) | 4 days |
 | B5 | The reminder and `persist()` (B.8) | 0.5 days |
