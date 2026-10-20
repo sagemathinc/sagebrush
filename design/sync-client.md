@@ -176,7 +176,9 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
 
 **As built (step 2b-1, web/workspace/sync-outbox.ts):**
 - **One transaction per scan page.** The lease is checked, records are made with the next dseqs, the watermark is advanced past every op looked at, and the next dseq and the totals are written, all in one transaction. A cut at any of its awaits leaves all of it or none.
-- **The bound** counts each record as the workspace's inert JSON writer writes it, two bytes a character (as TimeTravel's backlog counts an entry). An accepted record is counted with its seq.
+- **The bound** counts each record as the workspace's inert JSON writer writes it, two bytes a character (as TimeTravel's backlog counts an entry).
+  - Each record is admitted at its charge: its size accepted with the largest seq acked() takes (a non-negative safe integer, sixteen digits at most, checked at the boundary).
+  - The bound is kept on the sum of charges, so `bytes` (what is held now, an accepted record with its seq) $\le$ `charged` $\le$ 1 MiB always (daybreak2's LIMIT-855-1).
 - **A full outbox is said, never silent.** `status().full` holds when, and at what totals, a scan last stopped at a bound, until a page goes on. The foot and the Sync panel show it (step 5).
 - **Not sent:**
   - ops applied from the server (`origin: "server"`);
@@ -188,6 +190,7 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
   - Every change to an outbox, and every read of what to send, checks the lease in its own transaction. So nothing taken under an older lease is sent, or changes anything, across a switch mid-flight (`Fenced`).
   - The sender sends records only on the connection made under their lease (step 3).
 - **dropOps** never passes the lowest scan watermark of any namespace.
+- **Known, for a later lifecycle step:** each namespace's state (watermark, sequence, outbox, at most 1 MiB) is kept on purpose, so turning sync on again resumes it. Its total across many namespaces has no global cap yet. A later step garbage-collects old namespaces' outboxes after an account or generation change, with a cap (daybreak2).
 
 **Tests:**
 - a crash after a local change, before the scan;

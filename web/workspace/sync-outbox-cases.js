@@ -168,6 +168,43 @@ async function decisions() {
   w.close();
 }
 
+async function acceptBound() {
+  // (an outbox filled near maxBytes, every record then accepted with the largest seq there is: what it holds
+  // never past the bound, the totals what it holds (daybreak2's LIMIT-855-1)); and seqs out of range refused
+  const w = await fresh();
+  const ob = new W.Outbox(w, await W.switchTo(w, NS_A));
+  await ob.begin(await w.lastSeq());
+  const was = { ...W.OUTBOX };
+  try {
+    for (let i = 0; i < 12; i++) await w.create(`/m${i}.txt`, { content: "m" });
+    W.OUTBOX.maxBytes = 4000;
+    const r = await ob.scan();
+    const before = await ob.records();
+    await ob.acked(before.map((x) => ({ dseq: x.dseq, seq: Number.MAX_SAFE_INTEGER })));
+    const recs = await ob.records(), st = await ob.status();
+    const held = recs.reduce((t, x) => t + 2 * JSON.stringify(x).length, 0);
+    check(r.full && recs.length === before.length && recs.every((x) => x.accepted === Number.MAX_SAFE_INTEGER) && held === st.bytes && st.bytes <= W.OUTBOX.maxBytes && st.charged <= W.OUTBOX.maxBytes && st.bytes <= st.charged, "filled near the bound, every record accepted with the largest seq: what is held never past it, the totals what is held: " + J({ n: recs.length, bytes: st.bytes, charged: st.charged, max: W.OUTBOX.maxBytes }));
+    // (a reload: the totals still exactly what the records hold and may come to hold; then every record confirmed:
+    // all of it back to nothing)
+    const nm = { name: w.ws.name, mainName: w.main?.name };
+    const v = await W.Workspace.open(nm);
+    const ov = new W.Outbox(v, ob.lease), rv = await ov.records(1, 10000), sv = await ov.status();
+    const exact = sv.bytes === rv.reduce((t, x) => t + W.recordBytes(x), 0) && sv.charged === rv.reduce((t, x) => t + W.chargeOf(x), 0) && sv.count === rv.length;
+    await ov.confirmed(rv.slice(0, 3).map((x) => x.dseq));
+    const sp = await ov.status(), rp = await ov.records(1, 10000);
+    const partial = sp.bytes === rp.reduce((t, x) => t + W.recordBytes(x), 0) && sp.charged === rp.reduce((t, x) => t + W.chargeOf(x), 0) && sp.count === rp.length;
+    v.close();
+    check(exact && partial, "…after a reload, and after some are confirmed, the totals exactly what the records hold and are charged: " + J({ bytes: sv.bytes, charged: sv.charged, count: sv.count, afterConfirm: sp }));
+    const snapshot = J({ st: await ob.status(), recs: await ob.records() });
+    const bad = [];
+    for (const d of [{ dseq: 1, seq: Number.MAX_SAFE_INTEGER + 1 }, { dseq: 1, seq: -1 }, { dseq: 1, seq: 1.5 }, { dseq: 1, seq: "3" }, { dseq: 0, seq: 1 }, { dseq: 1, code: "x".repeat(65) }]) bad.push(!!(await fails(ob.acked([d]))));
+    check(bad.every(Boolean) && J({ st: await ob.status(), recs: await ob.records() }) === snapshot, "a seq or dseq out of range (past sixteen digits, negative, fractional, a string), or a code too long: refused, nothing changed: " + J(bad));
+  } finally {
+    Object.assign(W.OUTBOX, was);
+  }
+  w.close();
+}
+
 async function fencing() {
   const w = await fresh();
   const la = await W.switchTo(w, NS_A), a = new W.Outbox(w, la);
@@ -231,7 +268,7 @@ async function dropping() {
 }
 
 export async function run() {
-  for (const f of [scanning, cuts, pages, fillDrain, decisions, fencing, senders, dropping]) {
+  for (const f of [scanning, cuts, pages, fillDrain, decisions, acceptBound, fencing, senders, dropping]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;
