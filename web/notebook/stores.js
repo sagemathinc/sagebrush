@@ -131,23 +131,68 @@ export const LOCK_WAIT = { ms: 10_000 };
 export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
 // (bytes charged for each append beside its JSON text: the queue's closure, its promise, the counters)
 export const ENTRY_OVERHEAD = 256;
-// (whether `v` is plain JSON data: null, booleans, finite numbers, strings, arrays and plain objects, walked
-// without recursion; a property that is undefined too, which JSON leaves out as an object without it would be
-// (patchflow's envelopes have `file: undefined`); anything else (undefined in an array, which JSON makes null, a
-// function, a buffer, a typed array, a Map, a Set, a Date, a class's object) is not)
-function plainJson(v) {
-  const stack = [v];
-  while (stack.length) {
-    const x = stack.pop();
-    if (x === null || typeof x === "string" || typeof x === "boolean") continue;
-    if (typeof x === "number") { if (!Number.isFinite(x)) return false; continue; }
-    if (typeof x !== "object") return false;
-    if (Array.isArray(x)) { if (Object.getPrototypeOf(x) !== Array.prototype) return false; for (let i = 0; i < x.length; i++) stack.push(x[i]); continue; }
+// (one entry's JSON text at most, in characters, taken when nothing else waits: a large document's first version)
+export const HISTORY_ENTRY_MAX = 32 * 2 ** 20;
+// (whether `v` would be plain JSON data at all, its size aside: to tell a refusal for size, which is said, from
+// one for its shape)
+const plainShape = (v) => jsonTextSize(v, Infinity) >= 0;
+// (the length of `v`'s JSON text, exactly, if it is plain JSON data whose text is at most `max` characters; else
+// -1.  Plain: null, booleans, finite numbers, strings, arrays and plain objects; a property that is undefined
+// too, which JSON leaves out (patchflow's envelopes have `file: undefined`); anything else (undefined in an array,
+// a function, a buffer, a typed array, a Map, a Set, a Date, a class's object) is not.  Walked without recursion,
+// each object once: one met again on the path being walked is a cycle, refused; one met again after its walk
+// (shared, in a DAG) counts its size, remembered, without being walked again, so the walk is linear in the
+// distinct objects and a DAG costs what its text would, refused before any of it is written once that passes
+// `max` (daybreak2's LIMIT-7865-1, astra's CORR-786-1))
+function jsonTextSize(v, max) {
+  const leaf = (x) => {
+    if (x === null) return 4;
+    if (typeof x === "string") return JSON.stringify(x).length;
+    if (typeof x === "boolean") return x ? 4 : 5;
+    if (typeof x === "number") return Number.isFinite(x) ? String(x).length : -1;
+    return typeof x === "object" ? null : -1;
+  };
+  const first = leaf(v);
+  if (first !== null) return first >= 0 && first <= max ? first : -1;
+  const done = new WeakMap(), active = new WeakSet();
+  // (a frame: the object, its keys (an array's: none), the next child, and its text's length so far)
+  const open = (x) => {
+    if (Array.isArray(x)) return Object.getPrototypeOf(x) === Array.prototype ? { x, keys: null, n: x.length, i: 0, sum: 2 + Math.max(0, x.length - 1) } : null;
     const proto = Object.getPrototypeOf(x);
-    if (proto !== Object.prototype && proto !== null) return false;
-    for (const k of Object.keys(x)) if (x[k] !== undefined) stack.push(x[k]);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const keys = Object.keys(x).filter((k) => x[k] !== undefined);
+    let sum = 2 + Math.max(0, keys.length - 1);
+    for (const k of keys) sum += JSON.stringify(k).length + 1;
+    return { x, keys, n: keys.length, i: 0, sum };
+  };
+  const root = open(v);
+  if (!root || root.sum > max) return -1;
+  active.add(v);
+  const stack = [root];
+  while (stack.length) {
+    const f = stack[stack.length - 1];
+    if (f.i === f.n) {
+      stack.pop();
+      active.delete(f.x);
+      done.set(f.x, f.sum);
+      if (stack.length && (stack[stack.length - 1].sum += f.sum) > max) return -1;
+      continue;
+    }
+    const c = f.keys ? f.x[f.keys[f.i]] : f.x[f.i];
+    f.i++;
+    if (!f.keys && c === undefined) return -1;
+    const l = leaf(c);
+    if (l === -1) return -1;
+    if (l !== null) { if ((f.sum += l) > max) return -1; continue; }
+    if (active.has(c)) return -1;
+    const d = done.get(c);
+    if (d !== undefined) { if ((f.sum += d) > max) return -1; continue; }
+    const g = open(c);
+    if (!g || g.sum > max) return -1;
+    active.add(c);
+    stack.push(g);
   }
-  return true;
+  return done.get(v);
 }
 const backlog = { entries: 0, bytes: 0 };
 const refusedSubs = new Set();
@@ -405,7 +450,16 @@ export class IdbPatchStore {
     // changes the envelope later, and whatever its shape; parsed only at its turn.  Plain JSON data only: one
     // that isn't (a buffer, a Map, a class's object) would be kept as something else, or cost more than its
     // text: refused.  daybreak2's LIMIT-9D7-2 and LIMIT-5B7-1)
-    if (!plainJson(env)) { console.warn("history: an entry that isn't plain JSON data, not kept"); return false; }
+    // (its text's length known first, without writing it: no larger than what the backlog can still take, or,
+    // with nothing waiting, than HISTORY_ENTRY_MAX: one entry of a large document's history is never refused for
+    // its size alone)
+    const room = backlog.entries ? Math.floor((HISTORY_BACKLOG.bytes - backlog.bytes - ENTRY_OVERHEAD) / 2) : HISTORY_ENTRY_MAX;
+    const length = jsonTextSize(env, this.owned ? room : HISTORY_ENTRY_MAX);
+    if (length < 0) {
+      console.warn("history: an entry that isn't plain JSON data, or too large to wait, not kept");
+      if (this.owned && plainShape(env)) for (const f of refusedSubs) try { f(HISTORY_REFUSED); } catch {}
+      return false;
+    }
     let text;
     try { text = JSON.stringify(env); } catch { return false; }
     env = undefined;
