@@ -78,6 +78,8 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
+/** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
+const PLAN_RETRY_MS = 5000;
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
@@ -186,8 +188,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * recorded that generation in D1 (the inventory finds an account's objects
    * by its row, CORR-00F-1) and confirmed it.  An account registering or on
    * answers its own generation; one being deleted refuses until it's done.
+   *
+   * The plan comes first: enable never answers for an account whose plan
+   * CoCalc hasn't told (`busy`, "CoCalc can't be reached"), and never turns
+   * sync on for a plan without it (`forbidden`, "sync isn't available for
+   * this account").  An account already on answers with the state its plan
+   * gives it: `readonly` once the plan has no sync (§6.2).
    */
   async enable(a: { account: string; hash: string }): Promise<Result<{ state: string; generation: number }>> {
+    // (before the transaction, which can't await: an account already here refreshes its own limits,
+    // which also applies them; a new one only asks, storing nothing until it registers.  Everything is
+    // checked again in the transaction, after the await)
+    let plan: Limits | null = null;
+    if (allowed(this.env, a.account) && !this.deleted()) {
+      plan = this.exists() && this.get("account_id") === a.account ? await this.limits().catch(() => null) : await this.sharedPlan(a.account, false);
+    }
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
@@ -196,8 +211,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (had !== undefined) {
         if (had !== a.account) throw new SyncError("forbidden", "not this account");
         if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
+        if (!this.get("limits")) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: PLAN_RETRY_MS });
         return { state: this.state(), generation: Number(this.get("generation")) };
       }
+      if (!plan) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: PLAN_RETRY_MS });
+      if (!plan.sync.enabled) throw new SyncError("forbidden", "sync isn't available for this account");
       const generation = Number(this.get("retired") ?? 0) + 1;
       for (const s of SCHEMA) this.sql.exec(s);
       this.set("account_id", a.account);
@@ -205,8 +223,59 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.set("generation", generation);
       this.set("created", Date.now());
       this.set("state", "registering");
+      // (the plan just checked is the one kept: a second enable meanwhile, and the confirm, find it)
+      this.storeLimits(plan, plan.issued ?? Date.now());
+      this.set("limits_issued", plan.issued ?? 0);
+      this.set("limits_fetched", Date.now());
       return { state: "registering", generation };
     }));
+  }
+
+  /**
+   * The page's question (GET /api/sync/v1/status): whether this account may
+   * turn sync on, or how it is now.  It writes nothing, here or anywhere: an
+   * account never synced is answered from CoCalc's plan, asked and stored
+   * nowhere (a plan CoCalc gave is kept in memory for a minute, so a page
+   * that asks often doesn't ask CoCalc as often); an account on answers its
+   * state and generation.
+   *   - `available: false`: `reason` is "plan_has_no_sync", "cocalc_unreachable"
+   *     or "deleted" (CoCalc deleted the account);
+   *   - `state`: "off" (never on, or its data deleted), "registering", "active",
+   *     "readonly" or "deleting".
+   */
+  async status(a: { account: string }): Promise<{ available: boolean; reason?: string; state: string; generation?: number; retry_after?: number }> {
+    if (!allowed(this.env, a.account)) return { available: false, reason: "not_allowlisted", state: "off" };
+    if (this.deleted()) return { available: false, reason: "deleted", state: "off" };
+    if (this.exists() && this.get("account_id") === a.account) return { available: true, state: this.state(), generation: Number(this.get("generation")) };
+    const plan = await this.sharedPlan(a.account, true);
+    if (!plan) return { available: false, reason: "cocalc_unreachable", state: "off", retry_after: PLAN_RETRY_MS };
+    if (!plan.sync.enabled) return { available: false, reason: "plan_has_no_sync", state: "off" };
+    return { available: true, state: "off" };
+  }
+
+  // ---- CoCalc's plan for an account not registered here (enable, status), stored nowhere: one fetch at
+  // a time in this object, whoever asks, and none again for PLAN_RETRY_MS after CoCalc couldn't answer;
+  // a plan it gave is remembered a minute, for status only (LIMIT-SYNC-STATUS-1)
+  private planSeen?: { account: string; at: number; plan: Limits };
+  private planFetch?: { account: string; p: Promise<Limits | null> };
+  private planFailed?: { account: string; until: number };
+  private sharedPlan(account: string, remembered: boolean): Promise<Limits | null> {
+    const now = Date.now();
+    const test = testMode(this.env);
+    if (remembered && this.planSeen?.account === account && now - this.planSeen.at <= (test ? 1000 : 60_000)) return Promise.resolve(this.planSeen.plan);
+    if (this.planFetch?.account === account) return this.planFetch.p;
+    if (this.planFailed?.account === account && now < this.planFailed.until) return Promise.resolve(null);
+    const p: Promise<Limits | null> = this.planOf(account)
+      .then((plan) => {
+        if (plan) this.planSeen = { account, at: Date.now(), plan };
+        else this.planFailed = { account, until: Date.now() + (test ? 500 : PLAN_RETRY_MS) };
+        return plan;
+      })
+      .finally(() => {
+        if (this.planFetch?.p === p) this.planFetch = undefined;
+      });
+    this.planFetch = { account, p };
+    return p;
   }
 
   /**
@@ -784,11 +853,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const env = this.env;
     if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : cached ? JSON.parse(cached) : null;
     try {
-      const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
-      u.searchParams.set("account_id", this.get("account_id")!);
-      const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
-      if (!r.ok) throw new Error(String(r.status));
-      const l = checkLimits(await r.json());
+      const l = await this.askCoCalc(this.get("account_id")!);
       // (after the await: what is stored now, since a notice may have landed meanwhile; a newer one
       // stands, never undone by a fetch, §6, CORR-5E2-3)
       const now = this.get("limits");
@@ -807,6 +872,20 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const now = this.get("limits");
       return now ? JSON.parse(now) : null;
     }
+  }
+  /** CoCalc's plan for an account, as it answers now; throws if it can't be reached or answers badly. */
+  private async askCoCalc(account: string): Promise<Limits> {
+    const u = new URL("/api/v2/sagebrush/limits", this.env.COCALC_ORIGIN);
+    u.searchParams.set("account_id", account);
+    const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + this.env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error(String(r.status));
+    return checkLimits(await r.json());
+  }
+  /** The plan of an account not registered here, stored nowhere: null if CoCalc can't say (§6). */
+  private async planOf(account: string): Promise<Limits | null> {
+    const env = this.env;
+    if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
+    return this.askCoCalc(account).catch(() => null);
   }
   private used(): number {
     return Number(this.get("used_bytes") ?? 0);

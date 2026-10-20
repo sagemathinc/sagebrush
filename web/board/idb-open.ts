@@ -6,7 +6,7 @@
 // empty, rather than the board waiting on it (the board's code never ran:
 // web/board/test-idb-stall.mjs).  The connection closes itself when another
 // page asks for a version change, so this page never holds one up.
-export function openDb(name: string, version: number, upgrade: (db: IDBDatabase, oldVersion: number) => void, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
+export function openDb(name: string, version: number, upgrade: (db: IDBDatabase, oldVersion: number, tx: IDBTransaction) => void, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
   return new Promise((ok, no) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -15,7 +15,7 @@ export function openDb(name: string, version: number, upgrade: (db: IDBDatabase,
       no(new Error(`IndexedDB ${name} did not open in ${ms / 1000} s`));
     }, ms);
     const r = indexedDB.open(name, version);
-    r.onupgradeneeded = (ev) => upgrade(r.result, ev.oldVersion);
+    r.onupgradeneeded = (ev) => upgrade(r.result, ev.oldVersion, r.transaction!);
     r.onsuccess = () => {
       const db = r.result;
       db.onversionchange = () => { db.close(); onClose(); };
