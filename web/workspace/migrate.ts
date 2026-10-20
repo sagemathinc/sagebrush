@@ -144,6 +144,10 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
   const fileKeys = w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : [];
   const boardIds = (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[];
   const trashKeys = (await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").getAllKeys()))) as string[];
+  // (migrated data files' bytes, by fid; and old copies of migrated files not yet deleted, which
+  // are nobody's file of their own: never adopted, the migrator deletes them; capabilities §2b)
+  const fileBytesIds = new Set((await inTx(w.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getAllKeys()))) as string[]);
+  const stale = new Set((await w.staleCopies(Infinity)).map(([where, key]) => where + ":" + key));
   // bytes in Trash with no entry (CORR-4A0-1, CORR-094-1).  First the
   // destination is recorded (meta "recovering:<trash key>"), then the bytes
   // written there, where Python reads files; then, in one transaction, the
@@ -152,7 +156,7 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
   // that same recovery: it knows its destination from the record, never
   // from bytes that happen to be equal.
   for (const key of trashKeys) {
-    if (refs.trash.has(key)) continue;
+    if (refs.trash.has(key) || stale.has("trash:" + key)) continue;
     const bytes = await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key)));
     if (bytes === undefined) continue;
     const mark = RECOVERING + key, sha = await bytesHash(bytes);
@@ -212,11 +216,27 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     await w.adopt("/", safeName(rec.name), ".ipynb", { kind: "notebook", ref: id, mode: typeof rec.mode === "string" ? rec.mode : "python", created: rec.updated ?? Date.now(), updated: rec.updated ?? Date.now() });
     r.notebooks++;
   }
+  // bytes the old way at a moved file's own key, not marked as its old copy (a marked one is compared and
+  // deleted, or kept, by dropStale): written there since by a page still running the code from before
+  // (its workspace closed by the upgrade, it saves the old way): kept beside it as a file of their own,
+  // never lost (capabilities §2b, CORR-F81-1).  Not read here (reconcile holds the lock, and a reservation
+  // can't be taken holding it: LIMIT-CAP1A-1): its size comes when the migrator moves it.
+  const movedByRef = new Map(entries.filter((e) => e.kind === "file" && e.migrated && e.ref !== null && !e.trashed && !within(e.path, TRASH)).map((e) => [e.ref!, e]));
+  // (keys a file not yet moved names: such bytes are that file's, a copy already kept)
+  const oldWay = new Set(entries.filter((e) => e.kind === "file" && !e.migrated && e.ref !== null && !e.trashed && !within(e.path, TRASH)).map((e) => e.ref!));
+  for (const key of fileKeys) {
+    const moved = typeof key === "string" ? movedByRef.get(key) : undefined;
+    if (!moved || stale.has("files:" + key) || oldWay.has(key)) continue;
+    const [base, ext] = splitExt(nameOf(moved.path));
+    await w.adopt(parentOf(moved.path), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 });
+    r.recovered++;
+  }
   // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
   for (const key of fileKeys) {
-    if (typeof key !== "string" || refs.file.has(key)) continue;
-    const bytes = await w.mainTx("files", "readonly", (st) => st.get(key));
-    const size = bytes?.length ?? bytes?.byteLength ?? 0;
+    if (typeof key !== "string" || refs.file.has(key) || stale.has("files:" + key)) continue;
+    // (not read for its size: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1);
+    // the migrator, which reserves first, gives it its size as it moves it)
+    const size = undefined;
     let p: string | null = null;
     try { p = normPath(key); } catch {}
     if (p !== null && p !== "/" && !within(p, TRASH)) {
@@ -253,11 +273,11 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
       continue;
     }
     const set = e.kind === "file" && (e.trashed || within(e.path, TRASH)) ? have.trash : have[e.kind];
-    const gone = !set.has(e.ref);
+    const gone = e.kind === "file" && e.migrated ? !fileBytesIds.has(e.fid!) : !set.has(e.ref);
     if (gone === !!e.missing) continue;
     await inTx(w.ws, "entries", "readwrite", async (tx) => {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
-      if (!cur || cur.ref !== e.ref) return;
+      if (!cur || cur.ref !== e.ref || !!cur.migrated !== !!e.migrated) return;
       if (gone) st.put({ ...cur, missing: true });
       else {
         const { missing: _m, ...rest } = cur;
