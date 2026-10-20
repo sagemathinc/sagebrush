@@ -173,28 +173,33 @@ function jsonString(s) {
 // (a number as JSON text: finite only, by String, the language's own conversion, never a prototype's; -0 is "0")
 const jsonNumber = (n) => String(n);
 // (an inert copy (inertJson's: null-prototype objects, plain arrays, strings, finite numbers, booleans, null) as
-// JSON text, without recursion, by jsonString and jsonNumber: the same text inertJson measured)
+// JSON text, without recursion, by jsonString and jsonNumber: the same text inertJson measured.  A frame per open
+// array or object, walked by index, and the pieces folded into one string every CHUNK of them, so that what it
+// holds beside the text is a few frames and a short list, not an entry per element (daybreak2, on d761fdec))
 function writeJson(v) {
-  const out = [], stack = [v], RAW = Symbol("raw");
+  const CHUNK = 4096;
+  let done = "", parts = [];
+  const emit = (t) => { parts.push(t); if (parts.length >= CHUNK) { done += parts.join(""); parts = []; } };
+  const scalar = (x) => (x === null ? "null" : typeof x === "string" ? jsonString(x) : typeof x === "number" ? jsonNumber(x) : x ? "true" : "false");
+  const open = (x) => {
+    if (Array.isArray(x)) { emit("["); return { x, keys: null, n: x.length, i: 0 }; }
+    emit("{");
+    const keys = Object.keys(x);
+    return { x, keys, n: keys.length, i: 0 };
+  };
+  if (v === null || typeof v !== "object") return scalar(v);
+  const stack = [open(v)];
   while (stack.length) {
-    const x = stack.pop();
-    if (x !== null && typeof x === "object" && x[RAW] !== undefined) { out.push(x[RAW]); continue; }
-    if (x === null) out.push("null");
-    else if (typeof x === "string") out.push(jsonString(x));
-    else if (typeof x === "number") out.push(jsonNumber(x));
-    else if (typeof x === "boolean") out.push(x ? "true" : "false");
-    else if (Array.isArray(x)) {
-      out.push("[");
-      stack.push({ [RAW]: "]" });
-      for (let i = x.length - 1; i >= 0; i--) { stack.push(x[i]); if (i) stack.push({ [RAW]: "," }); }
-    } else {
-      out.push("{");
-      stack.push({ [RAW]: "}" });
-      const keys = Object.keys(x);
-      for (let i = keys.length - 1; i >= 0; i--) { stack.push(x[keys[i]]); stack.push({ [RAW]: (i ? "," : "") + jsonString(keys[i]) + ":" }); }
-    }
+    const f = stack[stack.length - 1];
+    if (f.i === f.n) { emit(f.keys ? "}" : "]"); stack.pop(); continue; }
+    if (f.i) emit(",");
+    const c = f.keys ? f.x[f.keys[f.i]] : f.x[f.i];
+    if (f.keys) emit(jsonString(f.keys[f.i]) + ":");
+    f.i++;
+    if (c !== null && typeof c === "object") stack.push(open(c));
+    else emit(scalar(c));
   }
-  return out.join("");
+  return done + parts.join("");
 }
 function inertJson(v, max) {
   // (whatever runs while it is read (a Proxy's traps) and throws: refused, never thrown on)
