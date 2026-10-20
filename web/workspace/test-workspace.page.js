@@ -2565,6 +2565,27 @@ async function durabilityLockOrder() {
       check(!!later?.saved && (await rawGet(a.main, "notebooks", e.ref)).name === "HELD", "…and the same change, saved again once the lock is free: kept: " + JSON.stringify(later));
     } finally { release?.(); off(); S.LOCK_WAIT.ms = 10_000; S.HISTORY_BACKLOG.entries = 1000; a.close(); db.close(); }
   }
+  // an append held while it waits as its JSON text alone (daybreak2's LIMIT-5B7-1): data that isn't plain JSON
+  // (a buffer, a typed array, a Map, a Set, a Date) refused, however small its JSON; a graph whose JSON is small
+  // for its heap (100,000 empty objects) charged as its text, which is all that is held; kept as it was asked for
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/plain.ipynb");
+    const db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    try {
+      const refused = [["a buffer", new ArrayBuffer(1 << 20)], ["a typed array", new Uint8Array(1 << 20)], ["a Map", new Map([[1, 2]])], ["a Set", new Set([1])], ["a Date", new Date()], ["undefined in an array", [undefined]]]
+        .map(([what, v]) => [what, h.append({ time: "x-" + what, id: "x", data: v })]);
+      const wide = { time: "wide", id: "wide", file: undefined, wide: Array.from({ length: 100_000 }, () => ({})) };
+      const b0 = S.historyBacklog().bytes, took = h.append(wide), charged = S.historyBacklog().bytes - b0, text = JSON.stringify(wide).length;
+      wide.wide.length = 0; wide.id = "CHANGED";
+      release(); release = null;
+      await h.appending;
+      const kept = (await rawGet(db, "history", [e.ref, "wide"]))?.env;
+      check(refused.every(([, t]) => t === false) && S.historyBacklog().entries === 0, "an append of data that isn't plain JSON (a buffer, a typed array, a Map, a Set, a Date, undefined in an array): refused, not queued: " + JSON.stringify(refused));
+      check(took && charged === 2 * text + S.ENTRY_OVERHEAD && kept?.id === "wide" && kept.wide.length === 100_000, "a wide graph of empty objects (and a property undefined, as patchflow's envelopes have): charged twice its text and ENTRY_OVERHEAD, the text being all that is held, and kept as it was asked: " + JSON.stringify({ took, charged, text, kept: kept && { id: kept.id, n: kept.wide.length } }));
+    } finally { release?.(); a.close(); db.close(); }
+  }
   // the OPFS witness's flush in the background: the lock held elsewhere, it doesn't wait for it (no request
   // left pending), and is done once the lock is free
   {

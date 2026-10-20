@@ -124,13 +124,31 @@ const UNREADABLE = "this browser's record of the workspace couldn't be read: rel
 // queue, holding up nothing
 const WORKSPACE_LOCK = "sagebrush-workspace";
 export const LOCK_WAIT = { ms: 10_000 };
-// (the appends waiting, all history stores together: at most HISTORY_BACKLOG.entries and .bytes, each charged
-// twice its JSON's length (UTF-16 code units, 2 bytes each in memory) and ENTRY_OVERHEAD, a copy of its own taken
-// when it is asked for; one past them is refused, not queued, and said to every onHistoryRefused listener, so
-// that a tab stuck holding the lock costs this page bounded memory, never more)
+// (the appends waiting, all history stores together: at most HISTORY_BACKLOG.entries and .bytes, each held as its
+// JSON text alone and charged twice its length (UTF-16 code units, 2 bytes each) and ENTRY_OVERHEAD; parsed only at
+// its turn, one at a time in a store; one past the bounds is refused, not queued, and said to every
+// onHistoryRefused listener, so that a tab stuck holding the lock costs this page bounded memory, never more)
 export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
-// (bytes charged for each append beside its JSON: the queue's closure, the record and the message around it)
+// (bytes charged for each append beside its JSON text: the queue's closure, its promise, the counters)
 export const ENTRY_OVERHEAD = 256;
+// (whether `v` is plain JSON data: null, booleans, finite numbers, strings, arrays and plain objects, walked
+// without recursion; a property that is undefined too, which JSON leaves out as an object without it would be
+// (patchflow's envelopes have `file: undefined`); anything else (undefined in an array, which JSON makes null, a
+// function, a buffer, a typed array, a Map, a Set, a Date, a class's object) is not)
+function plainJson(v) {
+  const stack = [v];
+  while (stack.length) {
+    const x = stack.pop();
+    if (x === null || typeof x === "string" || typeof x === "boolean") continue;
+    if (typeof x === "number") { if (!Number.isFinite(x)) return false; continue; }
+    if (typeof x !== "object") return false;
+    if (Array.isArray(x)) { if (Object.getPrototypeOf(x) !== Array.prototype) return false; for (let i = 0; i < x.length; i++) stack.push(x[i]); continue; }
+    const proto = Object.getPrototypeOf(x);
+    if (proto !== Object.prototype && proto !== null) return false;
+    for (const k of Object.keys(x)) if (x[k] !== undefined) stack.push(x[k]);
+  }
+  return true;
+}
 const backlog = { entries: 0, bytes: 0 };
 const refusedSubs = new Set();
 /** `f(message)`: called when an append is refused because too many wait (a stuck tab holding the lock). */
@@ -383,12 +401,17 @@ export class IdbPatchStore {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
     if (!this.db || (this.owned && refusal())) return false;
     // (bounded: past HISTORY_BACKLOG, refused and said, never queued)
-    // (the envelope taken as it is now, a copy of its own, so what is charged is what is kept: daybreak2's
-    // LIMIT-9D7-2; charged conservatively, twice its JSON's length (UTF-16 in memory) and ENTRY_OVERHEAD)
-    try { env = structuredClone(env); } catch { return false; }
+    // (kept while it waits as its JSON text alone, made now: what is charged is what is held, however the caller
+    // changes the envelope later, and whatever its shape; parsed only at its turn.  Plain JSON data only: one
+    // that isn't (a buffer, a Map, a class's object) would be kept as something else, or cost more than its
+    // text: refused.  daybreak2's LIMIT-9D7-2 and LIMIT-5B7-1)
+    if (!plainJson(env)) { console.warn("history: an entry that isn't plain JSON data, not kept"); return false; }
+    let text;
+    try { text = JSON.stringify(env); } catch { return false; }
+    env = undefined;
     let size = 0;
     if (this.owned) {
-      try { size = 2 * JSON.stringify(env).length + ENTRY_OVERHEAD; } catch { size = HISTORY_BACKLOG.bytes; }
+      size = 2 * text.length + ENTRY_OVERHEAD;
       if (backlog.entries + 1 > HISTORY_BACKLOG.entries || backlog.bytes + size > HISTORY_BACKLOG.bytes) {
         for (const f of refusedSubs) try { f(HISTORY_REFUSED); } catch {}
         return false;
@@ -399,6 +422,7 @@ export class IdbPatchStore {
     // (in order, each after the workspace's word on it, for an owned record, the word and the write in one hold
     // of the workspace's lock)
     this.queue(async () => {
+      const env = JSON.parse(text);
       getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
       if (this.owned && this.fence === undefined) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
       await underLock(!this.owned, async () => {
