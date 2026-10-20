@@ -20,7 +20,7 @@
 //   watermark, sequence and records, and one never sends another's.
 // - One sender per device and namespace: the tab holding the Web Lock `sagebrush-sync:<ns>` (sender()).
 // - dropOps (Workspace) never deletes ops past any namespace's watermark: they haven't been scanned yet.
-import type { Kind } from "./paths";
+import { TRASH, within, type Kind } from "./paths";
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { jsonTextSize } from "../notebook/stores.js";
@@ -178,39 +178,8 @@ export class Outbox {
         dseq++;
         made++;
       };
-      // (first, held identities' successors whose records were decided: each the identity's current state, while
-      // there is room (C2, astra's schedules 1, 2 and 5))
-      const succKey = key(this.ns, "successors");
-      const succ = ((await req(meta.get(succKey))) as string[] | undefined) ?? [];
-      const left: string[] = [];
-      for (const id of succ) {
-        if (full) { left.push(id); continue; }
-        const p = await pendingOf(tx, id), st = stateOf(p, this.ns);
-        if (!st.successor) continue;
-        const e = (await req(tx.objectStore("entries").index("byIdent").get(id))) as Entry | undefined;
-        const lseq = p.latest?.seq ?? 0;
-        const next: NsState = { ...st, held: false, cutoff: Math.max(st.cutoff ?? 0, lseq) };
-        delete next.successor;
-        // (its current state gone (a forget or emptying Trash came first): no write made, no identity brought back)
-        if (!e || e.kind !== "file" || !e.migrated || !e.sha256 || p.latest?.after === null) {
-          putPending(tx, p, this.ns, next, scanned);
-          continue;
-        }
-        const op: WireOp = { dseq, t: Date.now(), by: p.latest?.by ?? "person", op: "write", path: e.path, kind: "file", fid: e.fid!, sha256: e.sha256, size: e.size ?? 0, ...(st.successor.base ? { base: st.successor.base } : {}), ...(p.latest?.after?.parent ? { parent: p.latest.after.parent } : {}) };
-        const r: OutboxRecord = { ns: this.ns, dseq, lseq, id, op };
-        // (its present bytes pinned for it: the pin on them now, else a new one, owned by this record)
-        const cur = await pinOfCurrent(tx, e.fid!, e.sha256);
-        r.pin = cur ? cur.seq : lseq;
-        if (!fits(r)) { full = true; left.push(id); continue; }
-        if (cur) tx.objectStore("pins").put({ ...cur, owner: { ns: this.ns, dseq } } satisfies Pin);
-        else await pinPresent(tx, id, lseq, e.path, e.sha256, e.size ?? 0, e.fid!, { ns: this.ns, dseq });
-        next.allocated = { dseq, sha256: e.sha256, pinned: true, state: "undecided" };
-        admit(r);
-        putPending(tx, p, this.ns, next, scanned);
-      }
-      if (succ.length) meta.put(left, succKey);
       let at = scanned;
-      for (const o of full ? [] : ops) {
+      for (const o of ops) {
         const op = wireOf(o, dseq);
         if (op) {
           const id = (o.after?.id ?? o.fid ?? o.ref)!;
@@ -252,6 +221,44 @@ export class Outbox {
         }
         at = o.seq!;
       }
+      // (then, once this page has read every op logged (caught up, in this transaction), held identities'
+      // successors whose records were decided: each the identity's current state, while there is room (C2, astra's
+      // schedules 1, 2 and 5).  Only then: every op before it, of the identity and of the folders it is in (a
+      // mkdir, a rename, a move, a removal), already has its record, so the successor comes after all of them,
+      // with the state and place they left (astra's CORR-E5C-1).  One in Trash (itself, or a folder it is in)
+      // waits there: a write would bring it back, and its removal stands (no resurrection, CORR-E5C-2); it goes
+      // once restored, or ends as gone if it is deleted for good)
+      const succKey = key(this.ns, "successors");
+      const succ = ((await req(meta.get(succKey))) as string[] | undefined) ?? [];
+      const caughtUp = !full && ops.length < OUTBOX.page;
+      const left: string[] = [];
+      for (const id of succ) {
+        if (full || !caughtUp) { left.push(id); continue; }
+        const p = await pendingOf(tx, id), st = stateOf(p, this.ns);
+        if (!st.successor) continue;
+        const e = (await req(tx.objectStore("entries").index("byIdent").get(id))) as Entry | undefined;
+        const lseq = p.latest?.seq ?? 0;
+        const next: NsState = { ...st, held: false, cutoff: Math.max(st.cutoff ?? 0, lseq) };
+        delete next.successor;
+        // (its current state gone (a forget or emptying Trash came first): no write made, no identity brought back)
+        if (!e || e.kind !== "file" || !e.migrated || !e.sha256 || p.latest?.after === null) {
+          putPending(tx, p, this.ns, next, at);
+          continue;
+        }
+        if (e.trashed || within(e.path, TRASH)) { left.push(id); continue; }
+        const op: WireOp = { dseq, t: Date.now(), by: p.latest?.by ?? "person", op: "write", path: e.path, kind: "file", fid: e.fid!, sha256: e.sha256, size: e.size ?? 0, ...(st.successor.base ? { base: st.successor.base } : {}), ...(p.latest?.after?.parent ? { parent: p.latest.after.parent } : {}) };
+        const r: OutboxRecord = { ns: this.ns, dseq, lseq, id, op };
+        // (its present bytes pinned for it: the pin on them now, else a new one, owned by this record)
+        const cur = await pinOfCurrent(tx, e.fid!, e.sha256);
+        r.pin = cur ? cur.seq : lseq;
+        if (!fits(r)) { full = true; left.push(id); continue; }
+        if (cur) tx.objectStore("pins").put({ ...cur, owner: { ns: this.ns, dseq } } satisfies Pin);
+        else await pinPresent(tx, id, lseq, e.path, e.sha256, e.size ?? 0, e.fid!, { ns: this.ns, dseq });
+        next.allocated = { dseq, sha256: e.sha256, pinned: true, state: "undecided" };
+        admit(r);
+        putPending(tx, p, this.ns, next, at);
+      }
+      if (succ.length && left.length !== succ.length) meta.put(left, succKey);
       // (a page that stopped at a bound says so, until one goes on)
       if (full) t.full = { at: Date.now(), count: t.count, bytes: t.bytes };
       else delete t.full;

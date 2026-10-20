@@ -70,8 +70,14 @@
 // Version 5 (design/sync-client.md C2, step 2b-2):
 //
 //   pins' index byStorage, on each pin's `skey` (where its bytes are: "f:<fid>", a file's fileBytes, or
-//   "v:<version id>"): whether any other pin names a storage, one bounded count.  Schema only (the pins are
-//   empty until this step)
+//   "v:<version id>"): whether any other pin names a storage, one bounded count (the pins are empty until
+//   this step)
+//   versions' indexes byFileId [fid, id] (a file's versions in the order they were kept), prunable
+//            [free, id] (a file's versions not kept for sync, oldest first) and prunableAll [u, id] (everyone's
+//            not kept for sync, oldest first): a save's pruning, and the cleanup's, read a bounded few from
+//            the front, never a file's whole list (daybreak2's LIMIT-E5C-2).  A version not pinned has `free`
+//            (its fid) and `u` (1); a pinned one neither.  The one upgrade that writes records: each version
+//            kept before is given both (none was pinned before this version)
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
@@ -126,8 +132,24 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // state from version 3 is dropped and its next run walks the whole index again, as for version 3)
       if (old >= 1) tx.objectStore("meta").delete("migration");
     }
-    // (who names a storage, one bounded count (sync-pins.ts): the pins are empty until this step, so nothing to fill)
-    if (old < 5) tx.objectStore("pins").createIndex("byStorage", "skey");
+    if (old < 5) {
+      // (who names a storage, one bounded count (sync-pins.ts): the pins are empty until this step, so nothing to fill)
+      tx.objectStore("pins").createIndex("byStorage", "skey");
+      const vs = tx.objectStore("versions");
+      vs.createIndex("byFileId", ["fid", "id"]);
+      vs.createIndex("prunable", ["free", "id"]);
+      vs.createIndex("prunableAll", ["u", "id"]);
+      // (every version kept before: none pinned, so each prunable; a cursor in the upgrade's transaction)
+      if (old >= 1) {
+        const c = vs.openCursor();
+        c.onsuccess = () => {
+          const cur = c.result;
+          if (!cur) return;
+          cur.update({ ...cur.value, free: cur.value.fid, u: 1 });
+          cur.continue();
+        };
+      }
+    }
   }, onClose, ms);
 }
 

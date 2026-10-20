@@ -653,9 +653,9 @@ async function versionActions() {
   check((await w.dropVersions("/f", { expect: { count: fu2.count, bytes: fu2.bytes, created: fe.created } })) === fu2.bytes && (await w.versionsUsage("/f")).count === 0, "…as confirmed: dropped");
   // many small versions of other files: a file's drop reads only its own; all of them, in batches
   const many = 2500;
-  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d" }); q.onsuccess = () => vb.put(new Uint8Array([1]), q.result); } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
+  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d", free: "zz" + i, u: 1 }); q.onsuccess = () => vb.put(new Uint8Array([1]), q.result); } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
   const unbounded = [];
-  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if (q == null && (this.name === "byFile" || this.name === "versions")) unbounded.push([this.name, n]); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
+  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if ((q == null && (this.name === "byFile" || this.name === "versions")) || this.name === "prunableAll") unbounded.push([this.name, n]); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
   const un1 = wrap(IDBIndex.prototype), un2 = wrap(IDBObjectStore.prototype);
   try {
     await w.write("/moved.txt", "fourth");
@@ -663,7 +663,8 @@ async function versionActions() {
     check(unbounded.length === 0, "dropping a file's versions reads no other file's: " + JSON.stringify(unbounded));
     const before = (await w.versionsUsage()).count;
     const freed = await w.dropVersions("/");
-    check(unbounded.length > 1 && unbounded.every(([name, n]) => name === "versions" && n === 1000), "all of them: a batch of at most 1,000 records at a time (" + unbounded.length + " batches)");
+    // (a page of at most 190 a transaction, by a key range from the last id: astra's CORR-E5C-3)
+    check(unbounded.length > 1 && unbounded.every(([name, n]) => name === "prunableAll" && n === 190), "all of them: a page of at most 190 records at a time, by a key range (" + unbounded.length + " pages)");
     check(before >= many && freed >= many && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "…all gone, the total 0 (" + before + ", " + freed + ")");
   } finally { un1(); un2(); }
   w.close();

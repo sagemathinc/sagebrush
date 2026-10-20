@@ -430,7 +430,10 @@ async function upgrade() {
   const db = await W.openWorkspaceDb(name);
   const up = await dump(db), ix = indexes(db);
   const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, ...rest1 } = up;
-  check(db.version === 5 && same(rest0, rest1), "version 5 (the current; 4 added these stores, 5 the pins' index): entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
+  // (5 gives each version kept before `free` (its fid) and `u` (1), for its prunable indexes: none was pinned)
+  const sorted = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const versions0 = (rest0.versions ?? []).map(([k, v]) => [k, sorted({ ...v, free: v.fid, u: 1 })]);
+  check(db.version === 5 && same({ ...rest0, versions: versions0 }, rest1) && versions0.length > 0, "version 5 (the current; 4 added these stores, 5 the pins' index and the versions' prunable ones): entries, boards, trash, ops, versionBytes, fileBytes and grants the same, byte for byte; each version the same but for its `free` and `u`");
   check(same(m1, m0.filter(([k]) => k !== "migration")), "…meta the same but for the migration's state, dropped (so the migrator gives older entries their identity): " + J(m1.map(([k]) => k)));
   check([outbox, syncIndex, adoptJournal, pins, pending].every((s) => Array.isArray(s) && s.length === 0) && same(ix.entries, ["byIdent", "byNfc", "byRef"]) && same(ix.outbox, ["byIdent"]) && same(ix.adoptJournal, ["byParent"]), "…the new stores there and empty, and the new indexes: " + J(ix));
   db.close();

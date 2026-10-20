@@ -31,7 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
-import { PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, cleanPins, capNow, liveLease, pinTotal, epochOf, type Pin } from "./sync-pins";
+import { PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, type Pin } from "./sync-pins";
 
 export type Entry = {
   path: string;
@@ -106,12 +106,27 @@ export type OldBytes = { kind: "free" | "older" | "trash"; key: string; folder: 
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
 /** `pinned`: kept for sync, its bytes committed here and not yet decided (design/sync-client.md C2): exempt from
  * pruning, dropVersions and emptying Trash until its pin is released. */
-export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string; pinned?: boolean };
+export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string; pinned?: boolean; free?: string; u?: 1 };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
 export type Limits = { maxFileBytes: number; maxBoardBytes: number; maxEntries: number; maxFolderEntries: number; maxVersions: number; maxVersionAgeMs: number; maxVersionBytes: number };
 /** §6.3: one upload at most 200 MB; a board's JSON at most 64 MB; the
  * workspace at most 100,000 entries, a folder at most 10,000 of its own.  §2.5: a data file's latest 20
  * versions, none older than 30 days, all of them at most 1 GB. */
+/** The id of `fid`'s newest version past its newest `keep` (counted with those kept for sync), or -Infinity if it
+ * has no more than `keep`: two requests, a key cursor from the newest. */
+function newestDroppable(vs: IDBObjectStore, fid: string, keep: number): Promise<number> {
+  return new Promise((ok, no) => {
+    const c = vs.index("byFileId").openKeyCursor(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]), "prev");
+    let moved = false;
+    c.onsuccess = () => {
+      const cur = c.result;
+      if (!cur) return ok(-Infinity);
+      if (!moved) { moved = true; cur.advance(keep); return; }
+      ok(cur.primaryKey as number);
+    };
+    c.onerror = () => no(c.error);
+  });
+}
 /** The most versions one save drops (see putVersion). */
 export const PRUNE_STEP = 3;
 export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
@@ -129,7 +144,14 @@ export const BOARD_KEYS = {
   unread: (id: string) => "sagebrush-workspace-pending-unread:" + id,
 };
 // (dropVersions: files' versions dropped per transaction, and records per transaction when all go)
-const DROP_FILES = 200, DROP_RECORDS = 1000;
+/** dropVersions and emptyTrash's versions: at most DROP_PAGE records read a request, and DROP_REQUESTS requests a
+ * transaction, each going on from the last id it looked at (a key range), never over a page again (astra's
+ * CORR-E5C-3) */
+const DROP_PAGE = 190, DROP_REQUESTS = 400;
+/** a save's own drops past the bytes (the rest by the cleanup), and the versions it looks at for them */
+const BYTES_STEP = 8;
+/** meta: a file whose versions a save left past the count or the age, for the cleanup; versions past the bytes */
+export const VDUE = "versions:due:", VOVER = "versions:over";
 // (an old copy compared and kept as a file of its own at most this many times per dropStale: an older tab that
 // keeps writing there is caught up with by the next cleanup pass)
 const STALE_ROUNDS = 8;
@@ -1043,16 +1065,17 @@ export class Workspace {
     // they otherwise wouldn't be (empty, keepEmpty false), within the cap (read now: it can't be awaited in the
     // transaction); new bytes are pinned, the same bytes again not (one pin per storage): design/sync-client.md C2)
     const same = old !== undefined && sameBytes(old, b);
-    const on = await inTx(this.ws, "meta", "readonly", async (tx) => !!(await liveLease(tx.objectStore("meta"))));
-    const cap = on ? await capNow() : 0;
-    const pinnedVersion = on && old !== undefined && !same && !version ? await this.versionOf({ ...e, fid }, old) : null;
+    // (whether sync is on is read in the transaction itself, its stores always taken; the cap, the browser's
+    // estimate, asked at most every 2 s; the version only bytes that aren't kept would need is of empty bytes)
+    const cap = await capNow();
+    const pinnedVersion = old !== undefined && !same && !version ? await this.versionOf({ ...e, fid }, old) : null;
     let entry: Entry, collapsed: { ns: string; epoch: number } | null = null;
     try {
-      entry = await inTx(this.ws, withSync("entries", "ops", "fileBytes", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...(on ? RELEASE_STORES : [])), "readwrite", async (tx) => {
+      entry = await inTx(this.ws, withSync("entries", "ops", "fileBytes", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...RELEASE_STORES), "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         // (still the file read, at the revision read: CORR-CAP-2's identity at use)
         if (!cur || cur.kind !== "file" || cur.ref !== e.ref || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) throw new WorkspaceError("conflict", `${e.path} changed while it was written`);
-        const lease = on && !same && old !== undefined ? await liveLease(tx.objectStore("meta")) : undefined;
+        const lease = !same && old !== undefined ? await liveLease(tx.objectStore("meta")) : undefined;
         const pin = lease ? await pinOfCurrent(tx, fid, cur.sha256) : undefined;
         let kept = false;
         if (pin) {
@@ -1087,9 +1110,10 @@ export class Workspace {
       old = undefined;
       await this.dropStale(where, e.ref!, box).catch(() => {});
     }
-    // (a collapse released only a few of its pins in the save: the rest now, a page at a time, after it)
-    // (begun after this save has returned, so none of its pages is part of the save's own work)
-    if (collapsed) this.pinsCleaning = new Promise((r) => setTimeout(r, 0)).then(() => PINS.cleanAfter).then(() => cleanPins(this, collapsed!)).catch((err) => console.warn("workspace: sync's pins:", err));
+    // (a collapse released only a few of its pins in the save, and a save drops only a few versions: the rest
+    // by the cleanup, a slice at a time, begun after this save has returned, so none of it is the save's work)
+    if (collapsed) scheduleClean(this, collapsed);
+    this.versionsLeft();
     this.tell({ ops });
     return { entry, rev };
   }
@@ -1233,9 +1257,9 @@ export class Workspace {
     const e = await this.mustStat(p);
     if (e.kind !== "file") throw new WorkspaceError("invalid", "history() is for data files here; a document's is its TimeTravel");
     if (!e.fid) return [];
-    const vs: Version[] = await inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").index("byFile").getAll(IDBKeyRange.bound([e.fid, -Infinity], [e.fid, Infinity]))));
-    // (in the order they were kept: the ids count up, whatever the clock did)
-    return vs.sort((x, y) => x.id! - y.id!);
+    // (in the order they were kept: the ids count up, whatever the clock did; the index byFileId is in that order)
+    const vs: Version[] = await inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").index("byFileId").getAll(IDBKeyRange.bound([e.fid, -Infinity], [e.fid, Infinity]))));
+    return vs.map(({ free: _f, u: _u, ...v }) => v);
   }
 
   /** The bytes of a data file's version `i` (an index into history()). */
@@ -1331,38 +1355,47 @@ export class Workspace {
       };
       let freed = 0;
       if (fids) {
-        for (let i = 0; i < fids.length; i += DROP_FILES) {
-          const batch = fids.slice(i, i + DROP_FILES);
+        // (each file's, from its oldest not kept for sync, up to the newest `keep` (counted with those kept for
+        // sync, which stay) and the fence; a transaction at most DROP_REQUESTS requests, going on from the last
+        // id looked at)
+        let i = 0, after = -Infinity, upper: number | null = null;
+        while (i < fids.length) {
           freed += await inTx(this.ws, stores, "readwrite", async (tx) => {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
-            let f = 0;
-            for (const fid of batch) {
-              const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-              list.sort((x, y) => x.id! - y.id!);
-              for (const v of list.slice(0, Math.max(0, list.length - keep))) {
-                if ((only && !only.has(v.id!)) || v.id! > upTo || v.pinned) continue;
+            let f = 0, left = DROP_REQUESTS - 2;
+            while (i < fids!.length && left >= 4) {
+              const fid = fids![i];
+              if (upper === null) { upper = Math.min(keep > 0 ? await newestDroppable(vs, fid, keep) : Infinity, upTo); left -= 2; }
+              const want = Math.min(DROP_PAGE, Math.floor((left - 1) / 2));
+              const list = upper === -Infinity ? [] : ((await req(vs.index("prunable").getAll(IDBKeyRange.bound([fid, after], [fid, upper], true, false), want))) as Version[]);
+              left -= 1;
+              for (const v of list) {
+                after = v.id!;
+                if (only && !only.has(v.id!)) continue;
                 vs.delete(v.id!); vb.delete(v.id!); f += v.size;
+                left -= 2;
               }
+              if (list.length < want) { i++; after = -Infinity; upper = null; }
             }
             await less(tx, f);
             return f;
           });
         }
       } else {
-        for (;;) {
-          const [n, f] = await inTx(this.ws, stores, "readwrite", async (tx) => {
+        // (everyone's not kept for sync, up to the fence, a page a transaction, each going on from the last id)
+        let after = -Infinity, done = false;
+        while (!done) {
+          freed += await inTx(this.ws, stores, "readwrite", async (tx) => {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
-            const list: Version[] = await req(vs.getAll(upTo === Infinity ? null : IDBKeyRange.upperBound(upTo), DROP_RECORDS));
+            const list = (await req(vs.index("prunableAll").getAll(IDBKeyRange.bound([1, after], [1, upTo], true, false), DROP_PAGE))) as Version[];
             let f = 0;
-            // (versions kept for sync (pinned) stay until their pins go: design/sync-client.md C2)
-            let pinned = false;
-            for (const v of list) { if (v.pinned) { pinned = true; continue; } vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
-            // (the total set to 0 only when no version is left at all: a drop fenced by maxId leaves newer ones, CORR-5D2-1)
-            await less(tx, f, upTo === Infinity && list.length < DROP_RECORDS && !pinned);
-            return [list.length, f] as const;
+            for (const v of list) { after = v.id!; vs.delete(v.id!); vb.delete(v.id!); f += v.size; }
+            done = list.length < DROP_PAGE;
+            // (the total set to 0 only when no version is left at all: a drop fenced by maxId leaves newer ones,
+            // CORR-5D2-1; and versions kept for sync stay until their pins go, design/sync-client.md C2)
+            await less(tx, f, done && upTo === Infinity && (await req(vs.count())) === 0);
+            return f;
           });
-          freed += f;
-          if (n < DROP_RECORDS) break;
         }
       }
       const ops: Op[] = [];
@@ -1399,8 +1432,11 @@ export class Workspace {
       }
       let count = 0, bytes = 0, maxId = 0;
       for (const fid of fids) {
-        const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-        for (const v of list) { count++; bytes += v.size; maxId = Math.max(maxId, v.id!); }
+        for (let after = -Infinity; ; ) {
+          const list: Version[] = await req(vs.index("byFileId").getAll(IDBKeyRange.bound([fid, after], [fid, Infinity], true, false), DROP_PAGE));
+          for (const v of list) { count++; bytes += v.size; maxId = Math.max(maxId, v.id!); after = v.id!; }
+          if (list.length < DROP_PAGE) break;
+        }
       }
       return { count, bytes, maxId, seq };
     });
@@ -1528,16 +1564,25 @@ export class Workspace {
         } catch (err) { console.warn("workspace: emptying Trash:", err); }
       }
       if (fids.size) {
-        await inTx(this.ws, ["versions", "versionBytes", "meta"], "readwrite", async (tx) => {
-          const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
-          let freed = 0;
-          for (const fid of fids) {
-            const list: Version[] = await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])));
-            for (const v of list) { if (v.pinned) continue; vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
-          }
-          const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
-          meta.put(Math.max(0, total - freed), "versionBytes");
-        });
+        // (their versions not kept for sync, a transaction at most DROP_REQUESTS requests, each going on from the
+        // last id looked at; those kept for sync stay until their pins go: design/sync-client.md C2)
+        const list = [...fids];
+        let i = 0, after = -Infinity;
+        while (i < list.length) {
+          await inTx(this.ws, ["versions", "versionBytes", "meta"], "readwrite", async (tx) => {
+            const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+            let freed = 0, left = DROP_REQUESTS - 2;
+            while (i < list.length && left >= 4) {
+              const fid = list[i], want = Math.min(DROP_PAGE, Math.floor((left - 1) / 2));
+              const page = (await req(vs.index("prunable").getAll(IDBKeyRange.bound([fid, after], [fid, Infinity], true, false), want))) as Version[];
+              left -= 1;
+              for (const v of page) { after = v.id!; vs.delete(v.id!); vb.delete(v.id!); freed += v.size; left -= 2; }
+              if (page.length < want) { i++; after = -Infinity; }
+            }
+            const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
+            meta.put(Math.max(0, total - freed), "versionBytes");
+          });
+        }
       }
       hdb?.close();
       bdb?.close();
@@ -1636,6 +1681,7 @@ export class Workspace {
     if (!v) return;
     try {
       await inTx(this.ws, VERSION_STORES, "readwrite", (tx) => this.putVersion(tx, v, bytes));
+      this.versionsLeft();
     } catch (err) {
       if (err instanceof WorkspaceError) throw err;
       throw new WorkspaceError("storage", `${e.path}'s present bytes couldn't be kept as a version (${(err as Error)?.name ?? err}), so it isn't written over`);
@@ -1648,44 +1694,103 @@ export class Workspace {
     if (bytes.length > this.limits.maxVersionBytes) throw new WorkspaceError("limit", `${e.path}'s present bytes are too large to keep as a version, so it isn't written over`);
     return { fid, t: this.now(), size: bytes.length, sha256: await bytesHash(bytes), by: this.actor, device: this.device };
   }
-  /** The version `v` (its `bytes`) kept in `tx` (with VERSION_STORES), and the oldest dropped past the bounds. */
+  /** The version `v` (its `bytes`) kept in `tx` (with VERSION_STORES), and the oldest dropped past the bounds:
+   * a bounded few, the rest left to the cleanup (versionsSlice). */
   private async putVersion(tx: IDBTransaction, v: Version, bytes: Uint8Array): Promise<number> {
     const { fid, t } = v;
     const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
-    const id = (await req(vs.add(v))) as number;
+    // (one kept for sync (pinned) is exempt: out of the prunable indexes, design/sync-client.md C2)
+    const id = (await req(vs.add(v.pinned ? v : { ...v, free: fid, u: 1 }))) as number;
     vb.put(bytes, id);
     let total = ((await req(meta.get("versionBytes"))) as number | undefined ?? 0) + bytes.length;
-    // (past the count or the age, at most PRUNE_STEP of this file's dropped a save, oldest first: one is kept a
-    // save, so past the count at most one is due without sync, but versions pinned for sync (exempt) and then
-    // released fall due together, and go a few a save, as ones past the age do, so a save's cost stays
-    // constant (design/sync-client.md C2).  Past the bytes, as many as it takes: that bound is held,
-    // pinned versions aside, which sync's own cap bounds)
-    let dropped = 0;
-    const drop = (v: Version, step = true) => {
-      if (step && dropped >= PRUNE_STEP) return;
+    const drop = (x: Version) => { vs.delete(x.id!); vb.delete(x.id!); total -= x.size; };
+    // (this file's others not kept for sync, oldest first, by the order they were kept (the ids count up; a
+    // clock set back doesn't reorder them): past the count left beside the one just kept, or past the age, at
+    // most PRUNE_STEP dropped a save.  One is kept a save, so without sync at most one is due past the count;
+    // versions released by sync together fall due together, as ones past the age do, and the cleanup drops the
+    // rest (the file marked due).  At most room + PRUNE_STEP + 1 read, never the file's whole list: as many as
+    // that and more are past the count (daybreak2's LIMIT-E5C-2).  A file left alone keeps what it has until
+    // its next save or the next cleanup that has it due)
+    const room = Math.max(0, this.limits.maxVersions - 1), oldest = t - this.limits.maxVersionAgeMs, look = room + PRUNE_STEP + 1;
+    const others = (await req(vs.index("prunable").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, id], false, true), look))) as Version[];
+    let excess = others.length - room, dropped = 0, due = false;
+    for (const x of others) {
+      if (excess <= 0 && x.t >= oldest) break;
+      if (dropped === PRUNE_STEP) { due = true; break; }
+      drop(x);
       dropped++;
-      vs.delete(v.id!); vb.delete(v.id!); total -= v.size;
-    };
-    // (this file's others, oldest first, by the order they were kept (the
-    // ids count up; a clock set back doesn't reorder them): past the
-    // count left beside the one just kept, or past the age.  The one just
-    // kept is counted apart, so the count is always right: CORR-BEF-1)
-    const others = ((await req(vs.index("byFile").getAll(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as Version[]).filter((v) => v.id !== id).sort((x, y) => x.id! - y.id!);
-    const room = Math.max(0, this.limits.maxVersions - 1);
-    // (a version kept for sync (pinned) is exempt, counted all the same: design/sync-client.md C2)
-    const prunable = others.filter((v) => !v.pinned);
-    prunable.forEach((v, i) => { if (i < prunable.length - room || v.t < t - this.limits.maxVersionAgeMs) drop(v); });
-    // (everyone's, oldest first, past the bytes; deletes made above are already out of this read)
+      excess--;
+    }
+    if (due) meta.put(1, VDUE + fid);
+    // (everyone's not kept for sync, oldest first, past the bytes: at most BYTES_STEP here, the rest by the
+    // cleanup (VOVER); deletes made above are already out of this read)
     if (total > this.limits.maxVersionBytes) {
-      const old: Version[] = await req(vs.getAll());
-      for (const v of old) {
-        if (total <= this.limits.maxVersionBytes) break;
-        if (v.id === id || v.pinned) continue;
-        drop(v, false);
+      const old = (await req(vs.index("prunableAll").getAll(IDBKeyRange.bound([1, -Infinity], [1, Infinity]), BYTES_STEP + 1))) as Version[];
+      let n = 0;
+      for (const x of old) {
+        if (total <= this.limits.maxVersionBytes || n === BYTES_STEP) break;
+        if (x.id === id) continue;
+        drop(x);
+        n++;
       }
+      if (total > this.limits.maxVersionBytes) { meta.put(1, VOVER); due = true; }
     }
     meta.put(Math.max(0, total), "versionBytes");
+    if (due) this.versionsDue = true;
     return id;
+  }
+  /** (after a change that kept a version: the cleanup begun if it left versions due) */
+  private versionsLeft() {
+    if (!this.versionsDue) return;
+    this.versionsDue = false;
+    scheduleClean(this);
+  }
+  private versionsDue = false;
+
+  /** The cleanup's step for versions (sync-pins.ts cleanSlice), in its transaction, within `left` requests: a file
+   * a save left due (its versions not kept for sync past the count or the age, oldest first), else everyone's
+   * past the bytes (VOVER).  Whether there may be more. */
+  async versionsSlice(tx: IDBTransaction, left: number): Promise<boolean> {
+    if (left < 16) return true;
+    const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), meta = tx.objectStore("meta");
+    // (the due key's read, the total's read and write, a key's delete, a count, a page)
+    left -= 6;
+    let total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0, changed = false;
+    const drop = (x: Version) => { vs.delete(x.id!); vb.delete(x.id!); total -= x.size; left -= 2; changed = true; };
+    const max = this.limits.maxVersionBytes;
+    let more = false;
+    const due = ((await req(meta.getAllKeys(IDBKeyRange.bound(VDUE, VDUE + "￿"), 1))) as string[])[0];
+    if (due !== undefined) {
+      const fid = due.slice(VDUE.length), range = IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]);
+      const oldest = this.now() - this.limits.maxVersionAgeMs;
+      let excess = ((await req(vs.index("prunable").count(range))) as number) - this.limits.maxVersions;
+      const want = Math.min(PINS.slice.examine, Math.floor(left / 2));
+      const list = (await req(vs.index("prunable").getAll(range, want))) as Version[];
+      let done = list.length < want;
+      for (const x of list) {
+        if (excess <= 0 && x.t >= oldest) { done = true; break; }
+        if (left < 2) { done = false; break; }
+        drop(x);
+        excess--;
+      }
+      if (done) meta.delete(due);
+      more = true;
+    } else if ((await req(meta.get(VOVER))) !== undefined) {
+      if (total <= max) meta.delete(VOVER);
+      else {
+        const want = Math.min(PINS.slice.examine, Math.floor(left / 2));
+        const list = (await req(vs.index("prunableAll").getAll(IDBKeyRange.bound([1, -Infinity], [1, Infinity]), want))) as Version[];
+        for (const x of list) {
+          if (total <= max || left < 2) break;
+          drop(x);
+        }
+        // (none left to drop: the rest are kept for sync, which sync's own cap bounds)
+        if (total <= max || list.length < want) meta.delete(VOVER);
+        else more = true;
+      }
+    }
+    if (changed) meta.put(Math.max(0, total), "versionBytes");
+    return more;
   }
 
   /** `f` holding the workspace's lock, as locked(), for a change to `p`: if it would read values kept
@@ -1695,6 +1800,8 @@ export class Workspace {
    * reservation, gives the lock back unchanged, reserves, and asks again. */
   /** (the cleanup of sync's pins a collapsing save started after it, if any: for tests to wait for) */
   pinsCleaning: Promise<unknown> | null = null;
+  /** (the cleanups asked for and not yet begun, by tag: sync-pins.ts scheduleClean) */
+  pinsQueued?: Set<string>;
   /** (the reservation the change now holding the lock took before it, lockedFor's; null if none) */
   private lockToken: Release | null = null;
   /** The reservation to read bytes whole in (LEGACY_MAX × COPIES): `t`, the caller's (else the lock holder's),

@@ -34,7 +34,7 @@ import type { Entry, Workspace } from "./api";
 import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
-import { cleanPins } from "./sync-pins";
+import { scheduleClean } from "./sync-pins";
 
 export const MIGRATE = {
   /** entries looked at per batch */
@@ -123,7 +123,8 @@ async function resume(w: Workspace, opening = false): Promise<void> {
       await cleanStale(w);
       // (sync's pins: a lifecycle change's purge, collapsed writes' pins, orphaned bytes no pin or entry names:
       // design/sync-client.md C2)
-      await cleanPins(w).catch((e) => console.warn("workspace: sync's pins:", e));
+      // (begun, not waited for: a slice at a time, a timer between, while the migration goes on)
+      void scheduleClean(w);
       const s = await readState(w).catch(() => ({}) as MigrationState);
       if (s.done || (s.paused && !opening && !(await room(0)))) return;
       if (s.paused) { delete s.paused; await writeState(w, s); }
