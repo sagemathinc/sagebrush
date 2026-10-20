@@ -274,6 +274,7 @@ const payloads = (item) => {
   r = await fetchAt("https://nolimit.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sn, origin: "https://nolimit.test", "content-type": "application/json" }, body: "{}" });
   ok(r.status === 404, "with the objects bound but no pre-authentication limit, sync is off too");
   // the limit comes before any session is read: requests with no session get 429, not 401, once it is used up
+  await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 5; i++) codes.push((await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).status);
   ok(codes.join() === "401,401,401,429,429", "the pre-authentication limit is per IP and before the session check: " + codes.join());
@@ -462,6 +463,15 @@ const docA = "0123456789ab";
 // ---- blobs: upload, reads, pins (§4.3, §5.4)
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 /** Poll `f` until it is truthy, at most `ms` (alarms run in real time, slower under load): its last value. */
+/**
+ * Miniflare's rate limits count in fixed windows on the clock (epoch = now / period): a sequence that
+ * straddles a minute's edge starts again in a new window, and sees no 429.  So a test of one waits
+ * until it has `need` ms of its window left (at most that long).
+ */
+async function clearOfMinuteEdge(need = 10_000) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < need) await new Promise((r) => setTimeout(r, left + 50));
+}
 async function until(f, ms = 15_000) {
   const end = Date.now() + ms;
   let v = await f();
@@ -619,6 +629,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   await put(sb, bb);
   const loc = new URL((await fetchAt(SITE, `/api/sync/v1/blob/${sha(bb)}`, { headers: { cookie: sb, "sec-fetch-site": "same-origin" } })).headers.get("location") ?? "https://files.test/");
   ok(loc.pathname.startsWith("/p/s/"), "(a signed URL for the files tests)");
+  await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 3; i++) codes.push((await mf.dispatchFetch(`https://tightfiles.test${loc.pathname}${loc.search}`, { headers: { "cf-connecting-ip": "198.51.100.7" } })).status);
   ok(codes[2] === 429, "a reused signed URL is limited per IP at the files Worker, before R2: " + codes.join());
@@ -1059,6 +1070,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(r.status === 411, "a notice with no Content-Length is refused before it is read (" + r.status + ")");
   r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
+  await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 4; i++) codes.push((await fetchAt("https://tight.test", "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.5" }, body: "{}" })).status);
   ok(codes.join() === "401,401,429,429", "the admin routes have a per-IP limit before any signature check: " + codes.join());
