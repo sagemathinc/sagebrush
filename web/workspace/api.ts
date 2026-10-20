@@ -27,7 +27,7 @@
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE, markBlocked } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 import { reserve } from "./reserve";
 
@@ -244,37 +244,44 @@ export class Workspace {
     // in meta, says which write it was)
     const s = this.durability.state;
     const phase = s === "confirmed" || s === "suspected" ? "quarantined" : s === "resetting" ? "resetting" : s === "purging" ? "purging" : "ok";
+    // (a tab whose identity meta no longer holds (a reset elsewhere, carried on here or not) writes nothing)
     const step = await inTx(this.ws, "meta", "readwrite", async (tx) => {
-      const st = tx.objectStore("meta"), n = (((await req(st.get("fenceStep"))) as number | undefined) ?? 0) + 1;
+      const st = tx.objectStore("meta"), id = (await req(st.get("identity"))) as Identity | undefined;
+      if (id && (id.workspace !== this.identity.workspace || id.generation !== this.identity.generation)) return null;
+      const n = (((await req(st.get("fenceStep"))) as number | undefined) ?? 0) + 1;
       st.put(n, "fenceStep");
       return n;
     });
-    const fence = { workspace: this.identity.workspace, generation: this.identity.generation, step, phase };
+    if (step === null) return;
+    // (the workspace's database named in it: the authority each write confirms, notebook/stores.js)
+    const fence = { workspace: this.identity.workspace, generation: this.identity.generation, step, phase, primary: this.ws.name };
     const put = (db: IDBDatabase, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => new Promise<void>((ok, no) => {
       const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store), g = st.get(key);
       // (never replaced by an earlier generation's: a tab left over from before a reset can't put its fence back;
-      // within a generation every write holds the workspace's lock, which orders them)
+      // within a generation every write holds the workspace's lock, which orders them.  One of a later generation
+      // left there (the workspace's own database rolled back behind it) is not this fence written: the database
+      // is blocked, as if the write had failed: astra's CORR-56C-1)
+      let skipped: unknown = null;
       g.onsuccess = () => {
         const c = cur(g.result);
-        if (typeof c?.generation === "number" && c.generation > fence.generation) return;
+        if (typeof c?.generation === "number" && c.generation > fence.generation) { skipped = c; return; }
         try { st.put(rec); } catch (e) { tx.abort(); no(e); }
       };
-      tx.oncomplete = () => ok();
+      tx.oncomplete = () => (skipped ? no(new Error(`a fence of a later generation is there: ${JSON.stringify(skipped)}`)) : ok());
       tx.onerror = () => no(tx.error);
       tx.onabort = () => no(tx.error);
     });
     // (every store the editors write outside the lock, design/workspace-durability.md A.3b: the notebooks', their
-    // history's, the boards' history's; one whose fence can't be written is marked blocked, here, in localStorage
-    // and in meta, so its writes are refused until a later write succeeds; never deleted)
+    // history's, the boards' history's; one whose fence can't be written is marked blocked in meta, which every
+    // write to it reads first (notebook/stores.js), so its writes are refused until a later write succeeds; a
+    // fence is never deleted.  meta itself refusing the mark fails the open)
     const blocked: string[] = [];
     const fenceIn = async (db: IDBDatabase | null, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => {
       if (!db) return;
       try {
         await put(db, store, key, rec, cur);
-        markBlocked(db.name, false);
       } catch (e) {
         console.warn(`workspace fence (${db.name}):`, e);
-        markBlocked(db.name, true);
         blocked.push(db.name);
       }
     };
@@ -285,6 +292,17 @@ export class Workspace {
     await fenceIn(this.bhdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
     this.fenceBlocked = blocked;
     await inTx(this.ws, "meta", "readwrite", async (tx) => { if (blocked.length) tx.objectStore("meta").put(blocked, "fenceBlocked"); else tx.objectStore("meta").delete("fenceBlocked"); });
+  }
+  /** The latest generation any of the editors' stores' fences names (0 if none). */
+  private async fencesUpTo(): Promise<number> {
+    const gen = async (db: IDBDatabase | null, store: string, key: IDBValidKey, f: (v: any) => any) => {
+      if (!db) return 0;
+      const v = f(await new Promise((ok) => { try { const r = db.transaction(store).objectStore(store).get(key); r.onsuccess = () => ok(r.result); r.onerror = () => ok(undefined); } catch { ok(undefined); } }));
+      return typeof v?.generation === "number" ? v.generation : 0;
+    };
+    try { this.hdb ??= await openHistoryDb(); } catch {}
+    try { this.bhdb ??= await openBoardHistoryDb(); } catch {}
+    return Math.max(await gen(this.main, "notebooks", FENCE, (v) => v), await gen(this.hdb, "history", [FENCE, ""], (v) => v?.fence), await gen(this.bhdb, "history", [FENCE, ""], (v) => v?.fence));
   }
   /** The stores whose fence couldn't be written at the latest try: their writes are refused (the pages' gates too). */
   fenceBlocked: string[] = [];
@@ -518,7 +536,9 @@ export class Workspace {
         return { id: now0.resetting.to, before: null };
       }
       if (now0.resetting || now0.purge) throw new WorkspaceError("storage", "a reset of this workspace is already under way: wait for it to finish, then reload");
-      const g = this.identity.generation, to = g + 1, now = this.now();
+      // (past every fence left in the editors' stores too: one of a later generation, left by a rollback of this
+      // database, would otherwise block the new workspace's fence for good: CORR-56C-1)
+      const g = this.identity.generation, to = Math.max(g, await this.fencesUpTo()) + 1, now = this.now();
       const before = await this.sample();
       const prepared: Witness = { ...before, reset: { to, kind, at: now } };
       // 1. prepared, in both witnesses (one already known unwritable this session is passed over)
@@ -667,9 +687,11 @@ export class Workspace {
       // (localStorage's boards and pending copies: LOCAL_PAGE a step from one list (LIMIT-28F-1); its marker
       // dropped only once a full listing finds none left.  Storage that can't be had, listed or emptied now is
       // unknown, never empty (astra's CORR-2A4-3 on 28f6511b): the marker kept, every migrate refused meanwhile,
-      // tried again at the next open; writers aren't held up by it, nothing of the workspace being there)
+      // tried again at the next open.  Writers aren't held up by it: the board page's pending copies and a board's
+      // marks of the new workspace are under the same prefixes, and each key is removed only if the board it names
+      // isn't the workspace's now (astra's CORR-2A4-3 on 56c60932))
       let n: number | "unknown";
-      try { n = this.purgeLocal(); } catch (e) { n = "unknown"; console.warn("workspace: localStorage's old boards couldn't be removed yet; tried again at the next open:", e); }
+      try { n = await this.purgeLocal(); } catch (e) { n = "unknown"; console.warn("workspace: localStorage's old boards couldn't be removed yet; tried again at the next open:", e); }
       if (n === "unknown") { this.localUnknown = true; return "done"; }
       if (n) return "purge";
       await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeLocal"); });
@@ -735,7 +757,7 @@ export class Workspace {
     this.sizes = { fileBytes: files, trash };
   }
   /** localStorage's boards kept before the workspace, and their pending copies, deleted (after a reset to a new
-   * workspace: nothing to bring back in). */
+   * workspace: nothing to bring back in); a key of a board the workspace has now (its pending copy, its marks) kept. */
   // (the keys to purge, listed by one pass over localStorage per cleanup run, then removed LOCAL_PAGE a step from
   // the list: never a scan per step, nor key(i) indexes trusted across removals: daybreak2's LIMIT-28F-1)
   private localDoomed: string[] | null = null;
@@ -743,8 +765,8 @@ export class Workspace {
   /** Whether localStorage's part of the old store's purge couldn't be done at the latest try (it is tried
    * again at every open; until it is done no migrate brings anything in). */
   localUnknown = false;
-  // (how many keys a step removed; a throw when localStorage can't be had, listed or emptied)
-  private purgeLocal(): number {
+  // (how many keys a step went through; a throw when localStorage can't be had, listed or emptied)
+  private async purgeLocal(): Promise<number> {
     const doomedKey = (k: string | null) => !!k && (k.startsWith("sagebrush-board:local:") || k.startsWith(BOARD_KEYS.pending("")) || k.startsWith(BOARD_KEYS.unread("")));
     const ls: Storage = globalThis.localStorage;
     if (!ls) throw new Error("no localStorage");
@@ -756,8 +778,18 @@ export class Workspace {
       this.localDoomed = keys.filter(doomedKey);
     }
     const page = this.localDoomed!.splice(0, LOCAL_PAGE);
-    for (const k of page) ls.removeItem(k);
-    if (page.length) RESET_HOOK.afterPage?.("localStorage", page.length);
+    if (!page.length) return 0;
+    // (the board each key names: "sagebrush-board:local:REF…", or the pending copy's prefix and REF)
+    const refOf = (k: string) => (k.startsWith("sagebrush-board:local:") ? k.slice(22, 34) : k.slice((k.startsWith(BOARD_KEYS.unread("")) ? BOARD_KEYS.unread("") : BOARD_KEYS.pending("")).length));
+    const ours = await inTx(this.ws, "entries", "readonly", async (tx) => {
+      const ix = tx.objectStore("entries").index("byRef");
+      const found = await Promise.all(page.map((k) => req(ix.getKey(["board", refOf(k)]))));
+      return new Set(page.filter((_, i) => found[i] !== undefined));
+    });
+    // (read just before each removal: never a key the workspace's board has; a later replacement of one listed
+    // for an old board is the same old board's, which the workspace doesn't have)
+    for (const k of page) if (!ours.has(k)) ls.removeItem(k);
+    RESET_HOOK.afterPage?.("localStorage", page.length);
     return page.length;
   }
 

@@ -10,4 +10,4 @@ export { showReloadNotice, showLossNotice } from "./notice";
 export { decide, best, newer, resolveReset, readLocal, readOpfs, writeLocal, writeOpfs, placeOf, isWitness, LOCAL_KEY, type Witness, type State, type Held, type Read } from "./witness";
 export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 // (the notebooks' store and its save gate, which the page closes while the workspace is quarantined: for tests)
-export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, BLOCKED_FLAG, ownedByWorkspace } from "../notebook/stores.js";
+export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace } from "../notebook/stores.js";

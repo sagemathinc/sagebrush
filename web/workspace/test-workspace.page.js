@@ -1413,7 +1413,6 @@ async function lookalikesAtScale() {
 const named = async () => {
   n++;
   for (const h of [await W.openHistoryDb(), await W.openBoardHistoryDb()]) if (h) { await rawDel(h, "history", ["__sagebrush-workspace__", ""]).catch(() => {}); h.close(); }
-  for (const k of Object.keys(localStorage)) if (k.startsWith(W.BLOCKED_FLAG)) localStorage.removeItem(k);
   return { name: `ws-test-${n}`, mainName: `main-test-${n}` };
 };
 const openAs = (o) => W.Workspace.open(o);
@@ -2344,8 +2343,135 @@ async function durabilityAstraProbes28f(){
  }
 }
 
+// astra's probes on 56c60932, verbatim
+async function deniedBundle(){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+ const witness=localW(o.name);await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+ const get=Storage.prototype.getItem,set=Storage.prototype.setItem,put=IDBObjectStore.prototype.put;
+ Storage.prototype.getItem=function(){throw Error('denied')};Storage.prototype.setItem=function(){throw Error('denied')};
+ IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');return put.call(this,v,...args)};
+ let b;try{b=await openAs(o);const st=new S.IdbStore(b.main,e.ref),doc=await st.load(),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT THROUGH BLOCKED FENCE'});
+ check(!save?.saved,'denied-separate-bundle: '+JSON.stringify({quarantined:b.quarantined,blocked:b.fenceBlocked,meta:await rawGet(b.ws,'meta','fenceBlocked'),seen:st.fence,save}));}
+ finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;IDBObjectStore.prototype.put=put;a.close();b?.close()}
+}
+async function primaryRollback(){
+ const S=await import('./stores.js'),o=await named();let a=await openAs(o);const e=await a.create('/n.ipynb'),old={...a.identity},oldStep=await rawGet(a.ws,'meta','fenceStep');await a.reset('keep');await a.flushOpfs();
+ const fence=await rawGet(a.main,'notebooks','__sagebrush-workspace__');await rawPut(a.ws,'meta',old,'identity');await rawPut(a.ws,'meta',oldStep,'fenceStep');a.close();a=await openAs(o);
+ const st=new S.IdbStore(a.main,e.ref),doc=await st.load(),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT THROUGH FUTURE FENCE'});
+ check(!save?.saved,'primary-generation-rollback: '+JSON.stringify({quarantined:a.quarantined,identity:a.identity,oldFence:fence,seen:st.fence,blocked:a.fenceBlocked,save}));a.close();
+}
+async function currentPending(){
+ const o=await named(),a=await openAs(o),key=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};
+ try{await a.reset('new')}finally{Storage.prototype.key=key}
+ const marker=await rawGet(a.ws,'meta','purgeLocal'),e=await a.create('/new.board.json');
+ const {WS_SAVE}=await import('./wssave.js');let enter,release;const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r),orig=a.write;
+ a.write=async function(...args){enter();await held;throw Error('simulated shutdown before IndexedDB commit')};
+ const save=new Function('ws','id','d',`let wsRefused=null,wsSeq=0,wsRev=1,wsEpoch=0,wsCopy=null,wsWriting=Promise.resolve();const wsLatest=new Map(),PENDING_MAX=8*2**20,PENDING='sagebrush-workspace-pending:',SESSION='aaaaaaaaaaaaaaaa';const logSave=()=>{};const dropPending=()=>{};${WS_SAVE};wsSave(id,d);return wsWriting;`);
+ const saving=save(a,e.ref,{title:'NEW UNSAVED EDIT',nodes:[]});await entered;
+ const pendingKey='sagebrush-workspace-pending:'+e.ref,before=localStorage.getItem(pendingKey);await a.cleanUp(true);const after=localStorage.getItem(pendingKey);
+ release();await saving;a.write=orig;
+ check(!!after,'current-generation-pending: '+JSON.stringify({marker,state:a.durability,ref:e.ref,before,after,stored:(await a.read(e.path)).content.title}));a.close();
+}
+
+async function deniedMeta(){
+ const S=await import('./stores.js'),o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+ const st=new S.IdbStore(a.main,e.ref),doc=await st.load();const witness=localW(o.name);await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+ const get=Storage.prototype.getItem,set=Storage.prototype.setItem,put=IDBObjectStore.prototype.put;
+ Storage.prototype.getItem=function(){throw Error('denied')};Storage.prototype.setItem=function(){throw Error('denied')};
+ IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');if(this.name==='meta'&&args[0]==='fenceBlocked')throw Error('meta refused');return put.call(this,v,...args)};
+ let err=null;try{await openAs(o)}catch(e){err=e.message}
+ try{const q=await rawGet(a.ws,'meta','quarantine'),save=await st.save({...doc,baseRev:doc.rev,name:'EDIT AFTER FAILED OPEN'});
+ check(!save?.saved,'denied-separate-bundle-and-meta: '+JSON.stringify({openError:err,quarantine:q?.state,blockedMeta:await rawGet(a.ws,'meta','fenceBlocked'),seen:st.fence,save}));}
+ finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;IDBObjectStore.prototype.put=put;a.close()}
+}
+
+// after a rollback of the workspace's database behind the editors' fences: "keep" goes past the latest fence, and
+// the editors write again (CORR-56C-1); a board history the workspace doesn't own is written whatever the storage
+// denies; and what confirming each write with the workspace's meta costs a save (for daybreak2)
+async function durabilityAuthority() {
+  {
+    const o = await named(); let a = await openAs(o); const e = await a.create("/n.ipynb"), old = { ...a.identity }, oldStep = await rawGet(a.ws, "meta", "fenceStep");
+    await a.reset("keep"); await a.flushOpfs();
+    await rawPut(a.ws, "meta", old, "identity"); await rawPut(a.ws, "meta", oldStep, "fenceStep"); a.close(); a = await openAs(o);
+    const blocked = [...a.fenceBlocked];
+    const k = await a.reset("keep");
+    const st = new W.IdbStore(a.main, e.ref), doc = await st.load(), save = await st.save({ ...doc, baseRev: doc.rev, name: "AFTER KEEP" });
+    check(blocked.includes(a.main.name) && k.generation === 3 && !a.fenceBlocked.length && !!save?.saved, "a fence of a later generation found: blocked, not taken for written; keep goes past it, and the notebook saves again: " + JSON.stringify({ blocked, k, save }));
+    a.close();
+  }
+  {
+    const o = await named(); let a = await openAs(o); await a.create("/b.board.json"); await a.flushOpfs(); a.close();
+    const wit = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...wit, seq: wit.seq + 10 }); a = await openAs(o);
+    const db = await W.openBoardHistoryDb(), ex = new W.IdbPatchStore(db, "board:examples/authority.json");
+    await ex.loadInitial();
+    const get = Storage.prototype.getItem; Storage.prototype.getItem = function () { throw Error("denied"); };
+    try { ex.append({ time: "e-time", id: "e" }); await new Promise((r) => setTimeout(r, 50)); } finally { Storage.prototype.getItem = get; }
+    check(a.quarantined && (await rawKeys(db, "history")).some((k) => k[0] === "board:examples/authority.json"), "quarantined, storage denied: a board history the workspace doesn't own still written");
+    await ex.drop(); a.close(); db.close();
+  }
+  // each rule of the confirming, alone, through another copy of the stores with nothing wired: the workspace's
+  // meta unreadable, naming another identity, a reset under way, or its database gone: refused; a history append too
+  {
+    const S = await import("./stores.js");
+    const fresh = async () => { const o = await named(), a = await openAs(o), e = await a.create("/r.ipynb"); a.channel?.close(); a.channel = null; const st = new S.IdbStore(a.main, e.ref), doc = await st.load(); return { o, a, e, st, doc }; };
+    const tryIt = (st, doc, name) => st.save({ ...doc, baseRev: doc.rev, name });
+    {
+      const { o, a, st, doc } = await fresh();
+      const tx = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (names, ...rest) { if (this.name === o.name && names === "meta") throw new Error("denied (test)"); return tx.call(this, names, ...rest); };
+      let save; try { save = await tryIt(st, doc, "UNREADABLE"); } finally { IDBDatabase.prototype.transaction = tx; }
+      const after = await tryIt(st, doc, "READABLE");
+      check(!save?.saved && !!after?.saved, "the workspace's meta unreadable: refused; readable again: saved: " + JSON.stringify({ save, after }));
+      a.close();
+    }
+    {
+      const { a, e, st, doc } = await fresh();
+      const id = await rawGet(a.ws, "meta", "identity");
+      await rawPut(a.ws, "meta", { ...id, workspace: "b".repeat(16) }, "identity");
+      const save = await tryIt(st, doc, "OTHER IDENTITY");
+      const hdb = await S.openHistoryDb(), h = new S.IdbPatchStore(hdb, "auth-" + e.ref); await h.loadInitial(); h.append({ time: "h-time", id: "h" }); await new Promise((r) => setTimeout(r, 80));
+      const rows = (await rawKeys(hdb, "history")).filter((k) => k[0] === "auth-" + e.ref);
+      check(!save?.saved && rows.length === 0, "the workspace's meta naming another identity than the fence: a save and a history append refused: " + JSON.stringify({ save, rows }));
+      await rawPut(a.ws, "meta", id, "identity"); hdb.close(); a.close();
+    }
+    {
+      const { a, st, doc } = await fresh();
+      const id = await rawGet(a.ws, "meta", "identity");
+      await rawPut(a.ws, "meta", { to: { workspace: "c".repeat(16), generation: id.generation + 1 }, seq: 0 }, "resetting");
+      const save = await tryIt(st, doc, "DURING RESET");
+      check(!save?.saved, "a reset under way in the workspace's meta, its fence not yet saying so: refused: " + JSON.stringify(save));
+      a.close();
+    }
+    {
+      const { o, a, st, doc } = await fresh();
+      a.close(); await dropDb(o.name);
+      const save = await tryIt(st, doc, "NO WORKSPACE");
+      check(!save?.saved, "the workspace's database gone, the fence still naming it: refused: " + JSON.stringify(save));
+    }
+  }
+  // a tab left behind by a reset elsewhere (its broadcast missed) writes no fence, and so blocks nothing
+  {
+    const o = await named(), a = await openAs(o), b = await openAs(o), e = await a.create("/s.ipynb");
+    for (const w of [a, b]) { w.channel?.close(); w.channel = null; }
+    await a.reset("keep");
+    await b.writeFence();
+    const S = await import("./stores.js"), st = new S.IdbStore(a.main, e.ref), doc = await st.load(), save = await st.save({ ...doc, baseRev: doc.rev, name: "AFTER STALE" });
+    check(!!save?.saved && (await rawGet(a.ws, "meta", "fenceBlocked")) === undefined && (await rawGet(a.main, "notebooks", "__sagebrush-workspace__")).generation === 2, "a stale tab's fence: not written, nothing blocked: " + JSON.stringify(save));
+    a.close(); b.close();
+  }
+  {
+    const o = await named(), a = await openAs(o), e = await a.create("/t.ipynb");
+    const S = await import("./stores.js"), st = new S.IdbStore(a.main, e.ref), doc = await st.load();
+    const plain = await S.openDb("authority-plain"), sp = new S.IdbStore(plain, "p"), dp = await sp.load();
+    const time = async (s, d) => { const t = []; for (let i = 0; i < 100; i++) { const t0 = performance.now(); const r = await s.save({ ...d, baseRev: d.rev, name: "n" + i }); t.push(performance.now() - t0); d = { ...d, rev: r.rev }; } t.sort((x, y) => x - y); return { median: +t[50].toFixed(2), p95: +t[95].toFixed(2) }; };
+    const owned = await time(st, doc), unowned = await time(sp, dp);
+    check(owned.median < 20, `a save confirmed with the workspace's meta: ${JSON.stringify(owned)} ms, without: ${JSON.stringify(unowned)} ms (100 saves each)`);
+    a.close(); plain.close(); await dropDb("authority-plain");
+  }
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
