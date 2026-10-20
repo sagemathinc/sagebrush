@@ -101,6 +101,32 @@ In **confirmed** or **suspected** loss, the workspace opens **quarantined**. Eve
 
 **The choices:** restore (part B, when there is a copy), restore from sync, import an export, or "Start a new workspace here". Starting new is a reset (A.3a), which then lifts the quarantine. In the **unknown** state, the workspace works as far as storage allows, with the notice.
 
+### A.3b The stores outside the workspace's lock: a fence
+
+The notebooks' store (`"sagebrush"/notebooks`) and their history (`"sagebrush-history"`) are written by the editors, which don't hold the workspace's lock. The workspace keeps a **fence** in each: a record of its own, `{workspace, generation, step, phase}`. Its phase is one of:
+- `ok`;
+- `quarantined`;
+- `resetting`;
+- `purging`: a reset's old-store purge not yet finished.
+
+**Writing the fence:**
+- It is written holding the workspace's lock, at every open and every change of state, by compare-and-set in one transaction.
+- It is never replaced by an earlier generation's, so a tab left over from before a reset can't put its fence back.
+- A fence that can't be written is deleted.
+
+**Checked by every write** (astra's CORR-2A4-2 on 0eefec71), whatever the page did or didn't wire:
+- **Binding:** a store is bound to the fence it found when it loaded, read in the same transaction as the document.
+- **Checking:** each write (a save, a history append, clear or drop) reads the fence in the write's own transaction. It is allowed only if the fence is that same workspace and generation, in phase `ok`.
+- **Failing closed:** a fence that appeared since a store found none, or went since it found one, refuses the write.
+
+**The page:**
+- The notebook page opens the workspace (at most a few seconds) before it loads any notebook.
+- The board page's save keeps nothing, not even its pending copy in localStorage, while the workspace is quarantined, resetting, purging, or closed.
+
+**A purge after a reset to a new workspace:**
+- It is finished before anything is written. Its stopping or failing (a key that can't be removed) keeps it pending, the workspace "purging", and `migrate` bringing nothing in.
+- It goes a page at a time, as does the reset's cleanup, an open resuming them for at most 250 ms and then in the background.
+
 ### A.3a Reset and replacing import: prepared, then committed
 
 Every deliberate reset follows four steps, holding the workspace's lock throughout:

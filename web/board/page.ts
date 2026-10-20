@@ -372,6 +372,12 @@ const logSave = (what: string, d: BoardDoc, epoch: number, base?: number) => {
 let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = null;
 function wsSave(id: string, d: BoardDoc) {
   const w = ws!, refused = wsRefused;
+  // (the workspace quarantined, being reset, or reset or upgraded elsewhere: nothing kept, not even the pending
+  // copy in localStorage, and said: astra's CORR-2A4-2 on 0eefec71)
+  if (w.quarantined || w.closed) {
+    wsRefused = new Error(w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : "this browser's copy of your workspace was lost, is missing changes, or is being reset: nothing can be changed until that is settled");
+    throw wsRefused;
+  }
   let journaled = true;
   const text = JSON.stringify(d), header = `${SESSION}:${++wsSeq}:${wsRev}`, epoch = wsEpoch;
   if (text.length > PENDING_MAX) {

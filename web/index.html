@@ -2394,6 +2394,9 @@ const dbReady = openDb("sagebrush", { onVersionChange: () => { db = null; update
 const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close(); nbHistory = null; updated(); } });
 (async () => {
   db = await dbReady;
+  // (the workspace opened first, at most a few seconds: its fence in the notebooks' store is there before any
+  // notebook is loaded, so each store is bound to it: design/workspace-durability.md A.3)
+  await wsNow();
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
