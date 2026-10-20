@@ -112,17 +112,46 @@ async function resume(w: Workspace, opening = false): Promise<void> {
   const cur = running.get(w);
   if (cur) return cur;
   const run = (async () => {
-    const s = await readState(w).catch(() => ({}) as MigrationState);
-    if (s.done || (s.paused && !opening && !(await room(0)))) return;
-    if (s.paused) { delete s.paused; await writeState(w, s); }
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks?.request) return;
     await locks.request(LOCK, { ifAvailable: true }, async (lock: unknown) => {
-      if (lock) await migrate(w);
+      if (!lock) return;
+      // (old copies first, whatever the migration's state: their marks are durable, and "done" covers only the
+      // passes over the index (astra's CORR-6B7-1: a tab closed between an adopt's move and its old copy's
+      // deletion leaves a mark that nothing else would ever come back to))
+      await cleanStale(w);
+      const s = await readState(w).catch(() => ({}) as MigrationState);
+      if (s.done || (s.paused && !opening && !(await room(0)))) return;
+      if (s.paused) { delete s.paused; await writeState(w, s); }
+      await migrate(w);
     });
   })().catch((e) => console.warn("workspace migration:", e)).finally(() => running.delete(w));
   running.set(w, run);
   return run;
+}
+
+/** Old copies of moved files deleted, or kept as files of their own if written since (Workspace.dropStale), by
+ * their marks, a page of MIGRATE.files at a time, each read with its reservation taken before the lock; at most
+ * STALE_PAGES pages a run (an older tab writing all the while is caught up with by the next run). */
+const STALE_PAGES = 32;
+async function cleanStale(w: Workspace) {
+  // (each mark tried once a run: one that stays (its copy written again and again, or a failure) waits for the next)
+  const tried = new Set<string>();
+  for (let page = 0; page < STALE_PAGES && !w.closed; page++) {
+    const marks = (await w.staleCopies(MIGRATE.files + tried.size)).filter(([where, key]) => !tried.has(where + ":" + key)).slice(0, MIGRATE.files);
+    if (!marks.length) return;
+    for (const [where, key] of marks) {
+      tried.add(where + ":" + key);
+      const release = await reserve(LEGACY_MAX * MIGRATE.copies);
+      try {
+        await w.locked(() => w.dropStale(where, key));
+      } catch (e) {
+        console.warn("workspace migration: an old copy:", e);
+      } finally {
+        release();
+      }
+    }
+  }
 }
 
 async function migrate(w: Workspace) {
