@@ -1703,6 +1703,10 @@ export function createNotebook(root, opts = {}) {
   const busy = new Map();
   function queueSave(mine, st, doc, json, seen) {
     {
+      // (this document's saves numbered: a busy one is kept only if no later save of it was asked for since, and
+      // a later one that succeeds supersedes it, so an older edit is never sent again over a newer one: astra's
+      // CORR-9D7-1)
+      const seq = mine.saveSeq = (mine.saveSeq ?? 0) + 1;
       busy.delete(mine);
       let sent = doc;
       mine.inflight = (mine.inflight ?? 0) + 1;
@@ -1720,8 +1724,9 @@ export function createNotebook(root, opts = {}) {
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
       saveChain = p.then((t) => {
-        // (a busy one sent again, done: its error no longer stands)
-        if (mine.busyError) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
+        // (an older busy one, superseded by this save: its error no longer stands, and it isn't sent again)
+        if ((busy.get(mine)?.seq ?? Infinity) <= seq) busy.delete(mine);
+        if (mine.busyError && mine.busySeq <= seq) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
         if (t && typeof t === "object" && t.conflict) {
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
@@ -1742,7 +1747,9 @@ export function createNotebook(root, opts = {}) {
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
-        if (e?.busy) { busy.set(mine, { st, sent, json }); mine.busyError = e; }
+        // (a busy one superseded by a later save of this document, asked for since: that one answers for it)
+        if (e?.busy && seq !== mine.saveSeq) return;
+        if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });

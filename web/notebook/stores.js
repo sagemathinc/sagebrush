@@ -124,10 +124,13 @@ const UNREADABLE = "this browser's record of the workspace couldn't be read: rel
 // queue, holding up nothing
 const WORKSPACE_LOCK = "sagebrush-workspace";
 export const LOCK_WAIT = { ms: 10_000 };
-// (the appends waiting, all history stores together: at most HISTORY_BACKLOG.entries and .bytes (as UTF-16 code
-// units of their JSON); one past them is refused, not queued, and said to every onHistoryRefused listener, so
+// (the appends waiting, all history stores together: at most HISTORY_BACKLOG.entries and .bytes, each charged
+// twice its JSON's length (UTF-16 code units, 2 bytes each in memory) and ENTRY_OVERHEAD, a copy of its own taken
+// when it is asked for; one past them is refused, not queued, and said to every onHistoryRefused listener, so
 // that a tab stuck holding the lock costs this page bounded memory, never more)
 export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
+// (bytes charged for each append beside its JSON: the queue's closure, the record and the message around it)
+export const ENTRY_OVERHEAD = 256;
 const backlog = { entries: 0, bytes: 0 };
 const refusedSubs = new Set();
 /** `f(message)`: called when an append is refused because too many wait (a stuck tab holding the lock). */
@@ -136,14 +139,24 @@ export function onHistoryRefused(f) { refusedSubs.add(f); return () => refusedSu
 export const historyBacklog = () => ({ ...backlog });
 export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel can't keep up: some of this document's latest history isn't kept";
 const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
+const BUSY_DELETE = "your files are busy (another tab is changing them)";
+// (a deadline: LOCK_WAIT from when it is made, its signal aborted then unless the lock was had first; made when a
+// save, clear or drop is asked for, so the time it spends queued counts too: daybreak2's LIMIT-9D7-1)
+function deadlineOf() {
+  const d = { ctl: new AbortController(), granted: false, timer: null };
+  d.timer = setTimeout(() => { if (!d.granted) d.ctl.abort(); }, LOCK_WAIT.ms);
+  return d;
+}
+// (`wait`: false, as long as it takes; true, a deadline from now; or a deadline made earlier)
 function underLock(lockHeld, f, wait = false) {
   const locks = globalThis.navigator?.locks;
   if (lockHeld || !locks || typeof locks.request !== "function") return f();
   if (!wait) return locks.request(WORKSPACE_LOCK, { mode: "shared" }, f);
-  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), LOCK_WAIT.ms);
-  return locks.request(WORKSPACE_LOCK, { mode: "shared", signal: ctl.signal }, (l) => { clearTimeout(timer); return f(l); })
+  const d = wait === true ? deadlineOf() : wait;
+  // (had: the deadline stops; aborted first: the request withdrawn, never had, f never run)
+  return locks.request(WORKSPACE_LOCK, { mode: "shared", signal: d.ctl.signal }, (l) => { d.granted = true; clearTimeout(d.timer); return f(l); })
     .catch((e) => { if (e?.name === "AbortError") throw Object.assign(new Error(BUSY), { busy: true }); throw e; })
-    .finally(() => clearTimeout(timer));
+    .finally(() => clearTimeout(d.timer));
 }
 async function primaryRefusal(db, fence) {
   if (!fence && !["sagebrush", "sagebrush-history", "sagebrush-board-history"].includes(db.name)) return null;
@@ -370,9 +383,12 @@ export class IdbPatchStore {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
     if (!this.db || (this.owned && refusal())) return false;
     // (bounded: past HISTORY_BACKLOG, refused and said, never queued)
+    // (the envelope taken as it is now, a copy of its own, so what is charged is what is kept: daybreak2's
+    // LIMIT-9D7-2; charged conservatively, twice its JSON's length (UTF-16 in memory) and ENTRY_OVERHEAD)
+    try { env = structuredClone(env); } catch { return false; }
     let size = 0;
     if (this.owned) {
-      try { size = JSON.stringify(env).length; } catch { size = HISTORY_BACKLOG.bytes; }
+      try { size = 2 * JSON.stringify(env).length + ENTRY_OVERHEAD; } catch { size = HISTORY_BACKLOG.bytes; }
       if (backlog.entries + 1 > HISTORY_BACKLOG.entries || backlog.bytes + size > HISTORY_BACKLOG.bytes) {
         for (const f of refusedSubs) try { f(HISTORY_REFUSED); } catch {}
         return false;
@@ -416,23 +432,37 @@ export class IdbPatchStore {
   }
   /** `opts.lockHeld`: the caller holds the workspace's lock already. */
   clear(opts = {}) {
-    return this.queue(async () => {
-      await this.deleteAllowed(opts);
-      getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
-    });
+    return this.deleteQueued(opts, true);
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
   drop(opts = {}) {
-    return this.queue(() => this.deleteAllowed(opts));
+    return this.deleteQueued(opts, false);
+  }
+  // (in the queue, in the order asked for; its deadline from when it was asked: refused once it passes, even
+  // while still queued behind appends waiting for the lock, and its turn then does nothing, so it can never
+  // delete afterwards: daybreak2's LIMIT-9D7-1)
+  deleteQueued(opts, tell) {
+    const timed = !(opts.lockHeld || !this.owned) && typeof globalThis.navigator?.locks?.request === "function";
+    const d = timed ? deadlineOf() : null;
+    const turn = this.queue(async () => {
+      if (d?.ctl.signal.aborted) return;
+      await this.deleteAllowed(opts, d ?? false);
+      if (tell) getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
+    });
+    if (!d) return turn;
+    const expired = new Promise((_, no) => d.ctl.signal.addEventListener("abort", () => no(new Error(`not done: ${BUSY_DELETE}`)), { once: true }));
+    turn.catch(() => {});
+    expired.catch(() => {});
+    return Promise.race([turn, expired]).finally(() => clearTimeout(d.timer));
   }
   // (asked first, without the lock; then the workspace's word again and the deletion, in one hold of it)
-  async deleteAllowed(opts) {
+  async deleteAllowed(opts, wait) {
     await this.allowed();
     await underLock(opts.lockHeld || !this.owned, async () => {
       const why = this.owned ? await primaryRefusal(this.db, this.fence) : null;
       if (why) throw new Error(`not done: ${why}`);
       await this.deleteChecked();
-    }, true).catch((e) => { throw e?.busy ? new Error(`not done: ${e.message.replace(": not saved yet, tried again with your next change", "")}`) : e; });
+    }, wait).catch((e) => { throw e?.busy ? new Error(`not done: ${BUSY_DELETE}`) : e; });
   }
   // (the rows deleted only if the fence, read in the same transaction, still allows it)
   async deleteChecked() {

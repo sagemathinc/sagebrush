@@ -558,6 +558,26 @@ try {
       return { first, left, error, saves, after: nb.leftOutstanding };
     })()`);
     check(/busy/.test(r.first ?? "") && r.left === 1 && r.error === null && r.saves.some(([n, c]) => n === "A" && c === "A busy") && r.after === 0, "the editor: a busy save, its document left: counted as left, then sent again by saved() and kept: " + JSON.stringify(r));
+    // (astra's CORR-9D7-1: A1 held, then refused busy; A2, asked for meanwhile, saved; A left: A1 is never sent
+    // again over A2, and nothing is left outstanding)
+    const r2 = await ev(`(async () => {
+      const nb = sagebrush.notebook, writes = [];
+      let release, n = 0;
+      const gate = new Promise((g) => (release = g));
+      const mk = (name, gated) => { let doc = { name, mode: "python", cells: [{ id: "c", code: name + "0" }] }, rev = 1; return { load: async () => ({ ...doc, rev }), save: async (d) => { if (gated && ++n === 1) { await gate; throw Object.assign(new Error("your files are busy (test)"), { busy: true }); } if (d.baseRev !== undefined && d.baseRev !== rev) return { conflict: { ...doc, rev } }; writes.push([name, d.cells[0].code, d.baseRev]); doc = d; rev++; return { saved: "saved", rev }; }, subscribe: () => () => {} }; };
+      const A = mk("A", true), B = mk("B", false);
+      await nb.attach(A);
+      nb.setInput(nb.cells()[0], "A1"); nb.flush();
+      await new Promise((r) => setTimeout(r, 50));
+      nb.setInput(nb.cells()[0], "A2"); nb.flush();
+      await nb.attach(B);
+      release();
+      let error = null; try { await nb.saved(); } catch (e) { error = String(e?.message ?? e); }
+      await new Promise((r) => setTimeout(r, 100));
+      try { await nb.saved(); } catch (e) { error = error ?? String(e?.message ?? e); }
+      return { error, writes, left: nb.leftOutstanding };
+    })()`);
+    check(r2.error === null && JSON.stringify(r2.writes.filter((w) => w[0] === "A").map((w) => w[1])) === '["A2"]' && r2.left === 0, "the editor: an older busy save superseded by a newer one saved is never sent again over it: " + JSON.stringify(r2));
     await ev(`sagebrush.workspace.stat("/Busy Y.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
   }
   // Undo of Move to Trash: that file, put in Trash that time; not another
