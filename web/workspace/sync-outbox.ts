@@ -52,8 +52,12 @@ export type WireOp = { dseq: number; t: number; by: string; op: string; path: st
 /** An outbox record: its op, fixed when made, and its decision so far.  `lseq`: the local op it was made from;
  * `id`: the identity it is for (the index byIdent's key); `accepted`: the server's seq, once acked. */
 export type OutboxRecord = { ns: string; dseq: number; lseq: number; id: string; op: WireOp; accepted?: number };
-/** The outbox's totals; `full`: when a scan last stopped at a bound, until one goes on (shown: status()). */
-type Totals = { count: number; bytes: number; full?: { at: number; count: number; bytes: number } };
+/** The outbox's totals: `bytes`, what its records hold now; `charged`, what they may come to hold, each at its
+ * largest (accepted with the largest seq there is: chargeOf), the sum the bound is kept on, so accepting never
+ * takes `bytes` past it (daybreak2's LIMIT-855-1); `full`: when a scan last stopped at a bound, until one goes on
+ * (shown: status()). */
+type Totals = { count: number; bytes: number; charged: number; full?: { at: number; count: number; bytes: number } };
+const NONE: Totals = { count: 0, bytes: 0, charged: 0 };
 
 const key = (ns: string, what: "scanned" | "dseq" | "outbox") => `sync:${ns}:${what}`;
 /** A record's size, as the bound counts it: its JSON text, keys and all, as the workspace's inert JSON writer
@@ -64,6 +68,9 @@ export function recordBytes(r: OutboxRecord): number {
   if (n < 0) throw new Error("sync: an outbox record that isn't plain JSON data");
   return 2 * n;
 }
+/** A record's charge against the bound: its size at its largest, accepted with the largest seq acked() takes
+ * (Number.MAX_SAFE_INTEGER: sixteen digits), whether or not it is accepted yet. */
+export const chargeOf = (r: OutboxRecord) => recordBytes({ ...r, accepted: Number.MAX_SAFE_INTEGER });
 // (a namespace's form: what welcome gives, account hash, generation and device; nothing that could reach
 // another's keys)
 const NS = /^[0-9a-f]{16,64}:[0-9]{1,15}:[0-9a-f]{16}$/;
@@ -133,7 +140,7 @@ export class Outbox {
       const meta = tx.objectStore("meta");
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       const nextDseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
-      const t = ((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) ?? { count: 0, bytes: 0 };
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       return { scanned, nextDseq, ...t };
     });
   }
@@ -153,7 +160,7 @@ export class Outbox {
       if (scanned === undefined) throw new Error(`sync: ${this.ns} has no scan watermark yet (begin)`);
       let dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
       cut(2);
-      const t = ((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) ?? { count: 0, bytes: 0 };
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       cut(3);
       const ops = (await req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(scanned, true), OUTBOX.page))) as Op[];
       cut(4);
@@ -162,14 +169,16 @@ export class Outbox {
         const op = wireOf(o, dseq);
         if (op) {
           const r: OutboxRecord = { ns: this.ns, dseq, lseq: o.seq!, id: (o.after?.id ?? o.fid ?? o.ref)!, op };
-          const n = recordBytes(r);
-          if (t.count + 1 > OUTBOX.maxRecords || t.bytes + n > OUTBOX.maxBytes) {
+          // (admitted at its charge, its largest: accepting it later never takes what is held past the bound)
+          const c = chargeOf(r);
+          if (t.count + 1 > OUTBOX.maxRecords || t.charged + c > OUTBOX.maxBytes) {
             full = true;
             break;
           }
           out.add(r);
           t.count++;
-          t.bytes += n;
+          t.bytes += recordBytes(r);
+          t.charged += c;
           dseq++;
           made++;
         }
@@ -214,8 +223,12 @@ export class Outbox {
     await inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
-      const t = ((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) ?? { count: 0, bytes: 0 };
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       for (const d of results) {
+        // (what the server says, checked at the boundary: a dseq and a seq are positive safe integers, a code a
+        // short string; anything else refused whole, nothing changed)
+        if (!Number.isSafeInteger(d.dseq) || d.dseq < 1) throw new Error("sync: an ack for a dseq that isn't a positive safe integer");
+        if ("seq" in d ? !Number.isSafeInteger(d.seq) || d.seq < 0 : typeof (d as { code: unknown }).code !== "string" || (d as { code: string }).code.length > 64) throw new Error("sync: an ack whose decision isn't a non-negative safe integer seq (sixteen digits at most) or a short code");
         const r = (await req(out.get([this.ns, d.dseq]))) as OutboxRecord | undefined;
         if (!r) continue;
         if ("seq" in d) {
@@ -229,6 +242,7 @@ export class Outbox {
           out.delete([this.ns, d.dseq]);
           t.count--;
           t.bytes -= recordBytes(r);
+          t.charged -= chargeOf(r);
         }
       }
       meta.put(t, key(this.ns, "outbox"));
@@ -241,13 +255,14 @@ export class Outbox {
     await inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
-      const t = ((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) ?? { count: 0, bytes: 0 };
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       for (const dseq of dseqs) {
         const r = (await req(out.get([this.ns, dseq]))) as OutboxRecord | undefined;
         if (!r) continue;
         out.delete([this.ns, dseq]);
         t.count--;
         t.bytes -= recordBytes(r);
+        t.charged -= chargeOf(r);
       }
       meta.put(t, key(this.ns, "outbox"));
     });
