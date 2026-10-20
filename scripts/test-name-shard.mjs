@@ -24,8 +24,17 @@ const selected = names.filter((_, position) => position % total === index - 1);
 if (selected.length === 0) throw new Error(`${sourceFile}: shard ${shard} is empty`);
 const escape = (text) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 const pattern = `^(?:${selected.map(escape).join("|")})$`;
+const concurrency = process.env.SAGEBRUSH_CPUS;
+if (concurrency && !/^[1-9]\d*$/.test(concurrency)) {
+  throw new Error(`bad SAGEBRUSH_CPUS ${JSON.stringify(concurrency)}`);
+}
 console.error(`${sourceFile}: shard ${shard}, ${selected.length}/${names.length} tests`);
-const result = spawnSync(process.execPath, ["--test", `--test-name-pattern=${pattern}`, compiledFile], {
+const result = spawnSync(process.execPath, [
+  "--test",
+  ...(concurrency ? [`--test-concurrency=${concurrency}`] : []),
+  `--test-name-pattern=${pattern}`,
+  compiledFile,
+], {
   env: process.env,
   stdio: "inherit",
 });

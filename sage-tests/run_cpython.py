@@ -30,6 +30,7 @@ if "--regen" in sys.argv:
 
 files = sorted(f for f in os.listdir(PRE) if f.startswith("test_") and f.endswith(".py"))
 own = "--own" in sys.argv
+workers = min(4, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "4"))))
 
 
 def one(f):
@@ -49,7 +50,7 @@ def one(f):
 
 
 bad = 0
-with cf.ThreadPoolExecutor(4) as ex:
+with cf.ThreadPoolExecutor(workers) as ex:
     for f, ref, code, out, err in ex.map(one, files):
         ok = code == 0 and out == ref
         print("%-24s %s  (%d lines)" % (f, "ok" if ok else "DIFF", ref.count("\n")))
