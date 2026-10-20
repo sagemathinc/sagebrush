@@ -35,9 +35,10 @@ export const PINS = {
   /** pins released at once by a collapse, in the save's transaction (a few, so that a collapsing save stays
    * within its 64 IndexedDB calls); the rest by cleanPins, begun after the save returns */
   collapseRelease: 4,
-  /** pins or fileBytes keys looked at per cleanPins transaction, and pages per run */
-  page: 500,
-  pages: 64,
+  /** each cleanup slice, one transaction: at most `examine` records read a step, and at most `requests`
+   * IndexedDB requests made (an item is begun only while its costliest outcome still fits); then the next slice,
+   * after a timer, until nothing durable is left (daybreak2's LIMIT-E5C-1) */
+  slice: { examine: 100, requests: 400 },
   /** files listed as "some intermediate versions weren't uploaded" */
   skippedList: 100,
   /** (tests: a change's transaction failing right after its pin is taken) */
@@ -113,12 +114,19 @@ export const epochOf = async (meta: IDBObjectStore) => (await readOnce<number>(m
 
 /** The cap on bytes pins keep now: PINS.capBytes, or half the estimated free space if that is less (read before
  * any transaction; advisory: a save that then meets the quota fails whole, nothing half-pinned). */
+// (every save asks, sync on or not, so the browser's estimate is asked at most every 2 s)
+let halfFree = Infinity, askedAt = -Infinity;
 export async function capNow(): Promise<number> {
-  try {
-    const est = await (globalThis.navigator as any)?.storage?.estimate?.();
-    if (est && typeof est.quota === "number" && typeof est.usage === "number") return Math.min(PINS.capBytes, Math.max(0, Math.floor((est.quota - est.usage) / 2)));
-  } catch {}
-  return PINS.capBytes;
+  const now = performance.now();
+  if (now - askedAt >= 2000) {
+    askedAt = now;
+    halfFree = Infinity;
+    try {
+      const est = await (globalThis.navigator as any)?.storage?.estimate?.();
+      if (est && typeof est.quota === "number" && typeof est.usage === "number") halfFree = Math.max(0, Math.floor((est.quota - est.usage) / 2));
+    } catch {}
+  }
+  return Math.min(PINS.capBytes, halfFree);
 }
 
 export const pinTotal = async (meta: IDBObjectStore) => (await readOnce<number>(meta, "sync:pinBytes")) ?? 0;
@@ -214,10 +222,7 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
   const left = await refs(pins, p.storage);
   if ("version" in p.storage) {
     const vs = tx.objectStore("versions"), v = (await req(vs.get(p.storage.version))) as Version | undefined;
-    if (v?.pinned && left === 0) {
-      const { pinned: _p, ...rest } = v;
-      vs.put(rest);
-    }
+    if (v?.pinned && left === 0) vs.put(unpinned(v));
   } else if (p.orphan && left === 0) {
     // (orphaned bytes go with the last reference to them: no pin naming them, no entry (from step 4, no journal
     // record either))
@@ -231,6 +236,12 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
     if (cur && s?.allocated?.dseq === p.owner.dseq) ps.put({ ...cur, byNs: { ...cur.byNs, [p.owner.ns]: { ...s, allocated: { ...s.allocated, pinned: false } } } });
   }
   if (p.owner || skipped) await noteSkipped(meta, p.path);
+}
+
+/** `v` no longer kept for sync: exempt no more, back in the prunable indexes (db.ts, version 5). */
+export function unpinned(v: Version): Version {
+  const { pinned: _p, ...rest } = v;
+  return { ...rest, free: v.fid, u: 1 };
 }
 
 /** Bytes not uploaded, noted for the Sync panel: "some intermediate versions weren't uploaded", with the file. */
@@ -264,10 +275,7 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
     if ("version" in p.storage) {
       // (one pin per storage: its version no longer exempt)
       const v = (await req(vs.get(p.storage.version))) as Version | undefined;
-      if (v?.pinned) {
-        const { pinned: _p, ...rest } = v;
-        vs.put(rest);
-      }
+      if (v?.pinned) vs.put(unpinned(v));
     } else await dropCurrent(meta, p);
   }
   if (freed) setTotal(meta, (await pinTotal(meta)) - freed);
@@ -295,59 +303,108 @@ export async function newEpoch(meta: IDBObjectStore) {
   meta.put({ epoch: e } satisfies Purge, "sync:purge");
 }
 
-/** The pins' cleanup, a page a transaction (PINS.page), at most PINS.pages pages a run, each page all of it or
- * none, each going on from a durable cursor: (1) a lifecycle change's purge (every pin of an older epoch
- * released, checked in that transaction); (2) the pins of collapsed writes (seq at or below their identity's
- * `collapsed` in the namespace that collapsed them, unowned) released; (3) orphaned bytes (marked when orphaned)
- * that no pin and no entry names any more, deleted.  Run at each start (the migrator's) and after a collapse or a lifecycle
- * change.  `tag`, a collapsing save's (its namespace and lifecycle epoch, P1): (2) then releases only pins of that
- * epoch or older collapsed in that namespace, checked in each page's transaction, so a run that starts after a
- * later save, or after sync was turned off and on, never takes a pin made since. */
-export async function cleanPins(w: Workspace, tag?: { ns: string; epoch: number }): Promise<void> {
-  for (let page = 0; page < PINS.pages && !w.closed; page++) {
-    const more = await inTx(w.ws, [...RELEASE_STORES], "readwrite", async (tx) => {
-      const meta = tx.objectStore("meta"), pins = tx.objectStore("pins"), ps = tx.objectStore("pending");
-      const purge = (await req(meta.get("sync:purge"))) as Purge | undefined;
-      if (purge) {
-        const list = (await req(pins.getAll(purge.cursor ? IDBKeyRange.lowerBound(purge.cursor, true) : null, PINS.page))) as Pin[];
-        for (const p of list) if (p.epoch < purge.epoch) await release(tx, p);
-        if (list.length < PINS.page) meta.delete("sync:purge");
-        else meta.put({ ...purge, cursor: [list.at(-1)!.id, list.at(-1)!.seq] }, "sync:purge");
-        return true;
-      }
-      const at = (await req(meta.get("sync:pinCursor"))) as [string, number] | undefined;
-      const list = (await req(pins.getAll(at ? IDBKeyRange.lowerBound(at, true) : null, PINS.page))) as Pin[];
-      const seen = new Map<string, Pending | undefined>();
+/** The most requests one release makes (release, above): the pin's delete; the total's read and write; the
+ * pointer's read and delete; the storage count; a version's read and write, or an orphan's entry count and two
+ * deletes; an owner's pending read and write; the skipped note's read and write. */
+export const RELEASE_COST = 13;
+/** The most requests one orphan marker costs the sweep: the storage count, the entry count, two deletes. */
+const SWEEP_COST = 4;
+type Tag = { ns: string; epoch: number };
+
+/** The cleanup, a slice at a time until nothing durable is left (each slice one transaction, all of it or none,
+ * within PINS.slice's records and requests, a timer between slices, each step going on from a durable cursor):
+ * (1) a lifecycle change's purge (every pin of an older epoch released, checked in that transaction); (2) the pins
+ * of collapsed writes (seq at or below their identity's `collapsed`, unowned) released; (3) orphaned bytes (marked
+ * when orphaned) that no pin and no entry names any more, deleted; (4) versions a save left due (past a file's
+ * count or age, or past the bytes) dropped (Workspace.versionsSlice).  Begun at each start (the migrator's), after
+ * a collapse, a lifecycle change, or a save that left versions due (scheduleClean).  `tag`, a collapsing save's
+ * (its namespace and lifecycle epoch, P1): (2) then releases only pins of that epoch or older collapsed in that
+ * namespace, checked in each slice's transaction, so a run that starts after a later save, or after sync was
+ * turned off and on, never takes a pin made since. */
+export async function cleanPins(w: Workspace, tag?: Tag): Promise<void> {
+  while (!w.closed && (await cleanSlice(w, tag))) await new Promise((r) => setTimeout(r, 0));
+}
+/** The cleanup begun after whatever cleanup is under way (one at a time; the same one asked again while it
+ * waits, not twice), for the workspace's tests to wait for as `w.pinsCleaning`. */
+export function scheduleClean(w: Workspace, tag?: Tag): Promise<unknown> {
+  const k = tag ? tag.ns + ":" + tag.epoch : "";
+  const queued = (w.pinsQueued ??= new Set());
+  if (queued.has(k)) return w.pinsCleaning!;
+  queued.add(k);
+  const run = (w.pinsCleaning ?? Promise.resolve())
+    .then(() => new Promise((r) => setTimeout(r, 0)))
+    .then(() => PINS.cleanAfter)
+    .then(() => { queued.delete(k); return cleanPins(w, tag); })
+    .catch((err) => { queued.delete(k); console.warn("workspace: sync's pins:", err); });
+  w.pinsCleaning = run;
+  return run;
+}
+
+/** One slice of the cleanup, in one transaction: whether there may be more. */
+async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
+  return inTx(w.ws, [...RELEASE_STORES, "versionBytes"], "readwrite", async (tx) => {
+    const meta = tx.objectStore("meta"), pins = tx.objectStore("pins"), ps = tx.objectStore("pending");
+    const n = PINS.slice.examine;
+    let left = PINS.slice.requests;
+    const spend = (c: number) => { left -= c; };
+    const fits = (c: number) => left >= c;
+    // (1) the purge: its read, the page, the cursor's write; each pin begun only while its release fits
+    spend(3);
+    const purge = (await req(meta.get("sync:purge"))) as Purge | undefined;
+    if (purge) {
+      const list = (await req(pins.getAll(purge.cursor ? IDBKeyRange.lowerBound(purge.cursor, true) : null, n))) as Pin[];
+      let done = 0;
       for (const p of list) {
-        if (p.owner) continue;
-        if (!seen.has(p.id)) seen.set(p.id, (await req(ps.get(p.id))) as Pending | undefined);
-        const byNs = seen.get(p.id)?.byNs ?? {};
-        const marks = tag ? (p.epoch <= tag.epoch && byNs[tag.ns] ? [byNs[tag.ns]] : []) : Object.values(byNs);
-        if (marks.some((s) => s.collapsed !== undefined && p.seq <= s.collapsed)) await release(tx, p, true);
+        if (!fits(RELEASE_COST)) break;
+        if (p.epoch < purge.epoch) { await release(tx, p); spend(RELEASE_COST); }
+        done++;
       }
-      if (list.length === PINS.page) {
-        meta.put([list.at(-1)!.id, list.at(-1)!.seq], "sync:pinCursor");
-        return true;
-      }
-      meta.delete("sync:pinCursor");
-      // (3) orphaned bytes no pin names any more: only fids marked when they were orphaned, never a file's own
-      const fat = (await req(meta.get("sync:bytesCursor"))) as string | undefined;
-      const keys = (await req(meta.getAllKeys(IDBKeyRange.bound(fat ?? ORPHAN, ORPHAN + "\uffff", !!fat), PINS.page))) as string[];
-      for (const k of keys) {
-        const fid = k.slice(ORPHAN.length);
-        if ((await refs(pins, { fileBytes: fid })) > 0) continue;
-        if ((await req(tx.objectStore("entries").index("byIdent").count(fid))) === 0) tx.objectStore("fileBytes").delete(fid);
-        meta.delete(k);
-      }
-      if (keys.length === PINS.page) {
-        meta.put(keys.at(-1)!, "sync:bytesCursor");
-        return true;
-      }
-      meta.delete("sync:bytesCursor");
-      return false;
-    });
-    if (!more) return;
-  }
+      if (done === list.length && list.length < n) meta.delete("sync:purge");
+      else if (done) meta.put({ ...purge, cursor: [list[done - 1].id, list[done - 1].seq] }, "sync:purge");
+      return true;
+    }
+    // (2) collapsed writes' pins: the cursor's read and write, the page; a pending read for each identity
+    spend(3);
+    const at = (await req(meta.get("sync:pinCursor"))) as [string, number] | undefined;
+    const list = (await req(pins.getAll(at ? IDBKeyRange.lowerBound(at, true) : null, n))) as Pin[];
+    const seen = new Map<string, Pending | undefined>();
+    let done = 0;
+    for (const p of list) {
+      if (!fits(1 + RELEASE_COST)) break;
+      done++;
+      if (p.owner) continue;
+      if (!seen.has(p.id)) { spend(1); seen.set(p.id, (await req(ps.get(p.id))) as Pending | undefined); }
+      const byNs = seen.get(p.id)?.byNs ?? {};
+      const marks = tag ? (p.epoch <= tag.epoch && byNs[tag.ns] ? [byNs[tag.ns]] : []) : Object.values(byNs);
+      if (marks.some((s) => s.collapsed !== undefined && p.seq <= s.collapsed)) { await release(tx, p, true); spend(RELEASE_COST); }
+    }
+    if (done < list.length || list.length === n) {
+      meta.put([list[done - 1].id, list[done - 1].seq], "sync:pinCursor");
+      return true;
+    }
+    meta.delete("sync:pinCursor");
+    // (3) orphaned bytes no pin names any more: only fids marked when they were orphaned, never a file's own
+    spend(3);
+    const fat = (await req(meta.get("sync:bytesCursor"))) as string | undefined;
+    const keys = (await req(meta.getAllKeys(IDBKeyRange.bound(fat ?? ORPHAN, ORPHAN + "￿", !!fat), n))) as string[];
+    let swept = 0;
+    for (const k of keys) {
+      if (!fits(SWEEP_COST)) break;
+      swept++;
+      spend(SWEEP_COST);
+      const fid = k.slice(ORPHAN.length);
+      if ((await refs(pins, { fileBytes: fid })) > 0) continue;
+      if ((await req(tx.objectStore("entries").index("byIdent").count(fid))) === 0) tx.objectStore("fileBytes").delete(fid);
+      meta.delete(k);
+    }
+    if (swept < keys.length || keys.length === n) {
+      meta.put(keys[swept - 1], "sync:bytesCursor");
+      return true;
+    }
+    meta.delete("sync:bytesCursor");
+    // (4) versions left due by saves (each save drops only a few: putVersion), in what is left of the budget
+    return w.versionsSlice(tx, left);
+  });
 }
 
 /** The bytes an outbox record names, read in `token`'s reservation: the file's present bytes if they are the

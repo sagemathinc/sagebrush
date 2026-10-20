@@ -11,7 +11,7 @@ import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const site = mkdtempSync(join(tmpdir(), "sb-ws-pin-site-"));
-const built = await Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
+const built = await Bun.build({ entrypoints: [join(here, "sync-pins-entry.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
 if (!built.success) {
   console.error(built.logs.join("\n"));
   process.exit(1);

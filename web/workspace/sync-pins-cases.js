@@ -317,8 +317,8 @@ async function cleanup() {
   await put(w.ws, "meta", 1, "sync:orphan:deadbeefdeadbeef");
   await put(w.ws, "entries", { path: "/old.bin", kind: "file", ref: "/old.bin", fid: "0ddba11000000000", migrated: true, size: 3, created: 1, updated: 1, nkey: "/\u0000old.bin" });
   await put(w.ws, "fileBytes", enc("old"), "0ddba11000000000");
-  const oldPage = W.PINS.page;
-  W.PINS.page = 2;
+  const oldSlice = W.PINS.slice;
+  W.PINS.slice = { examine: 2, requests: 400 };
   await W.syncOff(w);
   let pages = 0;
   const realGet = IDBObjectStore.prototype.getAll;
@@ -329,31 +329,47 @@ async function cleanup() {
   IDBObjectStore.prototype.getAll = realGet;
   const mid = await totalRight(w);
   await W.cleanPins(w);
-  W.PINS.page = oldPage;
+  W.PINS.slice = oldSlice;
   check(e && mid && (await all(w.ws, "pins")).length === 0 && (await pinBytes(w)) === 0 && (await get(w.ws, "fileBytes", "deadbeefdeadbeef")) === undefined && dec(await get(w.ws, "fileBytes", "0ddba11000000000")) === "old" && (await Promise.all(fids.map((fid) => get(w.ws, "fileBytes", fid)))).every((b) => b !== undefined), "the cleanup cut part way: nothing half done (the total right), then finished: every pin released, the total 0, the leaked bytes swept, the files' own bytes kept: " + J({ pages }));
   w.close();
 }
 
 // (IndexedDB calls made while `f` runs, counted on the stores and indexes)
-let lastBreakdown = {};
+let lastBreakdown = {}, lastPerTx = 0, lastRecords = 0;
 async function counting(f) {
-  let calls = 0;
-  const by = {};
+  let calls = 0, records = 0;
+  const by = {}, perTx = new Map();
   lastBreakdown = by;
   const saved = [];
-  for (const C of [IDBObjectStore, IDBIndex]) for (const m of ["get", "getAll", "getKey", "getAllKeys", "count", "put", "add", "delete", "openCursor", "openKeyCursor"]) {
+  const txOf = (o) => o instanceof IDBCursor ? o.request.transaction : o instanceof IDBIndex ? o.objectStore.transaction : o.transaction;
+  const methods = [[IDBObjectStore, ["get", "getAll", "getKey", "getAllKeys", "count", "put", "add", "delete", "openCursor", "openKeyCursor"]], [IDBIndex, ["get", "getAll", "getKey", "getAllKeys", "count", "openCursor", "openKeyCursor"]], [IDBCursor, ["continue", "advance", "update", "delete"]]];
+  for (const [C, ms] of methods) for (const m of ms) {
     if (!C.prototype[m]) continue;
     const real = C.prototype[m];
     saved.push([C, m, real]);
-    C.prototype[m] = function (...a) { calls++; const k = (this.objectStore ? this.objectStore.name + "." + this.name : this.name) + "." + m + (this.name === "meta" && m === "get" ? ":" + String(a[0]).replace(/:[0-9a-f]{8,}.*/, ":*") : ""); by[k] = (by[k] ?? 0) + 1; return real.apply(this, a); };
+    C.prototype[m] = function (...a) {
+      calls++;
+      const tx = txOf(this);
+      perTx.set(tx, (perTx.get(tx) ?? 0) + 1);
+      const k = (this instanceof IDBCursor ? "cursor" : this.objectStore ? this.objectStore.name + "." + this.name : this.name) + "." + m + (this.name === "meta" && m === "get" ? ":" + String(a[0]).replace(/:[0-9a-f]{8,}.*/, ":*") : "");
+      by[k] = (by[k] ?? 0) + 1;
+      const r = real.apply(this, a);
+      // (the records a request returns: what it materialises)
+      if (m === "getAll" || m === "getAllKeys") r.addEventListener("success", () => { records += r.result.length; });
+      else if (m === "get" || m === "openCursor" || m === "openKeyCursor") records++;
+      else if (C === IDBCursor && (m === "continue" || m === "advance")) records++;
+      return r;
+    };
   }
   try { await f(); } finally { for (const [C, m, real] of saved) C.prototype[m] = real; }
+  lastPerTx = Math.max(0, ...perTx.values());
+  lastRecords = records;
   return calls;
 }
 
 // (a collapsing save's own cost: the plain save's, plus the collapse (its pending record, one key range read, at
 // most PINS.collapseRelease pins released, each a few calls, the note); a constant, as the plain save's is)
-const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, CLEAN_RUN_BOUND = 2000;
+const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64;
 /** 200 overwrites of `path` at a 1 MiB cap: each save's IndexedDB calls, apart for the saves that collapsed. */
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
@@ -366,7 +382,7 @@ async function overwrites(w, path) {
     (collapsed ? collapsing : plain).push(n);
     if ((collapsed ? n > COLLAPSE_BOUND : n > PLAIN_BOUND) && seen.length < 2) seen.push([i, n, lastBreakdown]);
     // (the cleanup a collapsing save begins after it: counted apart, a run at a time)
-    if (collapsed) runs.push(await counting(() => w.pinsCleaning));
+    if (collapsed) { await counting(() => w.pinsCleaning); runs.push(lastPerTx); }
   }
   return { plain, collapsing, seen, runs };
 }
@@ -412,13 +428,12 @@ async function tail() {
   check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
   // (one identity with many pins (kept apart): a release, and a cleanup page, cost the same few calls)
   const recs = await ob.records();
-  const one = await counting(() => W.cleanPins(w));
-  check(one < 40 * 70, "…the cleanup after, a bounded number of calls a page: " + one);
+  await counting(() => W.cleanPins(w));
+  check(lastPerTx <= W.PINS.slice.requests, "…a cleanup after, each slice within its requests: " + lastPerTx);
   const r = stats(got.runs);
-  // (a run pages through the pins (PINS.page a transaction, at most PINS.pages): with the tail's 1,000 files it has
-  // more pages to look at than without, each page bounded)
+  // (a run goes slice by slice through the pins, each slice its own transaction within PINS.slice)
   const r0 = stats(without.runs);
-  check(r.n === c.n && r.max <= CLEAN_RUN_BOUND && r0.max <= CLEAN_RUN_BOUND, `…each cleanup a collapsing save begins after it at most ${CLEAN_RUN_BOUND} IndexedDB calls a run, with the tail and without (its tasks within the 50 ms above): ` + J({ tail: r, noTail: r0 }));
+  check(r.n === c.n && r.max <= W.PINS.slice.requests && r0.max <= W.PINS.slice.requests, `…the cleanup a collapsing save begins after it: each slice (one transaction) at most ${W.PINS.slice.requests} IndexedDB requests, with the tail and without (its tasks within the 50 ms above): ` + J({ tail: r, noTail: r0 }));
   check(recs.length === 0, "(nothing scanned yet)");
   w.close();
 }
@@ -566,21 +581,320 @@ async function pruneStep() {
   const start = await mine();
   clock += W.LIMITS.maxVersionAgeMs + 60_000;
   const aged = () => clock - W.LIMITS.maxVersionAgeMs;
-  const counts = [];
-  for (let k = 0; k < 20; k++) { clock += 1000; await w.write("/p.txt", "n" + k); counts.push(await mine()); }
-  const steps = counts.map((c, i) => (i ? counts[i - 1] : start) - c);
+  // (the save drops W.PRUNE_STEP and marks the file due; the cleanup it begins after drops the rest, a slice at
+  // a time; then each save keeps its own, within the count)
+  clock += 1000;
+  let open;
+  W.PINS.cleanAfter = new Promise((r) => (open = r));
+  await w.write("/p.txt", "n0");
+  const inSave = start + 1 - (await mine());
+  open();
+  W.PINS.cleanAfter = null;
+  await w.pinsCleaning;
+  const afterClean = await mine(), counts = [afterClean];
+  for (let k = 1; k < 5; k++) { clock += 1000; await w.write("/p.txt", "n" + k); await w.pinsCleaning; counts.push(await mine()); }
   const old = (await all(w.ws, "versions")).filter((v) => v.t < aged()).length;
-  // (each save keeps one and drops W.PRUNE_STEP of the backlog: it shrinks by PRUNE_STEP - 1 a save until it
-  // is gone; then only the saves' own, within the count, remain)
-  const drain = Math.floor(50 / W.PRUNE_STEP);
-  check(start === 50 && steps.slice(0, drain).every((d) => d === W.PRUNE_STEP - 1) && steps.every((d) => d >= -1 && d <= W.PRUNE_STEP - 1) && old === 0 && counts.at(-1) === 20, `50 versions past the age: ${W.PRUNE_STEP} dropped a save, the backlog only shrinking, all gone after: ` + J({ start, counts, old }));
+  check(start === 50 && inSave === W.PRUNE_STEP && afterClean === 1 && old === 0 && J(counts) === J([1, 2, 3, 4, 5]) && (await get(w.ws, "meta", "versions:due:" + (await w.stat("/p.txt")).fid)) === undefined, `50 versions past the age: ${W.PRUNE_STEP} dropped in the save, the rest by the cleanup after it, none past the age left: ` + J({ start, inSave, counts, old }));
   // (past the bytes: as many as it takes, in the one save)
   for (let i = 0; i < 30; i++) { clock += 1000; await w.write("/p.txt", "x".repeat(100) + i); }
   w.limits = { ...w.limits, maxVersionBytes: 1000 };
   clock += 1000;
+  await w.pinsCleaning;
+  const n0 = (await all(w.ws, "versions")).length;
+  W.PINS.cleanAfter = new Promise((r) => (open = r));
   await w.write("/p.txt", "y".repeat(100));
+  const n1 = (await all(w.ws, "versions")).length;
+  open();
+  W.PINS.cleanAfter = null;
+  // (past the bytes: a few in the save (daybreak2's LIMIT-E5C-2), the rest by the cleanup it begins after)
+  await w.pinsCleaning;
   const vs = await all(w.ws, "versions"), sum = vs.reduce((t, v) => t + v.size, 0);
-  check(sum <= 1000 && (await get(w.ws, "meta", "versionBytes")) === sum, "past the bytes: every version needed dropped in the one save: " + J({ sum, n: vs.length }));
+  check(n0 + 1 - n1 <= 8 && sum <= 1000 && (await get(w.ws, "meta", "versionBytes")) === sum && (await get(w.ws, "meta", "versions:over")) === undefined, "past the bytes: at most 8 dropped in the save, the rest by the cleanup after it, the total exact: " + J({ inSave: n0 + 1 - n1, sum, n: vs.length }));
+  w.close();
+}
+
+// (one pin per storage, whatever moved or orphaned them: no storage key named twice)
+const onePerStorage = async (w) => { const ks = (await all(w.ws, "pins")).map((p) => p.skey); return new Set(ks).size === ks.length; };
+
+// (the local tree and the server's, as the actual reducer makes it from the records, path for path and identity
+// for identity, and the files' bytes)
+const reduced = async (w, ob) => {
+  const ix = new W.SyncIndex();
+  let seq = 1;
+  for (const r of await ob.records()) W.reduce(ix, { ...r.op, seq: seq++, device: w.device });
+  return ix;
+};
+const trees = async (w, ob) => {
+  const ix = await reduced(w, ob);
+  // (in Trash, path and identity: the server keeps a trashed file's last accepted bytes until it is restored,
+  // when its successor goes; elsewhere its bytes too)
+  const inTrash = (p) => p === "/Trash" || p.startsWith("/Trash/");
+  const mine = [...(await w.list("/", { recursive: true })), ...(await w.list("/Trash", { recursive: true }))];
+  const local = [...new Map(mine.filter((e) => e.path !== "/Trash" && (e.kind === "file" || e.kind === "folder")).map((e) => [e.path, [e.path, e.fid, e.kind === "file" && !inTrash(e.path) ? e.sha256 : null]])).values()].sort();
+  const remote = ix.entries().filter((e) => e.kind === "file" || e.kind === "folder").map((e) => [e.path, e.id, e.kind === "file" && !inTrash(e.path) ? e.sha256 : null]).sort();
+  return { same: J(local) === J(remote), local, remote };
+};
+// (a held identity at `at`: created and scanned (dseq 1 for the create of a file at the root), then, past the
+// cap, written twice: its create's pin let go, the writes held)
+async function heldAt(nm, at, folders = []) {
+  localStorage.clear();
+  const w = await W.Workspace.open(nm);
+  const ob = await on(w);
+  for (const d of folders) await w.mkdir(d);
+  const f = await w.create(at, { content: "h0" });
+  await ob.scan();
+  W.PINS.capBytes = 1;
+  await w.write(at, "hA");
+  await ob.scan();
+  await w.write(at, "hB");
+  await ob.scan();
+  W.PINS.capBytes = 2 ** 30;
+  return { w, ob, f };
+}
+const dseqOf = async (ob, fid) => (await ob.records()).find((r) => r.id === fid && r.op.op === "create").dseq;
+async function reload(w, nm) {
+  w.close();
+  const w2 = await W.Workspace.open(nm);
+  const ob2 = new W.Outbox(w2, await W.switchTo(w2, NS_A));
+  return { w: w2, ob: ob2 };
+}
+
+async function ordering() {
+  // (astra's CORR-E5C-1 and 2, and the schedules around them: a held identity's successor goes after every op
+  // before it, of it and of its folders, with the state and place they left; one in Trash isn't brought back;
+  // each with a reload in the middle; the local tree and the reduced one the same)
+  try {
+    // (refused, after a move into a new folder: mkdir, rename, then the write at its new place)
+    let nm = names(), { w, ob, f } = await heldAt(nm, "/h.bin");
+    await w.rename("/h.bin", "/d/h2.bin");
+    ({ w, ob } = await reload(w, nm));
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), code: "missing" }]);
+    await ob.scan();
+    let t = await trees(w, ob);
+    check(t.same, "refused, the file moved into a new folder before the decision (a reload between): the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path, r.op.to ?? null]), ...t }));
+    w.close();
+    // (removed, and the removal scanned, before an acceptance; then before a refusal; a reload between)
+    for (const how of ["accepted", "missing"]) {
+      nm = names();
+      ({ w, ob, f } = await heldAt(nm, "/h.bin"));
+      await w.remove("/h.bin");
+      await ob.scan();
+      ({ w, ob } = await reload(w, nm));
+      const d = await dseqOf(ob, f.fid);
+      await ob.acked([how === "accepted" ? { dseq: d, seq: 1 } : { dseq: d, code: "missing" }]);
+      await ob.scan();
+      t = await trees(w, ob);
+      const recs = (await ob.records()).map((r) => [r.op.op, r.op.path]);
+      // (refused: the server never had it, so it isn't in the server's Trash either: here only, until it is
+      // restored (then it goes) or emptied (nothing the server had is lost); accepted: the same, path for path)
+      const same = how === "accepted" ? t.same : J(t.remote) === J([]) && J(t.local) === J([[`/Trash/h.bin`, f.fid, null]]);
+      check(same && !recs.some(([op, p]) => op === "write" && p.startsWith("/Trash")), `removed and scanned before it was ${how}: no write brings it back, the trees the same${how === "missing" ? " (but for the file the server never had, in Trash here only)" : ""}: ` + J({ recs, ...t }));
+      // (restored: its successor goes then, after the restore, with its bytes)
+      await w.restore((await w.list("/Trash")).find((e) => e.fid === f.fid).path);
+      await ob.scan();
+      t = await trees(w, ob);
+      check(t.same, `…restored from Trash: the successor goes after the restore, the trees the same (bytes too): ` + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path]), ...t }));
+      w.close();
+    }
+    // (decided first, removed after, before the scan: the removal's record, no write)
+    nm = names();
+    ({ w, ob, f } = await heldAt(nm, "/h.bin"));
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), seq: 1 }]);
+    await w.remove("/h.bin");
+    ({ w, ob } = await reload(w, nm));
+    await ob.scan();
+    t = await trees(w, ob);
+    check(t.same, "accepted, then removed before the scan (a reload between): the removal stands, the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path]), ...t }));
+    w.close();
+    // (a file in a folder put in Trash)
+    nm = names();
+    ({ w, ob, f } = await heldAt(nm, "/f/h.bin", ["/f"]));
+    await w.remove("/f");
+    await ob.scan();
+    ({ w, ob } = await reload(w, nm));
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), seq: 1 }]);
+    await ob.scan();
+    t = await trees(w, ob);
+    check(t.same, "a file in a folder put in Trash before the decision: not brought out of it, the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path]), ...t }));
+    w.close();
+    // (a held successor, then its folder renamed: the rename first, the write at the new place)
+    nm = names();
+    ({ w, ob, f } = await heldAt(nm, "/a/h.bin", ["/a"]));
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), seq: 1 }]);
+    await w.rename("/a", "/b");
+    ({ w, ob } = await reload(w, nm));
+    await ob.scan();
+    t = await trees(w, ob);
+    check(t.same, "a successor waiting, then its folder renamed (a reload between): the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path, r.op.to ?? null]), ...t }));
+    w.close();
+    // (then moved into a new folder, then that folder put in Trash: nothing brought back; restored, it goes)
+    nm = names();
+    ({ w, ob, f } = await heldAt(nm, "/h.bin"));
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), seq: 1 }]);
+    await w.rename("/h.bin", "/n/h.bin");
+    ({ w, ob } = await reload(w, nm));
+    await w.remove("/n");
+    await ob.scan();
+    t = await trees(w, ob);
+    check(t.same && (await ob.records()).every((r) => !(r.op.op === "write" && r.id === f.fid)), "moved into a new folder, then that folder put in Trash: no write, the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path, r.op.to ?? null]), ...t }));
+    w.close();
+  } finally { restore(); }
+}
+
+async function slicedCleanup() {
+  // (daybreak2's LIMIT-E5C-1: more than 32,000 tiny pins of collapsed writes, and some of a newer epoch: each slice
+  // of the cleanup within its requests and under 50 ms, nothing of the newer epoch taken, all drained by the one
+  // cleanup, no reload or save)
+  const w = await fresh();
+  await on(w);
+  const ids = 1000, each = 33;
+  await new Promise((ok, no) => {
+    const tx = w.ws.transaction(["pins", "pending"], "readwrite"), ps = tx.objectStore("pins"), pd = tx.objectStore("pending");
+    for (let i = 0; i < ids; i++) {
+      const id = "id" + String(i).padStart(6, "0");
+      pd.put({ id, latest: { seq: 1e6, by: "person" }, byNs: { [NS_A]: { collapsed: 1e6 } } });
+      for (let k = 0; k < each; k++) { const fid = id + "-" + k; ps.put({ id, seq: k + 1, path: "/x", sha256: "0", size: 1, epoch: 0, storage: { fileBytes: fid }, skey: "f:" + fid }); }
+      // (a newer epoch's: never the cleanup's, tagged with epoch 0)
+      if (i % 50 === 0) ps.put({ id, seq: 1000, path: "/x", sha256: "0", size: 1, epoch: 1, storage: { fileBytes: id + "-new" }, skey: "f:" + id + "-new" });
+    }
+    tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+  });
+  let longest = 0, slices = 0, maxTx = 0;
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+  obs.observe({ type: "longtask", buffered: false });
+  const realTx = IDBDatabase.prototype.transaction;
+  IDBDatabase.prototype.transaction = function (...a) { const st = [].concat(a[0]); if (st.includes("pins") && a[1] === "readwrite") slices++; return realTx.apply(this, a); };
+  try {
+    await counting(() => W.cleanPins(w, { ns: NS_A, epoch: 0 }));
+    maxTx = lastPerTx;
+  } finally {
+    IDBDatabase.prototype.transaction = realTx;
+    obs.disconnect();
+  }
+  const left = await all(w.ws, "pins");
+  check(left.length === ids / 50 && left.every((p) => p.epoch === 1) && maxTx <= W.PINS.slice.requests && longest < 50, `33,000 pins of collapsed writes: all released by one cleanup, a slice at a time (each at most ${W.PINS.slice.requests} requests, under 50 ms), the newer epoch's kept: ` + J({ left: left.length, slices, maxTx, longest: Math.round(longest) }));
+  w.close();
+}
+
+async function versionScale() {
+  // (daybreak2's LIMIT-E5C-2: one file with 1,000, 10,000 and 50,000 versions kept for sync: a save reads a
+  // bounded few of them, whatever the number, its time and longest task flat, its memory too)
+  const out = [];
+  let open;
+  for (const [n, pinned] of [[1000, true], [10000, true], [50000, true], [50000, false]]) {
+    const w = await fresh();
+    const f = await w.create("/v.bin", { content: "v" });
+    await new Promise((ok, no) => {
+      const tx = w.ws.transaction(["versions"], "readwrite"), vs = tx.objectStore("versions");
+      for (let i = 0; i < n; i++) vs.add({ fid: f.fid, t: Date.now(), size: 1, sha256: "0", by: "person", device: "d", ...(pinned ? { pinned: true } : { free: f.fid, u: 1 }) });
+      tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+    });
+    // (not pinned: a backlog the cleanup drains after each save; held back here, so a save's own reads are counted)
+    W.PINS.cleanAfter = new Promise((r) => (open = r));
+    globalThis.gc?.();
+    const heap0 = performance.memory?.usedJSHeapSize ?? 0;
+    let longest = 0;
+    const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+    obs.observe({ type: "longtask", buffered: false });
+    const times = [], recs = [], calls = [];
+    for (let k = 0; k < 10; k++) {
+      const t0 = performance.now();
+      calls.push(await counting(() => w.write("/v.bin", "w" + k)));
+      times.push(performance.now() - t0);
+      recs.push(lastRecords);
+    }
+    obs.disconnect();
+    open();
+    W.PINS.cleanAfter = null;
+    globalThis.gc?.();
+    const heap = Math.max(0, (performance.memory?.usedJSHeapSize ?? 0) - heap0);
+    const sorted = [...times].sort((x, y) => x - y);
+    out.push({ n, pinned, median: Math.round(sorted[5] * 10) / 10, ms: Math.round(Math.max(...times)), first: Math.round(times[0]), records: Math.max(...recs), calls: Math.max(...calls), longest: Math.round(longest), heapKB: Math.round(heap / 1024) });
+    w.close();
+  }
+  const [a, , c, d] = out;
+  check(d.records <= 60 && d.calls <= a.calls + 2 * W.PRUNE_STEP + 1 && d.longest < 50 && c.records <= a.records && c.records <= 60 && c.calls <= a.calls && out.every((x) => x.longest < 50) && c.median < Math.max(10, 3 * a.median) && c.heapKB < 4096, "one file with 1,000 to 50,000 versions kept for sync, or 50,000 not kept (a released backlog): a save reads a bounded few records, its median time, longest task and memory flat: " + J(out));
+}
+
+async function bulkDrop() {
+  // (astra's CORR-E5C-3: dropVersions("/") with 1,000 versions kept for sync, then droppable ones after them: it
+  // ends, each transaction within its requests, the pinned kept, the others gone, the total exact)
+  const w = await fresh();
+  await on(w);
+  await w.create("/bulk.bin", { content: "b0" });
+  for (let i = 1; i <= 1000; i++) await w.write("/bulk.bin", "b" + i);
+  await W.syncOff(w);
+  // (sync off: the next versions aren't pinned)
+  await w.create("/free.bin", { content: "f0" });
+  for (let i = 1; i <= 300; i++) await w.write("/free.bin", "f" + i);
+  const before = await all(w.ws, "versions");
+  const n = await counting(() => w.dropVersions("/"));
+  const after = await all(w.ws, "versions");
+  const sum = after.reduce((t, v) => t + v.size, 0);
+  check(after.length === before.filter((v) => v.pinned).length && after.length >= 1000 && after.every((v) => v.pinned) && (await get(w.ws, "meta", "versionBytes")) === sum && lastPerTx <= 400, "dropVersions(\"/\") past 1,000 versions kept for sync: it ends, the pinned kept, every other one gone, the total exact, each transaction within its requests: " + J({ before: before.length, after: after.length, perTx: lastPerTx, calls: n }));
+  // (a file's: its newest `keep`, counted with those kept for sync)
+  w.close();
+}
+
+async function unpinPrunable() {
+  // (versions kept for sync, released when their records are confirmed: prunable again, by the count)
+  const w = await fresh({ maxVersions: 2 });
+  const ob = await on(w);
+  await w.create("/u.bin", { content: "u0" });
+  for (let i = 1; i <= 6; i++) await w.write("/u.bin", "u" + i);
+  const pinned = (await all(w.ws, "versions")).filter((v) => v.pinned).length;
+  await ob.scan();
+  await ob.confirmed((await ob.records()).map((r) => r.dseq));
+  const freed = (await all(w.ws, "versions")).filter((v) => !v.pinned && v.free && v.u === 1).length;
+  await w.write("/u.bin", "u7");
+  await w.pinsCleaning;
+  const left = (await all(w.ws, "versions")).length;
+  check(pinned === 6 && freed === 6 && left === 2, "versions kept for sync, released: prunable again (in the prunable indexes), the file back to its count: " + J({ pinned, freed, left }));
+  w.close();
+}
+
+async function caughtUp() {
+  // (the successor waits until a scan has read every op: one page of ops (OUTBOX.page) and then a move into a new
+  // folder on the next; the trees the same)
+  const nm = names();
+  let { w, ob, f } = await heldAt(nm, "/h.bin");
+  try {
+    // (refused: the server never had it, so the successor's write makes it, where it is: after the mkdir its
+    // folder needs)
+    await ob.acked([{ dseq: await dseqOf(ob, f.fid), code: "missing" }]);
+    W.OUTBOX.page = 4;
+    for (let i = 0; i < 6; i++) await w.mkdir("/m" + i);
+    await w.rename("/h.bin", "/d/h2.bin");
+    await ob.scan();
+    const t = await trees(w, ob);
+    check(t.same, "a successor waiting while the scan has ops left (pages of 4): it goes after them all, the trees the same: " + J({ recs: (await ob.records()).map((r) => [r.op.op, r.op.path, r.op.to ?? null]), ...t }));
+  } finally {
+    restore();
+    w.close();
+  }
+}
+
+async function storageInvariant() {
+  // (one pin per storage key, after each way pins move or are orphaned: kept apart, collapsed, emptied from
+  // Trash (orphaned), drained as a successor, purged)
+  const w = await fresh();
+  const ob = await on(w);
+  const f = await w.create("/s.bin", { content: "s0" });
+  const ok = [];
+  for (let i = 1; i <= 4; i++) { await w.write("/s.bin", "s" + i); ok.push(await onePerStorage(w)); }
+  await ob.scan();
+  ok.push(await onePerStorage(w));
+  W.PINS.capBytes = 4;
+  for (let i = 5; i <= 9; i++) { await w.write("/s.bin", "s" + i); await w.pinsCleaning; ok.push(await onePerStorage(w)); }
+  W.PINS.capBytes = 2 ** 30;
+  await w.remove("/s.bin");
+  await w.emptyTrash();
+  ok.push(await onePerStorage(w));
+  await W.syncOff(w);
+  await W.cleanPins(w);
+  ok.push(await onePerStorage(w));
+  restore();
+  check(ok.every(Boolean) && f, "one pin per storage after every move: kept apart, collapsed, orphaned, purged: " + J(ok));
   w.close();
 }
 
@@ -635,7 +949,7 @@ async function upgradeV5() {
 }
 
 export async function run() {
-  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, manyPins, upgradeV5, tail]) {
+  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, storageInvariant, manyPins, upgradeV5, tail]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); } finally { restore(); }
   }
   return results;
