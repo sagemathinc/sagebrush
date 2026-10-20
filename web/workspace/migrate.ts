@@ -27,7 +27,7 @@
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
 import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
-import { bytesHash } from "../notebook/stores.js";
+import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 /** What migrate reads and writes of localStorage. */
@@ -51,8 +51,8 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
   if (w.quarantined) return Promise.resolve({ boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 });
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
-    // (a reset's purge not finished: finished first, so nothing it deletes is brought back in)
-    if (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("purgeMain")))) await w.purgeOld();
+    // (a reset's purge not finished: nothing brought in until it is, in the background; the next migrate brings in what's left)
+    if (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("purgeMain")))) { void w.cleanUp(); return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 }; }
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
@@ -144,7 +144,8 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     if (e.kind === "file" && (e.trashed || within(e.path, TRASH))) refs.trash.add(e.ref);
     else if (e.kind !== "folder") refs[e.kind].add(e.ref);
   }
-  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]) : [];
+  // (the workspace's fence is not a notebook)
+  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]).filter((k) => k !== FENCE) : [];
   const fileKeys = w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : [];
   const boardIds = (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[];
   const trashKeys = (await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").getAllKeys()))) as string[];

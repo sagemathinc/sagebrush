@@ -117,7 +117,9 @@ export type State =
   | { state: "first" }
   | { state: "confirmed"; witness?: Witness; why: string }
   | { state: "suspected"; witness: Witness; why: string }
-  | { state: "unknown"; why: string };
+  | { state: "unknown"; why: string }
+  /** a reset to a new workspace under way (resumed after a stop): every writer refused until it is done */
+  | { state: "resetting" };
 
 /** What a reset prepared in a witness means, given what IndexedDB holds (A.3a). */
 // (a reset is one IndexedDB transaction that never deletes the database: a new database under a prepared
