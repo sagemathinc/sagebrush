@@ -10,7 +10,8 @@
 // - a property test: on random edit sequences, editState accepts exactly what
 //   recordProblems (the whole-board rules) accepts; and preview, before each
 //   apply, changes nothing and decides as apply then does;
-// - preview spends neither budget nor id; reasons on refusals; pictures sent
+// - preview spends neither apply's budgets nor an id, and is metered by its
+//   own; boardBytes, editBytes, workBytes; reasons on refusals; pictures sent
 //   by reference (no data: URLs in an edit);
 // - costs against an 8 MiB board: a small edit and a remote change, the
 //   adversarial merge (was "A", the field near 8 MiB), and the indexes of
@@ -332,7 +333,7 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
       const pv = st.preview(m, at);
       if (snap(st) !== before) { mutated++; if (mutated <= 3) fails.push(`property: preview changed the state: ${JSON.stringify(changes)}`); }
       const r = st.apply(m, at);
-      if (pv.ok !== r.ok || (!r.ok && (pv.message !== r.message || pv.retryAfter !== r.retryAfter)) || (r.ok && (JSON.stringify(pv.changes) !== JSON.stringify(r.changes) || JSON.stringify(pv.dropped) !== JSON.stringify(r.dropped) || pv.bytes !== st.bytes))) { previewDiffers++; if (previewDiffers <= 3) fails.push(`property: preview ${JSON.stringify(pv)} but apply ${JSON.stringify(r)}`); }
+      if (pv.ok !== r.ok || (!r.ok && (pv.message !== r.message || pv.retryAfter !== r.retryAfter)) || (r.ok && (JSON.stringify(pv.changes) !== JSON.stringify(r.changes) || JSON.stringify(pv.dropped) !== JSON.stringify(r.dropped) || pv.boardBytes !== st.bytes || pv.editBytes !== new TextEncoder().encode(JSON.stringify(m)).length || !(pv.workBytes >= pv.editBytes)))) { previewDiffers++; if (previewDiffers <= 3) fails.push(`property: preview ${JSON.stringify(pv)} but apply ${JSON.stringify(r)}`); }
       previewed++;
       if (r.ok) accepted++; else refusedN++;
       // (a change keyed by an empty item or edge id is a malformed message, refused whatever it nets to)
@@ -358,12 +359,18 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
 {
   const st = editState(board({ nodes: [{ id: "a", text: "A" }] }));
   const m = (t) => edit([{ op: "set", key: K("item", "", "a"), fields: { text: t }, was: { text: "A" } }]);
-  // (the rate: 50 previews at one instant spend nothing; then the burst of 20 applies as ever)
-  let pv = 0;
-  for (let i = 0; i < 50; i++) if (st.preview(m("P" + i), 5_000_000).ok) pv++;
+  // (the rate: previews have their own, as apply's: 20 at one instant, then busy (daybreak2's LIMIT-74B-1);
+  // apply's burst of 20 untouched by them)
+  let pv = 0, pvLast;
+  for (let i = 0; i < 50; i++) { pvLast = st.preview(m("P" + i), 5_000_000); if (pvLast.ok) pv++; }
   let n = 0, last;
   for (let i = 0; i < 25; i++) { last = st.apply(m("Q" + i), 5_000_000); if (last.ok) n++; else break; }
-  check(pv === 50 && n === 20 && last.reason === "busy" && last.retryAfter > 0, `preview spends no rate: 50 previews, then 20 applies and busy (${pv}, ${n}, ${JSON.stringify(last)})`);
+  check(pv === 20 && pvLast.reason === "busy" && pvLast.retryAfter > 0 && n === 20 && last.reason === "busy" && last.retryAfter > 0, `previews metered by their own rate (20 of 50, then busy), apply's burst of 20 untouched by them (${pv}, ${n}, ${JSON.stringify(last)})`);
+  // (their work too: previews of an edit over a 3 MiB record, ~10 within 32 MiB, each saying what it cost)
+  const w = editState(board({ nodes: [{ id: "a", text: "x".repeat(3 * 2 ** 20) }] }));
+  let k = 0, wl;
+  for (let i = 0; i < 20; i++) { wl = w.preview(edit([{ op: "set", key: K("item", "", "a"), fields: { pos: i }, was: { pos: null } }]), 7_000_000 + i); if (wl.ok) { k++; if (!(wl.workBytes > 3 * 2 ** 20)) k = -99; } else break; }
+  check(k >= 9 && k <= 11 && wl.reason === "busy", `previews metered by their own work budget, each saying its workBytes (${k} within 32 MiB, then ${JSON.stringify({ reason: wl.reason, workBytes: wl.workBytes })})`);
   // (an id previewed isn't answered: apply takes it; an id applied is answered: preview says so too)
   const one = m("Z");
   const p1 = st.preview(one, 9_000_000), a1 = st.apply(one, 9_000_000), p2 = st.preview(one, 9_000_000);
@@ -373,6 +380,7 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
   const mv = edit([{ op: "set", key: K("item", "", "g"), fields: { parent: "h" }, was: { parent: "" } }]);
   const w0 = g.lastWalk, pw = g.preview(mv, 1), w1 = g.lastWalk, aw = g.apply(mv, 1);
   check(pw.ok && aw.ok && w0 === w1 && g.lastWalk > 0, `preview leaves lastWalk alone (${w0} → ${w1}; apply: ${g.lastWalk})`);
+  check(pw.workBytes >= pw.editBytes + 64 * g.lastWalk, `preview's workBytes counts its walk, 64 a visit (${pw.workBytes} for ${pw.editBytes} bytes and ${g.lastWalk} visits)`);
 }
 
 // ---------------------------------------------------------------- reasons
