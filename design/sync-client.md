@@ -60,6 +60,8 @@ As built (step 2a):
     - The read is reserved. Reconcile's old-way bytes are adopted after its locked pass: each one reserves LEGACY_MAX × COPIES before the lock, then reads and adopts holding it (adoptOld).
     - Any other adopt not given the bytes reads them itself, holding the caller's lock, under a reservation taken without waiting. If that reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
     - The move's copy is the one IndexedDB gave on read, put back once. That is within the same LEGACY_MAX × COPIES as the migrator's move.
+    - Every caller that gives an adopt bytes holds LEGACY_MAX × COPIES, taken before the lock, until the adopt and its old copy are done. adopt() fails loudly otherwise (daybreak2's LIMIT-6B7-1). Trash's bytes with no entry are therefore recovered after reconcile's locked pass, each reserved first, as adoptOld's are.
+    - Old copies are compared and kept one pair at a time: at most 8 rounds per call, with no recursion. Their marks are durable and win over a migration marked done: each migrator start first cleans them up, paged and bounded, whatever the migration's state (astra's CORR-6B7-1).
   - Bytes larger than LEGACY_MAX are adopted unmoved, with their hash, as the migrator marks them. They are over the 200 MiB file limit, so they are never synced.
   - Should any path reach an op without the hash, the change is refused whole.
   - A removal (forget, discard, emptyTrash) needs no hash: its identity is gone (`after: null`).

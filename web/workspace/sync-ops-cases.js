@@ -15,6 +15,7 @@ const fresh = async () => {
   return W.Workspace.open({ name: `ws-ops-${n}-${Math.random().toString(36).slice(2, 8)}`, mainName: `main-ops-${n}` });
 };
 const enc = (s) => new TextEncoder().encode(s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dec = (b) => new TextDecoder().decode(b);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const H = async (b) => hex(await crypto.subtle.digest("SHA-256", typeof b === "string" ? enc(b) : b));
@@ -243,6 +244,47 @@ async function others() {
   w.close();
 }
 
+// bytes read whole only inside the page's reservation (daybreak2's LIMIT-6B7-1), and old copies' marks cleaned
+// up, a bounded number of rounds at a time (astra's CORR-6B7-1 and limits note)
+async function reservations() {
+  const w = await fresh();
+  const tput = (k, b) => new Promise((ok, no) => { const tx = w.ws.transaction("trash", "readwrite"); tx.objectStore("trash").put(b, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const fput = (k, b) => new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); tx.objectStore("files").put(b, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  // (bytes in Trash with no entry, recovered: hashed with LEGACY_MAX × COPIES held, before the lock)
+  await tput("/Trash/lost.bin", enc("lost bytes"));
+  const digest = crypto.subtle.digest, seen = [];
+  crypto.subtle.digest = function (a, d) { seen.push(W.reserved().held); return digest.call(crypto.subtle, a, d); };
+  try { await W.migrate(w, localStorage); } finally { crypto.subtle.digest = digest; }
+  const rec = (await w.list("/Recovered")).find((e) => e.path.endsWith("lost.bin"));
+  check(rec && rec.migrated && rec.sha256 === (await H("lost bytes")) && seen.length >= 1 && seen.every((h) => h >= W.LEGACY_MAX * W.COPIES), "Trash's bytes with no entry: recovered after reconcile's lock, read and hashed inside a reservation of LEGACY_MAX × COPIES, moved with their hash: " + J({ seen: seen.map((h) => h / 2 ** 20) }));
+  // (while the page's reservation is held, the recovery waits for it, nothing made; then it goes ahead)
+  await tput("/Trash/later.bin", enc("later"));
+  const hold = await W.reserve(W.RESERVE_BYTES);
+  let finished = false;
+  const run = W.migrate(w, localStorage).then(() => { finished = true; });
+  await sleep(300);
+  const during = { finished, listed: (await w.list("/Recovered")).some((e) => e.path.endsWith("later.bin")) };
+  hold();
+  await run;
+  check(!during.finished && !during.listed && (await w.list("/Recovered")).some((e) => e.path.endsWith("later.bin")), "…with the reservation busy: it waits, nothing made meanwhile, then recovers them: " + J(during));
+  // (adopt given bytes read outside a reservation: refused loudly, nothing made)
+  let loud = false;
+  try { await w.locked(() => w.adopt("/", "x", ".bin", { kind: "file", ref: "/x.bin", rev: 0 }, { bytes: { bytes: enc("x") } })); } catch (e) { loud = !(e instanceof W.WorkspaceError) && /reservation/.test(String(e)); }
+  check(loud && !(await w.stat("/x.bin")), "adopt given bytes with no reservation held: an error, nothing made");
+  // (an older tab writing at the old key ten times while it is cleaned up: each version kept, a bounded number of
+  // rounds per cleanup, the rest by the next start)
+  await fput("/many.bin", enc("w0"));
+  let i = 0;
+  w.beforeStaleDelete = async () => { if (i < 10) await fput("/many.bin", enc("w" + ++i)); else w.beforeStaleDelete = null; };
+  await w.locked(() => w.adopt("/", "many", ".bin", { kind: "file", ref: "/many.bin", rev: 0 }));
+  const afterAdopt = (await w.staleCopies(10)).length;
+  await W.startMigrator(w);
+  const kept = [];
+  for (const e of (await w.list("/")).filter((x) => x.path.startsWith("/many"))) kept.push(dec((await w.read(e.path)).content));
+  check(afterAdopt === 1 && kept.sort().join() === "w0,w1,w10,w2,w3,w4,w5,w6,w7,w8,w9" && (await w.staleCopies(10)).length === 0, "an old copy written ten times while it is cleaned up: at most a bounded number of rounds per call (its mark left for the next), every version kept as a file of its own: " + J({ afterAdopt, kept: kept.length }));
+  w.close();
+}
+
 // ---- the version 4 upgrade
 
 // (a database's every store, its keys and values, bytes as their SHA-256: for comparing whole states)
@@ -395,7 +437,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, copies, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, reservations, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;

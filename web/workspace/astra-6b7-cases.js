@@ -1,0 +1,13 @@
+// astra's probes on sync-ops 6b7d8e3c (CORR-6B7-1: durable stale marks win over a done migration; an older
+// tab's writes each kept), verbatim from /scratch/astra-sync-ops-6b7/web/workspace/astra-6b7-cases.js
+import * as W from './ws.js';
+const enc=s=>new TextEncoder().encode(s),dec=b=>new TextDecoder().decode(b);
+const put=(w,s)=>new Promise((ok,no)=>{const tx=w.main.transaction('files','readwrite');tx.objectStore('files').put(enc(s),'/cut.bin');tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});
+export async function run(){const out=[];
+for(const changed of [false,true]){localStorage.clear();const opts={name:'astra6b7-'+changed,mainName:'astra6b7-main-'+changed};let w=await W.Workspace.open(opts);await W.startMigrator(w);await put(w,'first');
+w.beforeStaleDelete=async()=>{w.beforeStaleDelete=null;if(changed)await put(w,'older');throw Error('cut after adopt commit, before old-copy deletion')};
+await w.locked(()=>w.adopt('/','cut','.bin',{kind:'file',ref:'/cut.bin',rev:0}));const before={state:await W.migrationState(w),marks:(await w.staleCopies(10)).length};w.close();
+w=await W.Workspace.open(opts);await W.migrate(w,localStorage);await W.startMigrator(w);const entries=(await w.list('/')).filter(e=>e.kind==='file'),values=[];for(const e of entries)values.push(dec((await w.read(e.path)).content));const marks=(await w.staleCopies(10)).length;const raw=await new Promise((ok,no)=>{const r=w.main.transaction('files').objectStore('files').get('/cut.bin');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});out.push([marks===0&&(!changed||values.includes('older')),'restart retries durable stale cleanup '+(changed?'changed older-tab bytes':'unchanged copy')+': '+JSON.stringify({before,after:{state:await W.migrationState(w),marks,entries:entries.map(e=>e.path),values,raw:raw?dec(raw):null}})]);w.close()}
+// In uninterrupted cleanup, several older-tab writes must each be kept with their own immutable bytes.
+{localStorage.clear();const w=await W.Workspace.open({name:'astra6b7-many',mainName:'astra6b7-many-main'});await put(w,'v0');let i=0;w.beforeStaleDelete=async()=>{if(i<3)await put(w,'v'+(++i));else w.beforeStaleDelete=null};await w.locked(()=>w.adopt('/','cut','.bin',{kind:'file',ref:'/cut.bin',rev:0}));const es=(await w.list('/')).filter(e=>e.kind==='file'),values=[];for(const e of es)values.push(dec((await w.read(e.path)).content));out.push([values.sort().join(',')==='v0,v1,v2,v3'&&(await w.staleCopies(10)).length===0,'three successive older-tab writes retain four snapshots: '+JSON.stringify({values,marks:(await w.staleCopies(10)).length})]);w.close()}
+return out;}
