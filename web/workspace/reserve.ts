@@ -9,6 +9,23 @@
 export const RESERVE_BYTES = 256 * 2 ** 20;
 
 let held = 0;
+
+/** A reservation, its own: called, it is released (idempotently); `n` its size, `live()` whether it is still
+ * held.  Whoever reads bytes whole in its name is given it, and checks it (daybreak2: the page's total alone
+ * can't say whose a reservation is). */
+export type Release = (() => void) & { readonly n: number; live(): boolean };
+function token(n: number): Release {
+  let done = false;
+  const release = (() => {
+    if (done) return;
+    done = true;
+    held -= n;
+    next();
+  }) as Release;
+  Object.defineProperty(release, "n", { value: n });
+  (release as { live: () => boolean }).live = () => !done;
+  return release;
+}
 const waiting: { n: number; go: () => void }[] = [];
 
 function fits(n: number) {
@@ -23,15 +40,9 @@ function next() {
 }
 
 /** `n` bytes reserved (waiting for room, in order); resolves to the release, which may be called more than once. */
-export function reserve(n: number): Promise<() => void> {
+export function reserve(n: number): Promise<Release> {
   n = Math.max(0, Math.ceil(n));
-  let done = false;
-  const release = () => {
-    if (done) return;
-    done = true;
-    held -= n;
-    next();
-  };
+  const release = token(n);
   if (!waiting.length && fits(n)) {
     held += n;
     return Promise.resolve(release);
@@ -45,17 +56,11 @@ export function reserve(n: number): Promise<() => void> {
  * nothing reserved.  For a holder of the workspace's lock, which may never wait for a reservation (a reader
  * reserves before taking the lock: waiting here could wait for ever on one holding a reservation that waits
  * for the lock). */
-export function tryReserve(n: number): (() => void) | null {
+export function tryReserve(n: number): Release | null {
   n = Math.max(0, Math.ceil(n));
   if (waiting.length || !fits(n)) return null;
   held += n;
-  let done = false;
-  return () => {
-    if (done) return;
-    done = true;
-    held -= n;
-    next();
-  };
+  return token(n);
 }
 
 /** What is reserved now, and how many wait (for tests and the Storage panel). */
