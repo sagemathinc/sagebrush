@@ -910,7 +910,7 @@ export class Workspace {
         const doc = content as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
         const { id: _i, rev: _r, updated: _u, ...rest } = doc;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) });
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
         if (typeof out === "string") throw new WorkspaceError("storage", out);
         if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
         rev = out.rev;
@@ -1811,7 +1811,7 @@ export class Workspace {
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();
       mode = mode ?? doc.mode ?? "python";
-      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref });
+      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.mainTx("notebooks", "readwrite", (st) => st.delete(ref));
     } else if (kind === "board") {
@@ -2023,7 +2023,7 @@ export class Workspace {
       for (let i = 0; i < 5; i++) {
         const rec = await this.contents(e);
         if (!rec || (rec.name ?? "") !== oldName) return;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rec, name: newName, baseRev: rec.rev });
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rec, name: newName, baseRev: rec.rev }, { lockHeld: true });
         if (typeof out === "string" || !out.conflict) return;
       }
     } else if (e.kind === "board") {
