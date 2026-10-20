@@ -136,12 +136,20 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
   // before anything that reads a session: one limit per IP, whatever the request claims
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests");
+  // (the limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
+  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests", { retry_after: 60_000 });
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages
   if (!sameSite(req)) return err(403, "cross-site request");
   const who = await sessionOf(req, env);
   if (!who) return err(401, "sign in first");
+  // the page's question, whether this account may turn sync on and how it is: it never creates or
+  // registers anything.  Off the allowlist it is answered here, before any object is asked (the page
+  // hides its switch then: the reason is for the page's logic, not to show)
+  if (p === "/api/sync/v1/status" && m === "GET") {
+    if (!allowed(env, who.id)) return json({ available: false, reason: "not_allowlisted", state: "off" });
+    return json(await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + (await accountHash(who.id)))).status({ account: who.id }));
+  }
   if (!allowed(env, who.id)) return err(403, "sync isn't enabled for this account");
   const hash = await accountHash(who.id);
   const stub = env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + hash));
