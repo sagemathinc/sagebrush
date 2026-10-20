@@ -48,8 +48,10 @@ import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
-import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, type Entry } from "../workspace/index";
+import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, type Entry } from "../workspace/index";
+// (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
+onHistoryRefused((m: string) => showBusyNotice(m));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";

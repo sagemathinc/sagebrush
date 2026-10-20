@@ -258,7 +258,7 @@ try {
     await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
     check(await until(`window.__entered`, 5000), `(${item}: the workspace's lock held)`);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock to make where it goes)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 10000), `(${item}: waiting for the lock to make where it goes)`);
     const opened = await writeInPlace(null, "TYPED_WHILE_LEAVING");
     await ev(`(() => { window.__release(); return 1; })()`);
     check(await until(gone.replaceAll("REF", JSON.stringify(ref)), 30000), `${item}: the page goes once it is made`);
@@ -287,7 +287,7 @@ try {
     await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
     await sleep(300);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 10000), `(${item}: waiting for the lock)`);
     await key(false); await sleep(300);
     const undoTitle = await title();
     check(undoTitle === "After", `${item}, leaving: Undo changes nothing (${undoTitle}) ` + (undoTitle === "After" ? "" : JSON.stringify(await ev(`({ held: sagebrush.leaving?.(), says: [...document.querySelectorAll("[data-sbb=notice], .board-notice, [role=status], [role=alert]")].map((e) => e.textContent).join(" | ").slice(0, 300), at: location.search })`))));
@@ -309,9 +309,9 @@ try {
     await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
     await until(`window.__entered`, 5000);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), `(${item}, the lock never given up: waiting for it)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 20000), `(${item}, the lock never given up: waiting for it)`);
     check(await until(`document.body.innerText.includes("your files are busy")`, 45000), `${item}, the lock never given up: it gives up waiting, saying so`);
-    check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`)) && (await ev(`sagebrush.leaving?.() === false`)), `…its request for the lock withdrawn, the board no longer held`);
+    check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`)) && (await ev(`sagebrush.leaving?.() === false`)), `…its request for the lock withdrawn, the board no longer held`);
     check((await ev(`location.search`)) === here, `…the board stays`);
     check(await writeInPlace(null, "WRITABLE_AGAIN"), `…and can be written in again`);
     await ev(`(() => { document.querySelector(".board-editing .be-title")?.blur(); window.__release(); return 1; })()`);
@@ -332,9 +332,9 @@ try {
     check(await savesDone(), "(two departures: every save ended)");
     await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
     await sleep(300);
-    const pending = () => ev(`navigator.locks.query().then((s) => s.pending.filter((p) => p.name === "sagebrush-workspace").length)`);
+    const pending = () => ev(`navigator.locks.query().then((s) => s.pending.filter((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive").length)`);
     await ev(`(() => { document.querySelector("[data-sbb=newboard]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), "(two departures: New board waiting for the lock)");
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 20000), "(two departures: New board waiting for the lock)");
     await sleep(3500);
     await ev(`(() => { document.querySelector("[data-sbb=deleteboard]").click(); return 1; })()`);
     check(await until(`document.body.innerText.includes("already going elsewhere")`, 10000), "two departures: Trash asked for meanwhile is refused, saying so");

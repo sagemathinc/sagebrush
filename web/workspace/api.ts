@@ -510,7 +510,13 @@ export class Workspace {
     this.opfsTimer = null;
     if (!this.opfsDue || this.closed || this.quarantined) return;
     this.opfsDue = false;
-    await this.locked(async () => { await this.writeWitnesses(await this.sample(), false, { opfs: true }); }, undefined, { internal: true }).catch(() => {});
+    // (only if the lock is free now: a background write never waits behind another tab's hold, which may last;
+    // otherwise due still, tried again in OPFS_EVERY_MS)
+    const done = await this.locked(async () => { await this.writeWitnesses(await this.sample(), false, { opfs: true }); return true; }, undefined, { internal: true, ifAvailable: true }).catch(() => true);
+    if (done !== true && !this.closed) {
+      this.opfsDue = true;
+      this.opfsTimer ??= setTimeout(() => this.flushOpfs(), OPFS_EVERY_MS);
+    }
   }
   private watchHidden() {
     const doc = (globalThis as any).document;
@@ -1591,7 +1597,7 @@ export class Workspace {
    * With `signal`: aborted before the lock is held, `f` never runs, now or
    * later, and this rejects (an AbortError); once held, it runs to its end
    * (daybreak2's LIMIT-59D-1). */
-  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean } = {}): Promise<T> {
+  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean } = {}): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
     this.open();
@@ -1607,6 +1613,8 @@ export class Workspace {
       if (!how.internal || how.publish) await this.publish().catch(() => {});
       return out;
     };
+    // (ifAvailable: run only if the lock is free now; else nothing runs, and this resolves to undefined)
+    if (how.ifAvailable) return locks.request(LOCK, { ifAvailable: true }, (lock: unknown) => (lock ? g() : undefined));
     return signal ? locks.request(LOCK, { signal }, g) : locks.request(LOCK, g);
   }
   // (quarantined: every change refused until the person decides, A.3)

@@ -119,11 +119,31 @@ const UNREADABLE = "this browser's record of the workspace couldn't be read: rel
 // locked), so none of them falls between the confirming and the write, whether or not its fence could then be
 // written (astra's CORR-2A4-2 on 51106cb6).  `lockHeld`: a caller inside the workspace that holds it already, so
 // as not to wait on itself.  Without Web Locks there is no workspace to order against: as before)
+// A save, a clear or a drop waits for it at most LOCK_WAIT.ms, then is refused, said (BUSY), as the pages give up
+// waiting for it (another tab holding it for good never freezes the editors); a history append waits in its
+// queue, holding up nothing
 const WORKSPACE_LOCK = "sagebrush-workspace";
-function underLock(lockHeld, f) {
+export const LOCK_WAIT = { ms: 10_000 };
+// (the appends waiting, all history stores together: at most HISTORY_BACKLOG.entries and .bytes (as UTF-16 code
+// units of their JSON); one past them is refused, not queued, and said to every onHistoryRefused listener, so
+// that a tab stuck holding the lock costs this page bounded memory, never more)
+export const HISTORY_BACKLOG = { entries: 1000, bytes: 8 * 2 ** 20 };
+const backlog = { entries: 0, bytes: 0 };
+const refusedSubs = new Set();
+/** `f(message)`: called when an append is refused because too many wait (a stuck tab holding the lock). */
+export function onHistoryRefused(f) { refusedSubs.add(f); return () => refusedSubs.delete(f); }
+/** The appends waiting now: for tests and metrics. */
+export const historyBacklog = () => ({ ...backlog });
+export const HISTORY_REFUSED = "your files are busy (another tab is changing them), so TimeTravel can't keep up: some of this document's latest history isn't kept";
+const BUSY = "your files are busy (another tab is changing them): not saved yet, tried again with your next change";
+function underLock(lockHeld, f, wait = false) {
   const locks = globalThis.navigator?.locks;
   if (lockHeld || !locks || typeof locks.request !== "function") return f();
-  return locks.request(WORKSPACE_LOCK, { mode: "shared" }, f);
+  if (!wait) return locks.request(WORKSPACE_LOCK, { mode: "shared" }, f);
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), LOCK_WAIT.ms);
+  return locks.request(WORKSPACE_LOCK, { mode: "shared", signal: ctl.signal }, (l) => { clearTimeout(timer); return f(l); })
+    .catch((e) => { if (e?.name === "AbortError") throw Object.assign(new Error(BUSY), { busy: true }); throw e; })
+    .finally(() => clearTimeout(timer));
 }
 async function primaryRefusal(db, fence) {
   if (!fence && !["sagebrush", "sagebrush-history", "sagebrush-board-history"].includes(db.name)) return null;
@@ -258,7 +278,9 @@ export class IdbStore {
     // (bound first, if it saves before it loaded; then the workspace's own word: CORR-56C-1; the word and the
     // write in one hold of the workspace's lock)
     if (this.fence === undefined) this.fence = fenceOf(await idb(this.db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined));
-    const out = await underLock(opts.lockHeld, async () => {
+    let out;
+    try {
+    out = await underLock(opts.lockHeld, async () => {
     const why = await primaryRefusal(this.db, this.fence);
     if (why) return { refused: why };
     // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
@@ -285,7 +307,13 @@ export class IdbStore {
       tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error);
     });
-    });
+    }, true);
+    } catch (e) {
+      // (busy: rejected, so the editor keeps the change as not saved, says so, and sends it again with its next
+      // flush; nothing was written, and the request for the lock was withdrawn, so nothing will be)
+      if (e?.busy) throw Object.assign(new Error(e.message), { busy: true });
+      throw e;
+    }
     if (out.refused) return `not saved: ${out.refused}`;
     if (out.conflict) return { conflict: out.conflict };
     getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
@@ -340,7 +368,18 @@ export class IdbPatchStore {
   }
   append(env) {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
-    if (!this.db || (this.owned && refusal())) return;
+    if (!this.db || (this.owned && refusal())) return false;
+    // (bounded: past HISTORY_BACKLOG, refused and said, never queued)
+    let size = 0;
+    if (this.owned) {
+      try { size = JSON.stringify(env).length; } catch { size = HISTORY_BACKLOG.bytes; }
+      if (backlog.entries + 1 > HISTORY_BACKLOG.entries || backlog.bytes + size > HISTORY_BACKLOG.bytes) {
+        for (const f of refusedSubs) try { f(HISTORY_REFUSED); } catch {}
+        return false;
+      }
+      backlog.entries++;
+      backlog.bytes += size;
+    }
     // (in order, each after the workspace's word on it, for an owned record, the word and the write in one hold
     // of the workspace's lock)
     this.queue(async () => {
@@ -359,7 +398,8 @@ export class IdbPatchStore {
         tx.onerror = () => { console.warn("history:", tx.error); ok(); };
       });
       });
-    }).catch((e) => console.warn("history:", e));
+    }).catch((e) => console.warn("history:", e)).finally(() => { if (this.owned) { backlog.entries--; backlog.bytes -= size; } });
+    return true;
   }
   subscribe(f) {
     const g = (m) => { if (m.id === this.id && m.env) f(m.env); };
@@ -392,7 +432,7 @@ export class IdbPatchStore {
       const why = this.owned ? await primaryRefusal(this.db, this.fence) : null;
       if (why) throw new Error(`not done: ${why}`);
       await this.deleteChecked();
-    });
+    }, true).catch((e) => { throw e?.busy ? new Error(`not done: ${e.message.replace(": not saved yet, tried again with your next change", "")}`) : e; });
   }
   // (the rows deleted only if the fence, read in the same transaction, still allows it)
   async deleteChecked() {

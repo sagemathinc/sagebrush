@@ -382,12 +382,14 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+// (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
+onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -781,6 +783,8 @@ nb.on("mode", (m) => { modeEl.value = m; try { localStorage.setItem("sagebrush-m
 const cells = () => nb.cells();
 // for tests and in-page agents: the notebook and its kernel
 window.sagebrush = {
+  // (tests: how long a save waits for the workspace's lock, notebook/stores.js)
+  lockWait: LOCK_WAIT,
   notebook: nb, kernels, get kernel() { return kernel; }, get history() { return nbHistory; },
   get consoleKernel() { return consoleKernel; },
   // (tests: the reactive notebook's analyzer and its worker)
