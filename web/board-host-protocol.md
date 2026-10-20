@@ -670,17 +670,23 @@ well as show `message`:
 | `"quota"` | the user's or the board's pictures are past the host's quota | never | takes the picture out of its own changes, says `message` |
 | `"invalid"` | the message failed a check | never | as a refusal without `retryAfter` |
 
-- `what` (with `"too-large"` only) is one of:
+- `what` (with `"too-large"` only, and always with it) is one of:
   - `"item"`: one record;
   - `"edit"`: the message's bytes;
+  - `"values"`: the message's number of values (strings, numbers, keys and
+    entries all told; at most 200,000);
   - `"changes"`: the message's number of changes;
   - `"work"`: the merging an edit needs;
   - `"board"`: the board's bytes;
   - `"records"`: the board's number of records;
   - `"image"`: one picture's bytes;
   - `"images"`: the board's pictures, all together.
-- `limit` and `size` are bytes, except for `"changes"` and `"records"`, which
-  count those.
+- `limit` and `size` are bytes, except for `"values"`, `"changes"` and
+  `"records"`, which count those. Every `"too-large"` carries all three, so a
+  host never parses `message`.
+- For `"edit"` and `"values"`, `size` is what was counted when the bound was
+  passed: the message is measured only that far, so it is at least that
+  large.
 - A code is a promise about what happened, never a replacement for
   `message`: the frame still shows `message`, the host's own words.
 - A frame that doesn't know a code, or a refusal without one, acts as before:
@@ -688,9 +694,11 @@ well as show `message`:
 - No new message type is needed. These are new optional fields of the same
   message, and a receiver drops fields it doesn't know (The messages). An
   `editing` with `allowed: false` may carry the same `reason`.
-- editState's refusals carry `reason` (`"busy"`, `"too-large"` with `limit`
-  and `size`, or `"invalid"`). `"history-full"` and `"quota"` are the host's
-  own: editState never knows them.
+- editState's refusals carry `reason`: `"busy"`, `"too-large"` (with `what`,
+  `limit` and `size`), or `"invalid"`. Its bounds are `"edit"`, `"values"`,
+  `"changes"`, `"work"`, `"board"` and `"records"`. `"item"`, `"image"`,
+  `"images"`, `"history-full"` and `"quota"` are the host's own: editState
+  never knows them.
 
 ## Checking an edit at admission: preview
 
@@ -700,21 +708,37 @@ written) calls `editState.preview(message, now?)` at admission and
 `editState.apply(message, now?)` at commit.
 
 - `preview` runs the very same steps as `apply`: the message's checks, the
-  rate, the work budget, the merge, the board's checks, the walk. It changes
-  nothing of the board's: not the records, nor `apply`'s budgets, nor the ids
-  answered, nor `lastWalk`.
-- **Previews are metered** (daybreak2's LIMIT-74B-1). They have a rate and a
-  work budget of their own, the same as `apply`'s (20 at once, then 2 a
-  second; 32 MiB of work, then 3.2 MiB a second), charged by previews alone.
-  Past them a preview is refused `"busy"`, with `retryAfter`, before any
-  merge. Like `apply`, each call is bounded: it never walks the whole board.
+  rate, the work budget, the merge, the board's checks, the walk. The rate
+  and the work it checks are a copy of `apply`'s budgets as they are now, so
+  its answer, `"busy"` included, is `apply`'s at that clock (astra's
+  CORR-722-1). It changes nothing of the board's: not the records, nor
+  `apply`'s budgets, nor the ids answered, nor `lastWalk`.
+- **Previews are metered too** (daybreak2's LIMIT-74B-1), by a meter of their
+  own, charged by previews alone: twice `apply`'s budgets (40 at once, then 4
+  a second; 64 MiB of work, then 6.4 MiB a second), so one preview per edit,
+  and its retries, never meet it.
+  - Past it, a preview is refused unchecked: `{ ok: false, reason: "busy",
+    previewThrottled: true, retryAfter }`. **`previewThrottled` means "not
+    computed"**: it says nothing about what `apply` would do.
+  - `sharedPreviewBudget(limits?)` makes one meter, which a host can give
+    every editState (`editState(text, { previewBudget })`), so that all of
+    its previews draw on it together.
+  - Like `apply`, each call is bounded: it never walks the whole board.
+- **The host MUST bound preview work host-wide**, across boards and
+  connections, **and charge `workBytes` to that bound, refused previews
+  included.** One board's meter bounds that board alone; an attacker can
+  open many. A host does this with its own admission (in CoCalc, A2a's: run
+  `preview` inside BoardAdmission's validation, after its per-client rate
+  and its global reservation and before anything is queued, charging
+  `workBytes` to that reservation and releasing it on refusal), or with one
+  `sharedPreviewBudget` for every board, or both.
 - **Before calling it, the host checks what costs nothing**, in this order:
   1. the message's encoded size, at most 1 MiB (Bounds);
-  2. its own per-client rate and admission (CoCalc's HostAdmission);
+  2. its own per-client rate and admission;
   3. only then `preview`.
 - It returns what `apply` would return now, with three sizes:
   `{ ok: true, id, changes, dropped, boardBytes, editBytes, workBytes }` or
-  `{ ok: false, id?, message, reason?, limit?, size?, retryAfter?, ignore?, editBytes?, workBytes }`.
+  `{ ok: false, id?, message, reason?, what?, limit?, size?, retryAfter?, ignore?, previewThrottled?, editBytes?, workBytes }`.
   - **`boardBytes`**: the board's size after the edit, as UTF-8 JSON of its
     records, at most 8 MiB. It is editState's own bound, for showing or for
     metrics. **It is never the edit's size**: a host must not charge it to
@@ -730,23 +754,33 @@ written) calls `editState.preview(message, now?)` at admission and
     over, and 64 for each visit of the walk. A host charges it to its own
     work budget whether the edit was accepted or refused. It is 0 for a
     message refused before any merging.
-- With the same message, state and clock, `apply` decides exactly as
-  `preview` did. Between the two, other edits and remote changes can make
+- Unless it was throttled, then, `apply` with the same message, state and
+  clock decides exactly as `preview` did. Between the two, other edits and remote changes can make
   `apply` decide otherwise. So the host still calls `apply` at commit, and
   answers by what it says.
 - A preview spends none of `apply`'s budgets: a host that previews and then
   never applies has used none of the frame's edit rate, only the preview
-  rate.
+  meter.
 - web/board/test-edit-state.mjs checks this on the 2,400 random edits of its
   property test: before each `apply`, a `preview` at the same clock leaves
   the state alone (the records, the size, `lastWalk`) and decides the same
   (accepted or refused, the message, `retryAfter`, the changes, `dropped`,
-  the size). It also checks that 50 previews at one instant leave the burst
-  of 20 edits untouched, that a previewed id is not taken as answered, and
-  that `lastWalk` is `apply`'s alone. It also checks that 50 previews at
-  one instant are 20 taken and then busy, leaving `apply`'s burst of 20
-  untouched, and that previews of an edit over a 3 MiB record run out of
-  their own work budget after about 10, each giving its `workBytes`.
+  the size). It also checks:
+  - that a previewed id is not taken as answered, and that `lastWalk` is
+    `apply`'s alone;
+  - that of 50 previews at one instant, 40 are computed and the rest
+    throttled, leaving `apply`'s burst of 20 untouched;
+  - that previews of an edit over a 3 MiB record run out of their own meter
+    after about 21, each giving its `workBytes`;
+  - that after 20 applies a preview predicts `apply`'s `"busy"` (and its
+    `retryAfter`), and after 20 previews alone both take the edit;
+  - that a shared meter bounds two boards' previews together.
+
+  packages/sagebrush-board/test-contract.mjs and test-contract-722.mjs are
+  astra's probes on 74b4e93f and 7222199c (typed refusals, picture shapes,
+  the prediction after `apply`-only, preview-only and work-exhausting
+  histories). test.mjs runs them against the source and the built
+  /submission.
 
 ## Pictures: imagePut and imageGet
 
@@ -766,11 +800,25 @@ itself** has them sent apart, on the channel, and its board names them only:
   and posts a board text without `data:` URLs. A frame that doesn't say so
   is posted pictures inline, as before.
 - **In a host that grants it, editState is made with
-  `editState(text, { pictures: "by-reference" })`.** An edit that adds or
-  changes a picture whose `src` is anything but an `https:` address (a
-  `data:` URL above all), or whose name isn't such a hash, is refused,
-  `reason: "invalid"`. A picture the board had before is left alone, so a
-  board posted with `data:` URLs still takes other edits.
+  `editState(text, { pictures: "by-reference", pictureAllowed })`.** Where an
+  edit changes the board's `images`, editState checks it before any source
+  is looked at (astra's CORR-74B-2). Anything else is refused,
+  `reason: "invalid"`, at preview and at apply alike, with nothing kept:
+  - `images` is a plain map (or none);
+  - each picture the edit adds or changes is named `i` and exactly 32
+    lowercase hex digits;
+  - each such picture's entry is a plain `{ w, h, src? }`, with `w` and `h`
+    positive numbers;
+  - `src`, if given, is an absolute `https:` URL with a host, as `new URL`
+    parses it (never `data:`, `blob:`, `javascript:`, `http:`, relative, or
+    `https://` alone);
+  - **a picture the board didn't name before is taken only if
+    `pictureAllowed(name)` says so** (Authorization, below). Without
+    `pictureAllowed` no new picture is taken.
+
+  A picture the board had before, unchanged, is left alone, so a board
+  posted with `data:` URLs still takes other edits. Pictures stay inline by
+  default.
 
 **Frame to host:**
 - `{ sagebrush: "imagePut", version: 1, id, name, type, bytes }`
@@ -796,7 +844,7 @@ this order. Each is cheaper than the next, and none is skipped:
 - `id` a UUID;
 - `name` of the form above;
 - `type` one of the four;
-- **the byte length, first:** a picture of more than 2,000,000 bytes is
+- **the byte length, the first check of the bytes:** a picture of more than 2,000,000 bytes is
   refused (`"too-large"`, `what: "image"`) before it is hashed, parsed or
   looked at in any other way;
 - the bytes' first bytes those of that type (PNG's signature, JPEG's SOI,
@@ -824,17 +872,40 @@ A picture that fails one of these is refused with `"invalid"`.
 | in flight, per channel | 4 `imagePut` unanswered and 8 MiB of their bytes; 2 `imageGet` | the frame waits; a host refuses a fifth with `"busy"` |
 | rate, per channel | a bucket of 16 MiB of picture bytes, refilled at 2 MiB a second (apart from the edits' work budget) | `"busy"`, `retryAfter` the time until there is room |
 
-**Order.** The frame sends a picture's `imagePut`, and waits for its
-`imageSaved`, before it sends the edit that names it. An edit that names a
-picture the host doesn't have is refused `"invalid"`. The host checks this
-on the `images` of the doc record in the edit's `changes` (`preview` gives
-them at admission). A `quota` or `too-large` refusal of a picture makes the
-frame take that picture's transaction out of its own changes and say why.
+**Authorization** (astra's CORR-74B-3). A picture's name is a hash: an
+identifier anyone can compute from bytes they have, or learn from another
+board. It is never a permission. So the host keeps, for each channel, **the
+pictures this channel may name and read**:
+- those the board named when the host posted it, and those that trusted
+  changes (`remote`, `replace`: the host's own document) add;
+- those put on this channel by an `imagePut` that passed every check above,
+  the hash included;
+- those the host transfers to it explicitly by its own rules (a copy of a
+  board the user may read, say).
 
-**Privacy.** An `imageGet` gets only pictures the board on this channel names,
-or pictures put on this channel. A host never serves a picture by name alone
-from another document: a name is a hash, and anyone can compute one from
-bytes they already have.
+It never grows from the frame's own edits: an edit naming a picture adds
+nothing to the set.
+- **At admission and again at commit**, the host gives editState that set
+  as `pictureAllowed`. A picture an edit adds that isn't in it is refused,
+  `"invalid"`, even if the host keeps those bytes for another document.
+  Global deduplication of bytes is fine *after* this: storing H once for
+  many boards never lets one board name it.
+- **`imageGet`** serves only pictures in that set, never the board's own
+  list of names, which an edit could have changed.
+- web/board/test-edit-state.mjs checks the first part: a known hash the
+  host keeps for another board, never put on this channel, is refused at
+  preview and apply; once put and verified on this channel (in the set), the
+  same edit is taken.
+
+**Order.** The frame sends a picture's `imagePut`, and waits for its
+`imageSaved` (the picture is in the channel's set from then on), before it
+sends the edit that names it. A `quota` or `too-large` refusal of a picture
+makes the frame take that picture's transaction out of its own changes, and
+say why.
+
+**Privacy.** An `imageGet` gets only pictures in the channel's set
+(Authorization). A host never serves a picture by name alone from another
+document.
 
 ## Privacy
 
@@ -913,10 +984,11 @@ function openChannel(me) {
   to the file.
 - Built in `editState` (`@sagemathinc/sagebrush-board/submission`, the next
   release after 0.3.0, 0.4.0):
-  - `preview`;
-  - the refusals' `reason`, `limit` and `size`;
-  - `editState(text, { pictures: "by-reference" })`, which refuses `data:`
-    URLs and any other source but `https:`.
+  - `preview`, its meter, `previewThrottled` and `sharedPreviewBudget`;
+  - the refusals' `reason`, `what`, `limit` and `size`;
+  - `editState(text, { pictures: "by-reference", pictureAllowed })`, with
+    its checks of shapes, names and sources, and the authorization of new
+    pictures.
 
   Until that release a host refuses `data:` URLs in edits itself. Specified,
   not built yet: the frame's side of `imagePut`, `imageGet` and

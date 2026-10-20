@@ -193,6 +193,13 @@ try {
   const refSt = editState(JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "n", text: "A" }] }), { pictures: "by-reference" });
   const dataUrl = refSt.apply({ sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r1", changes: [{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images: { ["i" + "ab".repeat(16)]: { w: 1, h: 1, src: "data:image/png;base64,AAAA" } } }, was: { images: null } }] });
   check(!dataUrl.ok && dataUrl.reason === "invalid" && /imagePut/.test(dataUrl.message), "/submission: editState with pictures by reference refuses a data: URL: " + JSON.stringify(dataUrl));
+  // astra's twelve contract assertions (test-contract.mjs), through the source and the built /submission, with Bun
+  const bun = spawnSync("bun", [join(here, "test-contract.mjs")], { encoding: "utf8", cwd: here });
+  const tally = (bun.stdout ?? "").trim().split("\n").pop();
+  check(bun.status === 0 && tally === '{"passed":12,"checks":12}', "astra's contract assertions on 74b4e93f, source and built: " + (tally || (bun.stderr ?? "").slice(0, 400)));
+  const bun2 = spawnSync("bun", [join(here, "test-contract-722.mjs")], { encoding: "utf8", cwd: here });
+  const tally2 = (bun2.stdout ?? "").trim().split("\n").pop();
+  check(bun2.status === 0 && tally2 === '{"checks":6,"failed":0}', "astra's budget assertions on 7222199c, source and built: " + (tally2 || (bun2.stderr ?? "").slice(0, 400)));
   // CommonJS: require() of both entry points, as CoCalc's project host loads them (Node's
   // require(esm), the "default" condition): it fails if top-level await ever appears in either
   const cj = mkdtempSync(join(tmpdir(), "sb-pkg-cjs-"));
