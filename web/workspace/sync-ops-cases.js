@@ -312,6 +312,30 @@ async function reservations() {
   w.close();
 }
 
+// old copies that can't go, more than a batch of them: the migrator still ends, its work bounded, and the index's
+// migration goes on (daybreak2's LIMIT-1F3-1: old copies are the start's cleanup alone, never a batch's work)
+async function stuckMarks() {
+  const w = await fresh();
+  const raw = (db, store, f) => new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"); f(tx.objectStore(store)); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const one = enc("x"), sha = await H(one);
+  for (let i = 0; i < W.MIGRATE.files + 8; i++) {
+    const k = "/stuck" + String(i).padStart(3, "0") + ".bin";
+    await raw(w.main, "files", (st) => st.put(one, k));
+    await raw(w.ws, "meta", (st) => st.put({ fid: "f" + String(i).padStart(15, "0"), size: 1, sha256: sha }, "stale:files:" + k));
+  }
+  // (a file still kept the old way, for the migration to move)
+  await raw(w.main, "files", (st) => st.put(enc("old"), "/legacy.txt"));
+  await raw(w.ws, "entries", (st) => st.put({ path: "/legacy.txt", kind: "file", ref: "/legacy.txt", size: 3, rev: 0, created: 1, updated: 1, nkey: "/\u0000legacy.txt" }));
+  await raw(w.ws, "meta", (st) => st.delete("migration"));
+  let tries = 0;
+  w.beforeStaleDelete = () => { tries++; throw new Error("this old copy can't go"); };
+  const ended = await Promise.race([W.startMigrator(w).then(() => "ended"), sleep(30000).then(() => "still running")]);
+  w.beforeStaleDelete = null;
+  const legacy = await w.stat("/legacy.txt"), marks = (await w.staleCopies(100)).length;
+  check(ended === "ended" && legacy?.migrated === true && legacy.sha256 === (await H("old")) && marks === W.MIGRATE.files + 9 && tries <= W.MIGRATE.files + 9 && (await W.migrationState(w)).done, "more old copies that can't go than a batch: the migrator ends, each tried once (and the moved file's own old copy, which can't go either, once), the file kept the old way moved, the marks left for the next start: " + J({ ended, tries, marks, migrated: legacy?.migrated }));
+  w.close();
+}
+
 // ---- the version 4 upgrade
 
 // (a database's every store, its keys and values, bytes as their SHA-256: for comparing whole states)
@@ -464,7 +488,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, copies, reservations, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, reservations, stuckMarks, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;
