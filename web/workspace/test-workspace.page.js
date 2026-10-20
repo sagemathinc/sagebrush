@@ -874,7 +874,7 @@ const legacyLeft = async (w) => (await w.list("/", { recursive: true })).concat(
 async function migrateV1() {
   const big = "B".repeat(70000);
   const w = await v1([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]], [["/Trash/t.txt", "in trash", "/t.txt"]]);
-  check(w.ws.version === 3 && w.ws.objectStoreNames.contains("fileBytes") && w.ws.objectStoreNames.contains("grants"), "a version 1 workspace opened: upgraded to the current version, its stores added");
+  check(w.ws.version === 4 && ["fileBytes", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending"].every((x) => w.ws.objectStoreNames.contains(x)), "a version 1 workspace opened: upgraded to the current version, its stores added");
   check((await legacyLeft(w)) === 4 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing moved by the upgrade itself");
   check(dec((await w.read("/L/a.txt")).content) === "AAA" && dec((await w.read("/Trash/t.txt")).content) === "in trash", "files not yet moved are read where they are (and Trash's)");
   check((await w.dataFiles()).map(([p]) => p).sort().join() === "/L/a.txt,/L/big.bin,/top.csv", "…and given to a notebook's interpreter (dataFiles: not Trash's)");
@@ -962,11 +962,11 @@ async function migrateCrashBetween() {
   check((await w.stat("/c/a.txt")).migrated && dec(await rawGet(w.main, "files", "/c/a.txt")) === "AAA" && (await w.staleCopies(10)).length === 1, "(a crash between the move and the old copy's deletion: both, the old marked)");
   check(dec((await w.read("/c/a.txt")).content) === "AAA", "…the file read from where it is now");
   const r = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
-  await w.locked(() => W.reconcile(w, false, r));
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, r)), r);
   check(r.files === 0 && r.recovered === 0 && (await w.list("/", { recursive: true })).filter((e) => e.kind === "file").length === 1, "reconcile doesn't take the marked old copy for a file of its own");
   await w.rename("/c/a.txt", "/c/b.txt");
   check(dec((await w.read("/c/b.txt")).content) === "AAA", "(renamed meanwhile)");
-  await w.locked(() => W.reconcile(w, false, r));
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, r)), r);
   check(r.files === 0 && r.recovered === 0, "…nor after the file was renamed away from its key");
   await W.startMigrator(w);
   check((await W.migrationState(w)).done && (await rawGet(w.main, "files", "/c/a.txt")) === undefined && (await w.staleCopies(10)).length === 0, "the migrator deletes the old copy, then its mark, and is done");
@@ -980,14 +980,14 @@ async function olderTabWrite() {
   check((await w.stat("/o/a.txt")).migrated, "(moved)");
   await rawPut(w.main, "files", enc("written by an older tab"), "/o/a.txt");
   const r = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
-  await w.locked(() => W.reconcile(w, false, r));
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, r)), r);
   const copy = await w.stat("/o/a (from an older tab).txt");
   check(copy && dec((await w.read(copy.path)).content) === "written by an older tab" && dec((await w.read("/o/a.txt")).content) === "AAA", "an older tab's write to a moved file: kept beside it as a file of its own, the file as it was");
-  await w.locked(() => W.reconcile(w, false, r));
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, r)), r);
   check((await w.list("/o")).length === 2, "…once, however often reconcile runs");
   await rawPut(w.main, "files", enc("AAA"), "/o/b.txt");
   await w.create("/o/b.txt", { content: "AAA" }).catch(() => {});
-  await w.locked(() => W.reconcile(w, false, r));
+  await W.adoptOld(w, await w.locked(() => W.reconcile(w, false, r)), r);
   await W.startMigrator(w);
   check((await w.list("/o")).every((e) => e.migrated), "…and moved beside the index in turn");
   w.close();
@@ -1146,7 +1146,10 @@ async function staleChanged() {
   // (a) written between the move and the old copy's deletion
   const w = await v1([["/s/a.txt", "BEFORE"]]);
   w.beforeStaleDelete = async () => { await rawPut(w.main, "files", enc("NEW OLD TAB EDIT"), "/s/a.txt"); };
-  await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt")));
+  // (holding a reservation of LEGACY_MAX × COPIES, as every caller of migrateOne does: the older tab's bytes are
+  // read, and kept, inside it (daybreak2's LIMIT-6B7-1))
+  const held = await W.reserve(W.LEGACY_MAX * W.COPIES);
+  try { await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt"), undefined, held)); } finally { held(); }
   w.beforeStaleDelete = null;
   const copy = await w.stat("/s/a (from an older tab).txt");
   check(copy && dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && dec((await w.read("/s/a.txt")).content) === "BEFORE", "an older tab's write as the old copy is cleaned up: kept as a file of its own, the moved file as it was");

@@ -31,7 +31,7 @@
 //   own transaction) is still the one it began
 //   with, checked holding the lock (CORR-CAP-46A-1).
 import type { Entry, Workspace } from "./api";
-import { COPIES, LEGACY_MAX } from "./api";
+import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
 
@@ -112,17 +112,62 @@ async function resume(w: Workspace, opening = false): Promise<void> {
   const cur = running.get(w);
   if (cur) return cur;
   const run = (async () => {
-    const s = await readState(w).catch(() => ({}) as MigrationState);
-    if (s.done || (s.paused && !opening && !(await room(0)))) return;
-    if (s.paused) { delete s.paused; await writeState(w, s); }
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks?.request) return;
     await locks.request(LOCK, { ifAvailable: true }, async (lock: unknown) => {
-      if (lock) await migrate(w);
+      if (!lock) return;
+      // (old copies first, whatever the migration's state: their marks are durable, and "done" covers only the
+      // passes over the index (astra's CORR-6B7-1: a tab closed between an adopt's move and its old copy's
+      // deletion leaves a mark that nothing else would ever come back to))
+      await cleanStale(w);
+      const s = await readState(w).catch(() => ({}) as MigrationState);
+      if (s.done || (s.paused && !opening && !(await room(0)))) return;
+      if (s.paused) { delete s.paused; await writeState(w, s); }
+      await migrate(w);
     });
   })().catch((e) => console.warn("workspace migration:", e)).finally(() => running.delete(w));
   running.set(w, run);
   return run;
+}
+
+/** Old copies of moved files deleted, or kept as files of their own if written since (Workspace.dropStale), by
+ * their marks, a page of MIGRATE.files at a time, each read in its reservation taken before the lock; at most
+ * STALE_PAGES pages a run.  Each run goes on from where the last left off (a durable cursor in meta, CURSOR: the
+ * last mark looked at), wrapping round at the end, so marks that keep failing (a copy that can't be kept: its
+ * folder full) can't keep any after them from being reached (astra's CORR-AC1-1); each mark once a run. */
+const STALE_PAGES = 32;
+const CURSOR = "staleCursor";
+async function cleanStale(w: Workspace) {
+  const getCursor = async () => ((await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(CURSOR)))) as string | undefined) ?? "";
+  const setCursor = (c: string) => inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(c, CURSOR); });
+  let cursor = await getCursor(), wrapped = cursor === "";
+  const tried = new Set<string>();
+  for (let page = 0; page < STALE_PAGES && !w.closed; page++) {
+    const marks = (await w.staleCopies(MIGRATE.files, cursor || undefined)).filter(([where, key]) => !tried.has(where + ":" + key));
+    if (!marks.length) {
+      // (the end: round to the first mark, once a run)
+      if (wrapped) return;
+      wrapped = true;
+      cursor = "";
+      await setCursor(cursor);
+      continue;
+    }
+    for (const [where, key] of marks) {
+      const at = where + ":" + key;
+      tried.add(at);
+      const release = await reserve(LEGACY_MAX * MIGRATE.copies);
+      try {
+        await w.locked(() => w.dropStale(where, key, undefined, release));
+      } catch (e) {
+        console.warn("workspace migration: an old copy:", e);
+      } finally {
+        release();
+      }
+      // (past it, whether it went or stayed: the next run goes on after it)
+      cursor = at;
+      await setCursor(cursor);
+    }
+  }
 }
 
 async function migrate(w: Workspace) {
@@ -144,8 +189,10 @@ async function migrate(w: Workspace) {
     if (r === "end") {
       // (done only if this whole pass did nothing and nothing changed the index meanwhile, checked holding the lock)
       const done = await w.locked(async () => {
-        const gen = await w.generation(), staleLeft = (await w.staleCopies(1)).length > 0;
-        if (!s.pass!.work && gen === s.pass!.start && !staleLeft) {
+        // (old copies left aren't the passes' to wait for: their marks are durable, and each start cleans them up
+        // first, whatever the state says (CORR-6B7-1))
+        const gen = await w.generation();
+        if (!s.pass!.work && gen === s.pass!.start) {
           await writeState(w, { done: true });
           return true;
         }
@@ -166,18 +213,8 @@ async function migrate(w: Workspace) {
 async function batch(w: Workspace, p: { start: number; at: string; work: boolean }): Promise<"end" | "more" | "paused"> {
   const t0 = performance.now();
   let moved = 0, bytes = 0;
-  // old copies a crash left (their entries already migrated): deleted first, if still the bytes moved
-  // (their bytes are read: reserved first)
-  for (const [where, key] of await w.staleCopies(MIGRATE.files)) {
-    const release = await reserve(LEGACY_MAX * MIGRATE.copies);
-    try {
-      await w.locked(() => w.dropStale(where, key));
-    } finally {
-      release();
-    }
-    p.work = true;
-    moved++;
-  }
+  // (old copies are cleanStale's alone, bounded and fair, at each start: none here, so marks that can't go are
+  // never counted as this pass's work, nor hold it at its start (daybreak2's LIMIT-1F3-1))
   // (a cursor over the index from the checkpoint: at most MIGRATE.files entries held, never a list of all)
   const next: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(IDBKeyRange.lowerBound(p.at, true), MIGRATE.files)));
   if (!next.length) return "end";
@@ -193,7 +230,7 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
           const cur = await w.stat(e.path);
           if (!cur || cur.kind !== "file" || cur.migrated || cur.unmoved || cur.ref === null) return "none";
           try {
-            const after = await w.migrateOne(cur, LEGACY_MAX);
+            const after = await w.migrateOne(cur, LEGACY_MAX, release);
             return after.migrated ? "moved" : after.unmoved ? "unmoved" : "none";
           } catch (err) {
             if (isQuota(err)) return "quota";
@@ -206,10 +243,22 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
         release();
       }
     }
-    // an entry made before its identities were kept: a folder's id (§6), before any grant can name it, and
-    // any entry's nkey (§3), so names that look the same are found by the index
-    if ((e.kind === "folder" && !e.fid) || e.nkey === undefined) {
+    // an entry made before its identities were kept: a folder's id (§6), before any grant can name it, any
+    // entry's nkey (§3), so names that look the same are found by the index, and any entry's ident, its
+    // identity as the index byIdent's key (design/sync-client.md §3a)
+    if ((e.kind === "folder" && !e.fid) || e.nkey === undefined || (e.ident === undefined && identOf(e) !== undefined)) {
       if (await w.locked(() => w.fillIdentity(e))) { p.work = true; moved++; }
+    }
+    // a data file written before its SHA-256 was kept: hashed (its bytes read whole: reserved first, before
+    // the lock, as a move's; counted in the batch's bytes)
+    if (needsHash(e)) {
+      const size = e.size ?? 0;
+      const release = await reserve(size * MIGRATE.copies);
+      try {
+        if (await w.locked(async () => { const cur = await w.stat(e.path); return !!cur && w.fillHash(cur); })) { p.work = true; moved++; bytes += size; }
+      } finally {
+        release();
+      }
     }
     p.at = e.path;
   }
