@@ -6,6 +6,7 @@
 // and the work of the largest workspace bounded.
 //   bun web/workspace/test-sync-reduce.mjs
 import { readFileSync } from "node:fs";
+import { heapStats } from "bun:jsc";
 import { reduce, reduceAll, SyncIndex } from "./sync-reduce.ts";
 import { TRASH, normPath, parentOf } from "./paths.ts";
 
@@ -15,13 +16,21 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const here = new URL(".", import.meta.url).pathname;
 const view = (ix) => ix.entries().map((e) => ({ path: e.path, id: e.id, kind: e.kind, ...(e.sha256 ? { sha256: e.sha256 } : {}), ...(e.trashed ? { trashedFrom: e.trashed.from } : {}) }));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// (all of an index: every field of every entry, its maps, what it forgot)
+const state = (ix) => JSON.stringify([ix.entries(), [...ix.byKey].sort(), [...ix.children].map(([k, v]) => [k, [...v].sort()]).sort(), [...ix.gone].sort()]);
 
 // the vectors: each from an empty index, in seq order
 const { vectors } = JSON.parse(readFileSync(here + "sync-vectors.json", "utf8"));
-check(vectors.length >= 39, `the vectors: ${vectors.length}`);
+check(vectors.length >= 41, `the vectors: ${vectors.length}`);
 for (const v of vectors) {
   const ix = new SyncIndex(), skipped = [];
-  for (const op of v.ops) if (reduce(ix, op).skipped !== undefined) skipped.push(op.seq);
+  for (const op of v.ops) {
+    const before = state(ix), out = reduce(ix, op);
+    if (out.skipped === undefined) continue;
+    skipped.push(op.seq);
+    // (skipped whole: every entry as it was, to its dates and the op that last changed it)
+    if (state(ix) !== before) check(false, `${v.name}: seq ${op.seq} skipped but changed the index`);
+  }
   check(same(view(ix), v.expect), `${v.name}: ${JSON.stringify(view(ix))}`);
   check(same(skipped, v.skipped), `${v.name}: skipped ${JSON.stringify(skipped)}, not ${JSON.stringify(v.skipped)}`);
   check(v.ops.every((op, i) => op.seq === i + 1), `${v.name}: its ops in seq order`);
@@ -57,6 +66,8 @@ function randomOp(seq, dseq) {
   if (what === "rename") base.to = path();
   if (what === "remove") base.to = "/Trash/" + pick(NAMES);
   if (what === "restore" && rand() < 0.5) base.to = path();
+  // (and now and then the root or Trash itself, where nothing can be: astra's CORR-7F4-1)
+  if ((what === "restore" || what === "rename") && rand() < 0.1) base.to = pick(["/", "/Trash"]);
   // (where it goes, by a folder's identity: one there or not, a file's, or one on an op that can't have it)
   if (rand() < 0.4) base.parent = pick([...FOLDERS, ...FOLDERS, pick(FILES)]);
   return base;
@@ -67,6 +78,7 @@ function broken(ix) {
   let kids = 0;
   for (const [id, e] of ix.byId) {
     if (e.id !== id || ix.byKey.get(e.path.normalize("NFC")) !== id) return `${e.path}: its keys`;
+    if (e.path === "/" || e.path === TRASH) return `an entry at ${e.path}`;
     try { if (normPath(e.path) !== e.path) return `${e.path}: not a path as it is`; } catch (err) { return `${e.path.length} characters: ${err.message}`; }
     const up = parentOf(e.path);
     if (up !== "/" && up !== TRASH && ix.at(up)?.kind !== "folder") return `${e.path}: no folder ${up}`;
@@ -78,7 +90,6 @@ function broken(ix) {
   return kids === ix.byId.size ? "" : `${kids} children for ${ix.byId.size} entries`;
 }
 let threw = 0, bad = "", lost = "", nondet = "", partial = "", applied = 0, skippedN = 0;
-const state = (ix) => JSON.stringify([view(ix), [...ix.byKey].sort(), [...ix.children].map(([k, v]) => [k, [...v].sort()]).sort(), [...ix.gone].sort()]);
 for (let run = 0; run < 400; run++) {
   const ops = [], dseq = {};
   for (let i = 1; i <= 80; i++) ops.push(randomOp(i, dseq));
@@ -103,25 +114,47 @@ check(!lost, `random logs: an applied write's bytes are never lost: ${lost}`);
 check(!nondet, `random logs: the same ops give the same index: ${nondet}`);
 check(applied > 10000 && skippedN > 1000, `random logs exercise both: ${applied} applied, ${skippedN} skipped`);
 
-// the largest workspace (100,000 entries; 10,000 in one folder): built, then that folder renamed and put in Trash, each bounded
+// the largest workspace, all in one folder (daybreak2's LIMIT-7F4-1): ~100,000 entries under /big, whose
+// last (by the order a move takes them) has a long name.  A move that would put only that one past the
+// bounds is skipped whole; then /big renamed, put in Trash and forgotten: each under 0.5 s, and its memory
+// under a ceiling: the process's resident memory grown during the op (its peak: Bun's heap counters move
+// only at a collection), and the heap it keeps after one
 {
-  const ops = [];
+  const ops = [], gc = () => globalThis.Bun?.gc?.(true);
   let seq = 0, n = 0;
   const op = (o) => ops.push({ seq: ++seq, device: DEV[0], dseq: seq, t: seq, by: "person", ...o });
   const fid = () => (++n).toString(16).padStart(16, "0");
+  const big = fid();
+  op({ op: "mkdir", path: "/big", kind: "folder", fid: big });
   for (let d = 0; d < 10; d++) {
-    const f = fid();
-    op({ op: "mkdir", path: `/d${d}`, kind: "folder", fid: f });
-    if (d === 0) var big = f;
-    for (let i = 0; i < 9999; i++) op({ op: "create", path: `/d${d}/f${i}.txt`, kind: "file", fid: fid(), sha256: SHAS[i % 16], size: 1 });
+    op({ op: "mkdir", path: `/big/s${d}`, kind: "folder", fid: fid() });
+    for (let i = 0; i < 9998; i++) op({ op: "create", path: `/big/s${d}/` + (d === 9 && i === 9997 ? "w".repeat(200) : `f${i}.txt`), kind: "file", fid: fid(), sha256: SHAS[i % 16], size: 1 });
   }
   const t0 = performance.now(), ix = reduceAll(ops), t1 = performance.now();
-  const ren = reduce(ix, { seq: ++seq, device: DEV[1], dseq: 1, t: seq, by: "person", op: "rename", path: "/d0", to: "/big", kind: "folder", fid: big });
-  const t2 = performance.now();
-  const rem = reduce(ix, { seq: ++seq, device: DEV[1], dseq: 2, t: seq, by: "person", op: "remove", path: "/big", to: "/Trash/big", kind: "folder", fid: big });
-  const t3 = performance.now();
-  check(ix.byId.size === 100000 && ren.changed.length === 10000 && rem.changed.length === 10000 && ix.at("/Trash/big/f5.txt") && !broken(ix), `100,000 entries: the folder of 10,000 renamed then put in Trash: ${ix.byId.size}, ${ren.changed.length}, ${rem.changed.length}`);
-  check(t1 - t0 < 5000 && t2 - t1 < 500 && t3 - t2 < 500, `…built in ${Math.round(t1 - t0)} ms (under 5 s); rename ${Math.round(t2 - t1)} ms, remove ${Math.round(t3 - t2)} ms (each under 0.5 s)`);
+  const N = ix.byId.size, longest = "/big/s9/" + "w".repeat(200), longId = ix.at(longest)?.id;
+  const fingerprint = () => JSON.stringify([ix.byId.size, ix.byKey.size, ix.children.size, ix.gone.size, view(ix).map((e) => e.path + "\u0000" + e.id).join("\n")]);
+  const before = fingerprint();
+  const at = (o) => {
+    gc();
+    const r0 = process.memoryUsage.rss(), h0 = heapStats().heapSize, t = performance.now();
+    const r = reduce(ix, { seq: ++seq, device: DEV[1], dseq: seq, t: seq, by: "person", ...o });
+    const ms = performance.now() - t, grew = process.memoryUsage.rss() - r0;
+    gc();
+    return { r, ms, grew: grew / 2 ** 20, kept: (heapStats().heapSize - h0) / 2 ** 20 };
+  };
+  // (854 characters: every path under /big fits there but the long one, which a move takes last)
+  const far = "/" + ["a", "b", "c"].map((c) => c.repeat(200)).join("/") + "/" + "d".repeat(250);
+  const bad = at({ op: "rename", path: "/big", to: far, kind: "folder", fid: big });
+  check(bad.r.skipped !== undefined && bad.r.changed.length === 0 && fingerprint() === before && !ix.at("/" + "a".repeat(200)), `a move of ${N} entries whose last would be past the bounds: skipped whole, nothing changed, no folder left: ${bad.r.skipped}`);
+  const ren = at({ op: "rename", path: "/big", to: "/big2", kind: "folder", fid: big });
+  const rem = at({ op: "remove", path: "/big2", to: "/Trash/big2", kind: "folder", fid: big });
+  const fg = at({ op: "forget", path: "/Trash/big2", kind: "folder", fid: big });
+  check(N > 99990 && ren.r.changed.length === N && ix.byId.size === 0 && rem.r.changed.length === N && fg.r.changed.length === N && ix.gone.get(big) === "/Trash/big2" && ix.gone.get(longId) === "/Trash/big2/s9/" + "w".repeat(200), `${N} entries in one folder: renamed, put in Trash, forgotten`);
+  const ms = (x) => Math.round(x.ms), mb = (x) => `${Math.round(x.grew)}/${Math.round(x.kept)} MiB`;
+  const report = `built in ${Math.round(t1 - t0)} ms; the move skipped ${ms(bad)} ms ${mb(bad)}; rename ${ms(ren)} ms ${mb(ren)}; Trash ${ms(rem)} ms ${mb(rem)}; forget ${ms(fg)} ms ${mb(fg)} (grown during / kept after)`;
+  console.log(report);
+  check(t1 - t0 < 5000 && [bad, ren, rem, fg].every((x) => x.ms < 500), `…built in under 5 s, and each op under 0.5 s: ${report}`);
+  check([bad, ren, rem, fg].every((x) => x.grew < 48 && x.kept < 24), `…each op's memory under its ceiling (48 MiB grown, 24 MiB kept): ${report}`);
 }
 
 // no DOM, IndexedDB or clock: only paths' rules and the synchronous SHA-256, so a Worker and the server bundle it

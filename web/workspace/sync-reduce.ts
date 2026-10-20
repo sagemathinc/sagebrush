@@ -38,7 +38,7 @@
 //   identity it doesn't carry, a move into itself, a path past the
 //   workspace's bounds, its own or any it would make) changes nothing, and
 //   says why.  The log is never redefined.
-import { MAX_NAME, TRASH, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
+import { MAX_DEPTH, MAX_NAME, MAX_PATH, TRASH, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
 import { sha256Hex } from "../../src/runtime/sha256";
 
 /** An op of the server's log (sync-server §5.2's `index` message). */
@@ -128,6 +128,15 @@ const valid = (p: string) => {
   } catch {
     return false;
   }
+};
+/** Whether an entry may be at `p` (astra's CORR-7F4-1): never the root or Trash itself, and in Trash only
+ * as what was put there (`intoTrash`: directly in Trash), never anywhere else in it. */
+const placeable = (p: string, intoTrash: boolean) => p !== "/" && p !== TRASH && (intoTrash ? parentOf(p) === TRASH : !within(p, TRASH));
+/** How many names `p` has ("/" none). */
+const depth = (p: string) => {
+  let n = 0;
+  for (let i = 0; i < p.length; i++) if (p.charCodeAt(i) === 47) n++;
+  return p === "/" ? 0 : n;
 };
 /** `base` cut so that `base + tail` is a name the workspace can hold (never through a surrogate pair). */
 function fit(base: string, tail: string): string {
@@ -243,6 +252,7 @@ class Reducer {
   /** `e` added: its path one the workspace can hold, free, in a folder that is there; its identity not one the index has. */
   private put(e: SyncEntry) {
     if (!valid(e.path)) throw new Skip(`${e.path.slice(0, 80)}… is past the workspace's bounds`);
+    if (!placeable(e.path, !!e.trashed)) throw new Skip(`nothing can be at ${e.path}`);
     if (this.ix.byId.has(e.id)) throw new Skip(`${e.id} is already there`);
     if (this.ix.byKey.has(keyOf(e.path))) throw new Skip(`${e.path} is taken`);
     const up = parentOf(e.path);
@@ -263,12 +273,6 @@ class Reducer {
     this.rawDel(e);
     this.log.push(() => this.rawPut(was));
     this.changed.add(e.id);
-  }
-
-  private forgotten(e: SyncEntry) {
-    const was = this.ix.gone.get(e.id);
-    this.ix.gone.set(e.id, e.path);
-    this.log.push(() => (was === undefined ? this.ix.gone.delete(e.id) : this.ix.gone.set(e.id, was)));
   }
 
   /** `e` with `changes`, as a new record (so the old one is what undo puts back). */
@@ -337,17 +341,47 @@ class Reducer {
   }
 
   /** `e` (and what's in it) moved to `dest`, free, in a folder that is there; every path checked before anything is kept. */
+  // (in two phases, as a subtree may be the whole workspace, LIMIT-7F4-1: every new path checked with
+  // nothing changed; then the move, which can't fail, logged as one step that moves it all back, with no
+  // copy of any entry)
   private relocate(e: SyncEntry, dest: string, trashed: SyncEntry["trashed"] | null) {
-    const all = this.subtree(e), from = e.path;
-    for (const x of all) this.unput(x);
-    for (const x of all) {
-      const n = { ...copy(x), path: dest + x.path.slice(from.length), updated: this.op.t, seq: this.op.seq };
-      if (x === e) {
-        if (trashed === null) delete n.trashed;
-        else n.trashed = trashed;
+    const from = e.path, all = this.subtree(e);
+    if (!valid(dest)) throw new Skip(`${dest.slice(0, 80)}… is past the workspace's bounds`);
+    if (!placeable(dest, !!trashed)) throw new Skip(`nothing can be put at ${dest}`);
+    if (this.taken(dest, e.id)) throw new Skip(`${dest} is taken`);
+    const up = parentOf(dest);
+    if (up !== "/" && up !== TRASH && this.ix.at(up)?.kind !== "folder") throw new Skip(`no folder ${up}`);
+    if (keyOf(dest) !== keyOf(from) && within(keyOf(dest), keyOf(from))) throw new Skip(`${from} can't go into itself`);
+    // (a descendant's names are its own, already valid: only its length and depth change)
+    const dLen = dest.length - from.length, dDepth = depth(dest) - depth(from);
+    for (const x of all) if (x.path.length + dLen > MAX_PATH || depth(x.path) + dDepth > MAX_DEPTH) throw new Skip(`${x.path.slice(0, 80)}… would be past the workspace's bounds`);
+    const was = { trashed: e.trashed, updated: new Float64Array(all.length), seq: new Float64Array(all.length) };
+    const move = (a: string, b: string) => {
+      for (const x of all) this.rawDel(x);
+      for (const x of all) {
+        x.path = b + x.path.slice(a.length);
+        this.rawPut(x);
       }
-      this.put(n);
-    }
+    };
+    move(from, dest);
+    all.forEach((x, i) => {
+      was.updated[i] = x.updated;
+      was.seq[i] = x.seq;
+      x.updated = this.op.t;
+      x.seq = this.op.seq;
+      this.changed.add(x.id);
+    });
+    if (trashed === null) delete e.trashed;
+    else if (trashed) e.trashed = trashed;
+    this.log.push(() => {
+      move(dest, from);
+      all.forEach((x, i) => {
+        x.updated = was.updated[i];
+        x.seq = was.seq[i];
+      });
+      if (was.trashed) e.trashed = was.trashed;
+      else delete e.trashed;
+    });
   }
 
   /** `e` and everything in it, `e` first, parents before their children. */
@@ -464,9 +498,18 @@ class Reducer {
   forget() {
     const e = this.ix.byId.get(this.id);
     if (!e) throw new Skip(`${this.id} isn't there`);
-    for (const x of this.subtree(e)) {
-      this.unput(x);
-      this.forgotten(x);
+    // (as a move: one step to put it all back, no copies; nothing here can fail)
+    const all = this.subtree(e);
+    for (const x of all) {
+      this.rawDel(x);
+      this.ix.gone.set(x.id, x.path);
+      this.changed.add(x.id);
     }
+    this.log.push(() => {
+      for (const x of all) {
+        this.ix.gone.delete(x.id);
+        this.rawPut(x);
+      }
+    });
   }
 }
