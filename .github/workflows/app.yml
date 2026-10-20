@@ -6,8 +6,15 @@ name: app
 
 on:
   push:
+    branches: [master]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
+  pull_request:
     paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
   workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   page:

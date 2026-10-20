@@ -452,7 +452,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const p = freePath(folder, base, ext, (x) => taken.has(x));
     if (!p) return say("No free name here");
     try {
-      const e = kind === "folder" ? await w.mkdir(p) : await w.create(p);
+      // (made by the person here, in the file browser's New: provenance "person", design/capabilities.md §6)
+      const e = kind === "folder" ? await w.mkdir(p) : await w.createByPerson(p);
       if (folder !== "/") { open.add(folder); saveOpen(); }
       await refresh();
       const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`);

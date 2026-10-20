@@ -36,7 +36,7 @@ ws.onmessage = (ev) => {
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   // (Delete's confirm: yes)
-  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true });
+  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) });
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -93,6 +93,10 @@ try {
   check(await until(`!location.search.includes(${JSON.stringify("local:" + sageId)}) && /doc=local:[0-9a-f]{12}/.test(location.search) && !!${B}?.snapshot()`, 60000), "File > New board opens a new board");
   check((await countBoards()) === before + 1 && (await ev(`localStorage.getItem("sagebrush-board:local:" + location.search.match(/local:([0-9a-f]{12})/)[1]) === null`)), "…a board of the workspace, not of localStorage");
   check(await ev(`localStorage.getItem("sagebrush-board:local:" + location.search.match(/local:([0-9a-f]{12})/)[1] + "#here") === "1"`), "…marked as written here (its remote pictures show at once)");
+  // provenance (design/capabilities.md §6): the person's own New is theirs; a board brought in from before is unknown
+  const madeOfRef = (ref) => ev(`${W}.list("/", { recursive: true }).then((l) => l.find((e) => e.ref === ${ref})?.made ?? "unknown")`);
+  check((await madeOfRef(`location.search.match(/local:([0-9a-f]{12})/)[1]`)) === "person", "File > New board: made by the person (provenance)");
+  check((await madeOfRef(JSON.stringify(id))) === "unknown", "…a board brought in from before the workspace: unknown");
   await ev(`${B}.edit((d) => { d.title = "To copy"; }).then(() => 1)`);
   await sleep(300);
   // (Duplicate saves, then opens the copy: what follows waits for the copy's page,
@@ -104,6 +108,7 @@ try {
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/To copy (copy).board.json"))`, 30000), "Duplicate makes a board of the workspace: To copy (copy)");
   const markOf = (path) => ev(`${W}.stat(${JSON.stringify(path)}).then((e) => localStorage.getItem("sagebrush-board:local:" + e.ref + "#here"))`);
   check((await markOf("/To copy (copy).board.json")) === "1", "…a copy of a board written here, marked as one");
+  check((await ev(`${W}.stat("/To copy (copy).board.json").then((e) => e.made)`)) === "person", "…its provenance the source's: the person's");
   // a copy is never trusted more than what it copies (CORR-30D-1): a board
   // an agent wrote, with a remote picture, isn't marked; a closed page's
   // changes to it, recovered as a board of their own, aren't either, and
@@ -328,6 +333,19 @@ try {
   check(await until(`!!window.sagebrush?.notebook && !!${W}`, 60000), "the notebook page opens its workspace");
   const nbId = await ev(`localStorage.getItem("sagebrush-current")`);
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.kind === "notebook" && e.ref === ${JSON.stringify(nbId)}))`), "the open notebook is listed");
+  // provenance: the Welcome notebook isn't the person's; File > New is; Save a copy keeps it
+  check((await ev(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(nbId)})?.made ?? "unknown")`)) !== "person", "the Welcome notebook a first visit makes: not made by the person");
+  await ev(`(() => { document.querySelector('[data-f="new"]').click(); return 1; })()`);
+  check(await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(nbId)}`, 15000), "(File > New notebook)");
+  const newNb = await ev(`localStorage.getItem("sagebrush-current")`);
+  check(await until(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(newNb)})?.made === "person")`), "File > New notebook: made by the person");
+  await ev(`(() => { document.querySelector('[data-f="duplicate"]').click(); return 1; })()`);
+  check(await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(newNb)}`, 15000), "(Save a copy)");
+  const copyNb = await ev(`localStorage.getItem("sagebrush-current")`);
+  check(await until(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(copyNb)})?.made === "person")`), "…Save a copy: the source's provenance");
+  await ev(`(async () => { await sagebrush.notebook.saved?.(); return 1; })()`).catch(() => {});
+  await go(base + "?nb=" + encodeURIComponent(nbId));
+  check(await until(`!!window.sagebrush?.notebook && !!${W} && localStorage.getItem("sagebrush-current") === ${JSON.stringify(nbId)}`, 60000), "(back on the notebook the rest of this test uses)");
   await ev(`(() => { const i = document.querySelector("#nbname"); i.value = "Renamed nb"; i.dispatchEvent(new Event("input")); return 1; })()`);
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.path === "/Renamed nb.ipynb" && e.ref === ${JSON.stringify(nbId)}))`, 8000), "renaming the notebook renames its file");
   // uploads through the workspace: an overwrite keeps a version
