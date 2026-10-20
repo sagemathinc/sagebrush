@@ -41,7 +41,7 @@ interface Records {
 interface PatchHistoryLike {
   init(): Promise<unknown>;
   on(f: () => void): () => void;
-  committed(): Records;
+  committed(): Records | null;
   commit(next: Records): unknown;
   versions(): Version[];
   valueAt(time: string): Records;
@@ -127,9 +127,12 @@ export class BoardHistory {
   }
   async init() { await this.h.init(); return this; }
   on(f: () => void) { return this.h.on(f); }
-  /** Keep the board as it is now as a version (nothing if it has not changed): only what changed. */
+  /** Keep the board as it is now as a version (nothing if it has not changed): only what changed; null while the
+   *  history is (re)opened, none made then (the next one has the change: astra's CORR-529-1). */
   record(d: BoardDoc) {
-    const cur = this.h.committed(), recs = toRecords(d);
+    const cur = this.h.committed();
+    if (!cur) return null;
+    const recs = toRecords(d);
     // (the version: its records, as inserting or patching each would leave
     // them, made at once; the patch is what changed, computed from the two.
     // Made one record at a time, each remade the document's indexes: a

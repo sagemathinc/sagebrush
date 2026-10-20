@@ -12,7 +12,7 @@
 // The cases are in test-workspace.page.js.
 //   CHROME=google-chrome bun web/workspace/test-workspace.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -48,11 +48,21 @@ if (!opened.success) {
   console.error(opened.logs.join("\n"));
   process.exit(1);
 }
+// (the notebooks' store on its own, as an editor loads it: astra's probe that it refuses to save while quarantined)
+await Bun.build({ entrypoints: [join(here, "../notebook/stores.js")], outdir: site, naming: "stores.js", target: "browser", format: "esm" });
+// (the board page's own wsSave, as this head has it, for astra's probe that it keeps nothing while quarantined)
+{
+  const page = readFileSync(join(here, "../board/page.ts"), "utf8"), at = page.indexOf("function wsSave(");
+  let end = page.indexOf("{", at);
+  for (let depth = 0; end < page.length; end++) { if (page[end] === "{") depth++; else if (page[end] === "}" && --depth === 0) break; }
+  const js = new Bun.Transpiler({ loader: "ts" }).transformSync("export " + page.slice(at, end + 1)).replace(/^export /m, "");
+  writeFileSync(join(site, "wssave.js"), `export const WS_SAVE = ${JSON.stringify(js)};\n`);
+}
 copyFileSync(join(here, "test-workspace.page.js"), join(site, "cases.js"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>workspace test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
-  if (!["/", "/ws.js", "/fileopen.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
+  if (!["/", "/ws.js", "/fileopen.js", "/cases.js", "/stores.js", "/wssave.js"].includes(p)) return new Response("not found", { status: 404 });
   const f = Bun.file(join(site, p === "/" ? "index.html" : p.slice(1)));
   return new Response(f, { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
 } });
@@ -71,6 +81,8 @@ try {
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    // (PROGRESS=1: each test named as it starts, to find one that never ends)
+    if (process.env.PROGRESS && m.method === "Runtime.consoleAPICalled" && m.params.args?.[0]?.value?.startsWith?.("test: ")) console.log(m.params.args[0].value);
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -85,6 +97,8 @@ try {
     console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   } else {
     console.log(`ok: the workspace, ${results.length} checks`);
+    // (SHOW=1: every check said, with what it measured)
+    if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
     code = 0;
   }
   ws.close();

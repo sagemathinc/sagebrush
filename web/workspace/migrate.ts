@@ -27,7 +27,7 @@
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
 import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
-import { bytesHash } from "../notebook/stores.js";
+import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 /** What migrate reads and writes of localStorage. */
@@ -47,8 +47,13 @@ export type MigrateReport = { boards: number; copies: number; unreadable: string
 /** Everything of this browser's in the workspace (above); safe to run at every load. */
 /** `proceed`: asked once the lock is held; false, and nothing is done (a page that gave up on the workspace meanwhile: LIMIT-12C-3). */
 export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () => boolean } = {}): Promise<MigrateReport> {
+  // (a quarantined workspace is written by nothing, this included, until the person decides: design/workspace-durability.md A.3)
+  if (w.quarantined) return Promise.resolve({ boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 });
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
+    // (a reset's purge not finished: nothing brought in until it is, in the background; the next migrate brings in what's left)
+    // (localStorage's part too: an old board it couldn't yet remove isn't brought into the new workspace: CORR-2A4-3)
+    if (await inTx(w.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("purgeMain"))) || (await req(tx.objectStore("meta").get("purgeLocal"))))) { void w.cleanUp(); return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 }; }
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
@@ -140,7 +145,8 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     if (e.kind === "file" && (e.trashed || within(e.path, TRASH))) refs.trash.add(e.ref);
     else if (e.kind !== "folder") refs[e.kind].add(e.ref);
   }
-  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]) : [];
+  // (the workspace's fence is not a notebook)
+  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]).filter((k) => k !== FENCE) : [];
   const fileKeys = w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : [];
   const boardIds = (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[];
   const trashKeys = (await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").getAllKeys()))) as string[];
