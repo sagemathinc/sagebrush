@@ -1881,8 +1881,7 @@ export class Workspace {
         if (a.kind === "free" ? naming.length > 0 : mine.length > 0 || !naming.some((e) => e.migrated)) return undefined;
         const bytes = await this.readOld("files", a.key);
         if (bytes === undefined) return undefined;
-        const sha256 = await bytesHash(bytes);
-        return this.adopt(a.folder, a.base, a.ext, { kind: "file", ref: a.key, size: bytes.byteLength, rev: 0, sha256, ...(bytes.byteLength > LEGACY_MAX ? { unmoved: "too large to move" } : {}) });
+        return this.adopt(a.folder, a.base, a.ext, { kind: "file", ref: a.key, rev: 0 }, { bytes });
       });
     } finally {
       release();
@@ -1892,7 +1891,9 @@ export class Workspace {
     const mk = staleKey(where, key);
     if (where === "trash" || !isPath(key)) return void (await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete(mk); }));
     const [base, ext] = splitExt(nameOf(key));
-    await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, size: bytes.byteLength, rev: 0, sha256: await bytesHash(bytes) }, { dropMeta: [mk] });
+    // (moved as it is adopted: its own mark replaces this one, in the adopt's transaction, and its old copy goes
+    // as any moved file's does)
+    await this.adopt(parentOf(key), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 }, { bytes });
   }
   private async readOld(where: "files" | "trash", key: string): Promise<Uint8Array | undefined> {
     return this.oldTx(where, "readonly", (st) => req(st.get(key))) as Promise<Uint8Array | undefined>;
@@ -2005,58 +2006,85 @@ export class Workspace {
   /** An entry for contents that are already kept (migration, reconcile):
    * at `base + ext` in `folder`, or the first free `base (2) + ext`, …
    * Hold the lock (locked()) around it. */
-  /** A data file's bytes, about to be adopted, read and hashed holding the lock (the caller's): from fileBytes
-   * (by its fid) if moved, else where they are kept the old way.  Their size isn't known until read, so
-   * LEGACY_MAX × COPIES is reserved first, without waiting (tryReserve: the lock's holder never waits for a
-   * reservation, LIMIT-CAP1A-1); if it can't be had now, the adopt is refused (a WorkspaceError("storage"),
-   * nothing made) and is asked for again later (reconcile's next run).  Larger than LEGACY_MAX: marked unmoved, as
-   * the migrator marks one.  Returns the fields to add: sha256, size, and maybe unmoved. */
-  private async hashOf(f: { ref: string | null; fid?: string; migrated?: boolean; trashed?: Entry["trashed"] }): Promise<Pick<Entry, "sha256" | "size" | "unmoved">> {
+  /** A data file's bytes kept the old way, about to be adopted, read holding the lock (the caller's).  Their
+   * size isn't known until read, so LEGACY_MAX × COPIES is reserved first, without waiting (tryReserve: the
+   * lock's holder never waits for a reservation, LIMIT-CAP1A-1); if it can't be had now, the adopt is refused
+   * (a WorkspaceError("storage"), nothing made) and asked for again later (reconcile's next run).  Returns the
+   * bytes and the reservation's release, which the adopt calls once it is done with them. */
+  private async oldBytesFor(f: { ref: string | null; trashed?: Entry["trashed"] }): Promise<{ bytes: Uint8Array; release: () => void }> {
     const release = tryReserve(LEGACY_MAX * COPIES);
     if (!release) throw new WorkspaceError("storage", "a file's bytes can't be read just now (the page's memory for reading files is in use): try again");
     try {
-      const bytes: Uint8Array | undefined = f.migrated && f.fid ? await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(f.fid!))) : await this.readOld(f.trashed ? "trash" : "files", f.ref!);
+      const bytes = await this.readOld(f.trashed ? "trash" : "files", f.ref!);
       if (bytes === undefined) throw new WorkspaceError("missing", `the bytes of ${f.ref} are not in this browser`);
-      return { sha256: await bytesHash(bytes), size: bytes.byteLength, ...(!f.migrated && bytes.byteLength > LEGACY_MAX ? { unmoved: "too large to move" } : {}) };
-    } finally {
+      return { bytes, release };
+    } catch (e) {
       release();
+      throw e;
     }
   }
 
-  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[] } = {}): Promise<Entry> {
+  /** `also.bytes`: a data file's bytes as the caller read them (its reservation held), else read here
+   * (oldBytesFor).  A data file adopted from bytes kept the old way is moved as it is adopted (astra's
+   * CORR-12E-1; @sagebrush's decision): the bytes read (a snapshot: what IndexedDB gave), hashed, put in
+   * fileBytes under its fid in the same transaction as its entry, marked migrated, and its op, with the old
+   * copy marked stale (its size and hash) there too, as migrateOne does.  So the entry, its bytes and its op's
+   * hash and `after` all name the same bytes, whatever an older tab writes at the old key meanwhile.  Then the
+   * old copy goes as the migrator's does (dropStale): deleted if it is still those bytes, else (an older tab
+   * wrote there since the read) kept as a file of its own, adopted in turn with its own hash.  Bytes larger than
+   * LEGACY_MAX aren't moved: adopted marked unmoved, with their hash, as the migrator marks one (larger than
+   * the 200 MiB file limit, so never synced).  Never a data file's op without its hash (CORR-9C2-2). */
+  async adopt(folder: string, base: string, ext: string, fields: Omit<Entry, "path" | "created" | "updated"> & { created?: number; updated?: number }, also: { at?: string; board?: BoardRecord; meta?: [string, unknown][]; dropMeta?: string[]; dropTrash?: string[]; bytes?: Uint8Array } = {}): Promise<Entry> {
     // (with the entry, in its transaction: a board's record, records put in
     // or dropped from meta, bytes dropped from trash; all of it, or none)
     const ops: Op[] = [];
-    // (a data file whose bytes are kept the old way: the migration, if it was done, has one more to
-    // move, so it starts again (its state dropped with this entry, in this transaction: capabilities §2b))
-    const oldWay = fields.kind === "file" && !fields.migrated && fields.ref !== null;
-    // (never a data file's op without its hash (astra's CORR-9C2-2): its bytes hashed first, here if the caller
-    // didn't (adoptOld, keepOld and reconcile's recovery from Trash do))
-    if (fields.kind === "file" && !fields.sha256 && fields.ref !== null) fields = { ...fields, ...(await this.hashOf(fields)) };
-    const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || oldWay ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : [])];
-    const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
-      const st = tx.objectStore("entries");
-      const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
-      const p = also.at ?? freePath(folder, base, ext, (x) => taken.has(x));
-      if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
-      if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
-      if (also.board) tx.objectStore("boards").put(also.board);
-      for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
-      for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
-      for (const k of also.dropTrash ?? []) tx.objectStore("trash").delete(k);
-      if (oldWay) tx.objectStore("meta").delete("migration");
-      await this.folders(tx, parentOf(p), ops);
-      await this.room(st, p);
-      const t = this.now();
-      const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), ...(fields.kind === "folder" && !fields.fid ? { fid: hex(8) } : {}), path: p, nkey: nkeyOf(p) };
-      const ident = identOf(e);
-      if (ident) e.ident = ident;
-      st.put(e);
-      await this.log(tx, ops, { op: "adopt", path: p, kind: e.kind }, e);
-      return e;
-    });
-    this.tell({ ops });
-    return entry;
+    let move: { bytes: Uint8Array; where: "files" | "trash"; key: string; mark: StaleMark } | null = null, release: (() => void) | null = null;
+    try {
+      if (fields.kind === "file" && fields.ref !== null && !fields.migrated) {
+        let bytes = also.bytes;
+        if (!bytes) ({ bytes, release } = await this.oldBytesFor(fields));
+        const sha256 = await bytesHash(bytes);
+        const where = fields.trashed ? "trash" : "files";
+        if (bytes.byteLength > LEGACY_MAX) fields = { ...fields, sha256, size: bytes.byteLength, unmoved: "too large to move" };
+        else {
+          const fid = fields.fid ?? hex(8);
+          fields = { ...fields, fid, migrated: true, size: bytes.byteLength, sha256 };
+          move = { bytes, where, key: fields.ref!, mark: { fid, size: bytes.byteLength, sha256 } };
+        }
+      } else if (fields.kind === "file" && !fields.sha256) throw new WorkspaceError("invalid", "a data file is adopted with its SHA-256 (design/sync-client.md §3)");
+      const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || move ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : []), ...(move ? ["fileBytes"] : [])];
+      const entry = await inTx(this.ws, stores, "readwrite", async (tx) => {
+        const st = tx.objectStore("entries");
+        const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
+        const p = also.at ?? freePath(folder, base, ext, (x) => taken.has(x));
+        if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
+        if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
+        if (also.board) tx.objectStore("boards").put(also.board);
+        for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
+        for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
+        for (const k of also.dropTrash ?? []) tx.objectStore("trash").delete(k);
+        // (the snapshot moved with the entry, and the old copy marked, all in this one transaction)
+        if (move) {
+          tx.objectStore("fileBytes").put(move.bytes, move.mark.fid);
+          tx.objectStore("meta").put(move.mark, staleKey(move.where, move.key));
+        }
+        await this.folders(tx, parentOf(p), ops);
+        await this.room(st, p);
+        const t = this.now();
+        const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), ...(fields.kind === "folder" && !fields.fid ? { fid: hex(8) } : {}), path: p, nkey: nkeyOf(p) };
+        const ident = identOf(e);
+        if (ident) e.ident = ident;
+        st.put(e);
+        await this.log(tx, ops, { op: "adopt", path: p, kind: e.kind }, e);
+        return e;
+      });
+      this.tell({ ops });
+      // (then the old copy, as the migrator's: deleted if it is still the bytes moved, else kept as a file of its own)
+      if (move) await this.dropStale(move.where, move.key, move.bytes).catch((err) => console.warn("workspace: an old copy:", err));
+      return entry;
+    } finally {
+      release?.();
+    }
   }
 
   /** The folders `folder` and those above it, made where missing (in `tx`); a file in the way is an error. */

@@ -219,7 +219,7 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
       await w.mainTx("files", "readwrite", (st) => st.put(bytes, d));
       const [base, ext] = splitExt(nameOf(d));
       // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
-      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, sha256: sha, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark] });
+      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark], bytes });
       entries.push({ path: d, kind: "file", ref: d, created: 0, updated: 0 });
     }
     refs.file.add(d);
