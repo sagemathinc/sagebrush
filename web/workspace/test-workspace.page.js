@@ -1601,12 +1601,34 @@ async function durabilityPurge() {
     await w.reset("new").catch(() => {});
     W.RESET_HOOK.beforePurge = undefined;
     let v = w;
-    if (killed) { w.close(); v = await openAs(o); }
+    if (killed) { w.close(); v = await openAs(o); await v.settled(); }
     await W.migrate(v, localStorage);
-    const nbs = await new Promise((ok) => { const r = v.main.transaction("notebooks").objectStore("notebooks").getAllKeys(); r.onsuccess = () => ok(r.result); });
+    const nbs = await new Promise((ok) => { const r = v.main.transaction("notebooks").objectStore("notebooks").getAllKeys(); r.onsuccess = () => ok(r.result.filter((k) => k !== "__sagebrush-workspace__")); });
     check((await paths(v)).length === 0 && nbs.length === 0 && localStorage.getItem("sagebrush-board:local:aaaaaaaaaaaa") === null, `a reset to a new workspace${killed ? ", killed before its purge" : ""}, then migrate: nothing brought back`);
     v.close();
   }
+}
+
+async function durabilityPurgePending() {
+  // astra's CORR-2A4-3: migrate brings nothing in while a purge is pending, even with its pages under way
+  const o = await named();
+  let w = await openAs(o);
+  await new Promise((ok, no) => { const tx = w.main.transaction("notebooks", "readwrite"); for (let i = 0; i < 600; i++) tx.objectStore("notebooks").put({ id: "old-" + String(i).padStart(4, "0"), name: "n" + i, cells: [], rev: 1, updated: 1 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+  await w.reset("new").catch(() => {});
+  W.RESET_HOOK.beforePurge = undefined;
+  w.close();
+  // (the purge stopped after its first page, as a stop would leave it: 100 old notebooks left, the purge pending)
+  W.RESET_HOOK.afterPage = (store) => { if (store === "notebooks") throw new Error("stopped (test)"); };
+  w = await openAs(o);
+  await w.settled();
+  W.RESET_HOOK.afterPage = undefined;
+  await W.migrate(w, localStorage);
+  const early = await paths(w);
+  await w.cleanUp();
+  await W.migrate(w, localStorage);
+  check(early.length === 0 && (await paths(w)).length === 0, `migrate while a purge is pending, and after: nothing brought back (${early.length}, ${(await paths(w)).length})`);
+  w.close();
 }
 
 async function durabilityResetBounds() {
@@ -1625,12 +1647,47 @@ async function durabilityResetBounds() {
     if (killed) {
       check(await fails(v.create("/x.txt", { content: "x" }), "storage") || await fails(v.create("/x.txt", { content: "x" }), "quarantined"), "(killed part way: nothing written meanwhile)");
       v.close();
+      // (the open returns at once, the reset resumed in the background, writers refused until it's done: LIMIT-99B-3)
+      const t0 = performance.now();
+      W.RESET_HOOK.openBudgetMs = 0;
       v = await openAs(o);
+      W.RESET_HOOK.openBudgetMs = undefined;
+      const openMs = performance.now() - t0;
+      check(v.durability.state === "resetting" && await fails(v.create("/y.txt", { content: "y" }), "quarantined"), "killed part way: the next open says resetting, and refuses writes meanwhile: " + JSON.stringify(v.durability));
+      check(openMs < 2000, `…and returns without waiting for the cleanup (${Math.round(openMs)} ms)`);
+      await v.settled();
     }
     const left = await new Promise((ok) => { const r = v.ws.transaction("entries").objectStore("entries").count(); r.onsuccess = () => ok(r.result); });
     check(left === 0 && v.durability.state === "ok" && v.identity.generation === 2 && !!(await v.create("/new.txt", { content: "n" })), `a reset of ${N} entries${killed ? ", killed part way, finished by the next open" : ""}: emptied, writable`);
-    check(pages.every(([, n]) => n <= W.RESET_PAGE) && pages.filter(([st]) => st === "entries").length >= Math.ceil((killed ? 2 : N) / W.RESET_PAGE), `…a page of at most ${W.RESET_PAGE} records per transaction (${pages.length} pages)`);
+    const bytes = new Set(["fileBytes", "versionBytes", "trash", "files"]);
+    check(pages.every(([st, n]) => n <= (bytes.has(st) ? W.RESET_BYTES_PAGE : W.RESET_PAGE)) && (killed || pages.filter(([st]) => st === "entries").length === Math.ceil(N / W.RESET_PAGE)), `…a page of at most ${W.RESET_PAGE} records per transaction, ${W.RESET_BYTES_PAGE} of files' bytes (${pages.length} pages)`);
     v.close();
+  }
+  // daybreak2's LIMIT-99B-2: many keys in meta, deleted in pages by a bounded cursor (never all read again each page)
+  {
+    const o = await named();
+    const w = await openAs(o);
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); for (let i = 0; i < 3000; i++) tx.objectStore("meta").put({ x: i }, `stale:files:/f${i}`); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n) => { if (store === "meta") pages.push(n); };
+    await w.reset("new");
+    W.RESET_HOOK.afterPage = undefined;
+    const left = await new Promise((ok) => { const r = w.ws.transaction("meta").objectStore("meta").getAllKeys(); r.onsuccess = () => ok(r.result.filter((k) => String(k).startsWith("stale:"))); });
+    check(left.length === 0 && pages.length === 6 && pages.every((n) => n <= W.RESET_PAGE), `3,000 keys in meta: deleted, ${W.RESET_PAGE} a page (${JSON.stringify(pages)})`);
+    w.close();
+  }
+  // daybreak2's LIMIT-99B-1: files' bytes deleted RESET_BYTES_PAGE records a page, each page's time measured with large values
+  {
+    const o = await named();
+    const w = await openAs(o);
+    const big = new Uint8Array(4 << 20);
+    for (let i = 0; i < 64; i++) await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); big[0] = i; tx.objectStore("fileBytes").put(big, i.toString(16).padStart(16, "0")); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const pages = [];
+    W.RESET_HOOK.afterPage = (store, n, ms) => { if (store === "fileBytes") pages.push([n, Math.round(ms)]); };
+    await w.reset("new");
+    W.RESET_HOOK.afterPage = undefined;
+    check(pages.length === 2 && pages.every(([n, ms]) => n <= W.RESET_BYTES_PAGE && ms < 500), `256 MiB of files' bytes: ${W.RESET_BYTES_PAGE} records a page, each page under 0.5 s (${JSON.stringify(pages)})`);
+    w.close();
   }
   // daybreak2's L1: after a reset out of a quarantine, the OPFS witness is flushed when the page is hidden too
   const o = await named();
@@ -1758,6 +1815,59 @@ async function durabilityAstraProbes() {
     let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir}
     report('reset-without-prepare',{error,paths:await paths(a),identity:a.identity});a.close();
   }
+}
+
+// astra's six Chromium probes on 99b71e36 (evidence/durability-detect-99b-astra/probes.patch), kept as regression tests
+async function durabilityAstraProbes99(){
+ const out=(ok,name,v)=>check(ok,name+': '+JSON.stringify(v));
+ // Fresh at indexedDB.open is not fresh after a different opener initializes it.
+ {
+  const o=await named(),proto=W.Workspace.prototype,orig=proto.arrive;let release,entered;
+  const wait=new Promise(r=>release=r),ready=new Promise(r=>entered=r);
+  proto.arrive=async function(info){if(info.fresh){entered();await wait}return orig.call(this,info)};
+  let a,b;try{const pending=openAs(o);await ready;b=await openAs(o);await b.create('/real.txt',{content:'REAL'});release();a=await pending}finally{proto.arrive=orig}
+  out(!a.quarantined&&!b.quarantined,'delayed-first-open',{a:a.durability,b:b.durability,paths:await paths(a)});a.close();b.close();
+ }
+ // A main-store page fails after deleting 500 of 501 records.
+ {
+  const o=await named();let a=await openAs(o);
+  await new Promise((ok,no)=>{const tx=a.main.transaction('notebooks','readwrite'),st=tx.objectStore('notebooks');for(let i=0;i<501;i++)st.put({id:'p'+i,name:'p'+i,rev:1,cells:[]});tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});
+  let injected=false;W.RESET_HOOK.afterPage=(st)=>{if(st==='notebooks'&&!injected){injected=true;throw Error('purge page failed')}};
+  let error=null;try{await a.reset('new')}catch(e){error=e.message}finally{W.RESET_HOOK.afterPage=undefined}
+  const pending=await rawGet(a.ws,'meta','purgeMain');a.close();a=await openAs(o);await W.migrate(a,localStorage);
+  const ps=await paths(a);out(ps.length===0,'purge-failure',{injected,error,pending,paths:ps});a.close();
+ }
+ // A stale notebook editor after reset is not fenced by workspace identity.
+ {
+  const o=await named(),a=await openAs(o),b=await openAs(o),e=await a.create('/old.ipynb');
+  const store=new W.IdbStore(b.main,e.ref),old=await store.load();W.setSaveGate(()=>b.quarantined?'quarantined':null);
+  await a.reset('new');await new Promise(r=>setTimeout(r,50));const save=await store.save({...old,baseRev:old.rev,name:'RESURRECTED'});
+  await W.migrate(a,localStorage);const ps=await paths(a);out(!save?.saved&&ps.length===0,'stale-editor-after-reset',{bClosed:b.closed,save,paths:ps});W.setSaveGate(null);a.close();b.close();
+ }
+ // Existing page gate has not learned another tab's quarantine; flag reads/writes denied.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();
+  const store=new W.IdbStore(a.main,e.ref),old=await store.load();W.setSaveGate(()=>a.quarantined?'quarantined':null);
+  a.channel?.close();a.channel=null;const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});await W.writeOpfs(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const get=Storage.prototype.getItem,set=Storage.prototype.setItem;
+  Storage.prototype.getItem=function(){throw Error('localStorage denied')};
+  Storage.prototype.setItem=function(){throw Error('localStorage denied')};
+  let b;try{b=await openAs(o);const save=await store.save({...old,baseRev:old.rev,name:'WRITTEN'});out(!save?.saved,'denied-flag-incumbent',{a:a.durability,b:b.durability,save})}finally{Storage.prototype.getItem=get;Storage.prototype.setItem=set;W.setSaveGate(null);a.close();b?.close()}
+ }
+
+ // First-visit state persists after its first save, so down notices are suppressed.
+ {
+  const o=await named(),a=await openAs(o),set=Storage.prototype.setItem,dir=navigator.storage.getDirectory;
+  Storage.prototype.setItem=function(){throw Error('denied after open')};navigator.storage.getDirectory=async()=>{throw Error('denied after open')};
+  try{await a.create('/first.txt',{content:'F'});await a.flushOpfs();out(!!W.showLossNotice(a),'first-save-failure-notice',{state:a.durability,down:a.witnessDown,notice:!!document.querySelector('#sagebrush-loss-notice')})}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir;a.close();document.querySelector('#sagebrush-loss-notice')?.remove()}
+ }
+ // Resume of a reset out of quarantine leaves the old quarantine flag behind.
+ {
+  const o=await named();let a=await openAs(o);await a.create('/a.txt',{content:'A'});await a.flushOpfs();a.close();
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
+  W.RESET_HOOK.afterPage=(st)=>{if(st==='entries')throw Error('killed reset')};await a.reset('new').catch(()=>{});W.RESET_HOOK.afterPage=undefined;a.close();
+  a=await openAs(o);const save=await new W.IdbStore(a.main,'new-nb').save({id:'new-nb',name:'New',cells:[]});out(!!save?.saved,'resumed-reset-flag',{state:a.durability,flag:localStorage.getItem('sagebrush-quarantined:'+a.main.name),save});a.close();
+ }
 }
 
 async function durabilityDeliberate() {
@@ -1892,7 +2002,7 @@ async function durabilityReset() {
 }
 
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

@@ -382,7 +382,7 @@ import { RunnerWorker } from "./notebook/runner-worker.js";
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE } from "./notebook/stores.js";
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
@@ -1644,7 +1644,7 @@ fileMenu.addEventListener("click", async (e) => {
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
       if (hdb) await new IdbPatchStore(hdb, current.id).drop();
-      const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+      const rest = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).filter((d) => d.id !== FENCE).sort((a, b) => b.updated - a.updated);
       if (rest.length) await openId(rest[0].id); else await openNew("Untitled", nb.mode, [""], true);
       announce("Notebook deleted");
       break;
@@ -1701,7 +1701,7 @@ window.sagebrush.openBundle = openBundle;
 const openDlg = $("#opendlg");
 async function showOpen() {
   saveNow();
-  const all = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).sort((a, b) => b.updated - a.updated);
+  const all = ((await idb(db, "notebooks", "readonly", (st) => st.getAll())) ?? []).filter((d) => d.id !== FENCE).sort((a, b) => b.updated - a.updated);
   const list = $("#nblist");
   list.textContent = "";
   for (const d of all) {
@@ -2225,7 +2225,7 @@ const wsReady = (async () => {
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
     showLossNotice(w);
     w.onDurability(() => showLossNotice(w));
-    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : null));
+    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : null));
     // (and the notebook read-only meanwhile, now and when another tab finds the loss)
     const readOnlyIfQuarantined = () => { if (w.quarantined) nb.setReadOnly(true); };
     readOnlyIfQuarantined();

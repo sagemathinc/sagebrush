@@ -54,18 +54,21 @@ export class MemoryStore {
 let saveGate = null;
 /** `f()`: why saves are refused now (a string), or nothing to let them go. */
 export function setSaveGate(f) { saveGate = f; }
-/** The localStorage key a quarantined workspace sets for its old store (the notebooks' database, by name), so
- * every editor and tab refuses to save there whatever its page did (astra's CORR-2A4-2). */
-export const QUARANTINE_FLAG = "sagebrush-quarantined:";
-const flagged = (name) => {
-  try {
-    if (name !== undefined) return localStorage.getItem(QUARANTINE_FLAG + name);
-    for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i)?.startsWith(QUARANTINE_FLAG)) return localStorage.getItem(localStorage.key(i));
-  } catch {}
+/** The workspace's fence, a record of its own in the notebooks' store (and in their history's): its identity and
+ * whether it is quarantined or being reset, written by the workspace (design/workspace-durability.md A.3).  A
+ * notebook's or its history's write reads it in the write's own transaction, and is refused when it says the
+ * workspace is quarantined, or names another workspace than the one the store first found: a store opened
+ * before a reset (or in a tab whose page knows nothing of it) can't write into the next workspace (astra's
+ * CORR-2A4-2).  Every list of notebooks passes it over. */
+export const FENCE = "__sagebrush-workspace__";
+const fenceRefusal = (f, seen) => {
+  if (f?.quarantined) return "this browser's copy of your workspace was lost or is missing changes, or is being reset: choose what to do first, or reload";
+  if (seen && (!f || f.workspace !== seen.workspace || f.generation !== seen.generation)) return "the workspace was reset in another tab: reload this page";
   return null;
 };
-// (why a save is refused now: the page's gate, or a quarantine flagged for this database (any, for history))
-const refusal = (name) => saveGate?.() || (flagged(name) ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : null);
+const fenceOf = (f) => (f && typeof f.workspace === "string" ? { workspace: f.workspace, generation: f.generation } : null);
+// (why a save is refused now by the page: its gate)
+const refusal = () => saveGate?.() || null;
 
 function open(name, stores, onVersionChange) {
   return new Promise((resolve) => {
@@ -141,6 +144,8 @@ export class IdbStore {
   constructor(db, id, initial = null) { this.db = db; this.id = id; this.initial = initial; }
   async load() {
     const doc = await idb(this.db, "notebooks", "readonly", (st) => st.get(this.id));
+    // (the workspace this store writes into: the fence as first found)
+    if (this.fence === undefined && this.db) this.fence = fenceOf(await idb(this.db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined));
     if (doc) return doc;
     const fresh = { ...(this.initial ?? { name: "Untitled", mode: "python", cells: [] }), id: this.id };
     await this.save(fresh);
@@ -149,14 +154,21 @@ export class IdbStore {
   async save(doc) {
     if (!this.db) return "not saved: this browser has no storage";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
-    const gate = refusal(this.db.name);
+    const gate = refusal();
     if (gate) return `not saved: ${gate}`;
-    // read and write in one transaction: the compare and swap is atomic
+    // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
     const out = await new Promise((resolve, reject) => {
       const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
       let result = null;
+      const fence = st.get(FENCE);
+      fence.onsuccess = () => {
+        const why = fenceRefusal(fence.result, this.fence);
+        if (why) result = { refused: why };
+        else if (this.fence === undefined) this.fence = fenceOf(fence.result);
+      };
       const get = st.get(this.id);
       get.onsuccess = () => {
+        if (result?.refused) return;
         const rec = revise(get.result, { ...doc, id: this.id, updated: Date.now() });
         if (!rec) result = { conflict: get.result };
         else {
@@ -167,6 +179,7 @@ export class IdbStore {
       tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error);
     });
+    if (out.refused) return `not saved: ${out.refused}`;
     if (out.conflict) return { conflict: out.conflict };
     getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
     return { saved: "saved in this browser", rev: out.rec.rev };
@@ -192,15 +205,27 @@ function getHistoryChannel() {
 }
 export class IdbPatchStore {
   constructor(db, id) { this.db = db; this.id = id; }
+  // (refused, said, by the page's gate or the fence)
+  async allowed() {
+    const why = refusal() || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
+    if (why) throw new Error(`not done: ${why}`);
+  }
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
   async loadInitial() {
+    if (this.fence === undefined && this.db) this.fence = fenceOf((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence);
     const rows = (await idb(this.db, "history", "readonly", (st) => st.getAll(this.range()))) ?? [];
     return { patches: rows.map((r) => r.env), hasMore: false };
   }
   append(env) {
-    // (not while the page refuses saves: the workspace quarantined)
-    if (refusal()) return;
-    idb(this.db, "history", "readwrite", (st) => st.put({ nb: this.id, time: env.time, env })).catch((e) => console.warn("history:", e));
+    // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
+    if (refusal() || !this.db) return;
+    const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
+    f.onsuccess = () => {
+      if (fenceRefusal(f.result?.fence, this.fence)) return;
+      if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
+      st.put({ nb: this.id, time: env.time, env });
+    };
+    tx.onerror = () => console.warn("history:", tx.error);
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, env });
   }
   subscribe(f) {
@@ -217,13 +242,13 @@ export class IdbPatchStore {
     return () => historySubs.delete(g);
   }
   async clear() {
-    if (refusal()) throw new Error(`not done: ${refusal()}`);
+    await this.allowed();
     await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
     getHistoryChannel()?.postMessage({ from: tabId, id: this.id, clear: true });
   }
   /** Forget this notebook's history without telling anyone (the notebook was deleted). */
   async drop() {
-    if (refusal()) throw new Error(`not done: ${refusal()}`);
+    await this.allowed();
     await idb(this.db, "history", "readwrite", (st) => st.delete(this.range()));
   }
 }

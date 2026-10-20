@@ -43,7 +43,8 @@ export function showLossNotice(w: { durability: any; witnessDown?: { local?: str
   if (!doc?.body || !d) return null;
   const down = Object.values(w.witnessDown ?? {}).filter(Boolean).join("; ");
   const loss = d.state === "confirmed" || d.state === "suspected";
-  const info = d.state === "unknown" ? d.why : d.state === "ok" && (d.unavailable || down) ? (d.unavailable || down) : "";
+  // (a loss that can't be detected here: from the open, or a witness that couldn't be written since, a first save's included)
+  const info = d.state === "unknown" ? d.why : d.state === "resetting" ? "" : d.unavailable || down || "";
   doc.getElementById(LOSS_ID)?.remove();
   if (!loss && !info) return null;
   const box = doc.createElement("div");
