@@ -1412,8 +1412,8 @@ async function lookalikesAtScale() {
 // an earlier case's workspace left there is dropped first; in a browser there is only ever one workspace)
 const named = async () => {
   n++;
-  const h = await W.openHistoryDb();
-  if (h) { await rawDel(h, "history", ["__sagebrush-workspace__", ""]).catch(() => {}); h.close(); }
+  for (const h of [await W.openHistoryDb(), await W.openBoardHistoryDb()]) if (h) { await rawDel(h, "history", ["__sagebrush-workspace__", ""]).catch(() => {}); h.close(); }
+  for (const k of Object.keys(localStorage)) if (k.startsWith(W.BLOCKED_FLAG)) localStorage.removeItem(k);
   return { name: `ws-test-${n}`, mainName: `main-test-${n}` };
 };
 const openAs = (o) => W.Workspace.open(o);
@@ -1635,6 +1635,36 @@ async function durabilityPurgePending() {
   await w.cleanUp();
   await W.migrate(w, localStorage);
   check(early.length === 0 && (await paths(w)).length === 0, `migrate while a purge is pending, and after: nothing brought back (${early.length}, ${(await paths(w)).length})`);
+  w.close();
+}
+
+async function durabilityPurgeLocalSparse() {
+  // daybreak2's LIMIT-28F-1: 500 keys to purge among 20,000 others: listed once per run, never a scan per step
+  const o = await named();
+  let w = await openAs(o);
+  const others = [];
+  for (let i = 0; i < 20000; i++) {
+    const k = `unrelated-${i}`;
+    localStorage.setItem(k, "x");
+    others.push(k);
+    if (i % 40 === 0) localStorage.setItem(`sagebrush-board:local:${String(i).padStart(12, "0")}`, "{}");
+  }
+  W.RESET_HOOK.beforePurge = () => { throw new Error("killed (test)"); };
+  await w.reset("new").catch(() => {});
+  W.RESET_HOOK.beforePurge = undefined;
+  w.close();
+  const steps = [];
+  let last = performance.now();
+  W.RESET_HOOK.afterPage = (store, n) => { if (store === "localStorage") { const t = performance.now(); steps.push([n, Math.round(t - last)]); last = t; } };
+  const t0 = performance.now();
+  w = await openAs(o);
+  const openMs = performance.now() - t0;
+  await w.settled();
+  W.RESET_HOOK.afterPage = undefined;
+  const left = Object.keys(localStorage).filter((k) => k.startsWith("sagebrush-board:local:")).length;
+  check(left === 0 && steps.length === 3 && steps.every(([n, ms]) => n <= W.LOCAL_PAGE && ms < 200), `500 keys purged among 20,000 others, ${W.LOCAL_PAGE} a step, each step bounded: ${JSON.stringify(steps)}`);
+  check(openMs < 1000 && others.every((k) => localStorage.getItem(k) === "x"), `…the open within its budget (${Math.round(openMs)} ms), the other keys untouched`);
+  for (const k of others) localStorage.removeItem(k);
   w.close();
 }
 
@@ -2151,8 +2181,171 @@ async function durabilityReset() {
   }
 }
 
+// astra's CORR-28F-1, and @sagebrush's cases for it: one reset at a time; a reset to a new workspace already
+// admitted (here or in another tab) is joined, carried on to its own target, never another's; anything else
+// meanwhile refused as busy
+async function durabilityAdmission() {
+  const H = W.RESET_HOOK;
+  const two = async () => { const o = await named(), a = await openAs(o), b = await openAs(o); await a.create("/a.txt", { content: "A" }); for (const w of [a, b]) { w.channel?.close(); w.channel = null; } return { o, a, b }; };
+  const primary = (w) => rawGet(w.ws, "meta", "identity");
+  const same = (x, p) => x.workspace === p.workspace && x.generation === p.generation;
+  // new and new at once (no broadcasts): one target, both told it
+  {
+    const { a, b } = await two();
+    const r = await Promise.allSettled([a.reset("new"), b.reset("new")]);
+    const p = await primary(a);
+    check(p.generation === 2 && r.every((x) => x.status === "fulfilled" && same(x.value, p)), "two resets to a new workspace at once: the second joins the first, both told its identity: " + JSON.stringify({ r, p }));
+    check(!!(await a.create("/a2.txt", { content: "a" })) && !!(await b.create("/b2.txt", { content: "b" })), "…both tabs write to it after");
+    a.close(); b.close();
+  }
+  // new, and keep asked while it runs: keep refused, the new reset's target kept
+  {
+    const { a, b } = await two();
+    let keep = null;
+    H.afterPage = () => { keep ??= b.reset("keep").then((v) => v, (e) => ({ refused: String(e?.message ?? e) })); };
+    const ra = await a.reset("new").finally(() => { H.afterPage = undefined; });
+    const k = await keep, p = await primary(a);
+    check(!!k?.refused && same(ra, p) && p.generation === 2 && p.workspace !== (await rawGet(b.ws, "meta", "identity")).workspace + "x", "keep asked while a new reset runs: refused, the new reset's target kept: " + JSON.stringify({ ra, k, p }));
+    a.close(); b.close();
+  }
+  // keep and new at once: whichever is admitted second is refused (its tab's identity is stale), never written over
+  {
+    const { a, b } = await two();
+    const r = await Promise.allSettled([b.reset("keep"), a.reset("new")]);
+    const p = await primary(a);
+    check(r.filter((x) => x.status === "fulfilled").length === 1 && r.every((x) => x.status === "rejected" || same(x.value, p)), "keep and new at once: one admitted, the other refused, the primary the admitted one's: " + JSON.stringify({ r, p }));
+    a.close(); b.close();
+  }
+  // a tab that missed a reset's broadcast, resetting after it: refused, the reset kept
+  {
+    const { a, b } = await two();
+    const ra = await a.reset("new");
+    const err = await b.reset("new").then(() => null, (e) => String(e?.message ?? e));
+    const p = await primary(a);
+    check(!!err && same(ra, p), "a reset after another tab's, its broadcast missed: refused, the first reset's target kept: " + err);
+    a.close(); b.close();
+  }
+  // a reset stopped part way, retried here and asked from a tab that missed everything: both join its target
+  {
+    const { a, b } = await two();
+    let stopped = false;
+    H.afterPage = () => { if (!stopped) { stopped = true; throw new Error("stopped (test)"); } };
+    const first = await a.reset("new").then(() => null, (e) => String(e?.message ?? e));
+    H.afterPage = undefined;
+    const pending = await rawGet(a.ws, "meta", "resetting");
+    const kept = await b.reset("keep").then(() => null, (e) => String(e?.message ?? e));
+    const r = await Promise.allSettled([a.reset("new"), b.reset("new")]);
+    const p = await primary(a);
+    check(!!first && !!pending && !!kept && same(pending.to, p) && r.every((x) => x.status === "fulfilled" && same(x.value, p)), "a reset stopped part way: a keep refused; retried here and from a tab that missed it, both join its own target: " + JSON.stringify({ first, kept, pending, r, p }));
+    check((await paths(a)).length === 0 && (await rawGet(a.ws, "meta", "resetting")) === undefined, "…and finish it");
+    a.close(); b.close();
+  }
+  // a reset whose cleanup is done, and another reset, from a tab opened since, run to its end before the first
+  // commits: the first publishes nothing, the witnesses and fence the second's
+  {
+    const { o, a, b } = await two();
+    b.close();
+    let c = null, rc = null;
+    H.afterIdb = async () => { H.afterIdb = undefined; c = await openAs(o); c.channel?.close(); c.channel = null; rc = await c.reset("new"); };
+    const ra = await a.reset("new").then((v) => v, (e) => ({ refused: String(e?.message ?? e) }));
+    H.afterIdb = undefined;
+    const p = await primary(a), lw = localW(o.name), fence = await rawGet(a.main, "notebooks", "__sagebrush-workspace__");
+    check(!!ra.refused && same(rc, p) && p.generation === 3 && same(lw, p) && same(fence, p), "a reset overtaken before it committed: refused, the witness and fence the later reset's: " + JSON.stringify({ ra, rc, p, lw: { workspace: lw.workspace, generation: lw.generation }, fence }));
+    a.close(); c?.close();
+  }
+}
+// the ownership list (stores.js ownedByWorkspace), not whether a fence is there, decides what the workspace governs;
+// a fence that can't be written blocks its database, across copies of the stores and until written
+async function durabilityOwnership() {
+  const O = W.ownedByWorkspace;
+  check(O("sagebrush", "x") && O("sagebrush-history", "x") && O("sagebrush-board-history", "board:local:0123456789ab") && O("sagebrush-board-history", "board:local:0123456789ab:v2") && !O("sagebrush-board-history", "board:examples/sagebrush.json") && !O("sagebrush-board-history", "board:unsaved:abc") && !O("sagebrush-board-history", "board:local:0123456789abc"), "the ownership list: notebooks and their history, the workspace's own boards' history; not an example's, an unsaved one's");
+  // quarantined: the workspace's board's history refused; an example's, not the workspace's, kept
+  {
+    const o = await named(); let a = await openAs(o); const e = await a.create("/b.board.json"); await a.flushOpfs(); a.close();
+    const db = await W.openBoardHistoryDb();
+    const mine = new W.IdbPatchStore(db, "board:local:" + e.ref), example = new W.IdbPatchStore(db, "board:examples/own-test.json");
+    await mine.loadInitial(); await example.loadInitial();
+    const wit = localW(o.name); W.writeLocal(W.placeOf(o.name), { ...wit, seq: wit.seq + 10 }); a = await openAs(o);
+    mine.append({ time: "m-time", id: "m" }); example.append({ time: "x-time", id: "x" });
+    await new Promise((r) => setTimeout(r, 50));
+    const keys = (await rawKeys(db, "history")).filter((k) => k[1] !== "");
+    check(a.quarantined && !keys.some((k) => k[0] === "board:local:" + e.ref) && keys.some((k) => k[0] === "board:examples/own-test.json"), "quarantined: the workspace's board's history refused, an example's kept: " + JSON.stringify(keys));
+    await example.drop(); a.close(); db.close();
+  }
+  // a fence that couldn't be written: its database blocked (meta says so too), a write through another copy of the
+  // stores refused; the next open writes it and lets writes through again
+  {
+    const S = await import("./stores.js");
+    const o = await named(); let a = await openAs(o); const e = await a.create("/c.board.json"); await a.flushOpfs(); a.close();
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (v, ...args) { if (this.name === "history" && v?.nb === "__sagebrush-workspace__") throw Error("fence refused (test)"); return put.call(this, v, ...args); };
+    try { a = await openAs(o); } finally { IDBObjectStore.prototype.put = put; }
+    const db = await S.openBoardHistoryDb(), key = "board:local:" + e.ref, h = new S.IdbPatchStore(db, key);
+    await h.loadInitial(); h.append({ time: "b-time", id: "b" }); await new Promise((r) => setTimeout(r, 50));
+    const meta = await rawGet(a.ws, "meta", "fenceBlocked");
+    check(a.fenceBlocked.includes("sagebrush-board-history") && !!meta?.includes("sagebrush-board-history") && !(await rawKeys(db, "history")).some((k) => k[0] === key), "a fence that couldn't be written: its database blocked, in meta too; a write through another copy of the stores refused: " + JSON.stringify({ blocked: a.fenceBlocked, meta }));
+    a.close(); a = await openAs(o);
+    const h2 = new S.IdbPatchStore(db, key); await h2.loadInitial(); h2.append({ time: "b2-time", id: "b2" }); await new Promise((r) => setTimeout(r, 50));
+    check(!a.fenceBlocked.length && (await rawGet(a.ws, "meta", "fenceBlocked")) === undefined && (await rawKeys(db, "history")).some((k) => k[0] === key), "…the next open writes it: unblocked, writes let through");
+    await h2.drop(); a.close(); db.close();
+  }
+  // localStorage that can't be had, or listed, while a reset purges it: unknown, never empty; the marker kept,
+  // migrate refused meanwhile; the next open, with it back, finishes the purge
+  for (const how of ["had", "listed"]) {
+    const H = W.RESET_HOOK, o = await named(); let a = await openAs(o);
+    const key = "sagebrush-board:local:0000000000a" + (how === "had" ? "1" : "2");
+    localStorage.setItem(key, JSON.stringify({ title: "Old board " + how, nodes: [] })); await W.migrate(a, localStorage);
+    const own = Object.getOwnPropertyDescriptor(globalThis, "localStorage"), len = Object.getOwnPropertyDescriptor(Storage.prototype, "length");
+    const deny = () => { if (how === "had") Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("denied (test)"); } }); else Object.defineProperty(Storage.prototype, "length", { configurable: true, get() { throw new Error("denied (test)"); } }); };
+    const allow = () => { if (how === "had") Object.defineProperty(globalThis, "localStorage", own); else Object.defineProperty(Storage.prototype, "length", len); };
+    H.beforePurge = deny; H.afterIdb = allow;
+    let error = null; try { await a.reset("new"); } catch (e) { error = String(e?.message ?? e); } finally { allow(); H.beforePurge = undefined; H.afterIdb = undefined; }
+    const marker = await rawGet(a.ws, "meta", "purgeLocal"), unknown = a.localUnknown;
+    const during = await W.migrate(a, localStorage);
+    check(error === null && marker === true && unknown && (await paths(a)).length === 0 && localStorage.getItem(key) !== null, `localStorage that can't be ${how} during the purge: the reset done, its purge kept pending, migrate brings nothing in: ` + JSON.stringify({ error, marker, unknown, during }));
+    a.close(); a = await openAs(o); await a.settled(); await W.migrate(a, localStorage);
+    check((await paths(a)).length === 0 && localStorage.getItem(key) === null && (await rawGet(a.ws, "meta", "purgeLocal")) === undefined && !a.localUnknown, "…the next open, with it back, finishes it: " + JSON.stringify(await paths(a)));
+    a.close(); localStorage.removeItem(key);
+  }
+}
+
+// astra's probes on 28f6511b, verbatim (only the name)
+async function durabilityAstraProbes28f(){
+ const out=(ok,name,v)=>check(ok,name+': '+JSON.stringify(v));W.setSaveGate(null);
+ // Failed fence is deleted: a NEW editor now binds null and is allowed to write.
+ {
+  const o=await named(),a=await openAs(o),e=await a.create('/n.ipynb');await a.flushOpfs();a.channel?.close();a.channel=null;
+  const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});
+  const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,...args){if(this.name==='notebooks'&&v?.id==='__sagebrush-workspace__')throw Error('fence refused');return put.call(this,v,...args)};
+  let b;try{b=await openAs(o);const st=new W.IdbStore(b.main,e.ref),doc=await st.load();const save=await st.save({...doc,baseRev:doc.rev,name:'NEW EDITOR THROUGH LOST FENCE'});out(!save?.saved,'new-editor-after-fence-deletion',{quarantined:b.quarantined,seen:st.fence,save})}finally{IDBObjectStore.prototype.put=put;a.close();b?.close()}
+ }
+ // Enumeration is unreadable only during reset; old local board returns afterwards.
+ {
+  const o=await named();let a=await openAs(o);const key='sagebrush-board:local:123456789abc';localStorage.setItem(key,JSON.stringify({title:'Enum old board',nodes:[]}));await W.migrate(a,localStorage);
+  const oldKey=Storage.prototype.key;Storage.prototype.key=function(){throw Error('enumeration denied')};let error=null;
+  try{await a.reset('new')}catch(e){error=e.message}finally{Storage.prototype.key=oldKey}
+  const pending=await rawGet(a.ws,'meta','purgeMain');a.close();a=await openAs(o);await W.migrate(a,localStorage);const ps=await paths(a);out(ps.length===0,'local-enumeration-failure',{error,pending,paths:ps});a.close();localStorage.removeItem(key);
+ }
+ // Two admitted resets can overwrite the same resetting metadata between cleanup pages.
+ {
+  const o=await named(),a=await openAs(o),b=await openAs(o);await a.create('/a.txt',{content:'A'});
+  a.channel?.close();a.channel=null;b.channel?.close();b.channel=null;
+  const resets=await Promise.allSettled([a.reset('new'),b.reset('new')]);const primary=await rawGet(a.ws,'meta','identity');
+  let aError=null,bError=null;try{await a.create('/a-after.txt',{content:'A'})}catch(e){aError=e.message}try{await b.create('/b-after.txt',{content:'B'})}catch(e){bError=e.message}
+  const fulfilled=resets.filter(x=>x.status==='fulfilled').map(x=>x.value), coherent=fulfilled.every(x=>x.workspace===primary.workspace&&x.generation===primary.generation);
+  out(coherent,'concurrent-resets',{resets:resets.map(x=>x.status==='fulfilled'?x.value:{error:String(x.reason)}),primary,aError,bError});a.close();b.close();
+ }
+ // Local board history is the same IdbPatchStore in a DB that never receives a workspace fence.
+ {
+  const S=await import('./stores.js');const o=await named();let a=await openAs(o);const e=await a.create('/board.board.json');await a.flushOpfs();a.close();
+  const db=await S.openBoardHistoryDb(),h=new S.IdbPatchStore(db,'local:'+e.ref);await h.loadInitial();const witness=localW(o.name);W.writeLocal(W.placeOf(o.name),{...witness,seq:witness.seq+10});a=await openAs(o);
+  h.append({time:'q-time',id:'q-change'});await new Promise(r=>setTimeout(r,50));const keys=await rawKeys(db,'history');const written=keys.filter(k=>k[0]==='local:'+e.ref);
+  out(written.length===0,'local-board-history',{quarantined:a.quarantined,seen:h.fence,keys:written});a.close();db.close();
+ }
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;

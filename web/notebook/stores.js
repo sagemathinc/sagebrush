@@ -64,7 +64,8 @@ export const FENCE = "__sagebrush-workspace__";
 // (the rules, the same for every write (astra's CORR-2A4-2 on 0eefec71): a store is bound to the fence it found
 // when it loaded, read in the same transaction as the document; a write is allowed only if the fence now is that
 // same workspace and generation, in phase "ok"; a fence that appeared since a store found none, or went since it
-// found one (an unwritable fence is deleted, so that this fails closed), refuses it)
+// found one, refuses it.  A fence is never deleted: one the workspace couldn't write marks its database blocked,
+// below.  Which records the workspace owns is decided by ownedByWorkspace, never by whether a fence is there)
 const fenceRefusal = (f, seen) => {
   if (!f) return seen ? "this browser's record of the workspace is missing: reload this page" : null;
   if (f.quarantined) return "this browser's copy of your workspace was lost or is missing changes: choose what to do first";
@@ -74,8 +75,30 @@ const fenceRefusal = (f, seen) => {
   return null;
 };
 const fenceOf = (f) => (f && typeof f.workspace === "string" ? { workspace: f.workspace, generation: f.generation } : null);
-// (why a save is refused now by the page: its gate)
-const refusal = () => saveGate?.() || null;
+// (a database whose fence the workspace couldn't write: the fence there is no longer to be trusted, so every
+// write to it is refused, by this module's mark and by localStorage's, until a later write of the fence succeeds;
+// a fence is never deleted to say so: astra's CORR-2A4-2 on 28f6511b)
+const blockedDbs = new Set();
+export const BLOCKED_FLAG = "sagebrush-fence-blocked:";
+/** The workspace marks `name` blocked (its fence couldn't be written) or not. */
+export function markBlocked(name, on) {
+  if (on) blockedDbs.add(name); else blockedDbs.delete(name);
+  try { if (on) localStorage.setItem(BLOCKED_FLAG + name, "1"); else localStorage.removeItem(BLOCKED_FLAG + name); } catch {}
+}
+const isBlocked = (name) => {
+  if (blockedDbs.has(name)) return true;
+  try { return !!localStorage.getItem(BLOCKED_FLAG + name); } catch { return false; }
+};
+/** Whether the record `id` of the database `name` belongs to the workspace, its fence and its gates governing it
+ * (design/workspace-durability.md A.3b): every notebook and its history; of the boards' history only the
+ * workspace's own boards' ("local:" and the 12-hex ref): an example's, a board in the address or another site's
+ * frame keep theirs whatever the workspace's state, deliberately. */
+export function ownedByWorkspace(name, id) {
+  if (name === "sagebrush-board-history") return /^(board:)?local:[0-9a-f]{12}(:|$)/.test(String(id));
+  return true;
+}
+// (why a write to `db` is refused now: the page's gate, or its fence blocked)
+const refusal = (db) => saveGate?.() || (db && isBlocked(db.name) ? "this browser's record of the workspace couldn't be written: reload this page" : null);
 
 function open(name, stores, onVersionChange) {
   return new Promise((resolve) => {
@@ -166,7 +189,7 @@ export class IdbStore {
   async save(doc) {
     if (!this.db) return "not saved: this browser has no storage";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
-    const gate = refusal();
+    const gate = refusal(this.db);
     if (gate) return `not saved: ${gate}`;
     // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
     const out = await new Promise((resolve, reject) => {
@@ -217,10 +240,11 @@ function getHistoryChannel() {
   return historyChannel;
 }
 export class IdbPatchStore {
-  constructor(db, id) { this.db = db; this.id = id; }
-  // (refused, said, by the page's gate or the fence)
+  constructor(db, id) { this.db = db; this.id = id; this.owned = !db || ownedByWorkspace(db.name, id); }
+  // (refused, said, by the page's gate or the fence; a history the workspace doesn't own, never)
   async allowed() {
-    const why = refusal() || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
+    if (!this.owned) return;
+    const why = refusal(this.db) || fenceRefusal((await idb(this.db, "history", "readonly", (st) => st.get([FENCE, ""])).catch(() => undefined))?.fence, this.fence);
     if (why) throw new Error(`not done: ${why}`);
   }
   range() { return IDBKeyRange.bound([this.id, ""], [this.id, "\uffff"]); }
@@ -237,11 +261,11 @@ export class IdbPatchStore {
   }
   append(env) {
     // (not while the page refuses saves, nor when the fence says no, checked in the write's own transaction)
-    if (refusal() || !this.db) return;
+    if (!this.db || (this.owned && refusal(this.db))) return;
     const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
     f.onsuccess = () => {
       if (this.fence === undefined) this.fence = fenceOf(f.result?.fence);
-      if (fenceRefusal(f.result?.fence, this.fence)) return;
+      if (this.owned && fenceRefusal(f.result?.fence, this.fence)) return;
       st.put({ nb: this.id, time: env.time, env });
     };
     tx.onerror = () => console.warn("history:", tx.error);
@@ -276,7 +300,7 @@ export class IdbPatchStore {
     const why = await new Promise((ok, no) => {
       const tx = this.db.transaction("history", "readwrite"), st = tx.objectStore("history"), f = st.get([FENCE, ""]);
       let refused = null;
-      f.onsuccess = () => { refused = fenceRefusal(f.result?.fence, this.fence); if (!refused) st.delete(this.range()); };
+      f.onsuccess = () => { refused = this.owned ? fenceRefusal(f.result?.fence, this.fence) : null; if (!refused) st.delete(this.range()); };
       tx.oncomplete = () => ok(refused);
       tx.onerror = () => no(tx.error);
     });
