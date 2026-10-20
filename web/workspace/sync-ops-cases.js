@@ -430,7 +430,7 @@ async function upgrade() {
   const db = await W.openWorkspaceDb(name);
   const up = await dump(db), ix = indexes(db);
   const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, ...rest1 } = up;
-  check(db.version === 4 && same(rest0, rest1), "version 4: entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
+  check(db.version === 5 && same(rest0, rest1), "version 5 (the current; 4 added these stores, 5 the pins' index): entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
   check(same(m1, m0.filter(([k]) => k !== "migration")), "…meta the same but for the migration's state, dropped (so the migrator gives older entries their identity): " + J(m1.map(([k]) => k)));
   check([outbox, syncIndex, adoptJournal, pins, pending].every((s) => Array.isArray(s) && s.length === 0) && same(ix.entries, ["byIdent", "byNfc", "byRef"]) && same(ix.outbox, ["byIdent"]) && same(ix.adoptJournal, ["byParent"]), "…the new stores there and empty, and the new indexes: " + J(ix));
   db.close();
