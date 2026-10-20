@@ -240,6 +240,15 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-6b7.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1-trash.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-1f3.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-detect.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-9d7.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-c05.mjs

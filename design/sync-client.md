@@ -39,6 +39,40 @@
 
 This is the "client's log plus identity" of sync-server §3. Hashing new bytes happens before their transaction, as the 1a migration already does.
 
+As built (step 2a):
+- A data file's entry keeps its `sha256` (a write no longer drops it). The migrator gives it to a file written before, and gives every entry its identity key `ident`, the entries' `byIdent` index key. Both are filled in, a batch at a time, after the version 4 upgrade drops the migration's state.
+- `after.parent` is `null` for the root, and for something put in Trash itself, which carries `trashed: true`. Trash's own folder is the workspace's, and has no identity, as the root has none.
+- `parent` on the op is absent for the root and for anything in Trash.
+- `after: null` means the op removed its identity: `forget`, `discard`, and `emptyTrash`, which records one op for each identity removed whole. What was in a folder goes with it, as the reducer's forget has it.
+- An op that changes no entry (`dropVersions`) carries no identity and no `after`. An entry or folder with no identity yet (from before ids were kept, until the migrator gives one) has no `after`.
+- In the stores, a key can't hold `null`, so the root's parent is `""` there.
+- **Hashing:** bytes the caller gives are copied once, at the call, before anything is awaited. The hash and the bytes kept are then the same, whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).
+  - The copy is the engine's own: buffer, offset and length come from %TypedArray%.prototype's getters, and %TypedArray%.prototype.set copies into a new Uint8Array. No method, getter or species of a caller's subclass runs.
+  - Views of other kinds (DataView, Int16Array) are refused, as before.
+  - Peak cost: that copy, plus one transient copy while hashing (WebCrypto copies its input). That is two copies of the new bytes beyond what a write held before this step, each at most the 200 MiB file limit.
+  - Time: one more pass over the new bytes, off the main thread.
+  - The old bytes are hashed only when no hash of them is already at hand: a file written before this step, once.
+- **Every data-file op carries its hash: none is ever logged without it** (astra's CORR-9C2-2; @sagebrush's decision: no deferral).
+  - Create and write compute the hash.
+  - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is.
+  - **An adopt moves the bytes it hashes** (astra's CORR-12E-1). In the one transaction that makes the entry and its op, the snapshot read is put in fileBytes, the entry is marked migrated, and the old copy is marked stale with that snapshot's size and hash. The entry, its bytes, and its op's hash and `after` then all name the same bytes.
+    - The old copy then goes as the migrator's does (dropStale): deleted if it still holds those bytes. If an older tab wrote there since the read, it is kept as a file of its own, adopted and moved in turn with its own hash.
+    - The read is reserved. Reconcile's old-way bytes are adopted after its locked pass: each one reserves LEGACY_MAX × COPIES before the lock, then reads and adopts holding it (adoptOld).
+    - Any other adopt not given the bytes reads them itself, holding the caller's lock, under a reservation taken without waiting. If that reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
+    - The move's copy is the one IndexedDB gave on read, put back once. That is within the same LEGACY_MAX × COPIES as the migrator's move.
+    - Every caller that gives an adopt bytes holds LEGACY_MAX × COPIES, taken before the lock, until the adopt and its old copy are done. adopt() fails loudly otherwise (daybreak2's LIMIT-6B7-1). Trash's bytes with no entry are therefore recovered after reconcile's locked pass, each reserved first, as adoptOld's are.
+    - Old copies are compared and kept one pair at a time: at most 8 rounds per call, with no recursion. Their marks are durable and win over a migration marked done: each migrator start first cleans them up, paged and bounded, whatever the migration's state (astra's CORR-6B7-1).
+      - Each start goes on from a durable cursor and wraps round, so marks that keep failing can't hide those after them (CORR-AC1-1).
+      - Old copies are the start's cleanup alone, never a batch's work: marks that can't go don't hold the passes over the index, nor keep a migration from being done (daybreak2's LIMIT-1F3-1).
+      - Ownership is checked first: a key an entry already names as its bytes is that file's, its mark dropped, nothing re-adopted (astra's CORR-1F3-1).
+      - An old copy is deleted only after a move of exactly those bytes. One kept unmoved is that file's storage and is never deleted. Nor is any key an entry still names as its bytes (CORR-AC1-2).
+    - A reservation is a token: whoever reads bytes whole is given it and checks that it is live and large enough. The page's total isn't enough (daybreak2).
+    - Trash recovery hashes the Trash bytes and lets them go before it checks the destination, then reads them again: at most two copies at once (LIMIT-AC1-1).
+  - Bytes larger than LEGACY_MAX are adopted unmoved, with their hash, as the migrator marks them. They are over the 200 MiB file limit, so they are never synced.
+  - Should any path reach an op without the hash, the change is refused whole.
+  - A removal (forget, discard, emptyTrash) needs no hash: its identity is gone (`after: null`).
+- **Emptying Trash records at most 10,000 ops** (maxFolderEntries, Trash's own entries), whatever is in them: a bounded burst.
+
 **The queue: `dseq`.** The server decides a device's ops in `dseq` order, with no gaps.
 - The local `seq` can't serve as `dseq`: ops from before sync was on, and remote ops applied here, are in the same store.
 - So the client keeps its own outgoing queue, in `meta`, as `sync:out:<dseq>`. Each item points at a local op, with its identity filled in. The queue is bounded by the queue limits below.
