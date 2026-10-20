@@ -235,7 +235,7 @@ async function migration() {
   await rawPut(w.main, "files", enc("csv"), "/primes.csv");
   await rawPut(w.main, "files", enc("deep"), "/out/run1/result.txt");
   await rawPut(w.main, "files", enc("odd"), "relative.txt");
-  const before = JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
+  const before = JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => !k.startsWith(W.LOCAL_KEY)).sort().map((k) => [k, localStorage.getItem(k)])));
   const r = await W.migrate(w, localStorage);
   const all = await paths(w);
   check(all.includes("/My board.board.json") && all.includes("/My board (2).board.json"), "boards made here listed, same titles apart: " + all.join());
@@ -252,8 +252,9 @@ async function migration() {
   check(r.unreadable.join() === "sagebrush-board:local:cccccccccccc", "a key that isn't a board is reported");
   check(r.boards === 3 && r.notebooks === 3 && r.files === 2 && r.recovered === 1, "the report's counts: " + JSON.stringify(r));
   check(!all.some((p) => p.includes("not kept")), "a board storage refused (unsaved) isn't one to bring in");
-  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
-  check(before === after, "localStorage is left exactly as it was");
+  // (the workspace's own witness, design/workspace-durability.md A.1, aside: what was there is left as it was)
+  const after = JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter((k) => !k.startsWith(W.LOCAL_KEY)).sort().map((k) => [k, localStorage.getItem(k)])));
+  check(before === after, "localStorage is left exactly as it was (the workspace's witness aside)");
   check(localStorage.getItem("sagebrush-board:local:cccccccccccc") === "{not json", "…the unreadable key too");
   // again: nothing new
   const r2 = await W.migrate(w, localStorage);
@@ -1406,8 +1407,256 @@ async function lookalikesAtScale() {
   w.close();
 }
 
+// ---- detecting a lost workspace (design/workspace-durability.md, part A)
+const named = async () => { n++; return { name: `ws-test-${n}`, mainName: `main-test-${n}` }; };
+const openAs = (o) => W.Workspace.open(o);
+const dropDb = (name) => new Promise((ok, no) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = ok; r.onerror = () => no(r.error); r.onblocked = ok; });
+const localW = (name) => { const r = W.readLocal(W.placeOf(name)); return "witness" in r ? r.witness : r; };
+const opfsW = async (name) => { const r = await W.readOpfs(W.placeOf(name)); return "witness" in r ? r.witness : r; };
+const wit = (o) => ({ v: 1, workspace: "a".repeat(16), generation: 1, seq: 10, entries: 3, sampled: 1, ...o });
+
+async function durabilityDecide() {
+  const R = (w) => ({ witness: w }), none = { none: true }, bad = { unreadable: "denied" };
+  const held = (o) => ({ fresh: false, workspace: "a".repeat(16), generation: 1, seq: 10, ...o });
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [none, none]).state === "first", "decide: nothing anywhere: a first visit (or a complete clearing: indistinguishable)");
+  check(W.decide(held({}), [none, none]).state === "ok", "decide: a workspace and no witness: ok");
+  check(W.decide(held({ dataLoss: "total" }), [none, none]).state === "confirmed", "decide: Chrome's dataLoss total: confirmed");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [R(wit({})), none]).state === "confirmed", "decide: a new database and a witness: confirmed");
+  check(W.decide(held({ seq: 7 }), [R(wit({})), none]).state === "suspected", "decide: behind the witness, same workspace and generation: suspected");
+  check(W.decide(held({ seq: 12 }), [R(wit({})), none]).state === "ok", "decide: ahead of the witness: ok (IndexedDB ahead is harmless)");
+  check(W.decide(held({ generation: 1 }), [R(wit({ generation: 2, seq: 1 })), none]).state === "suspected", "decide: below a committed witness generation: suspected");
+  check(W.decide(held({ generation: 3, seq: 0 }), [R(wit({ generation: 2 })), none]).state === "ok", "decide: a higher generation than the witnesses: ok");
+  check(W.decide(held({ workspace: "b".repeat(16), seq: 0 }), [R(wit({})), none]).state === "ok", "decide: another workspace's witness: not compared");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [bad, none]).state === "unknown", "decide: a new database and an unreadable witness: unknown, never a first visit");
+  const okU = W.decide(held({}), [bad, bad]);
+  check(okU.state === "ok" && !!okU.unavailable, "decide: a workspace whose witnesses can't be read: ok, detection unavailable said");
+  check(W.decide(held({ seq: 15 }), [R(wit({ seq: 20 })), R(wit({ seq: 12 }))]).state === "suspected", "decide: two witnesses disagreeing: the newer counts");
+  const p = wit({ reset: { to: 2, kind: "new", at: 1 } });
+  check(W.resolveReset(p, held({})) === "rollback", "a prepared reset, IndexedDB unchanged: rolled back");
+  check(W.resolveReset(p, held({ workspace: "c".repeat(16), generation: 2 })) === "finish", "…IndexedDB at the new generation: finished");
+  check(W.resolveReset(p, held({ fresh: true, workspace: undefined })) === "finish", "…the database gone during a reset to a new workspace: finished");
+  check(W.resolveReset(wit({ reset: { to: 2, kind: "import", at: 1 } }), held({ fresh: true, workspace: undefined })) === "interrupted-import", "…during an import: the import interrupted");
+  check(W.resolveReset(p, null) === "unknown" && W.resolveReset(p, held({ workspace: "d".repeat(16), generation: 7 })) === "unknown", "…storage unreadable, or another generation: unknown");
+  check(!W.newer(wit({ seq: 30 }), p) && W.newer(wit({ seq: 30 }), wit({})) && !W.newer(wit({ seq: 5 }), wit({})), "a normal publication never replaces a prepared reset, nor a newer witness");
+}
+
+async function durabilityFirstSave() {
+  const o = await named();
+  const w = await openAs(o);
+  check(w.durability.state === "first" && !("witness" in W.readLocal(W.placeOf(o.name))), "a first visit: no witness yet");
+  await w.create("/a.txt", { content: "a" });
+  const lw = localW(o.name);
+  check(lw.workspace === w.identity.workspace && lw.generation === 1 && lw.seq >= 1 && lw.entries === 1, "the first save has its witness in localStorage before it is reported: " + JSON.stringify(lw));
+  await w.flushOpfs();
+  const ow = await opfsW(o.name);
+  check(ow.seq === lw.seq && ow.workspace === lw.workspace, "…and in OPFS once flushed: " + JSON.stringify(ow));
+  w.close();
+}
+
+async function durabilityConfirmed() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.create("/b.txt", { content: "b" });
+  const before = localW(o.name);
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.durability.state === "confirmed" && w.durability.witness?.entries === 2, "the database gone, a witness left: confirmed, with the witness's numbers: " + JSON.stringify(w.durability));
+  check(await fails(w.create("/c.txt", { content: "c" }), "quarantined") && await fails(w.mkdir("/d"), "quarantined") && await fails(w.forAgent("agent:x").create("/e.txt", { content: "e" }), "quarantined"), "quarantined: the verbs refuse, the agents' too");
+  const mr = await W.migrate(w, { length: 0, key: () => null, getItem: () => null, setItem: () => {} });
+  await W.startMigrator(w);
+  check(mr.boards === 0 && (await W.migrationState(w)).done === undefined && (await W.migrationState(w)).pass === undefined, "…and nothing else writes: migrate and the migrator do nothing");
+  check(JSON.stringify(localW(o.name)) === JSON.stringify(before), "…the witness left as it was");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "confirmed", "a reload doesn't lift the quarantine");
+  const id = await w.reset("new");
+  check(id.generation === 2 && w.durability.state === "ok" && !!(await w.create("/c.txt", { content: "c" })), "Start a new workspace here: generation 2, writable");
+  check(localW(o.name).generation === 2 && localW(o.name).workspace === id.workspace && !localW(o.name).reset, "…the witness committed at it");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "…and the next open is ok");
+  w.close();
+}
+
+async function durabilitySuspected() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.create("/b.txt", { content: "b" });
+  const lw = localW(o.name);
+  W.writeLocal(W.placeOf(o.name), { ...lw, seq: lw.seq + 5 });
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "suspected", "changes missing (the witness ahead): suspected: " + JSON.stringify(w.durability));
+  await w.reset("keep");
+  check(w.durability.state === "ok" && (await paths(w)).join() === "/a.txt,/b.txt" && w.identity.generation === 2, "Keep what this browser has: nothing deleted, generation 2");
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "…and the next open is ok");
+  w.close();
+}
+
+async function durabilityWitnesses() {
+  const o = await named();
+  let w = await openAs(o);
+  await w.create("/a.txt", { content: "a" });
+  await w.flushOpfs();
+  localStorage.setItem(W.placeOf(o.name).key, "{not json");
+  w.close();
+  await dropDb(o.name);
+  w = await openAs(o);
+  check(w.durability.state === "confirmed", "the localStorage witness corrupt, the OPFS one used: confirmed");
+  w.close();
+  const p = await named();
+  w = await openAs(p);
+  await w.create("/a.txt", { content: "a" });
+  W.writeLocal(W.placeOf(p.name), null);
+  await W.writeOpfs(W.placeOf(p.name), null);
+  w.close();
+  w = await openAs(p);
+  check(w.durability.state === "ok", "both witnesses gone, the workspace there: ok");
+  w.close();
+}
+
+async function durabilityDenied() {
+  const o = await named();
+  const get = Storage.prototype.getItem, set = Storage.prototype.setItem, dir = navigator.storage.getDirectory;
+  Storage.prototype.getItem = function () { throw new Error("denied (test)"); };
+  Storage.prototype.setItem = function () { throw new Error("denied (test)"); };
+  navigator.storage.getDirectory = async () => { throw new Error("denied (test)"); };
+  try {
+    let w = await openAs(o);
+    check(w.durability.state === "unknown", "storage denied on a first visit: unknown, never first: " + JSON.stringify(w.durability));
+    check(!!(await w.create("/a.txt", { content: "a" })) && !!w.witnessDown.local, "a save goes through when its witness can't be written, the witness noted down: " + JSON.stringify(w.witnessDown));
+    w.close();
+    w = await openAs(o);
+    check(w.durability.state === "ok" && !!w.durability.unavailable, "…and a workspace there with unreadable witnesses: ok, detection said unavailable");
+    w.close();
+  } finally {
+    Storage.prototype.getItem = get;
+    Storage.prototype.setItem = set;
+    navigator.storage.getDirectory = dir;
+  }
+}
+
+async function durabilityTwoTabs() {
+  const o = await named();
+  const a = await openAs(o), b = await openAs(o);
+  let last = 0, regressed = false;
+  for (let i = 0; i < 10; i++) {
+    await (i % 2 ? a : b).create(`/f${i}.txt`, { content: String(i) });
+    const s = localW(o.name).seq;
+    if (s < last) regressed = true;
+    last = s;
+  }
+  // (the OPFS witness, flushed late and out of order: each flush samples under the lock, so it never goes back)
+  await b.flushOpfs();
+  await a.flushOpfs();
+  check(!regressed && last === (await a.generation()) && (await opfsW(o.name)).seq === last, "two tabs committing in turn: the witnesses never go back");
+  a.close();
+  b.close();
+}
+
+async function durabilityDeliberate() {
+  const o = await named();
+  let w = await openAs(o);
+  for (let i = 0; i < 20; i++) await w.create(`/f${i}.txt`, { content: "x" });
+  for (let i = 0; i < 20; i++) await w.remove(`/f${i}.txt`);
+  await w.emptyTrash();
+  await w.dropOps(await w.lastSeq());
+  w.close();
+  w = await openAs(o);
+  check(w.durability.state === "ok", "a mass delete, Trash emptied and the op log pruned: no false loss");
+  w.close();
+}
+
+async function durabilityReset() {
+  const H = W.RESET_HOOK;
+  const kill = () => { throw new Error("killed (test)"); };
+  const setup = async () => { const o = await named(); const w = await openAs(o); await w.create("/a.txt", { content: "a" }); await w.flushOpfs(); return { o, w }; };
+  // a refused reset changes nothing: the first witness written, the second not; then its cleanup failing too
+  {
+    const { o, w } = await setup();
+    const was = localW(o.name);
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    check(await fails(w.reset("new"), "storage"), "prepare failing after the first witness: refused");
+    H.afterFirstWitness = undefined;
+    check(JSON.stringify(localW(o.name)) === JSON.stringify(was) && w.identity.generation === 1 && (await paths(w)).join() === "/a.txt", "…the first witness put back, nothing changed");
+    H.afterFirstWitness = () => { throw new Error("OPFS refused (test)"); };
+    H.failCleanup = true;
+    check(await fails(w.reset("new"), "storage"), "…and with its cleanup failing too: refused");
+    H.afterFirstWitness = undefined;
+    H.failCleanup = false;
+    check(!!localW(o.name).reset, "…the prepared witness left behind");
+    check(!!(await w.create("/b.txt", { content: "b" })) && !!localW(o.name).reset, "…a normal save meanwhile doesn't write over a prepared witness");
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && !localW(o.name).reset && v.identity.generation === 1 && (await paths(v)).join() === "/a.txt,/b.txt", "…the next open rolls it back: nothing changed");
+    v.close();
+  }
+  // killed after prepare: rolled back
+  {
+    const { o, w } = await setup();
+    H.afterPrepare = kill;
+    check(!!(await fails(w.reset("new"), "storage").catch(() => true)), "(a kill after prepare)");
+    H.afterPrepare = undefined;
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && v.identity.generation === 1 && (await paths(v)).join() === "/a.txt" && !localW(o.name).reset && !(await opfsW(o.name)).reset, "killed after prepare: rolled back, both witnesses cleared");
+    v.close();
+  }
+  // killed after the IndexedDB reset: finished
+  {
+    const { o, w } = await setup();
+    H.afterIdb = kill;
+    await w.reset("new").catch(() => {});
+    H.afterIdb = undefined;
+    w.close();
+    const v = await openAs(o);
+    check(v.durability.state === "ok" && v.identity.generation === 2 && (await paths(v)).length === 0 && localW(o.name).generation === 2 && !localW(o.name).reset, "killed after the IndexedDB reset: finished, the witnesses committed");
+    v.close();
+  }
+  // killed after one witness's commit: finished
+  {
+    const { o, w } = await setup();
+    H.afterFirstCommit = kill;
+    await w.reset("new").catch(() => {});
+    H.afterFirstCommit = undefined;
+    w.close();
+    const v = await openAs(o);
+    const ow = await opfsW(o.name);
+    check(v.durability.state === "ok" && v.identity.generation === 2 && ow.generation === 2 && !ow.reset, "killed after one witness's commit: finished, the other committed");
+    v.close();
+  }
+  // the database gone during a reset to a new workspace: finished, not a loss; during an import: interrupted
+  for (const kind of ["new", "import"]) {
+    const { o, w } = await setup();
+    H.afterPrepare = kill;
+    await w.reset(kind).catch(() => {});
+    H.afterPrepare = undefined;
+    w.close();
+    await dropDb(o.name);
+    const v = await openAs(o);
+    if (kind === "new") check(v.durability.state === "ok" && v.identity.generation === 2, "the database gone during a reset to a new workspace: finished, not taken for a loss");
+    else check(v.durability.state === "unknown" && /import was interrupted/.test(v.durability.why), "…during an import: said interrupted: " + JSON.stringify(v.durability));
+    v.close();
+  }
+  // a stale tab: by the broadcast, and by identity (workspace id, and generation alone)
+  for (const kind of ["new", "keep"]) {
+    const { o, w } = await setup();
+    const other = await openAs(o);
+    other.channel?.close();
+    await w.reset(kind);
+    check(await fails(other.create("/z.txt", { content: "z" }), "storage") && other.closed, `a tab opened before a reset (${kind}: ${kind === "new" ? "another workspace id" : "the same id, another generation"}): can't write, told to reload`);
+    w.close();
+    other.close();
+  }
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityDeliberate, durabilityReset]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
