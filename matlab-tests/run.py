@@ -25,6 +25,7 @@ args = [a for a in sys.argv[1:] if not a.startswith("-")]
 verbose = "-v" in sys.argv
 files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".m") and (not args or any(a in f for a in args)))
 OCTAVE = os.environ.get("OCTAVE", "/scratch/octave-root/octave-cli")
+workers = min(4, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "4"))))
 
 
 def run(cmd):
@@ -77,7 +78,7 @@ def one(f):
 
 bad = 0
 total = 0
-with cf.ThreadPoolExecutor(4) as ex:
+with cf.ThreadPoolExecutor(workers) as ex:
     for f, kind, ref, got in ex.map(one, files):
         ok = got[0] == 0 and ref == got[1]
         n = ref.count("\n")

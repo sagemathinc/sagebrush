@@ -17,6 +17,7 @@ CLI = os.path.join(os.path.dirname(HERE), "dist", "src", "cli.js")
 args = [a for a in sys.argv[1:] if not a.startswith("-")]
 verbose = "-v" in sys.argv
 files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py") and (not args or any(a in f for a in args)))
+workers = min(8, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "8"))))
 
 
 def run(cmd):
@@ -60,7 +61,7 @@ def compare(ref, got):
 
 
 bad = 0
-with cf.ThreadPoolExecutor(8) as ex:
+with cf.ThreadPoolExecutor(workers) as ex:
     for f, ref, got in ex.map(one, files):
         if ref[0] != got[0]:
             notes = ["exit status: scipy %s, sagebrush %s" % (ref[0], got[0]), (got[2] or ref[2]).strip()[-1500:]]
