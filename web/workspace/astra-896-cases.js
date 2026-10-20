@@ -60,6 +60,52 @@ export async function run(){const out=[];const w=await W.Workspace.open({name:'a
   const rr=(await h.loadInitial()).patches,root=rr.find(r=>r.time===r1.time),child=rr.find(r=>r.time===r2?.time),R=await reload(h);const t={st,before,during,rows,ms:Math.round(ms),root:root?.parents,child:!!child?.parents?.includes(r1.time),a0:R.at(s0.time),a1:R.at(r1.time),a2:r2&&R.at(r2.time)};R.n.close();
   out.push([st.paused&&st.refusedTime===null&&!st.tail&&!st.rebuilding&&during===before&&rows===1&&root?.parents?.length===0&&t.child&&!caught.paused&&!caught.tail&&!caught.rebuilding&&liveR.includes(r1.time)&&liveR.includes(r2?.time)&&t.a0==='s0'&&t.a1==='r1'&&t.a2==='r2','a document paused through 3,000 edits: its state the same size, nothing kept; a root small enough resumes it, the next chained to it: '+JSON.stringify(t)]);
   nh.close();S.HISTORY_BACKLOG.bytes=cap0;}
+ // ---- the session's catching up (astra's CORR-BE4-1/2, @sagebrush's decisions on be486fe2)
+ // (a store whose loadInitial, once armed, takes its rows and then waits to be let go; its live subscriptions counted)
+ const gated=(h)=>{const g={held:[],subs:0,arm:0};g.store=new Proxy(h,{get:(t,k)=>k==='loadInitial'?async(...a)=>{const r=await t.loadInitial(...a);if(g.arm>0){g.arm--;await new Promise(go=>g.held.push(go));}return r;}:k==='subscribe'?(f)=>{g.subs++;const un=t.subscribe(f);let on=true;return()=>{if(on){on=false;g.subs--;}un?.();};}:typeof t[k]==='function'?t[k].bind(t):t[k]});return g;};
+ // (a wait that gives up: a rebuild that never finishes fails its check, not the run)
+ const within=(p,ms=3000)=>Promise.race([p,sleep(ms)]);
+ const journalRec={type:'run',id:'run-be4',n:0,t:1,sid:'s-be4',kind:'code',cell:'c',status:'ok'};
+ // a resumed root (cell NEW) and the journal's records made at once, then the next version, all before the rebuild
+ // (the lock held): every one based on the tail, so after a reload the journal's patch has NEW and the run, the next
+ // version both; meanwhile a version the rebuild hasn't reached is withheld (not listed, docAt refused, never a
+ // plausible other document), then listed and right once it has
+ {S.HISTORY_BACKLOG.bytes=4096;const h=new S.IdbPatchStore(db,e.ref+'tailbase'),nh=await new H.NotebookHistory(h).init();
+  nh.record(nbOf('old'));await h.appending;await settle(nh);nh.record(nbOf('x'.repeat(8000)));await h.appending;await settle(nh);
+  let release;await new Promise(r=>navigator.locks.request('sagebrush-workspace',()=>new Promise(g=>{release=g;r();})));
+  const root=nh.record(nbOf('NEW')),j=nh.journal([journalRec]),next=nh.record(nbOf('NEW2'));
+  const at=(n,t)=>{try{return n.docAt(t)?.cells?.[0]?.code}catch{return 'withheld'}};
+  const early={listed:nh.versions().some(v=>v.time===root?.time||v.time===next?.time),root:at(nh,root?.time),next:at(nh,next?.time)};
+  release();await h.appending;await settle(nh);
+  const late={listed:[root,next].every(x=>nh.versions().some(v=>v.time===x?.time)),root:at(nh,root?.time),next:at(nh,next?.time)};
+  const R=await reload(h),rj=R.n.valueAt(j?.time),t={early,late,journal:rj?.getOne({type:'cell',id:'c'})?.input,run:!!rj?.getOne({type:'run',id:'run-be4'}),runs:R.n.records('run').length,a1:R.at(root?.time),a2:R.at(next?.time),nextRun:!!R.n.valueAt(next?.time)?.getOne({type:'run',id:'run-be4'})};R.n.close();
+  out.push([!early.listed&&early.root==='withheld'&&early.next==='withheld'&&late.listed&&late.root==='NEW'&&late.next==='NEW2'&&t.journal==='NEW'&&t.run&&t.runs===1&&t.a1==='NEW'&&t.a2==='NEW2'&&t.nextRun,'a resumed root, the journal at once and the next version before the rebuild: all based on the tail, withheld until the rebuild has them, right after a reload: '+JSON.stringify(t)]);
+  nh.close();S.HISTORY_BACKLOG.bytes=cap0;}
+ // clear() while a rebuild has read the store's rows but not finished: that rebuild let go, the history empty
+ {const g=gated(new S.IdbPatchStore(db,e.ref+'clearrace')),nh=await new H.NotebookHistory(g.store).init();
+  nh.record(nbOf('c0'));await g.store.appending;await settle(nh);
+  g.arm=1;const old=nh.rebuild();for(let i=0;i<200&&!g.held.length;i++)await sleep(5);const caught=g.held.length;
+  await nh.clear();const afterClear=nh.versions().length;
+  g.held.shift()();await within(old);await sleep(20);
+  const rows=(await g.store.loadInitial()).patches.length,t={caught,afterClear,live:nh.versions().length,rows,subs:g.subs};
+  out.push([caught===1&&afterClear===0&&t.live===0&&rows===0&&g.subs===1,'clear() while a rebuild is half done: that rebuild let go, nothing listed, one live subscription: '+JSON.stringify(t)]);
+  nh.close();}
+ // close() while a rebuild is half done: it stays closed, nothing subscribed
+ {const g=gated(new S.IdbPatchStore(db,e.ref+'closerace')),nh=await new H.NotebookHistory(g.store).init();
+  nh.record(nbOf('k0'));await g.store.appending;await settle(nh);
+  g.arm=1;const old=nh.rebuild();for(let i=0;i<200&&!g.held.length;i++)await sleep(5);const caught=g.held.length;
+  nh.close();g.held.shift()();await within(old);await sleep(20);
+  const t={caught,session:nh.session!==null,subs:g.subs};
+  out.push([caught===1&&!t.session&&g.subs===0,'close() while a rebuild is half done: it stays closed, no live subscription: '+JSON.stringify(t)]);}
+ // a rebuild of the generation before, finishing while one of the next runs: it leaves the newer one's handle
+ {const g=gated(new S.IdbPatchStore(db,e.ref+'handle')),nh=await new H.NotebookHistory(g.store).init();
+  nh.record(nbOf('h0'));await g.store.appending;await settle(nh);
+  g.arm=1;const old=nh.rebuild();for(let i=0;i<200&&!g.held.length;i++)await sleep(5);
+  await nh.init();g.arm=1;const fresh=nh.rebuild();for(let i=0;i<200&&g.held.length<2;i++)await sleep(5);
+  g.held.shift()();await within(old);const during=nh.pauseState().rebuilding&&nh.rebuilding===fresh;
+  g.held.shift()?.();await within(fresh);const t={during,after:nh.pauseState().rebuilding,live:nh.versions().length,subs:g.subs};
+  out.push([during&&!t.after&&t.live===1&&g.subs===1,'an earlier generation\'s rebuild finishing leaves the newer one\'s handle: '+JSON.stringify(t)]);
+  nh.close();}
  // two documents: one's refusal pauses its own history alone
  {S.HISTORY_BACKLOG.bytes=4096;const ha=new S.IdbPatchStore(db,e.ref+'docA'),hb=new S.IdbPatchStore(db,e.ref+'docB'),A=await new H.NotebookHistory(ha).init(),B=await new H.NotebookHistory(hb).init();
   B.record(nbOf('b0'));A.record(nbOf('z'.repeat(8000)));const b1=B.record(nbOf('b1'));await ha.appending;await hb.appending;
