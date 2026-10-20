@@ -207,6 +207,14 @@ const sameTrashed = (e: Entry, x: Entry) =>
   !!e.trashed?.id && e.trashed.id === x.trashed?.id &&
   e.kind === x.kind && e.created === x.created && e.fid === x.fid && (e.kind === "file" || e.ref === x.ref) && e.trashed.from === x.trashed?.from;
 /** The bytes of a data file's contents as given (bytes, a buffer, or text). */
+// (bytes the caller gave, copied once, at the call, before anything is awaited: what is hashed is what is kept,
+// whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).  One copy, at most `max` bytes:
+// larger ones aren't copied, and are refused as too large)
+function owned(c: unknown, max: number): unknown {
+  if (c instanceof Uint8Array) return c.byteLength > max ? c : c.slice();
+  if (c instanceof ArrayBuffer) return c.byteLength > max ? c : new Uint8Array(c.slice(0));
+  return c;
+}
 function bytesOf(c: unknown): Uint8Array {
   if (c instanceof Uint8Array) return c;
   if (c instanceof ArrayBuffer) return new Uint8Array(c);
@@ -915,9 +923,9 @@ export class Workspace {
     return this.createAs(p, opts, source.made);
   }
   private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal }, made: Entry["made"]): Promise<Entry> {
-    const q = path(p), kind = kindOf(q);
+    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, opts.content, opts.mode, undefined, made), opts.signal).then((e) => { this.askToKeep(); return e; });
+    return this.locked(() => this.make(q, kind, content, opts.mode, undefined, made), opts.signal).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -926,7 +934,7 @@ export class Workspace {
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")). */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } = {}): Promise<{ entry: Entry; rev: number }> {
-    return this.writeLocked(p, content, opts).then((out) => { this.askToKeep(); return out; });
+    return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
   private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string }): Promise<{ entry: Entry; rev: number }> {
     return this.lockedFor(p, async () => {
@@ -1408,7 +1416,9 @@ export class Workspace {
             out.push(e);
           }
           // (one op for each identity removed whole: the entry asked for, or, Trash emptied, each thing in
-          // it; what was in a folder removed goes with it, as sync's forget has it: design/sync-client.md §3)
+          // it; what was in a folder removed goes with it, as sync's forget has it: design/sync-client.md §3.
+          // So at most maxFolderEntries (10,000) ops, Trash's own entries, whatever is in them: a burst of
+          // records and of watchers' notices bounded at about a kilobyte each, low tens of MiB (daybreak2))
           for (const e of top ? [top] : under.filter((x) => parentOf(x.path) === TRASH)) await this.log(tx, ops, { op: "emptyTrash", path: e.path, kind: e.kind }, null, e);
         }
         return out;
@@ -1593,20 +1603,33 @@ export class Workspace {
    * so changes keep the order they were asked for; only one that finds such a file, holding no
    * reservation, gives the lock back unchanged, reserves, and asks again. */
   private async lockedFor<T>(p: string, f: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    let release: (() => void) | null = null;
+    let release: (() => void) | null = null, held = 0;
     try {
       for (;;) {
-        let need = false;
+        let need = 0;
         const out = await this.locked(async () => {
-          if (!release && (await this.oldWayUnder(p))) { need = true; return undefined as T; }
+          need = await this.readsUnder(p);
+          if (need > held) return undefined as T;
           return f();
         }, signal);
-        if (!need) return out;
-        release = await reserve(LEGACY_MAX * COPIES);
+        if (need <= held) return out;
+        release?.();
+        release = await reserve(need);
+        held = need;
       }
     } finally {
       release?.();
     }
+  }
+  /** What a change to `p` may read whole, to reserve before the lock: a data file's bytes still kept the old
+   * way at or under it (moved first: LEGACY_MAX × COPIES), else `p` itself a data file whose SHA-256 isn't
+   * kept yet (hashed first, so that its op carries it: its size × COPIES, astra's CORR-9C2-2); else 0. */
+  private async readsUnder(p: string): Promise<number> {
+    if (await this.oldWayUnder(p)) return LEGACY_MAX * COPIES;
+    let q: string;
+    try { q = path(p); } catch { return 0; }
+    const top: Entry | undefined = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(q)));
+    return top && needsHash(top) ? (top.size ?? 0) * COPIES : 0;
   }
   /** Whether `p` or anything under it is a data file whose bytes are still kept the old way. */
   private async oldWayUnder(p: string): Promise<boolean> {
@@ -1717,7 +1740,10 @@ export class Workspace {
 
   /** Its SHA-256 kept (fillHash), holding the lock (and, taken before it, a reservation of its size ×
    * COPIES: its bytes are read whole, and hashing copies them): read from fileBytes, hashed, then put on its
-   * entry only if it is still the file read (path, fid, revision) with no hash yet.  Returns whether it was. */
+   * entry only if it is still the file read (path, fid, revision) with no hash yet, its size set from the
+   * bytes.  The reservation trusts the entry's size: this API writes the true one with the bytes, in the same
+   * transaction; a record changed by other means is outside that (its bytes are read and hashed all the
+   * same, past the reservation, once, and its size corrected; daybreak2).  Returns whether it was. */
   async fillHash(e: Entry): Promise<boolean> {
     if (!needsHash(e)) return false;
     const bytes: Uint8Array | undefined = await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(e.fid!)));
@@ -2045,6 +2071,11 @@ export class Workspace {
   private async afterOf(st: IDBObjectStore, e: Entry): Promise<OpAfter | undefined> {
     const id = identOf(e);
     if (!id) return undefined;
+    // (a data file whose SHA-256 isn't known: its bytes still kept the old way (adopted from there), so
+    // nothing it left is said, as for an identity not yet given; its hash comes when the migrator moves it.
+    // Every other path to an op fills the hash first: create and write compute it, a move hashes a file
+    // written before (astra's CORR-9C2-2))
+    if (e.kind === "file" && !e.sha256) return undefined;
     const folder = parentOf(e.path);
     let parent: string | null = null;
     if (!e.trashed && folder !== "/" && folder !== TRASH) {
@@ -2082,6 +2113,11 @@ export class Workspace {
     }
     // (its data files' bytes in fileBytes first, one at a time, holding the lock as the caller does)
     for (const e of await read()) if (e.kind === "file" && !e.migrated) await this.migrateOne(e);
+    // (a data file moved whose SHA-256 isn't kept yet, written before it was: hashed first, holding the lock
+    // (reserved by lockedFor), so that the move's op carries it; ops can't be mended later (astra's
+    // CORR-9C2-2).  Only the moved entry's: what is in a moved folder has no op of its own)
+    const [top] = await read();
+    if (top && needsHash(top)) await this.fillHash(top);
     const old = await read();
     // (a file too large to move beside the index stays where its bytes are, so it isn't moved; nothing is)
     const stuck = old.find((e) => e.kind === "file" && e.unmoved);
