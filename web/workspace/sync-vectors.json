@@ -555,6 +555,28 @@
   {"path": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm", "id": "f000000000000008", "kind": "folder"},
   {"path": "/after.txt", "id": "f000000000000002", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
 ],
-"skipped": [7]}
+"skipped": [7]},
+{"name": "a write that says folder, to a file's fid",
+"about": "skipped: only a data file is written (no conflict copy)",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "create", "path": "/a.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1},
+  {"seq": 2, "device": "bbbbbbbbbbbbbbbb", "dseq": 1, "t": 2000, "by": "person", "op": "write", "path": "/a.txt", "kind": "folder", "fid": "f000000000000001", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1},
+  {"seq": 3, "device": "bbbbbbbbbbbbbbbb", "dseq": 2, "t": 3000, "by": "person", "op": "create", "path": "/after.txt", "kind": "file", "fid": "f000000000000002", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1}
+],
+"expect": [
+  {"path": "/a.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+  {"path": "/after.txt", "id": "f000000000000002", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": [2]},
+{"name": "a write to an unseen identity in a folder not there",
+"about": "as a create: the folder is made (its identity derived), then the file in it",
+"ops": [
+  {"seq": 1, "device": "aaaaaaaaaaaaaaaa", "dseq": 1, "t": 1000, "by": "person", "op": "write", "path": "/new/x.txt", "kind": "file", "fid": "f000000000000001", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 1, "base": "0000000000000000000000000000000000000000000000000000000000000000"}
+],
+"expect": [
+  {"path": "/new", "id": "f7ce6c94818b52a8", "kind": "folder"},
+  {"path": "/new/x.txt", "id": "f000000000000001", "kind": "file", "sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+],
+"skipped": []}
 ]
 }
