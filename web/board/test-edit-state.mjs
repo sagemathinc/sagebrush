@@ -462,6 +462,12 @@ const refused = (r, re) => !r.ok && !r.retryAfter && re.test(r.message);
     const { p, a, kept } = both(images);
     check(p.ok === ok && a.ok === ok && (ok || (p.reason === "invalid" && a.reason === "invalid" && kept === undefined)), `by reference, ${label}: ${ok ? "taken" : "refused, invalid, nothing kept"} at preview and apply: ` + JSON.stringify({ p: p.ok || p.message, a: a.ok || a.message, kept }));
   }
+  // (astra on 7cca504a: containers and entries that aren't maps, each a typed invalid, never a throw, nothing kept)
+  for (const [label, images] of [["an empty array as the map", []], ["0 as the map", 0], ["\"x\" as the map", "x"], ["true as the map", true], ["a null entry", { [H2]: null }], ["an array entry", { [H2]: [] }]]) {
+    let r;
+    try { r = both(images); } catch (e) { r = { threw: String(e?.message ?? e) }; }
+    check(!r.threw && !r.p.ok && !r.a.ok && r.p.reason === "invalid" && r.a.reason === "invalid" && r.kept === undefined, `by reference, ${label}: invalid at preview and apply, no throw, nothing kept: ` + JSON.stringify(r.threw ? r : { p: r.p.message, a: r.a.message, kept: r.kept }));
+  }
   // (put on this channel, verified: the host's word changes, and the same edit is taken)
   allowed.add(H);
   const after = both({ [H]: { w: 1, h: 1 } });
