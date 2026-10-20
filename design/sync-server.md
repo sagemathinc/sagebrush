@@ -121,7 +121,7 @@ meta(k, v)               account_id, account_hash, generation, retired,
                           limits (JSON), limits_issued, limits_fetched, used_bytes, ...
 devices(device, name, created, last_seen, index_cursor, session_hash, next_dseq)
 ops(seq INTEGER PRIMARY KEY, device, dseq, t, by, op, path, "to", kind,
-    ref, fid, sha256, size, base, recv)                  UNIQUE(device, dseq)
+    ref, fid, sha256, size, base, recv, parent)          UNIQUE(device, dseq)
 entries(path PRIMARY KEY, kind, ref, mode, size, sha256, fid, created, updated,
         trashed_from, trashed_at, by, seq)          (the index as of the last op)
 docs(doc PRIMARY KEY, kind, created, bytes, head_seq, epoch, deleted)
@@ -143,7 +143,8 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 **The operation log is the index's history** (§7.2).
 - The client's log (`Op` in web/workspace/api.ts on the `workspace-index` branch: `{seq, t, device, by, op, path, to, kind}`) is uploaded as it is, plus the contents' identity, which @sagebrush-board adds to `Op` with the sync client:
   - `ref`: a document's own id (a notebook's UUID, or a board's 12 hex), or a data file's key;
-  - for a data file, also its `fid` (16 hex), its `sha256` and `size`, and for a `write` its `base`, the `sha256` it replaced. `base` is how the reducer tells two devices' changes to one file apart: §7.2's `name (conflict, <device>).ext`.
+  - for a data file, also its `fid` (16 hex), its `sha256` and `size`, and for a `write` its `base`, the `sha256` it replaced. `base` is how the reducer tells two devices' changes to one file apart: §7.2's `name (conflict, <device>).ext`;
+  - `parent` (optional, 16 lowercase hex, Oct 20): the fid of the folder the op puts something in, on `create`, `mkdir`, `adopt`, `write`, `restore`, and on `rename` and `duplicate` the destination's. It is refused on `remove`, `forget` and `dropVersions`. The server checks only its form, then stores and echoes it. What it means is the reducer's: an absent `parent`, or one naming a folder the index doesn't have, means "go by the path", so a create after another device renamed the folder lands in that folder, not in a rebuilt old path (astra's review of the reducer). An object made before the field gains the column when it next starts.
 - **Ids are the client's own, and everything is keyed by (account, id).** A document object's name includes its owner (§1), and every table is per account. So a collision across accounts is impossible, and one within an account (48 random bits for a board) is negligible. The server checks each id's form: a UUID, 12 hex or 16 hex.
 - **The op names:**
   - `create`, `mkdir`, `write`, `rename`, `remove`, `restore`;
