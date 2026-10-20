@@ -78,6 +78,8 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
+/** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
+const PLAN_RETRY_MS = 5000;
 const DEV_LIMITS: Limits = { storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, sync: { enabled: true, version_bytes: 256 << 20, read_bytes_per_day: 4 << 30 } };
 /** How long an upload may take before its reservation is reaped (§5.4). */
 const RESERVE_MS = 3600_000;
@@ -195,7 +197,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // checked again in the transaction, after the await)
     let plan: Limits | null = null;
     if (allowed(this.env, a.account) && !this.deleted()) {
-      plan = this.exists() && this.get("account_id") === a.account ? await this.limits().catch(() => null) : await this.planOf(a.account);
+      plan = this.exists() && this.get("account_id") === a.account ? await this.limits().catch(() => null) : await this.sharedPlan(a.account, false);
     }
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!allowed(this.env, a.account)) throw new SyncError("forbidden", "sync isn't enabled for this account");
@@ -205,10 +207,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (had !== undefined) {
         if (had !== a.account) throw new SyncError("forbidden", "not this account");
         if (this.state() === "deleting") throw new SyncError("deleting", "this account's synced data is still being deleted");
-        if (!this.get("limits")) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: 5000 });
+        if (!this.get("limits")) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: PLAN_RETRY_MS });
         return { state: this.state(), generation: Number(this.get("generation")) };
       }
-      if (!plan) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: 5000 });
+      if (!plan) throw new SyncError("busy", "CoCalc can't be reached to check this account's plan; try again", { retry_after: PLAN_RETRY_MS });
       if (!plan.sync.enabled) throw new SyncError("forbidden", "sync isn't available for this account");
       const generation = Number(this.get("retired") ?? 0) + 1;
       for (const s of SCHEMA) this.sql.exec(s);
@@ -237,20 +239,40 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    *   - `state`: "off" (never on, or its data deleted), "registering", "active",
    *     "readonly" or "deleting".
    */
-  async status(a: { account: string }): Promise<{ available: boolean; reason?: string; state: string; generation?: number }> {
+  async status(a: { account: string }): Promise<{ available: boolean; reason?: string; state: string; generation?: number; retry_after?: number }> {
     if (!allowed(this.env, a.account)) return { available: false, reason: "not_allowlisted", state: "off" };
     if (this.deleted()) return { available: false, reason: "deleted", state: "off" };
     if (this.exists() && this.get("account_id") === a.account) return { available: true, state: this.state(), generation: Number(this.get("generation")) };
-    // (a plan CoCalc gave is remembered a minute; an unreachable CoCalc isn't, so its return is seen at once)
-    const now = Date.now();
-    const seen = this.planSeen?.account === a.account && now - this.planSeen.at <= (testMode(this.env) ? 1000 : 60_000) ? this.planSeen.plan : null;
-    const plan = seen ?? (await this.planOf(a.account));
-    if (plan && plan !== seen) this.planSeen = { account: a.account, at: now, plan };
-    if (!plan) return { available: false, reason: "cocalc_unreachable", state: "off" };
+    const plan = await this.sharedPlan(a.account, true);
+    if (!plan) return { available: false, reason: "cocalc_unreachable", state: "off", retry_after: PLAN_RETRY_MS };
     if (!plan.sync.enabled) return { available: false, reason: "plan_has_no_sync", state: "off" };
     return { available: true, state: "off" };
   }
+
+  // ---- CoCalc's plan for an account not registered here (enable, status), stored nowhere: one fetch at
+  // a time in this object, whoever asks, and none again for PLAN_RETRY_MS after CoCalc couldn't answer;
+  // a plan it gave is remembered a minute, for status only (LIMIT-SYNC-STATUS-1)
   private planSeen?: { account: string; at: number; plan: Limits };
+  private planFetch?: { account: string; p: Promise<Limits | null> };
+  private planFailed?: { account: string; until: number };
+  private sharedPlan(account: string, remembered: boolean): Promise<Limits | null> {
+    const now = Date.now();
+    const test = testMode(this.env);
+    if (remembered && this.planSeen?.account === account && now - this.planSeen.at <= (test ? 1000 : 60_000)) return Promise.resolve(this.planSeen.plan);
+    if (this.planFetch?.account === account) return this.planFetch.p;
+    if (this.planFailed?.account === account && now < this.planFailed.until) return Promise.resolve(null);
+    const p: Promise<Limits | null> = this.planOf(account)
+      .then((plan) => {
+        if (plan) this.planSeen = { account, at: Date.now(), plan };
+        else this.planFailed = { account, until: Date.now() + (test ? 500 : PLAN_RETRY_MS) };
+        return plan;
+      })
+      .finally(() => {
+        if (this.planFetch?.p === p) this.planFetch = undefined;
+      });
+    this.planFetch = { account, p };
+    return p;
+  }
 
   /**
    * The Worker's word that D1 records `generation`, active: a registering
