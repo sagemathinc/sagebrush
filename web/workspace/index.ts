@@ -11,3 +11,4 @@ export { decide, best, newer, resolveReset, readLocal, readOpfs, writeLocal, wri
 export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 // (the notebooks' store and its save gate, which the page closes while the workspace is quarantined: for tests)
 export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace, LOCK_WAIT, HISTORY_BACKLOG, historyBacklog, onHistoryRefused } from "../notebook/stores.js";
+export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
