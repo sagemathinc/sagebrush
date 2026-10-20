@@ -2599,6 +2599,49 @@ async function durabilityLockOrder() {
       check(took && charged === 2 * text + S.ENTRY_OVERHEAD && kept?.id === "wide" && kept.wide.length === 100_000, "a wide graph of empty objects (and a property undefined, as patchflow's envelopes have): charged twice its text and ENTRY_OVERHEAD, the text being all that is held, and kept as it was asked: " + JSON.stringify({ took, charged, text, kept: kept && { id: kept.id, n: kept.wide.length } }));
     } finally { release?.(); a.close(); db.close(); }
   }
+  // hooks never run (astra's CORR-C05-2): an own toJSON (not enumerable), one inherited through a plain-looking
+  // object's prototype, a getter, a getter changing between reads, a toJSON put on Object.prototype: each refused,
+  // no hook run; and the 8 MiB bound exact and unconditional (daybreak2's LIMIT-C05-1, astra's CORR-C05-1): an
+  // entry alone just within it taken, just past it refused, said as too large for TimeTravel, its document saved
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/hooks.ipynb");
+    const db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial();
+    const said = [], off = S.onHistoryRefused((m) => said.push(m));
+    let ran = 0;
+    const own = { time: "own", id: "own" }; Object.defineProperty(own, "toJSON", { value: () => { ran++; return { time: "own", id: "HOOK" }; }, enumerable: false });
+    const inherited = Object.create(Object.create(null, { toJSON: { value: () => { ran++; return {}; } } })); inherited.time = "inh"; inherited.id = "inh";
+    const getter = { time: "get", id: "get" }; Object.defineProperty(getter, "x", { get: () => { ran++; return 1; }, enumerable: true });
+    let reads = 0; const changing = { time: "chg", id: "chg" }; Object.defineProperty(changing, "x", { get: () => (++reads, ran++, reads > 1 ? "y".repeat(1e6) : "small"), enumerable: true });
+    // (a Proxy can't be told from its object, and its descriptor traps run when it is read; but what is written is
+    // the copy made from those descriptors, so its get trap never runs, and what is kept is what was measured)
+    let gets = 0;
+    const proxied = new Proxy({ time: "prx", id: "prx" }, { get: (t, k) => (k === "id" ? (gets++, "FROM GET TRAP") : t[k]) });
+    const tookProxy = h.append(proxied);
+    const took = [own, inherited, getter, changing].map((env) => h.append(env));
+    Object.prototype.toJSON = function () { ran++; return this; };
+    let polluted;
+    try { polluted = h.append({ time: "pol", id: "pol" }); } finally { delete Object.prototype.toJSON; }
+    await h.appending;
+    const rows = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    const prx = (await rawGet(db, "history", [e.ref, "prx"]))?.env;
+    check(tookProxy && gets === 0 && prx?.id === "prx", "a Proxy: what is written is the copy of what was measured, its get trap never run: " + JSON.stringify({ tookProxy, gets, prx }));
+    check(took.every((t) => t === false) && polluted === false && ran === 0 && rows.filter((r) => r !== "prx").length === 0 && S.historyBacklog().entries === 0, "hooks: an own toJSON (not enumerable), an inherited one, a getter, a changing getter, a toJSON on Object.prototype: each refused, no hook run, nothing kept: " + JSON.stringify({ took, polluted, ran, rows }));
+    const alone = Math.floor((S.HISTORY_BACKLOG.bytes - S.ENTRY_OVERHEAD) / 2), base = JSON.stringify({ time: "bigU", id: "big", t: "" }).length;
+    const under = h.append({ time: "bigU", id: "big", t: "x".repeat(alone - base) });
+    await h.appending;
+    // (the backlog empty again before the next: its counters let go once the write is done)
+    for (let i = 0; i < 100 && S.historyBacklog().entries; i++) await new Promise((r) => setTimeout(r, 10));
+    const emptyBefore = S.historyBacklog().entries === 0;
+    said.length = 0;
+    const over = h.append({ time: "bigO", id: "big", t: "x".repeat(alone - base + 1) });
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), saved = await st.save({ ...doc, baseRev: doc.rev, cells: [{ id: "c", code: "x".repeat(alone - base + 1) }] });
+    await h.appending;
+    const kept = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+    check(under === true && kept.includes("bigU"), "an entry alone just within 8 MiB of charge: taken: " + JSON.stringify({ under, kept }));
+    check(emptyBefore && over === false && !kept.includes("bigO") && said.length === 1 && /too large to keep in TimeTravel/.test(said[0]) && !!saved?.saved && (await rawGet(a.main, "notebooks", e.ref)).cells[0].code.length === alone - base + 1, "…one just past it: refused, said as too large for TimeTravel, its document saved all the same: " + JSON.stringify({ over, said, saved }));
+    off(); a.close(); db.close();
+  }
   // the OPFS witness's flush in the background: the lock held elsewhere, it doesn't wait for it (no request
   // left pending), and is done once the lock is free
   {
