@@ -10,6 +10,7 @@
   - explicit document checkpoints and ages (B.4);
   - the manifest pinned through a restore, and slot verification and retention (B.3, B.7).
 - It also answers daybreak2's LIMIT-DUR-4: whole-group admission, all or none (B.3a).
+- **Revisions 5 and 6** answer daybreak2's LIMIT-A54-1: saves' actual contract (B.3), and a blob written and verified outside the workspace's lock, with only the handoff inside it (B.5).
 - **Revision 4** answers astra's CORR-A54-1 (a checkpoint crossed by an over-size group, B.3b) and CORR-A54-2 (a blob's handoff to the commit that names it; what startup cleanup may delete, B.5, B.3a).
 - The finding and the promise are design/workspace-durability.md §1 and §2.
 
@@ -142,7 +143,16 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
   - an in-progress checkpoint.
 
   Deletion runs in pages, holding the workspace's lock and the recovery lock, so no new reference appears while a page is decided.
-- **The handoff (CORR-A54-2).** A new blob's publication (its temporary file, flush, name and verification) and the IndexedDB commit that names it happen in one hold of the workspace's lock. Deletion needs that lock too, so it can never fall between them.
+- **The handoff (CORR-A54-2, LIMIT-A54-1).** A new blob is written and checked before the workspace's lock is taken, and the lock is held only for the short handoff.
+  - **Outside the lock:**
+    - a temporary file, `/sagebrush/tmp/<tab>-<n>`, written while the tab holds the Web Lock `sagebrush-tmp-<tab>`;
+    - flushed, and verified by its hash.
+    - Temporary files are never deletion candidates.
+  - **Inside the lock**, in one hold:
+    - the temporary file is given its final name `/sagebrush/blobs/<sha256>` (if a blob of that hash is already there, the temporary file is dropped instead);
+    - then the IndexedDB commit that names it, which makes it a root.
+    - Deletion needs the same lock, so it can never fall between the name and the commit. The hold is a rename and one commit, whatever the file's size.
+  - **The startup cleanup** deletes a temporary file only when its tab's `sagebrush-tmp-<tab>` lock isn't held (`navigator.locks.query`), so no live tab's file is taken.
   - A blob orphaned by a kill between the two is named by nothing, and goes at the next deletion, correctly.
   - A pending restore's `restore.json` pins its slot's blobs too.
 - **The migration:** 1a's, again: batched, reserved, crash-tested, and the old copy dropped after the hash check.
@@ -197,7 +207,9 @@ A kill during that checkpoint leaves unpublished parts, which are reclaimed at t
 
 **A checkpoint crossed (CORR-A54-1).** An over-size move during a checkpoint's pages restarts the checkpoint. Another during the restart restarts it again. The third attempt holds the lock and publishes. At 100,000 entries, its lock hold, and the end-to-end time of a save made during it (from the save's call to its commit), are each under 3 s. While stale, a move suppressed during the checkpoint restarts it. No slot is ever published with a gap. The age shown is the authoritative point's commit time.
 
-**The blob handoff (CORR-A54-2).** Deletion attempted between a blob's verification and the commit naming it waits for the lock, and the blob stays. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
+**The blob handoff (CORR-A54-2, LIMIT-A54-1).** Deletion attempted between a blob's naming and the commit naming it waits for the lock, and the blob stays.
+- **A maximum-size blob (200 MB) with slow I/O injected** (each write and flush delayed). The workspace's lock is held only for the handoff, at most 200 ms. A save queued meanwhile commits within 200 ms of the lock being free, measured from its call. The pre-publication time isn't the bound.
+- **A temporary file:** one being written by a live tab is never deleted at another tab's startup. One from a tab that's gone is. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
 **GC with pending groups.** A file deleted, and its version dropped, while its group is still staged. Its blob stays until the group is published and nothing retains it.
 
