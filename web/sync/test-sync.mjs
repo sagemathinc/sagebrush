@@ -63,6 +63,8 @@ const ST1 = "5a5a5a5a-0001-4a5a-8a5a-5a5a5a5a5a01"; // GET /status: never synced
 const ST2 = "5a5a5a5a-0002-4a5a-8a5a-5a5a5a5a5a02"; // GET /status: not on the allowlist
 const ST3 = "5a5a5a5a-0003-4a5a-8a5a-5a5a5a5a5a03"; // GET /status beside an enable
 const ST4 = "5a5a5a5a-0004-4a5a-8a5a-5a5a5a5a5a04"; // GET /status while CoCalc is down
+const ST5 = "5a5a5a5a-0005-4a5a-8a5a-5a5a5a5a5a05"; // cold statuses and an enable at once: one CoCalc fetch
+const ST6 = "5a5a5a5a-0006-4a5a-8a5a-5a5a5a5a5a06"; // statuses polled through an outage: a fetch per retry gate
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -84,7 +86,7 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const URL_KEY = "url-key";
 const LOSE = "fa17fa17fa17";
 // ---- a fake CoCalc: the limits (§6)
-const fake = { limits: new Map(), down: false };
+const fake = { limits: new Map(), down: false, calls: new Map() };
 // (one storage_bytes for sharing and sync together, §6.1)
 const sync = (storage, reads) => ({ storage_bytes: storage, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: reads } });
 fake.limits.set(A, sync(30_000, 60_000));
@@ -111,12 +113,15 @@ for (const r of [R1, R2, R3, R4, W1, W2, Y1, Y2, Y3, Y4, X2]) fake.limits.set(r,
 fake.limits.set(X1, plan(false));
 fake.limits.set(Z0, sync(1 << 20, 1 << 20));
 fake.limits.set(N, sync(1 << 20, 1 << 20)); // (enable asks for the plan first)
-for (const st of [ST1, ST2, ST3, ST4]) fake.limits.set(st, sync(1 << 20, 1 << 20));
+for (const st of [ST1, ST2, ST3, ST4, ST5, ST6]) fake.limits.set(st, sync(1 << 20, 1 << 20));
 fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
   if (u.pathname === "/api/v2/sagebrush/limits") {
+    // (each account's limits requests, counted as they arrive)
+    const who = u.searchParams.get("account_id");
+    fake.calls.set(who, (fake.calls.get(who) ?? 0) + 1);
     if (fake.limitsGate) await fake.limitsGate;
     if (fake.down) return new Response("down", { status: 503 });
     const l = fake.limits.get(u.searchParams.get("account_id"));
@@ -129,7 +134,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -272,6 +277,8 @@ const payloads = (item) => {
   const codes = [];
   for (let i = 0; i < 5; i++) codes.push((await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).status);
   ok(codes.join() === "401,401,401,429,429", "the pre-authentication limit is per IP and before the session check: " + codes.join());
+  const r429 = await (await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).json();
+  ok(r429.error === "too many requests" && r429.retry_after === 60_000, "and the 429 says how long to wait: the limit's minute (LIMIT-SYNC-STATUS-1): " + JSON.stringify(r429));
   r = await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.10" }, body: "{}" });
   ok(r.status === 401, "another IP has its own limit");
   const sa = await signIn(A);
@@ -534,6 +541,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   r = await put(sd, Buffer.from("d while down"));
   ok(r.status === 403, "and the account takes no upload: sync isn't on");
   fake.down = false;
+  await new Promise((r) => setTimeout(r, 600)); // (CoCalc isn't asked again for a moment after it failed: 0.5 s in tests)
   const ez2 = await (await post(sd, "/api/sync/v1/enable", {})).json();
   r = await put(sd, Buffer.from("d while down"));
   ok(ez2.state === "active" && r.status === 201, "once CoCalc answers, enable turns it on, and the upload goes");
@@ -2088,9 +2096,10 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const s4 = await signIn(ST4);
   [c, b] = await status(s4);
   fake.down = false;
-  ok(b.available === false && b.reason === "cocalc_unreachable" && b.state === "off" && (await nothing(ST4)), "CoCalc down: cocalc_unreachable, nothing made: " + JSON.stringify(b));
+  ok(b.available === false && b.reason === "cocalc_unreachable" && b.retry_after === 5000 && b.state === "off" && (await nothing(ST4)), "CoCalc down: cocalc_unreachable, with retry_after, nothing made: " + JSON.stringify(b));
+  await new Promise((r) => setTimeout(r, 600));
   [c, b] = await status(s4);
-  ok(b.available === true, "and once CoCalc answers (the unreachable answer isn't remembered past a second in tests): available");
+  ok(b.available === true, "and once CoCalc answers, after the moment it isn't asked: available");
   [c, b] = await status(sa);
   ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)), "an account on: its state and generation: " + JSON.stringify(b));
   [c, b] = await status(await signIn(X2));
@@ -2102,6 +2111,32 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const [, after] = await status(s3);
   ok(en.status === 200 && enb.state === "active" && enb.generation === 1 && st.every(([c2, b2]) => c2 === 200 && b2.available === true && ["off", "registering", "active"].includes(b2.state)) && after.state === "active" && after.generation === 1 && (await genOf(ST3)) === 1,
     "statuses beside an enable: each answers off, registering or active, the enable registers generation 1 once, and status then says active 1: " + JSON.stringify({ enb, st: st.map(([, x]) => x.state), after }));
+  // LIMIT-SYNC-STATUS-1: cold, at once, four statuses and an enable make one CoCalc request between them
+  const s5 = await signIn(ST5);
+  let open5;
+  fake.limitsGate = new Promise((r) => (open5 = r));
+  const cold = Promise.all([status(s5), status(s5), post(s5, "/api/sync/v1/enable", {}).then(async (r) => [r.status, await r.json()]), status(s5), status(s5)]);
+  await until(async () => (fake.calls.get(ST5) ?? 0) >= 1, 5000);
+  await new Promise((r) => setTimeout(r, 300)); // (the rest arrive while the one request waits)
+  open5();
+  fake.limitsGate = null;
+  const coldRes = await cold;
+  ok(fake.calls.get(ST5) === 1 && coldRes[2][0] === 200 && coldRes[2][1].state === "active" && coldRes.every(([c5]) => c5 === 200),
+    "cold statuses and an enable at once: one CoCalc request between them, and the enable turns sync on: " + JSON.stringify({ calls: fake.calls.get(ST5), res: coldRes.map(([, x]) => x.state ?? x) }));
+  // polled through an outage: one CoCalc request per retry gate, not one per poll; an enable meanwhile asks none either
+  fake.down = true;
+  const s6 = await signIn(ST6);
+  const polls = [];
+  for (let i = 0; i < 8; i++) polls.push((await status(s6))[1]);
+  const en6 = await post(s6, "/api/sync/v1/enable", {});
+  const calls6 = fake.calls.get(ST6);
+  await new Promise((r) => setTimeout(r, 600));
+  polls.push((await status(s6))[1]);
+  const calls6b = fake.calls.get(ST6);
+  fake.down = false;
+  ok(calls6 === 1 && calls6b === 2 && polls.every((x) => x.reason === "cocalc_unreachable" && x.retry_after === 5000) && en6.status === 503 && (await nothing(ST6)),
+    "8 statuses and an enable during an outage: one CoCalc request, then one more after the retry gate, each unreachable with retry_after: " + JSON.stringify({ calls6, calls6b, en: en6.status }));
+  await new Promise((r) => setTimeout(r, 600));
   // and a status from another site is refused like every sync request
   const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
   ok(xr.status === 403, "a status asked from another site is refused (403)");

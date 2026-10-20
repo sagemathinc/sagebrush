@@ -64,7 +64,7 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
   - A sync request is authenticated by its session cookie and D1, which gives the account.
   - An agent's request is authenticated by its token's tag (design/agent-endpoint.md §2): an HMAC the server made, checked at the Worker before the token's account hash is used to name anything.
   - A request that fails either check gets 401 from the Worker, without touching any object.
-- **An IP limit comes first,** independent of any account a request claims: Cloudflare's rate-limiting binding (`SYNC_PREAUTH`, keyed by IP), 60 requests a minute on `/api/sync/` and `/api/agent/`, before authentication. Over it, 429.
+- **An IP limit comes first,** independent of any account a request claims: Cloudflare's rate-limiting binding (`SYNC_PREAUTH`, keyed by IP), 60 requests a minute on `/api/sync/` and `/api/agent/`, before authentication. Over it, 429, with `retry_after` 60000 (the limit's minute).
   - A sync request that fails authentication costs one D1 read, within that limit.
   - **The binding is part of the flag** (LIMIT-321-1): with the objects bound but no `SYNC_PREAUTH`, sync is off (404).
 - **An object never creates or writes storage for a request it refuses.** A refused request reads at most the rows it needs to refuse, and an account object that doesn't exist yet is created only by "turn on sync" from a session.
@@ -507,7 +507,8 @@ William's decision (Oct 19): read-only, then deleted after a retention period, w
   - An account already on refreshes its plan first, so enable answers `readonly` once the plan has ended, and `busy` while nothing is known. It never answers `active` for an account whose plan isn't known.
   - **`GET /api/sync/v1/status`** is the page's question before it shows its switch. It answers `{available, reason?, state, generation?}` and never creates or registers anything:
     - off the allowlist: `available: false`, reason `not_allowlisted`, answered by the Worker without asking the account object. The page hides its switch then; the reason is for the page's logic, not to show;
-    - an account never synced: answered from CoCalc's plan, asked and stored nowhere. A plan CoCalc gave is kept in the object's memory for a minute; an unreachable CoCalc isn't. The answers are `available: true` with `state: "off"`, or `available: false` with reason `plan_has_no_sync` or `cocalc_unreachable`;
+    - an account never synced: answered from CoCalc's plan, asked and stored nowhere. The answers are `available: true` with `state: "off"`, or `available: false` with reason `plan_has_no_sync` or `cocalc_unreachable` (with `retry_after` 5000);
+    - **CoCalc is asked at most once at a time per account object** (LIMIT-SYNC-STATUS-1). Concurrent statuses and an enable share one in-flight fetch. A plan CoCalc gave is kept in memory for a minute, for status only. After CoCalc couldn't answer, it isn't asked again for that account for 5 s, and an enable in that time is `busy` at once. So polling through an outage costs CoCalc one request per account per 5 s;
     - CoCalc deleted the account: reason `deleted`;
     - an account on: `available: true` with its `state` (`registering`, `active`, `readonly`, `deleting`) and `generation`.
   - The confirm applies the plan enable kept (fetched again only if it's old). A plan that ends in between arrives as CoCalc's notice, and makes the account `readonly` before any write. A batch or a clear checks the account again after every wait (the room for it, which may fetch the plan), before anything is held or sent. If CoCalc can't be reached at enable, the plan is fetched before the first write that needs room.

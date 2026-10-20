@@ -136,7 +136,8 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
   // before anything that reads a session: one limit per IP, whatever the request claims
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests");
+  // (the limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
+  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests", { retry_after: 60_000 });
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages
   if (!sameSite(req)) return err(403, "cross-site request");
