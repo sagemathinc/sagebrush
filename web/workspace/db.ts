@@ -72,12 +72,14 @@
 //   pins' index byStorage, on each pin's `skey` (where its bytes are: "f:<fid>", a file's fileBytes, or
 //   "v:<version id>"): whether any other pin names a storage, one bounded count (the pins are empty until
 //   this step)
-//   versions' indexes byFileId [fid, id] (a file's versions in the order they were kept), prunable
-//            [free, id] (a file's versions not kept for sync, oldest first) and prunableAll [u, id] (everyone's
-//            not kept for sync, oldest first): a save's pruning, and the cleanup's, read a bounded few from
-//            the front, never a file's whole list (daybreak2's LIMIT-E5C-2).  A version not pinned has `free`
-//            (its fid) and `u` (1); a pinned one neither.  The one upgrade that writes records: each version
-//            kept before is given both (none was pinned before this version)
+//   prunable  the versions not kept for sync, by [fid, id] ({fid, id, t, size}: a file's oldest first), with an
+//            index byId (everyone's oldest first): a save's pruning, and the cleanup's, read a bounded few from
+//            the front, never a file's whole list (daybreak2's LIMIT-E5C-2).  A pinned version has no record
+//            here; its release puts one.  A store of its own, made empty, so the upgrade builds no index over
+//            the versions already kept, whatever their number: schema only, as every upgrade is, and as quick
+//            with 50,000 versions as with none (daybreak2's LIMIT-563-2).  The versions kept before are put here
+//            afterwards, a bounded slice at a time, by the cleanup (sync-pins.ts, from the marker
+//            `versions:backfill`); until then they are in none, so kept, never wrongly dropped (none was pinned)
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
@@ -135,20 +137,9 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
     if (old < 5) {
       // (who names a storage, one bounded count (sync-pins.ts): the pins are empty until this step, so nothing to fill)
       tx.objectStore("pins").createIndex("byStorage", "skey");
-      const vs = tx.objectStore("versions");
-      vs.createIndex("byFileId", ["fid", "id"]);
-      vs.createIndex("prunable", ["free", "id"]);
-      vs.createIndex("prunableAll", ["u", "id"]);
-      // (every version kept before: none pinned, so each prunable; a cursor in the upgrade's transaction)
-      if (old >= 1) {
-        const c = vs.openCursor();
-        c.onsuccess = () => {
-          const cur = c.result;
-          if (!cur) return;
-          cur.update({ ...cur.value, free: cur.value.fid, u: 1 });
-          cur.continue();
-        };
-      }
+      db.createObjectStore("prunable", { keyPath: ["fid", "id"] }).createIndex("byId", "id");
+      // (every version kept before is made prunable after the open, from this marker: one write here)
+      if (old >= 1) tx.objectStore("meta").put({ after: 0 }, "versions:backfill");
     }
   }, onClose, ms);
 }

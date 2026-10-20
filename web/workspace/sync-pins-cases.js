@@ -335,10 +335,11 @@ async function cleanup() {
 }
 
 // (IndexedDB calls made while `f` runs, counted on the stores and indexes)
-let lastBreakdown = {}, lastPerTx = 0, lastRecords = 0;
+let lastBreakdown = {}, lastPerTx = 0, lastRecords = 0, lastTxRecords = 0;
 async function counting(f) {
   let calls = 0, records = 0;
-  const by = {}, perTx = new Map();
+  const by = {}, perTx = new Map(), recTx = new Map();
+  const addRec = (tx, k) => { records += k; recTx.set(tx, (recTx.get(tx) ?? 0) + k); };
   lastBreakdown = by;
   const saved = [];
   const txOf = (o) => o instanceof IDBCursor ? o.request.transaction : o instanceof IDBIndex ? o.objectStore.transaction : o.transaction;
@@ -355,14 +356,15 @@ async function counting(f) {
       by[k] = (by[k] ?? 0) + 1;
       const r = real.apply(this, a);
       // (the records a request returns: what it materialises)
-      if (m === "getAll" || m === "getAllKeys") r.addEventListener("success", () => { records += r.result.length; });
-      else if (m === "get" || m === "openCursor" || m === "openKeyCursor") records++;
-      else if (C === IDBCursor && (m === "continue" || m === "advance")) records++;
+      if (m === "getAll" || m === "getAllKeys") r.addEventListener("success", () => addRec(tx, r.result.length));
+      else if (m === "get" || m === "openCursor" || m === "openKeyCursor") addRec(tx, 1);
+      else if (C === IDBCursor && (m === "continue" || m === "advance")) addRec(tx, 1);
       return r;
     };
   }
   try { await f(); } finally { for (const [C, m, real] of saved) C.prototype[m] = real; }
   lastPerTx = Math.max(0, ...perTx.values());
+  lastTxRecords = Math.max(0, ...recTx.values());
   lastRecords = records;
   return calls;
 }
@@ -609,7 +611,7 @@ async function pruneStep() {
   // (past the bytes: a few in the save (daybreak2's LIMIT-E5C-2), the rest by the cleanup it begins after)
   await w.pinsCleaning;
   const vs = await all(w.ws, "versions"), sum = vs.reduce((t, v) => t + v.size, 0);
-  check(n0 + 1 - n1 <= 8 && sum <= 1000 && (await get(w.ws, "meta", "versionBytes")) === sum && (await get(w.ws, "meta", "versions:over")) === undefined, "past the bytes: at most 8 dropped in the save, the rest by the cleanup after it, the total exact: " + J({ inSave: n0 + 1 - n1, sum, n: vs.length }));
+  check(n0 + 1 - n1 <= W.BYTES_STEP && sum <= 1000 && (await get(w.ws, "meta", "versionBytes")) === sum && (await get(w.ws, "meta", "versions:over")) === undefined, `past the bytes: at most ${W.BYTES_STEP} dropped in the save, the rest by the cleanup after it, the total exact: ` + J({ inSave: n0 + 1 - n1, sum, n: vs.length }));
   w.close();
 }
 
@@ -689,6 +691,11 @@ async function ordering() {
       // restored (then it goes) or emptied (nothing the server had is lost); accepted: the same, path for path)
       const same = how === "accepted" ? t.same : J(t.remote) === J([]) && J(t.local) === J([[`/Trash/h.bin`, f.fid, null]]);
       check(same && !recs.some(([op, p]) => op === "write" && p.startsWith("/Trash")), `removed and scanned before it was ${how}: no write brings it back, the trees the same${how === "missing" ? " (but for the file the server never had, in Trash here only)" : ""}: ` + J({ recs, ...t }));
+      // (its successor kept, durably: across a reload and a cleanup (astra's ruling on the refused case))
+      ({ w, ob } = await reload(w, nm));
+      await W.cleanPins(w);
+      const pend = (await get(w.ws, "pending", f.fid))?.byNs?.[NS_A], listed = ((await get(w.ws, "meta", `sync:${NS_A}:successors`)) ?? []).includes(f.fid);
+      check(pend?.successor && listed, `…its successor kept across a reload and a cleanup (${how}): ` + J({ pend, listed }));
       // (restored: its successor goes then, after the restore, with its bytes)
       await w.restore((await w.list("/Trash")).find((e) => e.fid === f.fid).path);
       await ob.scan();
@@ -781,16 +788,22 @@ async function versionScale() {
   // bounded few of them, whatever the number, its time and longest task flat, its memory too)
   const out = [];
   let open;
-  for (const [n, pinned] of [[1000, true], [10000, true], [50000, true], [50000, false]]) {
+  for (const [n, pinned, other] of [[1000, true], [10000, true], [50000, true], [50000, false], [50000, false, true]]) {
     const w = await fresh();
     const f = await w.create("/v.bin", { content: "v" });
+    // (other: the versions another file's, to tell the store's size from any walk over this file's keys)
+    const fidOf = other ? "0ther0000000000f" : f.fid;
     await new Promise((ok, no) => {
-      const tx = w.ws.transaction(["versions"], "readwrite"), vs = tx.objectStore("versions");
-      for (let i = 0; i < n; i++) vs.add({ fid: f.fid, t: Date.now(), size: 1, sha256: "0", by: "person", device: "d", ...(pinned ? { pinned: true } : { free: f.fid, u: 1 }) });
+      const tx = w.ws.transaction(["versions", "prunable"], "readwrite"), vs = tx.objectStore("versions"), pr = tx.objectStore("prunable");
+      for (let i = 0; i < n; i++) { const t = Date.now(), r = vs.add({ fid: fidOf, t, size: 1, sha256: "0", by: "person", device: "d", ...(pinned ? { pinned: true } : {}) }); if (!pinned) r.onsuccess = () => pr.put({ fid: fidOf, id: r.result, t, size: 1 }); }
       tx.oncomplete = ok; tx.onerror = () => no(tx.error);
     });
     // (not pinned: a backlog the cleanup drains after each save; held back here, so a save's own reads are counted)
     W.PINS.cleanAfter = new Promise((r) => (open = r));
+    // (the insert's garbage collected first, so its collection isn't taken for a save's task)
+    await sleep(300);
+    globalThis.gc?.();
+    await sleep(100);
     globalThis.gc?.();
     const heap0 = performance.memory?.usedJSHeapSize ?? 0;
     let longest = 0;
@@ -809,11 +822,14 @@ async function versionScale() {
     globalThis.gc?.();
     const heap = Math.max(0, (performance.memory?.usedJSHeapSize ?? 0) - heap0);
     const sorted = [...times].sort((x, y) => x - y);
-    out.push({ n, pinned, median: Math.round(sorted[5] * 10) / 10, ms: Math.round(Math.max(...times)), first: Math.round(times[0]), records: Math.max(...recs), calls: Math.max(...calls), longest: Math.round(longest), heapKB: Math.round(heap / 1024) });
+    out.push({ n, pinned, other: !!other, median: Math.round(sorted[5] * 10) / 10, ms: Math.round(Math.max(...times)), first: Math.round(times[0]), records: Math.max(...recs), calls: Math.max(...calls), longest: Math.round(longest), heapKB: Math.round(heap / 1024) });
     w.close();
   }
-  const [a, , c, d] = out;
-  check(d.records <= 60 && d.calls <= a.calls + 2 * W.PRUNE_STEP + 1 && d.longest < 50 && c.records <= a.records && c.records <= 60 && c.calls <= a.calls && out.every((x) => x.longest < 50) && c.median < Math.max(10, 3 * a.median) && c.heapKB < 4096, "one file with 1,000 to 50,000 versions kept for sync, or 50,000 not kept (a released backlog): a save reads a bounded few records, its median time, longest task and memory flat: " + J(out));
+  // (exact counts, not times: a save reads at most maxVersions + PRUNE_STEP of its file's prunable versions (the
+  // window, 21) and makes at most 3 * PRUNE_STEP + 1 more requests to drop and mark due; versions kept for sync,
+  // or another file's, aren't read at all.  Times are reported, not asserted)
+  const look = W.LIMITS.maxVersions + W.PRUNE_STEP, [a, b, c, d, e] = out;
+  check(b.records === a.records && c.records === a.records && b.calls === a.calls && c.calls === a.calls && d.records <= a.records + look && d.calls <= a.calls + 3 * W.PRUNE_STEP + 1 && e.records === a.records && e.calls === a.calls && out.every((x) => x.longest < 50) && c.heapKB < 4096, "one file with 1,000 to 50,000 versions kept for sync, 50,000 not kept, or 50,000 of another file: a save reads the same records and makes the same requests (at most the window of 21 and 4 more requests for a backlog), its longest task under 50 ms (times reported): " + J(out));
 }
 
 async function bulkDrop() {
@@ -845,11 +861,11 @@ async function unpinPrunable() {
   const pinned = (await all(w.ws, "versions")).filter((v) => v.pinned).length;
   await ob.scan();
   await ob.confirmed((await ob.records()).map((r) => r.dseq));
-  const freed = (await all(w.ws, "versions")).filter((v) => !v.pinned && v.free && v.u === 1).length;
+  const freed = (await all(w.ws, "prunable")).length;
   await w.write("/u.bin", "u7");
   await w.pinsCleaning;
   const left = (await all(w.ws, "versions")).length;
-  check(pinned === 6 && freed === 6 && left === 2, "versions kept for sync, released: prunable again (in the prunable indexes), the file back to its count: " + J({ pinned, freed, left }));
+  check(pinned === 6 && freed === 6 && left === 2, "versions kept for sync, released: prunable again (a prunable record each), the file back to its count: " + J({ pinned, freed, left }));
   w.close();
 }
 
@@ -872,6 +888,202 @@ async function caughtUp() {
     restore();
     w.close();
   }
+}
+
+// (versions as a workspace before database v5 kept them: no `free` or `u`, and the backfill's marker, as the
+// upgrade leaves them; ids from `from`)
+async function legacyVersions(w, fid, n, size = 1, t = Date.now()) {
+  await new Promise((ok, no) => {
+    const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
+    for (let i = 0; i < n; i++) { const r = vs.add({ fid, t: t + i, size, sha256: "0", by: "person", device: "d" }); r.onsuccess = () => vb.put(new Uint8Array(size), r.result); }
+    tx.objectStore("meta").put({ after: 0 }, W.BACKFILL);
+    const m = tx.objectStore("meta").get("versionBytes");
+    m.onsuccess = () => tx.objectStore("meta").put((m.result ?? 0) + n * size, "versionBytes");
+    tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+  });
+}
+const prunableVersions = async (w, fid, n, size = 1) => {
+  await new Promise((ok, no) => {
+    const tx = w.ws.transaction(["versions", "versionBytes", "prunable", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable");
+    for (let i = 0; i < n; i++) { const t = Date.now(), r = vs.add({ fid, t, size, sha256: "0", by: "person", device: "d" }); r.onsuccess = () => { vb.put(new Uint8Array(size), r.result); pr.put({ fid, id: r.result, t, size }); }; }
+    const m = tx.objectStore("meta").get("versionBytes");
+    m.onsuccess = () => tx.objectStore("meta").put((m.result ?? 0) + n * size, "versionBytes");
+    tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+  });
+};
+const bytesExact = async (w) => (await get(w.ws, "meta", "versionBytes")) === (await all(w.ws, "versions")).reduce((t, v) => t + v.size, 0);
+// (each slice's wall time: from a readwrite transaction's start to its completion)
+async function timedSlices(f) {
+  const realTx = IDBDatabase.prototype.transaction, times = [];
+  IDBDatabase.prototype.transaction = function (...a) {
+    const tx = realTx.apply(this, a);
+    if (a[1] === "readwrite" && [].concat(a[0]).includes("pins")) { const t0 = performance.now(); tx.addEventListener("complete", () => times.push(performance.now() - t0)); }
+    return tx;
+  };
+  try { await counting(f); } finally { IDBDatabase.prototype.transaction = realTx; }
+  const sorted = [...times].sort((x, y) => x - y), at = (q) => Math.round((sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0) * 10) / 10;
+  return { slices: times.length, medianMs: at(0.5), p95Ms: at(0.95), maxMs: Math.round(Math.max(0, ...times) * 10) / 10, perTx: lastPerTx, records: lastTxRecords };
+}
+
+async function dueDrain() {
+  // (daybreak2's LIMIT-563-1: a due file with 1,000, 10,000 and 50,000 versions not kept for sync, drained by the
+  // cleanup: every slice within its requests and records, its time flat; the file back to its count)
+  const out = [];
+  for (const n of [1000, 10000, 50000]) {
+    const w = await fresh();
+    const f = await w.create("/due.bin", { content: "d" });
+    await prunableVersions(w, f.fid, n);
+    await put(w.ws, "meta", 1, W.VDUE + f.fid);
+    let longest = 0;
+    const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+    obs.observe({ type: "longtask", buffered: false });
+    const r = await timedSlices(() => W.cleanPins(w));
+    obs.disconnect();
+    out.push({ n, ...r, longest: Math.round(longest), left: (await all(w.ws, "versions")).length, exact: await bytesExact(w) });
+    w.close();
+  }
+  check(out.every((x) => x.left === W.LIMITS.maxVersions && x.exact && x.longest < 50 && x.perTx <= W.PINS.slice.requests && x.records <= W.PINS.slice.examine + W.LIMITS.maxVersions + 10) && out[2].perTx === out[0].perTx && out[2].records === out[0].records, "a due file with 1,000 to 50,000 versions: drained by the cleanup, every slice within its requests and records, the same at every size, no long task (slice times reported): " + J(out));
+}
+
+async function upgradeOpen() {
+  // (daybreak2's LIMIT-563-2: the upgrade to v5 over 1,000, 10,000 and 50,000 versions kept before: schema only
+  // (indexes, and the backfill's marker), its time bounded; nothing written to the versions)
+  const out = [];
+  for (const n of [1000, 10000, 50000]) {
+    const name = "ws-up5-" + n + "-" + Math.random().toString(36).slice(2, 8);
+    await new Promise((ok, no) => {
+      const r = indexedDB.open(name, 4);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        const e = db.createObjectStore("entries", { keyPath: "path" });
+        e.createIndex("byRef", ["kind", "ref"]); e.createIndex("byNfc", "nkey"); e.createIndex("byIdent", "ident");
+        db.createObjectStore("boards", { keyPath: "id" }); db.createObjectStore("trash"); db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+        const v = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
+        v.createIndex("byFile", ["fid", "t"]); v.createIndex("byTime", "t");
+        db.createObjectStore("versionBytes"); db.createObjectStore("meta"); db.createObjectStore("fileBytes");
+        const g = db.createObjectStore("grants", { keyPath: ["doc", "scope"] }); g.createIndex("byDoc", "doc"); g.createIndex("lastUsed", "lastUsed");
+        db.createObjectStore("outbox", { keyPath: ["ns", "dseq"] }).createIndex("byIdent", ["ns", "id"]);
+        db.createObjectStore("syncIndex", { keyPath: ["ns", "id"] });
+        db.createObjectStore("adoptJournal", { keyPath: ["ns", "id"] }).createIndex("byParent", ["ns", "parent"]);
+        db.createObjectStore("pins", { keyPath: ["id", "seq"] }); db.createObjectStore("pending", { keyPath: "id" });
+      };
+      r.onsuccess = () => {
+        const db = r.result, tx = db.transaction(["versions"], "readwrite"), vs = tx.objectStore("versions");
+        for (let i = 0; i < n; i++) vs.add({ fid: "f" + (i % 100), t: i, size: 1, sha256: "0", by: "person", device: "d" });
+        tx.oncomplete = () => { db.close(); ok(); };
+        tx.onerror = () => no(tx.error);
+      };
+      r.onerror = () => no(r.error);
+    });
+    const t0 = performance.now();
+    const db = await W.openWorkspaceDb(name, undefined, 120000);
+    const ms = performance.now() - t0;
+    const marker = await get(db, "meta", W.BACKFILL);
+    const v = await new Promise((ok) => { const r = db.transaction("versions").objectStore("versions").get(1); r.onsuccess = () => ok(r.result); });
+    const empty = await new Promise((ok) => { const r = db.transaction("prunable").objectStore("prunable").count(); r.onsuccess = () => ok(r.result === 0); });
+    out.push({ n, ms: Math.round(ms), marker, untouched: !!v && J(Object.keys(v).sort()) === J(["by", "device", "fid", "id", "sha256", "size", "t"]) && empty });
+    db.close();
+    await new Promise((ok) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => ok(); });
+  }
+  // (no index over the versions kept: the open's time doesn't grow with them; reported, and well within 3 s)
+  check(out.every((x) => x.marker?.after === 0 && x.untouched && x.ms < 1000), "the upgrade to v5 over 1,000 to 50,000 versions kept before: schema only (a new, empty store; no index built over them; no record written; the backfill's marker set), well within the 3 s open: " + J(out));
+}
+
+async function backfill() {
+  // (the backfill, a page a slice, cut at every page (a throw in it) and reloaded: each page all of it or none, it
+  // goes on from its marker, and ends as a fresh v5 would have them; a save meanwhile; the bytes bound past during
+  // it, kept after it)
+  const nm = names();
+  localStorage.clear();
+  let w = await W.Workspace.open({ ...nm, limits: { ...W.LIMITS, maxVersionBytes: 200 } });
+  const f = await w.create("/old.bin", { content: "o" });
+  await legacyVersions(w, f.fid, 50, 10);
+  const ids = (await all(w.ws, "versions")).map((v) => v.id).sort((a, b) => a - b);
+  W.PINS.slice = { examine: 10, requests: 400 };
+  // (the cleanup a save begins held back: only the runs here go on with the backfill)
+  let open;
+  W.PINS.cleanAfter = new Promise((r) => (open = r));
+  const marks = [], oks = [];
+  let ok = true;
+  try {
+    for (let k = 0; k < 5; k++) {
+      // (a save meanwhile: kept, the old versions not dropped for it, the bytes past the bound marked)
+      if (k === 2) {
+        const reached = (await get(w.ws, "meta", W.BACKFILL)).after;
+        await w.write("/old.bin", "o" + k);
+        const unreached = (await all(w.ws, "versions")).filter((v) => ids.includes(v.id) && v.id > reached).length;
+        ok &&= unreached === ids.filter((x) => x > reached).length && (await get(w.ws, "meta", W.VOVER)) !== undefined;
+        oks.push(["save", reached, unreached, (await get(w.ws, "meta", W.VOVER)) !== undefined]);
+      }
+      let puts = 0;
+      const realPut = IDBObjectStore.prototype.put;
+      // (each run goes on from the marker: cut at its first page's first write, then at its second page's)
+      IDBObjectStore.prototype.put = function (...a) { if (this.name === "prunable" && ++puts === (k === 0 ? 1 : 11)) throw new Error("cut"); return realPut.apply(this, a); };
+      let err;
+      try { await W.cleanPins(w); } catch (e) { err = e; } finally { IDBObjectStore.prototype.put = realPut; }
+      const m = await get(w.ws, "meta", W.BACKFILL);
+      marks.push(m?.after ?? null);
+      ok &&= !!err && m?.after === (k === 0 ? 0 : ids[k * 10 - 1]);
+      oks.push([k, !!err, String(err?.message ?? "").slice(0, 40)]);
+      w.close();
+      w = await W.Workspace.open({ ...nm, limits: { ...W.LIMITS, maxVersionBytes: 200 } });
+    }
+    await W.cleanPins(w);
+  } finally {
+    open();
+    restore();
+  }
+  await w.pinsCleaning;
+  const vs = await all(w.ws, "versions"), pr = await all(w.ws, "prunable");
+  const shaped = !vs.some((v) => v.pinned) && J(pr.map((p) => [p.fid, p.id, p.t, p.size])) === J(vs.map((v) => [v.fid, v.id, v.t, v.size]));
+  const total = await get(w.ws, "meta", "versionBytes");
+  const conds = { ok, shaped, marker: (await get(w.ws, "meta", W.BACKFILL)) === undefined, total: total <= 200, exact: await bytesExact(w), over: (await get(w.ws, "meta", W.VOVER)) === undefined };
+  // (versions kept before already past the bytes, and no save: the backfill's end marks them, and the cleanup
+  // then keeps the bound)
+  const nm2 = names();
+  localStorage.clear();
+  const w2 = await W.Workspace.open({ ...nm2, limits: { ...W.LIMITS, maxVersionBytes: 200 } });
+  const g = await w2.create("/older.bin", { content: "o" });
+  await legacyVersions(w2, g.fid, 40, 10);
+  await W.cleanPins(w2);
+  conds.alone = (await get(w2.ws, "meta", "versionBytes")) <= 200 && (await bytesExact(w2)) && (await get(w2.ws, "meta", W.VOVER)) === undefined;
+  w2.close();
+  check(Object.values(conds).every(Boolean), "the backfill cut at every page and reloaded: each page whole or not at all, going on from its marker; ended as v5 makes them; a save meanwhile kept the old ones; the bytes bound past during it, kept after it: " + J({ marks, n: vs.length, total, conds, oks }));
+  w.close();
+}
+
+async function rangeEdges() {
+  // (astra's round 2: drops at exact page multiples and one either side, to a fence or a file's newest kept that is
+  // exactly the last id: no exception, the exact survivors)
+  const out = [];
+  // (at the page (W.DROP_PAGE), one either side, and two pages)
+  const pg = W.DROP_PAGE;
+  for (const n of [pg - 1, pg, pg + 1, 2 * pg]) {
+    // (everyone's, fenced at the last id, five newer after the fence)
+    let w = await fresh();
+    const f = await w.create("/r.bin", { content: "r" });
+    await prunableVersions(w, f.fid, n);
+    const fence = Math.max(...(await all(w.ws, "versions")).map((v) => v.id));
+    await prunableVersions(w, f.fid, 5);
+    let e = await fails(w.dropVersions("/", { expect: { maxId: fence } }));
+    let left = await all(w.ws, "versions");
+    out.push({ n, root: !e && left.length === 5 && left.every((v) => v.id > fence) && (await bytesExact(w)) });
+    w.close();
+    // (one file's, keep 1; and fenced at its last id)
+    w = await fresh();
+    const g = await w.create("/s.bin", { content: "s" });
+    await prunableVersions(w, g.fid, n);
+    const last = Math.max(...(await all(w.ws, "versions")).map((v) => v.id));
+    e = await fails(w.dropVersions("/s.bin", { keep: 1, expect: { maxId: last } }));
+    left = await all(w.ws, "versions");
+    out.at(-1).keep1 = !e && left.length === 1 && left[0].id === last && (await bytesExact(w));
+    await prunableVersions(w, g.fid, n);
+    const last2 = Math.max(...(await all(w.ws, "versions")).map((v) => v.id));
+    e = await fails(w.dropVersions("/s.bin", { expect: { maxId: last2 } }));
+    out.at(-1).fileFence = !e && (await all(w.ws, "versions")).length === 0 && (await bytesExact(w));
+    w.close();
+  }
+  check(out.every((x) => x.root && x.keep1 && x.fileFence), `drops at ${pg - 1}, ${pg}, ${pg + 1} and ${2 * pg} versions (pages of ${pg}), fenced at the last id, everyone's and one file's (keep 1 too): no exception, the exact survivors: ` + J(out));
 }
 
 async function storageInvariant() {
@@ -917,7 +1129,8 @@ async function manyPins() {
 }
 
 async function upgradeV5() {
-  // (a version 4 workspace upgraded: every store the same, the pins' index byStorage added)
+  // (a version 4 workspace upgraded: every store the same, the pins' index byStorage and the empty store prunable
+  // added, and the backfill's marker the one write)
   const name = `ws-pin-v4-${Math.random().toString(36).slice(2, 8)}`;
   const db4 = await new Promise((ok, no) => {
     const r = indexedDB.open(name, 4);
@@ -944,12 +1157,16 @@ async function upgradeV5() {
   db4.close();
   const db5 = await W.openWorkspaceDb(name);
   const after = await dump(db5), idx = [...db5.transaction("pins").objectStore("pins").indexNames];
-  check(db5.version === 5 && J(after) === J(before) && J(idx) === J(["byStorage"]), "version 4 to 5: every store the same, byte for byte, and the pins' index byStorage added: " + J(idx));
+  const marker = await get(db5, "meta", W.BACKFILL), prunable = after.prunable;
+  delete after.prunable;
+  const metaKeys = JSON.parse(after.meta)[0];
+  after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL), JSON.parse(after.meta)[1].filter((v) => !(v && typeof v === "object" && "after" in v))]);
+  check(db5.version === 5 && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && marker?.after === 0, "version 4 to 5: every store the same, byte for byte; the pins' index byStorage and the empty store prunable added; the backfill's marker set: " + J({ idx, prunable, marker }));
   db5.close();
 }
 
 export async function run() {
-  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, storageInvariant, manyPins, upgradeV5, tail]) {
+  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); } finally { restore(); }
   }
   return results;
