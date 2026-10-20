@@ -10,6 +10,7 @@
   - explicit document checkpoints and ages (B.4);
   - the manifest pinned through a restore, and slot verification and retention (B.3, B.7).
 - It also answers daybreak2's LIMIT-DUR-4: whole-group admission, all or none (B.3a).
+- **Revision 4** answers astra's CORR-A54-1 (a checkpoint crossed by an over-size group, B.3b) and CORR-A54-2 (a blob's handoff to the commit that names it; what startup cleanup may delete, B.5, B.3a).
 - The finding and the promise are design/workspace-durability.md §1 and §2.
 
 
@@ -21,7 +22,7 @@
 - It is written by **one writer**: the tab holding the Web Lock `sagebrush-recovery`, as the sync sender is one tab.
 - It covers a committed prefix of the workspace's transactions. Its **authoritative point** is the last transaction group whose every frame and every referenced byte is published under the current manifest (B.3).
 - **Documents' content has points of its own** (B.4). A restore reports the index's point and each document's separately.
-- It lags by at most the writer's interval (10 s) while it runs, and the Storage panel shows its point and age.
+- It normally lags by the writer's interval (10 s). That isn't a hard bound: a checkpoint, a pause or a stale copy lags longer. The Storage panel shows the copy's actual age: the commit time of its authoritative point, recorded in its last group.
 
 ### B.2 What it holds
 
@@ -94,7 +95,15 @@ The person's saves are never refused or slowed by the copy.
 
 **Checkpoints without room.** The checkpoint needs room for a whole snapshot. Without that room, reserved first (B.6), nothing is appended, and the copy stays at its prior point, shown **stale**. Its later groups aren't kept either: once stale, `rcStage` holds only the `checkpoint: needed` record, so it can't grow.
 
-**Unpublished parts.** Anything in OPFS that no valid manifest slot or in-progress checkpoint names is deleted when the writer starts, in pages: temporary snapshot files, and frames past the published point.
+**Unpublished parts.** When the writer starts, it deletes, in pages, only its own temporary journal files: temporary snapshot files (`tmp-*`), and segments' frames past the published point. It never deletes a blob or a document snapshot at startup: those go only by B.5's deletion, which honours every root and pin.
+
+### B.3b A checkpoint crossed by an over-size group (CORR-A54-1)
+
+A checkpoint's pages can't be repaired by a group staged only as `{checkpoint: needed}`: it has no assignments to replay. So:
+- **Restarted.** A checkpoint under way is invalidated and started again when any such marker is staged with a seq after its S0. The same holds for a group suppressed because the copy is stale. The writer checks before reading each page, and before publication.
+- **Bounded.** The third attempt in a row holds the workspace's lock while it reads its pages: about 1 s per 100,000 entries, measured in the tests. Saves wait meanwhile, and are never refused; the page shows "saving…". Restarts are therefore bounded without needing a quiet interval.
+- **While stale.** A checkpoint that will bring a stale copy back starts staging groups again from its S0. It has its tail like any other.
+- **Never across a gap.** A slot is published only if its tail's seq runs continuously from S0 to S1. Otherwise the checkpoint is started again.
 
 **Before building on OPFS:** feature tests in the writer's worker for OPFS, sync access handles, `flush()` and, where used, `move()`. Without them, the copy is "not available in this browser", shown, and part A still works.
 
@@ -130,6 +139,9 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
   - an in-progress checkpoint.
 
   Deletion runs in pages, holding the workspace's lock and the recovery lock, so no new reference appears while a page is decided.
+- **The handoff (CORR-A54-2).** A new blob's publication (its temporary file, flush, name and verification) and the IndexedDB commit that names it happen in one hold of the workspace's lock. Deletion needs that lock too, so it can never fall between them.
+  - A blob orphaned by a kill between the two is named by nothing, and goes at the next deletion, correctly.
+  - A pending restore's `restore.json` pins its slot's blobs too.
 - **The migration:** 1a's, again: batched, reserved, crash-tested, and the old copy dropped after the hash check.
 
 **Until this step is built,** the copy covers the index and documents only. A restore then lists data files whose bytes it doesn't have, with "restore from sync or an export".
@@ -179,6 +191,10 @@ The copy counts in "Storage in this browser" as its own line, **recovery copy**:
 - without room for the checkpoint, the copy goes stale at its prior point, appends nothing, and `rcStage` holds one record.
 
 A kill during that checkpoint leaves unpublished parts, which are reclaimed at the next start.
+
+**A checkpoint crossed (CORR-A54-1).** An over-size move during a checkpoint's pages restarts the checkpoint. Another during the restart restarts it again. The third attempt holds the lock and publishes. While stale, a move suppressed during the checkpoint restarts it. No slot is ever published with a gap. The age shown is the authoritative point's commit time.
+
+**The blob handoff (CORR-A54-2).** Deletion attempted between a blob's verification and the commit naming it waits for the lock, and the blob stays. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
 **GC with pending groups.** A file deleted, and its version dropped, while its group is still staged. Its blob stays until the group is published and nothing retains it.
 
