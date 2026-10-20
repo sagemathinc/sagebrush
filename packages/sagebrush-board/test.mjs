@@ -189,7 +189,7 @@ try {
   // preview: what apply would do, nothing changed (lite2's A2B-GATE-1); pictures by reference
   const pm = { sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r2", changes: [{ op: "set", key: { type: "item", page: "", id: "n" }, fields: { text: "XABC" }, was: { text: "XAB" } }] };
   const before = JSON.stringify(st.records()), pv = st.preview(pm), same = JSON.stringify(st.records()) === before, ap = st.apply(pm);
-  check(pv.ok && same && typeof pv.bytes === "number" && ap.ok && pv.bytes === st.bytes, "/submission: editState.preview decides as apply, changing nothing: " + JSON.stringify(pv));
+  check(pv.ok && same && typeof pv.boardBytes === "number" && ap.ok && pv.boardBytes === st.bytes && pv.editBytes === new TextEncoder().encode(JSON.stringify(pm)).length && pv.workBytes >= pv.editBytes, "/submission: editState.preview decides as apply, changing nothing: " + JSON.stringify(pv));
   const refSt = editState(JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "n", text: "A" }] }), { pictures: "by-reference" });
   const dataUrl = refSt.apply({ sagebrush: "edit", version: 1, id: crypto.randomUUID(), base: "r1", changes: [{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images: { ["i" + "ab".repeat(16)]: { w: 1, h: 1, src: "data:image/png;base64,AAAA" } } }, was: { images: null } }] });
   check(!dataUrl.ok && dataUrl.reason === "invalid" && /imagePut/.test(dataUrl.message), "/submission: editState with pictures by reference refuses a data: URL: " + JSON.stringify(dataUrl));

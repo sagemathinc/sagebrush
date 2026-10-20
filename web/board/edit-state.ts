@@ -56,9 +56,12 @@ export type Applied =
   /** not merged: why (the host's `refused`); `retryAfter` (ms): the rate or the work budget, to send again;
    * `ignore`: an id already answered (nothing to answer) */
   | { ok: false; id?: string; message: string; reason?: RefusalReason; limit?: number; size?: number; retryAfter?: number; ignore?: true };
-/** What apply would do with the same message now, nothing changed: merged, with the board's size after it
- * (`bytes`), or refused, as apply would refuse it. */
-export type Previewed = (Applied & { ok: true; bytes: number }) | (Applied & { ok: false });
+/** What apply would do with the same message now, nothing of the board's changed: merged, with the board's
+ * size after it (`boardBytes`) and the message's own (`editBytes`, its UTF-8 JSON: what a host's admission
+ * charges for the edit, never `boardBytes`), or refused, as apply would refuse it. */
+// (`workBytes`: the work the preview did, in the work budget's bytes (the edit's size, the records its changes
+// passed over, 64 a visit of the walk): for a host to charge its own admission, refused or not: LIMIT-74B-1)
+export type Previewed = (Applied & { ok: true; boardBytes: number; editBytes: number; workBytes: number }) | (Applied & { ok: false; editBytes?: number; workBytes: number });
 /** How the board's pictures travel: "inline" (in the board, as data: URLs: the default, as before) or
  * "by-reference" (sent apart, by `imagePut`: an edit giving a picture any source but an https: address is
  * refused). */
@@ -287,9 +290,11 @@ export function recordProblems(records: Iterable<Rec>): string[] {
 export interface EditState {
   /** An `edit` message from the frame, merged and checked; kept only if it passes.  `now`: the clock (ms) for the rate. */
   apply(message: unknown, now?: number): Applied;
-  /** The same as apply, changing nothing: not the board, the rate's or the work's budget, the ids answered or
-   * lastWalk.  apply with the same message, state and clock decides the same; between the two, other edits
-   * and remote changes can make apply decide otherwise, so a host still applies (and may be refused) at commit. */
+  /** The same as apply, changing nothing of the board's: not the records, apply's rate and work budgets, the ids
+   * answered or lastWalk.  Its own work is metered by budgets of its own, the same as apply's, so previews
+   * alone are bounded too (daybreak2's LIMIT-74B-1).  apply with the same message, state and clock decides the
+   * same; between the two, other edits and remote changes can make apply decide otherwise, so a host still
+   * applies (and may be refused) at commit. */
   preview(message: unknown, now?: number): Previewed;
   /** The host's own changes (another tab, an agent), as they are, merged without rules but within the
    * bounds: plain JSON, 8 MiB, 100,000 records, all or none.  Refused: the board can't be edited here as
@@ -386,12 +391,16 @@ export function editState(postedText: string, options: EditOptions = {}): EditSt
     }
     if (now > b.clock) b.clock = now;
   }
+  // (preview's own rate and work: as apply's, charged by previews alone)
+  const previewBucket = { ...bucket };
+  let charged = 0;
   const byReference = options.pictures === "by-reference";
 
-  // (apply and preview are this one function: `commit` false runs every step on a copy of the budgets, and
-  // keeps nothing (the records, the ids answered, lastWalk), so the two decide alike: lite2's A2B-GATE-1)
-  function run(m: unknown, now: number, commit: boolean): Applied & { bytes?: number } {
-    const B = commit ? bucket : { ...bucket };
+  // (apply and preview are this one function: `commit` false runs every step on preview's own budgets, and
+  // keeps nothing else (the records, the ids answered, lastWalk), so the two decide alike: lite2's A2B-GATE-1)
+  function run(m: unknown, now: number, commit: boolean): Applied & { boardBytes?: number } {
+    const B = commit ? bucket : previewBucket;
+    charged = 0;
     const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
     const keep = (id: string) => { if (commit) remember(id); };
     const no = (message: string, reason: RefusalReason = "invalid", sized?: { limit: number; size: number }): Applied => { if (id) keep(id); return { ok: false, ...(id ? { id } : {}), message, reason, ...(sized ?? {}) }; };
@@ -428,6 +437,7 @@ export function editState(postedText: string, options: EditOptions = {}): EditSt
     if (cost > B.work) return later("too much to merge at once", ((cost - B.work) / EDIT_LIMITS.workPerSecond) * 1000);
     B.edits -= 1;
     B.work -= cost;
+    charged = cost;
 
     // the merge, staged over the records: nothing kept until every check passes
     const staged = new Map<string, Rec | null>(), dropped: Key[] = [];
@@ -559,6 +569,7 @@ export function editState(postedText: string, options: EditOptions = {}): EditSt
         if (by === walk) return no(`item "${g.id}"'s parents go round`);
         if (by !== undefined) continue;
         visited.set(gk, walk);
+        charged += 64;
         if ((B.work -= 64) < 0) { B.work = 0; keep(id); return { ok: false, id, message: "too much to check at once", reason: "busy", retryAfter: Math.ceil((64 / EDIT_LIMITS.workPerSecond) * 1000 * Math.max(1, visited.size)) }; }
         if (d > EDIT_LIMITS.levels) return no(`item "${g.id}" is more than ${EDIT_LIMITS.levels} levels deep`);
         if (g.kind === "group") for (const c of childrenOf(g)) stack.push([c, d + 1]);
@@ -577,13 +588,20 @@ export function editState(postedText: string, options: EditOptions = {}): EditSt
       if (old) for (const f of Object.keys(old)) if (!KEY_FIELDS.has(f) && !own(r, f)) { fields[f] = null; changed = true; }
       if (changed) out.push({ op: "set", key: { type: r.type, page: r.page, id: r.id }, fields });
     }
-    if (!commit) return { ok: true, id, changes: out, dropped, bytes: size };
+    if (!commit) return { ok: true, id, changes: out, dropped, boardBytes: size };
     for (const [k, r] of staged) put(k, r);
     remember(id);
     return { ok: true, id, changes: out, dropped };
   }
   function apply(m: unknown, now: number = Date.now()): Applied { return run(m, now, true); }
-  function preview(m: unknown, now: number = Date.now()): Previewed { return run(m, now, false) as Previewed; }
+  function preview(m: unknown, now: number = Date.now()): Previewed {
+    const r = run(m, now, false) as Previewed;
+    // (editBytes: the UTF-8 length of JSON.stringify of the whole message as received, every field of it: the
+    // envelope's size, what a host's admission caps an edit by)
+    let editBytes: number | undefined;
+    try { editBytes = enc.encode(JSON.stringify(m)).length; } catch {}
+    return { ...r, workBytes: charged, ...(editBytes === undefined ? {} : { editBytes }) };
+  }
 
   function remote(changes: Change[]): { ok: true } | { ok: false; message: string } {
     const no = (message: string) => ({ ok: false as const, message });

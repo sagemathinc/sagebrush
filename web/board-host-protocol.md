@@ -701,25 +701,52 @@ written) calls `editState.preview(message, now?)` at admission and
 
 - `preview` runs the very same steps as `apply`: the message's checks, the
   rate, the work budget, the merge, the board's checks, the walk. It changes
-  nothing: not the records, nor the budgets, nor the ids answered, nor
-  `lastWalk`.
-- It returns what `apply` would return now, plus `bytes`, the board's size
-  after the edit, when it would be merged:
-  `{ ok: true, id, changes, dropped, bytes }` or
-  `{ ok: false, id?, message, reason?, limit?, size?, retryAfter?, ignore? }`.
+  nothing of the board's: not the records, nor `apply`'s budgets, nor the ids
+  answered, nor `lastWalk`.
+- **Previews are metered** (daybreak2's LIMIT-74B-1). They have a rate and a
+  work budget of their own, the same as `apply`'s (20 at once, then 2 a
+  second; 32 MiB of work, then 3.2 MiB a second), charged by previews alone.
+  Past them a preview is refused `"busy"`, with `retryAfter`, before any
+  merge. Like `apply`, each call is bounded: it never walks the whole board.
+- **Before calling it, the host checks what costs nothing**, in this order:
+  1. the message's encoded size, at most 1 MiB (Bounds);
+  2. its own per-client rate and admission (CoCalc's HostAdmission);
+  3. only then `preview`.
+- It returns what `apply` would return now, with three sizes:
+  `{ ok: true, id, changes, dropped, boardBytes, editBytes, workBytes }` or
+  `{ ok: false, id?, message, reason?, limit?, size?, retryAfter?, ignore?, editBytes?, workBytes }`.
+  - **`boardBytes`**: the board's size after the edit, as UTF-8 JSON of its
+    records, at most 8 MiB. It is editState's own bound, for showing or for
+    metrics. **It is never the edit's size**: a host must not charge it to
+    an admission that caps edits (CoCalc's BoardAdmission caps a commit at
+    512 KiB).
+  - **`editBytes`**: the edit's size, which is what an admission that caps
+    edits charges. Exactly: the length in UTF-8 of `JSON.stringify(message)`,
+    the whole `edit` envelope as received (`sagebrush`, `version`, `id`,
+    `base`, `changes`, and any other field it carries). It is absent only
+    for a message that can't be serialized.
+  - **`workBytes`**: the work the preview did, in the work budget's units:
+    the message's size, the current size of each record its changes pass
+    over, and 64 for each visit of the walk. A host charges it to its own
+    work budget whether the edit was accepted or refused. It is 0 for a
+    message refused before any merging.
 - With the same message, state and clock, `apply` decides exactly as
   `preview` did. Between the two, other edits and remote changes can make
   `apply` decide otherwise. So the host still calls `apply` at commit, and
   answers by what it says.
-- A preview spends nothing: a host that previews and then never applies has
-  used none of the frame's rate.
+- A preview spends none of `apply`'s budgets: a host that previews and then
+  never applies has used none of the frame's edit rate, only the preview
+  rate.
 - web/board/test-edit-state.mjs checks this on the 2,400 random edits of its
   property test: before each `apply`, a `preview` at the same clock leaves
   the state alone (the records, the size, `lastWalk`) and decides the same
   (accepted or refused, the message, `retryAfter`, the changes, `dropped`,
   the size). It also checks that 50 previews at one instant leave the burst
   of 20 edits untouched, that a previewed id is not taken as answered, and
-  that `lastWalk` is `apply`'s alone.
+  that `lastWalk` is `apply`'s alone. It also checks that 50 previews at
+  one instant are 20 taken and then busy, leaving `apply`'s burst of 20
+  untouched, and that previews of an edit over a 3 MiB record run out of
+  their own work budget after about 10, each giving its `workBytes`.
 
 ## Pictures: imagePut and imageGet
 
@@ -764,17 +791,26 @@ itself** has them sent apart, on the channel, and its board names them only:
   - `more`: the names left for another `imageGet`, past 8 MiB.
 - `{ sagebrush: "refused", version: 1, id, message, reason, ... }`, as above.
 
-**The host's checks of an `imagePut`**, all before it keeps anything:
+**The host's checks of an `imagePut`**, all before it keeps anything, in
+this order. Each is cheaper than the next, and none is skipped:
 - `id` a UUID;
 - `name` of the form above;
 - `type` one of the four;
+- **the byte length, first:** a picture of more than 2,000,000 bytes is
+  refused (`"too-large"`, `what: "image"`) before it is hashed, parsed or
+  looked at in any other way;
 - the bytes' first bytes those of that type (PNG's signature, JPEG's SOI,
   `GIF87a`/`GIF89a`, `RIFF....WEBP`);
-- its size and pixels read from its header (web/image-size.ts
+- its size and pixels, read from its header alone (web/image-size.ts
   `imageSizeOf`): each side at most 8,192 pixels, at most 40,000,000
   pixels;
 - the SHA-256 of the bytes giving `name`: computed by the host, never
   trusted.
+
+**The host never decodes a picture at ingestion.** The type and size
+checks read only the leading bytes and the header, and nothing is decoded,
+scaled or converted on the way in. Decoding happens only where a picture is
+shown, in a browser, within the same bounds.
 
 A picture that fails one of these is refused with `"invalid"`.
 
