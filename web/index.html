@@ -2225,7 +2225,7 @@ const wsReady = (async () => {
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
     showLossNotice(w);
     w.onDurability(() => showLossNotice(w));
-    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : null));
+    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : null));
     // (and the notebook read-only meanwhile, now and when another tab finds the loss)
     const readOnlyIfQuarantined = () => { if (w.quarantined) nb.setReadOnly(true); };
     readOnlyIfQuarantined();

@@ -52,7 +52,8 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     // (a reset's purge not finished: nothing brought in until it is, in the background; the next migrate brings in what's left)
-    if (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("purgeMain")))) { void w.cleanUp(); return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 }; }
+    // (localStorage's part too: an old board it couldn't yet remove isn't brought into the new workspace: CORR-2A4-3)
+    if (await inTx(w.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("purgeMain"))) || (await req(tx.objectStore("meta").get("purgeLocal"))))) { void w.cleanUp(); return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 }; }
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {

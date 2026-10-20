@@ -27,7 +27,7 @@
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE, markBlocked } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 import { reserve } from "./reserve";
 
@@ -141,7 +141,7 @@ const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "str
 // keys it keeps)
 const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants"];
 const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
-const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "fenceStep"]);
+const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
 /** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
  * over the whole workspace). */
 export const RESET_PAGE = 500;
@@ -160,7 +160,7 @@ type Resetting = { to: Identity; seq: number };
 const OPFS_EVERY_MS = 10_000;
 /** Test hooks at the reset's boundaries (A.3a): each is called holding the lock, and may throw, as a kill
  * there would stop the reset; the next open then resolves it. */
-export const RESET_HOOK: { afterFirstWitness?: () => void; afterPrepare?: () => void; afterPage?: (store: string, n: number, ms?: number) => void; openBudgetMs?: number; beforePurge?: () => void; afterIdb?: () => void; afterFirstCommit?: () => void; failCleanup?: boolean } = {};
+export const RESET_HOOK: { afterFirstWitness?: () => void; afterPrepare?: () => void; afterPage?: (store: string, n: number, ms?: number) => void; openBudgetMs?: number; beforePurge?: () => void; afterIdb?: () => void | Promise<void>; afterFirstCommit?: () => void; failCleanup?: boolean } = {};
 
 // (bytes compared four at a time where both are aligned: a 200 MB file in well under a second, inside one
 // transaction's callback, which can't yield; a byte at a time was 2 s there)
@@ -239,7 +239,8 @@ export class Workspace {
   async writeFence() {
     // (called holding the lock, which orders writes within a generation; a fence is never replaced by an earlier
     // generation's, compared in the same transaction, so a stale tab can't put an older one back; one that can't
-    // be written is deleted, so the stores bound to it refuse: astra's CORR-2A4-2 on 0eefec71.  The step, counted
+    // be written is never deleted (its absence would read as a database the workspace never had): its database is
+    // marked blocked instead, every write to it refused: astra's CORR-2A4-2 on 28f6511b.  The step, counted
     // in meta, says which write it was)
     const s = this.durability.state;
     const phase = s === "confirmed" || s === "suspected" ? "quarantined" : s === "resetting" ? "resetting" : s === "purging" ? "purging" : "ok";
@@ -262,19 +263,32 @@ export class Workspace {
       tx.onerror = () => no(tx.error);
       tx.onabort = () => no(tx.error);
     });
-    const del = (db: IDBDatabase, store: string, key: IDBValidKey) => new Promise<void>((ok, no) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).delete(key); tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); });
-    if (this.main) {
-      try { await put(this.main, "notebooks", FENCE, { id: FENCE, ...fence }, (v) => v); }
-      catch (e) { console.warn("workspace fence:", e); await del(this.main, "notebooks", FENCE).catch((e2) => console.warn("workspace fence, deleting:", e2)); }
-    }
-    try {
-      this.hdb ??= await openHistoryDb();
-      if (this.hdb) {
-        try { await put(this.hdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence); }
-        catch (e) { console.warn("workspace fence (history):", e); await del(this.hdb, "history", [FENCE, ""]).catch(() => {}); }
+    // (every store the editors write outside the lock, design/workspace-durability.md A.3b: the notebooks', their
+    // history's, the boards' history's; one whose fence can't be written is marked blocked, here, in localStorage
+    // and in meta, so its writes are refused until a later write succeeds; never deleted)
+    const blocked: string[] = [];
+    const fenceIn = async (db: IDBDatabase | null, store: string, key: IDBValidKey, rec: unknown, cur: (v: any) => any) => {
+      if (!db) return;
+      try {
+        await put(db, store, key, rec, cur);
+        markBlocked(db.name, false);
+      } catch (e) {
+        console.warn(`workspace fence (${db.name}):`, e);
+        markBlocked(db.name, true);
+        blocked.push(db.name);
       }
-    } catch (e) { console.warn("workspace fence (history):", e); }
+    };
+    await fenceIn(this.main, "notebooks", FENCE, { id: FENCE, ...fence }, (v) => v);
+    try { this.hdb ??= await openHistoryDb(); } catch {}
+    await fenceIn(this.hdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    try { this.bhdb ??= await openBoardHistoryDb(); } catch {}
+    await fenceIn(this.bhdb, "history", [FENCE, ""], { nb: FENCE, time: "", fence }, (v) => v?.fence);
+    this.fenceBlocked = blocked;
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { if (blocked.length) tx.objectStore("meta").put(blocked, "fenceBlocked"); else tx.objectStore("meta").delete("fenceBlocked"); });
   }
+  /** The stores whose fence couldn't be written at the latest try: their writes are refused (the pages' gates too). */
+  fenceBlocked: string[] = [];
+  private bhdb: IDBDatabase | null = null;
   private hdb: IDBDatabase | null = null;
 
   /** `ws`: the workspace's database; `main`: "sagebrush" (notebooks, files), or null where there is none. */
@@ -328,11 +342,11 @@ export class Workspace {
     return made;
   }
   /** meta's identity, quarantine and an unfinished purge, read together. */
-  private async metaState(): Promise<{ identity?: Identity; kept?: State; purge: boolean; resetting?: Resetting }> {
+  private async metaState(): Promise<{ identity?: Identity; kept?: State; purge: boolean; purgeLocal: boolean; resetting?: Resetting }> {
     return inTx(this.ws, "meta", "readonly", async (tx) => {
       const st = tx.objectStore("meta"), id = await req(st.get("identity")), q = (await req(st.get("quarantine"))) as State | undefined;
       const r = (await req(st.get("resetting"))) as Resetting | undefined;
-      return { identity: isIdentity(id) ? id : undefined, kept: q && (q.state === "confirmed" || q.state === "suspected") ? q : undefined, purge: !!(await req(st.get("purgeMain"))), resetting: r && isIdentity(r.to) ? r : undefined };
+      return { identity: isIdentity(id) ? id : undefined, kept: q && (q.state === "confirmed" || q.state === "suspected") ? q : undefined, purge: !!(await req(st.get("purgeMain"))), purgeLocal: !!(await req(st.get("purgeLocal"))), resetting: r && isIdentity(r.to) ? r : undefined };
     });
   }
 
@@ -353,13 +367,14 @@ export class Workspace {
     if (locks && typeof locks.request === "function") await this.locked(decided, undefined, { internal: true });
     else await decided();
     // (a reset resumed, or a purge: run here for at most a short while, then on in the background: LIMIT-99B-3)
-    if (this.durability.state === "resetting" || this.purgePending) await Promise.race([this.cleanUp(), new Promise((r) => setTimeout(r, RESET_HOOK.openBudgetMs ?? 250))]);
+    if (this.durability.state === "resetting" || this.purgePending || this.localPending) await Promise.race([this.cleanUp(), new Promise((r) => setTimeout(r, RESET_HOOK.openBudgetMs ?? 250))]);
     // (the witnesses brought up to what IndexedDB holds: IndexedDB ahead of them is harmless; a first visit gets none until its first save)
     if (!this.quarantined && this.durability.state !== "first" && locks) await this.locked(async () => {}, undefined, { internal: true, publish: true }).catch(() => {});
     this.watchHidden();
   }
   private async decideHere(info: OpenInfo) {
-    const { identity, kept, purge, resetting } = await this.metaState();
+    const { identity, kept, purge, purgeLocal, resetting } = await this.metaState();
+    this.localPending = purgeLocal;
     // (a database is new only if, read now under the lock, nobody has made it a workspace yet: another tab's
     // first open may have, since this one's indexedDB.open made it: astra's CORR-2A4-1; Chrome's dataLoss stands)
     if (info.fresh && (identity || (await this.generation()) > 0)) info = { ...info, fresh: false };
@@ -492,8 +507,17 @@ export class Workspace {
    * A witness write that fails while preparing refuses the reset, nothing changed. */
   async reset(kind: ResetKind): Promise<Identity> {
     return this.locked(async () => {
-      // (a tab whose workspace was reset elsewhere resets nothing: astra's probe on 2a4e53a8)
+      // (a tab whose workspace was reset elsewhere resets nothing: astra's probe on 2a4e53a8; nor while a reset or
+      // its purge is under way, from here or another tab: one reset at a time, astra's CORR-28F-1)
       await this.sameIdentity();
+      // (a reset to a new workspace already admitted, here or in another tab, is joined: carried on to the target
+      // it chose, never another; anything else meanwhile is refused as busy)
+      const now0 = await this.metaState();
+      if (now0.resetting && kind !== "keep") {
+        this.durability = { state: "resetting" };
+        return { id: now0.resetting.to, before: null };
+      }
+      if (now0.resetting || now0.purge) throw new WorkspaceError("storage", "a reset of this workspace is already under way: wait for it to finish, then reload");
       const g = this.identity.generation, to = g + 1, now = this.now();
       const before = await this.sample();
       const prepared: Witness = { ...before, reset: { to, kind, at: now } };
@@ -530,14 +554,17 @@ export class Workspace {
         this.durability = { state: "resetting" };
         await this.writeFence();
       }
-      return { id, before };
+      return { id, before: before as Witness | null };
     }, undefined, { internal: true }).then(async ({ id }) => {
       // (the cleanup: a page per hold of the lock, then the switch, each in its own hold; then the witnesses committed)
       if (kind !== "keep") await this.cleanUp(true);
       this.identity = id;
       this.durability = { state: "ok" };
-      RESET_HOOK.afterIdb?.();
+      await RESET_HOOK.afterIdb?.();
       return this.locked(async () => {
+      // (published only if the workspace is still the one this reset made: astra's CORR-28F-1)
+      const { identity: now1 } = await this.metaState();
+      if (!now1 || now1.workspace !== id.workspace || now1.generation !== id.generation) throw new WorkspaceError("storage", "the workspace was reset again meanwhile, in another tab: reload this page");
       await this.writeFence();
       // 3. committed, in both witnesses (a write that fails is noted: the next open finds IndexedDB ahead, and harmless)
       const after = await this.sample();
@@ -554,6 +581,7 @@ export class Workspace {
 
   private cleaning: Promise<void> | null = null;
   private purgePending = false;
+  private localPending = false;
   /** Resolves when the cleanup under way here (a reset's, resumed or not, and the old store's purge) is done. */
   settled(): Promise<void> { return this.cleaning ?? Promise.resolve(); }
   /** A reset to a new workspace carried through, or resumed, and the old store's purge: a page per hold of the
@@ -563,6 +591,8 @@ export class Workspace {
   cleanUp(throws = false): Promise<void> {
     this.cleaning ??= (async () => {
       let wasResetting = false;
+      this.localDoomed = null;
+      this.localChecked = false;
       try {
         if ((await this.metaState()).resetting) await this.learnSizes();
         for (;;) {
@@ -591,7 +621,7 @@ export class Workspace {
   /** One page of the cleanup, holding the lock: a page of a store a reset empties (its files' bytes first), a
    * page of meta's other keys, the switch to the new identity, or a page of the old store's purge. */
   private async cleanStep(): Promise<"reset" | "purge" | "done"> {
-    const { resetting, purge } = await this.metaState();
+    const { resetting, purge, purgeLocal } = await this.metaState();
     if (resetting) {
       for (const name of RESET_STORES) if (await this.deletePage(this.ws, name)) return "reset";
       // (meta's own keys, those it keeps aside: a bounded key cursor, never every key read again: LIMIT-99B-2)
@@ -626,12 +656,24 @@ export class Workspace {
     }
     if (purge) {
       if (this.main) for (const st of ["files", "notebooks"]) if (await this.deletePage(this.main, st)) return "purge";
-      // (localStorage's boards and pending copies: LOCAL_PAGE a step, the scan repeated until none is left: LIMIT-0EE-1)
-      if (this.purgeLocal()) return "purge";
-      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeMain"); });
+      // (the old store emptied: writers let go; localStorage's part marked pending in the same transaction)
+      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeMain"); tx.objectStore("meta").put(true, "purgeLocal"); });
       this.purgePending = false;
       if (this.durability.state === "purging") { this.durability = { state: "ok" }; this.durabilityChanged(); }
       await this.writeFence();
+      return "purge";
+    }
+    if (purgeLocal) {
+      // (localStorage's boards and pending copies: LOCAL_PAGE a step from one list (LIMIT-28F-1); its marker
+      // dropped only once a full listing finds none left.  Storage that can't be had, listed or emptied now is
+      // unknown, never empty (astra's CORR-2A4-3 on 28f6511b): the marker kept, every migrate refused meanwhile,
+      // tried again at the next open; writers aren't held up by it, nothing of the workspace being there)
+      let n: number | "unknown";
+      try { n = this.purgeLocal(); } catch (e) { n = "unknown"; console.warn("workspace: localStorage's old boards couldn't be removed yet; tried again at the next open:", e); }
+      if (n === "unknown") { this.localUnknown = true; return "done"; }
+      if (n) return "purge";
+      await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").delete("purgeLocal"); });
+      this.localUnknown = false;
       return "purge";
     }
     return "done";
@@ -694,23 +736,34 @@ export class Workspace {
   }
   /** localStorage's boards kept before the workspace, and their pending copies, deleted (after a reset to a new
    * workspace: nothing to bring back in). */
+  // (the keys to purge, listed by one pass over localStorage per cleanup run, then removed LOCAL_PAGE a step from
+  // the list: never a scan per step, nor key(i) indexes trusted across removals: daybreak2's LIMIT-28F-1)
+  private localDoomed: string[] | null = null;
+  private localChecked = false;
+  /** Whether localStorage's part of the old store's purge couldn't be done at the latest try (it is tried
+   * again at every open; until it is done no migrate brings anything in). */
+  localUnknown = false;
+  // (how many keys a step removed; a throw when localStorage can't be had, listed or emptied)
   private purgeLocal(): number {
-    // (localStorage that can't be read holds nothing anyone can bring back in: nothing to do; a key that can't
-    // be removed keeps the purge pending, to be tried again: astra's CORR-2A4-3 on 0eefec71)
-    let ls: Storage, doomed: string[] = [];
-    try {
-      ls = globalThis.localStorage;
-      for (let i = 0; i < ls.length && doomed.length < LOCAL_PAGE; i++) { const k = ls.key(i); if (k && (k.startsWith("sagebrush-board:local:") || k.startsWith(BOARD_KEYS.pending("")) || k.startsWith(BOARD_KEYS.unread("")))) doomed.push(k); }
-    } catch {
-      return 0;
+    const doomedKey = (k: string | null) => !!k && (k.startsWith("sagebrush-board:local:") || k.startsWith(BOARD_KEYS.pending("")) || k.startsWith(BOARD_KEYS.unread("")));
+    const ls: Storage = globalThis.localStorage;
+    if (!ls) throw new Error("no localStorage");
+    if (!this.localDoomed?.length && !this.localChecked) {
+      // (a list once per run; listed again once when it runs out, to find any key it missed)
+      this.localChecked = this.localDoomed !== null;
+      const keys: string[] = [];
+      for (let i = 0, n = ls.length; i < n; i++) { const k = ls.key(i); if (k !== null) keys.push(k); }
+      this.localDoomed = keys.filter(doomedKey);
     }
-    for (const k of doomed) ls.removeItem(k);
-    if (doomed.length) RESET_HOOK.afterPage?.("localStorage", doomed.length);
-    return doomed.length;
+    const page = this.localDoomed!.splice(0, LOCAL_PAGE);
+    for (const k of page) ls.removeItem(k);
+    if (page.length) RESET_HOOK.afterPage?.("localStorage", page.length);
+    return page.length;
   }
 
   close() {
     this.hdb?.close();
+    this.bhdb?.close();
     if (this.opfsTimer) clearTimeout(this.opfsTimer);
     this.opfsTimer = null;
     if (this.onHidden) (globalThis as any).document?.removeEventListener("visibilitychange", this.onHidden);

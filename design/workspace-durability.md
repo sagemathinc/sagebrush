@@ -103,7 +103,21 @@ In **confirmed** or **suspected** loss, the workspace opens **quarantined**. Eve
 
 ### A.3b The stores outside the workspace's lock: a fence
 
-The notebooks' store (`"sagebrush"/notebooks`) and their history (`"sagebrush-history"`) are written by the editors, which don't hold the workspace's lock. The workspace keeps a **fence** in each: a record of its own, `{workspace, generation, step, phase}`. Its phase is one of:
+**Every store a page writes, and whose it is** (the ownership list: `ownedByWorkspace` in web/notebook/stores.js decides what the workspace governs, never whether a fence happens to be there):
+
+| Store | What it holds | Owned by the workspace | Governed by |
+|---|---|---|---|
+| IndexedDB `"sagebrush-workspace"` | the workspace: entries, bytes, versions, trash, ops, meta | yes | its lock (A.2) |
+| IndexedDB `"sagebrush"` / `notebooks` | the notebooks the editors save | yes, every record | the fence |
+| IndexedDB `"sagebrush"` / `files` | the store before the workspace | yes (read only through the workspace's verbs, or with no workspace at all) | migrate, and the purge after a reset |
+| IndexedDB `"sagebrush-history"` | the notebooks' TimeTravel | yes, every record | the fence |
+| IndexedDB `"sagebrush-board-history"` | the boards' TimeTravel | only the workspace's own boards' (`board:local:` and a 12-hex ref); an example's, an unsaved board's, a board in the address's or in another site's frame are not, and keep their history whatever the workspace's state, deliberately | the fence, for those it owns |
+| IndexedDB `"sagebrush-blobs"`, `"sagebrush-board-images"`, `"sagebrush-board-docs-2"`, `"sagebrush-outputs"` | content by its hash, and caches | no: they hold nothing a lost workspace could be confused with | none |
+| localStorage `sagebrush-board:local:`, `sagebrush-workspace-pending:`, `sagebrush-workspace-pending-unread:` | boards before the workspace, and the board page's pending copies | yes | the board page's save (refused while quarantined, resetting, purging or closed), migrate, and the purge |
+| localStorage `sagebrush-boards` | the list of those boards | yes, read by migrate only | harmless once the boards it lists are purged: migrate finds nothing under it |
+| other localStorage keys | preferences (theme, mode, panels, tools, recent files, console history), the migrator's progress, the witness, the blocked marks | no | none |
+
+The workspace keeps a **fence** in each IndexedDB store the editors write without its lock (`"sagebrush"`/`notebooks`, `"sagebrush-history"`, `"sagebrush-board-history"`): a record of its own, `{workspace, generation, step, phase}`. Its phase is one of:
 - `ok`;
 - `quarantined`;
 - `resetting`;
@@ -112,20 +126,27 @@ The notebooks' store (`"sagebrush"/notebooks`) and their history (`"sagebrush-hi
 **Writing the fence:**
 - It is written holding the workspace's lock, at every open and every change of state, by compare-and-set in one transaction.
 - It is never replaced by an earlier generation's, so a tab left over from before a reset can't put its fence back.
-- A fence that can't be written is deleted.
+- **It is never deleted** (astra's CORR-2A4-2 on 28f6511b): a fence's absence reads as a store the workspace never had. A fence that can't be written marks its database **blocked**: in the stores' module, in localStorage (`sagebrush-fence-blocked:NAME`, which every copy of the stores reads, the board page's included) and in meta (`fenceBlocked`). Every write to a blocked database's owned records is refused, and the notebook page's gate refuses saves. The next open writes the fence again; when that succeeds the database is unblocked.
 
-**Checked by every write** (astra's CORR-2A4-2 on 0eefec71), whatever the page did or didn't wire:
+**Checked by every write to an owned record** (astra's CORR-2A4-2 on 0eefec71), whatever the page did or didn't wire:
 - **Binding:** a store is bound to the fence it found when it loaded, read in the same transaction as the document.
-- **Checking:** each write (a save, a history append, clear or drop) reads the fence in the write's own transaction. It is allowed only if the fence is that same workspace and generation, in phase `ok`.
-- **Failing closed:** a fence that appeared since a store found none, or went since it found one, refuses the write.
+- **Checking:** each write (a save, a history append, clear or drop) reads the fence in the write's own transaction. It is allowed only if the fence is that same workspace and generation, in phase `ok`, and its database isn't blocked.
+- **Failing closed:** a fence that appeared since a store found none, or went since it found one, refuses the write. A store that found none writes only into a database the workspace has never fenced (before its first open), which can't hold the workspace's records yet.
 
 **The page:**
 - The notebook page opens the workspace (at most a few seconds) before it loads any notebook.
-- The board page's save keeps nothing, not even its pending copy in localStorage, while the workspace is quarantined, resetting, purging, or closed.
+- The board page's save keeps nothing, not even its pending copy in localStorage, while the workspace is quarantined, resetting, purging, or closed; its local board's history is refused by the fence.
+
+**One reset at a time** (astra's CORR-28F-1): a reset's cleanup lets go of the lock between pages, so admission is checked holding it:
+- A reset to a new workspace asked while another is admitted (meta's `resetting`, from this tab or another, its broadcast seen or not) **joins** it: it carries the same cleanup on to the target the first chose, and reports that target. It never chooses its own.
+- Any other reset meanwhile ("keep", or anything during the purge) is refused as busy.
+- A reset from a tab whose workspace was reset elsewhere is refused (its identity is stale).
+- Completion is checked against the primary: the witnesses and fences are published only if meta's identity is still the target.
 
 **A purge after a reset to a new workspace:**
-- It is finished before anything is written. Its stopping or failing (a key that can't be removed) keeps it pending, the workspace "purging", and `migrate` bringing nothing in.
-- It goes a page at a time, as does the reset's cleanup, an open resuming them for at most 250 ms and then in the background.
+- The old store's notebooks and files go first, a page at a time; until they are gone the workspace is "purging" and every write is refused.
+- Then localStorage's boards and pending copies, LOCAL_PAGE keys a step from one listing (daybreak2's LIMIT-28F-1), marked pending (`purgeLocal`) in the same transaction that ends the first part. Storage that can't be had, listed or emptied is **unknown, never empty** (astra's CORR-2A4-3 on 28f6511b): the marker stays, `migrate` brings nothing in, and every open tries again. Writers aren't held up by it: nothing of the new workspace is there.
+- Both go a page at a time, as does the reset's cleanup, an open resuming them for at most 250 ms and then in the background.
 
 ### A.3a Reset and replacing import: prepared, then committed
 
