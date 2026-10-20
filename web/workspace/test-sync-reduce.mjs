@@ -154,7 +154,11 @@ check(applied > 10000 && skippedN > 1000, `random logs exercise both: ${applied}
   const report = `built in ${Math.round(t1 - t0)} ms; the move skipped ${ms(bad)} ms ${mb(bad)}; rename ${ms(ren)} ms ${mb(ren)}; Trash ${ms(rem)} ms ${mb(rem)}; forget ${ms(fg)} ms ${mb(fg)} (grown during / kept after)`;
   console.log(report);
   check(t1 - t0 < 5000 && [bad, ren, rem, fg].every((x) => x.ms < 500), `…built in under 5 s, and each op under 0.5 s: ${report}`);
-  check([bad, ren, rem, fg].every((x) => x.grew < 48 && x.kept < 24), `…each op's memory under its ceiling (48 MiB grown, 24 MiB kept): ${report}`);
+  // Full GC runs on both sides of each operation.  The retained-heap bound is therefore the stable leak guard;
+  // RSS also includes Bun/JSC allocator arenas and OS page accounting, which measured 48–49 MiB twice on GitHub
+  // and passed on rerun.  64 MiB gives that transient peak 33% headroom, while still failing well before a 2x
+  // regression from the measured 48 MiB.  Keep the post-GC heap ceiling tight at 24 MiB.
+  check([bad, ren, rem, fg].every((x) => x.grew < 64 && x.kept < 24), `…each op's memory under its ceiling (64 MiB grown, 24 MiB kept): ${report}`);
 }
 
 // no DOM, IndexedDB or clock: only paths' rules and the synchronous SHA-256, so a Worker and the server bundle it
