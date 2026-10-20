@@ -6,6 +6,7 @@
 // deletes older versions, after confirming what it frees.  The Storage
 // panel says what this browser holds, whether the browser may clear it,
 // and frees old versions.
+import { migrationState, type MigrationState } from "./migrator";
 import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { nameOf, splitExt } from "./paths";
 
@@ -358,6 +359,10 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     const trashBtns = h("span", {}, button("Show", () => { close(); host.showTrash(); }));
     if (use.trash.count) trashBtns.append(" ", button("Empty Trash…", async () => { await host.emptyTrash(); draw(); }, "danger"));
     line("Trash", `${use.trash.count} item${use.trash.count === 1 ? "" : "s"}${use.trash.bytes ? ` · ${fmtSize(use.trash.bytes)} of files` : ""}`, trashBtns);
+    // (files kept the old way, being moved beside the index: capabilities §2b; read where they are meanwhile)
+    const mig = await migrationState(w).catch(() => ({}) as MigrationState);
+    if (mig.paused) line("Moving your files' storage", "paused: storage is full. Your files are all still readable; free some space (empty Trash, delete old versions) and it goes on.", undefined, "warn");
+    else if (use.migration.left) line("Moving your files' storage", `${use.migration.left} file${use.migration.left === 1 ? "" : "s"} left (read where they are meanwhile)`);
     body.append(dl);
     const keep = h("p", { className: "keep" });
     if (kept === true) keep.textContent = "Kept: this browser won't clear it when space runs short.";

@@ -99,6 +99,20 @@ try {
   await click("#wssidebar .ffoot button:last-child");
   check(await until(`${W}.list("/Trash").then((l) => l.length === 0)`), "Empty Trash (confirmed) empties it");
   await click("#wssidebar .ffoot button");
+  // a file kept by an older version, too large to move beside the index (capabilities 1a): Trash can't take
+  // it, so Delete asks, and deletes it for good, never reading it
+  await ev(`(async () => {
+    const put = (db, store, v, k) => new Promise((ok, no) => { const r = indexedDB.open(db); r.onsuccess = () => { const tx = r.result.transaction(store, "readwrite"); tx.objectStore(store).put(v, k); tx.oncomplete = () => { r.result.close(); ok(); }; tx.onerror = () => no(tx.error); }; });
+    await put("sagebrush", "files", new Uint8Array([1, 2, 3]), "/Old huge.bin");
+    await put("sagebrush-workspace", "entries", { path: "/Old huge.bin", kind: "file", ref: "/Old huge.bin", size: 300 * 2 ** 20, rev: 0, fid: "0123456789abcdef", created: 1, updated: 1, unmoved: "too large to move" });
+    await ${W}.mkdir("/refresh-list");
+    return 1;
+  })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/Old huge.bin"))})`), "(a file too large to move, listed)");
+  await click(rowSel("/Old huge.bin") + " .more");
+  await menu("Move to Trash");
+  check(await until(`${W}.stat("/Old huge.bin").then((e) => !e)`) && !(await ev(`${W}.stat("/Trash/Old huge.bin").then((e) => !!e)`)), "Delete on a file too large to move: deleted for good (confirmed), not put in Trash");
+  check(await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const q = r.result.transaction("files").objectStore("files").getKey("/Old huge.bin"); q.onsuccess = () => { r.result.close(); ok(q.result === undefined); }; }; })`), "…its old bytes gone too");
   // search
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "sylow"; i.dispatchEvent(new Event("input")); return 1; })()`);
   check(await until(`document.querySelectorAll("#wssidebar .frow").length === 1 && !!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`), "search shows what matches");

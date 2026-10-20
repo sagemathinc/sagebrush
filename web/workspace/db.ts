@@ -1,10 +1,13 @@
 // The workspace's own IndexedDB database, "sagebrush-workspace"
 // (design/workspace-files.md §2.2), and small promise helpers for it.
 //
-// Its stores are made when the database is, and it is never upgraded (the
-// rule of web/notebook/stores.js: an upgrade waits on every page holding the
-// database, an older tab or the installed app among them), so every store it
-// will need is here from version 1:
+// An upgrade waits on every page holding the database, an older tab or the
+// installed app among them; every connection here closes itself when asked
+// (web/board/idb-open.ts), and the page then says the workspace was
+// upgraded elsewhere and offers to reload (Workspace's onClosed).  An
+// upgrade only adds stores: it moves no data (design/capabilities.md §2b).
+//
+// Version 1:
 //
 //   entries  the index: one record per path (keyPath "path"), with an index
 //            byRef on [kind, ref], the contents it names
@@ -12,29 +15,58 @@
 //   trash    the bytes of data files in Trash, by their path there (out of
 //            "sagebrush"/"files", which every interpreter is sent)
 //   ops      the operation log, one record per change (keyPath "seq",
-//            counted up): what sync will send (§7.2)
+//            counted up): what sync will send (§7.2).  Every change to the
+//            entries adds its op in the same transaction, so the latest seq
+//            is the index's generation (the migrator's "did anything change
+//            during this pass", design/capabilities.md §2b).  The
+//            generation never goes down: Workspace.generation() is the
+//            latest seq or meta's "opsFloor", whichever is larger, and
+//            anything that deletes op records (Workspace.dropOps) first
+//            records the highest seq it deletes as opsFloor, in the same
+//            transaction
 //   versions data files' earlier versions (§2.5): one record each (keyPath
 //            "id", counted up), by file id and time (index byFile [fid, t])
 //            and by time (index byTime)
 //   versionBytes  their bytes, by the version's id (apart, so listing
 //            versions reads no bytes)
 //   meta     this browser's own values: its device id, when it migrated
+//
+// Version 2 (design/capabilities.md §2a, §2b):
+//
+//   fileBytes  data files' bytes, by the file's own id (its fid), beside
+//            the index, so a change to a file is one transaction of this
+//            database.  An entry marked `migrated` has its bytes here;
+//            another, still in "sagebrush"/"files" (or in Trash, in trash),
+//            until the migrator moves them (web/workspace/migrator.ts)
+//   grants   what each document may do with the person's files (step 3;
+//            made now so that no later upgrade is needed): keyPath [doc,
+//            scope], with indexes byDoc and lastUsed
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
+export const WS_VERSION = 2;
 export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
-  return openDb(name, 1, (db) => {
-    const entries = db.createObjectStore("entries", { keyPath: "path" });
-    entries.createIndex("byRef", ["kind", "ref"]);
-    db.createObjectStore("boards", { keyPath: "id" });
-    db.createObjectStore("trash");
-    db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
-    const versions = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
-    versions.createIndex("byFile", ["fid", "t"]);
-    versions.createIndex("byTime", "t");
-    db.createObjectStore("versionBytes");
-    db.createObjectStore("meta");
+  return openDb(name, WS_VERSION, (db, old) => {
+    if (old < 1) {
+      const entries = db.createObjectStore("entries", { keyPath: "path" });
+      entries.createIndex("byRef", ["kind", "ref"]);
+      db.createObjectStore("boards", { keyPath: "id" });
+      db.createObjectStore("trash");
+      db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+      const versions = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
+      versions.createIndex("byFile", ["fid", "t"]);
+      versions.createIndex("byTime", "t");
+      db.createObjectStore("versionBytes");
+      db.createObjectStore("meta");
+    }
+    // (schema only, no data moved: the upgrade takes no longer than an open)
+    if (old < 2) {
+      db.createObjectStore("fileBytes");
+      const grants = db.createObjectStore("grants", { keyPath: ["doc", "scope"] });
+      grants.createIndex("byDoc", "doc");
+      grants.createIndex("lastUsed", "lastUsed");
+    }
   }, onClose, ms);
 }
 

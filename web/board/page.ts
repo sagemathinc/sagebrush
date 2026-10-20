@@ -49,7 +49,7 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, type Entry } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, type Entry } from "../workspace/index";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
@@ -161,6 +161,12 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
   return w;
 }).catch((e) => { console.warn("workspace:", e); return null; }), 5000, null);
 if (!ws) wsAbandoned = true;
+// (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
+if (ws) {
+  ws.onClosed(() => showReloadNotice());
+  if (ws.closed) showReloadNotice();
+  void startMigrator(ws);
+}
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";
 /** The largest save journaled as pending (characters of JSON): a larger board is kept by the workspace alone, and a pending value larger than this isn't ours to parse (LIMIT-12C-4). */
 const PENDING_MAX = 8 * 2 ** 20;
