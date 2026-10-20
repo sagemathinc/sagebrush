@@ -149,7 +149,7 @@ Bytes move from IndexedDB's `fileBytes` to `/sagebrush/blobs/<sha256>` in OPFS.
     - flushed, and verified by its hash.
     - Temporary files are never deletion candidates.
   - **Inside the lock**, in one hold:
-    - the temporary file is given its final name `/sagebrush/blobs/<sha256>` (if a blob of that hash is already there, the temporary file is dropped instead);
+    - the temporary file is given its final name `/sagebrush/blobs/<sha256>` (if a blob of that hash is already there, it's trusted by its immutable name and its size, and the temporary file is dropped instead);
     - then the IndexedDB commit that names it, which makes it a root.
     - Deletion needs the same lock, so it can never fall between the name and the commit. The hold is a rename and one commit, whatever the file's size.
   - **The startup cleanup** deletes a temporary file only when its tab's `sagebrush-tmp-<tab>` lock isn't held (`navigator.locks.query`), so no live tab's file is taken.
@@ -209,7 +209,9 @@ A kill during that checkpoint leaves unpublished parts, which are reclaimed at t
 
 **The blob handoff (CORR-A54-2, LIMIT-A54-1).** Deletion attempted between a blob's naming and the commit naming it waits for the lock, and the blob stays.
 - **A maximum-size blob (200 MB) with slow I/O injected** (each write and flush delayed). The workspace's lock is held only for the handoff, at most 200 ms. A save queued meanwhile commits within 200 ms of the lock being free, measured from its call. The pre-publication time isn't the bound.
-- **A temporary file:** one being written by a live tab is never deleted at another tab's startup. One from a tab that's gone is. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
+- **A temporary file:** one being written by a live tab is never deleted at another tab's startup. One from a tab that's gone is.
+- **A kill between verification and the lock:** the temporary file is left behind and collected by a later startup. Nothing names it, and the index never does.
+- **A kill between the final name and the commit:** the named blob is an orphan, and is collected correctly by a later deletion. The index never names missing bytes. A restart finds blobs named only by the primary store, only by a staged group, or only by `restore.json`. None is deleted by the startup cleanup or by deletion.
 
 **GC with pending groups.** A file deleted, and its version dropped, while its group is still staged. Its blob stays until the group is published and nothing retains it.
 
