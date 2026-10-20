@@ -106,8 +106,9 @@ export class PatchHistory {
   }
   on(f) { this.listeners.add(f); return () => this.listeners.delete(f); }
   emit() { for (const f of this.listeners) f(); }
-  /** The records as they are now. */
-  committed() { return this.tail?.doc ?? this.session.getCommittedDocument() ?? this.codec.fromString(""); }
+  /** The records as they are now; null while the history is (re)opened (no session yet: nothing to base a version
+   *  on, so none is made; the next one, made once it is open, has every change since: astra's CORR-529-1). */
+  committed() { return this.tail?.doc ?? (this.session ? this.session.getCommittedDocument() ?? this.codec.fromString("") : null); }
   /** Keep `next` (records) as a version, or, with `meta`, as a patch so marked; null if nothing changed. */
   commit(next, meta) {
     if (!this.session) return null;
@@ -132,7 +133,10 @@ export class PatchHistory {
   /** The newest version's id, or null. */
   head() { const e = this.editTimes(); return e[e.length - 1] ?? null; }
   /** The records at a version. */
-  valueAt(time) { return this.session.value({ time }); }
+  valueAt(time) {
+    if (!this.session) throw new Error("history: not available while it is opened");
+    return this.session.value({ time });
+  }
   /** The patches, for sending elsewhere (CoCalc). */
   patches() { return this.session?.history() ?? []; }
   /** Forget every version. */
