@@ -59,8 +59,12 @@ export type Entry = {
   nkey?: string;
   /** a data file whose bytes are in "sagebrush-workspace"/fileBytes under its fid (design/capabilities.md §2b) */
   migrated?: boolean;
-  /** a migrated data file's SHA-256 (hex), as moved; dropped by its next write */
+  /** a data file's SHA-256 (hex): of the bytes it was made, moved or last written with (the migrator gives it to
+   * a file written before it was kept: design/sync-client.md §3) */
   sha256?: string;
+  /** its identity (identOf: a data file's or folder's fid, a document's ref), the entries' index byIdent's
+   * key; written with the entry, and by the migrator for one made before (design/sync-client.md §3a) */
+  ident?: string;
   /** a data file kept the old way that the migrator won't move (its bytes larger than LEGACY_MAX): why */
   unmoved?: string;
   /** in Trash: where it was, when it was put there, and that time's own id (Undo's, CORR-989-2) */
@@ -72,7 +76,27 @@ export type Entry = {
   /** contents reconcile could not find (shown, never dropped) */
   missing?: boolean;
 };
-export type Op = { seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind };
+/** An op's identity as the op left it (design/sync-client.md §3): its identity, the folder it is in (that
+ * folder's fid; null for the root, or for something put in Trash itself), its name, its kind, a data file's
+ * SHA-256 and size, and whether it was put in Trash (an entry in a folder put there isn't: its folder is). */
+export type OpAfter = { id: string; parent: string | null; name: string; kind: Kind; sha256?: string; size?: number; trashed: boolean };
+/** One record of the operation log.  With sync's identity (design/sync-client.md §3): `fid` (a data file's or
+ * folder's) or `ref` (a document's); a data file's `sha256` and `size` as the op left it, and, on a write,
+ * `base`, the SHA-256 it replaced; `parent`, on an op that puts something in a folder (create, adopt, mkdir,
+ * write, rename, restore), that folder's fid (absent for the root or Trash); `after`, what the op left
+ * (null: its identity is gone; absent: it has none yet, or the op changes no entry, as dropVersions).
+ * `origin: "server"` marks an op applied from the server (sync's next steps), never sent back. */
+export type Op = {
+  seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind;
+  ref?: string; fid?: string; sha256?: string; size?: number; base?: string; parent?: string; after?: OpAfter | null; origin?: "server";
+};
+/** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
+ * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
+export const identOf = (e: Pick<Entry, "kind" | "fid" | "ref">): string | undefined => ((e.kind === "file" || e.kind === "folder" ? e.fid : e.ref) ?? undefined);
+/** Whether `e` is a data file whose bytes are beside the index but whose SHA-256 isn't kept (written before it
+ * was: design/sync-client.md §3): the migrator hashes it (Workspace.fillHash). */
+export const needsHash = (e: Entry): boolean => e.kind === "file" && !!e.migrated && !!e.fid && !e.sha256;
+
 /** An earlier version of a data file (§2.5): its bytes are in versionBytes under `id`. */
 export type Version = { id?: number; fid: string; t: number; size: number; sha256: string; by: string; device: string };
 export type BoardRecord = { id: string; doc: any; rev: number; updated: number; docId?: string; origin?: string; tag?: string };
@@ -139,7 +163,7 @@ export type Identity = { workspace: string; generation: number };
 const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
 // (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
 // keys it keeps)
-const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants"];
+const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending"];
 const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
 const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
 /** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
@@ -938,7 +962,7 @@ export class Workspace {
         const next: Entry = { ...cur, updated: t };
         delete next.missing;
         st.put(next);
-        this.log(tx, ops, { op: "write", path: e.path, kind: e.kind });
+        await this.log(tx, ops, { op: "write", path: e.path, kind: e.kind }, next);
         return next;
       });
       this.tell({ ops });
@@ -966,6 +990,11 @@ export class Workspace {
     // (a file kept the old way that wasn't moved (too large): its old copy marked, and deleted after, as a move's is)
     const where = e.trashed || within(e.path, TRASH) ? "trash" : "files";
     const oldMark: StaleMark | null = !e.migrated && old !== undefined && e.ref !== null ? { fid, size: old.byteLength, sha256: await bytesHash(old) } : null;
+    // (its new bytes' SHA-256, before the transaction (none can await anything else), and the one it replaces:
+    // as kept, else as just computed for its version or its old copy's mark; the bytes hashed only when no
+    // hash of them is at hand: design/sync-client.md §3)
+    const sha256 = await bytesHash(b);
+    const base = e.sha256 ?? version?.sha256 ?? oldMark?.sha256 ?? (old === undefined ? undefined : sameBytes(old, b) ? sha256 : await bytesHash(old));
     let entry: Entry;
     try {
       entry = await inTx(this.ws, ["entries", "ops", "fileBytes", ...(version || oldMark ? VERSION_STORES : [])], "readwrite", async (tx) => {
@@ -975,12 +1004,11 @@ export class Workspace {
         if (version) await this.putVersion(tx, version, old!);
         tx.objectStore("fileBytes").put(b, fid);
         if (oldMark) tx.objectStore("meta").put(oldMark, staleKey(where, e.ref!));
-        const next: Entry = { ...cur, fid, migrated: true, rev, size: b.length, updated: t };
+        const next: Entry = { ...cur, fid, ident: fid, migrated: true, rev, size: b.length, sha256, updated: t };
         delete next.missing;
-        delete next.sha256;
         delete next.unmoved;
         st.put(next);
-        this.log(tx, ops, { op: "write", path: e.path, kind: "file" });
+        await this.log(tx, ops, { op: "write", path: e.path, kind: "file" }, next, undefined, base);
         return next;
       });
     } catch (err) {
@@ -1259,7 +1287,7 @@ export class Workspace {
         }
       }
       const ops: Op[] = [];
-      await inTx(this.ws, "ops", "readwrite", async (tx) => { this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
+      await inTx(this.ws, "ops", "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
       this.tell({ ops });
       return freed;
     });
@@ -1379,7 +1407,9 @@ export class Workspace {
             else if (e.kind === "file" && e.ref !== null) tx.objectStore("trash").delete(e.ref);
             out.push(e);
           }
-          this.log(tx, ops, { op: "emptyTrash", path: t, kind: top?.kind ?? "folder" });
+          // (one op for each identity removed whole: the entry asked for, or, Trash emptied, each thing in
+          // it; what was in a folder removed goes with it, as sync's forget has it: design/sync-client.md §3)
+          for (const e of top ? [top] : under.filter((x) => parentOf(x.path) === TRASH)) await this.log(tx, ops, { op: "emptyTrash", path: e.path, kind: e.kind }, null, e);
         }
         return out;
       });
@@ -1468,7 +1498,7 @@ export class Workspace {
       await inTx(this.ws, ["entries", "ops"], "readwrite", async (tx) => {
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(q));
         if (cur && cur.fid === e.fid && cur.created === e.created) st.delete(q);
-        this.log(tx, ops, { op: "discard", path: q, kind: "file" });
+        await this.log(tx, ops, { op: "discard", path: q, kind: "file" }, null, e);
       });
       this.tell({ ops });
     });
@@ -1487,7 +1517,7 @@ export class Workspace {
         if (!e) return;
         if (e.kind === "folder" && (await req(st.count(subtree(q)))) > 0) throw new WorkspaceError("invalid", `${q} isn't empty`);
         st.delete(q);
-        this.log(tx, ops, { op: "forget", path: q, kind: e.kind });
+        await this.log(tx, ops, { op: "forget", path: q, kind: e.kind }, null, e);
       });
       this.tell({ ops });
     });
@@ -1675,8 +1705,28 @@ export class Workspace {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
       if (!cur || cur.kind !== e.kind || cur.created !== e.created) return false;
       const fid = cur.kind === "folder" && !cur.fid, nk = cur.nkey !== nkeyOf(cur.path);
-      if (!fid && !nk) return false;
-      st.put({ ...cur, ...(fid ? { fid: hex(8) } : {}), nkey: nkeyOf(cur.path) });
+      const n: Entry = { ...cur, ...(fid ? { fid: hex(8) } : {}), nkey: nkeyOf(cur.path) };
+      // (its identity as the index byIdent's key: design/sync-client.md §3a)
+      const ident = identOf(n);
+      if (!fid && !nk && n.ident === ident) return false;
+      if (ident) n.ident = ident;
+      st.put(n);
+      return true;
+    });
+  }
+
+  /** Its SHA-256 kept (fillHash), holding the lock (and, taken before it, a reservation of its size ×
+   * COPIES: its bytes are read whole, and hashing copies them): read from fileBytes, hashed, then put on its
+   * entry only if it is still the file read (path, fid, revision) with no hash yet.  Returns whether it was. */
+  async fillHash(e: Entry): Promise<boolean> {
+    if (!needsHash(e)) return false;
+    const bytes: Uint8Array | undefined = await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(e.fid!)));
+    if (bytes === undefined) return false;
+    const sha256 = await bytesHash(bytes);
+    return inTx(this.ws, "entries", "readwrite", async (tx) => {
+      const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+      if (!cur || !needsHash(cur) || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) return false;
+      st.put({ ...cur, sha256, size: bytes.byteLength });
       return true;
     });
   }
@@ -1718,7 +1768,7 @@ export class Workspace {
       if (!same(cur)) return cur;
       tx.objectStore("fileBytes").put(old, fid);
       tx.objectStore("meta").put({ fid, size: old.byteLength, sha256 } satisfies StaleMark, staleKey(where, key));
-      const n: Entry = { ...cur!, fid, migrated: true, size: old.byteLength, sha256 };
+      const n: Entry = { ...cur!, fid, ident: fid, migrated: true, size: old.byteLength, sha256 };
       delete n.missing;
       st.put(n);
       return n;
@@ -1811,7 +1861,7 @@ export class Workspace {
   async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"]): Promise<Entry> {
     if (await this.stat(q)) throw new WorkspaceError("exists", `${q} is there already`);
     const t = this.now();
-    let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined;
+    let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined, sha256: string | undefined;
     if (kind === "notebook") {
       if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
       const given = (content ?? {}) as any;
@@ -1846,6 +1896,7 @@ export class Workspace {
       ref = q;
       size = b.length;
       fileBytes = b;
+      sha256 = await bytesHash(b);
       undo = async () => {};
     }
     const ops: Op[] = [];
@@ -1859,9 +1910,11 @@ export class Workspace {
         await this.room(st, q);
         // (a data file's bytes with its entry, in this one transaction)
         if (fileBytes) tx.objectStore("fileBytes").put(fileBytes, fid!);
-        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}), nkey: nkeyOf(q) };
+        const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true, ...(sha256 ? { sha256 } : {}) } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}), nkey: nkeyOf(q) };
+        const ident = identOf(e);
+        if (ident) e.ident = ident;
         st.put(e);
-        this.log(tx, ops, { op: "create", path: q, kind });
+        await this.log(tx, ops, { op: "create", path: q, kind }, e);
         return e;
       });
       this.tell({ ops });
@@ -1898,8 +1951,10 @@ export class Workspace {
       await this.room(st, p);
       const t = this.now();
       const e: Entry = { created: t, updated: t, ...fields, ...(fields.kind === "file" && !fields.fid ? { fid: hex(8) } : {}), ...(fields.kind === "folder" && !fields.fid ? { fid: hex(8) } : {}), path: p, nkey: nkeyOf(p) };
+      const ident = identOf(e);
+      if (ident) e.ident = ident;
       st.put(e);
-      this.log(tx, ops, { op: "adopt", path: p, kind: e.kind });
+      await this.log(tx, ops, { op: "adopt", path: p, kind: e.kind }, e);
       return e;
     });
     this.tell({ ops });
@@ -1920,8 +1975,9 @@ export class Workspace {
         await this.room(st, at);
         const t = this.now();
         // (its own id, never reused: a folder made again is a new one, which no grant of the old names)
-        st.put({ path: at, kind: "folder", ref: null, created: t, updated: t, fid: hex(8), nkey: nkeyOf(at) } satisfies Entry);
-        this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" });
+        const fid = hex(8), f: Entry = { path: at, kind: "folder", ref: null, created: t, updated: t, fid, ident: fid, nkey: nkeyOf(at) };
+        st.put(f);
+        await this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" }, f);
       }
     }
   }
@@ -1955,10 +2011,48 @@ export class Workspace {
     if (direct + 1 > max) throw new WorkspaceError("limit", `a folder holds at most ${max} entries: ${folder} is full`);
   }
 
-  private log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">) {
-    const rec: Op = { ...op, t: this.now(), device: this.device, by: this.actor };
+  /** The op recorded in `tx`, with its identity (design/sync-client.md §3): `now`, the entry as the op left it
+   * (null: the op removed `gone`; undefined: it changed no entry), and, on a data file's write, `base`, the
+   * SHA-256 it replaced.  Its parent folder read in `tx`: one lookup. */
+  private async log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">, now?: Entry | null, gone?: Entry, base?: string) {
+    // (Trash's own folder is the workspace's, not something synced: no identity, as the root has none)
+    const e = (now ?? gone)?.path === TRASH ? undefined : now ?? gone, id: Partial<Op> = {};
+    if (e) {
+      if (e.kind === "file" || e.kind === "folder") { if (e.fid) id.fid = e.fid; }
+      else if (e.ref !== null) id.ref = e.ref;
+      if (now && now.kind === "file") {
+        if (now.sha256) id.sha256 = now.sha256;
+        if (now.size !== undefined) id.size = now.size;
+        if (base) id.base = base;
+      }
+    }
+    if (now && e) {
+      const after = await this.afterOf(tx.objectStore("entries"), now);
+      if (after) {
+        id.after = after;
+        // (an op whose result is in a folder is one that put it there: create, adopt, mkdir, write, rename,
+        // restore; one in Trash has no folder here (after.parent null), and nothing is written or made in Trash)
+        if (after.parent !== null) id.parent = after.parent;
+      }
+    } else if (now === null && e && identOf(e)) id.after = null;
+    const rec: Op = { ...op, ...id, t: this.now(), device: this.device, by: this.actor };
     tx.objectStore("ops").add(rec);
     ops.push(rec);
+  }
+
+  /** What an op left of `e` (OpAfter), read in `st`'s transaction; undefined when it, or the folder it is in,
+   * has no identity yet (the migrator gives them). */
+  private async afterOf(st: IDBObjectStore, e: Entry): Promise<OpAfter | undefined> {
+    const id = identOf(e);
+    if (!id) return undefined;
+    const folder = parentOf(e.path);
+    let parent: string | null = null;
+    if (!e.trashed && folder !== "/" && folder !== TRASH) {
+      const f: Entry | undefined = await req(st.get(folder));
+      if (!f?.fid) return undefined;
+      parent = f.fid;
+    }
+    return { id, parent, name: nameOf(e.path), kind: e.kind, ...(e.kind === "file" ? { ...(e.sha256 ? { sha256: e.sha256 } : {}), ...(e.size !== undefined ? { size: e.size } : {}) } : {}), trashed: !!e.trashed };
   }
 
   /** `a` and everything under it moved to `b` (free).  Its data files are
@@ -2016,7 +2110,7 @@ export class Workspace {
         st.put(n);
         out.push(n);
       }
-      this.log(tx, ops, { op, path: a, to: b, kind: old[0].kind });
+      await this.log(tx, ops, { op, path: a, to: b, kind: old[0].kind }, out[0]);
       return out;
     });
     this.tell({ ops });

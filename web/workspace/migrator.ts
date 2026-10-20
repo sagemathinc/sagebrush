@@ -31,7 +31,7 @@
 //   own transaction) is still the one it began
 //   with, checked holding the lock (CORR-CAP-46A-1).
 import type { Entry, Workspace } from "./api";
-import { COPIES, LEGACY_MAX } from "./api";
+import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
 
@@ -206,10 +206,22 @@ async function batch(w: Workspace, p: { start: number; at: string; work: boolean
         release();
       }
     }
-    // an entry made before its identities were kept: a folder's id (§6), before any grant can name it, and
-    // any entry's nkey (§3), so names that look the same are found by the index
-    if ((e.kind === "folder" && !e.fid) || e.nkey === undefined) {
+    // an entry made before its identities were kept: a folder's id (§6), before any grant can name it, any
+    // entry's nkey (§3), so names that look the same are found by the index, and any entry's ident, its
+    // identity as the index byIdent's key (design/sync-client.md §3a)
+    if ((e.kind === "folder" && !e.fid) || e.nkey === undefined || (e.ident === undefined && identOf(e) !== undefined)) {
       if (await w.locked(() => w.fillIdentity(e))) { p.work = true; moved++; }
+    }
+    // a data file written before its SHA-256 was kept: hashed (its bytes read whole: reserved first, before
+    // the lock, as a move's; counted in the batch's bytes)
+    if (needsHash(e)) {
+      const size = e.size ?? 0;
+      const release = await reserve(size * MIGRATE.copies);
+      try {
+        if (await w.locked(async () => { const cur = await w.stat(e.path); return !!cur && w.fillHash(cur); })) { p.work = true; moved++; bytes += size; }
+      } finally {
+        release();
+      }
     }
     p.at = e.path;
   }
