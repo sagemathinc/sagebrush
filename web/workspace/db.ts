@@ -55,8 +55,18 @@ import { openDb } from "../board/idb-open";
 export const WS_DB = "sagebrush-workspace";
 
 export const WS_VERSION = 3;
-export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
-  return openDb(name, WS_VERSION, (db, old, tx) => {
+/** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
+ * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
+ * the upgradeneeded event: non-standard, in Blink's IDL). */
+export type OpenInfo = { fresh: boolean; dataLoss?: string; dataLossMessage?: string };
+export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000, info?: OpenInfo): Promise<IDBDatabase> {
+  return openDb(name, WS_VERSION, (db, old, tx, ev) => {
+    if (info) {
+      info.fresh = old === 0;
+      const loss = (ev as any)?.dataLoss, message = (ev as any)?.dataLossMessage;
+      if (typeof loss === "string" && loss !== "none") info.dataLoss = loss;
+      if (typeof message === "string" && message) info.dataLossMessage = message;
+    }
     if (old < 1) {
       const entries = db.createObjectStore("entries", { keyPath: "path" });
       entries.createIndex("byRef", ["kind", "ref"]);

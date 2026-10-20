@@ -49,7 +49,7 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, type Entry } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, type Entry } from "../workspace/index";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
@@ -165,6 +165,8 @@ if (!ws) wsAbandoned = true;
 if (ws) {
   ws.onClosed(() => showReloadNotice());
   if (ws.closed) showReloadNotice();
+  // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written until then)
+  showLossNotice(ws);
   void startMigrator(ws);
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";

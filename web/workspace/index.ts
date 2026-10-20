@@ -1,10 +1,11 @@
 // The workspace (design/workspace-files.md): its index and verbs (api.ts),
 // paths (paths.ts), and bringing in what this browser keeps today
 // (migrate.ts).
-export { Workspace, WorkspaceError, LIMITS, LEGACY_MAX, COPIES, nkeyOf, BOARD_KEYS, askToKeep, type Entry, type Op, type Version, type BoardRecord, type Limits } from "./api";
+export { Workspace, WorkspaceError, RESET_HOOK, type Identity, LIMITS, LEGACY_MAX, COPIES, nkeyOf, BOARD_KEYS, askToKeep, type Entry, type Op, type Version, type BoardRecord, type Limits } from "./api";
 export { migrate, reconcile, signature, RECOVERED, EDITED_FOLDER, type KeyValue, type MigrateReport } from "./migrate";
 export { normPath, kindOf, safeName, freePath, splitExt, parentOf, nameOf, join, within, TRASH, PathError, type Kind } from "./paths";
 export { WS_DB, openWorkspaceDb } from "./db";
 export { startMigrator, onMigration, migrationState, MIGRATE, type MigrationState } from "./migrator";
-export { showReloadNotice } from "./notice";
+export { showReloadNotice, showLossNotice } from "./notice";
+export { decide, best, newer, resolveReset, readLocal, readOpfs, writeLocal, writeOpfs, placeOf, isWitness, LOCAL_KEY, type Witness, type State, type Held, type Read } from "./witness";
 export { reserve, reserved, RESERVE_BYTES } from "./reserve";

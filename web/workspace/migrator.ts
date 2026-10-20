@@ -97,6 +97,8 @@ export function onMigration(w: Workspace, f: (s: MigrationState) => void): () =>
 
 /** The migration run in this tab, if no other tab runs it and it isn't done (a pause from an earlier page cleared: the next open tries again). Resolves when this run ends. */
 export function startMigrator(w: Workspace): Promise<void> {
+  // (a quarantined workspace is written by nothing until the person decides: design/workspace-durability.md A.3)
+  if (w.quarantined) return Promise.resolve();
   if (!watching.has(w)) {
     watching.add(w);
     // (space freed in this page: a paused migration tries again)

@@ -387,7 +387,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection } from "./share/upload.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -2221,6 +2221,8 @@ const wsReady = (async () => {
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
     w.onClosed(() => showReloadNotice());
     if (w.closed) showReloadNotice();
+    // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing written until then)
+    showLossNotice(w);
     void startMigrator(w);
     return w;
   } catch (e) { console.warn("workspace:", e); return null; }
