@@ -34,6 +34,7 @@
 - `ref`;
 - for a data file, its `fid`, `sha256` and `size`;
 - for a write, `base` (the `sha256` it replaced);
+- `parent`: on an op that puts something in a folder (create, mkdir, adopt, a write that makes its file, rename, restore), that folder's `fid`. Absent for the root, or to go by the path. It is optional on the wire; the server stores and echoes it, and refuses it on other ops (@sagebrush-auth). See C4;
 - `after`: the identity's resulting state, `{id, parent, name, kind, sha256, size, trashed}`, with `parent` the parent folder's identity (C3's replay and C2's summary use it).
 
 This is the "client's log plus identity" of sync-server §3. Hashing new bytes happens before their transaction, as the 1a migration already does.
@@ -65,7 +66,7 @@ Without the bytes, the server refuses the op with `missing`. `limit`, `storage_f
   - Each fetch is checked against the `sha256` and put in fileBytes. This uses the same reservation and quota preflight as the migrator.
   - Fetches run in the background, a few at a time.
 
-**The reducer:** `web/workspace/sync-reduce.ts`, a pure `reduce(entries, op) → entries'` with no DOM or IndexedDB imports, so the Worker can bundle it. It implements §7.2's rules:
+**The reducer:** `web/workspace/sync-reduce.ts`, a deterministic `reduce(index, op)` that changes the index whole or not at all (with `clone()`, O(entries), never called per op), with no DOM or IndexedDB imports, so the Worker can bundle it. It implements §7.2's rules:
 - the later rename wins;
 - an edit after a delete brings the file back out of Trash;
 - a second new file at a path becomes `name (2)`;
@@ -256,6 +257,9 @@ A crash anywhere resumes from the journal's state and progress keys: a walk mid-
 ### C4. The reducer: identity, order, copies (CORR-8E7-4)
 
 - **Targets are identities, never paths:** a data file's or folder's `fid`, a document's `ref`. A rename, write, remove or restore applies to its identity wherever it is now. Path reuse can't misdirect it.
+- **Where an op puts something is a folder's identity too** (astra, on step 1; @sagebrush's decision): `parent` names the folder by its `fid`. If another device renamed that folder meanwhile, the entry goes into it where it is now; a new folder at its old path doesn't take it. A folder in Trash is brought back first (the edit wins). Without `parent`, or when it names no folder the index has (never seen, forgotten, or a file), the op goes by its path, and a missing folder on it is made, with an identity derived from the op.
+- **Every op applies whole or not at all.** That covers the folders it would make and the entries it would move. Every path it produces is checked against the workspace's bounds (a name at most 255 characters, a path at most 1,024, a depth at most 32) before anything is kept. A `(2)` or a conflict copy's name is shortened to fit; a move whose descendants wouldn't fit is skipped.
+- **A derived identity** (a made folder's, a conflict copy's) is never one the index has, has forgotten, or that the op names: the next of a deterministic series is taken.
 - **Order is the server's `seq` only.** `t` is shown, never ordered by.
 - **Writes:**
   - `base` equal to the current hash: applied;
@@ -275,7 +279,8 @@ A crash anywhere resumes from the journal's state and progress keys: a walk mid-
   - write after Trash, and after forget;
   - two writes from one base;
   - a copy of a copy;
-  - creates colliding three ways.
+  - creates colliding three ways;
+  - and (step 1's review) derived identities that are taken, long names and paths at the bounds, unseen writes at the root or in Trash, and `parent` with its folder renamed, its old path reused, forgotten, or in Trash.
 
 ### C5. A download is installed only if it is still wanted (CORR-8E7-5)
 
