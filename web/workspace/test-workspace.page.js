@@ -20,6 +20,8 @@ const rawKeys = (db, store) => new Promise((ok, no) => { const r = db.transactio
 const rawPut = (db, store, value, key) => new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); });
 const rawDel = (db, store, key) => new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).delete(key); tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); });
 const board = (title, extra = {}) => ({ title, nodes: [{ id: "a", text: "hi" }], ...extra });
+// (a data file's bytes where they are kept now: fileBytes, under its own id, beside the index: capabilities §2a)
+const fb = async (w, p) => { const e = await w.stat(p); return e?.fid ? rawGet(w.ws, "fileBytes", e.fid) : undefined; };
 
 async function paths_() {
   const bad = ["", "a", "/a//b", "/a/./b", "/a/../b", "/a\u0000b", "/" + "x".repeat(256), "/" + Array(33).fill("d").join("/"), "/" + "y/".repeat(600)];
@@ -43,10 +45,10 @@ async function createAndRead() {
   const b = await w.read(bd.path);
   check(b.content.title === "Sylow" && Array.isArray(b.content.nodes) && b.rev === 1, "a blank board, titled for its name");
   const f = await w.create("/data/primes.csv", { content: "2\n3\n5\n" });
-  check(f.ref === "/data/primes.csv" && f.size === 6, "a data file, at its path");
-  check(dec(await rawGet(w.main, "files", "/data/primes.csv")) === "2\n3\n5\n", "its bytes where Python reads them");
+  check(f.ref === "/data/primes.csv" && f.size === 6 && f.migrated === true, "a data file, at its path, kept beside the index");
+  check(dec(await fb(w, "/data/primes.csv")) === "2\n3\n5\n" && (await rawGet(w.main, "files", "/data/primes.csv")) === undefined, "its bytes in fileBytes, under its id, not the old way");
   check(await fails(w.create("/data/primes.csv", { content: "x" }), "exists"), "a taken path is refused");
-  check(dec(await rawGet(w.main, "files", "/data/primes.csv")) === "2\n3\n5\n", "…and not written over");
+  check(dec(await fb(w, "/data/primes.csv")) === "2\n3\n5\n", "…and not written over");
   await rawPut(w.main, "files", enc("orphan"), "/data/orphan.txt");
   check(await fails(w.create("/data/orphan.txt", { content: "new" }), "exists"), "bytes kept at a path with no entry are not written over");
   check(dec(await rawGet(w.main, "files", "/data/orphan.txt")) === "orphan", "…they stay");
@@ -98,12 +100,12 @@ async function renames() {
   await w.rename("/proj", "/work");
   check((await paths(w)).join() === "/work,/work/data,/work/data/a.csv,/work/data/b.csv,/work/notes.ipynb", "a folder renamed with all it holds");
   const keys = (await rawKeys(w.main, "files")).sort();
-  check(keys.join() === "/work/data/a.csv,/work/data/b.csv", "data files' bytes moved to their new paths: " + keys.join());
+  check(keys.length === 0 && dec(await fb(w, "/work/data/a.csv")) === "1" && dec((await w.read("/work/data/b.csv")).content) === "2", "data files' bytes stay under their ids, readable at their new paths: " + keys.join());
   check((await w.stat("/work/data/a.csv")).ref === "/work/data/a.csv", "…and their entries name them there");
   check(await fails(w.rename("/work", "/work/inside"), "invalid"), "a folder can't go inside itself");
   await w.create("/x.txt", { content: "x" });
   check(await fails(w.rename("/x.txt", "/work"), "exists"), "renaming onto a taken path is refused");
-  check(dec(await rawGet(w.main, "files", "/x.txt")) === "x", "…and changes nothing");
+  check(dec(await fb(w, "/x.txt")) === "x" && !!(await w.stat("/x.txt")), "…and changes nothing");
   await w.rename("/work/notes.ipynb", "/work/lecture.ipynb");
   check((await rawGet(w.main, "notebooks", nb.ref)).name === "lecture", "a notebook named as its file is renamed with it");
   await w.write("/work/lecture.ipynb", { cells: [] });
@@ -117,7 +119,7 @@ async function renames() {
   // bytes at the new path, no entry: refused, nothing lost
   await rawPut(w.main, "files", enc("someone's"), "/y.txt");
   check(await fails(w.rename("/x.txt", "/y.txt"), "exists"), "a rename onto unlisted bytes is refused");
-  check(dec(await rawGet(w.main, "files", "/y.txt")) === "someone's" && dec(await rawGet(w.main, "files", "/x.txt")) === "x", "…both kept");
+  check(dec(await rawGet(w.main, "files", "/y.txt")) === "someone's" && dec(await fb(w, "/x.txt")) === "x", "…both kept");
   w.close();
 }
 
@@ -130,13 +132,13 @@ async function trash() {
   check((await paths(w, "/")).every((p) => !p.startsWith("/Trash")), "Trash isn't listed with the rest");
   check((await paths(w, "/Trash")).join() === "/Trash/d,/Trash/d/a.txt,/Trash/d/n.ipynb", "Trash lists what's in it");
   check((await rawKeys(w.main, "files")).length === 0, "a data file in Trash is out of Python's files");
-  check(dec(await rawGet(w.ws, "trash", "/Trash/d/a.txt")) === "A", "…its bytes kept in the workspace's trash");
+  check(dec(await fb(w, "/Trash/d/a.txt")) === "A" && (await rawKeys(w.ws, "trash")).length === 0, "…its bytes kept where they were, under its id");
   check((await rawGet(w.main, "notebooks", nb.ref)) !== undefined, "a notebook in Trash is still kept");
   check(await fails(w.restore("/Trash/d/a.txt"), "invalid"), "something inside a folder in Trash comes back with the folder");
   await w.create("/d/new.txt", { content: "N" });
   const back = await w.restore("/Trash/d");
   check(back.path === "/d (2)" && !back.trashed, "restored beside what took its place: " + back.path);
-  check(dec(await rawGet(w.main, "files", "/d (2)/a.txt")) === "A" && (await rawKeys(w.ws, "trash")).length === 0, "its bytes back where Python reads them");
+  check(dec(await fb(w, "/d (2)/a.txt")) === "A" && dec((await w.read("/d (2)/a.txt")).content) === "A", "its bytes readable where it is back");
   await w.remove("/d/new.txt");
   await w.create("/d/new.txt", { content: "N2" });
   await w.remove("/d/new.txt");
@@ -164,7 +166,7 @@ async function duplicates() {
 async function limits() {
   const w = await fresh({ maxFileBytes: 10, maxBoardBytes: 200, maxEntries: 5 });
   check(await fails(w.create("/big.bin", { content: new Uint8Array(11) }), "limit"), "a file over the limit is refused");
-  check((await rawKeys(w.main, "files")).length === 0, "…and nothing of it kept");
+  check((await rawKeys(w.main, "files")).length === 0 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing of it kept");
   check(await fails(w.create("/big.board.json", { content: board("x".repeat(300)) }), "limit"), "a board over the limit is refused");
   await w.create("/1.txt", { content: "" });
   await w.create("/2.txt", { content: "" });
@@ -172,7 +174,7 @@ async function limits() {
   await w.create("/4.txt", { content: "" });
   await w.create("/5.txt", { content: "" });
   check(await fails(w.create("/6.txt", { content: "" }), "limit"), "the workspace's entries are bounded");
-  check((await rawKeys(w.main, "files")).length === 5, "…the refused file's bytes taken back");
+  check((await rawKeys(w.ws, "fileBytes")).length === 5, "…nothing of the refused file kept (its bytes in its entry's one transaction)");
   w.close();
 }
 
@@ -200,7 +202,7 @@ async function concurrent() {
   // two tabs making the same path at once: one of them, never both or a mixture
   const r = await Promise.allSettled([w.create("/same.txt", { content: "one" }), other.create("/same.txt", { content: "two" })]);
   check(r.filter((x) => x.status === "fulfilled").length === 1, "two tabs making one path: exactly one wins");
-  const e = await w.stat("/same.txt"), bytes = dec(await rawGet(w.main, "files", "/same.txt"));
+  const e = await w.stat("/same.txt"), bytes = dec(await fb(w, "/same.txt"));
   const winner = r[0].status === "fulfilled" ? "one" : "two";
   check(bytes === winner && e.size === 3, "…its bytes are the winner's: " + bytes);
   // two renames of one folder: one wins, the other finds it gone
@@ -208,7 +210,7 @@ async function concurrent() {
   const rr = await Promise.allSettled([w.rename("/f", "/g"), other.rename("/f", "/h")]);
   check(rr.filter((x) => x.status === "fulfilled").length === 1, "two renames of one folder: one wins");
   const where = (await paths(w)).filter((p) => p.endsWith("z.txt"));
-  check(where.length === 1 && (await rawKeys(w.main, "files")).filter((k) => k.endsWith("z.txt")).length === 1, "…one copy of its file, in one place: " + where.join());
+  check(where.length === 1 && (await rawKeys(w.ws, "fileBytes")).length === 2 && dec(await fb(w, where[0])) === "z", "…one copy of its file, in one place: " + where.join());
   other.close();
   w.close();
 }
@@ -359,7 +361,7 @@ async function edges() {
   await w.create(u, { content: "hello" });
   check((await w.list("/f", { recursive: true })).length === 1, "a U+FFFF name is listed");
   await w.rename("/f", "/g");
-  check((await w.stat("/g/" + String.fromCharCode(0xffff) + "x.txt")) !== undefined && !(await w.stat(u)) && dec(await rawGet(w.main, "files", "/g/" + String.fromCharCode(0xffff) + "x.txt")) === "hello", "…and moves with its folder, bytes and all");
+  check((await w.stat("/g/" + String.fromCharCode(0xffff) + "x.txt")) !== undefined && !(await w.stat(u)) && dec(await fb(w, "/g/" + String.fromCharCode(0xffff) + "x.txt")) === "hello", "…and moves with its folder, bytes and all");
   await w.remove("/g");
   check((await paths(w, "/Trash")).length === 2, "…and goes to Trash with it");
   // a move that would make a descendant too deep or too long is refused whole (CORR-4A0-4)
@@ -485,7 +487,7 @@ async function folderLimit() {
   const w = await fresh({ ...W.LIMITS, maxFolderEntries: 3 });
   for (const i of [1, 2, 3]) await w.create(`/f/${i}.txt`, { content: "" });
   check(await fails(w.create("/f/4.txt", { content: "" }), "limit"), "a fourth entry in a folder of three is refused");
-  check(!(await w.stat("/f/4.txt")) && (await rawKeys(w.main, "files")).length === 3, "…and nothing of it kept");
+  check(!(await w.stat("/f/4.txt")) && (await rawKeys(w.ws, "fileBytes")).length === 3, "…and nothing of it kept");
   check(await fails(w.create("/f/sub/x.txt", { content: "" }), "limit"), "…a folder made on the way counts too");
   for (const i of [1, 2, 3]) await w.create(`/g/${i}.txt`, { content: "" });
   check((await w.list("/g")).length === 3, "another folder has its own room");
@@ -827,8 +829,402 @@ async function recent() {
   w.close();
 }
 
+// ---- capabilities step 1a: data files' bytes beside the index (design/capabilities.md §2a, §2b)
+
+// (a workspace as version 1 made it, before fileBytes: its stores and entries, data files kept the old
+// way: their bytes put in "sagebrush"/files (and Trash's in trash) once the page has opened it)
+async function v1(files, trashed = []) {
+  n++;
+  localStorage.clear();
+  const name = `ws-test-${n}`, mainName = `main-test-${n}`;
+  await new Promise((ok, no) => {
+    const r = indexedDB.open(name, 1);
+    r.onupgradeneeded = () => {
+      const db = r.result, e = db.createObjectStore("entries", { keyPath: "path" });
+      e.createIndex("byRef", ["kind", "ref"]);
+      db.createObjectStore("boards", { keyPath: "id" });
+      db.createObjectStore("trash");
+      db.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+      const v = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
+      v.createIndex("byFile", ["fid", "t"]);
+      v.createIndex("byTime", "t");
+      db.createObjectStore("versionBytes");
+      db.createObjectStore("meta");
+    };
+    r.onsuccess = () => {
+      const db = r.result, tx = db.transaction(["entries", "trash"], "readwrite"), st = tx.objectStore("entries");
+      const folders = new Set();
+      for (const [p] of [...files, ...trashed]) { const parts = p.split("/").slice(1, -1); let at = ""; for (const x of parts) { at += "/" + x; folders.add(at); } }
+      for (const f of folders) st.put({ path: f, kind: "folder", ref: null, created: 1, updated: 1 });
+      let i = 0;
+      for (const [p, text] of files) st.put({ path: p, kind: "file", ref: p, size: enc(text).length, rev: 0, fid: "f" + String(++i).padStart(15, "0"), created: 1, updated: 1 });
+      for (const [p, text, from] of trashed) { st.put({ path: p, kind: "file", ref: p, size: enc(text).length, rev: 0, fid: "t" + String(++i).padStart(15, "0"), created: 1, updated: 1, trashed: { from, at: 1, id: "x" + i } }); tx.objectStore("trash").put(enc(text), p); }
+      tx.oncomplete = () => { db.close(); ok(); };
+      tx.onerror = () => no(tx.error);
+    };
+    r.onerror = () => no(r.error);
+  });
+  const w = await W.Workspace.open({ name, mainName });
+  for (const [p, text] of files) await rawPut(w.main, "files", enc(text), p);
+  return w;
+}
+const legacyLeft = async (w) => (await w.list("/", { recursive: true })).concat(await w.list("/Trash", { recursive: true })).filter((e) => e.kind === "file" && !e.migrated).length;
+
+async function migrateV1() {
+  const big = "B".repeat(70000);
+  const w = await v1([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]], [["/Trash/t.txt", "in trash", "/t.txt"]]);
+  check(w.ws.version === 2 && w.ws.objectStoreNames.contains("fileBytes") && w.ws.objectStoreNames.contains("grants"), "a version 1 workspace opened: upgraded to version 2, its stores added");
+  check((await legacyLeft(w)) === 4 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing moved by the upgrade itself");
+  check(dec((await w.read("/L/a.txt")).content) === "AAA" && dec((await w.read("/Trash/t.txt")).content) === "in trash", "files not yet moved are read where they are (and Trash's)");
+  check((await w.dataFiles()).map(([p]) => p).sort().join() === "/L/a.txt,/L/big.bin,/top.csv", "…and given to a notebook's interpreter (dataFiles: not Trash's)");
+  check((await w.usage()).migration.left === 4, "the Storage panel's count: 4 left");
+  await W.startMigrator(w);
+  const st = await W.migrationState(w);
+  check(st.done === true, "the migrator ran to done: " + JSON.stringify(st));
+  check((await legacyLeft(w)) === 0, "…every data file moved, Trash's too");
+  check(dec(await fb(w, "/L/big.bin")) === big && dec(await fb(w, "/Trash/t.txt")) === "in trash" && dec((await w.read("/top.csv")).content) === "x,y\n1,2\n", "…their bytes the same, in fileBytes");
+  const e = await w.stat("/L/big.bin");
+  check(e.size === 70000 && /^[0-9a-f]{64}$/.test(e.sha256 ?? ""), "…with their size and SHA-256 on the entry");
+  check((await rawKeys(w.main, "files")).length === 0 && (await rawKeys(w.ws, "trash")).length === 0, "…their old copies deleted");
+  check((await w.staleCopies(10)).length === 0, "…and no old copy left marked");
+  check((await w.usage()).migration.left === 0, "the Storage panel: nothing left");
+  // a later open doesn't run it again
+  await W.startMigrator(w);
+  check((await W.migrationState(w)).done === true, "done stays done");
+  w.close();
+}
+
+async function migrateOnWrite() {
+  const w = await v1([["/w.txt", "old bytes"]]);
+  await w.write("/w.txt", "new bytes");
+  const e = await w.stat("/w.txt");
+  check(e.migrated && dec(await fb(w, "/w.txt")) === "new bytes" && (await rawGet(w.main, "files", "/w.txt")) === undefined, "a write to a file not yet moved moves it first, then writes, the old copy deleted");
+  const h = await w.history("/w.txt");
+  check(h.length === 1 && dec(await w.version("/w.txt", 0)) === "old bytes", "…what it had kept as a version");
+  // a rename and Trash of files not yet moved
+  const v = await v1([["/r/a.txt", "a"], ["/r/b.txt", "b"]]);
+  await v.rename("/r", "/s");
+  check(dec((await v.read("/s/a.txt")).content) === "a" && (await rawKeys(v.main, "files")).length === 0 && (await legacyLeft(v)) === 0, "a folder moved: its files moved beside the index first, then the folder, one transaction");
+  await v.remove("/s");
+  check(dec((await v.read("/Trash/s/b.txt")).content) === "b", "…and to Trash");
+  await v.emptyTrash();
+  check((await rawKeys(v.ws, "fileBytes")).length === 0, "Trash emptied: their bytes gone with their entries, in one transaction");
+  w.close();
+  v.close();
+}
+
+async function migratePaused() {
+  const w = await v1([["/p/a.txt", "AAA"], ["/p/b.txt", "BBB"]]);
+  const est = navigator.storage.estimate;
+  navigator.storage.estimate = async () => ({ quota: 100, usage: 99 });
+  try {
+    await W.startMigrator(w);
+    const st = await W.migrationState(w);
+    check(st.paused === "storage full" && !st.done, "no room: the migration pauses, saying so: " + JSON.stringify(st));
+    check((await legacyLeft(w)) === 2 && dec((await w.read("/p/a.txt")).content) === "AAA", "…the old copies stay, and are read there");
+    await W.startMigrator(w).catch(() => {});
+  } finally {
+    navigator.storage.estimate = est;
+  }
+  // room again: a page's emptying of Trash makes it go on (no loop meanwhile)
+  await w.create("/junk.txt", { content: "j" });
+  await w.remove("/junk.txt");
+  await w.emptyTrash();
+  for (let i = 0; i < 100 && !(await W.migrationState(w)).done; i++) await new Promise((r) => setTimeout(r, 50));
+  check((await W.migrationState(w)).done === true && (await legacyLeft(w)) === 0, "space freed in the page: it goes on, to done");
+  w.close();
+}
+
+async function migrateTargetFails() {
+  const w = await v1([["/q/a.txt", "AAA"]]);
+  const put = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (v, k) { if (this.name === "fileBytes") throw new DOMException("the disk is full", "QuotaExceededError"); return put.call(this, v, k); };
+  try {
+    await W.startMigrator(w);
+  } finally {
+    IDBObjectStore.prototype.put = put;
+  }
+  const st = await W.migrationState(w);
+  check(st.paused === "storage full", "the move's own transaction refused (quota): paused, saying so");
+  check((await legacyLeft(w)) === 1 && dec((await w.read("/q/a.txt")).content) === "AAA" && dec(await rawGet(w.main, "files", "/q/a.txt")) === "AAA", "…nothing of it done: the old copy authoritative, readable");
+  check((await rawKeys(w.ws, "fileBytes")).length === 0 && (await w.staleCopies(10)).length === 0, "…and nothing half-made");
+  w.close();
+}
+
+async function migrateCrashBetween() {
+  // the move committed, the old copy's deletion never happened (a crash between the two)
+  const w = await v1([["/c/a.txt", "AAA"]]);
+  const drop = w.dropStale;
+  w.dropStale = async () => { throw new Error("crashed"); };
+  await w.locked(async () => w.migrateOne(await w.stat("/c/a.txt")));
+  w.dropStale = drop;
+  check((await w.stat("/c/a.txt")).migrated && dec(await rawGet(w.main, "files", "/c/a.txt")) === "AAA" && (await w.staleCopies(10)).length === 1, "(a crash between the move and the old copy's deletion: both, the old marked)");
+  check(dec((await w.read("/c/a.txt")).content) === "AAA", "…the file read from where it is now");
+  const r = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
+  await w.locked(() => W.reconcile(w, false, r));
+  check(r.files === 0 && r.recovered === 0 && (await w.list("/", { recursive: true })).filter((e) => e.kind === "file").length === 1, "reconcile doesn't take the marked old copy for a file of its own");
+  await w.rename("/c/a.txt", "/c/b.txt");
+  check(dec((await w.read("/c/b.txt")).content) === "AAA", "(renamed meanwhile)");
+  await w.locked(() => W.reconcile(w, false, r));
+  check(r.files === 0 && r.recovered === 0, "…nor after the file was renamed away from its key");
+  await W.startMigrator(w);
+  check((await W.migrationState(w)).done && (await rawGet(w.main, "files", "/c/a.txt")) === undefined && (await w.staleCopies(10)).length === 0, "the migrator deletes the old copy, then its mark, and is done");
+  w.close();
+}
+
+async function olderTabWrite() {
+  // a page still running the code from before writes a moved file the old way: kept beside it, once
+  const w = await v1([["/o/a.txt", "AAA"]]);
+  await W.startMigrator(w);
+  check((await w.stat("/o/a.txt")).migrated, "(moved)");
+  await rawPut(w.main, "files", enc("written by an older tab"), "/o/a.txt");
+  const r = { notebooks: 0, files: 0, recovered: 0, missing: 0 };
+  await w.locked(() => W.reconcile(w, false, r));
+  const copy = await w.stat("/o/a (from an older tab).txt");
+  check(copy && dec((await w.read(copy.path)).content) === "written by an older tab" && dec((await w.read("/o/a.txt")).content) === "AAA", "an older tab's write to a moved file: kept beside it as a file of its own, the file as it was");
+  await w.locked(() => W.reconcile(w, false, r));
+  check((await w.list("/o")).length === 2, "…once, however often reconcile runs");
+  await rawPut(w.main, "files", enc("AAA"), "/o/b.txt");
+  await w.create("/o/b.txt", { content: "AAA" }).catch(() => {});
+  await w.locked(() => W.reconcile(w, false, r));
+  await W.startMigrator(w);
+  check((await w.list("/o")).every((e) => e.migrated), "…and moved beside the index in turn");
+  w.close();
+}
+
+async function migrateCandidatePass() {
+  // an entry put behind the cursor during the candidate clean pass (adopted the old way: reconcile,
+  // an older page's file): that pass doesn't count as clean; the next moves it; then done (CORR-CAP-46A-1)
+  const w = await fresh();
+  for (const i of [1, 2, 3, 4, 5, 6]) await w.create(`/c${i}.txt`, { content: "c" + i });
+  const was = W.MIGRATE.files;
+  W.MIGRATE.files = 2;
+  let did = false, sawDoneEarly = false;
+  W.MIGRATE.afterBatch = async (s) => {
+    if (s.done && !(await w.stat("/a.bin"))?.migrated && did) sawDoneEarly = true;
+    if (!did && s.pass && !s.pass.work && s.pass.at >= "/c3.txt") {
+      did = true;
+      // (a change to the index that leaves an entry not yet moved, and records its op, as every change
+      // to the entries does, without touching the migration's own state: only the generation tells)
+      await rawPut(w.main, "files", enc("adopted"), "/a.bin");
+      await w.locked(() => new Promise((ok, no) => { const tx = w.ws.transaction(["entries", "ops"], "readwrite"); tx.objectStore("entries").put({ path: "/a.bin", kind: "file", ref: "/a.bin", size: 7, rev: 0, fid: "aaaaaaaaaaaaaaaa", created: 1, updated: 1 }); tx.objectStore("ops").add({ t: 1, device: w.device, by: "person", op: "adopt", path: "/a.bin", kind: "file" }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }));
+    }
+  };
+  try {
+    await W.startMigrator(w);
+  } finally {
+    W.MIGRATE.files = was;
+    W.MIGRATE.afterBatch = null;
+  }
+  check(did, "(an entry adopted behind the cursor during the candidate clean pass)");
+  const a = await w.stat("/a.bin");
+  check((await W.migrationState(w)).done && a?.migrated && dec(await fb(w, "/a.bin")) === "adopted" && !sawDoneEarly, "…the migration isn't done until it is moved too: " + JSON.stringify({ migrated: a?.migrated }));
+  w.close();
+}
+
+async function migrateOneTab() {
+  const w = await v1([["/o/a.txt", "AAA"]]);
+  let release;
+  const held = new Promise((r) => navigator.locks.request("sagebrush-workspace-migrate", () => new Promise((g) => { release = g; r(); })));
+  await held;
+  await W.startMigrator(w);
+  check(!(await W.migrationState(w)).done && (await legacyLeft(w)) === 1, "another tab migrating (its lock held): this one doesn't, and doesn't wait");
+  release();
+  await new Promise((r) => setTimeout(r, 50));
+  await W.startMigrator(w);
+  check((await W.migrationState(w)).done && (await legacyLeft(w)) === 0, "…and does once it is free");
+  w.close();
+}
+
+async function migrateUndersized() {
+  // LIMIT-CAP1A-1 / CORR-F81-2: an entry whose index says 1 byte, its old bytes 5 MiB: the read is
+  // reserved for what a value kept the old way can be, before the workspace's lock and before the read;
+  // the size corrected; the migration done in one pass, not retried for ever
+  const w = await v1([["/u/a.bin", "x"]]);
+  const big = new Uint8Array(5 * 2 ** 20).fill(7);
+  await rawPut(w.main, "files", big, "/u/a.bin");
+  const legacy = w.legacyBytes.bind(w), heldAtRead = [];
+  w.legacyBytes = async (e) => { heldAtRead.push(W.reserved().held); return legacy(e); };
+  // the workspace's lock held elsewhere: the migrator has its reservation while it waits for the lock
+  let release;
+  await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+  let batches = 0;
+  W.MIGRATE.afterBatch = () => { batches++; };
+  const run = W.startMigrator(w);
+  let reservedWaiting = false;
+  for (let i = 0; i < 100 && !reservedWaiting; i++) { await new Promise((r) => setTimeout(r, 20)); reservedWaiting = W.reserved().held === W.LEGACY_MAX * W.COPIES; }
+  check(reservedWaiting, "the reservation is taken before the workspace's lock (held while it waits): " + W.reserved().held);
+  release();
+  try { await run; } finally { W.MIGRATE.afterBatch = null; w.legacyBytes = legacy; }
+  check(heldAtRead.length > 0 && heldAtRead.every((h) => h >= W.LEGACY_MAX * W.COPIES), "…held when the old bytes are read, covering any value kept the old way: " + heldAtRead.join());
+  const e = await w.stat("/u/a.bin");
+  check(e.migrated && e.size === big.length && (await fb(w, "/u/a.bin")).length === big.length, "the index's 1 byte corrected to the bytes read, and moved");
+  check((await W.migrationState(w)).done && batches <= 3, "…and the migration done, not retried for ever: " + batches + " batches");
+  check(W.reserved().held === 0, "…its reservation released");
+  // a write to a file kept the old way reads its old bytes (as the version to keep): reserved first too
+  const x = await v1([["/wr/a.txt", "old"]]);
+  const lx = x.legacyBytes.bind(x), heldW = [];
+  x.legacyBytes = async (e) => { heldW.push(W.reserved().held); return lx(e); };
+  await x.write("/wr/a.txt", "new");
+  await x.rename("/wr", "/wr2");
+  x.legacyBytes = lx;
+  check(heldW.length > 0 && heldW.every((h) => h >= W.LEGACY_MAX * W.COPIES) && W.reserved().held === 0, "a write to a file kept the old way: its old bytes read under the reservation, released after: " + heldW.join());
+  x.close();
+  // larger than any value kept the old way can be: not moved, said, not read for it again; a move refused
+  // (a) its index saying so: marked without reading it at all
+  const t = await v1([["/huge/t.bin", "y".repeat(100)]]);
+  const lt = t.legacyBytes.bind(t);
+  let readsT = 0;
+  t.legacyBytes = async (e) => { readsT++; return lt(e); };
+  const afterT = await t.locked(async () => t.migrateOne(await t.stat("/huge/t.bin"), 10));
+  check(!afterT.migrated && afterT.unmoved && afterT.size === 100 && readsT === 0, "a value whose index says it is over the bound: marked, never read (" + readsT + " reads)");
+  // every change to it refused before any read of the old store, and nothing written (daybreak2)
+  const get = IDBObjectStore.prototype.get, oldGets = [];
+  IDBObjectStore.prototype.get = function (k) { if (this.name === "files" || this.name === "trash") oldGets.push(this.name + ":" + k); return get.apply(this, arguments); };
+  const ops0 = (await t.ops()).length, e0 = JSON.stringify(await t.stat("/huge/t.bin"));
+  try {
+    check(await fails(t.write("/huge/t.bin", "new"), "limit") && await fails(t.duplicate("/huge/t.bin"), "limit") && await fails(t.rename("/huge/t.bin", "/huge/u.bin"), "limit") && await fails(t.remove("/huge/t.bin"), "limit") && await fails(t.remove("/huge"), "limit"), "writing, copying, renaming or putting it (or its folder) in Trash: refused, saying why");
+    check(oldGets.length === 0 && readsT === 0, "…none of them reads the old store: " + oldGets.join());
+    check((await t.ops()).length === ops0 && JSON.stringify(await t.stat("/huge/t.bin")) === e0 && (await rawGet(t.main, "files", "/huge/t.bin")) !== undefined, "…and none of them writes anything");
+    // the way out: deleted for good by a person, without reading it; never by an agent
+    const ag = t.forAgent("agent:x");
+    const asAgent = Object.create(t);
+    asAgent.actor = "agent:x";
+    check(typeof ag.discard === "undefined" && await fails(asAgent.discard("/huge/t.bin", JSON.parse(e0)), "invalid"), "an agent can't delete it for good (not offered, and refused)");
+    const before = oldGets.length;
+    await t.discard("/huge/t.bin", JSON.parse(e0));
+    const readByDiscard = oldGets.length - before;
+    check(!(await t.stat("/huge/t.bin")) && (await rawGet(t.main, "files", "/huge/t.bin")) === undefined && readByDiscard === 0, "a person deletes it for good: its entry and old bytes gone, never read (" + readByDiscard + " reads)");
+    check((await t.ops()).some((o) => o.op === "discard" && o.path === "/huge/t.bin"), "…logged");
+    check(await fails(t.discard("/huge/none.bin", { fid: "x", created: 1 }), "missing"), "…a file not there: missing");
+  } finally {
+    IDBObjectStore.prototype.get = get;
+  }
+  // one parked in Trash: restoring it refused without reading it
+  const tt = await v1([], [["/Trash/big.bin", "z".repeat(50), "/big.bin"]]);
+  await tt.locked(async () => tt.migrateOne(await tt.stat("/Trash/big.bin"), 10));
+  const g2 = [];
+  IDBObjectStore.prototype.get = function (k) { if (this.name === "files" || this.name === "trash") g2.push(k); return get.apply(this, arguments); };
+  try {
+    check((await tt.stat("/Trash/big.bin")).unmoved && await fails(tt.restore("/Trash/big.bin"), "limit") && g2.length === 0, "one in Trash: restoring it refused, the old store not read");
+  } finally {
+    IDBObjectStore.prototype.get = get;
+  }
+  await tt.discard("/Trash/big.bin", await tt.stat("/Trash/big.bin"));
+  check(!(await tt.stat("/Trash/big.bin")) && (await rawKeys(tt.ws, "trash")).length === 0, "…and deleted for good from there");
+  tt.close();
+  // an ordinary file isn't deleted for good this way: it goes to Trash
+  const o = await fresh();
+  await o.create("/plain.txt", { content: "p" });
+  const pe = await o.stat("/plain.txt");
+  check(await fails(o.discard("/plain.txt", pe), "invalid"), "an ordinary file isn't deleted for good this way");
+  o.close();
+  t.legacyBytes = lt;
+  t.close();
+  // (b) its index saying less than it is: read once, marked, never read by the migration again
+  const v = await v1([["/huge/h.bin", "y"]]);
+  await rawPut(v.main, "files", new Uint8Array(100), "/huge/h.bin");
+  const lv = v.legacyBytes.bind(v);
+  let readsV = 0;
+  v.legacyBytes = async (e) => { readsV++; return lv(e); };
+  const after = await v.locked(async () => v.migrateOne(await v.stat("/huge/h.bin"), 10));
+  check(!after.migrated && after.unmoved && after.size === 100 && readsV === 1, "a value over the bound, its index saying less: read once, not moved, the entry says so, with its size");
+  await v.locked(async () => v.migrateOne(await v.stat("/huge/h.bin"), 10));
+  await W.startMigrator(v);
+  check(readsV === 1, "…and never read by the migration again (" + readsV + " reads)");
+  v.legacyBytes = lv;
+  check((await W.migrationState(v)).done && (await v.usage()).migration.left === 0 && (await v.read("/huge/h.bin")).content.length === 100, "…the migration done without it; it is still read where it is");
+  check(await fails(v.rename("/huge", "/huge2"), "limit"), "…and moving it is refused (its bytes stay where they are)");
+  w.close();
+  v.close();
+}
+
+async function staleChanged() {
+  // CORR-F81-1: an older tab's write at a moved file's old key is never deleted
+  // (a) written between the move and the old copy's deletion
+  const w = await v1([["/s/a.txt", "BEFORE"]]);
+  w.beforeStaleDelete = async () => { await rawPut(w.main, "files", enc("NEW OLD TAB EDIT"), "/s/a.txt"); };
+  await w.locked(async () => w.migrateOne(await w.stat("/s/a.txt")));
+  w.beforeStaleDelete = null;
+  const copy = await w.stat("/s/a (from an older tab).txt");
+  check(copy && dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && dec((await w.read("/s/a.txt")).content) === "BEFORE", "an older tab's write as the old copy is cleaned up: kept as a file of its own, the moved file as it was");
+  check((await w.staleCopies(10)).length === 0, "…its mark gone");
+  await W.startMigrator(w);
+  check(dec((await w.read(copy.path)).content) === "NEW OLD TAB EDIT" && (await W.migrationState(w)).done && (await rawGet(w.main, "files", "/s/a.txt")) === undefined, "…then moved in turn, the migration done, nothing lost");
+  // (b) after a crash left the mark, then an older tab's write, then a reopened page's migrator
+  const v = await v1([["/s/b.txt", "BEFORE B"]]);
+  const drop = v.dropStale;
+  v.dropStale = async () => { throw new Error("crashed"); };
+  await v.locked(async () => v.migrateOne(await v.stat("/s/b.txt")));
+  v.dropStale = drop;
+  await rawPut(v.main, "files", enc("WRITTEN AFTER THE CRASH"), "/s/b.txt");
+  await W.startMigrator(v);
+  const copyB = await v.stat("/s/b (from an older tab).txt");
+  check(copyB && dec((await v.read(copyB.path)).content) === "WRITTEN AFTER THE CRASH" && dec((await v.read("/s/b.txt")).content) === "BEFORE B", "after a crash, an older tab's write at the marked key: kept, not deleted with the mark");
+  // (c) the same bytes, in both cases: deleted, no copy
+  const u = await v1([["/s/c.txt", "SAME"], ["/s/d.txt", "SAME D"]]);
+  u.beforeStaleDelete = async () => { await rawPut(u.main, "files", enc("SAME"), "/s/c.txt"); };
+  await u.locked(async () => u.migrateOne(await u.stat("/s/c.txt")));
+  u.beforeStaleDelete = null;
+  const dropU = u.dropStale;
+  u.dropStale = async () => { throw new Error("crashed"); };
+  await u.locked(async () => u.migrateOne(await u.stat("/s/d.txt")));
+  u.dropStale = dropU;
+  await W.startMigrator(u);
+  check((await u.list("/s")).length === 2 && (await rawKeys(u.main, "files")).length === 0 && (await u.staleCopies(10)).length === 0, "the old copy still the bytes moved (written again the same, or after a crash): deleted, no copy made");
+  w.close(); v.close(); u.close();
+}
+
+async function migrateQueuedAndBounded() {
+  // a migrator queued behind another tab's holds nothing: no reservation, no request for the workspace's lock
+  const files = Array.from({ length: 70 }, (_, i) => [`/b/f${String(i).padStart(2, "0")}.txt`, "x" + i]);
+  const w = await v1(files);
+  let release;
+  await new Promise((r) => navigator.locks.request("sagebrush-workspace-migrate", () => new Promise((g) => { release = g; r(); })));
+  await W.startMigrator(w);
+  const q = await navigator.locks.query();
+  check(W.reserved().held === 0 && W.reserved().waiting === 0 && !q.pending.some((p) => p.name === "sagebrush-workspace" || p.name === "sagebrush-workspace-migrate"), "a migrator queued behind another tab's: no reservation, no lock asked for");
+  release();
+  await new Promise((r) => setTimeout(r, 30));
+  // each batch reads at most MIGRATE.files entries of the index, never a list of all of them
+  const getAll = IDBObjectStore.prototype.getAll, counts = [];
+  IDBObjectStore.prototype.getAll = function (q, n) { if (this.name === "entries") counts.push(n); return getAll.call(this, q, n); };
+  try { await W.startMigrator(w); } finally { IDBObjectStore.prototype.getAll = getAll; }
+  check((await W.migrationState(w)).done && counts.length > 2 && counts.every((n) => n !== undefined && n <= W.MIGRATE.files), "each batch reads at most " + W.MIGRATE.files + " entries: " + counts.join());
+  w.close();
+}
+
+async function generationMonotonic() {
+  const w = await fresh();
+  await w.create("/g/a.txt", { content: "a" });
+  await w.create("/g/b.txt", { content: "b" });
+  const g = await w.generation();
+  check(g === (await w.lastSeq()) && g > 0, "the generation: the latest op's seq");
+  const n0 = await w.dropOps(g);
+  check(n0 > 0 && (await w.ops()).length === 0 && (await w.generation()) === g, "every op record dropped: the generation stays");
+  await w.create("/g/c.txt", { content: "c" });
+  check((await w.generation()) > g, "…and the next change raises it");
+  w.close();
+}
+
+async function closedByUpgrade() {
+  const w = await fresh();
+  await w.create("/k.txt", { content: "k" });
+  let told = 0;
+  w.onClosed(() => { told++; W.showReloadNotice(); });
+  // a newer page opening the workspace's database at a later version
+  await new Promise((ok, no) => { const r = indexedDB.open(`ws-test-${n}`, 99); r.onupgradeneeded = () => {}; r.onsuccess = () => { r.result.close(); ok(); }; r.onerror = () => no(r.error); r.onblocked = () => no(new Error("blocked: the old page didn't let go")); });
+  check(w.closed && told === 1, "a newer page upgraded the workspace: this page's is closed, and told once");
+  const box = document.getElementById("sagebrush-reload-notice");
+  check(!!box && /updated in another tab/.test(box.textContent) && [...box.querySelectorAll("button")].some((b) => b.textContent === "Reload"), "…the page says so, with Reload");
+  const err = await w.read("/k.txt").then(() => null, (e) => e);
+  check(err instanceof W.WorkspaceError && err.code === "storage" && /reload/.test(err.message), "…reading or changing then says to reload, not an IndexedDB error");
+  check(await fails(w.create("/l.txt", { content: "l" }), "storage"), "…and nothing is changed");
+  box?.remove();
+}
+
 export async function run() {
-  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent]) {
+  for (const t of [storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic]) {
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
   return results;
