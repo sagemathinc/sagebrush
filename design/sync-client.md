@@ -63,6 +63,8 @@ As built (step 2a):
     - Every caller that gives an adopt bytes holds LEGACY_MAX × COPIES, taken before the lock, until the adopt and its old copy are done. adopt() fails loudly otherwise (daybreak2's LIMIT-6B7-1). Trash's bytes with no entry are therefore recovered after reconcile's locked pass, each reserved first, as adoptOld's are.
     - Old copies are compared and kept one pair at a time: at most 8 rounds per call, with no recursion. Their marks are durable and win over a migration marked done: each migrator start first cleans them up, paged and bounded, whatever the migration's state (astra's CORR-6B7-1).
       - Each start goes on from a durable cursor and wraps round, so marks that keep failing can't hide those after them (CORR-AC1-1).
+      - Old copies are the start's cleanup alone, never a batch's work: marks that can't go don't hold the passes over the index, nor keep a migration from being done (daybreak2's LIMIT-1F3-1).
+      - Ownership is checked first: a key an entry already names as its bytes is that file's, its mark dropped, nothing re-adopted (astra's CORR-1F3-1).
       - An old copy is deleted only after a move of exactly those bytes. One kept unmoved is that file's storage and is never deleted. Nor is any key an entry still names as its bytes (CORR-AC1-2).
     - A reservation is a token: whoever reads bytes whole is given it and checks that it is live and large enough. The page's total isn't enough (daybreak2).
     - Trash recovery hashes the Trash bytes and lets them go before it checks the destination, then reads them again: at most two copies at once (LIMIT-AC1-1).

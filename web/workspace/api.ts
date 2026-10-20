@@ -1901,6 +1901,11 @@ export class Workspace {
     for (let round = 0; round < STALE_ROUNDS; round++) {
       const mark = (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mk)))) as StaleMark | undefined;
       if (mark === undefined) return;
+      // (ownership first (astra's CORR-1F3-1): a key an entry already names as its bytes, not moved (an adoption
+      // that committed unmoved before its mark could be dropped, say), is that file's: the mark dropped, nothing
+      // read, adopted or deleted.  The entry and the mark are in different databases, so this order, under the
+      // lock, is what makes a replay do nothing twice)
+      if (await this.storageOf(key)) return forget();
       if (!seen) {
         const cur = await this.readOld(where, key);
         if (cur === undefined) return forget();

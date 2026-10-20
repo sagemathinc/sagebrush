@@ -189,8 +189,10 @@ async function migrate(w: Workspace) {
     if (r === "end") {
       // (done only if this whole pass did nothing and nothing changed the index meanwhile, checked holding the lock)
       const done = await w.locked(async () => {
-        const gen = await w.generation(), staleLeft = (await w.staleCopies(1)).length > 0;
-        if (!s.pass!.work && gen === s.pass!.start && !staleLeft) {
+        // (old copies left aren't the passes' to wait for: their marks are durable, and each start cleans them up
+        // first, whatever the state says (CORR-6B7-1))
+        const gen = await w.generation();
+        if (!s.pass!.work && gen === s.pass!.start) {
           await writeState(w, { done: true });
           return true;
         }
@@ -211,18 +213,8 @@ async function migrate(w: Workspace) {
 async function batch(w: Workspace, p: { start: number; at: string; work: boolean }): Promise<"end" | "more" | "paused"> {
   const t0 = performance.now();
   let moved = 0, bytes = 0;
-  // old copies a crash left (their entries already migrated): deleted first, if still the bytes moved
-  // (their bytes are read: reserved first)
-  for (const [where, key] of await w.staleCopies(MIGRATE.files)) {
-    const release = await reserve(LEGACY_MAX * MIGRATE.copies);
-    try {
-      await w.locked(() => w.dropStale(where, key, undefined, release));
-    } finally {
-      release();
-    }
-    p.work = true;
-    moved++;
-  }
+  // (old copies are cleanStale's alone, bounded and fair, at each start: none here, so marks that can't go are
+  // never counted as this pass's work, nor hold it at its start (daybreak2's LIMIT-1F3-1))
   // (a cursor over the index from the checkpoint: at most MIGRATE.files entries held, never a list of all)
   const next: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(IDBKeyRange.lowerBound(p.at, true), MIGRATE.files)));
   if (!next.length) return "end";
