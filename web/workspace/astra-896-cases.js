@@ -1,6 +1,6 @@
 // astra's cases on 89685b0c (/scratch/astra-detect-896/web/workspace/astra-896-cases.js): hers verbatim but for the
 // third's assertion ("or isn't offered", marked); then the history-chain cases (CORR-896-1)
-import * as W from './ws.js';import * as S from './stores.js';import {H} from './hist.js';
+import * as W from './ws.js';import * as S from './stores.js';import {H,BoardHistory} from './hist.js';
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 export async function run(){const out=[];const w=await W.Workspace.open({name:'astra896',mainName:'astra896main'}),e=await w.create('/n.ipynb'),db=await S.openHistoryDb();
  // Array proxy must not have its get trap invoked.
@@ -106,6 +106,20 @@ export async function run(){const out=[];const w=await W.Workspace.open({name:'a
   g.held.shift()?.();await within(fresh);const t={during,after:nh.pauseState().rebuilding,live:nh.versions().length,subs:g.subs};
   out.push([during&&!t.after&&t.live===1&&g.subs===1,'an earlier generation\'s rebuild finishing leaves the newer one\'s handle: '+JSON.stringify(t)]);
   nh.close();}
+ // a board edited while its history is reopened (another tab cleared it, on the real BroadcastChannel; its load held):
+ // nothing to base a version on (committed() null, never some other document), no version then and no throw; the next version, once it is open, has that
+ // edit, based on what the store keeps, and right after a reload (astra's CORR-529-1)
+ {const bdb=await S.openBoardHistoryDb(),s=new S.IdbPatchStore(bdb,'board:local:529a529a529a'),g=gated(s),b=await new BoardHistory(H,g.store).init();
+  const d0={title:'t0',nodes:[{id:'c',text:'zero'}],edges:[]},v0=b.record(d0);await s.appending;await settle(b.h);
+  g.arm=1;const bc=new BroadcastChannel('sagebrush-history');bc.postMessage({from:'another-tab',id:s.id,clear:true});for(let i=0;i<400&&!g.held.length;i++)await sleep(5);const caught=g.held.length;
+  const base=b.h.committed();let error=null,during;try{during=b.record({title:'t1',nodes:[{id:'c',text:'during'}],edges:[]})}catch(x){error=String(x)}
+  g.held.shift()?.();for(let i=0;i<400&&!b.h.session;i++)await sleep(5);
+  const d2={title:'t1',nodes:[{id:'c',text:'during'},{id:'d',text:'after'}],edges:[]},v2=b.record(d2);await s.appending;await settle(b.h);
+  const rows=(await s.loadInitial()).patches,r2=rows.find(r=>r.time===v2?.time),br=await new BoardHistory(H,s).init();
+  const texts=(t)=>{try{return br.docAt(t).nodes.map(n=>n.text).join(',')}catch(x){return 'ERROR '+x}};
+  const t={caught,base:base===null?null:'a document',error,during:during??null,rows:rows.length,parents:r2?.parents?.length,fromV0:!!r2?.parents?.includes(v0?.time),v0:texts(v0?.time),v2:texts(v2?.time),vs:br.versions().length};
+  out.push([caught===1&&base===null&&!error&&during==null&&rows.length===2&&t.fromV0&&t.v0==='zero'&&t.v2==='during,after'&&t.vs===2,'a board edited while its history is reopened: no version then, no throw; the next has the edit, right after a reload: '+JSON.stringify(t)]);
+  bc.close();b.close();br.close();bdb.close();}
  // two documents: one's refusal pauses its own history alone
  {S.HISTORY_BACKLOG.bytes=4096;const ha=new S.IdbPatchStore(db,e.ref+'docA'),hb=new S.IdbPatchStore(db,e.ref+'docB'),A=await new H.NotebookHistory(ha).init(),B=await new H.NotebookHistory(hb).init();
   B.record(nbOf('b0'));A.record(nbOf('z'.repeat(8000)));const b1=B.record(nbOf('b1'));await ha.appending;await hb.appending;
