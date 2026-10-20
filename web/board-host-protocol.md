@@ -1002,15 +1002,15 @@ function openChannel(me) {
   to the file.
 - `editing`'s `keepUnsaved` (and `reason`) is specified, not implemented in
   the frame yet. It ships with the frame's editing side (CoCalc step 2).
-- Built in `editState` (`@sagemathinc/sagebrush-board/submission`, the next
-  release after 0.3.0, 0.4.0):
+- Built in `editState` (`@sagemathinc/sagebrush-board/submission` 0.4.0,
+  published with `sagebrush` 0.5.2):
   - `preview`, its meter, `previewThrottled` and `sharedPreviewBudget`;
   - the refusals' `reason`, `what`, `limit` and `size`;
   - `editState(text, { pictures: "by-reference", pictureAllowed })`, with
     its checks of shapes, names and sources, and the authorization of new
     pictures.
 
-  Until that release a host refuses `data:` URLs in edits itself. Specified,
+  With an older package a host refuses `data:` URLs in edits itself. Specified,
   not built yet: the frame's side of `imagePut`, `imageGet` and
   `pictures: ["by-reference"]` in `ready`, and the frame acting on `reason`.
 

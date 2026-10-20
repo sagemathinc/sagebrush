@@ -43,9 +43,9 @@ Each board, notebook or command uses ONE language. Each language is a SUBSET of 
 
 ## Command line
 
-- `npx sagebrush@0.5.1` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
-- `npx sagebrush@0.5.1 --sage -c 'factor(2^32+1)'` runs one command; `npx sagebrush@0.5.1 --search "elliptic curve rank" --json` searches the documentation.
-- `npx sagebrush@0.5.1 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
+- `npx sagebrush@0.5.2` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
+- `npx sagebrush@0.5.2 --sage -c 'factor(2^32+1)'` runs one command; `npx sagebrush@0.5.2 --search "elliptic curve rank" --json` searches the documentation.
+- `npx sagebrush@0.5.2 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
 
 ## Elsewhere
 
