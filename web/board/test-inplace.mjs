@@ -645,11 +645,20 @@ try {
   // recorded, whether held back, and never followed)
   const LK = { title: "Link under", nodes: [{ id: "under", text: "[Under WWWWWWWWWWWWWWWWWWWWWWWWWWW](https://example.invalid/under)", x: 0, y: 0, w: 260 }, { id: "over", title: "Selected", x: 250, y: 20, w: 260 }] };
   await ev("window.__clicks = []; document.addEventListener('click', (e) => { if (e.target.closest?.('a[href^=\"https://example.invalid\"]')) { window.__clicks.push(e.defaultPrevented); e.preventDefault(); } }), 1");
-  for (const how of ["mouse", "touch"]) {
-    await ev(`window.sagebrush.board.load(${JSON.stringify(LK)}).then(() => 1)`);
+  const loadLK = async (doc) => {
+    await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
     await until("!!window.board.item('over')", 10000);
     await ev("window.sagebrush.board.editing(true), window.board.setCamera({ x: -100, y: -100, z: 1 }), window.board.render(), 1");
     await sleep(300);
+  };
+  for (const how of ["mouse", "touch"]) {
+    await loadLK(LK);
+    // (the selected note put so its grip is over the link wherever the link's text fell on this machine: fonts,
+    // and so where a line ends or wraps, differ between runners; moved by what separates the grip from the
+    // nearest point of the link's rendered text, nothing at all where it is already over it)
+    const g0 = await gripOf("over");
+    const near = await ev(`(() => { let best = null; for (const r of document.querySelector('a[href="https://example.invalid/under"]')?.getClientRects() ?? []) { if (r.width < 2 || r.height < 2) continue; const ix = Math.min(4, r.width / 2), iy = Math.min(4, r.height / 2), x = Math.min(Math.max(${g0.x}, r.left + ix), r.right - ix), y = Math.min(Math.max(${g0.y}, r.top + iy), r.bottom - iy), d = Math.hypot(x - ${g0.x}, y - ${g0.y}); if (!best || d < best.d) best = { x, y, d }; } return best; })()`);
+    if (near && near.d > 0) await loadLK({ ...LK, nodes: LK.nodes.map((n) => (n.id === "over" ? { ...n, x: n.x + (near.x - g0.x), y: n.y + (near.y - g0.y) } : n)) });
     const ro = await rect("over");
     await click(ro.left + 150, ro.top + 30);
     await sleep(250);
@@ -665,7 +674,7 @@ try {
       await sleep(350);
     }
     const o1 = await box("over");
-    check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1]));
+    check(onLink && Math.abs(o1.x - (o0.x + 80)) <= 12 && Math.abs(o1.y - (o0.y + 100)) <= 12, `B2: the selected item's grip over another note's link drags it (${how}): ` + JSON.stringify([onLink, o0, o1, near]));
     const clicks = await ev("window.__clicks");
     check(clicks.every((held) => held), `B2: ...and the link is not followed, any click on it held back (${how}): ` + JSON.stringify(clicks));
   }
