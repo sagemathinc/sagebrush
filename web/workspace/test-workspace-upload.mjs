@@ -90,11 +90,15 @@ try {
   // several files at once: documents become documents; anything else, data files; nothing converted, nothing asked
   const mode = await upload(NB, [file("a.ipynb", ipynb("1 + 1")), file("b.board.json", boardJson("B")), file("c.py", "# %%\nprint(3)\n"), file("d.csv", "x,y\n1,2\n"), join(dir, "e.sbreplay"), file("bad.board.json", JSON.stringify({ nodes: "not a list" }))]);
   check(mode === "selectMultiple", "File ▸ Upload… takes several files: " + mode);
-  check(await until(`${W}.stat("/d.csv").then((e) => !!e)`), "the upload is done");
+  // d.csv is fourth in the sequential upload, so its presence does not mean
+  // the later board was validated or the final refusal was rendered.  The
+  // sticky file-browser notice is written only after the whole batch settles.
+  const refusedBadBoard = `(document.querySelector(".sbfiles .ftoast")?.textContent ?? "").includes("bad.board.json")`;
+  check(await until(refusedBadBoard), "the upload is done");
   const got = Object.fromEntries(await Promise.all(["/a.ipynb", "/b.board.json", "/c.py", "/d.csv", "/e.ipynb", "/c.ipynb", "/bad.board.json"].map(async (p) => [p, await stat(p)])));
   check(got["/a.ipynb"]?.kind === "notebook" && got["/b.board.json"]?.kind === "board" && got["/e.ipynb"]?.kind === "notebook", ".ipynb, .board.json and .sbreplay become documents: " + JSON.stringify(got));
   check(got["/c.py"]?.kind === "file" && got["/d.csv"]?.kind === "file" && !got["/c.ipynb"], "…a .py and a .csv are kept as data files, the .py not converted");
-  check(!got["/bad.board.json"] && (await ev(`document.querySelector("#status")?.textContent ?? ""`)).includes("bad.board.json"), "…one that isn't a board is refused, and said");
+  check(!got["/bad.board.json"] && (await ev(refusedBadBoard)), "…one that isn't a board is refused, and said");
   check((await historyRows(got["/e.ipynb"]?.ref)) > 0, "…the .sbreplay keeps its history");
   check(!dialogs.some((d) => d.type === "confirm") && (await nbRef()) === welcome, "…several files: nothing asked, nothing opened");
   check((await ev(`${W}.read("/a.ipynb").then((r) => r.content.cells.map((c) => c.code).join())`)) === "1 + 1", "…the notebook as uploaded");
