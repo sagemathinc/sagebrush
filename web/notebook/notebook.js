@@ -1647,7 +1647,8 @@ export function createNotebook(root, opts = {}) {
   // ("left": how many, said whenever it may have changed: the page asks
   // before closing while there are any, their saves only here)
   const leftChanged = () => emit("left", leftCount());
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); leftChanged(); };
+  // (one whose save was busy stays outstanding until it is sent again: counted, asked about before closing)
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s)) outstanding.delete(s); leftChanged(); };
   async function keepDetached(key, doc, theirs) {
     try {
       if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
@@ -1694,7 +1695,15 @@ export function createNotebook(root, opts = {}) {
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
-    if (store) {
+    if (store) queueSave(mine, store, doc, json, seen);
+  }
+  // (a save the workspace's lock didn't let through in time, "busy" (notebook/stores.js LOCK_WAIT): kept by
+  // document, and sent again as it was by the next saved(), whether that document is still shown or was left;
+  // nothing of it is lost while another tab holds the lock)
+  const busy = new Map();
+  function queueSave(mine, st, doc, json, seen) {
+    {
+      busy.delete(mine);
       let sent = doc;
       mine.inflight = (mine.inflight ?? 0) + 1;
       outstanding.add(mine);
@@ -1702,7 +1711,6 @@ export function createNotebook(root, opts = {}) {
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
-      const st = store;
       const start = () => {
         if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
         const base = mine.synced?.rev;
@@ -1712,6 +1720,8 @@ export function createNotebook(root, opts = {}) {
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
       saveChain = p.then((t) => {
+        // (a busy one sent again, done: its error no longer stands)
+        if (mine.busyError) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
         if (t && typeof t === "object" && t.conflict) {
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
@@ -1732,6 +1742,7 @@ export function createNotebook(root, opts = {}) {
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
+        if (e?.busy) { busy.set(mine, { st, sent, json }); mine.busyError = e; }
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
@@ -1745,6 +1756,8 @@ export function createNotebook(root, opts = {}) {
   async function saved() {
     for (let i = 0; i < 5; i++) {
       flush();
+      // (busy ones sent again, the shown document's by flush already)
+      for (const [m, b] of [...busy]) if (busy.get(m) === b && m !== shown) queueSave(m, b.st, b.sent, b.json, m.remoteSeen);
       await saveChain;
       if (lastSaveError) throw lastSaveError;
       // (saves of documents no longer shown that couldn't be kept: tried

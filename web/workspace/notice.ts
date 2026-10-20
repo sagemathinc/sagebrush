@@ -30,6 +30,28 @@ export function showReloadNotice(text = RELOAD_TEXT): HTMLElement | null {
   return box;
 }
 
+const BUSY_ID = "sagebrush-busy-notice";
+/** A notice that can be closed: `text` (one at a time, replaced). */
+export function showBusyNotice(text: string): HTMLElement | null {
+  const doc = (globalThis as any).document as Document | undefined;
+  if (!doc?.body) return null;
+  doc.getElementById(BUSY_ID)?.remove();
+  const box = doc.createElement("div");
+  box.id = BUSY_ID;
+  box.setAttribute("role", "status");
+  box.style.cssText = "position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;gap:12px;align-items:center;padding:8px 14px;background:#5b4a0e;color:#fff;font:14px/1.4 system-ui,sans-serif;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.3)";
+  const msg = doc.createElement("span");
+  msg.textContent = text;
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Close";
+  btn.style.cssText = "font:inherit;padding:2px 10px;border-radius:4px;border:0;background:#fff;color:#5b4a0e;cursor:pointer";
+  btn.onclick = () => box.remove();
+  box.append(msg, btn);
+  doc.body.append(box);
+  return box;
+}
+
 const LOSS_ID = "sagebrush-loss-notice";
 
 /** The notice that this browser's copy of the workspace was lost or is missing changes (design/workspace-

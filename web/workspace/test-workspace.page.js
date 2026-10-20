@@ -2524,6 +2524,52 @@ async function durabilityLockOrder() {
       check(waited && order[0] === "write" && b?.quarantined && after, `the lock orders ${mode} against a quarantine, its fence puts ${fails ? "failing" : "written"}: B waited for the write, and ${mode} after B refused: ` + JSON.stringify({ waited, order, quarantined: b?.quarantined, blocked: b?.fenceBlocked, first, second, rows, stored }));
     } finally { release(); IDBDatabase.prototype.transaction = origTx; IDBObjectStore.prototype.put = put; a.close(); b?.close(); db.close(); }
   }
+  // the lock held for good by another tab: a save and a clear give up after LOCK_WAIT, said, their requests
+  // withdrawn (the lock let go later, nothing is written by them), the editor's change kept for a later save
+  // that succeeds; appends wait in their queue, at most HISTORY_BACKLOG of them, one past it refused and said
+  // (an editor never frozen, memory bounded, by a stuck tab)
+  {
+    const S = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/held.ipynb");
+    const st = new S.IdbStore(a.main, e.ref), doc = await st.load(), db = await S.openHistoryDb(), h = new S.IdbPatchStore(db, e.ref);
+    await h.loadInitial(); h.append({ time: "seed", id: "seed" }); await h.appending;
+    S.LOCK_WAIT.ms = 300; S.HISTORY_BACKLOG.entries = 3;
+    const said = [], off = S.onHistoryRefused((m) => said.push(m));
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    try {
+      const t0 = performance.now(), save = await Promise.race([st.save({ ...doc, baseRev: doc.rev, name: "HELD" }).then((v) => ({ v }), (err) => ({ err: String(err?.message ?? err) })), new Promise((r) => setTimeout(() => r({ hung: true }), 5000))]), waited = performance.now() - t0;
+      const clear = await h.clear().then(() => "done", (err) => String(err?.message ?? err));
+      const taken = [1, 2, 3, 4, 5].map((i) => h.append({ time: "q" + i, id: "q" + i }));
+      const queued = S.historyBacklog().entries;
+      await new Promise((r) => setTimeout(r, 200));
+      const before = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]);
+      release(); release = null;
+      await h.appending; await new Promise((r) => setTimeout(r, 300));
+      const after = (await rawKeys(db, "history")).filter((k) => k[0] === e.ref).map((k) => k[1]), stored = (await rawGet(a.main, "notebooks", e.ref)).name;
+      check(/busy/.test(save.err ?? "") && waited < 3000 && /busy/.test(clear), "the lock held for good elsewhere: a save (rejected) and a clear give up, saying the files are busy: " + JSON.stringify({ save, waited: Math.round(waited), clear }));
+      check(stored !== "HELD" && after.includes("seed"), "…their requests withdrawn: the lock let go later, nothing written by them (the notebook as it was, the history not cleared): " + JSON.stringify({ stored, after }));
+      check(taken.join() === "true,true,true,false,false" && queued === 3 && said.length === 2 && /TimeTravel/.test(said[0]) && before.join() === "seed", "…appends: three wait (the bound set to 3), the next two refused and said: " + JSON.stringify({ taken, queued, said: said.length, before }));
+      check(["q1", "q2", "q3"].every((k) => after.includes(k)) && !after.includes("q4") && S.historyBacklog().entries === 0 && S.historyBacklog().bytes === 0, "…the three kept once it is let go, the backlog empty again: " + JSON.stringify({ after, backlog: S.historyBacklog() }));
+      const rec = await rawGet(a.main, "notebooks", e.ref), later = await st.save({ ...rec, baseRev: rec.rev, name: "HELD" });
+      check(!!later?.saved && (await rawGet(a.main, "notebooks", e.ref)).name === "HELD", "…and the same change, saved again once the lock is free: kept: " + JSON.stringify(later));
+    } finally { release?.(); off(); S.LOCK_WAIT.ms = 10_000; S.HISTORY_BACKLOG.entries = 1000; a.close(); db.close(); }
+  }
+  // the OPFS witness's flush in the background: the lock held elsewhere, it doesn't wait for it (no request
+  // left pending), and is done once the lock is free
+  {
+    const o = await named(), a = await openAs(o); await a.create("/flush.txt", { content: "f" });
+    let release; await new Promise((r) => navigator.locks.request("sagebrush-workspace", () => new Promise((g) => { release = g; r(); })));
+    let state;
+    try {
+      const raced = await Promise.race([a.flushOpfs().then(() => "returned"), new Promise((r) => setTimeout(() => r("waiting"), 1000))]);
+      const pending = (await navigator.locks.query()).pending.filter((l) => l.name === "sagebrush-workspace").length;
+      state = { raced, pending };
+    } finally { release(); }
+    const before = await opfsW(o.name);
+    await a.flushOpfs();
+    const after = await opfsW(o.name);
+    check(state.raced === "returned" && state.pending === 0 && after.seq > (before?.seq ?? 0), "the OPFS flush, the lock held elsewhere: not waiting for it, nothing pending; done once it is free: " + JSON.stringify({ ...state, before: before?.seq, after: after.seq }));
+    a.close();
+  }
   // append after clear: kept, after it; and the other tabs told in that order
   {
     const S2 = await import("./stores.js"), o = await named(), a = await openAs(o), e = await a.create("/m.ipynb"), db = await S2.openHistoryDb(), h = new S2.IdbPatchStore(db, e.ref);
