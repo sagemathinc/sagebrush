@@ -30,6 +30,7 @@ import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, s
 import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
+import { lowestWatermark } from "./sync-outbox";
 
 export type Entry = {
   path: string;
@@ -1179,6 +1180,9 @@ export class Workspace {
   async dropOps(upTo: number): Promise<number> {
     return inTx(this.ws, ["ops", "meta"], "readwrite", async (tx) => {
       const ops = tx.objectStore("ops"), meta = tx.objectStore("meta");
+      // (never past a sync namespace's scan watermark: the ops after it are still to be sent (C1))
+      const low = await lowestWatermark(meta);
+      if (low !== undefined) upTo = Math.min(upTo, low);
       const keys = (await req(ops.getAllKeys(IDBKeyRange.upperBound(upTo)))) as number[];
       if (!keys.length) return 0;
       const floor = ((await req(meta.get("opsFloor"))) as number | undefined) ?? 0;
