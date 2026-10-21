@@ -59,6 +59,8 @@ const X1 = "dbdbdbdb-dbdb-4dbd-8dbd-dbdbdbdbdbdb"; // a plan without sync from t
 const X2 = "dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc"; // a plan that ends between enable and the first batch
 const Z0 = "dddddddd-0000-4ddd-8ddd-dddddddddd00"; // turned on while CoCalc is down: nothing cached
 const Z1 = "dddddddd-0001-4ddd-8ddd-dddddddddd01"; // a lapse while a claim raise is answered
+const P1 = "9a9a9a9a-0001-4a9a-8a9a-9a9a9a9a9a01"; // index ops naming their folder by `parent` (§3)
+const P2 = "9a9a9a9a-0002-4a9a-8a9a-9a9a9a9a9a02"; // the client's own wire ops (sync-outbox.ts wireOf), parent and all
 const ST1 = "5a5a5a5a-0001-4a5a-8a5a-5a5a5a5a5a01"; // GET /status: never synced, plan with sync
 const ST2 = "5a5a5a5a-0002-4a5a-8a5a-5a5a5a5a5a02"; // GET /status: not on the allowlist
 const ST3 = "5a5a5a5a-0003-4a5a-8a5a-5a5a5a5a5a03"; // GET /status beside an enable
@@ -115,6 +117,8 @@ fake.limits.set(Z0, sync(1 << 20, 1 << 20));
 fake.limits.set(N, sync(1 << 20, 1 << 20)); // (enable asks for the plan first)
 for (const st of [ST1, ST2, ST3, ST4, ST5, ST6]) fake.limits.set(st, sync(1 << 20, 1 << 20));
 fake.limits.set(Z1, plan(true, 100));
+fake.limits.set(P1, sync(1 << 20, 1 << 20));
+fake.limits.set(P2, sync(1 << 20, 1 << 20));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 async function cocalc(req) {
   const u = new URL(req.url);
@@ -134,7 +138,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6},${P1},${P2}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -2082,6 +2086,87 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) <= 16_384), "with no further request, the alarm gives the grant back, to at most a chunk (CORR-AB4-1)");
   const [g5, b5] = await retentionOf(crypto.randomUUID());
   ok(g5 === 404, "CoCalc asking about an account that never synced: 404");
+}
+
+// ---- an op may name the folder it puts something in by its fid, `parent` (§3): checked for its form only,
+// stored, and echoed; the reducer decides what it means
+{
+  const sp = await signIn(P1);
+  ok((await post(sp, "/api/sync/v1/enable", {})).status === 200, "(P1: on)");
+  const acctP = () => acctNs.get(acctNs.idFromName("acct:" + hashOf(P1)));
+  const s = await socket(sp);
+  await hello(s, "device-parent-01");
+  const F1 = "aaaaaaaaaaaaaaaa", F2 = "bbbbbbbbbbbbbbbb", nbP = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const op = (dseq, o) => ({ dseq, t: 1000 + dseq, by: "person", ...o });
+  let a = await s.ask({ t: "ops", ops: [
+    op(1, { op: "mkdir", path: "/F1", kind: "folder", fid: F1 }),
+    op(2, { op: "mkdir", path: "/F1/F2", kind: "folder", fid: F2, parent: F1 }),
+    op(3, { op: "create", path: "/F1/F2/n.ipynb", kind: "notebook", ref: nbP, parent: F2 }),
+    op(4, { op: "rename", path: "/F1/F2/n.ipynb", to: "/F1/n.ipynb", kind: "notebook", ref: nbP, parent: F1 }),
+    op(5, { op: "duplicate", path: "/F1/n.ipynb", to: "/F1/F2/m.ipynb", kind: "notebook", ref: nbP, parent: F2 }),
+    op(6, { op: "restore", path: "/F1/F2", kind: "folder", fid: F2, parent: F1 }),
+    op(7, { op: "adopt", path: "/F1/x", kind: "folder", parent: F1 }),
+  ] });
+  ok(a?.t === "ack" && a.ops.length === 7 && a.ops.every((o) => o.seq), "parent is accepted on mkdir, create, rename (the destination's), duplicate, restore and adopt: " + JSON.stringify(a?.ops));
+  a = await s.ask({ t: "ops", ops: [
+    op(8, { op: "remove", path: "/F1/x", kind: "folder", parent: F1 }),
+    op(9, { op: "forget", path: "/F1/x", kind: "folder", parent: F1 }),
+    op(10, { op: "dropVersions", path: "/F1/n.ipynb", kind: "notebook", ref: nbP, parent: F1 }),
+    op(11, { op: "mkdir", path: "/F3", kind: "folder", parent: "AAAAAAAAAAAAAAAA" }),
+    op(12, { op: "mkdir", path: "/F3", kind: "folder", parent: "aaaaaaaaaaaaaaa" }),
+    op(13, { op: "mkdir", path: "/F3", kind: "folder", parent: 7 }),
+    op(14, { op: "mkdir", path: "/F3", kind: "folder", parent: "ffffffffffffffff" }),
+  ] });
+  ok(a?.ops?.slice(0, 6).every((o) => o.code === "invalid") && a.ops[6].seq, "and refused on remove, forget and dropVersions, or when it isn't 16 lowercase hex; a parent the index doesn't have is still accepted (not checked here): " + JSON.stringify(a?.ops));
+  const ix = await s.ask({ t: "pull_index", after: 0 });
+  const parents = ix?.ops?.map((o) => o.parent ?? null);
+  ok(JSON.stringify(parents) === JSON.stringify([null, F1, F2, F1, F2, F1, F1, "ffffffffffffffff"]), "the index echoes each op's parent, and leaves it out where there is none: " + JSON.stringify(parents));
+  s.ws.close();
+  // an object made before `parent`: its restart adds the column; its old ops come back without it, new ones carry it
+  await acctP().testOldOps();
+  await acctP().crash().catch(() => {});
+  await until(async () => (await acctP().inspect({}).catch(() => null)) !== null, 10_000);
+  const s2 = await socket(sp);
+  const { welcome } = await hello(s2, "device-parent-01");
+  const a2 = await s2.ask({ t: "ops", ops: [op(welcome.next_dseq, { op: "mkdir", path: "/F4", kind: "folder", parent: F1 })] });
+  const ix2 = await s2.ask({ t: "pull_index", after: 0 });
+  ok(a2?.ops?.[0]?.seq && ix2?.ops?.length === 9 && ix2.ops.slice(0, 8).every((o) => o.parent === undefined) && ix2.ops[8].parent === F1,
+    "an object whose ops table predates parent gains the column on restart: old ops come back without it, a new op carries it: " + JSON.stringify(ix2?.ops?.map((o) => o.parent ?? null)));
+  s2.ws.close();
+}
+
+// ---- the client's side of the contract: ops made by the client's own outbox (web/workspace/sync-outbox.ts
+// wireOf, as step 2b-2 will send them), `parent` and all, are taken by this server (the case that would break
+// 2b-2 if the field were refused).  The client sets parent only where the op's result is in a folder
+// (api.ts log(): never on a remove into Trash, or a forget)
+{
+  const sp = await signIn(P2);
+  ok((await post(sp, "/api/sync/v1/enable", {})).status === 200, "(P2: on)");
+  const bytes = Buffer.from("a data file the client syncs"), bytes2 = Buffer.from("its next version");
+  ok((await put(sp, bytes)).status === 201 && (await put(sp, bytes2)).status === 201, "(P2's two versions uploaded)");
+  const W = "1111111111111111", X = "2222222222222222", Fd = "3333333333333333", nb = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const local = [
+    { op: "mkdir", path: "/W", kind: "folder", fid: W },
+    { op: "mkdir", path: "/W/X", kind: "folder", fid: X, parent: W },
+    { op: "create", path: "/W/X/n.ipynb", kind: "notebook", ref: nb, parent: X },
+    { op: "rename", path: "/W/X/n.ipynb", to: "/W/n.ipynb", kind: "notebook", ref: nb, parent: W },
+    { op: "restore", path: "/W/X", kind: "folder", fid: X, parent: W },
+    { op: "adopt", path: "/W/old", kind: "folder", fid: "4444444444444444", parent: W },
+    { op: "create", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes), size: bytes.length, parent: X },
+    { op: "write", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length, base: sha(bytes), parent: X },
+  ];
+  const code = `import { wireOf } from ${JSON.stringify(join(here, "../workspace/sync-outbox.ts"))};
+const local = ${JSON.stringify(local)};
+console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person", device: "d", after: {} }, i + 1))));`;
+  const wire = JSON.parse(execFileSync("bun", ["-e", code], { encoding: "utf8" }));
+  ok(wire.length === 8 && wire.every((w, i) => w && w.parent === local[i].parent), "(the client's wireOf keeps each op's parent: " + JSON.stringify(wire.map((w) => w?.parent ?? null)) + ")");
+  const s = await socket(sp);
+  await hello(s, "device-wire-0002");
+  const a = await s.ask({ t: "ops", ops: wire });
+  ok(a?.t === "ack" && a.ops.length === 8 && a.ops.every((o) => o.seq && !o.code), "the server takes the client's own wire ops with parent: mkdir, create, rename, restore, adopt, and a data file's create and write: " + JSON.stringify(a?.ops));
+  const ix = await s.ask({ t: "pull_index", after: 0 });
+  ok(JSON.stringify(ix?.ops?.map((o) => o.parent ?? null)) === JSON.stringify(local.map((o) => o.parent ?? null)), "and gives each one's parent back in the index");
+  s.ws.close();
 }
 
 // ---- the page's question: GET /api/sync/v1/status, which never creates or registers anything

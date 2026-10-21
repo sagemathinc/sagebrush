@@ -35,7 +35,7 @@ interface Attachment {
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
   "CREATE TABLE IF NOT EXISTS devices (device TEXT PRIMARY KEY, name TEXT, created INTEGER, last_seen INTEGER, session_hash TEXT, next_dseq INTEGER NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, UNIQUE (device, dseq))",
+  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
   "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER)",
@@ -138,6 +138,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.sql = ctx.storage.sql;
     // (after a restart: whatever the stored state still needs, the alarm is armed for, CORR-321-3)
     ctx.blockConcurrencyWhile(async () => {
+      // (an object made before an op column existed gains it: §3's `parent`, Oct 20)
+      if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'") && !this.sql.exec("PRAGMA table_info(ops)").toArray().some((c) => (c as Row).name === "parent")) {
+        this.sql.exec("ALTER TABLE ops ADD COLUMN parent TEXT");
+      }
       this.alarmAt = await ctx.storage.getAlarm();
       if (this.hasMeta()) this.arm();
     });
@@ -475,8 +479,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
             if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) throw new SyncError("missing", "upload the file's bytes before the op");
           }
           this.sql.exec(
-            'INSERT INTO ops (device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, recv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            device, dseq, op.t, op.by, op.op, op.path, op.to ?? null, op.kind, op.ref ?? null, op.fid ?? null, op.sha256 ?? null, op.size ?? null, op.base ?? null, Date.now(),
+            'INSERT INTO ops (device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, recv, parent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            device, dseq, op.t, op.by, op.op, op.path, op.to ?? null, op.kind, op.ref ?? null, op.fid ?? null, op.sha256 ?? null, op.size ?? null, op.base ?? null, Date.now(), op.parent ?? null,
           );
           out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
           // (the reference an entry holds; it is given back when the reducer replaces the entry's bytes)
@@ -496,7 +500,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** The log after `after`, a page at a time (§5.2, §8). */
   private index(after: number): { ops: Row[]; more: boolean } {
-    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
+    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
     const ops: Row[] = [];
     let bytes = 0;
     for (const r of rows.slice(0, LIMITS.indexPage)) {
@@ -1793,6 +1797,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: forget the alarm and restart this object, as a crash after a pin would (CORR-321-3). */
+  /** Tests only: the ops table as an object made before `parent` has it (the restart then adds it). */
+  async testOldOps(): Promise<void> {
+    if (!testMode(this.env)) return;
+    this.sql.exec("ALTER TABLE ops DROP COLUMN parent");
+  }
   async crash(): Promise<void> {
     if (!testMode(this.env)) return;
     await this.ctx.storage.deleteAlarm();
