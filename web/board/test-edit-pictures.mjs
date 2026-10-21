@@ -243,11 +243,11 @@ const harness = () => {
 // kept, never dropped; quota and too-large take it out; busy every time: kept for download, its text and all
 {
   const board0 = J({ format: "sagebrush-board", version: 1, nodes: [{ id: "a", text: "a0" }] });
-  const setup = async (answerPut, seed) => {
+  const setup = async (answerPut, seed, retry = { retries: 2, maxWaitMs: 50 }) => {
     const st = store(), sent = [], shown = [], said = [];
     let kept = [];
     const pc = new PictureChannel((msg) => { sent.push(msg); queueMicrotask(() => answerPut(msg, pc)); }, st);
-    const ch = new EditChannel(board0, "r0", (m) => sent.push(m), { show: (d, note) => { shown.push(d); if (note) said.push(note); }, allowed: () => {}, kept: (c) => (kept = [...c]), say: (x) => said.push(x) }, undefined, { pictures: byReference(pc, { tries: 2, maxWaitMs: 50 }) });
+    const ch = new EditChannel(board0, "r0", (m) => sent.push(m), { show: (d, note) => { shown.push(d); if (note) said.push(note); }, allowed: () => {}, kept: (c) => (kept = [...c]), say: (x) => said.push(x) }, undefined, { pictures: retry ? byReference(pc, retry) : byReference(pc) });
     const name = await st.put(new Blob([png(seed)], { type: "image/png" }));
     ch.save({ format: "sagebrush-board", version: 1, images: { [name]: { w: 1, h: 1 } }, nodes: [{ id: "a", text: "a with a picture", image: name }] });
     return { st, sent, shown, said, ch, name, kept: () => kept };
@@ -272,6 +272,13 @@ const harness = () => {
   const k = h.kept();
   const dl = k.length ? JSON.parse(await h.ch.download(k[0].id).blob.text()) : null;
   check(k.length === 1 && h.ch.pending === 0 && !h.sent.some((m) => m.sagebrush === "edit") && J(dl?.transactions).includes("a with a picture"), "busy every time: never sent, kept for download with its text: " + J({ copies: k.length }));
+  // (#38: `retries` is how many times it is tried again after the first attempt: busy every time, the puts counted)
+  for (const [retry, attempts] of [[{ retries: 0, maxWaitMs: 50 }, 1], [{ retries: 2, maxWaitMs: 50 }, 3], [null, 5]]) {
+    let puts = 0;
+    h = await setup((m, pc) => { if (m.sagebrush === "imagePut") { puts++; pc.receive({ sagebrush: "refused", version: 1, id: m.id, message: "busy", reason: "busy", retryAfter: 5 }); } }, 10 + attempts, retry);
+    await settle(h);
+    check(puts === attempts && h.kept().length === 1, `retries ${retry ? retry.retries : "4 (the default)"}: ${attempts} attempts in all, then kept: ` + J({ puts }));
+  }
   // (quota, too-large: that action taken out, said)
   for (const reason of ["quota", "too-large"]) {
     h = await setup((m, pc) => { if (m.sagebrush === "imagePut") pc.receive({ sagebrush: "refused", version: 1, id: m.id, message: reason + " refusal", reason }); }, reason === "quota" ? 4 : 5);
