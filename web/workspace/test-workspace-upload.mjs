@@ -18,7 +18,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
-const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+// (with its trailing "/": pages are its paths, base + "board/…"; daybreak's SB_URL without one made every
+// board address invalid, and the page stayed where it was)
+const base = (process.env.SB_URL ?? "http://127.0.0.1:8765/").replace(/\/?$/, "/");
 const shots = process.env.SHOT_DIR;
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,6 +46,10 @@ const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiti
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
 const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
+// (every save this board page started has ended, written or otherwise: its log says so, a "save" entry
+// at the start of each and another when it ends; a later step that holds the workspace's lock can't
+// then catch a save still waiting for it)
+const savesDone = () => until(`(() => { const l = sagebrush.saveLog?.() ?? []; const started = l.filter((e) => e.what === "save").length; return started > 0 && started === l.length - started; })()`);
 const shot = async (name) => {
   if (!shots) return;
   await sleep(400);
@@ -90,11 +96,15 @@ try {
   // several files at once: documents become documents; anything else, data files; nothing converted, nothing asked
   const mode = await upload(NB, [file("a.ipynb", ipynb("1 + 1")), file("b.board.json", boardJson("B")), file("c.py", "# %%\nprint(3)\n"), file("d.csv", "x,y\n1,2\n"), join(dir, "e.sbreplay"), file("bad.board.json", JSON.stringify({ nodes: "not a list" }))]);
   check(mode === "selectMultiple", "File ▸ Upload… takes several files: " + mode);
-  check(await until(`${W}.stat("/d.csv").then((e) => !!e)`), "the upload is done");
+  // d.csv is fourth in the sequential upload, so its presence does not mean
+  // the later board was validated or the final refusal was rendered.  The
+  // sticky file-browser notice is written only after the whole batch settles.
+  const refusedBadBoard = `(document.querySelector(".sbfiles .ftoast")?.textContent ?? "").includes("bad.board.json")`;
+  check(await until(refusedBadBoard), "the upload is done");
   const got = Object.fromEntries(await Promise.all(["/a.ipynb", "/b.board.json", "/c.py", "/d.csv", "/e.ipynb", "/c.ipynb", "/bad.board.json"].map(async (p) => [p, await stat(p)])));
   check(got["/a.ipynb"]?.kind === "notebook" && got["/b.board.json"]?.kind === "board" && got["/e.ipynb"]?.kind === "notebook", ".ipynb, .board.json and .sbreplay become documents: " + JSON.stringify(got));
   check(got["/c.py"]?.kind === "file" && got["/d.csv"]?.kind === "file" && !got["/c.ipynb"], "…a .py and a .csv are kept as data files, the .py not converted");
-  check(!got["/bad.board.json"] && (await ev(`document.querySelector("#status")?.textContent ?? ""`)).includes("bad.board.json"), "…one that isn't a board is refused, and said");
+  check(!got["/bad.board.json"] && (await ev(refusedBadBoard)), "…one that isn't a board is refused, and said");
   check((await historyRows(got["/e.ipynb"]?.ref)) > 0, "…the .sbreplay keeps its history");
   check(!dialogs.some((d) => d.type === "confirm") && (await nbRef()) === welcome, "…several files: nothing asked, nothing opened");
   check((await ev(`${W}.read("/a.ipynb").then((r) => r.content.cells.map((c) => c.code).join())`)) === "1 + 1", "…the notebook as uploaded");
@@ -196,7 +206,7 @@ try {
   // an in-place edit under way when a file is dropped: kept before the page goes (astra's CORR-4B3-2)
   const edited = await ev(`${W}.create("/Edited.board.json", { content: { title: "Edited board", nodes: [{ id: "a", title: "Before", text: "body", x: 0, y: 0 }] } }).then((e) => e.ref)`);
   await go(base + "board/?doc=local:" + edited);
-  await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Edited board"`, 60000);
+  if (!(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Edited board"`, 60000))) throw new Error(`the board ${edited} didn't open: at ${await ev("location.href")}`);
   await ev(`(() => { sagebrush.board.editing(true); const it = board.item("a"); board.setCamera({ x: it.x - 200, y: it.y - 200, z: 1 }); board.render(); return 1; })()`);
   await sleep(300);
   const rect = await ev(`board.clientRect("a")`);
@@ -221,7 +231,7 @@ try {
   const freshBoard = async (path) => {
     const ref = await ev(`${W}.create(${JSON.stringify(path)}, { content: { title: "Edited board", nodes: [{ id: "a", title: "Before", text: "body", x: 0, y: 0 }] } }).then((e) => e.ref)`);
     await go(base + "board/?doc=local:" + ref);
-    await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Edited board"`, 60000);
+    if (!(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "Edited board"`, 60000))) throw new Error(`the board ${ref} didn't open: at ${await ev("location.href")}`);
     return ref;
   };
   // the same, the file dropped on the sidebar's file tree: every way of leaving the board keeps it (astra's CORR-BCD-1)
@@ -248,7 +258,7 @@ try {
     await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
     check(await until(`window.__entered`, 5000), `(${item}: the workspace's lock held)`);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock to make where it goes)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 10000), `(${item}: waiting for the lock to make where it goes)`);
     const opened = await writeInPlace(null, "TYPED_WHILE_LEAVING");
     await ev(`(() => { window.__release(); return 1; })()`);
     check(await until(gone.replaceAll("REF", JSON.stringify(ref)), 30000), `${item}: the page goes once it is made`);
@@ -269,11 +279,15 @@ try {
     await key(false);
     check(await until(`sagebrush.board.snapshot().doc.nodes[0].title === "After"`, 5000), `(${item}: an undo to make, and a redo)`);
     check(await until(`${W}.read("/Undo-${item}.board.json").then((r) => r.content.nodes[0].title === "After")`), `(${item}: saved)`);
+    // (and every save of it ended: "After" read back can be the first edit's save, with the second's and
+    // the undo's still to come, which the lock taken next would hold up, so the departure would wait on
+    // them and never start; seen with five suites at once)
+    check(await savesDone(), `(${item}: every save ended)`);
     const d0 = dialogs.length, at = await ev(`location.search`);
     await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
     await sleep(300);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 10000), `(${item}: waiting for the lock)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 10000), `(${item}: waiting for the lock)`);
     await key(false); await sleep(300);
     const undoTitle = await title();
     check(undoTitle === "After", `${item}, leaving: Undo changes nothing (${undoTitle}) ` + (undoTitle === "After" ? "" : JSON.stringify(await ev(`({ held: sagebrush.leaving?.(), says: [...document.querySelectorAll("[data-sbb=notice], .board-notice, [role=status], [role=alert]")].map((e) => e.textContent).join(" | ").slice(0, 300), at: location.search })`))));
@@ -295,9 +309,9 @@ try {
     await ev(`(() => { window.__entered = false; navigator.locks.request("sagebrush-workspace", () => { window.__entered = true; return new Promise((r) => (window.__release = r)); }); return 1; })()`);
     await until(`window.__entered`, 5000);
     await ev(`(() => { document.querySelector("[data-sbb=${item}]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), `(${item}, the lock never given up: waiting for it)`);
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 20000), `(${item}, the lock never given up: waiting for it)`);
     check(await until(`document.body.innerText.includes("your files are busy")`, 45000), `${item}, the lock never given up: it gives up waiting, saying so`);
-    check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`)) && (await ev(`sagebrush.leaving?.() === false`)), `…its request for the lock withdrawn, the board no longer held`);
+    check(!(await ev(`navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`)) && (await ev(`sagebrush.leaving?.() === false`)), `…its request for the lock withdrawn, the board no longer held`);
     check((await ev(`location.search`)) === here, `…the board stays`);
     check(await writeInPlace(null, "WRITABLE_AGAIN"), `…and can be written in again`);
     await ev(`(() => { document.querySelector(".board-editing .be-title")?.blur(); window.__release(); return 1; })()`);
@@ -315,11 +329,12 @@ try {
     await ev(`(() => { sagebrush.board.editing(true); return 1; })()`);
     await ev(`sagebrush.board.edit((d) => { d.nodes[0].title = "After"; }).then(() => 1)`);
     check(await until(`${W}.read("/Concurrent.board.json").then((r) => r.content.nodes[0].title === "After")`), "(two departures: an undoable change, saved)");
+    check(await savesDone(), "(two departures: every save ended)");
     await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
     await sleep(300);
-    const pending = () => ev(`navigator.locks.query().then((s) => s.pending.filter((p) => p.name === "sagebrush-workspace").length)`);
+    const pending = () => ev(`navigator.locks.query().then((s) => s.pending.filter((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive").length)`);
     await ev(`(() => { document.querySelector("[data-sbb=newboard]").click(); return 1; })()`);
-    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace"))`, 20000), "(two departures: New board waiting for the lock)");
+    check(await until(`sagebrush.leaving?.() === true && navigator.locks.query().then((s) => s.pending.some((p) => p.name === "sagebrush-workspace" && p.mode === "exclusive"))`, 20000), "(two departures: New board waiting for the lock)");
     await sleep(3500);
     await ev(`(() => { document.querySelector("[data-sbb=deleteboard]").click(); return 1; })()`);
     check(await until(`document.body.innerText.includes("already going elsewhere")`, 10000), "two departures: Trash asked for meanwhile is refused, saying so");

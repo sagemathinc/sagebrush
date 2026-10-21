@@ -50,13 +50,40 @@
 //            nkey until the migrator gives them one: the upgrade drops
 //            the migration's state, so a migration already done runs
 //            again (astra's CORR-D01-1)
+//
+// Version 4 (design/sync-client.md §3a, for sync; schema only, as 3 was):
+//
+//   entries' index byIdent, on each entry's `ident` (its identity: a data
+//            file's or folder's fid, a document's ref), written when it is
+//            made; entries made before have none until the migrator gives
+//            it (the upgrade drops the migration's state, as 3's did)
+//   outbox   the operations waiting to go up, by [ns, dseq] (ns, the sync
+//            namespace: account hash, generation and device), with an
+//            index byIdent on [ns, id]
+//   syncIndex  the confirmed index, by [ns, id]
+//   adoptJournal  a first sync's captured tree, by [ns, id], with an index
+//            byParent on [ns, parent] (the root's parent "": a key can't
+//            hold null)
+//   pins     bytes committed here and not yet decided, by [id, seq]
+//   pending  what is waiting to go up for an identity, by id
+// Nothing reads or writes the last five yet (sync's next step).
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 3;
-export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000): Promise<IDBDatabase> {
-  return openDb(name, WS_VERSION, (db, old, tx) => {
+export const WS_VERSION = 4;
+/** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
+ * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
+ * the upgradeneeded event: non-standard, in Blink's IDL). */
+export type OpenInfo = { fresh: boolean; dataLoss?: string; dataLossMessage?: string };
+export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000, info?: OpenInfo): Promise<IDBDatabase> {
+  return openDb(name, WS_VERSION, (db, old, tx, ev) => {
+    if (info) {
+      info.fresh = old === 0;
+      const loss = (ev as any)?.dataLoss, message = (ev as any)?.dataLossMessage;
+      if (typeof loss === "string" && loss !== "none") info.dataLoss = loss;
+      if (typeof message === "string" && message) info.dataLossMessage = message;
+    }
     if (old < 1) {
       const entries = db.createObjectStore("entries", { keyPath: "path" });
       entries.createIndex("byRef", ["kind", "ref"]);
@@ -81,6 +108,17 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // (entries made before have no nkey, and old folders no id: the migrator gives them both, so its state
       // from version 2, done, paused or a checkpoint, is dropped and its next run walks the whole index again;
       // the key is web/workspace/migrator.ts's)
+      if (old >= 1) tx.objectStore("meta").delete("migration");
+    }
+    if (old < 4) {
+      tx.objectStore("entries").createIndex("byIdent", "ident");
+      db.createObjectStore("outbox", { keyPath: ["ns", "dseq"] }).createIndex("byIdent", ["ns", "id"]);
+      db.createObjectStore("syncIndex", { keyPath: ["ns", "id"] });
+      db.createObjectStore("adoptJournal", { keyPath: ["ns", "id"] }).createIndex("byParent", ["ns", "parent"]);
+      db.createObjectStore("pins", { keyPath: ["id", "seq"] });
+      db.createObjectStore("pending", { keyPath: "id" });
+      // (older entries have no ident, and data files written before no sha256: the migrator gives them, so its
+      // state from version 3 is dropped and its next run walks the whole index again, as for version 3)
       if (old >= 1) tx.objectStore("meta").delete("migration");
     }
   }, onClose, ms);

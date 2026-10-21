@@ -26,8 +26,9 @@
 //   gone is marked missing, never removed.
 import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
-import { WorkspaceError, type BoardRecord, type Entry, type Workspace } from "./api";
-import { bytesHash } from "../notebook/stores.js";
+import { COPIES, LEGACY_MAX, WorkspaceError, type BoardRecord, type Entry, type OldBytes, type Workspace } from "./api";
+import { reserve, type Release } from "./reserve";
+import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
 /** What migrate reads and writes of localStorage. */
@@ -47,13 +48,19 @@ export type MigrateReport = { boards: number; copies: number; unreadable: string
 /** Everything of this browser's in the workspace (above); safe to run at every load. */
 /** `proceed`: asked once the lock is held; false, and nothing is done (a page that gave up on the workspace meanwhile: LIMIT-12C-3). */
 export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () => boolean } = {}): Promise<MigrateReport> {
+  // (a quarantined workspace is written by nothing, this included, until the person decides: design/workspace-durability.md A.3)
+  if (w.quarantined) return Promise.resolve({ boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 });
+  const old: OldBytes[] = [];
   return w.locked(async () => {
     if (opts.proceed && !opts.proceed()) return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
+    // (a reset's purge not finished: nothing brought in until it is, in the background; the next migrate brings in what's left)
+    // (localStorage's part too: an old board it couldn't yet remove isn't brought into the new workspace: CORR-2A4-3)
+    if (await inTx(w.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get("purgeMain"))) || (await req(tx.objectStore("meta").get("purgeLocal"))))) { void w.cleanUp(); return { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 }; }
     const first = (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("migrated")))) === undefined;
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
       await migrateBoards(w, storage, r);
-      await reconcile(w, first, r);
+      old.push(...(await reconcile(w, first, r)));
     } catch (e) {
       // (the workspace full: what fitted is in, the rest still where it was, said)
       if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
@@ -61,7 +68,32 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
     }
     if (first) await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(Date.now(), "migrated"); });
     return r;
-  });
+  }).then((r) => adoptOld(w, old, r));
+}
+
+/** The old-way bytes reconcile found no entry for (`old`), adopted one at a time, each read and hashed holding
+ * the lock with its reservation taken first (Workspace.adoptOld: never a data file's op without its hash,
+ * astra's CORR-9C2-2; a reservation is never taken holding the lock, LIMIT-CAP1A-1).  Counted in `r`. */
+export async function adoptOld(w: Workspace, old: OldBytes[], r: MigrateReport): Promise<MigrateReport> {
+  try {
+    for (const a of old) {
+      if (a.kind !== "trash") {
+        if (await w.adoptOld(a)) r[a.count]++;
+        continue;
+      }
+      // (Trash's bytes: their reservation before the lock, as adoptOld's (daybreak2's LIMIT-6B7-1))
+      const release = await reserve(LEGACY_MAX * COPIES);
+      try {
+        await w.locked(() => recoverTrash(w, a.key, r, release));
+      } finally {
+        release();
+      }
+    }
+  } catch (e) {
+    if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
+    else throw e;
+  }
+  return r;
 }
 
 // (the localStorage keys, as they are now)
@@ -132,7 +164,8 @@ async function freeBoardId(w: Workspace): Promise<string> {
  * entry listed (`first`: notebooks at the top; after that in /Recovered/),
  * entries whose contents are gone marked missing (and unmarked when they
  * are back).  Counts go in `r`. */
-export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) {
+export async function reconcile(w: Workspace, first: boolean, r: MigrateReport): Promise<OldBytes[]> {
+  const old: OldBytes[] = [];
   const entries: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll()));
   const refs = { notebook: new Set<string>(), board: new Set<string>(), file: new Set<string>(), trash: new Set<string>() };
   for (const e of entries) {
@@ -140,7 +173,8 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     if (e.kind === "file" && (e.trashed || within(e.path, TRASH))) refs.trash.add(e.ref);
     else if (e.kind !== "folder") refs[e.kind].add(e.ref);
   }
-  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]) : [];
+  // (the workspace's fence is not a notebook)
+  const notebookIds = w.main ? ((await w.mainTx("notebooks", "readonly", (st) => st.getAllKeys())) as string[]).filter((k) => k !== FENCE) : [];
   const fileKeys = w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : [];
   const boardIds = (await inTx(w.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getAllKeys()))) as string[];
   const trashKeys = (await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").getAllKeys()))) as string[];
@@ -148,62 +182,15 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
   // are nobody's file of their own: never adopted, the migrator deletes them; capabilities §2b)
   const fileBytesIds = new Set((await inTx(w.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getAllKeys()))) as string[]);
   const stale = new Set((await w.staleCopies(Infinity)).map(([where, key]) => where + ":" + key));
-  // bytes in Trash with no entry (CORR-4A0-1, CORR-094-1).  First the
-  // destination is recorded (meta "recovering:<trash key>"), then the bytes
-  // written there, where Python reads files; then, in one transaction, the
-  // entry naming them, the Trash copy dropped and the record dropped.  A
-  // run that stops part way leaves the record, and the next run finishes
-  // that same recovery: it knows its destination from the record, never
-  // from bytes that happen to be equal.
+  // bytes in Trash with no entry (CORR-4A0-1, CORR-094-1): recovered after this pass, each read with its
+  // reservation taken before the lock (recoverTrash, through adoptOld: daybreak2's LIMIT-6B7-1).  Where a
+  // recovery stopped part way said it would put its bytes (its "recovering:" record) is that recovery's, not a
+  // file to adopt here
+  const recovering = new Set<string>();
+  for (const v of (await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").getAll(IDBKeyRange.bound(RECOVERING, RECOVERING + "\uffff"))))) as { dest?: unknown }[]) if (typeof v?.dest === "string") recovering.add(v.dest);
   for (const key of trashKeys) {
     if (refs.trash.has(key) || stale.has("trash:" + key)) continue;
-    const bytes = await inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key)));
-    if (bytes === undefined) continue;
-    const mark = RECOVERING + key, sha = await bytesHash(bytes);
-    const rec = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mark)));
-    let dest: string | undefined = rec && typeof rec.dest === "string" && rec.sha === sha ? rec.dest : undefined;
-    let done = false;
-    if (dest !== undefined) {
-      const listed: Entry | undefined = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(dest!)));
-      if (listed) {
-        // (an entry there: this recovery's only if it says so, written with
-        // it in one transaction (its `recovered` names this Trash key and
-        // these bytes); anything else, a person's or anyone's, is not, and
-        // this recovery goes somewhere new: CORR-DF0-1)
-        if (listed.recovered?.from === key && listed.recovered.sha === sha) done = true;
-        else dest = undefined;
-      } else {
-        // (bytes put at the recorded place by someone else since: not ours to write over, so somewhere new)
-        const there = await w.mainTx("files", "readonly", (st) => st.get(dest!));
-        if (there !== undefined && (await bytesHash(there)) !== sha) dest = undefined;
-      }
-    }
-    if (dest === undefined) {
-      const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
-      const taken = new Set(((await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAllKeys()))) as string[]));
-      const stored = new Set(w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : []);
-      for (let i = 1; i <= 10000 && !dest; i++) {
-        const p = `${RECOVERED}/${base}${i === 1 ? "" : ` (${i})`}${ext}`;
-        if (!taken.has(p) && !stored.has(p)) dest = p;
-      }
-      if (!dest) throw new WorkspaceError("limit", `no free name in ${RECOVERED}`);
-      const d = dest;
-      await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put({ dest: d, sha }, mark); });
-    }
-    const d = dest;
-    if (done) {
-      // (completed, and proved so by the entry itself; only the Trash copy and the record were left)
-      await inTx(w.ws, ["trash", "meta"], "readwrite", async (tx) => { tx.objectStore("trash").delete(key); tx.objectStore("meta").delete(mark); });
-    } else {
-      await w.mainTx("files", "readwrite", (st) => st.put(bytes, d));
-      const [base, ext] = splitExt(nameOf(d));
-      // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
-      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size: bytes.length ?? 0, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark] });
-      entries.push({ path: d, kind: "file", ref: d, created: 0, updated: 0 });
-    }
-    refs.file.add(d);
-    if (!fileKeys.includes(d)) fileKeys.push(d);
-    r.recovered++;
+    old.push({ kind: "trash", key, folder: RECOVERED, base: "", ext: "", count: "recovered" });
   }
   // notebooks
   for (const id of notebookIds) {
@@ -228,25 +215,23 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     const moved = typeof key === "string" ? movedByRef.get(key) : undefined;
     if (!moved || stale.has("files:" + key) || oldWay.has(key)) continue;
     const [base, ext] = splitExt(nameOf(moved.path));
-    await w.adopt(parentOf(moved.path), base + " (from an older tab)", ext, { kind: "file", ref: key, rev: 0 });
-    r.recovered++;
+    // (adopted after, read and hashed with its reservation: adoptOld)
+    old.push({ kind: "older", key, folder: parentOf(moved.path), base: base + " (from an older tab)", ext, count: "recovered" });
   }
   // data files: at their own path (what Python's open() names them by), or, a key that isn't a path, in /Recovered/
   for (const key of fileKeys) {
-    if (typeof key !== "string" || refs.file.has(key) || stale.has("files:" + key)) continue;
-    // (not read for its size: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1);
-    // the migrator, which reserves first, gives it its size as it moves it)
-    const size = undefined;
+    if (typeof key !== "string" || refs.file.has(key) || stale.has("files:" + key) || recovering.has(key)) continue;
+    // (not read here: reconcile holds the lock, where no reservation may be taken (LIMIT-CAP1A-1); adopted
+    // after it, by adoptOld, which reserves first, then reads and hashes them, so that the adopt's op carries
+    // their hash (astra's CORR-9C2-2))
     let p: string | null = null;
     try { p = normPath(key); } catch {}
     if (p !== null && p !== "/" && !within(p, TRASH)) {
       const [base, ext] = splitExt(nameOf(p));
-      await w.adopt(parentOf(p), base, ext, { kind: "file", ref: key, size, rev: 0 });
-      r.files++;
+      old.push({ kind: "free", key, folder: parentOf(p), base, ext, count: "files" });
     } else {
       const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
-      await w.adopt(RECOVERED, base, ext, { kind: "file", ref: key, size, rev: 0 });
-      r.recovered++;
+      old.push({ kind: "free", key, folder: RECOVERED, base, ext, count: "recovered" });
     }
   }
   // boards with no entry
@@ -286,5 +271,72 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport) 
     });
     if (gone) r.missing++;
   }
+  return old;
 }
 
+/** One Trash key's bytes, with no entry, recovered to /Recovered (reconcile collects them; adoptOld calls this
+ * holding the lock, its reservation of LEGACY_MAX × COPIES taken before it: daybreak2's LIMIT-6B7-1).  Still
+ * nobody's, checked here: no entry in Trash names the key, and it isn't a moved file's marked old copy.  First the
+ * destination is recorded (meta "recovering:<trash key>"), then the bytes written there, where Python reads files;
+ * then, in one transaction, the entry naming them (the bytes moved beside the index, as any adopt's), the Trash
+ * copy dropped and the record dropped.  A run that stops part way leaves the record, and the next run finishes
+ * that same recovery: it knows its destination from the record, never from bytes that happen to be equal. */
+export async function recoverTrash(w: Workspace, key: string, r: MigrateReport, token: Release) {
+  if (await w.isStale("trash", key)) return;
+  const naming: Entry[] = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", key])));
+  if (naming.some((e) => e.trashed || within(e.path, TRASH))) return;
+  // (never more than two copies at once, the reservation's (daybreak2's LIMIT-AC1-1): the Trash bytes hashed and
+  // let go; the destination checked (read, hashed, let go); then the Trash bytes read again, and moved only if
+  // they are still the ones hashed (else left for the next run))
+  const readTrash = () => inTx(w.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(key))) as Promise<Uint8Array | undefined>;
+  let first = await readTrash();
+  if (first === undefined) return;
+  const size = first.byteLength, sha = await bytesHash(first);
+  first = undefined;
+  const mark = RECOVERING + key;
+  const rec = await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(mark)));
+  let dest: string | undefined = rec && typeof rec.dest === "string" && rec.sha === sha ? rec.dest : undefined;
+  let done = false;
+  if (dest !== undefined) {
+    const listed: Entry | undefined = await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(dest!)));
+    if (listed) {
+      // (an entry there: this recovery's only if it says so, written with
+      // it in one transaction (its `recovered` names this Trash key and
+      // these bytes); anything else, a person's or anyone's, is not, and
+      // this recovery goes somewhere new: CORR-DF0-1)
+      if (listed.recovered?.from === key && listed.recovered.sha === sha) done = true;
+      else dest = undefined;
+    } else {
+      // (bytes put at the recorded place by someone else since: not ours to write over, so somewhere new)
+      const there = await w.mainTx("files", "readonly", (st) => st.get(dest!));
+      if (there !== undefined && (await bytesHash(there)) !== sha) dest = undefined;
+    }
+  }
+  if (dest === undefined) {
+    const [base, ext] = splitExt(safeName(String(key).split("/").pop()));
+    const taken = new Set(((await inTx(w.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAllKeys()))) as string[]));
+    const stored = new Set(w.main ? ((await w.mainTx("files", "readonly", (st) => st.getAllKeys())) as string[]) : []);
+    for (let i = 1; i <= 10000 && !dest; i++) {
+      const p = `${RECOVERED}/${base}${i === 1 ? "" : ` (${i})`}${ext}`;
+      if (!taken.has(p) && !stored.has(p)) dest = p;
+    }
+    if (!dest) throw new WorkspaceError("limit", `no free name in ${RECOVERED}`);
+    const d = dest;
+    await inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put({ dest: d, sha }, mark); });
+  }
+  const d = dest;
+  let bytes = done ? undefined : await readTrash();
+  if (!done && (bytes === undefined || bytes.byteLength !== size || (await bytesHash(bytes)) !== sha)) return;
+  if (done) {
+    // (completed, and proved so by the entry itself; only the Trash copy and the record were left)
+    await inTx(w.ws, ["trash", "meta"], "readwrite", async (tx) => { tx.objectStore("trash").delete(key); tx.objectStore("meta").delete(mark); });
+  } else {
+    await w.mainTx("files", "readwrite", (st) => st.put(bytes!, d));
+    const [base, ext] = splitExt(nameOf(d));
+    // (the entry, the Trash copy dropped and the record dropped: one transaction; adopt refuses a taken path)
+    const box = { bytes: bytes as Uint8Array | undefined };
+    bytes = undefined;
+    await w.adopt(RECOVERED, base, ext, { kind: "file", ref: d, size, rev: 0, recovered: { from: key, sha } }, { at: d, dropTrash: [key], dropMeta: [mark], bytes: box, token });
+  }
+  r.recovered++;
+}

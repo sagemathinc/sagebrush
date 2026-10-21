@@ -189,9 +189,9 @@ try {
   await openRow("/v2.txt");
   await until(`/Earlier versions \\(1\\)/.test(${P}?.textContent ?? "")`);
   await ev(`(async () => { let entered; const ready = new Promise((r) => (entered = r)); const gate = new Promise((r) => (window.__releaseLock = r)); window.__held = navigator.locks.request("sagebrush-workspace", async () => { entered(); await gate; }); await ready; const w = ${W}; window.__moving = w.rename("/v2.txt", "/moved2.txt"); window.__replacing = w.create("/v2.txt", { content: "replacement" }); return 1; })()`);
-  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 2)`);
+  await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace" && x.mode === "exclusive").length >= 2)`);
   await ev(`(() => { [...document.querySelectorAll(".sbfprev .vr button")].find((b) => b.textContent === "Restore").click(); return 1; })()`);
-  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace").length >= 3)`), "(Restore's write waiting third for the lock, after the rename and the replacement)");
+  check(await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace" && x.mode === "exclusive").length >= 3)`), "(Restore's write waiting third for the lock, after the rename and the replacement)");
   await ev(`(async () => { __releaseLock(); await __held; await __moving; await __replacing; await new Promise((r) => setTimeout(r, 800)); return 1; })()`);
   const after = [await text("/v2.txt"), await text("/moved2.txt")];
   check(after[0] === "replacement" && after[1] === "current" && /changed since it was shown/.test(await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`)), "Restore in a preview, the file renamed and another put at its path first: nothing written, said: " + JSON.stringify(after));

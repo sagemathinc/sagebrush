@@ -34,9 +34,44 @@
 - `ref`;
 - for a data file, its `fid`, `sha256` and `size`;
 - for a write, `base` (the `sha256` it replaced);
+- `parent`: on an op that puts something in a folder (create, mkdir, adopt, a write that makes its file, rename, restore), that folder's `fid`. Absent for the root, or to go by the path. It is optional on the wire; the server stores and echoes it, and refuses it on other ops (@sagebrush-auth). See C4;
 - `after`: the identity's resulting state, `{id, parent, name, kind, sha256, size, trashed}`, with `parent` the parent folder's identity (C3's replay and C2's summary use it).
 
 This is the "client's log plus identity" of sync-server §3. Hashing new bytes happens before their transaction, as the 1a migration already does.
+
+As built (step 2a):
+- A data file's entry keeps its `sha256` (a write no longer drops it). The migrator gives it to a file written before, and gives every entry its identity key `ident`, the entries' `byIdent` index key. Both are filled in, a batch at a time, after the version 4 upgrade drops the migration's state.
+- `after.parent` is `null` for the root, and for something put in Trash itself, which carries `trashed: true`. Trash's own folder is the workspace's, and has no identity, as the root has none.
+- `parent` on the op is absent for the root and for anything in Trash.
+- `after: null` means the op removed its identity: `forget`, `discard`, and `emptyTrash`, which records one op for each identity removed whole. What was in a folder goes with it, as the reducer's forget has it.
+- An op that changes no entry (`dropVersions`) carries no identity and no `after`. An entry or folder with no identity yet (from before ids were kept, until the migrator gives one) has no `after`.
+- In the stores, a key can't hold `null`, so the root's parent is `""` there.
+- **Hashing:** bytes the caller gives are copied once, at the call, before anything is awaited. The hash and the bytes kept are then the same, whatever the caller does with its buffer meanwhile (astra's CORR-9C2-1).
+  - The copy is the engine's own: buffer, offset and length come from %TypedArray%.prototype's getters, and %TypedArray%.prototype.set copies into a new Uint8Array. No method, getter or species of a caller's subclass runs.
+  - Views of other kinds (DataView, Int16Array) are refused, as before.
+  - Peak cost: that copy, plus one transient copy while hashing (WebCrypto copies its input). That is two copies of the new bytes beyond what a write held before this step, each at most the 200 MiB file limit.
+  - Time: one more pass over the new bytes, off the main thread.
+  - The old bytes are hashed only when no hash of them is already at hand: a file written before this step, once.
+- **Every data-file op carries its hash: none is ever logged without it** (astra's CORR-9C2-2; @sagebrush's decision: no deferral).
+  - Create and write compute the hash.
+  - A move of a file written before its hash was kept hashes it first, under the lock, reserved before it as a migration is.
+  - **An adopt moves the bytes it hashes** (astra's CORR-12E-1). In the one transaction that makes the entry and its op, the snapshot read is put in fileBytes, the entry is marked migrated, and the old copy is marked stale with that snapshot's size and hash. The entry, its bytes, and its op's hash and `after` then all name the same bytes.
+    - The old copy then goes as the migrator's does (dropStale): deleted if it still holds those bytes. If an older tab wrote there since the read, it is kept as a file of its own, adopted and moved in turn with its own hash.
+    - The read is reserved. Reconcile's old-way bytes are adopted after its locked pass: each one reserves LEGACY_MAX × COPIES before the lock, then reads and adopts holding it (adoptOld).
+    - Any other adopt not given the bytes reads them itself, holding the caller's lock, under a reservation taken without waiting. If that reservation isn't free, the adopt is refused, nothing is made, and reconcile asks again on its next run.
+    - The move's copy is the one IndexedDB gave on read, put back once. That is within the same LEGACY_MAX × COPIES as the migrator's move.
+    - Every caller that gives an adopt bytes holds LEGACY_MAX × COPIES, taken before the lock, until the adopt and its old copy are done. adopt() fails loudly otherwise (daybreak2's LIMIT-6B7-1). Trash's bytes with no entry are therefore recovered after reconcile's locked pass, each reserved first, as adoptOld's are.
+    - Old copies are compared and kept one pair at a time: at most 8 rounds per call, with no recursion. Their marks are durable and win over a migration marked done: each migrator start first cleans them up, paged and bounded, whatever the migration's state (astra's CORR-6B7-1).
+      - Each start goes on from a durable cursor and wraps round, so marks that keep failing can't hide those after them (CORR-AC1-1).
+      - Old copies are the start's cleanup alone, never a batch's work: marks that can't go don't hold the passes over the index, nor keep a migration from being done (daybreak2's LIMIT-1F3-1).
+      - Ownership is checked first: a key an entry already names as its bytes is that file's, its mark dropped, nothing re-adopted (astra's CORR-1F3-1).
+      - An old copy is deleted only after a move of exactly those bytes. One kept unmoved is that file's storage and is never deleted. Nor is any key an entry still names as its bytes (CORR-AC1-2).
+    - A reservation is a token: whoever reads bytes whole is given it and checks that it is live and large enough. The page's total isn't enough (daybreak2).
+    - Trash recovery hashes the Trash bytes and lets them go before it checks the destination, then reads them again: at most two copies at once (LIMIT-AC1-1).
+  - Bytes larger than LEGACY_MAX are adopted unmoved, with their hash, as the migrator marks them. They are over the 200 MiB file limit, so they are never synced.
+  - Should any path reach an op without the hash, the change is refused whole.
+  - A removal (forget, discard, emptyTrash) needs no hash: its identity is gone (`after: null`).
+- **Emptying Trash records at most 10,000 ops** (maxFolderEntries, Trash's own entries), whatever is in them: a bounded burst.
 
 **The queue: `dseq`.** The server decides a device's ops in `dseq` order, with no gaps.
 - The local `seq` can't serve as `dseq`: ops from before sync was on, and remote ops applied here, are in the same store.
@@ -65,7 +100,7 @@ Without the bytes, the server refuses the op with `missing`. `limit`, `storage_f
   - Each fetch is checked against the `sha256` and put in fileBytes. This uses the same reservation and quota preflight as the migrator.
   - Fetches run in the background, a few at a time.
 
-**The reducer:** `web/workspace/sync-reduce.ts`, a pure `reduce(entries, op) → entries'` with no DOM or IndexedDB imports, so the Worker can bundle it. It implements §7.2's rules:
+**The reducer:** `web/workspace/sync-reduce.ts`, a deterministic `reduce(index, op)` that changes the index whole or not at all (with `clone()`, O(entries), never called per op), with no DOM or IndexedDB imports, so the Worker can bundle it. It implements §7.2's rules:
 - the later rename wins;
 - an edit after a delete brings the file back out of Trash;
 - a second new file at a path becomes `name (2)`;
@@ -138,6 +173,24 @@ Each is an invariant the code must keep, and the schedules its tests must run. *
 - Signing in as another account, or a `welcome` with another generation (after "Delete my synced data" and enabling again), starts a new `ns`. The old one's outbox is never sent into it.
 - Local changes still reach the new `ns` through its first sync (C3), which records the whole local tree.
 - Turning sync off keeps the `ns` state; turning it on again resumes it if `welcome` says the same generation.
+
+**As built (step 2b-1, web/workspace/sync-outbox.ts):**
+- **One transaction per scan page.** The lease is checked, records are made with the next dseqs, the watermark is advanced past every op looked at, and the next dseq and the totals are written, all in one transaction. A cut at any of its awaits leaves all of it or none.
+- **The bound** counts each record as the workspace's inert JSON writer writes it, two bytes a character (as TimeTravel's backlog counts an entry).
+  - Each record is admitted at its charge: its size accepted with the largest seq acked() takes (a non-negative safe integer, sixteen digits at most, checked at the boundary).
+  - The bound is kept on the sum of charges, so `bytes` (what is held now, an accepted record with its seq) $\le$ `charged` $\le$ 1 MiB always (daybreak2's LIMIT-855-1).
+- **A full outbox is said, never silent.** `status().full` holds when, and at what totals, a scan last stopped at a bound, until a page goes on. The foot and the Sync panel show it (step 5).
+- **Not sent:**
+  - ops applied from the server (`origin: "server"`);
+  - ops with no `after` (dropVersions: versions stay local);
+  - ops from before ids were kept.
+- **Sent as `forget`:** emptyTrash and discard.
+- **A lease.** Each namespace is used under a lease: `sync:current`, `{ns, gen}`.
+  - `switchTo(ns)` starts the next generation, for another account, another generation, or a reconnect.
+  - Every change to an outbox, and every read of what to send, checks the lease in its own transaction. So nothing taken under an older lease is sent, or changes anything, across a switch mid-flight (`Fenced`).
+  - The sender sends records only on the connection made under their lease (step 3).
+- **dropOps** never passes the lowest scan watermark of any namespace.
+- **Known, for a later lifecycle step:** each namespace's state (watermark, sequence, outbox, at most 1 MiB) is kept on purpose, so turning sync on again resumes it. Its total across many namespaces has no global cap yet. A later step garbage-collects old namespaces' outboxes after an account or generation change, with a cap (daybreak2).
 
 **Tests:**
 - a crash after a local change, before the scan;
@@ -256,6 +309,10 @@ A crash anywhere resumes from the journal's state and progress keys: a walk mid-
 ### C4. The reducer: identity, order, copies (CORR-8E7-4)
 
 - **Targets are identities, never paths:** a data file's or folder's `fid`, a document's `ref`. A rename, write, remove or restore applies to its identity wherever it is now. Path reuse can't misdirect it.
+- **Where an op puts something is a folder's identity too** (astra, on step 1; @sagebrush's decision): `parent` names the folder by its `fid`. If another device renamed that folder meanwhile, the entry goes into it where it is now; a new folder at its old path doesn't take it. A folder in Trash is brought back first (the edit wins). Without `parent`, or when it names no folder the index has (never seen, forgotten, or a file), the op goes by its path, and a missing folder on it is made, with an identity derived from the op.
+- **Every op applies whole or not at all.** That covers the folders it would make and the entries it would move. Every path it produces is checked against the workspace's bounds (a name at most 255 characters, a path at most 1,024, a depth at most 32) before anything is kept. A `(2)` or a conflict copy's name is shortened to fit; a move whose descendants wouldn't fit is skipped.
+- **The client never sends `duplicate`:** a copy goes as a `create`, with its own new `fid` (and its folder's `parent`). The server accepts `duplicate` (with `parent`, @sagebrush-auth's branch), but the reducer skips it like any op that doesn't change the index. It is implemented there first, with vectors, before the client uses it (astra, on sync-op-parent).
+- **A derived identity** (a made folder's, a conflict copy's) is never one the index has, has forgotten, or that the op names: the next of a deterministic series is taken.
 - **Order is the server's `seq` only.** `t` is shown, never ordered by.
 - **Writes:**
   - `base` equal to the current hash: applied;
@@ -275,7 +332,8 @@ A crash anywhere resumes from the journal's state and progress keys: a walk mid-
   - write after Trash, and after forget;
   - two writes from one base;
   - a copy of a copy;
-  - creates colliding three ways.
+  - creates colliding three ways;
+  - and (step 1's review) derived identities that are taken, long names and paths at the bounds, unseen writes at the root or in Trash, and `parent` with its folder renamed, its old path reused, forgotten, or in Trash.
 
 ### C5. A download is installed only if it is still wanted (CORR-8E7-5)
 

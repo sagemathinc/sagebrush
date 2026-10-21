@@ -120,13 +120,13 @@ try {
   check((await count()) === nv, `the versions are kept across a reload: ${await count()} of ${nv}`);
   const dbs = await ev("indexedDB.databases().then((ds) => ds.map((d) => d.name))");
   check(dbs.includes("sagebrush-board-history"), "the board's history has its own database: " + dbs);
-  const nb = await ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => {}; r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains("history")) return res(0); const q = db.transaction("history").objectStore("history").count(); q.onsuccess = () => res(q.result); }; r.onerror = () => res(-1); })`);
+  const nb = await ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onupgradeneeded = () => {}; r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains("history")) return res(0); const q = db.transaction("history").objectStore("history").getAllKeys(); q.onsuccess = () => res(q.result.filter((k) => k[0] !== "__sagebrush-workspace__").length); }; r.onerror = () => res(-1); })`);
   check(nb === 0, "no board patch is in the notebook's history: " + nb);
 
   // a history per document (William): New board is a board of its own with
   // its own history, the one it left keeping its own; Revert and another
   // document loaded each start one afresh, the one before gone; kept across a reload
-  const groups = () => ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-board-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => { const by = {}; for (const row of q.result) by[row.nb] = (by[row.nb] ?? 0) + 1; r.result.close(); res(by); }; }; })`);
+  const groups = () => ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-board-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => { const by = {}; for (const row of q.result) if (row.nb !== "__sagebrush-workspace__") by[row.nb] = (by[row.nb] ?? 0) + 1; r.result.close(); res(by); }; }; })`);
   check(Object.keys(await groups()).length === 1, "(one board's history so far: " + JSON.stringify(await groups()) + ")");
   // (reloaded, the history not opened before the next document: CORR-F75-1, daybreak)
   await send("Page.reload");

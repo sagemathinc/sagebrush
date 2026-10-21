@@ -1647,7 +1647,8 @@ export function createNotebook(root, opts = {}) {
   // ("left": how many, said whenever it may have changed: the page asks
   // before closing while there are any, their saves only here)
   const leftChanged = () => emit("left", leftCount());
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s)) outstanding.delete(s); leftChanged(); };
+  // (one whose save was busy stays outstanding until it is sent again: counted, asked about before closing)
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s)) outstanding.delete(s); leftChanged(); };
   async function keepDetached(key, doc, theirs) {
     try {
       if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
@@ -1694,7 +1695,19 @@ export function createNotebook(root, opts = {}) {
     if (json === lastJson) return;
     lastJson = json;
     emit("change", doc);
-    if (store) {
+    if (store) queueSave(mine, store, doc, json, seen);
+  }
+  // (a save the workspace's lock didn't let through in time, "busy" (notebook/stores.js LOCK_WAIT): kept by
+  // document, and sent again as it was by the next saved(), whether that document is still shown or was left;
+  // nothing of it is lost while another tab holds the lock)
+  const busy = new Map();
+  function queueSave(mine, st, doc, json, seen) {
+    {
+      // (this document's saves numbered: a busy one is kept only if no later save of it was asked for since, and
+      // a later one that succeeds supersedes it, so an older edit is never sent again over a newer one: astra's
+      // CORR-9D7-1)
+      const seq = mine.saveSeq = (mine.saveSeq ?? 0) + 1;
+      busy.delete(mine);
       let sent = doc;
       mine.inflight = (mine.inflight ?? 0) + 1;
       outstanding.add(mine);
@@ -1702,7 +1715,6 @@ export function createNotebook(root, opts = {}) {
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
-      const st = store;
       const start = () => {
         if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
         const base = mine.synced?.rev;
@@ -1712,6 +1724,9 @@ export function createNotebook(root, opts = {}) {
       const p = savesPending ? saveChain.then(start) : start();
       savesPending++;
       saveChain = p.then((t) => {
+        // (an older busy one, superseded by this save: its error no longer stands, and it isn't sent again)
+        if ((busy.get(mine)?.seq ?? Infinity) <= seq) busy.delete(mine);
+        if (mine.busyError && mine.busySeq <= seq) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
         if (t && typeof t === "object" && t.conflict) {
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
@@ -1732,6 +1747,9 @@ export function createNotebook(root, opts = {}) {
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
+        // (a busy one superseded by a later save of this document, asked for since: that one answers for it)
+        if (e?.busy && seq !== mine.saveSeq) return;
+        if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
@@ -1745,6 +1763,8 @@ export function createNotebook(root, opts = {}) {
   async function saved() {
     for (let i = 0; i < 5; i++) {
       flush();
+      // (busy ones sent again, the shown document's by flush already)
+      for (const [m, b] of [...busy]) if (busy.get(m) === b && m !== shown) queueSave(m, b.st, b.sent, b.json, m.remoteSeen);
       await saveChain;
       if (lastSaveError) throw lastSaveError;
       // (saves of documents no longer shown that couldn't be kept: tried
