@@ -203,6 +203,11 @@ export class Images {
     const b = this.blobs.get(name);
     return b ? toDataUrl(b) : undefined;
   }
+  /** A picture's bytes, if this browser holds them (from IndexedDB, if not at hand). */
+  async blob(name: string): Promise<Blob | undefined> {
+    await this.ensure([name]);
+    return this.blobs.get(name);
+  }
 
   /** Have these pictures ready to show (from IndexedDB). */
   async ensure(names: Iterable<string>): Promise<void> {
