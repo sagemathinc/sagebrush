@@ -111,3 +111,65 @@ export function showLossNotice(w: { durability: any; witnessDown?: { local?: str
   doc.body.append(box);
   return box;
 }
+
+const STALE_ID = "sagebrush-stale-notice";
+/** localStorage: the count and reasons the old copies' notice was closed at (it comes back if either grows). */
+export const STALE_DISMISSED = "sagebrush-stale-dismissed";
+type Why = "folder-full" | "limit" | "storage" | "rounds";
+type Stuck = { count: number; paths: { path: string; why: Why; folder?: string }[]; reasons: Partial<Record<Why, number>> };
+
+const files = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+const folderName = (f: string) => (f === "/" ? "your top folder" : f);
+/** What the notice says, one sentence a reason, each true of what that reason means (migrator.ts, api.ts dropStale):
+ * an old copy is deleted only after a move of exactly its bytes, so one still there was never deleted; one that
+ * couldn't be kept as a file of its own holds what an older tab wrote there since the file was moved; only a
+ * full folder is named. */
+export function staleText(s: Stuck): string {
+  const out: string[] = [];
+  const n = (w: Why) => s.reasons[w] ?? 0;
+  if (n("folder-full")) {
+    const folders = [...new Set(s.paths.filter((p) => p.why === "folder-full" && p.folder !== undefined).map((p) => folderName(p.folder!)))];
+    const where = folders.length ? folders.join(", ") : "a folder";
+    out.push(`Changes a Sagebrush tab from before an update saved to ${files(n("folder-full"))} couldn't be added as files of their own, because ${where} ${folders.length > 1 ? "are" : "is"} full. They're kept in this browser, and nothing has been deleted; make room and they'll be added the next time Sagebrush starts.`);
+  }
+  if (n("limit")) out.push(`Changes a Sagebrush tab from before an update saved to ${files(n("limit"))} couldn't be added as files of their own: your workspace has reached one of its limits. They're kept in this browser, and nothing has been deleted.`);
+  if (n("storage")) out.push(`The old copy of ${files(n("storage"))} couldn't be tidied up: an error stopped it each time. Nothing has been deleted; it's tried again each time Sagebrush starts.`);
+  if (n("rounds")) out.push(`The old copy of ${files(n("rounds"))} kept changing while it was being tidied up, most likely because a Sagebrush tab from before an update is still open. Nothing has been deleted; close other Sagebrush tabs and it'll be tidied the next time Sagebrush starts.`);
+  return out.join(" ");
+}
+
+/** The notice of old copies that cleanups keep leaving (Workspace.staleStuck), closable: closed, it stays closed
+ * until their count rises or a new reason appears; none left, it goes, and so does what it was closed at. */
+export async function showStaleNotice(w: { staleStuck(): Promise<Stuck | undefined> }, store: Storage | undefined = (globalThis as any).localStorage): Promise<HTMLElement | null> {
+  const doc = (globalThis as any).document as Document | undefined;
+  const s = await w.staleStuck().catch(() => undefined);
+  doc?.getElementById(STALE_ID)?.remove();
+  if (!s || !s.count) {
+    try { store?.removeItem(STALE_DISMISSED); } catch {}
+    return null;
+  }
+  let was: { count?: number; reasons?: Partial<Record<Why, number>> } | null = null;
+  try { was = JSON.parse(store?.getItem(STALE_DISMISSED) ?? "null"); } catch {}
+  const newReason = (Object.keys(s.reasons) as Why[]).some((r) => (s.reasons[r] ?? 0) > 0 && !((was?.reasons?.[r] ?? 0) > 0));
+  if (was && typeof was.count === "number" && s.count <= was.count && !newReason) return null;
+  if (!doc?.body) return null;
+  const box = doc.createElement("div");
+  box.id = STALE_ID;
+  box.setAttribute("role", "status");
+  box.style.cssText = "position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;gap:12px;align-items:center;max-width:min(720px,94vw);padding:8px 14px;background:#5b4a0e;color:#fff;font:14px/1.4 system-ui,sans-serif;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.3)";
+  const msg = doc.createElement("span");
+  msg.textContent = staleText(s);
+  msg.title = s.paths.map((p) => p.path).join("\n");
+  const btn = doc.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Close";
+  btn.dataset.sbb = "stale-close";
+  btn.style.cssText = "font:inherit;padding:2px 10px;border-radius:4px;border:0;background:#fff;color:#5b4a0e;cursor:pointer";
+  btn.onclick = () => {
+    try { store?.setItem(STALE_DISMISSED, JSON.stringify({ count: s.count, reasons: s.reasons })); } catch {}
+    box.remove();
+  };
+  box.append(msg, btn);
+  doc.body.append(box);
+  return box;
+}
