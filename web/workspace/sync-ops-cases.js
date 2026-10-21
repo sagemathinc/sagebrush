@@ -478,7 +478,7 @@ async function staleLapReload() {
   // after a whole lap was said and the next begun)
   const n = 100, files = "files:";
   const keys = Array.from({ length: n }, (_, i) => "/r" + String(i).padStart(5, "0") + ".bin");
-  const cut = async ({ cursor, pages, at, starts, after = 2 }) => {
+  const cut = async ({ cursor, pages, at = Infinity, starts, after = 2, failPut = 0 }) => {
     localStorage.clear();
     const r = Math.random().toString(36).slice(2, 8), nm = { name: "ws-stalerl-" + r, mainName: "main-stalerl-" + r };
     let w = await W.Workspace.open(nm);
@@ -493,8 +493,12 @@ async function staleLapReload() {
     W.MIGRATE.files = 32;
     W.MIGRATE.stalePages = pages;
     const seen = [];
+    // (the failPut-th write of the cursor refused, once, the database still writable)
+    const realPut = IDBObjectStore.prototype.put;
+    let puts = 0;
+    if (failPut) IDBObjectStore.prototype.put = function (v, k) { if (k === "staleCursor" && ++puts === failPut) throw new Error("refused once"); return realPut.call(this, v, k); };
     try {
-      for (let k = 0; k < starts && tries < at; k++) await W.startMigrator(w).catch(() => {});
+      try { for (let k = 0; k < starts && tries < at; k++) await W.startMigrator(w).catch(() => {}); } finally { IDBObjectStore.prototype.put = realPut; }
       try { w.close(); } catch {}
       w = await W.Workspace.open(nm);
       w.beforeStaleDelete = () => { throw new Error("storage refused"); };
@@ -502,7 +506,7 @@ async function staleLapReload() {
     } finally { W.MIGRATE.files = was.files; W.MIGRATE.stalePages = was.pages; }
     w.beforeStaleDelete = null;
     w.close();
-    return { tries, seen };
+    return { tries, puts, seen };
   };
   // (in the middle of a page: the 43rd mark, the 11th of the second page; the lap last whole at the first page's end)
   const mid = await cut({ pages: 32, at: 32 + 11, starts: 1 });
@@ -515,6 +519,10 @@ async function staleLapReload() {
   // first mark, said, and the next lap begun there; cut at that mark's attempt; then the next lap whole again)
   const said = await cut({ pages: 2, at: n + 1, starts: 3, after: 3 });
   check(said.tries === n + 1 && said.seen.length === 3 && said.seen.every((c) => c === n), `cut right after a whole lap is said and the next begun: said again whole, ${n}, never fewer: ` + J(said));
+  // (the cursor's write refused once after the 43rd mark, the database still writable (daybreak2): that mark tried
+  // again by the next start, and counted once)
+  const refused = await cut({ pages: 32, starts: 1, failPut: 43 });
+  check(refused.puts >= 43 && refused.tries >= 43 && J(refused.seen) === J([n, n]), `the cursor's write refused once, the database writable: the mark tried again, counted once, all ${n}: ` + J(refused));
 }
 
 async function staleNotice() {
