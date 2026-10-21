@@ -429,9 +429,9 @@ async function upgrade() {
   // the upgrade itself: only stores and indexes added, and the migration's state dropped
   const db = await W.openWorkspaceDb(name);
   const up = await dump(db), ix = indexes(db);
-  const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, ...rest1 } = up;
-  check(db.version === 4 && same(rest0, rest1), "version 4: entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
-  check(same(m1, m0.filter(([k]) => k !== "migration")), "…meta the same but for the migration's state, dropped (so the migrator gives older entries their identity): " + J(m1.map(([k]) => k)));
+  const { meta: m0, ...rest0 } = before, { meta: m1, outbox, syncIndex, adoptJournal, pins, pending, prunable, ...rest1 } = up;
+  check(db.version === 5 && same(rest0, rest1) && same(prunable, []), "version 5 (the current; 4 added these stores, 5 the pins' index and the empty store prunable): entries, boards, trash, ops, versions, versionBytes, fileBytes and grants the same, byte for byte");
+  check(same(m1.filter(([k]) => k !== "versions:backfill"), m0.filter(([k]) => k !== "migration")) && same(m1.find(([k]) => k === "versions:backfill")?.[1], { after: 0 }), "…meta the same but for the migration's state, dropped (so the migrator gives older entries their identity), and the versions' backfill marker, set: " + J(m1.map(([k]) => k)));
   check([outbox, syncIndex, adoptJournal, pins, pending].every((s) => Array.isArray(s) && s.length === 0) && same(ix.entries, ["byIdent", "byNfc", "byRef"]) && same(ix.outbox, ["byIdent"]) && same(ix.adoptJournal, ["byParent"]), "…the new stores there and empty, and the new indexes: " + J(ix));
   db.close();
   // then the workspace, its migrator: identities and hashes given, nothing else of the entries changed, no op

@@ -66,12 +66,25 @@
 //            hold null)
 //   pins     bytes committed here and not yet decided, by [id, seq]
 //   pending  what is waiting to go up for an identity, by id
-// Nothing reads or writes the last five yet (sync's next step).
+//
+// Version 5 (design/sync-client.md C2, step 2b-2):
+//
+//   pins' index byStorage, on each pin's `skey` (where its bytes are: "f:<fid>", a file's fileBytes, or
+//   "v:<version id>"): whether any other pin names a storage, one bounded count (the pins are empty until
+//   this step)
+//   prunable  the versions not kept for sync, by [fid, id] ({fid, id, t, size}: a file's oldest first), with an
+//            index byId (everyone's oldest first): a save's pruning, and the cleanup's, read a bounded few from
+//            the front, never a file's whole list (daybreak2's LIMIT-E5C-2).  A pinned version has no record
+//            here; its release puts one.  A store of its own, made empty, so the upgrade builds no index over
+//            the versions already kept, whatever their number: schema only, as every upgrade is, and as quick
+//            with 50,000 versions as with none (daybreak2's LIMIT-563-2).  The versions kept before are put here
+//            afterwards, a bounded slice at a time, by the cleanup (sync-pins.ts, from the marker
+//            `versions:backfill`); until then they are in none, so kept, never wrongly dropped (none was pinned)
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 4;
+export const WS_VERSION = 5;
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -120,6 +133,13 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // (older entries have no ident, and data files written before no sha256: the migrator gives them, so its
       // state from version 3 is dropped and its next run walks the whole index again, as for version 3)
       if (old >= 1) tx.objectStore("meta").delete("migration");
+    }
+    if (old < 5) {
+      // (who names a storage, one bounded count (sync-pins.ts): the pins are empty until this step, so nothing to fill)
+      tx.objectStore("pins").createIndex("byStorage", "skey");
+      db.createObjectStore("prunable", { keyPath: ["fid", "id"] }).createIndex("byId", "id");
+      // (every version kept before is made prunable after the open, from this marker: one write here)
+      if (old >= 1) tx.objectStore("meta").put({ after: 0 }, "versions:backfill");
     }
   }, onClose, ms);
 }

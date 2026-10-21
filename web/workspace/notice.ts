@@ -31,6 +31,10 @@ export function showReloadNotice(text = RELOAD_TEXT): HTMLElement | null {
 }
 
 const BUSY_ID = "sagebrush-busy-notice";
+/** The closable notice gone, if it is there. */
+export function hideBusyNotice() {
+  (globalThis as any).document?.getElementById(BUSY_ID)?.remove();
+}
 /** A notice that can be closed: `text` (one at a time, replaced). */
 export function showBusyNotice(text: string): HTMLElement | null {
   const doc = (globalThis as any).document as Document | undefined;

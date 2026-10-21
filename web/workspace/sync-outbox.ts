@@ -20,10 +20,11 @@
 //   watermark, sequence and records, and one never sends another's.
 // - One sender per device and namespace: the tab holding the Web Lock `sagebrush-sync:<ns>` (sender()).
 // - dropOps (Workspace) never deletes ops past any namespace's watermark: they haven't been scanned yet.
-import type { Kind } from "./paths";
-import type { Op, Workspace } from "./api";
+import { TRASH, within, type Kind } from "./paths";
+import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { jsonTextSize } from "../notebook/stores.js";
+import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -51,7 +52,7 @@ const CURRENT = "sync:current";
 export type WireOp = { dseq: number; t: number; by: string; op: string; path: string; to?: string; kind: Kind; ref?: string; fid?: string; parent?: string; sha256?: string; size?: number; base?: string };
 /** An outbox record: its op, fixed when made, and its decision so far.  `lseq`: the local op it was made from;
  * `id`: the identity it is for (the index byIdent's key); `accepted`: the server's seq, once acked. */
-export type OutboxRecord = { ns: string; dseq: number; lseq: number; id: string; op: WireOp; accepted?: number };
+export type OutboxRecord = { ns: string; dseq: number; lseq: number; id: string; op: WireOp; accepted?: number; pin?: number };
 /** The outbox's totals: `bytes`, what its records hold now; `charged`, what they may come to hold, each at its
  * largest (accepted with the largest seq there is: chargeOf), the sum the bound is kept on, so accepting never
  * takes `bytes` past it (daybreak2's LIMIT-855-1); `full`: when a scan last stopped at a bound, until one goes on
@@ -59,7 +60,7 @@ export type OutboxRecord = { ns: string; dseq: number; lseq: number; id: string;
 type Totals = { count: number; bytes: number; charged: number; full?: { at: number; count: number; bytes: number } };
 const NONE: Totals = { count: 0, bytes: 0, charged: 0 };
 
-const key = (ns: string, what: "scanned" | "dseq" | "outbox") => `sync:${ns}:${what}`;
+const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors") => `sync:${ns}:${what}`;
 /** A record's size, as the bound counts it: its JSON text, keys and all, as the workspace's inert JSON writer
  * writes it (notebook/stores.js, as TimeTravel's backlog counts an entry: 2a), two bytes a character, as the page
  * holds it. */
@@ -93,12 +94,18 @@ export function wireOf(o: Op, dseq: number): WireOp | null {
  * starts the next generation, in one transaction, so every lease taken before is fenced. */
 export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
   checkNs(ns);
-  return inTx(w.ws, "meta", "readwrite", async (tx) => {
-    const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as Lease | undefined;
+  const lease = await inTx(w.ws, "meta", "readwrite", async (tx) => {
+    const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
     const lease = { ns, gen: (cur?.gen ?? 0) + 1 };
-    meta.put(lease, CURRENT);
+    metaWrite(meta, CURRENT, lease);
+    // (another namespace: a lifecycle change, the previous one's pins purged (sync-pins: newEpoch); a reconnect,
+    // or turning sync on again for the same namespace, isn't: its pins are kept)
+    if (cur && cur.ns !== ns) await newEpoch(meta);
     return lease;
   });
+  // (another namespace: the old one's purge, begun)
+  afterReleases(w);
+  return lease;
 }
 /** The current lease, if any. */
 export async function currentLease(w: Workspace): Promise<Lease | undefined> {
@@ -151,7 +158,7 @@ export class Outbox {
    * `full`: it stopped at a bound (said in status() until a page goes on); `more`: ops may remain. */
   async scanPage(): Promise<{ made: number; full: boolean; more: boolean }> {
     const cut = (at: number) => OUTBOX.cut?.(at);
-    return inTx(this.w.ws, ["ops", "meta", "outbox"], "readwrite", async (tx) => {
+    const r = await inTx(this.w.ws, ["ops", "outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), out = tx.objectStore("outbox");
       await fence(meta, this.lease);
       cut(0);
@@ -164,26 +171,97 @@ export class Outbox {
       cut(3);
       const ops = (await req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(scanned, true), OUTBOX.page))) as Op[];
       cut(4);
-      let at = scanned, made = 0, full = false;
+      let made = 0, full = false;
+      const fits = (r: OutboxRecord) => t.count + 1 <= OUTBOX.maxRecords && t.charged + chargeOf(r) <= OUTBOX.maxBytes;
+      const admit = (r: OutboxRecord) => {
+        out.add(r);
+        t.count++;
+        t.bytes += recordBytes(r);
+        t.charged += chargeOf(r);
+        dseq++;
+        made++;
+      };
+      let at = scanned;
       for (const o of ops) {
         const op = wireOf(o, dseq);
         if (op) {
-          const r: OutboxRecord = { ns: this.ns, dseq, lseq: o.seq!, id: (o.after?.id ?? o.fid ?? o.ref)!, op };
-          // (admitted at its charge, its largest: accepting it later never takes what is held past the bound)
-          const c = chargeOf(r);
-          if (t.count + 1 > OUTBOX.maxRecords || t.charged + c > OUTBOX.maxBytes) {
-            full = true;
-            break;
+          const id = (o.after?.id ?? o.fid ?? o.ref)!;
+          const r: OutboxRecord = { ns: this.ns, dseq, lseq: o.seq!, id, op };
+          if (o.kind === "file" && o.sha256 && (o.op === "create" || o.op === "write" || o.op === "adopt")) {
+            const p = await pendingOf(tx, id), st = stateOf(p, this.ns);
+            const pin = (await req(tx.objectStore("pins").get([id, o.seq!]))) as Pin | undefined;
+            const waiting = st.successor !== undefined || st.held || (st.allocated?.state === "undecided" && !st.allocated.pinned);
+            const covered = o.seq! <= (st.collapsed ?? -1) || o.seq! <= (st.cutoff ?? -1);
+            // (collapsed or already represented: not sent, its pin let go; while a successor waits or an unpinned
+            // record awaits its decision: held, not sent, its pin let go: its state goes as the current one)
+            if (covered || waiting) {
+              if (pin && !pin.owner) await release(tx, pin, true);
+              if (waiting && !covered && st.successor === undefined) putPending(tx, p, this.ns, { ...st, held: true }, o.seq!);
+              at = o.seq!;
+              continue;
+            }
+            // (its base: the newest record it follows, undecided or accepted; else the newest accepted, not yet
+            // confirmed; else the confirmed index's; else, until C3 keeps it, the op's own)
+            const confirmed = (await req(tx.objectStore("syncIndex").get([this.ns, id]))) as { sha256?: string } | undefined;
+            const base = (st.allocated && st.allocated.state !== "confirmed" ? st.allocated.sha256 : undefined) ?? st.acceptedTip?.sha256 ?? confirmed?.sha256 ?? o.base;
+            // (the same bytes as its base: nothing for the server to do)
+            if (o.op === "write" && base === o.sha256) {
+              at = o.seq!;
+              continue;
+            }
+            if (base === undefined) delete op.base;
+            else op.base = base;
+            if (pin) r.pin = pin.seq;
+            if (!fits(r)) { full = true; break; }
+            if (pin) tx.objectStore("pins").put({ ...pin, owner: { ns: this.ns, dseq } } satisfies Pin);
+            putPending(tx, p, this.ns, { ...st, allocated: { dseq, sha256: o.sha256, pinned: !!pin, state: "undecided" } }, o.seq!);
+            admit(r);
+            at = o.seq!;
+            continue;
           }
-          out.add(r);
-          t.count++;
-          t.bytes += recordBytes(r);
-          t.charged += c;
-          dseq++;
-          made++;
+          if (!fits(r)) { full = true; break; }
+          admit(r);
         }
         at = o.seq!;
       }
+      // (then, once this page has read every op logged (caught up, in this transaction), held identities'
+      // successors whose records were decided: each the identity's current state, while there is room (C2, astra's
+      // schedules 1, 2 and 5).  Only then: every op before it, of the identity and of the folders it is in (a
+      // mkdir, a rename, a move, a removal), already has its record, so the successor comes after all of them,
+      // with the state and place they left (astra's CORR-E5C-1).  One in Trash (itself, or a folder it is in)
+      // waits there: a write would bring it back, and its removal stands (no resurrection, CORR-E5C-2); it goes
+      // once restored, or ends as gone if it is deleted for good)
+      const succKey = key(this.ns, "successors");
+      const succ = ((await req(meta.get(succKey))) as string[] | undefined) ?? [];
+      const caughtUp = !full && ops.length < OUTBOX.page;
+      const left: string[] = [];
+      for (const id of succ) {
+        if (full || !caughtUp) { left.push(id); continue; }
+        const p = await pendingOf(tx, id), st = stateOf(p, this.ns);
+        if (!st.successor) continue;
+        const e = (await req(tx.objectStore("entries").index("byIdent").get(id))) as Entry | undefined;
+        const lseq = p.latest?.seq ?? 0;
+        const next: NsState = { ...st, held: false, cutoff: Math.max(st.cutoff ?? 0, lseq) };
+        delete next.successor;
+        // (its current state gone (a forget or emptying Trash came first): no write made, no identity brought back)
+        if (!e || e.kind !== "file" || !e.migrated || !e.sha256 || p.latest?.after === null) {
+          putPending(tx, p, this.ns, next, at);
+          continue;
+        }
+        if (e.trashed || within(e.path, TRASH)) { left.push(id); continue; }
+        const op: WireOp = { dseq, t: Date.now(), by: p.latest?.by ?? "person", op: "write", path: e.path, kind: "file", fid: e.fid!, sha256: e.sha256, size: e.size ?? 0, ...(st.successor.base ? { base: st.successor.base } : {}), ...(p.latest?.after?.parent ? { parent: p.latest.after.parent } : {}) };
+        const r: OutboxRecord = { ns: this.ns, dseq, lseq, id, op };
+        // (its present bytes pinned for it: the pin on them now, else a new one, owned by this record)
+        const cur = await pinOfCurrent(tx, e.fid!, e.sha256);
+        r.pin = cur ? cur.seq : lseq;
+        if (!fits(r)) { full = true; left.push(id); continue; }
+        if (cur) tx.objectStore("pins").put({ ...cur, owner: { ns: this.ns, dseq } } satisfies Pin);
+        else await pinPresent(tx, id, lseq, e.path, e.sha256, e.size ?? 0, e.fid!, { ns: this.ns, dseq });
+        next.allocated = { dseq, sha256: e.sha256, pinned: true, state: "undecided" };
+        admit(r);
+        putPending(tx, p, this.ns, next, at);
+      }
+      if (succ.length && left.length !== succ.length) meta.put(left, succKey);
       // (a page that stopped at a bound says so, until one goes on)
       if (full) t.full = { at: Date.now(), count: t.count, bytes: t.bytes };
       else delete t.full;
@@ -193,6 +271,9 @@ export class Outbox {
       cut(5);
       return { made, full, more: full || ops.length === OUTBOX.page };
     });
+    // (a pin released by the scan: its version prunable again, its file due; the cleanup begun)
+    afterReleases(this.w);
+    return r;
   }
 
   /** Pages scanned until nothing is left past the watermark or the outbox is full. */
@@ -216,14 +297,17 @@ export class Outbox {
     });
   }
 
-  /** An `ack`'s per-op decisions, under the lease: accepted (`seq`), the record kept until it is confirmed;
-   * refused (`code`), the record removed at once.  In one transaction.  A dseq with no record (decided before)
-   * is passed over. */
+  /** An `ack`'s per-op decisions, under the lease, in one transaction: accepted (`seq`), the record kept until
+   * it is confirmed (its pin with it), its identity's newest accepted noted (`acceptedTip`, by dseq); refused
+   * (`code`), the record removed at once and its pin released.  Either decides a held identity's record: its
+   * successor (its current state, based on that answer) is then scheduled for the scan.  A dseq with no record
+   * (decided before) is passed over. */
   async acked(results: ({ dseq: number; seq: number } | { dseq: number; code: string })[]): Promise<void> {
-    await inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
+    await inTx(this.w.ws, ["outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
+      const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       for (const d of results) {
         // (what the server says, checked at the boundary: a dseq and a seq are positive safe integers, a code a
         // short string; anything else refused whole, nothing changed)
@@ -237,25 +321,30 @@ export class Outbox {
             const next = { ...r, accepted: d.seq };
             out.put(next);
             t.bytes += recordBytes(next) - recordBytes(r);
+            await this.decided(tx, r, "accepted", scanned);
           }
         } else {
           out.delete([this.ns, d.dseq]);
           t.count--;
           t.bytes -= recordBytes(r);
           t.charged -= chargeOf(r);
+          await this.decided(tx, r, "refused", scanned);
         }
       }
       meta.put(t, key(this.ns, "outbox"));
     });
+    afterReleases(this.w);
   }
 
   /** Records confirmed (their echo in an `index`, or the confirmed index past their seq: C3), removed under the
-   * lease, in one transaction, whether their ack came first or not. */
+   * lease, in one transaction, their pins released, whether their ack came first or not (an echo first decides a
+   * held identity's record as accepted). */
   async confirmed(dseqs: number[]): Promise<void> {
-    await inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
+    await inTx(this.w.ws, ["outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
+      const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       for (const dseq of dseqs) {
         const r = (await req(out.get([this.ns, dseq]))) as OutboxRecord | undefined;
         if (!r) continue;
@@ -263,9 +352,44 @@ export class Outbox {
         t.count--;
         t.bytes -= recordBytes(r);
         t.charged -= chargeOf(r);
+        await this.decided(tx, r, "confirmed", scanned);
       }
       meta.put(t, key(this.ns, "outbox"));
     });
+    afterReleases(this.w);
+  }
+
+  // (a record's decision, for its identity's pending state and its pin, in the deciding transaction: C2)
+  private async decided(tx: IDBTransaction, r: OutboxRecord, how: "accepted" | "refused" | "confirmed", scanned: number | undefined) {
+    const p = await pendingOf(tx, r.id), st: NsState = { ...stateOf(p, this.ns) };
+    const mine = st.allocated?.dseq === r.dseq;
+    const sha = r.op.sha256;
+    // (its pin: kept while accepted (until the echo); released once refused or confirmed, not said as skipped: it
+    // was decided)
+    if (how !== "accepted" && r.pin !== undefined) {
+      const pin = (await req(tx.objectStore("pins").get([r.id, r.pin]))) as Pin | undefined;
+      if (pin && pin.owner?.ns === this.ns && pin.owner.dseq === r.dseq) await release(tx, { ...pin, owner: undefined });
+    }
+    if (how === "accepted") {
+      if (mine) st.allocated = { ...st.allocated!, state: "accepted" };
+      // (the newest accepted not yet confirmed, by dseq, whatever order acks come in)
+      if (sha !== undefined && (!st.acceptedTip || st.acceptedTip.dseq < r.dseq)) st.acceptedTip = { dseq: r.dseq, sha256: sha };
+    } else if (how === "confirmed") {
+      if (mine) st.allocated = { ...st.allocated!, state: "confirmed" };
+      if (st.acceptedTip && st.acceptedTip.dseq <= r.dseq) delete st.acceptedTip;
+    } else if (mine) delete st.allocated;
+    // (a held identity's record decided: its successor scheduled, based on the answer: this record's hash if it was
+    // accepted (an echo first counts so), else the newest accepted, else the confirmed index's)
+    if (st.held && mine) {
+      const confirmedSha = ((await req(tx.objectStore("syncIndex").get([this.ns, r.id]))) as { sha256?: string } | undefined)?.sha256;
+      const base = how === "refused" ? (st.acceptedTip?.sha256 ?? confirmedSha) : sha;
+      st.held = false;
+      st.successor = base !== undefined ? { base } : {};
+      const meta = tx.objectStore("meta"), k = key(this.ns, "successors");
+      const list = ((await req(meta.get(k))) as string[] | undefined) ?? [];
+      if (!list.includes(r.id)) meta.put([...list, r.id], k);
+    }
+    putPending(tx, p, this.ns, st, scanned);
   }
 }
 

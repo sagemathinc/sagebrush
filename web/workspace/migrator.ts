@@ -34,6 +34,7 @@ import type { Entry, Workspace } from "./api";
 import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
+import { scheduleClean } from "./sync-pins";
 
 export const MIGRATE = {
   /** entries looked at per batch */
@@ -106,6 +107,11 @@ export function startMigrator(w: Workspace): Promise<void> {
       if (c.ops.some((o) => o.op === "emptyTrash" || o.op === "dropVersions")) void resume(w);
     });
   }
+  // (the cleanup begun first, whichever tab holds the migration: the backfill after the upgrade to v5 among its
+  // steps, so the time a deletion may wait for it is short and once (design/sync-client.md C2); the purge of a
+  // lifecycle change, collapsed writes' pins, orphaned bytes, versions due.  Not waited for: a slice at a time,
+  // a timer between)
+  void scheduleClean(w);
   return resume(w, true);
 }
 async function resume(w: Workspace, opening = false): Promise<void> {
