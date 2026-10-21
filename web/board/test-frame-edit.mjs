@@ -28,6 +28,14 @@ const BOARD_PIC = JSON.stringify({ format: "sagebrush-board", version: 1, title:
   { id: "a", text: "with a picture", image: "pic", x: 0, y: 0, w: 200, h: 120 },
   { id: "b", text: "b0", x: 300, y: 0, w: 200, h: 120 },
 ] });
+// (pictures by reference: one the host holds, named by its bytes' SHA-256, as the frame names them)
+const PNG_REF = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const nameOfBytes = async (b) => "i" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", b)).slice(0, 16)].map((x) => x.toString(16).padStart(2, "0")).join("");
+const REF_NAME = await nameOfBytes(Buffer.from(PNG_REF, "base64"));
+const BOARD_REF = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Editing", images: { [REF_NAME]: { w: 1, h: 1 } }, nodes: [
+  { id: "a", text: "a picture by reference", image: REF_NAME, x: 0, y: 0, w: 200, h: 120 },
+  { id: "b", text: "b0", x: 300, y: 0, w: 200, h: 120 },
+] });
 const NONCE = crypto.randomUUID();
 // (the host's merge, for the page)
 const built = await Bun.build({ entrypoints: [join(import.meta.dir, "edit-state.ts")], target: "browser", format: "esm" });
@@ -40,18 +48,41 @@ const parent = createServer((req, res) => {
 <script type="module">
 import { editState } from "/edit-state.js";
 window.got = []; window.mode = "save";
-const text = location.search.includes("pic=1") ? ${JSON.stringify(BOARD_PIC)} : ${JSON.stringify(BOARD)}, grant = !location.search.includes("edit=0");
-const st = window.st = editState(text);
+const ref = location.search.includes("ref=1");
+const text = ref ? ${JSON.stringify(BOARD_REF)} : location.search.includes("pic=1") ? ${JSON.stringify(BOARD_PIC)} : ${JSON.stringify(BOARD)}, grant = !location.search.includes("edit=0");
+// (the host's pictures, and those this channel may name: the board's as posted, and those put and checked)
+const pictures = new Map(), allowed = new Set();
+if (ref) { pictures.set(${JSON.stringify(REF_NAME)}, { type: "image/png", bytes: Uint8Array.from(atob(${JSON.stringify(PNG_REF)}), (c) => c.charCodeAt(0)).buffer }); allowed.add(${JSON.stringify(REF_NAME)}); }
+const st = window.st = editState(text, ref ? { pictures: "by-reference", pictureAllowed: (n) => allowed.has(n) } : {});
 let rev = 0, port = null, granted = false;
 window.rev = () => "r" + rev;
 const f = document.createElement("iframe");
 f.style.cssText = "width:100vw;height:100vh;border:0;display:block";
 f.src = ${JSON.stringify(site + "frame/board/")} + "#sb-nonce=" + ${JSON.stringify(NONCE)};
 document.body.append(f);
-window.post = (m) => port.postMessage(m);
+window.post = (m, t) => port.postMessage(m, t ?? []);
 // (a change made elsewhere, sent as a remote)
 window.remote = (changes) => { const r = st.remote(changes); if (!r.ok) throw new Error(r.message); const base = "r" + rev; post({ sagebrush: "remote", version: 1, base, revision: "r" + ++rev, changes }); };
-window.answer = (m) => {
+window.holdGets = false;
+const heldGets = [];
+window.releaseGets = () => { window.holdGets = false; for (const m of heldGets.splice(0)) answer(m); };
+// (a picture the host has, by its own rules, given to this channel: for a remote change naming it)
+window.hostPicture = async (b64) => { const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer; const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), name = "i" + [...d.slice(0, 16)].map((x) => x.toString(16).padStart(2, "0")).join(""); pictures.set(name, { type: "image/png", bytes }); allowed.add(name); return name; };
+window.answer = async (m) => {
+  if (m.sagebrush === "imagePut") {
+    if (mode === "refusePut") return post({ sagebrush: "refused", version: 1, id: m.id, message: "Your picture quota is spent.", reason: "quota" });
+    const d = new Uint8Array(await crypto.subtle.digest("SHA-256", m.bytes)), name = "i" + [...d.slice(0, 16)].map((x) => x.toString(16).padStart(2, "0")).join("");
+    if (name !== m.name) return post({ sagebrush: "refused", version: 1, id: m.id, message: "not that picture", reason: "invalid" });
+    pictures.set(name, { type: m.type, bytes: m.bytes });
+    allowed.add(name);
+    return post({ sagebrush: "imageSaved", version: 1, id: m.id, name });
+  }
+  if (m.sagebrush === "imageGet" && window.holdGets) return heldGets.push(m);
+  if (m.sagebrush === "imageGet") {
+    const images = [], missing = [];
+    for (const n of m.names) { const p = allowed.has(n) && pictures.get(n); if (p) images.push({ name: n, type: p.type, bytes: p.bytes.slice(0) }); else missing.push(n); }
+    return post({ sagebrush: "images", version: 1, id: m.id, images, missing, more: [] }, images.map((i) => i.bytes));
+  }
   if (m.sagebrush === "resync") return post({ sagebrush: "replace", version: 1, revision: "r" + ++rev, text: JSON.stringify(st.board()), answered: [] });
   if (m.sagebrush !== "edit" || mode === "hold") return;
   const a = st.apply(m, Date.now());
@@ -67,7 +98,7 @@ addEventListener("message", (e) => {
   const ch = new MessageChannel();
   port = ch.port1;
   port.onmessage = (ev) => { got.push({ port: ev.data }); answer(ev.data); };
-  f.contentWindow.postMessage({ sagebrush: "board", version: 1, text, name: "e.board.json", revision: "r0", ...(grant ? { edit: true } : {}) }, "*", [ch.port2]);
+  f.contentWindow.postMessage({ sagebrush: "board", version: 1, text, name: "e.board.json", revision: "r0", ...(grant ? { edit: true } : {}), ...(ref ? { pictures: "by-reference" } : {}) }, "*", [ch.port2]);
 });
 </script></body>`);
 }).listen(0, "127.0.0.1");
@@ -216,6 +247,48 @@ try {
   await until(() => frame(`!!document.getElementById("sbb-unsaved")`), 10000);
   const keptB = await frame(`(async () => { const c = sagebrushEdit.copies().at(-1); if (!c) return null; const t = JSON.parse(await sagebrushEdit.download(c.id).blob.text()); return { n: t.transactions.length, a: t.transactions.flat().find((x) => x.key.id === "a")?.fields?.text, view: t.view?.nodes?.find((x) => x.id === "a")?.text }; })()`);
   check(keptB?.n >= 1 && keptB.a === "kept edit" && keptB.view === "kept edit", "(b) keepUnsaved while the action's picture is read: the action kept, in the download and its view: " + JSON.stringify(keptB));
+
+  // pictures by reference: the frame says it can; the board's picture fetched and shown; a picture added is put,
+  // and saved by the host, before the edit that names it; the edit carries no bytes; a picture refused (quota): no
+  // edit names it, and the frame says why
+  contexts.clear();
+  await send("Page.navigate", { url: parentUrl + "?ref=1" });
+  frame = await frameEval();
+  check(!!(await until(() => top(`!!got.find((g) => g.ready?.sagebrush === "ready")?.ready?.pictures?.includes("by-reference")`), 15000)), "ready says the frame takes pictures by reference");
+  check(!!(await until(() => frame(`!!window.sagebrushPictures && [...document.querySelectorAll('img')].some((i) => i.src.startsWith("blob:") && i.naturalWidth === 1)`), 15000)), "the board's picture fetched from the host (imageGet) and shown");
+  check(await top(`got.some((g) => g.port?.sagebrush === "imageGet" && g.port.names.includes(${JSON.stringify(REF_NAME)}))`), "...asked for by its name");
+  const added = await frame(`(async () => { const b = await (await fetch("${PNG}")).blob(); const n = await sagebrushImages.put(b); await sagebrush.board.edit((d) => { d.images = { ...(d.images ?? {}), [n]: { w: 1, h: 1 } }; d.nodes.push({ id: "q", image: n, text: "", x: 300, y: 0, w: 100, h: 100 }); }); return n; })()`);
+  check(!!(await until(() => top(`!!st.board().images?.[${JSON.stringify(added)}] && !st.board().images[${JSON.stringify(added)}].src`), 10000)), "a picture added: the edit naming it saved, the board naming it only");
+  const order = await top(`(() => { const i = got.findIndex((g) => g.port?.sagebrush === "imagePut" && g.port.name === ${JSON.stringify(added)}), e = got.findIndex((g) => g.port?.sagebrush === "edit" && JSON.stringify(g.port.changes).includes(${JSON.stringify(added)})); return { i, e, dataUrl: got.some((g) => g.port?.sagebrush === "edit" && JSON.stringify(g.port).includes("data:")) }; })()`);
+  check(order.i >= 0 && order.e > order.i && !order.dataUrl, "its imagePut came before the edit naming it, and no edit carries a data: URL: " + JSON.stringify(order));
+  // CORR-PICREF-1: a picture of the user's, its bytes still being read, and a remote change meanwhile: its imagePut
+  // still sent, the edit taken by the host (never marked as the host's by the board the frame shows)
+  const PNG_P1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const p1 = await frame(`(async () => { const b = await (await fetch("data:image/png;base64,${PNG_P1}")).blob(); const n = await sagebrushImages.put(b); const im = sagebrushImages, orig = im.blob.bind(im); window.__p1 = new Promise((r) => (window.__p1go = r)); im.blob = async (x) => { if (x === n) await window.__p1; return orig(x); }; await sagebrush.board.edit((d) => { d.images = { ...(d.images ?? {}), [n]: { w: 1, h: 1 } }; const a = d.nodes.find((x) => x.id === "a"); a.text = "a with a new picture"; a.image = n; }); return n; })()`);
+  await sleep(400);
+  await top(`remote([{ op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote while reading" } }])`);
+  await until(() => frame(`${textOf("b")} === "remote while reading"`), 10000);
+  await frame(`__p1go()`);
+  check(!!(await until(() => top(`!!st.board().images?.[${JSON.stringify(p1)}] && st.board().nodes.find((n) => n.id === "a").text === "a with a new picture"`), 10000)), "a remote change while a new picture is read: its imagePut sent, the edit taken");
+  check(await top(`got.some((g) => g.port?.sagebrush === "imagePut" && g.port.name === ${JSON.stringify(p1)}) && st.board().nodes.find((n) => n.id === "b").text === "remote while reading"`), "...and the host keeps the remote change");
+  // CORR-PICREF-2: a remote change naming a picture this browser doesn't hold, its imageGet held: the user, on the
+  // board still shown, changes only a; the host keeps both
+  const P2 = await top(`hostPicture(${JSON.stringify(PNG_REF.slice(0, 40) + "AAAAAElFTkSuQmCC")})`);
+  await top(`(() => { window.holdGets = true; const b = st.board(); remote([{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images: { ...(b.images ?? {}), [${JSON.stringify(P2)}]: { w: 1, h: 1 } } } }, { op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote with a picture", image: ${JSON.stringify(P2)} } }]); })()`);
+  await until(() => top(`got.some((g) => g.port?.sagebrush === "imageGet" && g.port.names.includes(${JSON.stringify(P2)}))`), 10000);
+  check(await frame(`${textOf("b")} !== "remote with a picture"`), "while its picture is fetched (held), the frame still shows the board before the remote change");
+  await frame(`sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "a").text = "edited while fetching"; })`);
+  await sleep(600);
+  await top(`releaseGets()`);
+  check(!!(await until(() => top(`st.board().nodes.find((n) => n.id === "a").text === "edited while fetching" && st.board().nodes.find((n) => n.id === "b").text === "remote with a picture"`), 10000)), "the host keeps both: the user's change to a, and the remote change to b");
+  check(!!(await until(() => frame(`${textOf("b")} === "remote with a picture" && ${textOf("a")} === "edited while fetching"`), 10000)), "...and the frame then shows both");
+
+  await top(`mode = "refusePut"`);
+  const edits0 = (await edits()).length;
+  const refused = await frame(`(async () => { const b = new Blob([Uint8Array.from(atob("${PNG_REF}"), (c) => c.charCodeAt(0)).slice(0, 60), new Uint8Array([1, 2, 3])], { type: "image/png" }); const n = await sagebrushImages.put(b); await sagebrush.board.edit((d) => { d.images = { ...(d.images ?? {}), [n]: { w: 1, h: 1 } }; d.nodes.push({ id: "r", image: n, text: "", x: 500, y: 0, w: 100, h: 100 }); }); return n; })()`);
+  await sleep(2000);
+  const afterRefused = await frame(`({ shown: !!sagebrush.board.snapshot().doc.images?.[${JSON.stringify(refused)}], said: document.body.innerText.includes("A picture couldn't be saved") })`);
+  check((await edits()).length === edits0 && !afterRefused.shown && afterRefused.said, "a picture the host refuses (quota): no edit names it, the action not taken, and said: " + JSON.stringify(afterRefused));
 
   // a host that never answers, the same near-limit field changed over and over (LIMIT-9B5-1's acceptance):
   // Edit paused before the bound, nothing lost, the totals exact, the heap within a constant times the bound
