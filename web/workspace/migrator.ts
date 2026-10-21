@@ -30,8 +30,8 @@
 //   which never goes down; every change to the entries records an op in its
 //   own transaction) is still the one it began
 //   with, checked holding the lock (CORR-CAP-46A-1).
-import type { Entry, Workspace } from "./api";
-import { COPIES, LEGACY_MAX, identOf, needsHash } from "./api";
+import type { Entry, Workspace, StaleStuck, StaleWhy } from "./api";
+import { COPIES, LEGACY_MAX, WorkspaceError, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
 import { scheduleClean } from "./sync-pins";
@@ -49,7 +49,11 @@ export const MIGRATE = {
   copies: COPIES,
   /** (tests: awaited after each batch, with the state written) */
   afterBatch: null as null | ((s: MigrationState) => Promise<void> | void),
+  /** pages of old copies' marks a start's cleanup looks at, at most (cleanStale) */
+  stalePages: 32,
 };
+/** An old copy left by this many cleanups in a row is said (the notice, notice.ts); a few of them listed, each path cut. */
+export const STALE_NOTICE = 3, STUCK_PATHS = 20, STUCK_CHARS = 256;
 const LOCK = "sagebrush-workspace-migrate";
 const KEY = "migration";
 
@@ -138,21 +142,38 @@ async function resume(w: Workspace, opening = false): Promise<void> {
 
 /** Old copies of moved files deleted, or kept as files of their own if written since (Workspace.dropStale), by
  * their marks, a page of MIGRATE.files at a time, each read in its reservation taken before the lock; at most
- * STALE_PAGES pages a run.  Each run goes on from where the last left off (a durable cursor in meta, CURSOR: the
+ * MIGRATE.stalePages pages a run.  Each run goes on from where the last left off (a durable cursor in meta, CURSOR: the
  * last mark looked at), wrapping round at the end, so marks that keep failing (a copy that can't be kept: its
- * folder full) can't keep any after them from being reached (astra's CORR-AC1-1); each mark once a run. */
-const STALE_PAGES = 32;
+ * folder full) can't keep any after them from being reached (astra's CORR-AC1-1); each mark once a run.  A mark
+ * still there after its attempt is counted, with why (Workspace.noteStaleFailure); a lap that looked at every
+ * mark says how many have been left STALE_NOTICE times or more (Workspace.staleStuck, the notice: notice.ts). */
 const CURSOR = "staleCursor";
+/** Why a cleanup left an old copy: from what dropStale threw (none: its rounds ran out), and the full folder. */
+function whyOf(e: unknown): { why: StaleWhy; folder?: string } {
+  if (e instanceof WorkspaceError && e.code === "limit") {
+    const folder = (e.current as { folderFull?: unknown } | undefined)?.folderFull;
+    return typeof folder === "string" ? { why: "folder-full", folder } : { why: "limit" };
+  }
+  return { why: "storage" };
+}
 async function cleanStale(w: Workspace) {
   const getCursor = async () => ((await inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(CURSOR)))) as string | undefined) ?? "";
   const setCursor = (c: string) => inTx(w.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(c, CURSOR); });
   let cursor = await getCursor(), wrapped = cursor === "";
   const tried = new Set<string>();
-  for (let page = 0; page < STALE_PAGES && !w.closed; page++) {
+  // (the marks this lap leaves that cleanups have left STALE_NOTICE times or more: kept only once the lap has looked
+  // at every mark, so a partial lap never lowers the count; bounded: a count, a few paths, a count per reason)
+  const stuck: StaleStuck = { count: 0, paths: [], reasons: {} };
+  const cut = (p: string) => (p.length > STUCK_CHARS ? p.slice(0, STUCK_CHARS - 1) + "…" : p);
+  for (let page = 0; page < MIGRATE.stalePages && !w.closed; page++) {
     const marks = (await w.staleCopies(MIGRATE.files, cursor || undefined)).filter(([where, key]) => !tried.has(where + ":" + key));
     if (!marks.length) {
       // (the end: round to the first mark, once a run)
-      if (wrapped) return;
+      if (wrapped) {
+        // (a full lap: what it found said, best effort, never the start's end)
+        await w.setStaleStuck(stuck.count ? stuck : null).catch((e) => console.warn("workspace migration: the old copies' count:", e));
+        return;
+      }
       wrapped = true;
       cursor = "";
       await setCursor(cursor);
@@ -163,7 +184,28 @@ async function cleanStale(w: Workspace) {
       tried.add(at);
       const release = await reserve(LEGACY_MAX * MIGRATE.copies);
       try {
-        await w.locked(() => w.dropStale(where, key, undefined, release));
+        await w.locked(async () => {
+          // (none thrown, and the mark still there: its rounds ran out, the copy changing as it was compared)
+          let left: { why: StaleWhy; folder?: string } = { why: "rounds" };
+          try {
+            await w.dropStale(where, key, undefined, release);
+          } catch (e) {
+            console.warn("workspace migration: an old copy:", e);
+            left = whyOf(e);
+          }
+          // (still there: counted, best effort: a count that can't be written (storage refusing is one way to get
+          // here) is said and passed over, never the lap's end)
+          try {
+            const m = await w.noteStaleFailure(where, key, left.why, left.folder);
+            if (m && (m.fails ?? 0) >= STALE_NOTICE) {
+              stuck.count++;
+              stuck.reasons[left.why] = (stuck.reasons[left.why] ?? 0) + 1;
+              if (stuck.paths.length < STUCK_PATHS) stuck.paths.push({ path: cut(where === "trash" ? "Trash: " + key : key), why: left.why, ...(left.folder !== undefined ? { folder: cut(left.folder) } : {}) });
+            }
+          } catch (e) {
+            console.warn("workspace migration: an old copy's count:", e);
+          }
+        });
       } catch (e) {
         console.warn("workspace migration: an old copy:", e);
       } finally {

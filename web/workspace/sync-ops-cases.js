@@ -336,6 +336,140 @@ async function stuckMarks() {
   w.close();
 }
 
+// ---- old copies that cleanups keep leaving: counted, said, closed
+
+const rawPut = (db, store, v, k) => new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(v, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+const markOf = async (w, key) => new Promise((ok) => { const r = w.ws.transaction("meta").objectStore("meta").get("stale:files:" + key); r.onsuccess = () => ok(r.result); });
+const pick = (o) => o && { fails: o.fails, why: o.why, folder: o.folder };
+
+async function staleFolderFull() {
+  // (old copies written since their file was moved, in a full folder: each start's cleanup leaves them, counted once
+  // a start, with why and the folder; from the third start, said (staleStuck, the notice, naming the folder); room
+  // made: they go, their counts with them, and so does the notice)
+  localStorage.clear();
+  const r = Math.random().toString(36).slice(2, 8), nm = { name: "ws-stale-" + r, mainName: "main-stale-" + r };
+  let w = await W.Workspace.open({ ...nm, limits: { ...W.LIMITS, maxFolderEntries: 6 } });
+  await W.startMigrator(w);
+  w.beforeStaleDelete = () => { throw new Error("leave the mark"); };
+  for (let i = 1; i <= 6; i++) {
+    const key = `/f0${i}.bin`;
+    await rawPut(w.main, "files", enc("original"), key);
+    await w.locked(() => w.adopt("/", `f0${i}`, ".bin", { kind: "file", ref: key, rev: 0 }));
+  }
+  w.beforeStaleDelete = null;
+  for (let i = 1; i <= 5; i++) await rawPut(w.main, "files", enc("changed"), `/f0${i}.bin`);
+  const seen = [];
+  for (let start = 1; start <= 3; start++) {
+    await W.startMigrator(w);
+    seen.push({ start, mark: pick(await markOf(w, "/f01.bin")), stuck: await w.staleStuck(), gone6: (await markOf(w, "/f06.bin")) === undefined });
+  }
+  const box = await W.showStaleNotice(w);
+  const text = box?.textContent ?? "";
+  const s3 = seen[2].stuck;
+  check(J(seen.map((x) => x.mark)) === J([1, 2, 3].map((n) => ({ fails: n, why: "folder-full", folder: "/" }))) && seen[0].stuck === undefined && seen[1].stuck === undefined && s3?.count === 5 && J(s3.reasons) === J({ "folder-full": 5 }) && s3.paths.length === 5 && s3.paths.every((p) => p.why === "folder-full" && p.folder === "/") && seen.every((x) => x.gone6), "old copies in a full folder: counted once a start, with why and the folder; said from the third start (5 of them); the copy that could go, gone: " + J(seen));
+  check(/your top folder is full/.test(text) && /nothing has been deleted/i.test(text) && /5 files/.test(text), "…the notice says so, naming the folder, and that nothing has been deleted: " + J(text));
+  // (room made: they go, and their counts, and the notice)
+  w.close();
+  w = await W.Workspace.open({ ...nm, limits: { ...W.LIMITS, maxFolderEntries: 100 } });
+  await W.startMigrator(w);
+  const left = (await w.staleCopies(100)).length, again = await W.showStaleNotice(w);
+  check(left === 0 && (await w.staleStuck()) === undefined && again === null && !document.getElementById("sagebrush-stale-notice") && (await w.list("/")).filter((e) => / \(from an older tab\)/.test(e.path)).length === 5, "room made: the copies kept as files of their own, their marks and counts gone, the notice gone: " + J({ left }));
+  w.close();
+}
+
+async function staleCounts() {
+  // (a mark of the old shape counts from 0; a count saturates at its cap; a count that can't be written doesn't stop
+  // the lap; a lap cut short (fewer pages than marks) keeps what the last full lap found)
+  localStorage.clear();
+  const r = Math.random().toString(36).slice(2, 8), nm = { name: "ws-stalec-" + r, mainName: "main-stalec-" + r };
+  const w = await W.Workspace.open(nm);
+  await W.startMigrator(w);
+  const one = enc("x"), sha = await H(one);
+  const mark = async (key, extra = {}) => { await rawPut(w.main, "files", one, key); await rawPut(w.ws, "meta", { fid: "f" + key.replace(/\W/g, "").padStart(15, "0").slice(-15), size: 1, sha256: sha, ...extra }, "stale:files:" + key); };
+  await mark("/old-shape.bin");
+  await mark("/capped.bin", { fails: W.STALE_FAILS_CAP, why: "storage" });
+  w.beforeStaleDelete = () => { throw new Error("storage refused"); };
+  await W.startMigrator(w);
+  const a = pick(await markOf(w, "/old-shape.bin")), b = pick(await markOf(w, "/capped.bin"));
+  check(J(a) === J({ fails: 1, why: "storage" }) && J(b) === J({ fails: W.STALE_FAILS_CAP, why: "storage" }), "a mark of the old shape counts from 0; one at the cap stays there: " + J({ a, b }));
+  // (the count's write refused: said, passed over, the lap goes on: a mark after it that can go, gone)
+  await rawPut(w.ws, "meta", { fid: "f00000000000gone", size: 1, sha256: sha }, "stale:files:/zz-gone.bin");
+  const realNote = w.noteStaleFailure;
+  w.noteStaleFailure = async () => { throw new Error("the count refused"); };
+  const ended = await Promise.race([W.startMigrator(w).then(() => "ended"), sleep(30000).then(() => "stuck")]);
+  w.noteStaleFailure = realNote;
+  const a2 = pick(await markOf(w, "/old-shape.bin")), gone = (await markOf(w, "/zz-gone.bin")) === undefined;
+  check(ended === "ended" && gone && a2.fails === 1, "the count's write refused: the lap goes on (a later mark that could go, gone) and ends: " + J({ ended, gone, a2 }));
+  // (a lap cut short keeps the last full lap's figure)
+  await w.setStaleStuck({ count: 7, paths: [], reasons: { storage: 7 } });
+  for (let i = 0; i < 6; i++) await mark(`/p${i}.bin`);
+  const was = { files: W.MIGRATE.files, pages: W.MIGRATE.stalePages };
+  W.MIGRATE.files = 2;
+  W.MIGRATE.stalePages = 1;
+  try { await W.startMigrator(w); } finally { W.MIGRATE.files = was.files; W.MIGRATE.stalePages = was.pages; }
+  const kept = await w.staleStuck();
+  check(kept?.count === 7 && J(kept.reasons) === J({ storage: 7 }), "a lap cut short (one page of two marks): the last full lap's figure kept, never lowered: " + J(kept));
+  // (a full lap again: the figure from what it found, paths cut to STUCK_CHARS)
+  const long = "/" + "n".repeat(400) + ".bin";
+  await mark(long, { fails: 5, why: "storage" });
+  await W.startMigrator(w);
+  const full = await w.staleStuck();
+  check(full && full.count >= 2 && full.paths.every((p) => p.path.length <= W.STUCK_CHARS) && full.paths.length <= W.STUCK_PATHS && J(Object.keys(full.reasons)) === J(["storage"]), "a full lap: the count, at most STUCK_PATHS paths each cut to STUCK_CHARS, a count per reason: " + J({ count: full?.count, longest: Math.max(...(full?.paths ?? []).map((p) => p.path.length)) }));
+  w.beforeStaleDelete = null;
+  w.close();
+}
+
+async function staleRounds() {
+  // (an old copy that keeps changing while the cleanup compares it (a tab from before an update still writing to
+  // it): no error, its rounds run out, the mark left; counted as "rounds")
+  localStorage.clear();
+  const r = Math.random().toString(36).slice(2, 8), w = await W.Workspace.open({ name: "ws-staler-" + r, mainName: "main-staler-" + r });
+  await W.startMigrator(w);
+  const one = enc("x");
+  await rawPut(w.main, "files", one, "/rounds.bin");
+  await rawPut(w.ws, "meta", { fid: "f00000000rounds1", size: 1, sha256: await H(one) }, "stale:files:/rounds.bin");
+  let n = 0;
+  w.beforeStaleDelete = async () => { await rawPut(w.main, "files", enc("changed " + ++n), "/rounds.bin"); };
+  await W.startMigrator(w);
+  w.beforeStaleDelete = null;
+  const m = pick(await markOf(w, "/rounds.bin"));
+  check(m?.fails === 1 && m.why === "rounds" && n >= 2, "an old copy that keeps changing while it is compared: no error, the mark left, counted as \"rounds\": " + J({ m, n }));
+  w.close();
+}
+
+async function staleNotice() {
+  // (the notice closed: it stays closed while the count and reasons stay; it comes back if the count rises or a
+  // reason is new; none left, it goes, and what it was closed at with it.  And each reason's words: true of it,
+  // the folder named only when full)
+  localStorage.clear();
+  let s;
+  const w = { staleStuck: async () => s };
+  const shown = () => !!document.getElementById("sagebrush-stale-notice");
+  const close = () => document.querySelector('[data-sbb="stale-close"]')?.click();
+  const steps = [];
+  s = { count: 2, paths: [{ path: "/a.bin", why: "storage" }], reasons: { storage: 2 } };
+  await W.showStaleNotice(w); steps.push(shown());
+  close(); steps.push(shown());
+  await W.showStaleNotice(w); steps.push(shown());
+  s = { ...s, count: 3, reasons: { storage: 3 } };
+  await W.showStaleNotice(w); steps.push(shown());
+  close();
+  s = { ...s, count: 3, reasons: { storage: 2, rounds: 1 } };
+  await W.showStaleNotice(w); steps.push(shown());
+  close();
+  s = { ...s, count: 2, reasons: { storage: 2 } };
+  await W.showStaleNotice(w); steps.push(shown());
+  s = { count: 0, paths: [], reasons: {} };
+  await W.showStaleNotice(w); steps.push(shown(), localStorage.getItem(W.STALE_DISMISSED));
+  s = { count: 1, paths: [{ path: "/b.bin", why: "storage" }], reasons: { storage: 1 } };
+  await W.showStaleNotice(w); steps.push(shown());
+  close();
+  check(J(steps) === J([true, false, false, true, true, false, false, null, true]), "the notice: closed, it stays closed; back when the count rises or a reason is new; gone when none are left, and what it was closed at forgotten: " + J(steps));
+  const text = (why, extra = {}) => W.staleText({ count: 1, paths: [{ path: "/d/x.bin", why, folder: "/d", ...extra }], reasons: { [why]: 1 } });
+  const t = { full: text("folder-full"), limit: text("limit"), storage: text("storage"), rounds: text("rounds") };
+  check(Object.values(t).every((x) => /nothing has been deleted/i.test(x) && !/lost/i.test(x)) && /\/d is full/.test(t.full) && ["limit", "storage", "rounds"].every((k) => !t[k].includes("/d")) && /1 file\b/.test(t.storage), "each reason's words: nothing deleted (never \"lost\"); the folder named only when it is full: " + J(t));
+}
+
 // ---- the version 4 upgrade
 
 // (a database's every store, its keys and values, bytes as their SHA-256: for comparing whole states)
@@ -488,7 +622,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, copies, reservations, stuckMarks, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, reservations, stuckMarks, staleFolderFull, staleCounts, staleRounds, staleNotice, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;
