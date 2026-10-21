@@ -159,14 +159,16 @@ function whyOf(e: unknown): { why: StaleWhy; folder?: string } {
 }
 /** A lap of the cleanup over every mark, which may span starts (daybreak2: with more marks than a start looks at,
  * no one start sees them all): where it began (`origin`, the first mark it looked at), whether it has gone round
- * the end since, and what it has found so far (bounded as staleStuck is).  Kept in meta beside the cursor, best
- * effort; said as staleStuck only when the lap is whole. */
+ * the end since, and what it has found so far (bounded as staleStuck is).  Kept in meta, written with the cursor in
+ * one transaction, so that a reload between marks can't move the cursor past a mark the lap hasn't counted
+ * (daybreak2); said as staleStuck only when the lap is whole. */
 type Lap = { origin: string | null; wrapped: boolean; count: number; reasons: Partial<Record<StaleWhy, number>>; paths: StaleStuck["paths"] };
 const LAP = "staleLap";
 const newLap = (): Lap => ({ origin: null, wrapped: false, count: 0, reasons: {}, paths: [] });
 async function cleanStale(w: Workspace) {
   const meta = <T>(f: (st: IDBObjectStore) => Promise<T>, mode: IDBTransactionMode = "readonly") => inTx(w.ws, "meta", mode, (tx) => f(tx.objectStore("meta")));
-  const setCursor = (c: string) => meta(async (st) => { st.put(c, CURSOR); }, "readwrite");
+  // (the cursor and the lap together: one past a mark only with what it found)
+  const setCursor = (c: string) => meta(async (st) => { st.put(c, CURSOR); st.put(lap, LAP); }, "readwrite");
   let cursor = ((await meta((st) => req(st.get(CURSOR)))) as string | undefined) ?? "";
   let lap = (((await meta((st) => req(st.get(LAP))).catch(() => undefined)) as Lap | undefined) ?? newLap());
   const saveLap = () => meta(async (st) => { st.put(lap, LAP); }, "readwrite").catch((e) => console.warn("workspace migration: the old copies' lap:", e));
@@ -234,7 +236,6 @@ async function cleanStale(w: Workspace) {
         cursor = at;
         await setCursor(cursor);
       }
-      await saveLap();
     }
   } finally {
     await saveLap();
