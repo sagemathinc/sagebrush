@@ -612,6 +612,36 @@ const actOn = (v, text = "user edit") => { const d = JSON.parse(J(v)); d.images 
   check(last.nodes.find((n) => n.id === "a").text === "user edit" && last.nodes.find((n) => n.id === "b").text === "remote edit", "then shown again with both: " + J(last.nodes));
 }
 
+// 25. CORR-PICREF-2, two queued shows: the first reaches the editor while the second waits (its pictures fetched);
+// the view follows each board the editor shows, so an unrelated action fabricates nothing
+{
+  const h = harness({ nodes: [{ id: "a", text: "a", x: 0 }, { id: "b", text: "b0" }] }, { manual: true });
+  const realShow = h.ch["ui"].show;
+  // (as page.ts: shows one after another, each held until let go)
+  let chain = Promise.resolve();
+  const gates = [];
+  h.ch["ui"].show = (d, note) => { let go; const gate = new Promise((r) => (go = r)); gates.push(go); const p = (chain = chain.then(() => gate).then(() => { realShow(d, note); })); return p; };
+  const A = { type: "item", page: "", id: "a" };
+  h.remote([{ op: "set", key: A, fields: { x: 1 } }]);
+  h.remote([{ op: "set", key: A, fields: { x: 2 } }]);
+  check(gates.length === 2, "two shows queued: " + gates.length);
+  gates[0]();
+  await tick(); await tick();
+  const visible = h.shown.at(-1);
+  check(visible?.nodes.find((n) => n.id === "a").x === 1, "the first reaches the editor (x = 1) while the second waits");
+  // (the user, on that board, changes only b)
+  const v = JSON.parse(J(visible)); v.nodes.find((n) => n.id === "b").text = "user edit";
+  h.ch.save(v);
+  h.ch.flush();
+  const e = h.sent.find((m) => m.sagebrush === "edit");
+  check(e && e.changes.length === 1 && e.changes[0].key.id === "b", "an unrelated action: only its own change, no change to a fabricated: " + J(e?.changes.map((c) => [c.key.id, c.fields])));
+  h.answer(e);
+  gates[1]();
+  for (let i = 0; i < 6; i++) { await tick(); gates.slice(2).forEach((g) => g()); }
+  const b = h.st.board();
+  check(b.nodes.find((n) => n.id === "a").x === 2 && b.nodes.find((n) => n.id === "b").text === "user edit", "the host keeps x = 2 and the user's edit: " + J(b.nodes));
+}
+
 // 12. diff: unchanged fields not sent; a removed field sent as null with its was
 {
   const a = new Map(toRecords(board({ nodes: [{ id: "a", text: "A", color: "red" }] })).map((r) => [J([r.type, r.page, r.id]), r]));

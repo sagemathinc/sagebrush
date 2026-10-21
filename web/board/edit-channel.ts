@@ -355,6 +355,7 @@ export class EditChannel {
   // (refreshes shown, and actions taken: an action taken while a refresh is still being shown was made on the board
   // shown before it: astra's CORR-PICREF-2)
   private showGen = 0;
+  private shownGen = 0;
   private saves = 0;
   /** what happened, the latest 200: for tests */
   readonly log: { what: string; id?: string; n?: number }[] = [];
@@ -552,9 +553,13 @@ export class EditChannel {
     const r = this.ui.show(d, note);
     if (!r || typeof (r as Promise<unknown>).then !== "function") { this.view = shown; return; }
     void (r as Promise<unknown>).then(() => {
-      if (g !== this.showGen) return;
+      // (every board the editor shows becomes the view, the queued ones on the way too, never one older than a board
+      // shown already: astra's CORR-PICREF-2, two queued shows)
+      if (g < this.shownGen) return;
+      this.shownGen = g;
       this.view = shown;
-      if (this.saves !== savesAt) this.refresh();
+      // (actions taken since this board was asked for: shown again with them, by the newest show)
+      if (g === this.showGen && this.saves !== savesAt) this.refresh();
     }, () => {});
   }
   /** The pictures the host's board names (its own state, never the frame's unsaved changes over it): those the host
