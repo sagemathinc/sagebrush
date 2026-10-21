@@ -384,16 +384,25 @@ const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 33, COLLAPSE_WORST = 
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
   const plain = [], collapsing = [], seen = [], runs = [];
-  for (let i = 0; i < 200; i++) {
-    big[0] = i & 255; big[1] = i >> 8;
-    const before = w.pinsCleaning;
-    const n = await counting(() => w.write(path, big));
-    const collapsed = w.pinsCleaning !== before;
-    (collapsed ? collapsing : plain).push(n);
-    if ((collapsed ? n > COLLAPSE_BOUND : n > PLAIN_BOUND) && seen.length < 2) seen.push([i, n, lastBreakdown]);
-    // (the cleanup a collapsing save begins after it: counted apart, a run at a time)
-    if (collapsed) { await counting(() => w.pinsCleaning); runs.push(lastPerTx); }
-  }
+  // (the OPFS witness, flushed in the background at most every 10 s, held off from now, flushed once, and any flush
+  // its timer already began waited for (the lock taken once: a flush reads holding it): a flush is no part of a
+  // save's cost, but on a slower machine one still running when a save began had its reads counted as the save's
+  // (astra's 35))
+  w.flushOpfs = async () => {};
+  await W.Workspace.prototype.flushOpfs.call(w);
+  await w.locked(async () => {}, undefined, { internal: true });
+  try {
+    for (let i = 0; i < 200; i++) {
+      big[0] = i & 255; big[1] = i >> 8;
+      const before = w.pinsCleaning;
+      const n = await counting(() => w.write(path, big));
+      const collapsed = w.pinsCleaning !== before;
+      (collapsed ? collapsing : plain).push(n);
+      if ((collapsed ? n > COLLAPSE_BOUND : n > PLAIN_BOUND) && seen.length < 2) seen.push([i, n, lastBreakdown]);
+      // (the cleanup a collapsing save begins after it: counted apart, a run at a time)
+      if (collapsed) { await counting(() => w.pinsCleaning); runs.push(lastPerTx); }
+    }
+  } finally { delete w.flushOpfs; }
   return { plain, collapsing, seen, runs };
 }
 const stats = (xs) => { const s = [...xs].sort((a, b) => a - b); return { n: s.length, min: s[0], median: s[s.length >> 1], max: s.at(-1) }; };
