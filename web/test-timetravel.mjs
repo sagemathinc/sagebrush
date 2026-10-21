@@ -26,7 +26,14 @@ async function tab(wsUrl) {
   let n = 0; const waiting = new Map();
   ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500)); return r.result?.value; };
+  // (each evaluation answered within `ms`, or the test fails there, naming it: never a silent hang)
+  const ev = async (expression, ms = 120000) => {
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(new Error(`no answer in ${ms / 1000} s: ${expression.slice(0, 160)}`)), ms); });
+    const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), late]).finally(() => clearTimeout(timer));
+    if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500));
+    return r.result?.value;
+  };
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   return { ws, send, ev, until };
 }
@@ -126,7 +133,10 @@ try {
   await a.ev("document.querySelector('#ttclose').click()");
 
   // the stored patches: CoCalc's Jupyter records
-  const rec = await a.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-history"); r.onsuccess = () => { const q = r.result.transaction("history").objectStore("history").getAll(); q.onsuccess = () => res({ n: q.result.length, first: JSON.stringify(q.result[0].env.patch), size: JSON.stringify(q.result.map((x) => x.env)).length }); }; })`);
+  // (the notebooks' records: not the workspace's fence, a record of the same store keyed "__sagebrush-workspace__",
+  // design/workspace-durability.md A.3b, which sorts first when every notebook's id sorts after it; and any
+  // error is the test's failure, never a promise left waiting)
+  const rec = await a.ev(`new Promise((res, no) => { const r = indexedDB.open("sagebrush-history"); r.onerror = () => no(r.error); r.onblocked = () => no(new Error("opening sagebrush-history: blocked")); r.onsuccess = () => { try { const q = r.result.transaction("history").objectStore("history").getAll(); q.onerror = () => no(q.error); q.onsuccess = () => { try { const own = q.result.filter((x) => x.nb !== "__sagebrush-workspace__"); res({ n: own.length, first: JSON.stringify(own[0].env.patch), size: JSON.stringify(own.map((x) => x.env)).length }); } catch (e) { no(e); } }; } catch (e) { no(e); } }; })`);
   ok(/"type":"settings","kernel":"python3"/.test(rec.first) && /"type":"cell"/.test(rec.first) && /"cell_type":"code"/.test(rec.first) && /"pos":0/.test(rec.first), `kept in IndexedDB as CoCalc Jupyter records (${rec.n} patches, ${rec.size} bytes): ${rec.first.slice(0, 120)}`);
 
   // a reload keeps the history
