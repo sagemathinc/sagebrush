@@ -32,8 +32,12 @@ export const EDIT_BOUNDS = {
   /** edit ids answered, remembered */
   ids: 100,
 };
-// (room left in an edit message for its envelope: sagebrush, version, id, base)
-const ENVELOPE = 1024;
+/** The UTF-8 bytes of an edit message apart from its changes, exactly: `{"sagebrush":"edit","version":1,"id":"<a UUID>",
+ * "base":<the revision>,"changes":}` (daybreak2's LIMIT-BFE-1: exact, not an allowance; revisions are at most 200
+ * characters, else refused) */
+const envelopeBytes = (revision: string) => utf8Length(`{"sagebrush":"edit","version":1,"id":"","base":,"changes":}`) + 36 + jsonBytes(revision, Infinity);
+/** A revision as the protocol bounds it. */
+const REVISION_MAX = 200;
 
 type Key = { type: string; page: string; id: string };
 type Rec = Key & { [field: string]: unknown };
@@ -62,8 +66,6 @@ export interface EditUi {
 const keyOf = (k: { type: unknown; page: unknown; id: unknown }) => JSON.stringify([k.type, k.page, k.id]);
 const KEY_FIELDS = new Set(["type", "page", "id"]);
 const TEXT = new Set(SCHEMA.stringCols);
-// (the same JSON whatever the order of an object's keys)
-const canon = (x: unknown): string => JSON.stringify(x, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v)) ?? "null";
 /** UTF-8 bytes of a string, without encoding it. */
 export function utf8Length(s: string): number {
   let n = 0;
@@ -76,7 +78,83 @@ export function utf8Length(s: string): number {
   }
   return n;
 }
-const txOf = (changes: Change[]): Tx => ({ changes, bytes: utf8Length(JSON.stringify(changes)) + 1, ready: true });
+// (a transaction of changes already admitted: its JSON as an array, and the separator a download puts after it)
+const txOf = (changes: Change[]): Tx => ({ changes, bytes: jsonBytes(changes, Infinity) + 1, ready: true });
+
+/**
+ * The UTF-8 bytes of `x` as JSON.stringify writes it (strings escaped as it escapes them, `undefined` and functions
+ * left out of objects and written null in arrays), without writing it: an explicit stack, so no recursion.  -1 once
+ * past `cap` bytes, or `depth` levels: stopped there, the rest never walked (daybreak2's LIMIT-BFE-1: what an
+ * action may be is bounded before it is serialized, compared or kept).
+ */
+export function jsonBytes(x: unknown, cap: number, depth = 64): number {
+  let n = 0;
+  const stack: [unknown, number][] = [[x, 0]];
+  while (stack.length) {
+    const [v, d] = stack.pop()!;
+    if (v === null) n += 4;
+    else if (typeof v === "string") { if (v.length > cap) return -1; n += stringBytes(v); }
+    else if (typeof v === "number") n += Number.isFinite(v) ? String(v).length : 4;
+    else if (typeof v === "boolean") n += v ? 4 : 5;
+    else if (typeof v !== "object") n += 4;
+    else {
+      if (d >= depth) return -1;
+      if (Array.isArray(v)) {
+        if (v.length > cap) return -1;
+        n += 2 + Math.max(0, v.length - 1);
+        for (let i = v.length - 1; i >= 0; i--) { const e = v[i]; stack.push([e === undefined || typeof e === "function" || typeof e === "symbol" ? null : e, d + 1]); }
+      } else {
+        let k = 0;
+        for (const key of Object.keys(v)) {
+          const e = (v as Record<string, unknown>)[key];
+          if (e === undefined || typeof e === "function" || typeof e === "symbol") continue;
+          n += (k++ ? 1 : 0) + stringBytes(key) + 1;
+          stack.push([e, d + 1]);
+          if (n > cap) return -1;
+        }
+        n += 2;
+      }
+    }
+    if (n > cap) return -1;
+  }
+  return n;
+}
+// (a string's bytes as JSON writes it: its quotes, its escapes, its UTF-8; a lone surrogate as \uXXXX)
+function stringBytes(s: string): number {
+  let n = 2;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0x22 || c === 0x5c || c === 0x08 || c === 0x0c || c === 0x0a || c === 0x0d || c === 0x09) n += 2;
+    else if (c < 0x20) n += 6;
+    else if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) { if (i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; } else n += 6; }
+    else if (c >= 0xdc00 && c <= 0xdfff) n += 6;
+    else n += 3;
+  }
+  return n;
+}
+/** Whether two JSON values are the same, whatever the order of their objects' keys: no string made, an explicit
+ * stack. */
+export function sameJson(a: unknown, b: unknown): boolean {
+  const stack: [unknown, unknown][] = [[a, b]];
+  while (stack.length) {
+    const [x, y] = stack.pop()!;
+    if (x === y) continue;
+    if (x === null || y === null || typeof x !== "object" || typeof y !== "object") return false;
+    if (Array.isArray(x) !== Array.isArray(y)) return false;
+    if (Array.isArray(x)) {
+      const ya = y as unknown[];
+      if (x.length !== ya.length) return false;
+      for (let i = 0; i < x.length; i++) stack.push([x[i], ya[i]]);
+    } else {
+      const xo = x as Record<string, unknown>, yo = y as Record<string, unknown>, xk = Object.keys(xo).filter((k) => xo[k] !== undefined), yk = Object.keys(yo).filter((k) => yo[k] !== undefined);
+      if (xk.length !== yk.length) return false;
+      for (const k of xk) { if (!Object.prototype.hasOwnProperty.call(yo, k)) return false; stack.push([xo[k], yo[k]]); }
+    }
+  }
+  return true;
+}
 
 /** What a transaction's pictures need before it can be sent (astra's CORR-FRAMEEDIT-1: the transaction is taken
  * at the editor's action, its `was` from the view then; this only prepares it): to a host that keeps them inline,
@@ -133,10 +211,24 @@ function boardOf(m: Map<string, Rec>): BoardDoc {
 
 /** The changes that take `from` to `to`, each with what it was (`was`), as an editor action's transaction. */
 export function diff(from: Map<string, Rec>, to: Map<string, Rec>): Change[] {
+  return diffWithin(from, to, Infinity, Infinity)!.changes;
+}
+/** The same, counted as it is made: null as soon as it passes `maxBytes` (its JSON as an array, exactly) or
+ * `maxChanges`, the rest never compared or counted (daybreak2's LIMIT-BFE-1). */
+export function diffWithin(from: Map<string, Rec>, to: Map<string, Rec>, maxBytes: number, maxChanges: number): { changes: Change[]; bytes: number } | null {
   const out: Change[] = [];
+  let bytes = 2;
+  const add = (c: Change): boolean => {
+    if (out.length >= maxChanges) return false;
+    const b = jsonBytes(c, maxBytes - bytes - (out.length ? 1 : 0));
+    if (b < 0) return false;
+    bytes += b + (out.length ? 1 : 0);
+    out.push(c);
+    return true;
+  };
   for (const [k, r] of to) {
     const o = from.get(k), key = { type: r.type, page: r.page, id: r.id } as Key;
-    if (!o) { out.push({ op: "set", key, fields: fieldsOf(r), was: {}, create: true }); continue; }
+    if (!o) { if (!add({ op: "set", key, fields: fieldsOf(r), was: {}, create: true })) return null; continue; }
     const fields: Record<string, unknown> = {}, was: Record<string, unknown> = {};
     let text = false;
     for (const f of new Set([...Object.keys(o), ...Object.keys(r)])) {
@@ -145,15 +237,15 @@ export function diff(from: Map<string, Rec>, to: Map<string, Rec>): Change[] {
       // their content's name, and may not take one in at all (its pixels), so one missing from its view needn't be
       // one the user deleted; its bytes stay with the host)
       const v = r.type === "doc" && f === "images" ? keptPictures(o[f], r[f]) : r[f];
-      if (canon(o[f]) === canon(v)) continue;
+      if (sameJson(o[f], v)) continue;
       fields[f] = v === undefined ? null : v;
       was[f] = o[f] === undefined ? null : o[f];
       if (TEXT.has(f)) text = true;
     }
-    if (Object.keys(fields).length) out.push({ op: "set", key, fields, was, ...(text ? { record: fieldsOf(r) } : {}) });
+    if (Object.keys(fields).length && !add({ op: "set", key, fields, was, ...(text ? { record: fieldsOf(r) } : {}) })) return null;
   }
-  for (const [k, o] of from) if (!to.has(k)) out.push({ op: "delete", key: { type: o.type, page: o.page, id: o.id } as Key, was: textOf(o) });
-  return out;
+  for (const [k, o] of from) if (!to.has(k) && !add({ op: "delete", key: { type: o.type, page: o.page, id: o.id } as Key, was: textOf(o) })) return null;
+  return { changes: out, bytes };
 }
 
 // (the pictures map after an edit: what the view has, over what was there)
@@ -236,19 +328,25 @@ export class EditChannel {
 
   /** The editor kept `doc`: one action, so one transaction (none if nothing changed). */
   save(doc: BoardDoc) {
+    const undo = (why: string, n = 0) => { this.note("undone", { n }); this.ui.show(boardOf(this.viewMap()), why); };
+    if (this.ended) return undo("**Not saved:** editing here has ended.");
+    // (the document the editor kept, its size bounded before anything of it is copied or compared: one past an
+    // editable board and an edit can't be saved here, LIMIT-BFE-1)
+    if (jsonBytes(doc, EDIT_BOUNDS.boardBytes + EDIT_BOUNDS.messageBytes) < 0) return undo("**That change is too large to save here**, so it was undone.");
     const next = recordsOf(cleanDoc(doc));
     if (this.pictures?.inline) carryPictures(this.view, next);
-    const changes = diff(this.view, next);
+    // (the action's changes, counted as they are made, within one edit message: never compared or counted past it)
+    const d = diffWithin(this.view, next, EDIT_BOUNDS.messageBytes - envelopeBytes(this.revision), EDIT_BOUNDS.messageChanges);
+    if (!d) return undo("**That change is too large to save here**, so it was undone.");
+    const changes = d.changes;
     if (!changes.length) { this.view = next; return; }
-    const tx = txOf(changes);
+    const tx: Tx = { changes, bytes: d.bytes + 1, ready: true };
     // (its pictures, prepared after it is taken: counted now, as they will be sent)
     const docChange = changes.find((c) => c.op === "set" && c.key.type === "doc" && c.fields.images) as Extract<Change, { op: "set" }> | undefined;
     const names = docChange && this.pictures ? this.pictures.needs(docChange.fields.images as Record<string, unknown>) : [];
     if (names.length) { tx.bytes += this.pictures!.extraBytes(names); tx.ready = false; }
-    const undo = (why: string) => { this.note("undone", { n: changes.length }); this.ui.show(boardOf(this.viewMap()), why); };
-    if (this.ended) return undo("**Not saved:** editing here has ended.");
-    // (a single transaction past an edit's bounds: never sent; undone at once, said)
-    if (tx.bytes > EDIT_BOUNDS.messageBytes - ENVELOPE || changes.length > EDIT_BOUNDS.messageChanges) return undo("**That change is too large to save here**, so it was undone.");
+    // (with its pictures' bytes, still within one edit: else never sent; undone at once, said)
+    if (tx.bytes - 1 > EDIT_BOUNDS.messageBytes - envelopeBytes(this.revision)) return undo("**That change is too large to save here**, so it was undone.", changes.length);
     // (both margins, before it is taken: daybreak2's check 4; paused, nothing new is taken, and what is held fits)
     if (this.paused || this.held.bytes + tx.bytes > EDIT_BOUNDS.heldBytes || this.held.changes + changes.length > EDIT_BOUNDS.heldChanges) return undo("**Not saved:** waiting for the host to save your earlier changes.");
     this.unsaved.push(tx);
@@ -270,7 +368,7 @@ export class EditChannel {
       if (at < 0 && !kept) return;
       if (r.ok) {
         // (counted again as it is now: the bytes added as predicted, or not quite)
-        const bytes = utf8Length(JSON.stringify(tx.changes)) + 1;
+        const bytes = jsonBytes(tx.changes, Infinity) + 1;
         this.held.bytes += bytes - tx.bytes;
         tx.bytes = bytes;
         tx.ready = true;
@@ -357,13 +455,16 @@ export class EditChannel {
   flush() {
     if (this.inFlight || this.ended || !this.unsaved.length) return;
     if (this.now() < this.retryAt) return this.schedule(0);
-    let bytes = ENVELOPE, n = 0, count = 0;
+    // (the message's bytes exactly: its envelope, and its changes array, each transaction's changes without their own
+    // brackets and separator, a comma between)
+    let bytes = envelopeBytes(this.revision) + 2, n = 0, count = 0;
     while (n < this.unsaved.length) {
       const t = this.unsaved[n];
       // (one still being prepared: it and those after it wait)
       if (!t.ready) break;
-      if (n && (bytes + t.bytes > EDIT_BOUNDS.messageBytes || count + t.changes.length > EDIT_BOUNDS.messageChanges)) break;
-      bytes += t.bytes;
+      const inner = t.bytes - 3 + (n ? 1 : 0);
+      if (n && (bytes + inner > EDIT_BOUNDS.messageBytes || count + t.changes.length > EDIT_BOUNDS.messageChanges)) break;
+      bytes += inner;
       count += t.changes.length;
       n++;
     }
@@ -387,7 +488,7 @@ export class EditChannel {
   /** Show the view, if it isn't what the editor has. */
   private refresh(note?: string) {
     const m = this.viewMap(), d = boardOf(m), shown = recordsOf(cleanDoc(d));
-    const same = shown.size === this.view.size && [...shown].every(([k, r]) => { const o = this.view.get(k); return !!o && canon(o) === canon(r); });
+    const same = shown.size === this.view.size && [...shown].every(([k, r]) => { const o = this.view.get(k); return !!o && sameJson(o, r); });
     this.view = shown;
     if (!same || note) this.ui.show(d, note);
   }
@@ -395,7 +496,7 @@ export class EditChannel {
   // until a replace)
   private takeChanges(m: any): boolean {
     if (this.waitingReplace) return false;
-    if (m.base !== this.revision || !Array.isArray(m.changes) || typeof m.revision !== "string") {
+    if (m.base !== this.revision || !Array.isArray(m.changes) || typeof m.revision !== "string" || m.revision.length > REVISION_MAX) {
       this.waitingReplace = true;
       this.note("resync");
       this.post({ sagebrush: "resync", version: 1 });
@@ -451,7 +552,7 @@ export class EditChannel {
     this.ui.kept(this.keptCopies);
   }
   private onReplace(m: any) {
-    if (typeof m.text !== "string" || typeof m.revision !== "string") return;
+    if (typeof m.text !== "string" || typeof m.revision !== "string" || m.revision.length > REVISION_MAX) return;
     let d: any;
     try { d = JSON.parse(m.text); } catch { return; }
     if (!isBoard(d)) return;
@@ -484,7 +585,7 @@ export class EditChannel {
       lost += t.changes.length - kept.length;
       const nt = txOf(kept);
       // (one still being prepared: its pictures' bytes still to come, still counted)
-      if (!t.ready) nt.bytes += t.bytes - (utf8Length(JSON.stringify(t.changes)) + 1);
+      if (!t.ready) nt.bytes += t.bytes - (jsonBytes(t.changes, Infinity) + 1);
       this.held.bytes += nt.bytes - t.bytes;
       this.held.changes += kept.length - t.changes.length;
       t.changes = kept;

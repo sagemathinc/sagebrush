@@ -11,7 +11,7 @@
 // - the bound on what is held (LIMIT-9B5-1): counted exactly, Edit paused before it with nothing lost,
 //   resumed below half; a refusal's copy moves without the totals changing (daybreak2's check 1); copies count
 //   until discarded.
-import { EditChannel, EDIT_BOUNDS, diff, utf8Length, inlinePictures } from "./edit-channel.ts";
+import { EditChannel, EDIT_BOUNDS, diff, diffWithin, utf8Length, inlinePictures, jsonBytes, sameJson } from "./edit-channel.ts";
 import { editState } from "./edit-state.ts";
 import { toRecords } from "./history.ts";
 
@@ -406,6 +406,135 @@ const actOn = (v, text = "user edit") => { const d = JSON.parse(J(v)); d.images 
   await tick(); await tick();
   const recount2 = h2.ch["unsaved"].reduce((s, x) => s + utf8Length(J(x.changes)) + 1, 0);
   check(under < recount2 && h2.ch.totals().bytes === recount2, "its size not at hand: recounted once read: " + J({ under, after: h2.ch.totals().bytes, recount2 }));
+}
+
+// 20. jsonBytes: JSON.stringify's UTF-8 bytes exactly, without writing them; stopped at its cap and its depth.  sameJson.
+{
+  let seed = 7;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const chars = ["a", "\"", "\\", "\n", "\t", "\u0001", "\u001f", "é", "€", "😀", "\ud800", "\udc00", "\u2028", " "];
+  const val = (d) => {
+    const k = rnd(d > 3 ? 4 : 8);
+    if (k === 0) return Array.from({ length: rnd(6) }, () => chars[rnd(chars.length)]).join("");
+    if (k === 1) return [0, -0, 1.5, -2e-7, 1e21, 123456789, NaN, Infinity][rnd(8)];
+    if (k === 2) return [true, false, null][rnd(3)];
+    if (k === 3) return undefined;
+    if (k < 6) return Array.from({ length: rnd(4) }, () => val(d + 1));
+    const o = {};
+    for (let i = rnd(4); i > 0; i--) o[Array.from({ length: rnd(3) + 1 }, () => chars[rnd(chars.length)]).join("")] = val(d + 1);
+    return o;
+  };
+  let exact = 0, wrong = [];
+  for (let i = 0; i < 2000; i++) {
+    const v = [val(0), { x: val(0) }];
+    const want = utf8Length(JSON.stringify(v)), got = jsonBytes(v, Infinity);
+    if (want === got) exact++;
+    else if (wrong.length < 3) wrong.push({ v: JSON.stringify(v), want, got });
+  }
+  check(exact === 2000, "jsonBytes equals JSON.stringify's UTF-8 length on 2,000 values (escapes, surrogates, undefined, NaN): " + J(wrong));
+  const big = "x".repeat(10_000_000);
+  let t0 = performance.now();
+  const capped = jsonBytes({ a: [1, 2, { b: big }] }, 2 ** 20);
+  check(capped === -1 && performance.now() - t0 < 5, "past its cap: -1 at once, the string never scanned: " + (performance.now() - t0).toFixed(2) + " ms");
+  let deep = 0; for (let i = 0; i < 100_000; i++) deep = [deep];
+  check(jsonBytes(deep, Infinity) === -1 && jsonBytes(deep, Infinity, 200_000) > 0, "past its depth: -1, no recursion (100,000 levels walked when allowed)");
+  check(sameJson({ a: 1, b: [1, { c: 2 }] }, { b: [1, { c: 2 }], a: 1 }) && !sameJson({ a: 1 }, { a: 1, b: 2 }) && !sameJson([1, 2], [2, 1]) && sameJson({ a: 1, u: undefined }, { a: 1 }) && sameJson(deep, deep), "sameJson: keys in any order, arrays in order, undefined as absent, deep without recursion");
+}
+
+// 21. LIMIT-BFE-1: a huge single-field paste refused early, nothing large serialized
+{
+  const realStringify = JSON.stringify;
+  let largest = 0;
+  const watch = () => { largest = 0; JSON.stringify = (...a) => { const r = realStringify(...a); if (r && r.length > largest) largest = r.length; return r; }; };
+  const unwatch = () => { JSON.stringify = realStringify; };
+  const h = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+  const d = board({ nodes: [{ id: "a", text: "p".repeat(50 * 2 ** 20) }] });
+  Bun.gc(true);
+  const heap0 = process.memoryUsage().heapUsed;
+  watch();
+  const t0 = performance.now();
+  h.ch.save(d);
+  const ms = performance.now() - t0;
+  unwatch();
+  Bun.gc(true);
+  const heap1 = process.memoryUsage().heapUsed;
+  check(h.ch.pending === 0 && /too large/.test(h.said.at(-1) ?? "") && largest < 2 ** 20 && ms < 50 && heap1 - heap0 < 4 * 2 ** 20, "a 50 MiB paste: undone at once, nothing over 1 MiB serialized, little work and heap: " + J({ ms: Math.round(ms), largest, heapMB: ((heap1 - heap0) / 2 ** 20).toFixed(1) }));
+  // (a value with many keys: 100,000 pictures in the map, the board within an editable one's size)
+  const h2 = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+  const many = board({ nodes: [{ id: "a", text: "" }] });
+  many.images = {};
+  for (let i = 0; i < 100_000; i++) many.images["p" + i] = { w: 1, h: 1 };
+  watch();
+  const t1 = performance.now();
+  h2.ch.save(many);
+  const ms2 = performance.now() - t1;
+  unwatch();
+  check(h2.ch.pending === 0 && /too large/.test(h2.said.at(-1) ?? "") && largest <= EDIT_BOUNDS.boardBytes + EDIT_BOUNDS.messageBytes, "100,000 keys in one value: refused, its changes counted only to the bound, nothing past a board serialized: " + J({ ms: Math.round(ms2), largest }));
+  // (a deep value: refused before it is copied, no recursion)
+  const h3 = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+  let deep = 0; for (let i = 0; i < 100_000; i++) deep = { d: deep };
+  const dd = board({ nodes: [{ id: "a", text: "x", preview: deep }] });
+  let threw = null;
+  try { h3.ch.save(dd); } catch (e) { threw = String(e); }
+  check(!threw && h3.ch.pending === 0 && /too large/.test(h3.said.at(-1) ?? ""), "a value 100,000 levels deep: refused, nothing thrown: " + J({ threw }));
+}
+
+// 21b. diffWithin stops where the bound is passed: the records past it never looked at
+{
+  class Counting extends Map { n = 0; *[Symbol.iterator]() { for (const e of super.entries()) { this.n++; yield e; } } }
+  const from = new Counting(), to = new Counting();
+  for (let i = 0; i < 100_000; i++) to.set(J(["item", "", "n" + i]), { type: "item", page: "", id: "n" + i, text: "t", parent: "", pos: i });
+  const r1 = diffWithin(from, to, EDIT_BOUNDS.messageBytes, EDIT_BOUNDS.messageChanges);
+  check(r1 === null && to.n <= EDIT_BOUNDS.messageChanges + 1, "100,000 records made: refused after 1,001 looked at: " + to.n);
+  const to2 = new Counting();
+  for (let i = 0; i < 1000; i++) to2.set(J(["item", "", "m" + i]), { type: "item", page: "", id: "m" + i, text: "x".repeat(5000), parent: "", pos: i });
+  const r2 = diffWithin(new Map(), to2, EDIT_BOUNDS.messageBytes, EDIT_BOUNDS.messageChanges);
+  check(r2 === null && to2.n < 300, "past 1 MiB: refused at the record that passes it: " + to2.n);
+}
+
+// 22. the envelope, exactly: a 200-character revision, and edits filled to the bound, each message within 1 MiB;
+// a revision past 200 characters refused (resync)
+{
+  const h = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+  const long = "r".repeat(200);
+  h.ch.receive({ sagebrush: "replace", version: 1, revision: long, text: J(board({ nodes: [{ id: "a", text: "" }] })), answered: [] });
+  check(h.ch.revision === long, "a 200-character revision taken");
+  let v = board({ nodes: [{ id: "a", text: "" }] });
+  for (let i = 0; i < 8; i++) { v = JSON.parse(J(v)); v.nodes.push({ id: "n" + i, text: String(i).repeat(250_000) }); h.ch.save(v); }
+  let biggest = 0, sent = 0;
+  for (let k = 0; k < 10 && h.ch.pending; k++) {
+    h.ch.flush();
+    const e = h.sent.at(-1);
+    if (e?.sagebrush !== "edit" || h.ch.inFlightId !== e.id) break;
+    biggest = Math.max(biggest, utf8Length(J(e)));
+    sent++;
+    h.ch.receive({ sagebrush: "saved", version: 1, id: e.id, base: h.ch.revision, revision: long, changes: [], dropped: [] });
+  }
+  check(sent >= 2 && biggest <= EDIT_BOUNDS.messageBytes && biggest > EDIT_BOUNDS.messageBytes - 300_000, "edits filled to the bound with a 200-character base: each within 1 MiB exactly: " + J({ sent, biggest }));
+  // (two actions whose changes fit in one message only were its envelope left out: two messages, each within 1 MiB)
+  {
+    const g = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+    g.ch.receive({ sagebrush: "replace", version: 1, revision: long, text: J(board({ nodes: [{ id: "a", text: "" }] })), answered: [] });
+    const mapOf = (d) => new Map(toRecords(d).map((r) => [J([r.type, r.page, r.id]), r]));
+    const base = board({ nodes: [{ id: "a", text: "" }] });
+    const withA = JSON.parse(J(base)); withA.nodes.push({ id: "x", text: "a".repeat(200_000) });
+    const aBytes = diffWithin(mapOf(base), mapOf(withA), Infinity, Infinity).bytes;
+    // (b's bytes for a text of length L: c + L, a record made, its text once)
+    const bOf = (L) => { const w = JSON.parse(J(withA)); w.nodes.push({ id: "y", text: "b".repeat(L) }); return [w, diffWithin(mapOf(withA), mapOf(w), Infinity, Infinity).bytes]; };
+    const c = bOf(0)[1];
+    // (the two arrays' contents and a comma, in one array: just under 1 MiB, but over it with the envelope)
+    const target = EDIT_BOUNDS.messageBytes - 100;
+    const L = target - 2 - (aBytes - 2) - 1 - (c - 2);
+    const [withB] = bOf(L);
+    g.ch.save(withA);
+    g.ch.save(withB);
+    g.ch.flush();
+    const first = g.sent.filter((m) => m.sagebrush === "edit").at(-1);
+    check(first && utf8Length(J(first)) <= EDIT_BOUNDS.messageBytes && first.changes.length === 1, "two actions that fit only without the envelope: sent apart, each within 1 MiB: " + J({ size: utf8Length(J(first ?? {})), n: first?.changes.length }));
+  }
+  const r0 = h.ch.revision;
+  h.ch.receive({ sagebrush: "remote", version: 1, base: r0, revision: "r".repeat(201), changes: [] });
+  check(h.ch.revision === r0 && h.sent.at(-1)?.sagebrush === "resync", "a revision past 200 characters: not taken, resync");
 }
 
 // 12. diff: unchanged fields not sent; a removed field sent as null with its was
