@@ -107,6 +107,11 @@ export function startMigrator(w: Workspace): Promise<void> {
       if (c.ops.some((o) => o.op === "emptyTrash" || o.op === "dropVersions")) void resume(w);
     });
   }
+  // (the cleanup begun first, whichever tab holds the migration: the backfill after the upgrade to v5 among its
+  // steps, so the time a deletion may wait for it is short and once (design/sync-client.md C2); the purge of a
+  // lifecycle change, collapsed writes' pins, orphaned bytes, versions due.  Not waited for: a slice at a time,
+  // a timer between)
+  void scheduleClean(w);
   return resume(w, true);
 }
 async function resume(w: Workspace, opening = false): Promise<void> {
@@ -121,10 +126,6 @@ async function resume(w: Workspace, opening = false): Promise<void> {
       // passes over the index (astra's CORR-6B7-1: a tab closed between an adopt's move and its old copy's
       // deletion leaves a mark that nothing else would ever come back to))
       await cleanStale(w);
-      // (sync's pins: a lifecycle change's purge, collapsed writes' pins, orphaned bytes no pin or entry names:
-      // design/sync-client.md C2)
-      // (begun, not waited for: a slice at a time, a timer between, while the migration goes on)
-      void scheduleClean(w);
       const s = await readState(w).catch(() => ({}) as MigrationState);
       if (s.done || (s.paused && !opening && !(await room(0)))) return;
       if (s.paused) { delete s.paused; await writeState(w, s); }

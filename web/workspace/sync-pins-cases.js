@@ -377,7 +377,9 @@ async function counting(f) {
 
 // (a collapsing save's own cost: the plain save's, plus the collapse (its pending record, one key range read, at
 // most PINS.collapseRelease pins released, each a few calls, the note); a constant, as the plain save's is)
-const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64;
+// (and the worst of each measured exactly: a change in either shows at once; a collapsing save kept at most 60, four
+// calls under its bound, by PINS.collapseRelease)
+const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 33, COLLAPSE_WORST = 59;
 /** 200 overwrites of `path` at a 1 MiB cap: each save's IndexedDB calls, apart for the saves that collapsed. */
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
@@ -433,7 +435,7 @@ async function tail() {
   }
   const p = stats(got.plain), c = stats(got.collapsing), p0 = stats(without.plain), c0 = stats(without.collapsing);
   const same = J(p) === J(p0) && J(c) === J(c0);
-  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
+  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= 60 && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
   // (one identity with many pins (kept apart): a release, and a cleanup page, cost the same few calls)
   const recs = await ob.records();
   await counting(() => W.cleanPins(w));
@@ -806,10 +808,12 @@ async function versionScale() {
     });
     // (not pinned: a backlog the cleanup drains after each save; held back here, so a save's own reads are counted)
     W.PINS.cleanAfter = new Promise((r) => (open = r));
-    // (the insert's garbage collected first, so its collection isn't taken for a save's task)
-    await sleep(300);
+    // (the insert's garbage collected first, twice and given time, so its collection isn't taken for a save's task)
+    await sleep(1000);
     globalThis.gc?.();
-    await sleep(100);
+    await sleep(200);
+    globalThis.gc?.();
+    await sleep(200);
     globalThis.gc?.();
     const heap0 = performance.memory?.usedJSHeapSize ?? 0;
     // (long tasks counted only where they overlap a save: the insert's garbage, collected later, is no save's)
@@ -1167,7 +1171,7 @@ async function deleteDuringBackfill() {
     out.emptyInv = await idleInvariant(w);
     w.close();
   } finally { restore(); }
-  check(out.reached === 10 && out.drop.freed === 300 && out.drop.left === 0 && out.drop.prunable === 0 && out.drop.marker === null && out.drop.total === 0 && out.dropInv.ok && out.empty.left === 0 && out.empty.prunable === 0 && out.emptyInv.ok, "deletions during an unfinished backfill (a reload part way): dropVersions(\"/\") and emptying Trash delete every version, done only then; nothing prunable left behind: " + J(out));
+  check(out.reached === 10 && out.drop.freed === 300 && out.drop.left === 0 && out.drop.prunable === 0 && out.drop.total === 0 && out.dropInv.ok && out.empty.left === 0 && out.empty.prunable === 0 && out.emptyInv.ok, "deletions during an unfinished backfill (a reload part way): dropVersions(\"/\") and emptying Trash delete every version, from the versions store, without waiting for the backfill, done only then; nothing prunable left behind: " + J(out));
 }
 
 async function lateRelease() {
@@ -1260,6 +1264,90 @@ async function backfillGone() {
   const left = (await all(w.ws, "versions")).filter((v) => v.fid === "f00000000gone001").length, pr = (await all(w.ws, "prunable")).length;
   check(left === 0 && pr === 0 && (await bytesExact(w)), "the backfill and a file deleted for good: its versions deleted, none made prunable: " + J({ left, pr }));
   w.close();
+}
+
+async function deleteLatency() {
+  // (daybreak2's round 4: a deletion right after the upgrade to v5, before the backfill has reached any of 50,000
+  // versions kept before: emptying Trash waits for it, saying how far it is (onBackfill), and ends with every
+  // version of the file gone; its time reported)
+  const w = await fresh();
+  const f = await w.create("/old50k.bin", { content: "o" });
+  await legacyVersions(w, f.fid, 50000, 1);
+  await w.remove("/old50k.bin");
+  // (the insert's garbage collected first, twice and given time, so its collection isn't taken for the deletion's)
+  await sleep(1000);
+  globalThis.gc?.();
+  await sleep(200);
+  globalThis.gc?.();
+  await sleep(200);
+  const said = [];
+  const off = w.onDeleting((d) => said.push(d));
+  let longest = 0;
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+  obs.observe({ type: "longtask", buffered: false });
+  const t0 = performance.now();
+  await w.emptyTrash();
+  const ms = Math.round(performance.now() - t0);
+  await sleep(0);
+  for (const e of obs.takeRecords()) longest = Math.max(longest, e.duration);
+  obs.disconnect();
+  off();
+  const left = (await all(w.ws, "versions")).filter((v) => v.fid === f.fid).length;
+  const rising = said.every((d, i) => i === 0 || d >= said[i - 1]);
+  check(left === 0 && said.length > 1 && said.at(-1) === 1 && rising && longest < 50, "emptying Trash right after the upgrade, 50,000 versions kept before not yet backfilled: no wait for the backfill; every version deleted, saying how far it is (rising to 1); no long task: " + J({ ms, said: said.length, first: said[0], longest: Math.round(longest) }));
+  w.close();
+}
+
+async function deleteRaces() {
+  // (@sagebrush's round 5: a deletion racing the backfill's pages, and a reload part way through a deletion: no
+  // version of the file left, no prunable record without its version, the backfill never making a deleted one
+  // prunable; and a file's drop keeping its newest, by the order kept, before the backfill has reached it)
+  const out = {};
+  W.PINS.slice = { examine: 10, requests: 400 };
+  try {
+    // (racing: the backfill's slices and emptying Trash interleaved, a timer between each of the backfill's)
+    let w = await fresh();
+    const f = await w.create("/race.bin", { content: "r" });
+    await legacyVersions(w, f.fid, 400, 1);
+    await w.remove("/race.bin");
+    const race = W.cleanPins(w);
+    await sleep(0);
+    await w.emptyTrash();
+    await race;
+    out.race = { left: (await all(w.ws, "versions")).filter((v) => v.fid === f.fid).length, prunable: (await all(w.ws, "prunable")).filter((p) => p.fid === f.fid).length, gone: (await get(w.ws, "meta", W.GONE + f.fid)) ?? null };
+    out.raceInv = await idleInvariant(w);
+    w.close();
+    // (a reload part way through emptying Trash: the deletion cut after its first page; the cleanup finishes it)
+    const nm = names();
+    localStorage.clear();
+    w = await W.Workspace.open(nm);
+    const g = await w.create("/cut.bin", { content: "c" });
+    await legacyVersions(w, g.fid, 400, 1);
+    await W.cleanPins(w);
+    await w.remove("/cut.bin");
+    let deletes = 0;
+    const realDel = IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.delete = function (...a) { if (this.name === "versionBytes" && ++deletes === 150) throw new Error("cut"); return realDel.apply(this, a); };
+    let err;
+    try { await w.emptyTrash(); } catch (e) { err = e; } finally { IDBObjectStore.prototype.delete = realDel; }
+    const mid = { left: (await all(w.ws, "versions")).filter((v) => v.fid === g.fid).length, gone: (await get(w.ws, "meta", W.GONE + g.fid)) !== undefined };
+    w.close();
+    w = await W.Workspace.open(nm);
+    await W.cleanPins(w);
+    out.cut = { err: !!err, mid, left: (await all(w.ws, "versions")).filter((v) => v.fid === g.fid).length, prunable: (await all(w.ws, "prunable")).filter((p) => p.fid === g.fid).length, gone: (await get(w.ws, "meta", W.GONE + g.fid)) ?? null };
+    out.cutInv = await idleInvariant(w);
+    w.close();
+    // (a file's drop keeping its newest 2, before the backfill has reached its versions: that file's put first)
+    w = await fresh();
+    const h = await w.create("/keep.bin", { content: "k" });
+    await legacyVersions(w, h.fid, 30, 1);
+    const ids = (await all(w.ws, "versions")).filter((v) => v.fid === h.fid).map((v) => v.id).sort((a, b) => a - b);
+    await w.dropVersions("/keep.bin", { keep: 2 });
+    const kept = (await all(w.ws, "versions")).filter((v) => v.fid === h.fid).map((v) => v.id).sort((a, b) => a - b);
+    out.keep = { kept, want: ids.slice(-2), backfill: (await get(w.ws, "meta", W.BACKFILL)) !== undefined };
+    w.close();
+  } finally { restore(); }
+  check(out.race.left === 0 && out.race.prunable === 0 && out.race.gone === null && out.raceInv.ok && out.cut.err && out.cut.mid.left > 0 && out.cut.mid.gone && out.cut.left === 0 && out.cut.prunable === 0 && out.cut.gone === null && out.cutInv.ok && J(out.keep.kept) === J(out.keep.want), "emptying Trash racing the backfill, and cut part way then a reload (the cleanup finishing it): nothing of the file left, nothing prunable without its version; a file's drop, the backfill not yet at it, keeping its newest 2: " + J(out));
 }
 
 async function rangeEdges() {
@@ -1376,7 +1464,7 @@ async function upgradeV5() {
 }
 
 export async function run() {
-  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, backfillLive, deleteDuringBackfill, lateRelease, backfillRewind, backfillGone, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
+  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, backfillLive, deleteLatency, deleteRaces, deleteDuringBackfill, lateRelease, backfillRewind, backfillGone, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); } finally { restore(); }
   }
   return results;

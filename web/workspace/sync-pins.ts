@@ -34,7 +34,7 @@ export const PINS = {
   capBytes: 2 ** 30,
   /** pins released at once by a collapse, in the save's transaction (a few, so that a collapsing save stays
    * within its 64 IndexedDB calls); the rest by cleanPins, begun after the save returns */
-  collapseRelease: 4,
+  collapseRelease: 3,
   /** each cleanup slice, one transaction: at most `examine` records read a step, and at most `requests`
    * IndexedDB requests made (an item is begun only while its costliest outcome still fits); then the next slice,
    * after a timer, until nothing durable is left (daybreak2's LIMIT-E5C-1) */
@@ -349,6 +349,44 @@ export async function newEpoch(meta: IDBObjectStore) {
 /** meta: a file whose versions a save left past the count or the age, for the cleanup; versions past the bytes;
  * the versions kept before database v5 not yet made prunable (db.ts), from the last id done */
 export const VDUE = "versions:due:", VOVER = "versions:over", BACKFILL = "versions:backfill";
+/** meta: a file emptied from Trash whose versions are still being deleted (api.ts emptyTrash), for the cleanup to
+ * finish should that be cut short (a reload). */
+export const GONE = "versions:gone:";
+
+/** A page of `fid`'s versions by the index byFile (`index`, keyed [fid, t]), from just after `after` (its last key
+ * and id), at most `limit`: one request (getAll from that key, those at it already looked at passed over), so a
+ * page of versions kept for sync is never read again.  Only should a whole page share one key (as many versions
+ * kept in one millisecond) does it go by a key cursor instead, one request a record. */
+export async function filePage(index: IDBIndex, fid: string, after: [IDBValidKey, number] | null, limit: number): Promise<{ list: Version[]; last: [IDBValidKey, number] | null; end: boolean }> {
+  const raw = (await req(index.getAll(IDBKeyRange.bound(after ? after[0] : [fid, -Infinity], [fid, Infinity]), limit))) as Version[];
+  const t = after ? (after[0] as [string, number])[1] : -Infinity;
+  const list = after ? raw.filter((v) => v.t > t || (v.t === t && v.id! > after[1])) : raw;
+  if (after && raw.length === limit && list.length === 0) return filePageByCursor(index, fid, after, limit);
+  const lastV = list[list.length - 1];
+  return { list, last: lastV ? [[fid, lastV.t], lastV.id!] : after, end: raw.length < limit };
+}
+function filePageByCursor(index: IDBIndex, fid: string, after: [IDBValidKey, number] | null, limit: number): Promise<{ list: Version[]; last: [IDBValidKey, number] | null; end: boolean }> {
+  return new Promise((ok, no) => {
+    const r = index.openCursor(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]));
+    const list: Version[] = [];
+    let moved = !after, last = after;
+    r.onsuccess = () => {
+      const c = r.result;
+      if (!c) return ok({ list, last, end: true });
+      if (!moved) {
+        moved = true;
+        // (past the last one looked at: to it, then (if it is still there) one more)
+        if (indexedDB.cmp(c.key, after![0]) < 0 || (indexedDB.cmp(c.key, after![0]) === 0 && (c.primaryKey as number) < after![1])) { c.continuePrimaryKey(after![0], after![1]); return; }
+      }
+      if (after && list.length === 0 && indexedDB.cmp(c.key, after[0]) === 0 && c.primaryKey === after[1]) { c.continue(); return; }
+      list.push(c.value as Version);
+      last = [c.key, c.primaryKey as number];
+      if (list.length >= limit) return ok({ list, last, end: false });
+      c.continue();
+    };
+    r.onerror = () => no(r.error);
+  });
+}
 
 /** The most requests one release makes (release, above): the pin's delete; the total's read and write; the
  * pointer's read and delete; the storage count; a version's read, its file's count, and three writes (or two
@@ -399,7 +437,7 @@ export function scheduleClean(w: Workspace, tag?: Tag): Promise<unknown> {
  * have (never made prunable: astra's round 3), once the migrator has given every entry its identity (until then a
  * file's absence can't be told).  At the end, the bytes bound checked again.  Saves go on meanwhile: a version not
  * yet done has no prunable record, so it is kept.  Whether there was a page to do (false: the backfill is over). */
-export async function backfillPage(tx: IDBTransaction, w: Workspace, n: number, left: number): Promise<boolean> {
+export async function backfillPage(tx: IDBTransaction, w: Workspace, n: number, left: number): Promise<false | { at: number; through: number }> {
   const meta = tx.objectStore("meta");
   const bf = (await req(meta.get(BACKFILL))) as { after: number; through?: number } | undefined;
   if (!bf) return false;
@@ -408,14 +446,15 @@ export async function backfillPage(tx: IDBTransaction, w: Workspace, n: number, 
   left -= 8;
   if (bf.through === undefined) bf.through = await new Promise<number>((ok, no) => { const c = vs.openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
   const identities = !!((await req(meta.get("migration"))) as { done?: boolean } | undefined)?.done;
-  // (each version at most: its file's count and due read, and three writes (prunable, its due marks) or two deletes)
-  const want = Math.max(1, Math.min(n, Math.floor(left / 5)));
+  // (each version at most: its file's gone mark, count and due read, and three writes (prunable, its due marks) or
+  // two deletes)
+  const want = Math.max(1, Math.min(n, Math.floor(left / 6)));
   const list = bf.after >= bf.through ? [] : ((await req(vs.getAll(IDBKeyRange.bound(bf.after, bf.through, true, false), want))) as Version[]);
   const there = new Map<string, boolean>(), due = new Set<string>();
   let gone = 0;
   for (const v of list) {
     if (v.pinned) continue;
-    if (!there.has(v.fid)) there.set(v.fid, !identities || (await req(byIdent.count(v.fid))) > 0);
+    if (!there.has(v.fid)) there.set(v.fid, (await req(meta.get(GONE + v.fid))) === undefined && (!identities || (await req(byIdent.count(v.fid))) > 0));
     if (!there.get(v.fid)) {
       vs.delete(v.id!);
       vb.delete(v.id!);
@@ -437,16 +476,28 @@ export async function backfillPage(tx: IDBTransaction, w: Workspace, n: number, 
   else {
     meta.delete(BACKFILL);
     if (total > w.limits.maxVersionBytes) meta.put(1, VOVER);
+    return { at: bf.through, through: bf.through };
   }
-  return true;
+  return { at, through: bf.through };
 }
-/** The backfill finished, a page a transaction (a timer between), before a deletion the person asked for reads
- * the prunable store: so it covers every version, however far the backfill had got (astra's round 3).  Its end is
- * fixed, and each page bounded, so this ends. */
-export async function finishBackfill(w: Workspace): Promise<void> {
+/** One file's versions kept before database v5 put in the prunable store, a page a transaction (a key cursor by
+ * the index byFile), before a drop of that file's that needs them in the order they were kept (its newest `keep`,
+ * a fence): bounded by that file's versions, whatever the rest of the backfill has left (@sagebrush's (b)).  Nothing
+ * once the backfill is over; one already there is the same after (a put). */
+export async function finishBackfillFor(w: Workspace, fid: string): Promise<void> {
+  let at: [IDBValidKey, number] | null = null;
   for (;;) {
-    const more = await inTx(w.ws, [...RELEASE_STORES], "readwrite", (tx) => backfillPage(tx, w, PINS.slice.examine, PINS.slice.requests));
-    if (!more || w.closed) return;
+    const end = await inTx(w.ws, [...RELEASE_STORES], "readwrite", async (tx) => {
+      const meta = tx.objectStore("meta");
+      if ((await req(meta.get(BACKFILL))) === undefined) return true;
+      const page = await filePage(tx.objectStore("versions").index("byFile"), fid, at, Math.floor((PINS.slice.requests - 8) / 2));
+      const pr = tx.objectStore("prunable");
+      for (const v of page.list) if (!v.pinned) pr.put(prunableOf(v));
+      if (page.list.some((v) => !v.pinned) && (await req(meta.get(VDUE + fid))) !== undefined) markDue(tx, fid);
+      at = page.last;
+      return page.end;
+    });
+    if (end || w.closed) return;
     await new Promise((r) => setTimeout(r, 0));
   }
 }
@@ -517,7 +568,25 @@ async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
       return true;
     }
     meta.delete("sync:bytesCursor");
-    // (4) versions left due by saves (each save drops only a few: putVersion), in what is left of the budget
+    // (4) a file emptied from Trash whose versions a reload left part deleted: finished, a page a slice, from its
+    // mark's cursor, those kept for sync passed over (their release deletes them: unpinOrDrop), its prunable range and
+    // mark deleted at its end
+    spend(2);
+    const gone = ((await req(meta.getAllKeys(IDBKeyRange.bound(GONE, GONE + "\uffff"), 1))) as string[])[0];
+    if (gone !== undefined) {
+      const fid = gone.slice(GONE.length), mark = (await req(meta.get(gone))) as { at?: [IDBValidKey, number] } | number;
+      const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes");
+      const page = await filePage(vs.index("byFile"), fid, typeof mark === "object" && mark.at ? mark.at : null, Math.max(1, Math.floor((left - 6) / 3)));
+      let freed = 0;
+      for (const v of page.list) if (!v.pinned) { vs.delete(v.id!); vb.delete(v.id!); freed += v.size; }
+      if (freed) meta.put(Math.max(0, (((await req(meta.get("versionBytes"))) as number | undefined) ?? 0) - freed), "versionBytes");
+      if (page.end) {
+        tx.objectStore("prunable").delete(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]));
+        meta.delete(gone);
+      } else meta.put({ at: page.last }, gone);
+      return true;
+    }
+    // (5) versions left due by saves (each save drops only a few: putVersion), in what is left of the budget
     return w.versionsSlice(tx, left);
   });
 }

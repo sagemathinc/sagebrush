@@ -49,7 +49,7 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, type Entry } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, type Entry } from "../workspace/index";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m: string) => showBusyNotice(m));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
@@ -176,6 +176,8 @@ if (ws) {
   // until then; said again when that changes, another tab's say)
   showLossNotice(ws);
   ws.onDurability(() => showLossNotice(ws!));
+  // (a long deletion of old versions: said as it goes, so it never looks stuck)
+  ws.onDeleting((done) => (done < 1 ? showBusyNotice(`Deleting old versions… ${Math.floor(done * 100)}%`) : hideBusyNotice()));
   void startMigrator(ws);
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";

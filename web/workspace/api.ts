@@ -31,7 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
-import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfill, afterReleases, type Pin } from "./sync-pins";
+import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
 export type Entry = {
   path: string;
@@ -1355,11 +1355,15 @@ export class Workspace {
         const meta = tx.objectStore("meta"), total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
         meta.put(all ? 0 : Math.max(0, total - f), "versionBytes");
       };
-      // (versions kept before database v5 and not yet in the prunable store: put there first, a bounded page at
-      // a time, so the drop covers them all, however far the backfill had got (astra's CORR-FB0-1))
-      await finishBackfill(this);
       let freed = 0;
       if (fids) {
+        // (a file's newest `keep`, and the fence, are by the order its versions were kept, which the prunable store
+        // has: its versions kept before database v5 put there first, that file's alone, a bounded page at a time,
+        // so the drop covers them all however far the backfill had got (astra's CORR-FB0-1; @sagebrush's (b)))
+        for (let k = 0; k < fids.length; k++) {
+          await finishBackfillFor(this, fids[k]);
+          if (fids.length > 1) this.noteDeleting((k + 1) / (2 * fids.length));
+        }
         // (each file's not kept for sync, from its oldest, up to its newest `keep` of them and the fence (those kept
         // for sync stay, and aren't counted); a transaction at most DROP_REQUESTS requests, going on from the
         // last id looked at)
@@ -1386,25 +1390,37 @@ export class Workspace {
             await less(tx, f);
             return f;
           });
+          if (fids.length > 1) this.noteDeleting(0.5 + i / (2 * fids.length));
         }
       } else {
-        // (everyone's not kept for sync, up to the fence, a page a transaction, each going on from the last id)
-        let after = -Infinity, done = false;
+        // (everyone's not kept for sync, up to the fence: from the versions store itself, by id, a page a
+        // transaction, each going on from the last id, those kept for sync passed over; each with its prunable
+        // record, if it has one.  Never waiting for the backfill: a version it hasn't reached goes all the same
+        // (@sagebrush's (b)))
+        const all = (await inTx(this.ws, "versions", "readonly", (tx) => req(tx.objectStore("versions").count(upTo === Infinity ? undefined : IDBKeyRange.upperBound(upTo))))) as number;
+        let after = -Infinity, done = false, seen = 0;
         while (!done) {
           freed += await inTx(this.ws, stores, "readwrite", async (tx) => {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable");
             // (at the fence already: nothing past it, and no range to make from it (astra's round 2))
-            const list = after >= upTo ? [] : ((await req(pr.index("byId").getAll(IDBKeyRange.bound(after, upTo, true, false), DROP_PAGE))) as Prunable[]);
+            const list = after >= upTo ? [] : ((await req(vs.getAll(IDBKeyRange.bound(after, upTo, true, false), DROP_PAGE))) as Version[]);
             let f = 0;
-            for (const v of list) { after = v.id; vs.delete(v.id); vb.delete(v.id); pr.delete([v.fid, v.id]); f += v.size; }
+            for (const v of list) {
+              after = v.id!;
+              if (v.pinned) continue;
+              vs.delete(v.id!); vb.delete(v.id!); pr.delete([v.fid, v.id!]); f += v.size;
+            }
+            seen += list.length;
             done = list.length < DROP_PAGE || after >= upTo;
             // (the total set to 0 only when no version is left at all: a drop fenced by maxId leaves newer ones,
             // CORR-5D2-1; and versions kept for sync stay until their pins go, design/sync-client.md C2)
             await less(tx, f, done && upTo === Infinity && (await req(vs.count())) === 0);
             return f;
           });
+          this.noteDeleting(all ? seen / all : 1);
         }
       }
+      this.noteDeleting(1);
       const ops: Op[] = [];
       await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
       this.tell({ ops });
@@ -1525,6 +1541,9 @@ export class Workspace {
           const under: Entry[] = await req(st.getAll(subtree(t)));
           for (const e of [...(top ? [top] : []), ...under]) {
             st.delete(e.path);
+            // (its versions to go too, said durably with the entry's going: a reload part way through deleting them
+            // leaves the cleanup to finish (sync-pins.ts, GONE); the backfill never makes them prunable)
+            if (e.kind === "file" && e.fid) tx.objectStore("meta").put(1, GONE + e.fid);
             // (a data file's bytes with its entry, in this one transaction: in fileBytes, or the old way in trash)
             if (e.kind === "file" && e.migrated && e.fid) {
               const pin = lease ? await pinOfCurrent(tx, e.fid, e.sha256) : undefined;
@@ -1568,27 +1587,47 @@ export class Workspace {
         } catch (err) { console.warn("workspace: emptying Trash:", err); }
       }
       if (fids.size) {
-        // (every version first in the prunable store, as for dropVersions (astra's CORR-FB0-1))
-        await finishBackfill(this);
-        // (their versions not kept for sync, a transaction at most DROP_REQUESTS requests, each going on from the
-        // last id looked at; those kept for sync stay until their pins go: design/sync-client.md C2)
+        // (their versions not kept for sync: from the versions store itself, by the index byFile, a transaction at
+        // most DROP_REQUESTS requests, each going on from the last one looked at (a key cursor); those kept for sync
+        // stay until their pins go (design/sync-client.md C2).  Never waiting for the backfill: a version it hasn't
+        // reached goes all the same.  A file's last page also deletes its whole prunable range, one request, and its
+        // gone mark: done only when every one of its versions not kept for sync is gone (@sagebrush's (b) and (c))
         const list = [...fids];
-        let i = 0, after = -Infinity;
+        const all = (await inTx(this.ws, "versions", "readonly", async (tx) => {
+          let n = 0;
+          for (const fid of list) n += (await req(tx.objectStore("versions").index("byFile").count(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as number;
+          return n;
+        })) as number;
+        let i = 0, at: [IDBValidKey, number] | null = null, seen = 0;
         while (i < list.length) {
           await inTx(this.ws, ["versions", "versionBytes", "prunable", "meta"], "readwrite", async (tx) => {
             const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable"), meta = tx.objectStore("meta");
-            let freed = 0, left = DROP_REQUESTS - 2;
-            while (i < list.length && left >= 6) {
-              const fid = list[i], want = Math.min(DROP_PAGE, Math.floor((left - 1) / 3));
-              const page = (await req(pr.getAll(IDBKeyRange.bound([fid, after], [fid, Infinity], true, false), want))) as Prunable[];
-              left -= 1;
-              for (const v of page) { after = v.id; vs.delete(v.id); vb.delete(v.id); pr.delete([fid, v.id]); freed += v.size; left -= 3; }
-              if (page.length < want) { i++; after = -Infinity; }
+            let freed = 0, left = DROP_REQUESTS - 4;
+            while (i < list.length && left >= 8) {
+              const fid = list[i], want = Math.min(DROP_PAGE, Math.floor((left - 4) / 3));
+              const page = await filePage(vs.index("byFile"), fid, at, want);
+              left -= page.list.length + 2;
+              for (const v of page.list) {
+                seen++;
+                if (v.pinned) continue;
+                vs.delete(v.id!); vb.delete(v.id!); freed += v.size;
+                left -= 2;
+              }
+              at = page.last;
+              if (page.end) {
+                pr.delete(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]));
+                meta.delete(GONE + fid);
+                left -= 2;
+                i++;
+                at = null;
+              }
             }
             const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
             meta.put(Math.max(0, total - freed), "versionBytes");
           });
+          this.noteDeleting(all ? seen / all : 1);
         }
+        this.noteDeleting(1);
       }
       hdb?.close();
       bdb?.close();
@@ -1818,6 +1857,16 @@ export class Workspace {
    * reservation, gives the lock back unchanged, reserves, and asks again. */
   /** (the cleanup of sync's pins a collapsing save started after it, if any: for tests to wait for) */
   pinsCleaning: Promise<unknown> | null = null;
+  private deletingSubs = new Set<(done: number) => void>();
+  /** `f` called with how much of a deletion of old versions is done (0 to 1, 1 at its end), while dropVersions or
+   * emptying Trash goes on, page by page: so a long one is said, and never looks stuck. */
+  onDeleting(f: (done: number) => void): () => void {
+    this.deletingSubs.add(f);
+    return () => this.deletingSubs.delete(f);
+  }
+  private noteDeleting(done: number) {
+    for (const f of this.deletingSubs) try { f(Math.max(0, Math.min(1, done))); } catch (e) { console.warn("workspace onDeleting:", e); }
+  }
   /** (the cleanups asked for and not yet begun, by tag: sync-pins.ts scheduleClean) */
   pinsQueued?: Set<string>;
   /** (the reservation the change now holding the lock took before it, lockedFor's; null if none) */
