@@ -1,6 +1,9 @@
 # Fast pull-request CI and the full master/nightly audit.
 name: ci
 
+env:
+  SAGEBRUSH_CPUS_OVERRIDE: ${{ vars.CI_CPUS }}
+
 on:
   push:
     branches: [master]
