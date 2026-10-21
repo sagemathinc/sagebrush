@@ -46,12 +46,51 @@ export type Rec = Key & { [field: string]: unknown };
 export type Change =
   | { op: "set"; key: Key; fields: { [field: string]: unknown }; was?: { [field: string]: unknown }; create?: boolean; record?: { [field: string]: unknown } }
   | { op: "delete"; key: Key; was?: { [field: string]: unknown } };
+/** Why an edit was refused, for the host's `refused` (web/board-host-protocol.md, Refusals): "busy" (the
+ * rate or the work budget: `retryAfter` says when), "too-large" (the edit, the board or the work it needs:
+ * `limit` and `size`, in bytes or records), "invalid" (it failed a check). */
+export type RefusalReason = "busy" | "too-large" | "invalid";
+/** Which bound a "too-large" refusal passed: "edit" (the message's bytes), "values" (its number of values),
+ * "changes" (its number of changes), "work" (the merging it needs, in bytes), "board" (the board's bytes
+ * after it) or "records" (its number of records after it).  ("item", "image" and "images" are the host's.) */
+export type TooLargeWhat = "edit" | "values" | "changes" | "work" | "board" | "records" | "item" | "image" | "images";
 export type Applied =
   /** merged: `changes` is what changed in the board (for the host to write, and to send in `saved`), `dropped` the keys of the edit's changes that had no effect */
   | { ok: true; id: string; changes: Change[]; dropped: Key[] }
   /** not merged: why (the host's `refused`); `retryAfter` (ms): the rate or the work budget, to send again;
    * `ignore`: an id already answered (nothing to answer) */
-  | { ok: false; id?: string; message: string; retryAfter?: number; ignore?: true };
+  | { ok: false; id?: string; message: string; reason?: RefusalReason; what?: TooLargeWhat; limit?: number; size?: number; retryAfter?: number; ignore?: true };
+/** What apply would do with the same message now, nothing of the board's changed: merged, with the board's
+ * size after it (`boardBytes`) and the message's own (`editBytes`, its UTF-8 JSON: what a host's admission
+ * charges for the edit, never `boardBytes`), or refused, as apply would refuse it. */
+// (`workBytes`: the work the preview did, in the work budget's bytes (the edit's size, the records its changes
+// passed over, 64 a visit of the walk): for a host to charge its own admission, refused or not: LIMIT-74B-1)
+// (`previewThrottled`: preview's own meter was past, and nothing was checked: a refusal of the preview, never a
+// prediction of apply's answer: astra's CORR-722-1)
+export type Previewed = (Applied & { ok: true; boardBytes: number; editBytes: number; workBytes: number }) | (Applied & { ok: false; editBytes?: number; workBytes: number; previewThrottled?: true });
+/** How the board's pictures travel: "inline" (in the board, as data: URLs: the default, as before) or
+ * "by-reference" (sent apart, by `imagePut`: an edit giving a picture any source but an https: address is
+ * refused). */
+export interface EditOptions {
+  pictures?: "inline" | "by-reference";
+  /** With pictures by reference: whether a picture the board doesn't name yet may be named by an edit: one
+   * already authorized for this board, or put and verified on this channel (web/board-host-protocol.md,
+   * Pictures: Authorization).  Asked at preview and at apply alike.  Without it no new picture is taken. */
+  pictureAllowed?: (name: string) => boolean;
+  /** One budget for every preview of every board the host has (sharedPreviewBudget): previews across many
+   * boards and channels bounded together (daybreak2's LIMIT-722-1).  Without it, each board's previews have
+   * a budget of their own, the same as its edits'. */
+  previewBudget?: PreviewBudget;
+}
+/** A rate and work budget that previews draw on: refilled continuously, as the edits' are. */
+export interface PreviewBudget { edits: number; work: number; clock: number; readonly limits: BudgetLimits }
+export interface BudgetLimits { editBurst: number; editsPerSecond: number; workBurst: number; workPerSecond: number }
+/** A budget for every preview a host runs, shared by passing it to each editState: `limits` default to one
+ * board's (20 at once, 2 a second; 32 MiB of work, 3.2 MiB a second). */
+export function sharedPreviewBudget(limits: Partial<BudgetLimits> = {}): PreviewBudget {
+  const l: BudgetLimits = { editBurst: EDIT_LIMITS.editBurst, editsPerSecond: EDIT_LIMITS.editsPerSecond, workBurst: EDIT_LIMITS.workBurst, workPerSecond: EDIT_LIMITS.workPerSecond, ...limits };
+  return { edits: l.editBurst, work: l.workBurst, clock: -1, limits: l };
+}
 
 const TEXT = new Set(SCHEMA.stringCols);
 const TYPES = new Set<string>(["doc", "page", "item", "edge"]);
@@ -153,33 +192,47 @@ export function mergeValue(base: unknown, cur: unknown, ours: unknown, text = fa
 
 // ------------------------------------------------------------ checking a message
 /** Plain JSON data, nested at most `depth`, at most `bytes` as UTF-8: why not, or null. */
-function plainProblem(m: unknown, depth: number, bytes: number, MAX = 200_000): string | null {
+// (a bound passed: which, and by how much, in the units the protocol gives: bytes, or a count for "values",
+// "changes" and "records"; `size` is what was counted when the bound was passed, at least that)
+type TooLarge = { what: TooLargeWhat; limit: number; size: number };
+// (an absolute https: address with a host: what a picture's source may be when pictures go by reference)
+function httpsAddress(src: unknown): boolean {
+  if (typeof src !== "string" || src.length > 2048 || !/^https:/i.test(src)) return false;
+  try { const u = new URL(src); return u.protocol === "https:" && u.hostname !== ""; } catch { return false; }
+}
+function plainProblem(m: unknown, depth: number, bytes: number, MAX = 200_000): { message: string; tooLarge?: TooLarge } | null {
+  const r = plainProblemText(m, depth, bytes, MAX);
+  return r === null ? null : typeof r === "string" ? { message: r } : r;
+}
+function plainProblemText(m: unknown, depth: number, bytes: number, MAX: number): string | { message: string; tooLarge: TooLarge } | null {
   const plain = "an edit is plain JSON data";
+  const big = (size: number) => ({ message: `an edit is at most ${bytes / 2 ** 20} MiB`, tooLarge: { what: "edit" as const, limit: bytes, size } });
+  const many = (size: number) => ({ message: "an edit has too many values", tooLarge: { what: "values" as const, limit: MAX, size } });
   const stack: [unknown, number][] = [[m, 1]];
   let found = 1, chars = 0;
   while (stack.length) {
     const [v, d] = stack.pop()!;
-    if (typeof v === "string") { if ((chars += v.length) > bytes) return `an edit is at most ${bytes / 2 ** 20} MiB`; continue; }
+    if (typeof v === "string") { if ((chars += v.length) > bytes) return big(chars); continue; }
     if (v === null || typeof v === "boolean") continue;
     if (typeof v === "number") { if (!Number.isFinite(v)) return "an edit's numbers are finite"; continue; }
     if (d > depth) return `an edit nests at most ${depth} deep`;
     if (Array.isArray(v)) {
       if (Object.getPrototypeOf(v) !== Array.prototype) return plain;
-      if ((found += v.length) > MAX) return "an edit has too many values";
+      if ((found += v.length) > MAX) return many(found);
       for (let i = 0; i < v.length; i++) stack.push([v[i], d + 1]);
       continue;
     }
     if (typeof v !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(v))) return plain;
     for (const k in v) {
       if (!own(v, k)) continue;
-      if (++found > MAX) return "an edit has too many values";
-      if ((chars += k.length) > bytes) return `an edit is at most ${bytes / 2 ** 20} MiB`;
+      if (++found > MAX) return many(found);
+      if ((chars += k.length) > bytes) return big(chars);
       stack.push([(v as any)[k], d + 1]);
     }
   }
   let n: number;
   try { n = enc.encode(JSON.stringify(m)).length; } catch { return plain; }
-  return n > bytes ? `an edit is at most ${bytes / 2 ** 20} MiB` : null;
+  return n > bytes ? big(n) : null;
 }
 const goodName = (f: string) => f.length > 0 && f.length <= EDIT_LIMITS.fieldName && !BAD_NAMES.has(f);
 function keyProblem(k: unknown): string | null {
@@ -276,6 +329,12 @@ export function recordProblems(records: Iterable<Rec>): string[] {
 export interface EditState {
   /** An `edit` message from the frame, merged and checked; kept only if it passes.  `now`: the clock (ms) for the rate. */
   apply(message: unknown, now?: number): Applied;
+  /** The same as apply, changing nothing of the board's: not the records, apply's rate and work budgets, the ids
+   * answered or lastWalk.  Its own work is metered by budgets of its own, the same as apply's, so previews
+   * alone are bounded too (daybreak2's LIMIT-74B-1).  apply with the same message, state and clock decides the
+   * same; between the two, other edits and remote changes can make apply decide otherwise, so a host still
+   * applies (and may be refused) at commit. */
+  preview(message: unknown, now?: number): Previewed;
   /** The host's own changes (another tab, an agent), as they are, merged without rules but within the
    * bounds: plain JSON, 8 MiB, 100,000 records, all or none.  Refused: the board can't be edited here as
    * it now is (the host ends editing, or resets to a board that can be). */
@@ -299,7 +358,7 @@ export interface EditState {
  * host's record of it: at most 8 MiB as UTF-8 text, a board of this format.
  * Throws when it can't be edited in a frame (too large, not a board).
  */
-export function editState(postedText: string): EditState {
+export function editState(postedText: string, options: EditOptions = {}): EditState {
   if (enc.encode(postedText).length > EDIT_LIMITS.boardBytes) throw new Error(`a board edited in a frame is at most ${EDIT_LIMITS.boardBytes / 2 ** 20} MiB`);
   const recs = new Map<string, Rec>(), sizes = new Map<string, number>();
   // (indexes: children per group and edges per item, keyed page\0id; items and edges per page; page records)
@@ -362,34 +421,53 @@ export function editState(postedText: string): EditState {
 
   let lastWalk = 0;
   // (the rate and the work budget: token buckets, full at the start)
-  let edits: number = EDIT_LIMITS.editBurst, work: number = EDIT_LIMITS.workBurst, clock = -1;
-  function refill(now: number) {
-    if (clock >= 0 && now > clock) {
-      const s = (now - clock) / 1000;
-      edits = Math.min(EDIT_LIMITS.editBurst, edits + s * EDIT_LIMITS.editsPerSecond);
-      work = Math.min(EDIT_LIMITS.workBurst, work + s * EDIT_LIMITS.workPerSecond);
+  const bucket: PreviewBudget = sharedPreviewBudget();
+  function refill(b: PreviewBudget, now: number) {
+    if (b.clock >= 0 && now > b.clock) {
+      const s = (now - b.clock) / 1000;
+      b.edits = Math.min(b.limits.editBurst, b.edits + s * b.limits.editsPerSecond);
+      b.work = Math.min(b.limits.workBurst, b.work + s * b.limits.workPerSecond);
     }
-    if (now > clock) clock = now;
+    if (now > b.clock) b.clock = now;
   }
+  // (preview's own meter, charged by previews alone: whether a preview is computed at all, never what it
+  // predicts (astra's CORR-722-1); twice apply's, so one preview an edit, and its retries, never meet it)
+  const previewBucket = options.previewBudget ?? sharedPreviewBudget({ editBurst: 2 * EDIT_LIMITS.editBurst, editsPerSecond: 2 * EDIT_LIMITS.editsPerSecond, workBurst: 2 * EDIT_LIMITS.workBurst, workPerSecond: 2 * EDIT_LIMITS.workPerSecond });
+  let charged = 0;
+  const byReference = options.pictures === "by-reference";
 
-  function apply(m: unknown, now: number = Date.now()): Applied {
+  // (apply and preview are this one function: `commit` false runs every step on a copy of apply's budgets as
+  // they are, and keeps nothing (the records, the budgets, the ids answered, lastWalk), so the two decide
+  // alike at the same clock: lite2's A2B-GATE-1, astra's CORR-722-1.  A preview also passes preview's own
+  // meter first; past it, it is refused unworked, `previewThrottled`, which says nothing of apply)
+  function run(m: unknown, now: number, commit: boolean): Applied & { boardBytes?: number; previewThrottled?: true } {
+    const B = commit ? bucket : { ...bucket };
+    const P = previewBucket;
+    charged = 0;
     const id = isObj(m) && typeof m.id === "string" && UUID.test(m.id) ? m.id : undefined;
-    const no = (message: string): Applied => { if (id) remember(id); return { ok: false, ...(id ? { id } : {}), message }; };
+    const keep = (id: string) => { if (commit) remember(id); };
+    const no = (message: string, reason: RefusalReason = "invalid", sized?: TooLarge): Applied => { if (id) keep(id); return { ok: false, ...(id ? { id } : {}), message, reason, ...(sized ?? {}) }; };
     if (id && idSet.has(id)) return { ok: false, id, message: "answered already", ignore: true };
     const plain = plainProblem(m, EDIT_LIMITS.depth, EDIT_LIMITS.messageBytes);
-    if (plain) return no(plain);
+    if (plain) return plain.tooLarge ? no(plain.message, "too-large", plain.tooLarge) : no(plain.message);
     const msg = m as { [k: string]: unknown };
     if (msg.sagebrush !== "edit" || msg.version !== 1) return no("not an edit");
     if (!id) return no("an edit's id is a UUID");
     if (typeof msg.base !== "string" || msg.base.length > 200) return no("an edit's base is a revision");
-    if (!Array.isArray(msg.changes) || msg.changes.length > EDIT_LIMITS.changes) return no(`an edit has a list of at most ${EDIT_LIMITS.changes} changes`);
+    if (!Array.isArray(msg.changes)) return no(`an edit has a list of at most ${EDIT_LIMITS.changes} changes`);
+    if (msg.changes.length > EDIT_LIMITS.changes) return no(`an edit has a list of at most ${EDIT_LIMITS.changes} changes`, "too-large", { what: "changes", limit: EDIT_LIMITS.changes, size: msg.changes.length });
     for (const c of msg.changes) { const p = changeProblem(c); if (p) return no(p); }
     const changes = msg.changes as Change[];
 
     // the rate, then the work: the edit's size and the current size of the records it touches
-    refill(now);
-    const later = (message: string, ms: number): Applied => { remember(id); return { ok: false, id, message, retryAfter: Math.max(1, Math.ceil(ms)) }; };
-    if (edits < 1) return later("too many edits at once", ((1 - edits) / EDIT_LIMITS.editsPerSecond) * 1000);
+    refill(B, now);
+    const later = (message: string, ms: number): Applied => { keep(id); return { ok: false, id, message, reason: "busy", retryAfter: Math.max(1, Math.ceil(ms)) }; };
+    const throttled = (ms: number) => ({ ok: false as const, id, message: "too many previews at once: not checked", reason: "busy" as const, previewThrottled: true as const, retryAfter: Math.max(1, Math.ceil(ms)) });
+    if (!commit) {
+      refill(P, now);
+      if (P.edits < 1) return throttled(((1 - P.edits) / P.limits.editsPerSecond) * 1000);
+    }
+    if (B.edits < 1) return later("too many edits at once", ((1 - B.edits) / B.limits.editsPerSecond) * 1000);
     // (each change is a pass over its record as it is then, which is at most its size before the edit
     // plus the bytes of this edit's changes to it: charged so, an upper bound, before anything is
     // merged; a record's first pass is only its size before (daybreak2's LIMIT-C075-1).  An edit
@@ -403,10 +481,16 @@ export function editState(postedText: string): EditState {
       cost += sizes.get(k) ?? 0;
       if (passed.has(k)) cost += keyBytes.get(k)!; else passed.add(k);
     }
-    if (cost > EDIT_LIMITS.workBurst) return no(`an edit is at most ${EDIT_LIMITS.workBurst / 2 ** 20} MiB of merging: its changes and the records each one passes over`);
-    if (cost > work) return later("too much to merge at once", ((cost - work) / EDIT_LIMITS.workPerSecond) * 1000);
-    edits -= 1;
-    work -= cost;
+    if (cost > EDIT_LIMITS.workBurst) return no(`an edit is at most ${EDIT_LIMITS.workBurst / 2 ** 20} MiB of merging: its changes and the records each one passes over`, "too-large", { what: "work", limit: EDIT_LIMITS.workBurst, size: cost });
+    if (!commit) {
+      if (cost > P.work) return throttled(((cost - P.work) / P.limits.workPerSecond) * 1000);
+      P.edits -= 1;
+      P.work -= cost;
+    }
+    if (cost > B.work) return later("too much to merge at once", ((cost - B.work) / B.limits.workPerSecond) * 1000);
+    B.edits -= 1;
+    B.work -= cost;
+    charged = cost;
 
     // the merge, staged over the records: nothing kept until every check passes
     const staged = new Map<string, Rec | null>(), dropped: Key[] = [];
@@ -447,12 +531,35 @@ export function editState(postedText: string): EditState {
     }
     const count = (m: Map<string, number>, dm: Map<string, number>, k: string) => (m.get(k) ?? 0) + (dm.get(k) ?? 0);
     const pagesNow = pageRecs + d.pages;
-    if (size > EDIT_LIMITS.boardBytes) return no(`a board edited here is at most ${EDIT_LIMITS.boardBytes / 2 ** 20} MiB`);
+    if (size > EDIT_LIMITS.boardBytes) return no(`a board edited here is at most ${EDIT_LIMITS.boardBytes / 2 ** 20} MiB`, "too-large", { what: "board", limit: EDIT_LIMITS.boardBytes, size });
     let made = 0;
     for (const [k, r] of staged) made += (r ? 1 : 0) - (recs.has(k) ? 1 : 0);
-    if (recs.size + made > EDIT_LIMITS.records) return no(`a board edited here has at most ${EDIT_LIMITS.records} records`);
+    if (recs.size + made > EDIT_LIMITS.records) return no(`a board edited here has at most ${EDIT_LIMITS.records} records`, "too-large", { what: "records", limit: EDIT_LIMITS.records, size: recs.size + made });
     const doc = cur(DOC);
     if (!doc) return no("the board's doc record isn't deleted");
+    // (pictures sent apart: a picture this edit adds or changes carries no source of its own but an https:
+    // address, and is named as the frame names pictures (the SHA-256 of its bytes); one the board had before
+    // is its own business)
+    // (and its shape: a map of names to {w, h, src?}, checked where the edit changed it, before any source is
+    // looked at; and a picture the board didn't name before only with the host's word: CORR-74B-2/3)
+    if (byReference && staged.has(DOC)) {
+      const before = recs.get(DOC)?.images, after = doc.images;
+      if (!same(before, after) && after !== undefined && after !== null) {
+        if (!isPlain(after)) return no("a board's pictures are a map of their names to {w, h}");
+        const was = (isPlain(before) ? before : {}) as { [k: string]: unknown };
+        for (const [name, v] of Object.entries(after as { [k: string]: unknown })) {
+          if (own(was, name) && same(was[name], v)) continue;
+          const shown = JSON.stringify(name.slice(0, 40));
+          if (!/^i[0-9a-f]{32}$/.test(name)) return no(`a picture's name is "i" and 32 lowercase hex digits of its bytes' SHA-256 (picture ${shown})`);
+          if (!isPlain(v)) return no(`a picture is {w, h} (picture ${shown})`);
+          const e = v as { [k: string]: unknown };
+          for (const f of Object.keys(e)) if (f !== "w" && f !== "h" && f !== "src") return no(`a picture is {w, h, src?} (picture ${shown})`);
+          if (!(typeof e.w === "number" && Number.isFinite(e.w) && e.w > 0 && typeof e.h === "number" && Number.isFinite(e.h) && e.h > 0)) return no(`a picture's w and h are its size in pixels (picture ${shown})`);
+          if (own(e, "src") && !httpsAddress(e.src)) return no(`pictures are sent by imagePut, not in the board: picture ${shown} gives a source that isn't an https: address`);
+          if (!own(was, name) && !(options.pictureAllowed?.(name) ?? false)) return no(`picture ${shown} isn't one this board may show: put it first`);
+        }
+      }
+    }
     const paged = doc.paged === true, wasPaged = recs.get(DOC)?.paged === true;
     const pageThere = (p: string) => !!cur(keyOf({ type: "page", page: p, id: "" }));
     // (pages: every page with records has its record; with no pages, none; checked for every page only when `paged` changes)
@@ -513,7 +620,7 @@ export function editState(postedText: string): EditState {
     // earlier one, a group under another the edit moved, already checked)
     const visited = new Map<string, number>();
     let walk = 0;
-    lastWalk = 0;
+    if (commit) lastWalk = 0;
     for (const [k, r] of staged) {
       if (r?.type !== "item" || r.kind !== "group") continue;
       const old = recs.get(k);
@@ -526,13 +633,15 @@ export function editState(postedText: string): EditState {
         if (by === walk) return no(`item "${g.id}"'s parents go round`);
         if (by !== undefined) continue;
         visited.set(gk, walk);
-        if ((work -= 64) < 0) { work = 0; remember(id); return { ok: false, id, message: "too much to check at once", retryAfter: Math.ceil((64 / EDIT_LIMITS.workPerSecond) * 1000 * Math.max(1, visited.size)) }; }
+        charged += 64;
+        if (!commit && (P.work -= 64) < 0) { P.work = 0; return throttled((64 / P.limits.workPerSecond) * 1000 * Math.max(1, visited.size)); }
+        if ((B.work -= 64) < 0) { B.work = 0; keep(id); return { ok: false, id, message: "too much to check at once", reason: "busy", retryAfter: Math.ceil((64 / B.limits.workPerSecond) * 1000 * Math.max(1, visited.size)) }; }
         if (d > EDIT_LIMITS.levels) return no(`item "${g.id}" is more than ${EDIT_LIMITS.levels} levels deep`);
         if (g.kind === "group") for (const c of childrenOf(g)) stack.push([c, d + 1]);
       }
     }
 
-    lastWalk = visited.size;
+    if (commit) lastWalk = visited.size;
     // kept: what changed in the board, record by record
     const out: Change[] = [];
     for (const [k, r] of staged) {
@@ -544,16 +653,26 @@ export function editState(postedText: string): EditState {
       if (old) for (const f of Object.keys(old)) if (!KEY_FIELDS.has(f) && !own(r, f)) { fields[f] = null; changed = true; }
       if (changed) out.push({ op: "set", key: { type: r.type, page: r.page, id: r.id }, fields });
     }
+    if (!commit) return { ok: true, id, changes: out, dropped, boardBytes: size };
     for (const [k, r] of staged) put(k, r);
     remember(id);
     return { ok: true, id, changes: out, dropped };
+  }
+  function apply(m: unknown, now: number = Date.now()): Applied { return run(m, now, true); }
+  function preview(m: unknown, now: number = Date.now()): Previewed {
+    const r = run(m, now, false) as Previewed;
+    // (editBytes: the UTF-8 length of JSON.stringify of the whole message as received, every field of it: the
+    // envelope's size, what a host's admission caps an edit by)
+    let editBytes: number | undefined;
+    try { editBytes = enc.encode(JSON.stringify(m)).length; } catch {}
+    return { ...r, workBytes: charged, ...(editBytes === undefined ? {} : { editBytes }) };
   }
 
   function remote(changes: Change[]): { ok: true } | { ok: false; message: string } {
     const no = (message: string) => ({ ok: false as const, message });
     // (values bounded by the bytes: a board's worth, at most)
     const plain = plainProblem(changes, 32, EDIT_LIMITS.boardBytes, 2_000_000);
-    if (plain) return no(plain.replace(/an edit/g, "a remote change"));
+    if (plain) return no(plain.message.replace(/an edit/g, "a remote change"));
     if (!Array.isArray(changes)) return no("remote changes are a list");
     // (staged: nothing kept unless the board stays within the bounds)
     const staged = new Map<string, Rec | null>();
@@ -588,6 +707,7 @@ export function editState(postedText: string): EditState {
 
   return {
     apply,
+    preview,
     remote,
     reset: load,
     answered: (id: string) => remember(id),

@@ -1,0 +1,7 @@
+// astra's probes on sync-ops ac1c27eb (CORR-AC1-1/2; the pending Trash destination control), verbatim from
+// /scratch/sagebrush-reviews/evidence/sync-ops-ac1-astra/astra-ac1-trash-cases.js
+import * as W from './ws.js';
+const enc=s=>new TextEncoder().encode(s),dec=b=>new TextDecoder().decode(b),H=async b=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',b))].map(x=>x.toString(16).padStart(2,'0')).join('');
+export async function run(){localStorage.clear();const w=await W.Workspace.open({name:'astra-ac1-recovery',mainName:'astra-ac1-recovery-main'}),b=enc('recover me'),sha=await H(b),dest='/Recovered/cut.bin';
+await new Promise((ok,no)=>{const tx=w.ws.transaction(['trash','meta'],'readwrite');tx.objectStore('trash').put(b,'/Trash/cut.bin');tx.objectStore('meta').put({dest,sha},'recovering:/Trash/cut.bin');tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});await new Promise((ok,no)=>{const tx=w.main.transaction('files','readwrite');tx.objectStore('files').put(b,dest);tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});
+await W.migrate(w,localStorage);await W.migrate(w,localStorage);const es=(await w.list('/',{recursive:true})).filter(e=>e.kind==='file');const values=[];for(const e of es)values.push(dec((await w.read(e.path)).content));w.close();return[[es.length===1&&es[0].path===dest&&values[0]==='recover me','pending Trash destination is not adopted twice after restart: '+JSON.stringify({paths:es.map(e=>e.path),values})]];}
