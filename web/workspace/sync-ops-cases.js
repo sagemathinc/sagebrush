@@ -471,6 +471,52 @@ async function staleLapSpans() {
   w.close();
 }
 
+async function staleLapReload() {
+  // (daybreak2, astra: the tab gone (its database closed under it, no write after) at a mark, then a reload: the
+  // lap goes on from the last mark the cursor is past, so the next whole lap counts every mark, none passed over
+  // uncounted and none counted twice.  Cut: in the middle of a page; right after the wrap to the first mark; right
+  // after a whole lap was said and the next begun)
+  const n = 100, files = "files:";
+  const keys = Array.from({ length: n }, (_, i) => "/r" + String(i).padStart(5, "0") + ".bin");
+  const cut = async ({ cursor, pages, at, starts, after = 2 }) => {
+    localStorage.clear();
+    const r = Math.random().toString(36).slice(2, 8), nm = { name: "ws-stalerl-" + r, mainName: "main-stalerl-" + r };
+    let w = await W.Workspace.open(nm);
+    await W.startMigrator(w);
+    const one = enc("x"), sha = await H(one);
+    await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); for (const k of keys) tx.objectStore("files").put(one, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); keys.forEach((k, i) => tx.objectStore("meta").put({ fid: "f" + String(i).padStart(15, "0"), size: 1, sha256: sha, fails: 5, why: "storage" }, "stale:files:" + k)); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    if (cursor !== undefined) await rawPut(w.ws, "meta", files + keys[cursor], "staleCursor");
+    let tries = 0;
+    w.beforeStaleDelete = () => { if (++tries === at) w.ws.close(); throw new Error("storage refused"); };
+    const was = { files: W.MIGRATE.files, pages: W.MIGRATE.stalePages };
+    W.MIGRATE.files = 32;
+    W.MIGRATE.stalePages = pages;
+    const seen = [];
+    try {
+      for (let k = 0; k < starts && tries < at; k++) await W.startMigrator(w).catch(() => {});
+      try { w.close(); } catch {}
+      w = await W.Workspace.open(nm);
+      w.beforeStaleDelete = () => { throw new Error("storage refused"); };
+      for (let k = 0; k < after; k++) { await W.startMigrator(w); seen.push((await w.staleStuck())?.count ?? 0); }
+    } finally { W.MIGRATE.files = was.files; W.MIGRATE.stalePages = was.pages; }
+    w.beforeStaleDelete = null;
+    w.close();
+    return { tries, seen };
+  };
+  // (in the middle of a page: the 43rd mark, the 11th of the second page; the lap last whole at the first page's end)
+  const mid = await cut({ pages: 32, at: 32 + 11, starts: 1 });
+  check(mid.tries === 43 && J(mid.seen) === J([n, n]), `cut in the middle of a page: the next whole lap counts all ${n} marks: ` + J(mid));
+  // (right after the wrap: a lap begun at the 51st mark, gone round the end (the cursor back to the first mark), cut
+  // at the first mark after it)
+  const wrap = await cut({ cursor: 49, pages: 32, at: 51, starts: 1 });
+  check(wrap.tries === 51 && J(wrap.seen) === J([n, n]), `cut right after the wrap to the first mark: the lap whole at its origin with all ${n}, none twice: ` + J(wrap));
+  // (right after a whole lap is said: two pages a start (64 marks), so the lap is whole in the third start at the
+  // first mark, said, and the next lap begun there; cut at that mark's attempt; then the next lap whole again)
+  const said = await cut({ pages: 2, at: n + 1, starts: 3, after: 3 });
+  check(said.tries === n + 1 && said.seen.length === 3 && said.seen.every((c) => c === n), `cut right after a whole lap is said and the next begun: said again whole, ${n}, never fewer: ` + J(said));
+}
+
 async function staleNotice() {
   // (the notice closed: it stays closed while the count and reasons stay; it comes back if the count rises or a
   // reason is new; none left, it goes, and what it was closed at with it.  And each reason's words: true of it,
@@ -656,7 +702,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, copies, reservations, stuckMarks, staleFolderFull, staleCounts, staleRounds, staleLapSpans, staleNotice, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, reservations, stuckMarks, staleFolderFull, staleCounts, staleRounds, staleLapSpans, staleLapReload, staleNotice, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;
