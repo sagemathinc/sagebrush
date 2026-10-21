@@ -49,6 +49,7 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { EditChannel, EDIT_BOUNDS, inlinePictures, utf8Length, type Kept } from "./edit-channel";
+import { PictureChannel, byReference } from "./edit-pictures";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
 import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, type Entry } from "../workspace/index";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
@@ -315,6 +316,9 @@ let answers: AnswerChannel | null = null;
 // on the port (edit-channel.ts), and what the host says the board has become is shown in place.  Without a
 // grant, a frame offers no Edit.
 let editCh: EditChannel | null = null;
+// (pictures by reference, when the host grants them: edit-pictures.ts)
+let pics: PictureChannel | null = null;
+let editShowing: Promise<void> = Promise.resolve();
 const editSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
 type EditingState = { allowed: boolean; hidden?: boolean; why?: string };
 let editingNow: EditingState = { allowed: false, hidden: true };
@@ -358,7 +362,7 @@ if (fromParent) {
   const said = /^#sb-nonce=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(location.hash);
   let nonce: string | null = said ? said[1] : null;
   if (said) try { history.replaceState(null, "", location.pathname + location.search); } catch {}
-  const say = (m: { sagebrush: string; message?: string; nonce?: string }) => parent.postMessage({ ...m, version: 1 }, "*");
+  const say = (m: { sagebrush: string; message?: string; nonce?: string; pictures?: string[] }) => parent.postMessage({ ...m, version: 1 }, "*");
   if (parent === window) fromParentDoc({ doc: { title: "Board", nodes: [] }, notice: "**This page shows a board another site's page gives it.** To open a board, go to [sagebrush.space/board](https://sagebrush.space/board/)." });
   else {
     let first = true;
@@ -381,27 +385,45 @@ if (fromParent) {
         // (editing granted: a revision, a port given with a nonce, and a board an editable one's size)
         if (port && given && m.edit === true && typeof revision === "string" && utf8Length(m.text) <= EDIT_BOUNDS.boardBytes) {
           try {
+            // (pictures by reference: the board names them only, and their bytes come apart: the host's own
+            // changes may name pictures this browser doesn't hold, fetched before they are shown)
+            const p = m.pictures === "by-reference" ? (pics = new PictureChannel((x, t) => port.postMessage(x, t ?? []), { blob: (n) => host.images.blob(n), put: (b) => host.images.put(b) })) : null;
             const ch = (editCh = new EditChannel(m.text, revision, (x) => port.postMessage(x), {
-              show: (d, note) => { for (const f of editSubs) void f(d, note); },
+              // (resolved once the editor shows it: the channel takes the user's actions against what they see)
+              show: (d, note) => {
+                const toEditor = () => Promise.all([...editSubs].map((f) => f(d, note)));
+                if (!p) return toEditor();
+                // (the pictures the host has: its own board's, never the unsaved ones over it: CORR-PICREF-1)
+                for (const n of editCh?.hostPictures() ?? []) p.hostHas.add(n);
+                const names = Object.keys(d.images ?? {});
+                return (editShowing = editShowing.then(() => p.fetch(names)).then(toEditor).then(() => {}, (e) => console.warn("board: pictures not fetched:", e)));
+              },
               allowed: (on, why) => setEditing({ allowed: on, ...(why ? { why } : {}) }),
               kept: (c) => showKept(c),
               say: (md) => setEditing({ ...editingNow, why: md }),
-            }, undefined, { pictures: inlinePictures({ sizeOf: (n) => host.images.sizeOf(n), dataUrl: (n) => host.images.dataUrl(n) }) }));
-            port.addEventListener("message", (ev) => ch.receive(ev.data));
+            }, undefined, { pictures: p ? byReference(p) : inlinePictures({ sizeOf: (n) => host.images.sizeOf(n), dataUrl: (n) => host.images.dataUrl(n) }) }));
+            port.addEventListener("message", (ev) => { if (!p?.receive(ev.data)) ch.receive(ev.data); });
             port.start();
             (window as any).sagebrushEdit = ch;
             (window as any).sagebrushImages = host.images;
+            (window as any).sagebrushPictures = p;
             setEditing({ allowed: true });
           } catch (err) { console.warn("board: editing not taken:", err); }
         }
         // (the page gone: what waits for the host settled, the port closed)
         addEventListener("pagehide", () => answers?.close());
-        fromParentDoc({ doc, notice });
+        // (pictures by reference: the board's, fetched before it is shown; those the host doesn't have, said)
+        if (pics) {
+          const names = Object.keys(doc.images ?? {});
+          for (const n of names) pics.hostHas.add(n);
+          void pics.fetch(names).then((missing) => fromParentDoc({ doc, notice: missing.length ? [notice, `**${missing.length} of this board's pictures couldn't be had from the host.**`].filter(Boolean).join("\n\n") : notice }), () => fromParentDoc({ doc, notice }));
+        } else fromParentDoc({ doc, notice });
       } else location.reload();
       first = false;
     });
     const given = nonce !== null;
-    say({ sagebrush: "ready", ...(nonce ? { nonce } : {}) });
+    // (and that it can take pictures by reference: web/board-host-protocol.md, "Pictures")
+    say({ sagebrush: "ready", ...(nonce ? { nonce } : {}), pictures: ["by-reference"] });
     nonce = null;
   }
 }
