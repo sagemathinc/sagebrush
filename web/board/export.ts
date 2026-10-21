@@ -116,7 +116,12 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
 /** The board page's template with its parts inline in place of its script:
  * an exported file (exportHtml), or the frame other sites show a board in
  * (frameHtml).  `doc` is the document's JSON, its "<"s escaped. */
+/** The site's early-alpha notice, as web/build.ts puts it in the site's own board page (web/alpha-banner.js). */
+export const ALPHA_BANNER_TAG = '<script src="/alpha-banner.js" defer></script>\n';
 export function assemble(template: string, p: { doc: string; from?: "parent"; outputs?: string | null; mathJs?: string | null; mathCss?: string | null; engine?: string[]; board: string; title: string; generator: string }): string {
+  // (never the site's early-alpha notice: a downloaded board, the frame other sites embed and a file
+  // exported again from either are not the site's pages, whichever copy of the page they were made from)
+  template = template.split(ALPHA_BANNER_TAG).join("");
   // (the template rides along for exporting again, its scripts' ends escaped
   // as everything inline is, and unescaped when used)
   const parts = [
