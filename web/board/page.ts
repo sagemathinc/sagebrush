@@ -48,7 +48,7 @@ import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
-import { EditChannel, EDIT_BOUNDS, utf8Length, type Kept } from "./edit-channel";
+import { EditChannel, EDIT_BOUNDS, inlinePictures, utf8Length, type Kept } from "./edit-channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
 import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, type Entry } from "../workspace/index";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
@@ -312,7 +312,6 @@ let answers: AnswerChannel | null = null;
 // on the port (edit-channel.ts), and what the host says the board has become is shown in place.  Without a
 // grant, a frame offers no Edit.
 let editCh: EditChannel | null = null;
-let editSaving: Promise<void> = Promise.resolve();
 const editSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
 type EditingState = { allowed: boolean; hidden?: boolean; why?: string };
 let editingNow: EditingState = { allowed: false, hidden: true };
@@ -384,10 +383,11 @@ if (fromParent) {
               allowed: (on, why) => setEditing({ allowed: on, ...(why ? { why } : {}) }),
               kept: (c) => showKept(c),
               say: (md) => setEditing({ ...editingNow, why: md }),
-            }));
+            }, undefined, { pictures: inlinePictures({ sizeOf: (n) => host.images.sizeOf(n), dataUrl: (n) => host.images.dataUrl(n) }) }));
             port.addEventListener("message", (ev) => ch.receive(ev.data));
             port.start();
             (window as any).sagebrushEdit = ch;
+            (window as any).sagebrushImages = host.images;
             setEditing({ allowed: true });
           } catch (err) { console.warn("board: editing not taken:", err); }
         }
@@ -797,13 +797,9 @@ const host: BoardHost = {
     // its answers are kept while it is open, and sent by Submit; nothing to
     // say, web/board-host-protocol.md "Unsent answers")
     save(d) {
-      // (in a frame: to the host, if it granted editing; else kept nowhere.  With its pictures in it (data: URLs),
-      // as the host keeps them: the editor keeps them apart; one save after another, in order)
-      if (fromParent) {
-        const ch = editCh;
-        if (ch) editSaving = editSaving.then(async () => ch.save(await host.images.inline(d))).catch((e) => console.warn("board: an edit not sent:", e));
-        return;
-      }
+      // (in a frame: to the host, if it granted editing; else kept nowhere.  Taken now, at the action, its pictures'
+      // bytes prepared after: astra's CORR-FRAMEEDIT-1)
+      if (fromParent) { editCh?.save(d); return; }
       if (unsaved) throw new Error(STORAGE_REFUSED);
       if (local && ws) return wsSave(source.slice(6), d);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }

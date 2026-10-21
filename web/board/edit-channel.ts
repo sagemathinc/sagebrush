@@ -42,7 +42,7 @@ export type Change =
   | { op: "delete"; key: Key; was: Record<string, unknown> };
 /** One editor action, with every record it touched; `bytes`: its UTF-8 JSON as an array, plus one for the
  * separator a download puts after it (daybreak2's check 2: the framing counted, not allowed for). */
-interface Tx { changes: Change[]; bytes: number }
+interface Tx { changes: Change[]; bytes: number; ready: boolean }
 /** What the frame keeps for the user to download: a refused edit's changes, or everything unsaved when editing
  * ended with keepUnsaved (then with the view as the user saw it). */
 export interface Kept { id: number; why: string; revision: string; txs: Tx[]; view?: BoardDoc }
@@ -76,7 +76,46 @@ export function utf8Length(s: string): number {
   }
   return n;
 }
-const txOf = (changes: Change[]): Tx => ({ changes, bytes: utf8Length(JSON.stringify(changes)) + 1 });
+const txOf = (changes: Change[]): Tx => ({ changes, bytes: utf8Length(JSON.stringify(changes)) + 1, ready: true });
+
+/** What a transaction's pictures need before it can be sent (astra's CORR-FRAMEEDIT-1: the transaction is taken
+ * at the editor's action, its `was` from the view then; this only prepares it): to a host that keeps them inline,
+ * their bytes in it; by reference, their bytes put to the host first. */
+export interface PicturePrep {
+  /** inline: a picture the view has, unchanged, carries the bytes the host has */
+  inline: boolean;
+  /** of the pictures an action's change to the board's map gives, those that need preparing */
+  needs(entries: Record<string, unknown>): string[];
+  /** the bytes they add to the transaction once prepared, exactly as far as can be known now (for the bound) */
+  extraBytes(names: string[]): number;
+  /** prepare them (may fill the entries in `changes`); not ok: kept for download (`keep`), or that action taken out */
+  prepare(changes: Change[], names: string[]): Promise<{ ok: true } | { ok: false; keep: boolean; why: string }>;
+}
+/** To a host that keeps pictures inline: each picture an action adds without its bytes, given them (data: URLs). */
+export function inlinePictures(store: { sizeOf(name: string): { size: number; type: string } | undefined; dataUrl(name: string): Promise<string | undefined> }): PicturePrep {
+  return {
+    inline: true,
+    needs: (entries) => Object.entries(entries ?? {}).filter(([, v]) => !!v && typeof v === "object" && !(v as any).src).map(([k]) => k),
+    // (,"src":"data:<type>;base64,<base64>")
+    extraBytes: (names) => names.reduce((t, n) => { const s = store.sizeOf(n); return t + (s ? 9 + utf8Length(`data:${s.type};base64,`) + 4 * Math.ceil(s.size / 3) : 0); }, 0),
+    async prepare(changes, names) {
+      const docChange = changes.find((c) => c.op === "set" && c.key.type === "doc" && c.fields.images) as Extract<Change, { op: "set" }> | undefined;
+      for (const n of names) {
+        const url = await store.dataUrl(n);
+        if (!url) return { ok: false, keep: true, why: "a picture in it isn't in this browser any more" };
+        const e = (docChange?.fields.images as Record<string, any> | undefined)?.[n];
+        if (e && typeof e === "object") e.src = url;
+      }
+      return { ok: true };
+    },
+  };
+}
+// (inline: the pictures the editor names as the view has them carry the view's bytes: the editor keeps them apart)
+function carryPictures(view: Map<string, Rec>, next: Map<string, Rec>) {
+  const k = keyOf({ type: "doc", page: "", id: "" }), v = view.get(k)?.images as Record<string, any> | undefined, n = next.get(k)?.images as Record<string, any> | undefined;
+  if (!v || !n) return;
+  for (const [name, e] of Object.entries(n)) if (e && typeof e === "object" && !e.src && v[name]?.src) n[name] = { ...e, src: v[name].src };
+}
 const fieldsOf = (r: Rec) => { const o: Record<string, unknown> = {}; for (const k of Object.keys(r)) if (!KEY_FIELDS.has(k)) o[k] = r[k]; return o; };
 const textOf = (r: Rec) => { const o: Record<string, unknown> = {}; for (const k of Object.keys(r)) if (TEXT.has(k)) o[k] = r[k]; return o; };
 
@@ -176,7 +215,9 @@ export class EditChannel {
   /** what happened, the latest 200: for tests */
   readonly log: { what: string; id?: string; n?: number }[] = [];
 
-  constructor(text: string, revision: string, private post: (m: object) => void, private ui: EditUi, private now: () => number = () => Date.now()) {
+  private pictures?: PicturePrep;
+  constructor(text: string, revision: string, private post: (m: object) => void, private ui: EditUi, private now: () => number = () => Date.now(), opts: { pictures?: PicturePrep } = {}) {
+    this.pictures = opts.pictures;
     const d = JSON.parse(text);
     if (!isBoard(d)) throw new Error("not a board");
     this.revision = revision;
@@ -196,9 +237,14 @@ export class EditChannel {
   /** The editor kept `doc`: one action, so one transaction (none if nothing changed). */
   save(doc: BoardDoc) {
     const next = recordsOf(cleanDoc(doc));
+    if (this.pictures?.inline) carryPictures(this.view, next);
     const changes = diff(this.view, next);
     if (!changes.length) { this.view = next; return; }
     const tx = txOf(changes);
+    // (its pictures, prepared after it is taken: counted now, as they will be sent)
+    const docChange = changes.find((c) => c.op === "set" && c.key.type === "doc" && c.fields.images) as Extract<Change, { op: "set" }> | undefined;
+    const names = docChange && this.pictures ? this.pictures.needs(docChange.fields.images as Record<string, unknown>) : [];
+    if (names.length) { tx.bytes += this.pictures!.extraBytes(names); tx.ready = false; }
     const undo = (why: string) => { this.note("undone", { n: changes.length }); this.ui.show(boardOf(this.viewMap()), why); };
     if (this.ended) return undo("**Not saved:** editing here has ended.");
     // (a single transaction past an edit's bounds: never sent; undone at once, said)
@@ -211,7 +257,44 @@ export class EditChannel {
     this.view = next;
     this.note("tx", { n: changes.length });
     this.checkBound();
+    if (!tx.ready) this.prepare(tx, names);
     this.schedule(EDIT_BOUNDS.batchMs);
+  }
+
+  /** A taken transaction's pictures prepared.  Ready: sent in its turn (the ones before it never wait for it, nor do
+   * the ones after it overtake it).  Not: kept for download with those after it, or that action taken out. */
+  private prepare(tx: Tx, names: string[]) {
+    void this.pictures!.prepare(tx.changes, names).then((r) => r, (e: any) => ({ ok: false as const, keep: true, why: String(e?.message ?? e) })).then((r) => {
+      const at = this.unsaved.indexOf(tx), kept = at < 0 && this.keptCopies.some((c) => c.txs.includes(tx));
+      // (released meanwhile: editing ended without keepUnsaved)
+      if (at < 0 && !kept) return;
+      if (r.ok) {
+        // (counted again as it is now: the bytes added as predicted, or not quite)
+        const bytes = utf8Length(JSON.stringify(tx.changes)) + 1;
+        this.held.bytes += bytes - tx.bytes;
+        tx.bytes = bytes;
+        tx.ready = true;
+        this.note("prepared", { n: names.length });
+        this.checkBound();
+        this.schedule(0);
+        return;
+      }
+      // (frozen already, kept for download: kept as it is)
+      if (kept) { tx.ready = true; return; }
+      if (r.keep) {
+        // (can't be sent: it, and those made on it, kept for download: moved, not released)
+        this.keep(r.why, this.unsaved.splice(at));
+        this.note("prepare kept", { n: names.length });
+        this.refresh(`**Your last changes couldn't be saved:** ${r.why}. They're kept for you to download.`);
+      } else {
+        // (that action taken out, said: a picture the host refused)
+        this.unsaved.splice(at, 1);
+        this.release([tx]);
+        this.note("prepare dropped", { n: names.length });
+        this.refresh(`**A picture couldn't be saved:** ${r.why}`);
+      }
+      this.checkBound();
+    });
   }
 
   /** A message from the host on the port: true if it was editing's. */
@@ -277,11 +360,14 @@ export class EditChannel {
     let bytes = ENVELOPE, n = 0, count = 0;
     while (n < this.unsaved.length) {
       const t = this.unsaved[n];
+      // (one still being prepared: it and those after it wait)
+      if (!t.ready) break;
       if (n && (bytes + t.bytes > EDIT_BOUNDS.messageBytes || count + t.changes.length > EDIT_BOUNDS.messageChanges)) break;
       bytes += t.bytes;
       count += t.changes.length;
       n++;
     }
+    if (!n) return;
     const id = uuid(), changes = this.unsaved.slice(0, n).flatMap((t) => t.changes);
     this.inFlight = { id, n };
     this.note("edit", { id, n: changes.length });
@@ -397,6 +483,8 @@ export class EditChannel {
       const kept = t.changes.filter((_, i) => ok[i]);
       lost += t.changes.length - kept.length;
       const nt = txOf(kept);
+      // (one still being prepared: its pictures' bytes still to come, still counted)
+      if (!t.ready) nt.bytes += t.bytes - (utf8Length(JSON.stringify(t.changes)) + 1);
       this.held.bytes += nt.bytes - t.bytes;
       this.held.changes += kept.length - t.changes.length;
       t.changes = kept;
