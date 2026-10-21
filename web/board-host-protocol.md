@@ -418,7 +418,12 @@ host sent on this channel, which need not be an edit's own `base`.
     view of the board with them applied (the host's last revision with the
     frame's unsaved changes over it) and its transactions not yet saved,
     each change with its `was`. It says so beside `message`, offers
-    Download, and never sends them again on this channel. A host sends it
+    Download, and never sends them again on this channel. What it keeps is
+    then **frozen**: nothing is added to it (Edit has ended), and it is
+    within the frame's unsaved-state bound (see Bounds), so it can't grow.
+    It is released only when the user discards it, or the page closes.
+    Downloading it doesn't release it, since a page can't tell whether a
+    download finished; the user can download it again. A host sends it
     when the user's work can't be taken now but shouldn't be lost: the
     history is full, the user's quota is spent, the document moved or
     became read-only while they typed.
@@ -622,8 +627,9 @@ names, and nothing outside it. Nothing runs because of it.
 - **Without it** (the edit failed a check): nothing was merged. The frame
   drops the refused changes and those made after them, since they were
   made on top of the refused ones, and shows `message`. It keeps a copy of
-  what it dropped, which the user can download as JSON. The host follows
-  with a `replace`.
+  what it dropped, which the user can download as JSON, until the user
+  discards it or the page closes. That copy counts in the frame's
+  unsaved-state bound (see Bounds). The host follows with a `replace`.
 
 ### Bounds
 
@@ -639,6 +645,42 @@ names, and nothing outside it. Nothing runs because of it.
   - **A single transaction past the bound** (a paste of more than 1 MiB,
     or a change to more than 1,000 records) is never sent: the frame undoes
     it at once and says it is too large to save here.
+- **The frame's unsaved state** (daybreak2's LIMIT-9B5-1) is bounded in
+  total, not only per message. The bound covers the edit in flight, the
+  transactions made since and not yet sent, and every copy kept for the user
+  to download (a refused edit's, and what `keepUnsaved` keeps), each change
+  with its `was`. A host that never answers, or answers only with
+  `retryAfter`, can't make it grow past the bound.
+  - **Counted as it changes:** the frame keeps two running totals, the
+    UTF-8 size of these changes as they would be sent and their number. A
+    transaction adds to them when it is made, and an answer that settles
+    changes takes them off. Each step costs only the change counted,
+    never what is already held: nothing is re-serialized to count.
+  - **The bound:** at most **8 MiB** and **8,000 changes** in all, eight
+    messages' worth.
+  - **Editing pauses before it**, never past it, and nothing is dropped.
+    - When the totals are within one transaction's maximum of the bound
+      (1 MiB or 1,000 changes, as above), Edit is paused before the next
+      transaction can start. So every transaction already made fits, and
+      none is undone or lost.
+    - The frame says "Waiting for the host to save your changes", and keeps
+      showing its view with them.
+    - It offers **Download** (everything held, as below). It never sends
+      more than the rules above allow: still one edit in flight, and a
+      refused one again only after its `retryAfter`.
+    - Edit comes back on its own when answers take the totals below half
+      the bound.
+    - A copy kept for download counts until it is discarded. So with copies
+      held, the user may have to download and discard one to go on editing,
+      and the frame says so.
+  - **The download is bounded too.** It is made only when the user asks,
+    as a `Blob` from parts: the view's text, then one part per transaction.
+    No second whole-state string is ever built. It is at most the bound plus
+    an editable board (8 MiB), and its object URL is revoked once the
+    download has been handed to the browser.
+  - The frame's memory for all of this is therefore bounded by the bound
+    times a constant (the parsed changes beside their counted size), plus
+    one editable board for its view.
 - **A `replace`** is at most 8 MiB of text (an editable board's limit). The
   host sends at most one every 2 seconds per channel, and at most 32 MiB
   of `replace` text per minute. A change set that would need another
@@ -1002,6 +1044,23 @@ function openChannel(me) {
   to the file.
 - `editing`'s `keepUnsaved` (and `reason`) is specified, not implemented in
   the frame yet. It ships with the frame's editing side (CoCalc step 2).
+- The frame's unsaved-state bound (Bounds) ships with it too. These tests
+  are its acceptance (daybreak2's LIMIT-9B5-1):
+  - **A host that never answers.** The user changes the same near-limit
+    field over and over, each change a large `was` and value. Then:
+    - Edit pauses before the bound;
+    - no transaction already made is lost;
+    - the totals equal the encoded size and count of what is held;
+    - the page's heap stays within a measured constant times the bound,
+      plus the board.
+  - **Then `editing { allowed: false, keepUnsaved: true }`.** What is held
+    is frozen: a further attempt to edit adds nothing. The download parses
+    back to the view and to every unsaved transaction, each with its `was`.
+    Making it doesn't build a second whole copy (heap measured around it).
+  - **Only `retryAfter`, again and again.** The same pause, then Edit back
+    once answers come and the totals fall below half the bound.
+  - **Copies kept from refusals** count toward the bound. Discarding one
+    lets editing go on.
 - Built in `editState` (`@sagemathinc/sagebrush-board/submission` 0.4.0,
   published with `sagebrush` 0.5.2):
   - `preview`, its meter, `previewThrottled` and `sharedPreviewBudget`;
