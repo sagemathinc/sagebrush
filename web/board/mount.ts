@@ -85,6 +85,9 @@ export interface BoardStore {
    * for the caption (a merge's); shown in place, `f` resolving once it is
    * (edits made before were made from the one before).  Returns: stop. */
   subscribe?(f: (doc: BoardDoc, notice?: string) => void | Promise<void>): () => void;
+  /** Whether Edit is offered (`hidden`: not at all) and allowed now (not: left, with `why` said), as it
+   * changes, the current state at once.  None: always.  Returns: stop. */
+  editing?(f: (s: { allowed: boolean; hidden?: boolean; why?: string }) => void): () => void;
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
@@ -1314,6 +1317,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
+  // (whether Edit is offered and allowed, as the store says: a frame its host doesn't let edit offers none; one
+  // paused at its bound, or whose host ended editing, leaves Edit and says why: web/board-host-protocol.md)
+  const offEditing = host.store?.editing?.((s) => {
+    editBtn.hidden = !!s.hidden;
+    editBtn.toggleAttribute("disabled", !s.allowed);
+    editBtn.title = s.allowed ? "" : s.why ?? "";
+    if (!s.allowed && editor.on) editor.setOn(false);
+    if (s.why) say(s.why.startsWith("**") ? s.why : `**${s.why}**`);
+  });
+  if (offEditing) offs.push(offEditing);
   offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
     root.classList.toggle("sbb-editing", editor.editing.value);

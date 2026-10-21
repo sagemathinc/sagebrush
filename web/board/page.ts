@@ -48,6 +48,7 @@ import { BoardHistory, type HistoryModule } from "./history";
 import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
+import { EditChannel, EDIT_BOUNDS, utf8Length, type Kept } from "./edit-channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
 import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, type Entry } from "../workspace/index";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
@@ -307,6 +308,49 @@ const ref = file ? engineRef() : null;
 let fromParentDoc: (d: { doc: BoardDoc; notice: string }) => void = () => {};
 const parentDoc = new Promise<{ doc: BoardDoc; notice: string }>((r) => (fromParentDoc = r));
 let answers: AnswerChannel | null = null;
+// Editing, when the host grants it (web/board-host-protocol.md, "Editing"): the frame's edits go to the host
+// on the port (edit-channel.ts), and what the host says the board has become is shown in place.  Without a
+// grant, a frame offers no Edit.
+let editCh: EditChannel | null = null;
+let editSaving: Promise<void> = Promise.resolve();
+const editSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+type EditingState = { allowed: boolean; hidden?: boolean; why?: string };
+let editingNow: EditingState = { allowed: false, hidden: true };
+const editingSubs = new Set<(s: EditingState) => void>();
+const setEditing = (s: EditingState) => { editingNow = s; for (const f of editingSubs) f(s); };
+// (the copies of unsaved changes kept for download: a bar, each with Download and Discard; one object URL
+// live at a time, any earlier one revoked, daybreak2's check 3)
+let liveUrl: string | null = null;
+function showKept(copies: readonly Kept[]) {
+  let bar = document.getElementById("sbb-unsaved");
+  if (!copies.length) { bar?.remove(); return; }
+  if (!bar) {
+    bar = Object.assign(document.createElement("div"), { id: "sbb-unsaved" });
+    bar.setAttribute("role", "status");
+    bar.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:50;max-width:min(560px,90vw);background:#fff8e1;border:1px solid #e0b000;border-radius:6px;padding:6px 10px;font:13px system-ui,sans-serif;box-shadow:0 2px 6px #0002";
+    document.body.append(bar);
+  }
+  bar.replaceChildren(...copies.map((c) => {
+    const row = document.createElement("div"), msg = document.createElement("span");
+    msg.textContent = `Unsaved changes (${c.txs.length}${c.view ? ", with the board as you saw it" : ""}): ${c.why} `;
+    const dl = Object.assign(document.createElement("button"), { textContent: "Download" });
+    dl.dataset.sbb = "unsaved-download";
+    dl.onclick = () => {
+      const r = editCh?.download(c.id);
+      if (!r) return;
+      if (liveUrl) URL.revokeObjectURL(liveUrl);
+      const url = (liveUrl = URL.createObjectURL(r.blob));
+      Object.assign(document.createElement("a"), { href: url, download: r.name }).click();
+      // (handed to the browser: revoked soon after, unless a later download already did)
+      setTimeout(() => { if (liveUrl === url) { URL.revokeObjectURL(url); liveUrl = null; } }, 1000);
+    };
+    const discard = Object.assign(document.createElement("button"), { textContent: "Discard" });
+    discard.dataset.sbb = "unsaved-discard";
+    discard.onclick = () => editCh?.discard(c.id);
+    row.append(msg, dl, " ", discard);
+    return row;
+  }));
+}
 if (fromParent) {
   // (nothing it says is secret: to any parent; the nonce only once)
   const said = /^#sb-nonce=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(location.hash);
@@ -332,6 +376,21 @@ if (fromParent) {
         const port = e.ports?.[0], revision = m.revision === undefined || m.revision === null ? null : typeof m.revision === "string" && m.revision.length <= 200 ? m.revision : undefined;
         if (port && given && revision !== undefined) answers = answerChannel(port, typeof m.name === "string" ? m.name : null, revision);
         host.answers = answers;
+        // (editing granted: a revision, a port given with a nonce, and a board an editable one's size)
+        if (port && given && m.edit === true && typeof revision === "string" && utf8Length(m.text) <= EDIT_BOUNDS.boardBytes) {
+          try {
+            const ch = (editCh = new EditChannel(m.text, revision, (x) => port.postMessage(x), {
+              show: (d, note) => { for (const f of editSubs) void f(d, note); },
+              allowed: (on, why) => setEditing({ allowed: on, ...(why ? { why } : {}) }),
+              kept: (c) => showKept(c),
+              say: (md) => setEditing({ ...editingNow, why: md }),
+            }));
+            port.addEventListener("message", (ev) => ch.receive(ev.data));
+            port.start();
+            (window as any).sagebrushEdit = ch;
+            setEditing({ allowed: true });
+          } catch (err) { console.warn("board: editing not taken:", err); }
+        }
         // (the page gone: what waits for the host settled, the port closed)
         addEventListener("pagehide", () => answers?.close());
         fromParentDoc({ doc, notice });
@@ -738,7 +797,13 @@ const host: BoardHost = {
     // its answers are kept while it is open, and sent by Submit; nothing to
     // say, web/board-host-protocol.md "Unsent answers")
     save(d) {
-      if (fromParent) return;
+      // (in a frame: to the host, if it granted editing; else kept nowhere.  With its pictures in it (data: URLs),
+      // as the host keeps them: the editor keeps them apart; one save after another, in order)
+      if (fromParent) {
+        const ch = editCh;
+        if (ch) editSaving = editSaving.then(async () => ch.save(await host.images.inline(d))).catch((e) => console.warn("board: an edit not sent:", e));
+        return;
+      }
       if (unsaved) throw new Error(STORAGE_REFUSED);
       if (local && ws) return wsSave(source.slice(6), d);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
@@ -749,6 +814,11 @@ const host: BoardHost = {
     },
     // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
     ...(local && ws ? { subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; } } : {}),
+    // (a frame: the host's changes, and whether Edit is offered at all)
+    ...(fromParent ? {
+      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { editSubs.add(f); return () => { editSubs.delete(f); }; },
+      editing(f: (s: EditingState) => void) { editingSubs.add(f); f(editingNow); return () => { editingSubs.delete(f); }; },
+    } : {}),
     // (whether it was written here, a new board: kept beside it, never in it)
     writtenHere(set) {
       const k = saveKey + "#here";

@@ -1,0 +1,436 @@
+// The frame's side of editing (web/board-host-protocol.md, "Editing: a host
+// that saves the board"): a host that grants `edit: true` saves the board,
+// and the frame sends it what the user does, as changes with what they were
+// changed from (`was`), and shows what the host says the board has become.
+//
+// The frame keeps two things: the host's state at the latest revision it
+// received, and its own transactions not yet saved (the edit in flight, then
+// those made since).  It shows the host's state with its own changes over it.
+// What it holds unsaved is bounded in total (Bounds, daybreak2's
+// LIMIT-9B5-1): counted as it changes, editing paused before the bound, and
+// nothing dropped that the user made; what can't be saved is kept for the user
+// to download until they discard it.
+//
+// No DOM here: the page gives the frame's channel a port and an EditUi.
+
+import { cleanDoc, isBoard, type BoardDoc } from "./doc";
+import { toRecords, fromRecords, SCHEMA } from "./history";
+import { uuid } from "./channel";
+
+/** The bounds (web/board-host-protocol.md, Bounds). */
+export const EDIT_BOUNDS = {
+  /** one message (`edit`), as UTF-8 */
+  messageBytes: 2 ** 20,
+  messageChanges: 1000,
+  /** everything held unsaved: the edit in flight, the transactions not sent, the copies kept (LIMIT-9B5-1) */
+  heldBytes: 8 * 2 ** 20,
+  heldChanges: 8000,
+  /** transactions made within this long go into one edit */
+  batchMs: 250,
+  /** an editable board, as JSON text */
+  boardBytes: 8 * 2 ** 20,
+  /** edit ids answered, remembered */
+  ids: 100,
+};
+// (room left in an edit message for its envelope: sagebrush, version, id, base)
+const ENVELOPE = 1024;
+
+type Key = { type: string; page: string; id: string };
+type Rec = Key & { [field: string]: unknown };
+export type Change =
+  | { op: "set"; key: Key; fields: Record<string, unknown>; was: Record<string, unknown>; create?: true; record?: Record<string, unknown> }
+  | { op: "delete"; key: Key; was: Record<string, unknown> };
+/** One editor action, with every record it touched; `bytes`: its UTF-8 JSON as an array, plus one for the
+ * separator a download puts after it (daybreak2's check 2: the framing counted, not allowed for). */
+interface Tx { changes: Change[]; bytes: number }
+/** What the frame keeps for the user to download: a refused edit's changes, or everything unsaved when editing
+ * ended with keepUnsaved (then with the view as the user saw it). */
+export interface Kept { id: number; why: string; revision: string; txs: Tx[]; view?: BoardDoc }
+
+/** What the frame shows: the page's side of the channel. */
+export interface EditUi {
+  /** show this board (the host's state with the frame's unsaved changes over it), with a note for the caption */
+  show(doc: BoardDoc, note?: string): void;
+  /** Edit allowed or not: paused at the bound, or ended by the host (`why` said) */
+  allowed(on: boolean, why: string): void;
+  /** the copies kept for download changed */
+  kept(copies: readonly Kept[]): void;
+  /** say this in the caption */
+  say(md: string): void;
+}
+
+const keyOf = (k: { type: unknown; page: unknown; id: unknown }) => JSON.stringify([k.type, k.page, k.id]);
+const KEY_FIELDS = new Set(["type", "page", "id"]);
+const TEXT = new Set(SCHEMA.stringCols);
+// (the same JSON whatever the order of an object's keys)
+const canon = (x: unknown): string => JSON.stringify(x, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v)) ?? "null";
+/** UTF-8 bytes of a string, without encoding it. */
+export function utf8Length(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+}
+const txOf = (changes: Change[]): Tx => ({ changes, bytes: utf8Length(JSON.stringify(changes)) + 1 });
+const fieldsOf = (r: Rec) => { const o: Record<string, unknown> = {}; for (const k of Object.keys(r)) if (!KEY_FIELDS.has(k)) o[k] = r[k]; return o; };
+const textOf = (r: Rec) => { const o: Record<string, unknown> = {}; for (const k of Object.keys(r)) if (TEXT.has(k)) o[k] = r[k]; return o; };
+
+/** A board's records, keyed. */
+function recordsOf(d: BoardDoc): Map<string, Rec> {
+  const m = new Map<string, Rec>();
+  for (const r of toRecords(d)) m.set(keyOf(r), r);
+  return m;
+}
+function boardOf(m: Map<string, Rec>): BoardDoc {
+  const rs = [...m.values()];
+  const match = (w: any) => (r: any) => Object.entries(w).every(([k, v]) => r[k] === v);
+  return fromRecords({ get: (w: object) => rs.filter(match(w)), getOne: (w: object) => rs.find(match(w)) } as any);
+}
+
+/** The changes that take `from` to `to`, each with what it was (`was`), as an editor action's transaction. */
+export function diff(from: Map<string, Rec>, to: Map<string, Rec>): Change[] {
+  const out: Change[] = [];
+  for (const [k, r] of to) {
+    const o = from.get(k), key = { type: r.type, page: r.page, id: r.id } as Key;
+    if (!o) { out.push({ op: "set", key, fields: fieldsOf(r), was: {}, create: true }); continue; }
+    const fields: Record<string, unknown> = {}, was: Record<string, unknown> = {};
+    let text = false;
+    for (const f of new Set([...Object.keys(o), ...Object.keys(r)])) {
+      if (KEY_FIELDS.has(f)) continue;
+      // (the board's pictures: an edit adds or changes them, never removes one: the editor keeps pictures apart, by
+      // their content's name, and may not take one in at all (its pixels), so one missing from its view needn't be
+      // one the user deleted; its bytes stay with the host)
+      const v = r.type === "doc" && f === "images" ? keptPictures(o[f], r[f]) : r[f];
+      if (canon(o[f]) === canon(v)) continue;
+      fields[f] = v === undefined ? null : v;
+      was[f] = o[f] === undefined ? null : o[f];
+      if (TEXT.has(f)) text = true;
+    }
+    if (Object.keys(fields).length) out.push({ op: "set", key, fields, was, ...(text ? { record: fieldsOf(r) } : {}) });
+  }
+  for (const [k, o] of from) if (!to.has(k)) out.push({ op: "delete", key: { type: o.type, page: o.page, id: o.id } as Key, was: textOf(o) });
+  return out;
+}
+
+// (the pictures map after an edit: what the view has, over what was there)
+function keptPictures(before: unknown, after: unknown): unknown {
+  const plainMap = (x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null);
+  const a = plainMap(before), b = plainMap(after);
+  if (!a) return after;
+  return { ...a, ...(b ?? {}) };
+}
+
+/** `changes` applied to `m` (a host's: without `was`; or the frame's own, over the host's state).  For the
+ * frame's own: a set of a record that isn't there is taken only if it makes it (`create`) or restores it
+ * (`record`); else it returns false, for the caller to drop it. */
+function applyTo(m: Map<string, Rec>, changes: readonly any[], own = false): boolean[] {
+  return changes.map((c) => {
+    const k = keyOf(c.key);
+    if (c.op === "delete") { m.delete(k); return true; }
+    const cur = m.get(k);
+    if (!cur) {
+      if (own && !c.create && !c.record) return false;
+      const base: Rec = { ...(c.record ?? {}), type: c.key.type, page: c.key.page, id: c.key.id };
+      m.set(k, setFields(base, c.fields));
+      return true;
+    }
+    m.set(k, setFields({ ...cur }, c.fields));
+    return true;
+  });
+}
+function setFields(r: Rec, fields: Record<string, unknown>): Rec {
+  for (const [f, v] of Object.entries(fields ?? {})) {
+    if (KEY_FIELDS.has(f)) continue;
+    if (v === null) delete r[f];
+    else r[f] = v;
+  }
+  return r;
+}
+
+/** The frame's side of an editing channel. */
+export class EditChannel {
+  /** the latest revision received */
+  revision: string;
+  private host: Map<string, Rec>;
+  /** the view as the editor has it (what it was last shown, with its own saves), normalized as it saves */
+  private view: Map<string, Rec>;
+  /** transactions not yet saved: the in-flight edit's first */
+  private unsaved: Tx[] = [];
+  private inFlight: { id: string; n: number } | null = null;
+  private keptCopies: Kept[] = [];
+  private nextKept = 1;
+  /** everything held: unsaved and kept (LIMIT-9B5-1).  Changed only where state is made or released, never
+   * when it moves from unsaved to kept (daybreak2's check 1, astra's clarification) */
+  private held = { bytes: 0, changes: 0 };
+  private paused = false;
+  private ended = false;
+  private waitingReplace = false;
+  private answered: string[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private retryAt = 0;
+  /** what happened, the latest 200: for tests */
+  readonly log: { what: string; id?: string; n?: number }[] = [];
+
+  constructor(text: string, revision: string, private post: (m: object) => void, private ui: EditUi, private now: () => number = () => Date.now()) {
+    const d = JSON.parse(text);
+    if (!isBoard(d)) throw new Error("not a board");
+    this.revision = revision;
+    this.host = recordsOf(d);
+    this.view = recordsOf(cleanDoc(d));
+  }
+
+  /** Everything held unsaved, for the bound and for tests. */
+  totals(): { bytes: number; changes: number } { return { ...this.held }; }
+  get isPaused(): boolean { return this.paused; }
+  get isEnded(): boolean { return this.ended; }
+  get inFlightId(): string | null { return this.inFlight?.id ?? null; }
+  get pending(): number { return this.unsaved.length; }
+  copies(): readonly Kept[] { return this.keptCopies; }
+  private note(what: string, extra: { id?: string; n?: number } = {}) { this.log.push({ what, ...extra }); if (this.log.length > 200) this.log.shift(); }
+
+  /** The editor kept `doc`: one action, so one transaction (none if nothing changed). */
+  save(doc: BoardDoc) {
+    const next = recordsOf(cleanDoc(doc));
+    const changes = diff(this.view, next);
+    if (!changes.length) { this.view = next; return; }
+    const tx = txOf(changes);
+    const undo = (why: string) => { this.note("undone", { n: changes.length }); this.ui.show(boardOf(this.viewMap()), why); };
+    if (this.ended) return undo("**Not saved:** editing here has ended.");
+    // (a single transaction past an edit's bounds: never sent; undone at once, said)
+    if (tx.bytes > EDIT_BOUNDS.messageBytes - ENVELOPE || changes.length > EDIT_BOUNDS.messageChanges) return undo("**That change is too large to save here**, so it was undone.");
+    // (both margins, before it is taken: daybreak2's check 4; paused, nothing new is taken, and what is held fits)
+    if (this.paused || this.held.bytes + tx.bytes > EDIT_BOUNDS.heldBytes || this.held.changes + changes.length > EDIT_BOUNDS.heldChanges) return undo("**Not saved:** waiting for the host to save your earlier changes.");
+    this.unsaved.push(tx);
+    this.held.bytes += tx.bytes;
+    this.held.changes += changes.length;
+    this.view = next;
+    this.note("tx", { n: changes.length });
+    this.checkBound();
+    this.schedule(EDIT_BOUNDS.batchMs);
+  }
+
+  /** A message from the host on the port: true if it was editing's. */
+  receive(m: any): boolean {
+    if (!m || typeof m !== "object" || m.version !== 1) return false;
+    switch (m.sagebrush) {
+      case "saved": return this.onSaved(m), true;
+      case "remote": return this.onRemote(m), true;
+      case "replace": return this.onReplace(m), true;
+      case "editing": return this.onEditing(m), true;
+      case "refused": return this.inFlight !== null && m.id === this.inFlight.id ? (this.onRefused(m), true) : false;
+    }
+    return false;
+  }
+
+  /** The kept copy `id` as a file, built from parts (no second whole-state string), and its name. */
+  download(id: number): { blob: Blob; name: string } | null {
+    const k = this.keptCopies.find((c) => c.id === id);
+    if (!k) return null;
+    const parts: string[] = [`{"format":"sagebrush-board-unsaved","version":1,"revision":${JSON.stringify(k.revision)},"why":${JSON.stringify(k.why)}`];
+    if (k.view) parts.push(`,"view":`, JSON.stringify(k.view));
+    parts.push(`,"transactions":[`);
+    k.txs.forEach((t, i) => parts.push((i ? "," : "") + JSON.stringify(t.changes)));
+    parts.push("]}\n");
+    return { blob: new Blob(parts, { type: "application/json" }), name: "unsaved-changes.json" };
+  }
+  /** Forget the kept copy `id` (the user discarded it): what it held is released. */
+  discard(id: number) {
+    const i = this.keptCopies.findIndex((c) => c.id === id);
+    if (i < 0) return;
+    const [k] = this.keptCopies.splice(i, 1);
+    this.release(k.txs);
+    this.note("discard", { n: k.txs.length });
+    this.ui.kept(this.keptCopies);
+    this.checkBound();
+  }
+
+  // (state released: the only place the totals go down)
+  private release(txs: readonly Tx[]) {
+    for (const t of txs) { this.held.bytes -= t.bytes; this.held.changes -= t.changes.length; }
+  }
+  private checkBound() {
+    const near = this.held.bytes > EDIT_BOUNDS.heldBytes - EDIT_BOUNDS.messageBytes || this.held.changes > EDIT_BOUNDS.heldChanges - EDIT_BOUNDS.messageChanges;
+    const below = this.held.bytes < EDIT_BOUNDS.heldBytes / 2 && this.held.changes < EDIT_BOUNDS.heldChanges / 2;
+    if (!this.paused && near) {
+      this.paused = true;
+      this.note("pause");
+      if (!this.ended) this.ui.allowed(false, this.keptCopies.length && !this.unsaved.length ? "Edit is paused: you have unsaved changes kept for download. Download them, then discard them, to go on editing." : "Waiting for the host to save your changes. Edit comes back once it has.");
+    } else if (this.paused && below) {
+      this.paused = false;
+      this.note("resume");
+      if (!this.ended) this.ui.allowed(true, "");
+    }
+  }
+  private schedule(ms: number) {
+    if (this.timer || this.inFlight || this.ended || !this.unsaved.length) return;
+    this.timer = setTimeout(() => { this.timer = null; this.flush(); }, Math.max(ms, this.retryAt - this.now()));
+  }
+  /** Send the next edit, if none is in flight: whole transactions, within one message's bounds. */
+  flush() {
+    if (this.inFlight || this.ended || !this.unsaved.length) return;
+    if (this.now() < this.retryAt) return this.schedule(0);
+    let bytes = ENVELOPE, n = 0, count = 0;
+    while (n < this.unsaved.length) {
+      const t = this.unsaved[n];
+      if (n && (bytes + t.bytes > EDIT_BOUNDS.messageBytes || count + t.changes.length > EDIT_BOUNDS.messageChanges)) break;
+      bytes += t.bytes;
+      count += t.changes.length;
+      n++;
+    }
+    const id = uuid(), changes = this.unsaved.slice(0, n).flatMap((t) => t.changes);
+    this.inFlight = { id, n };
+    this.note("edit", { id, n: changes.length });
+    this.post({ sagebrush: "edit", version: 1, id, base: this.revision, changes });
+  }
+
+  private settle(id: string) {
+    this.answered.push(id);
+    if (this.answered.length > EDIT_BOUNDS.ids) this.answered.shift();
+  }
+  /** The view: the host's state with the frame's unsaved changes over it. */
+  private viewMap(): Map<string, Rec> {
+    const m = new Map(this.host);
+    for (const t of this.unsaved) applyTo(m, t.changes, true);
+    return m;
+  }
+  /** Show the view, if it isn't what the editor has. */
+  private refresh(note?: string) {
+    const m = this.viewMap(), d = boardOf(m), shown = recordsOf(cleanDoc(d));
+    const same = shown.size === this.view.size && [...shown].every(([k, r]) => { const o = this.view.get(k); return !!o && canon(o) === canon(r); });
+    this.view = shown;
+    if (!same || note) this.ui.show(d, note);
+  }
+  // (the host's changes, from `base`: applied if base is the latest revision; else resync, and changes ignored
+  // until a replace)
+  private takeChanges(m: any): boolean {
+    if (this.waitingReplace) return false;
+    if (m.base !== this.revision || !Array.isArray(m.changes) || typeof m.revision !== "string") {
+      this.waitingReplace = true;
+      this.note("resync");
+      this.post({ sagebrush: "resync", version: 1 });
+      return false;
+    }
+    try { applyTo(this.host, m.changes); } catch {
+      this.waitingReplace = true;
+      this.post({ sagebrush: "resync", version: 1 });
+      return false;
+    }
+    this.revision = m.revision;
+    return true;
+  }
+
+  private onSaved(m: any) {
+    if (!this.inFlight || m.id !== this.inFlight.id) return this.note("ignored", { id: m.id });
+    const txs = this.unsaved.splice(0, this.inFlight.n);
+    this.release(txs);
+    this.settle(m.id);
+    this.inFlight = null;
+    this.note("saved", { id: m.id });
+    this.takeChanges(m);
+    const dropped = Array.isArray(m.dropped) ? m.dropped.length : 0;
+    this.refresh(dropped ? `**${dropped} of your changes had no effect:** what they changed was deleted elsewhere, or kept back because it was changed there.` : undefined);
+    this.checkBound();
+    this.schedule(0);
+  }
+  private onRemote(m: any) {
+    if (this.takeChanges(m)) this.refresh();
+  }
+  private onRefused(m: any) {
+    const id = this.inFlight!.id, n = this.inFlight!.n;
+    this.settle(id);
+    this.inFlight = null;
+    const message = typeof m.message === "string" ? m.message.slice(0, 500) : "refused";
+    if (typeof m.retryAfter === "number" && m.retryAfter >= 0) {
+      // (kept, each with its `was`, and sent again with what came since as a new edit, no sooner)
+      this.retryAt = this.now() + Math.min(m.retryAfter, 3_600_000);
+      this.note("retry", { id, n });
+      this.schedule(0);
+      return;
+    }
+    // (failed a check: those changes and the ones made on top of them, kept for download, moved there whole:
+    // the totals don't change, as nothing is released, astra's clarification)
+    this.keep(message, this.unsaved.splice(0, this.unsaved.length));
+    this.note("refused", { id, n });
+    this.refresh(`**Your last changes couldn't be saved:** ${message}. They're kept for you to download.`);
+    this.checkBound();
+  }
+  private keep(why: string, txs: Tx[], view?: BoardDoc) {
+    if (!txs.length && !view) return;
+    this.keptCopies.push({ id: this.nextKept++, why, revision: this.revision, txs, ...(view ? { view } : {}) });
+    this.ui.kept(this.keptCopies);
+  }
+  private onReplace(m: any) {
+    if (typeof m.text !== "string" || typeof m.revision !== "string") return;
+    let d: any;
+    try { d = JSON.parse(m.text); } catch { return; }
+    if (!isBoard(d)) return;
+    this.host = recordsOf(d);
+    this.revision = m.revision;
+    this.waitingReplace = false;
+    this.note("replace");
+    // (the edits it answers)
+    for (const a of Array.isArray(m.answered) ? m.answered : []) {
+      if (!a || !this.inFlight || a.id !== this.inFlight.id) continue;
+      if (a.outcome === "saved") {
+        this.release(this.unsaved.splice(0, this.inFlight.n));
+        this.settle(a.id);
+        this.inFlight = null;
+        this.note("saved", { id: a.id });
+      } else if (a.outcome === "refused") {
+        this.settle(a.id);
+        this.inFlight = null;
+        this.keep(typeof a.message === "string" ? a.message.slice(0, 500) : "refused", this.unsaved.splice(0, this.unsaved.length));
+        this.note("refused", { id: a.id });
+      }
+    }
+    // (unsaved changes to a record not there now: kept if they make it or restore it, else dropped, said)
+    let lost = 0;
+    const m2 = new Map(this.host);
+    for (const t of this.unsaved) {
+      const ok = applyTo(m2, t.changes, true);
+      if (ok.every(Boolean)) continue;
+      const kept = t.changes.filter((_, i) => ok[i]);
+      lost += t.changes.length - kept.length;
+      const nt = txOf(kept);
+      this.held.bytes += nt.bytes - t.bytes;
+      this.held.changes += kept.length - t.changes.length;
+      t.changes = kept;
+      t.bytes = nt.bytes;
+    }
+    // (a transaction left empty: gone; never the in-flight edit's, whose answer still counts them)
+    for (let i = this.unsaved.length - 1; i >= (this.inFlight?.n ?? 0); i--) if (!this.unsaved[i].changes.length) { this.release([this.unsaved[i]]); this.unsaved.splice(i, 1); }
+    this.refresh(lost ? `**${lost} of your changes had no effect:** what they changed isn't on the board any more.` : undefined);
+    this.checkBound();
+    this.schedule(0);
+  }
+  private onEditing(m: any) {
+    if (m.allowed !== false || this.ended) return;
+    this.ended = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const message = typeof m.message === "string" ? m.message.slice(0, 500) : "Editing has ended.";
+    const txs = this.unsaved.splice(0, this.unsaved.length);
+    this.inFlight = null;
+    if (m.keepUnsaved === true) {
+      // (kept, frozen: the view as the user saw it and every transaction not saved; nothing more is added)
+      this.keep(message, txs, boardOf(this.viewMap2(txs)));
+      this.note("keepUnsaved", { n: txs.length });
+    } else {
+      this.release(txs);
+      this.note("dropped", { n: txs.length });
+    }
+    this.ui.allowed(false, message);
+    this.refresh();
+  }
+  // (the view with these transactions over the host's state)
+  private viewMap2(txs: readonly Tx[]): Map<string, Rec> {
+    const m = new Map(this.host);
+    for (const t of txs) applyTo(m, t.changes, true);
+    return m;
+  }
+}

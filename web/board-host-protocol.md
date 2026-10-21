@@ -430,10 +430,8 @@ host sent on this channel, which need not be an edit's own `base`.
   - `reason` is one of the Refusal reasons' codes (`"history-full"`,
     `"quota"`, ...), for the frame to act on beside `message`.
     `"history-full"` always comes with `keepUnsaved: true`.
-  - **Specified, not implemented in the frame yet:** `keepUnsaved` ships
-    with the frame's editing side (CoCalc's step 2), as does the rest of
-    Editing (see Status). A host can send it now; a frame without it acts
-    as without the flag, since a receiver drops fields it doesn't know.
+  - An older frame, from before its editing side was built, acts as
+    without the flag, since a receiver drops fields it doesn't know.
 
 **Every edit is answered exactly once:** by its `saved`, by its `refused`,
 or by an entry in a `replace`'s `answered`, never more than one of these.
@@ -1039,13 +1037,28 @@ function openChannel(me) {
 
 ## Status
 
-- Editing (the section above) is specified, not built. The frame's side and
-  `editState` come with CoCalc's step 2, which saves edits made in the card
-  to the file.
-- `editing`'s `keepUnsaved` (and `reason`) is specified, not implemented in
-  the frame yet. It ships with the frame's editing side (CoCalc step 2).
-- The frame's unsaved-state bound (Bounds) ships with it too. These tests
-  are its acceptance (daybreak2's LIMIT-9B5-1):
+- Editing (the section above): the frame's side is built
+  (web/board/edit-channel.ts, wired in page.ts and mount.ts), with
+  `keepUnsaved` and the frame's unsaved-state bound. web/board/test-edit-channel.mjs
+  plays `editState` as the host against it, and web/board/test-frame-edit.mjs
+  does the same in a real frame, its heap measured. A frame not granted
+  editing offers no Edit.
+  CoCalc's host side (step 2, which saves edits made in the card to the
+  file) is built apart, with `editState`.
+- Pictures in an edit, to a host that keeps them inline (no
+  `pictures: "by-reference"` yet): the frame sends them as `data:` URLs, as
+  posted. Its editor names pictures by their content, so the first edit of a
+  board whose pictures have other names adds them under those, and an edit
+  never removes a picture from the board's map: the bytes of every picture
+  the board names stay with the host. Sent by reference (above), a picture
+  is named by its content on both sides, so nothing is renamed.
+- `editing`'s `keepUnsaved` is implemented in the frame: what it keeps is
+  frozen, shown in a bar with Download and Discard, and counted in the bound.
+  A `reason` is shown with `message`; the frame doesn't act on it otherwise
+  yet.
+- The frame's unsaved-state bound (Bounds) is built with it. Its acceptance
+  tests (daybreak2's LIMIT-9B5-1) are in test-edit-channel.mjs and, with the
+  heap measured, test-frame-edit.mjs:
   - **A host that never answers.** The user changes the same near-limit
     field over and over, each change a large `was` and value. Then:
     - Edit pauses before the bound;
