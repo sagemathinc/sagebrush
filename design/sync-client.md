@@ -231,7 +231,7 @@ The record goes when nothing is pending for the identity. Every rule below reads
 - **accepted:** the blob was uploaded before (an ack lost), or another device uploaded the same bytes. A takes effect like any accepted op. If the view later needs A's bytes (say, after a refusal of what followed), they are fetched like any remote content (C5).
 - **refused `missing`:** A is removed (C1), and `allocated` falls back to the identity's confirmed hash.
 
-Until A is decided, the scan allocates no further write for that identity. It sets `held` and passes on, so the watermark isn't stuck: one record written per skipped op. A's decision, in its own transaction, clears `held` and allocates one write for the identity's current state. Its `base` is A's hash if A was accepted, else the confirmed hash. So the current state is scheduled in both cases, from the actual answer.
+Until A is decided, the scan allocates no further write for that identity. It sets `held` and passes on, so the watermark isn't stuck: one record written per skipped op. A's decision, in its own transaction, clears `held` and allocates one write for the identity's current state. Its `base` is A's hash if A was accepted; else the newest accepted record's not yet confirmed (`acceptedTip`), else the confirmed hash (see As built below). So the current state is scheduled in both cases, from the actual answer.
 
 A held write is part of the view (C3). Its bytes are the file's current ones, so it adds nothing to the cap.
 
@@ -246,6 +246,86 @@ A held write is part of the view (C3). Its bytes are the file's current ones, so
   - another device had uploaded A's bytes (accepted; likewise);
 - **a long offline tail** (50,000 ops across 1,000 files), then 200 overwrites of one file at a 1 MiB cap. Each save reads and writes at most 40 records, counted by an instrumented store, and its longest task stays under 50 ms. The cleanup then drains in pages of 500;
 - a crash mid-way, including part-way through the paged cleanup: no pin leaked, every pin owned by an op, a record or the journal, and the byte total equal to the sum of the retained pins.
+
+**As built (step 2b-2):** settled with @sagebrush, astra and daybreak2 before the code, then amended by astra's P1 and P2, and by the review of e5c5993b (astra's CORR-E5C-1 to 3, daybreak2's LIMIT-E5C-1 and 2). The code is web/workspace/sync-pins.ts, with the outbox's scan and decisions in sync-outbox.ts. The workspace database is at v5. Its upgrade is schema only, as every upgrade is: the versions kept before are made prunable afterwards by the cleanup, a bounded slice at a time (daybreak2's LIMIT-563-2).
+- **The lease's lifecycle.** Sync is on while `sync:current` is a lease that isn't off.
+  - Off (turning sync off, signing out) writes `{ns, gen + 1, off: true}`. A switch writes `{ns', gen + 1}`. A reconnect takes a new generation of the same namespace.
+  - Generations only ever increase. `sync:current` is never deleted, so no old lease can come back. A generation only fences stale writers.
+  - **The lifecycle epoch** (`sync:epoch`) moves only on off, sign-out or a namespace switch, never on a reconnect (P1). It records a purge (`sync:purge` `{epoch, cursor}`) of every pin of an older epoch, done a page at a time by cleanPins. A reconnect keeps every pin.
+  - The namespace's resume state (watermark, sequence, outbox, its pending fields) is kept: re-enabling resumes it.
+- **Pins.** A pin is `pins[id, seq] = {path, sha256, size, epoch, storage, skey, orphan?, owner?}`.
+  - `storage` says where its bytes are: `{fileBytes: fid}` while they are the file's present bytes or orphaned (`orphan`), `{version: id}` once kept apart. `skey` (`f:<fid>`, `v:<id>`) is indexed (`byStorage`).
+  - `owner` is `{ns, dseq}`, the record a scan handed it to (P1: no generation in it, so a reconnect keeps it owned).
+  - One pin per storage: a write of the same bytes again takes no pin.
+  - `sync:pinBytes` totals the bytes pins keep of their own, apart or orphaned, against the cap: min(1 GiB, half the estimated free space). Charging past the cap releases the pin instead.
+  - Pinned versions are exempt from pruning, dropVersions and emptyTrash's version drops. They have no record in the store `prunable` (database v5: one `{fid, id, t, size}` per version not kept for sync, by `[fid, id]`, with an index `byId`); a release puts one, if the file is still there. Every drop reads only that store, so only droppable ones.
+- **Release** is one transaction with everything it implies:
+  - the total goes down;
+  - a version kept apart loses its exemption once no pin names it;
+  - orphaned bytes go with the last reference to them: no pin naming that storage, no entry, and, from step 4, no journal record;
+  - an owned pin marks its record unpinned (`allocated.pinned = false`) and notes `sync:skipped` `{count, files}`. No owned pin is ever deleted silently.
+- **Orphans.** Emptying Trash while a file's present bytes are pinned keeps fileBytes[fid], charged as the pin's own (or released and noted if past the cap), and marks it (`sync:orphan:<fid>`). bytesFor reads them through the pin's `storage`, verifying the hash, under the read token. cleanPins sweeps only marked fids that no pin and no entry names; a file's own bytes are never candidates (an entry not yet given its identity would look unnamed).
+- **Pending.** A pending record is `{id, latest, byNs}`.
+  - `latest` {seq, by, after} is local and kept across namespaces.
+  - `byNs[ns]` holds that namespace's `allocated` {dseq, sha256, pinned, state}, `acceptedTip`, `held`, `collapsed`, `cutoff` and `successor`. A new namespace's first write inherits no base, held bit or cutoff. A settled state is dropped once its identity's latest op is scanned.
+- **Decisions.** An echo before the ack counts as acceptance. `acceptedTip` goes by dseq, so a late answer for an older record never moves it back.
+- **The base.** A successor's base is:
+  - `allocated.sha256` while that record is undecided or accepted;
+  - else `acceptedTip` (the newest accepted, not yet confirmed);
+  - else the confirmed index's (and, until C3 keeps syncIndex, the op's local base).
+  - So with Z confirmed, A accepted but not echoed, B unpinned and refused `missing`, and C held, C's base is A, never Z.
+  - A write whose bytes equal its base is skipped.
+- **Held successors as durable intents** (astra's schedules 1, 2 and 5; P2).
+  - A's decision (accepted, or refused `missing`) clears `held`. In the same transaction it records `successor: {base}`, the base from A's actual answer, and the identity in `sync:<ns>:successors`. It allocates nothing there, so an ack never needs room and the cap is never overrun.
+  - A recorded successor gates allocation: no later write of that identity is allocated before it.
+  - The scan drains successors only once a page has read every op logged (caught up, in that transaction), while there is room (astra's CORR-E5C-1). Every op before the successor, of the identity and of the folders it is in (a mkdir, a rename, a move, a removal), then already has its record, so the successor comes after all of them. Each becomes one write record of the identity's current state, read then: the entry by `byIdent`, its present sha and size, its path and parent. It is re-pinned on the present bytes, with `lseq` = latest.seq.
+  - An identity in Trash (itself, or a folder it is in) keeps its successor waiting: a write would bring it back, and the removal stands (no resurrection, CORR-E5C-2). It goes once the identity is restored, after the restore's record, with its bytes; it ends as gone if the identity is deleted for good. Until then the server's Trash holds the identity's last accepted bytes. One the server never had (its create refused) is in this device's Trash only, until it is restored (then it goes) or emptied.
+  - In that same transaction `cutoff` = latest.seq is recorded, so the scan later skips this identity's writes with seq ≤ cutoff (already represented). It does not skip its renames, removes or forgets.
+  - If the current state is gone (no entry, or latest.after null: a forget or emptyTrash came first), no write is made and no identity is resurrected. The successor and held clear, its pins are released, and the deletion op goes as usual.
+  - A renamed or moved current identity is allocated at its present path and parent.
+- **Collapse** (a save past the cap):
+  - `collapsed` is set to the previous latest seq, and at most PINS.collapseRelease (3) unowned pins with seq ≤ collapsed are released in that save's transaction. cleanPins releases the rest, begun after the save returns.
+  - That cleanup is tagged with the save's namespace and lifecycle epoch (P1). In each slice's transaction it releases only unowned pins of that epoch or older, collapsed in that namespace. A run that starts after a later save, a reconnect, or sync turned off and on never takes an owned pin or one of a newer epoch.
+  - If still over, the replaced bytes aren't kept apart: their pin is released (its record unpinned) and `sync:skipped` is noted.
+  - A save that then fails for quota refuses the change whole: nothing is half-pinned.
+  - Versions released together fall due for pruning together. A save drops at most PRUNE_STEP (1) of its file's versions past the count or the age, reading at most maxVersions + PRUNE_STEP (21) of its prunable records; past the bytes, at most 2 of everyone's, by `byId` (daybreak2's LIMIT-E5C-2). One version is kept a save, so without sync at most one is ever due past the count. Each drop is three requests: the version, its bytes, its prunable record. What is left is marked due (`versions:due:<fid>`, `versions:over`), and the cleanup drops it.
+  - Count and age pruning happen on a file's saves and on the cleanup they leave due, not while a file sits unchanged. Should idle pruning be added, it goes through the same bounded cleanup.
+- **The scan, for a data file's write** (create, write, adopt):
+  - seq ≤ collapsed or ≤ cutoff: no record, its pin released, noted skipped.
+  - held, a successor recorded, or the allocated record unpinned and undecided: `held`, no record, its pin released.
+  - Otherwise: the record with the base above, its pin handed over (`owner`), `allocated` updated.
+- **Ownership in one lookup each** (daybreak2):
+  - "the last reference" is one count on the `byStorage` index (database v5);
+  - each file's pin on its present bytes is pointed to by `sync:cur:<fid>`;
+  - the sweep's candidates are the orphan markers.
+  - So no ownership question scans pins.
+  - A save reads the lease, the pin total and the epoch once per transaction. Every write of one goes through `metaWrite`, so a read after it in that transaction sees it. The cache is dropped when its transaction completes or aborts, so it never outlives it.
+  - The cleanup goes a slice at a time, each slice one transaction, until nothing durable is left (daybreak2's LIMIT-E5C-1). Its steps, each from a durable cursor: the versions kept before v5 made prunable (`versions:backfill`, the last id done), the purge, collapsed pins, the orphan markers, then versions left due.
+  - The upgrade makes `prunable` empty, so it builds no index over the versions already kept: its time doesn't grow with them (daybreak2's LIMIT-563-2; indexes on the versions store itself took 3.3 s over 50,000).
+  - Until that backfill ends, a version kept before v5 has no prunable record, so it is kept, never wrongly dropped; none of them is pinned. A save meanwhile drops only what it can see and marks `versions:over` if it is past the bytes; the backfill marks it again at its end if the total is still past them, and the cleanup then drops the rest. The open never waits for it.
+  - The backfill's end is fixed when it begins (`through`, the newest version's id then): versions saved since have prunable records of their own and are never its to walk, so however fast they come it ends, and the steps behind it (the purge, the version cleanup) run (daybreak2's round 4).
+  - A deletion the person asks for never waits for the backfill (@sagebrush's round 5). Emptying Trash and dropVersions("/") delete straight from the versions store: a file's versions by the index byFile, everyone's by id, a page a transaction going on from the last one looked at, those kept for sync passed over, each with its prunable record if it has one. A file emptied from Trash has its whole prunable range deleted in one request on its last page. Each reports done only when every matching version not kept for sync is gone, and says its own progress as it goes (onDeleting: the board page shows "Deleting old versions… N%"). Measured: emptying Trash of one file with 50,000 versions kept before v5, none backfilled, takes 9.7 s.
+  - Emptying Trash marks each file's versions to go (`versions:gone:<fid>`) in the transaction that removes its entry; a reload part way through leaves the cleanup to finish them, and the backfill deletes, never makes prunable, a version so marked. A backfill page racing a deletion reads only versions still there, so it leaves no prunable record without its version.
+  - A drop of a file's that needs its versions in the order kept (its newest `keep`, a fence) first puts that file's versions kept before v5 in the prunable store (finishBackfillFor), bounded by that file's versions, not the whole store's.
+  - The backfill makes no version of a file deleted for good prunable: it deletes it, as the deletion would have, once the migrator has given every entry its identity (until then absence can't be told).
+  - A file's due versions: the newest maxVersions stay, found by a key cursor from the newest advanced over them (maxVersions keys at most), never a count of the file's whole list (daybreak2's LIMIT-563-1). Each slice then drops a bounded page from the oldest end.
+  - A slice reads at most PINS.slice.examine (100) records a step and makes at most PINS.slice.requests (400) IndexedDB requests. An item is begun only while its costliest outcome still fits (a release, RELEASE_COST = 13 requests). A timer comes between slices, and a new one is scheduled while work remains, so a run never stops with work left and none to follow it.
+  - It begins first at each start (whichever tab holds the migration, so the backfill after the upgrade starts at once), after a collapse, after a lifecycle change (turning sync off, a namespace switch), after a change that released a pin, and after a save that left versions due. One runs at a time; the same one asked for again while it waits isn't queued twice.
+  - Every release that makes a version prunable (by confirmation, refusal, purge or collapse) marks its file due from its oldest, and the bytes bound to be checked again, in the same transaction, so the cleanup's cursor for that file never passes it by, and a file pushed past its count by releases after its due mark has gone is due again (astra's CORR-FB0-2). The backfill rewinds the cursor of a file already due; a file not due stays so (an idle file's versions are pruned on its next save, as before v5). A released version of a file deleted for good is deleted, never made prunable.
+  - dropVersions and emptyTrash's version drops go from the last id they looked at, a key range, at most 400 requests a transaction, so they never read a page again (astra's CORR-E5C-3). One that has reached a finite upper bound (the fence, or a file's newest kept) stops there, before making a range from it (astra's round 2).
+- **CI assertions, not a bench** (decided with @sagebrush):
+  - In the 50,000-op tail, each plain save makes at most 40 IndexedDB calls, counted by an instrumented store, and one that collapses at most 64 (measured exactly: 33 and 59, so a change shows at once; PINS.collapseRelease 3 keeps the collapsing save five under its bound). Each kind's figures are the same as on a workspace with no tail.
+  - Each slice of the cleanup makes at most 400 requests, with the tail and without. More than 32,000 pins of collapsed writes drain in one cleanup, each slice under 50 ms, with no reload or save, and a newer epoch's pins are kept.
+  - The longest task stays under 50 ms, as the browser's long-task observer reports it (the check requires the observer).
+  - A cleanup page and a decision on an identity with many pins stay bounded too.
+  - A backlog of 50 versions past the age: 1 dropped in the save, the rest by the cleanup after it. Past the bytes: a few in the save, the rest by the cleanup, the total exact.
+  - One file with 1,000, 10,000 and 50,000 pinned versions, or 50,000 of another file: a save reads the same records and makes the same requests. With 50,000 prunable ones of its own: at most the window of 21 more records and 4 more requests. Counts are asserted exactly; times are reported, not asserted; the longest task is asserted under 50 ms.
+  - A due file with 1,000, 10,000 and 50,000 prunable versions drains in the cleanup, every slice within its requests and records, the same at every size; slice times reported.
+  - The upgrade to v5 over 1,000, 10,000 and 50,000 versions kept before writes no record and stays under 1 s. The backfill, cut at every page and reloaded, goes on from its marker and ends as v5 makes them; a save meanwhile drops none it hasn't reached; the bytes bound, past during it, is kept after it.
+  - Drops at 189, 190, 191 and 380 versions, fenced at the last id, everyone's and one file's (keep 1 too): no exception, the exact survivors (astra's round 2).
+  - dropVersions("/") past 1,000 pinned versions ends, keeps them, drops every other one, and keeps the total exact, each transaction within its requests.
+  - One pin per storage key, after every way pins move or are orphaned.
+  - astra's schedules (a move into a new folder; removal before either decision; a file in a trashed folder; a folder renamed after the decision; a move into a new folder that is then trashed), each with a reload in the middle: the local tree and the one the actual reducer makes from the records match, path for path and identity for identity.
 
 ### C3. The confirmed index and the optimistic view (CORR-8E7-3)
 

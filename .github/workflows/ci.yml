@@ -244,6 +244,7 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs

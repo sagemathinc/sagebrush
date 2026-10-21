@@ -653,9 +653,9 @@ async function versionActions() {
   check((await w.dropVersions("/f", { expect: { count: fu2.count, bytes: fu2.bytes, created: fe.created } })) === fu2.bytes && (await w.versionsUsage("/f")).count === 0, "…as confirmed: dropped");
   // many small versions of other files: a file's drop reads only its own; all of them, in batches
   const many = 2500;
-  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d" }); q.onsuccess = () => vb.put(new Uint8Array([1]), q.result); } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
-  const unbounded = [];
-  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if (q == null && (this.name === "byFile" || this.name === "versions")) unbounded.push([this.name, n]); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
+  await new Promise((ok) => { const tx = w.ws.transaction(["versions", "versionBytes", "prunable", "meta"], "readwrite"), vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable"); for (let i = 0; i < many; i++) { const q = vs.add({ fid: "zz" + i, t: i, size: 1, sha256: "", by: "person", device: "d" }); q.onsuccess = () => { vb.put(new Uint8Array([1]), q.result); pr.put({ fid: "zz" + i, id: q.result, t: i, size: 1 }); }; } const m = tx.objectStore("meta"), g = m.get("versionBytes"); g.onsuccess = () => m.put((g.result ?? 0) + many, "versionBytes"); tx.oncomplete = ok; });
+  const unbounded = [], pages = [];
+  const wrap = (proto) => { const orig = proto.getAll; proto.getAll = function (q, n) { if (q == null && (this.name === "byFile" || this.name === "versions")) unbounded.push([this.name, n]); else if (this.name === "versions" && this instanceof IDBObjectStore) pages.push(n); return orig.apply(this, arguments); }; return () => (proto.getAll = orig); };
   const un1 = wrap(IDBIndex.prototype), un2 = wrap(IDBObjectStore.prototype);
   try {
     await w.write("/moved.txt", "fourth");
@@ -663,7 +663,9 @@ async function versionActions() {
     check(unbounded.length === 0, "dropping a file's versions reads no other file's: " + JSON.stringify(unbounded));
     const before = (await w.versionsUsage()).count;
     const freed = await w.dropVersions("/");
-    check(unbounded.length > 1 && unbounded.every(([name, n]) => name === "versions" && n === 1000), "all of them: a batch of at most 1,000 records at a time (" + unbounded.length + " batches)");
+    // (a page of at most 130 a transaction, by a key range from the last id: astra's CORR-E5C-3)
+    // (from the versions store itself, by id, never waiting for the backfill: @sagebrush's round 5)
+    check(unbounded.length === 0 && pages.length > 1 && pages.every((n) => n === 130), "all of them: a page of at most 130 records at a time, by a key range of ids (" + pages.length + " pages)");
     check(before >= many && freed >= many && (await w.versionsUsage()).count === 0 && (await w.versionsUsage()).bytes === 0, "…all gone, the total 0 (" + before + ", " + freed + ")");
   } finally { un1(); un2(); }
   w.close();
@@ -874,7 +876,7 @@ const legacyLeft = async (w) => (await w.list("/", { recursive: true })).concat(
 async function migrateV1() {
   const big = "B".repeat(70000);
   const w = await v1([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]], [["/Trash/t.txt", "in trash", "/t.txt"]]);
-  check(w.ws.version === 4 && ["fileBytes", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending"].every((x) => w.ws.objectStoreNames.contains(x)), "a version 1 workspace opened: upgraded to the current version, its stores added");
+  check(w.ws.version === 5 && ["fileBytes", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending"].every((x) => w.ws.objectStoreNames.contains(x)), "a version 1 workspace opened: upgraded to the current version, its stores added");
   check((await legacyLeft(w)) === 4 && (await rawKeys(w.ws, "fileBytes")).length === 0, "…and nothing moved by the upgrade itself");
   check(dec((await w.read("/L/a.txt")).content) === "AAA" && dec((await w.read("/Trash/t.txt")).content) === "in trash", "files not yet moved are read where they are (and Trash's)");
   check((await w.dataFiles()).map(([p]) => p).sort().join() === "/L/a.txt,/L/big.bin,/top.csv", "…and given to a notebook's interpreter (dataFiles: not Trash's)");
