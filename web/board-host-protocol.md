@@ -1085,9 +1085,20 @@ function openChannel(me) {
     its checks of shapes, names and sources, and the authorization of new
     pictures.
 
-  With an older package a host refuses `data:` URLs in edits itself. Specified,
-  not built yet: the frame's side of `imagePut`, `imageGet` and
-  `pictures: ["by-reference"]` in `ready`, and the frame acting on `reason`.
+  With an older package a host refuses `data:` URLs in edits itself.
+- The frame's side of pictures by reference is built (web/board/edit-pictures.ts,
+  wired in page.ts). `ready` says `pictures: ["by-reference"]`. Granted:
+  - the board's pictures are got by `imageGet` before it is shown, and those
+    a `remote` or `replace` names before it is shown. Each picture is kept
+    only under the name its bytes hash to;
+  - each picture an edit adds is put by `imagePut`, and saved by the host,
+    before the edit that names it. One refused takes that action back, said;
+  - the in-flight bounds: 4 `imagePut` and 8 MiB of their bytes (with
+    pictures of at most 2,000,000 bytes, the count binds first), and 2
+    `imageGet` of at most 32 names, `more` asked again once.
+  web/board/test-edit-pictures.mjs checks these, and web/board/test-frame-edit.mjs
+  plays a host that grants them against the real frame. The frame doesn't
+  yet act on a refusal's `reason` beyond saying `message`.
 
 - Ask items, `sb board answers` and the controls are built in the order of
   /scratch/sagebrush-reviews/boards-both-ways-plan.md.

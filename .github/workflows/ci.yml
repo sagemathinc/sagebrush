@@ -271,6 +271,7 @@ jobs:
           bun web/board/test-own-names.mjs
           bun web/board/test-edit-state.mjs
           bun web/board/test-edit-channel.mjs
+          bun web/board/test-edit-pictures.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
 
