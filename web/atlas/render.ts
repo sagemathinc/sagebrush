@@ -151,6 +151,7 @@ ${o.noindex ? '<meta name="robots" content="noindex">' : ""}
 <link rel="stylesheet" href="/katex/katex.min.css">
 <style>${CSS}</style>
 <script type="module" src="/atlas/atlas.js"></script>
+<script src="/alpha-banner.js" defer></script>
 </head><body>
 <div class="top"><div class="in">
 <a class="brand" href="/atlas/">🌿 Sagebrush <span>Atlas</span></a>

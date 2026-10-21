@@ -7,6 +7,11 @@ import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync,
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
+/** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
+function withAlphaBanner(html: string): string {
+  if (!html.includes("</head>")) throw new Error("build: a page without </head> for the early-alpha notice");
+  return html.replace("</head>", '<script src="/alpha-banner.js" defer></script>\n</head>');
+}
 const here = import.meta.dir;
 const shims: Record<string, string> = {
   fs: "fs.ts", vm: "vm.ts", path: "path.ts", os: "os.ts", crypto: "crypto.ts",
@@ -153,6 +158,8 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + "<script>" + js + "</script>" + html.slice(m.index + m[0].length));
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
+// the early-alpha notice, for the site's own pages only (web/alpha-banner.js, SECURITY.md)
+copyFileSync(join(here, "alpha-banner.js"), join(here, "dist", "alpha-banner.js"));
 copyFileSync(join(here, "board-format.md"), join(here, "dist", "board-format.md"));
 copyFileSync(join(here, "board-host-protocol.md"), join(here, "dist", "board-host-protocol.md"));
 // (the format as a JSON Schema, written from web/board/doc.ts: scripts/board-format-schema.mjs)
@@ -260,7 +267,9 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   if (!cliMath.success) { for (const m of cliMath.logs) console.error(m); process.exit(1); }
   rmSync(join(here, "dist", ".cli-math"), { recursive: true, force: true });
   builds.push(["the command line's board render (math)", cliMath]);
-  copyFileSync(join(here, "board", "index.html"), join(here, "dist", "board", "index.html"));
+  // (the site's board page gets the early-alpha notice; the template itself doesn't, so neither the frame
+  // other sites embed (below) nor a downloaded board (export.ts) ever carries it)
+  writeFileSync(join(here, "dist", "board", "index.html"), withAlphaBanner(readFileSync(join(here, "board", "index.html"), "utf8")));
   mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
   for (const f of readdirSync(join(here, "board", "examples"))) if (/\.(json|md|mmd)$/.test(f)) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
   // (and the generated ones: scripts/board-examples.mjs)
@@ -393,7 +402,7 @@ mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
 mkdirSync(join(here, "dist", "s"), { recursive: true });
 copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
 mkdirSync(join(here, "site", "public", "s"), { recursive: true });
-for (const f of ["index.html", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
 // (the library's chunks)
 rmSync(join(here, "site", "public", "lib"), { recursive: true, force: true });

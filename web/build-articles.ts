@@ -187,6 +187,7 @@ function page(p: Page): string {
 <link rel="stylesheet" href="/katex/katex.min.css">
 <style>${CSS}</style>
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>
+<script src="/alpha-banner.js" defer></script>
 </head>
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
