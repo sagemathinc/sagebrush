@@ -58,7 +58,8 @@ export function answerChannel(port: MessagePort, name: string | null, revision: 
   const submits = new Map<string, { promise: Promise<SubmitResult>; settle: (r: SubmitResult) => void }>();
   const decides = new Map<string, (r: DecideResult) => void>();
   let closed = false;
-  port.onmessage = (e) => {
+  // (a listener, not onmessage: the editing channel, edit-channel.ts, listens on the same port)
+  const onMessage = (e: MessageEvent) => {
     const m = e.data;
     if (!m || typeof m !== "object" || m.version !== 1 || typeof m.id !== "string" || !UUID.test(m.id)) return;
     if (m.sagebrush === "received" || (m.sagebrush === "refused" && submits.has(m.id))) {
@@ -71,6 +72,8 @@ export function answerChannel(port: MessagePort, name: string | null, revision: 
       else w({ refused: "the host's answer was not one of the options" });
     }
   };
+  port.addEventListener("message", onMessage);
+  port.start();
   return {
     submit(id, a) {
       if (closed) return Promise.resolve({ unanswered: NO_ANSWER });
@@ -101,7 +104,7 @@ export function answerChannel(port: MessagePort, name: string | null, revision: 
       closed = true;
       for (const w of [...submits.values()]) w.settle({ unanswered: NO_ANSWER });
       for (const w of [...decides.values()]) w({ refused: NO_ANSWER });
-      port.onmessage = null;
+      port.removeEventListener("message", onMessage);
       port.close();
     },
     waiting: () => ({ submits: submits.size, decides: decides.size }),

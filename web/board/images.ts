@@ -192,6 +192,18 @@ export class Images {
     this.urls.set(name, URL.createObjectURL(blob));
   }
 
+  /** A picture's size and type, if it is at hand (no wait: for counting before its bytes are read). */
+  sizeOf(name: string): { size: number; type: string } | undefined {
+    const b = this.blobs.get(name);
+    return b ? { size: b.size, type: b.type } : undefined;
+  }
+  /** A picture as a data: URL, if this browser holds it. */
+  async dataUrl(name: string): Promise<string | undefined> {
+    await this.ensure([name]);
+    const b = this.blobs.get(name);
+    return b ? toDataUrl(b) : undefined;
+  }
+
   /** Have these pictures ready to show (from IndexedDB). */
   async ensure(names: Iterable<string>): Promise<void> {
     const missing = [...new Set(names)].filter((n) => !this.urls.has(n));
