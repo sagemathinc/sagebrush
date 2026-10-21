@@ -167,8 +167,11 @@ const LAP = "staleLap";
 const newLap = (): Lap => ({ origin: null, wrapped: false, count: 0, reasons: {}, paths: [] });
 async function cleanStale(w: Workspace) {
   const meta = <T>(f: (st: IDBObjectStore) => Promise<T>, mode: IDBTransactionMode = "readonly") => inTx(w.ws, "meta", mode, (tx) => f(tx.objectStore("meta")));
-  // (the cursor and the lap together: one past a mark only with what it found)
-  const setCursor = (c: string) => meta(async (st) => { st.put(c, CURSOR); st.put(lap, LAP); }, "readwrite");
+  // (the cursor and the lap together: one past a mark only with what it found.  One refused leaves both as they
+  // were, and the lap is then not saved on its own (the end's save, skipped), so the mark, tried again, isn't counted
+  // twice (daybreak2))
+  let unsaved = false;
+  const setCursor = (c: string) => meta(async (st) => { st.put(c, CURSOR); st.put(lap, LAP); }, "readwrite").catch((e) => { unsaved = true; throw e; });
   let cursor = ((await meta((st) => req(st.get(CURSOR)))) as string | undefined) ?? "";
   let lap = (((await meta((st) => req(st.get(LAP))).catch(() => undefined)) as Lap | undefined) ?? newLap());
   const saveLap = () => meta(async (st) => { st.put(lap, LAP); }, "readwrite").catch((e) => console.warn("workspace migration: the old copies' lap:", e));
@@ -238,7 +241,7 @@ async function cleanStale(w: Workspace) {
       }
     }
   } finally {
-    await saveLap();
+    if (!unsaved) await saveLap();
   }
 }
 
