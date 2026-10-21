@@ -412,6 +412,9 @@ async function staleCounts() {
   // (a full lap again: the figure from what it found, paths cut to STUCK_CHARS)
   const long = "/" + "n".repeat(400) + ".bin";
   await mark(long, { fails: 5, why: "storage" });
+  // (a lap spans starts (daybreak2): one already under way when the mark was made may have passed its place, so
+  // the next whole lap is the one sure to count it)
+  await W.startMigrator(w);
   await W.startMigrator(w);
   const full = await w.staleStuck();
   check(full && full.count >= 2 && full.paths.every((p) => p.path.length <= W.STUCK_CHARS) && full.paths.length <= W.STUCK_PATHS && J(Object.keys(full.reasons)) === J(["storage"]), "a full lap: the count, at most STUCK_PATHS paths each cut to STUCK_CHARS, a count per reason: " + J({ count: full?.count, longest: Math.max(...(full?.paths ?? []).map((p) => p.path.length)) }));
@@ -434,6 +437,37 @@ async function staleRounds() {
   w.beforeStaleDelete = null;
   const m = pick(await markOf(w, "/rounds.bin"));
   check(m?.fails === 1 && m.why === "rounds" && n >= 2, "an old copy that keeps changing while it is compared: no error, the mark left, counted as \"rounds\": " + J({ m, n }));
+  w.close();
+}
+
+async function staleLapSpans() {
+  // (daybreak2: more failing marks (1,100) than a start looks at (MIGRATE.stalePages × MIGRATE.files, 1,024): the lap
+  // spans starts, kept in meta; said once it is whole; a partial lap never lowers what is shown; a lap with every
+  // mark gone clears it)
+  localStorage.clear();
+  const r = Math.random().toString(36).slice(2, 8), w = await W.Workspace.open({ name: "ws-stalel-" + r, mainName: "main-stalel-" + r });
+  await W.startMigrator(w);
+  const one = enc("x"), sha = await H(one), n = 1100;
+  const keys = Array.from({ length: n }, (_, i) => "/l" + String(i).padStart(5, "0") + ".bin");
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); for (const k of keys) tx.objectStore("files").put(one, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); keys.forEach((k, i) => tx.objectStore("meta").put({ fid: "f" + String(i).padStart(15, "0"), size: 1, sha256: sha, fails: 5, why: "storage" }, "stale:files:" + k)); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  w.beforeStaleDelete = () => { throw new Error("storage refused"); };
+  const seen = [];
+  await W.startMigrator(w);
+  seen.push((await w.staleStuck())?.count ?? 0);
+  await W.startMigrator(w);
+  seen.push((await w.staleStuck())?.count ?? 0);
+  // (400 of them gone (their old copies removed): what is shown stays until a lap is whole again)
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); for (const k of keys.slice(0, 400)) tx.objectStore("files").delete(k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const after = [];
+  for (let k = 0; k < 4; k++) { await W.startMigrator(w); after.push((await w.staleStuck())?.count ?? 0); }
+  // (every one gone: a whole lap clears it)
+  await new Promise((ok, no) => { const tx = w.main.transaction("files", "readwrite"); for (const k of keys) tx.objectStore("files").delete(k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const clear = [];
+  for (let k = 0; k < 2; k++) { await W.startMigrator(w); clear.push((await w.staleStuck())?.count ?? 0); }
+  w.beforeStaleDelete = null;
+  const firstWhole = after.findIndex((c) => c === n - 400);
+  check(seen[0] === 0 && seen[1] === n && after.every((c) => c === n || c === n - 400 || (c >= n - 400 && c <= n)) && after.at(-1) === n - 400 && after.slice(0, firstWhole).every((c) => c === n) && clear.at(-1) === 0, `more failing marks than a start looks at (${n}): the lap spans starts, said once whole; a partial lap never lowers it; every mark gone, cleared: ` + J({ seen, after, clear }));
   w.close();
 }
 
@@ -622,7 +656,7 @@ async function resumable() {
 }
 
 export async function run() {
-  for (const f of [createAndWrite, copies, reservations, stuckMarks, staleFolderFull, staleCounts, staleRounds, staleNotice, documents, moves, emptying, others, upgrade, resumable]) {
+  for (const f of [createAndWrite, copies, reservations, stuckMarks, staleFolderFull, staleCounts, staleRounds, staleLapSpans, staleNotice, documents, moves, emptying, others, upgrade, resumable]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); }
   }
   return results;
