@@ -149,6 +149,7 @@ jobs:
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
           node web/test-app-frontend.mjs
           node web/test-llms.mjs
+          node web/test-alpha-banner.mjs
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
