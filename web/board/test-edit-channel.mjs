@@ -589,6 +589,29 @@ const actOn = (v, text = "user edit") => { const d = JSON.parse(J(v)); d.images 
   check(h.ch.revision === r0 && h.sent.at(-1)?.sagebrush === "resync", "a revision past 200 characters: not taken, resync");
 }
 
+// 24. CORR-PICREF-2: the view moves only once the editor shows a refresh; an action meanwhile is taken against the
+// board shown, and the refresh shown again with it
+{
+  let release;
+  const h = harness({ nodes: [{ id: "a", text: "a0" }, { id: "b", text: "b0" }] }, { manual: true });
+  const realShow = h.ch["ui"].show;
+  h.ch["ui"].show = (d, note) => { realShow(d, note); return new Promise((r) => (release = r)); };
+  h.remote([{ op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote edit" } }]);
+  // (the user, on the board still shown, changes only a)
+  const visible = board({ nodes: [{ id: "a", text: "user edit" }, { id: "b", text: "b0" }] });
+  h.ch.save(visible);
+  h.ch.flush();
+  const e = h.sent.find((m) => m.sagebrush === "edit");
+  check(e && e.changes.length === 1 && e.changes[0].key.id === "a" && e.changes[0].was.text === "a0", "an action while a refresh is being shown: taken against the board shown, only its own change: " + J(e?.changes.map((c) => c.key.id)));
+  h.answer(e);
+  release();
+  await tick(); await tick();
+  const b = h.st.board();
+  check(b.nodes.find((n) => n.id === "b").text === "remote edit" && b.nodes.find((n) => n.id === "a").text === "user edit", "the host keeps both edits");
+  const last = h.shown.at(-1);
+  check(last.nodes.find((n) => n.id === "a").text === "user edit" && last.nodes.find((n) => n.id === "b").text === "remote edit", "then shown again with both: " + J(last.nodes));
+}
+
 // 12. diff: unchanged fields not sent; a removed field sent as null with its was
 {
   const a = new Map(toRecords(board({ nodes: [{ id: "a", text: "A", color: "red" }] })).map((r) => [J([r.type, r.page, r.id]), r]));

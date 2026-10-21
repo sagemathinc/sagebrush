@@ -6,7 +6,8 @@
 //   a picture past 2,000,000 bytes or of another type never sent;
 // - imageGet: at most 32 names a message and 2 in flight; `more` asked again once; bytes kept only under the name
 //   they hash to; names the host doesn't have reported missing; an answer that never comes given up on.
-import { PictureChannel, PICTURE_BOUNDS } from "./edit-pictures.ts";
+import { PictureChannel, PICTURE_BOUNDS, byReference } from "./edit-pictures.ts";
+import { EditChannel } from "./edit-channel.ts";
 
 const fails = [];
 let checks = 0;
@@ -19,11 +20,15 @@ const png = (seed, size = 64) => { const b = new Uint8Array(size); b.set([0x89, 
 // The browser's pictures, as images.ts keeps them: by the name their bytes hash to.
 function store() {
   const m = new Map();
-  return {
-    m,
+  let gate = null, held = 0;
+  const st = {
+    m, puts: 0,
+    get held() { return held; },
+    hold() { let r; gate = new Promise((x) => (r = x)); return () => { gate = null; r(); }; },
     async blob(n) { return m.get(n); },
-    async put(blob) { const n = await hashName(await blob.arrayBuffer()); m.set(n, blob); return n; },
+    async put(blob) { st.puts++; if (gate) { held++; await gate; held--; } const n = await hashName(await blob.arrayBuffer()); m.set(n, blob); return n; },
   };
+  return st;
 }
 const harness = () => {
   const st = store(), sent = [];
@@ -151,6 +156,128 @@ const harness = () => {
   }
   const missing = await done;
   check(J(missing) === J([n]) && h.sent.filter((s) => s.msg.sagebrush === "imageGet").length === 2, "more, again and again: asked twice, then missing: " + J(missing));
+}
+
+// 7. LIMIT-BPR-1: an images answer admitted whole or not at all, before anything of it is hashed or kept
+{
+  const answer = async (h, f) => { await sleep(10); const g = h.sent.filter((x) => x.msg.sagebrush === "imageGet").at(-1); h.ch.receive({ sagebrush: "images", version: 1, id: g.msg.id, ...f(g.msg.names) }); };
+  const names = async (k, size = 64) => { const out = []; for (let i = 0; i < k; i++) { const b = png(2000 + i * 7 + size, size); out.push([await hashName(b), b]); } return out; };
+  // (more entries than names asked)
+  {
+    const h = harness(), ns = await names(32);
+    const done = h.ch.fetch(ns.map(([n]) => n));
+    await answer(h, (asked) => ({ images: [...ns, ns[0]].map(([n, b]) => ({ name: n, type: "image/png", bytes: b.buffer.slice(0) })), missing: [], more: [] }));
+    const missing = await done;
+    check(missing.length === 32 && h.st.puts === 0, "33 pictures for 32 names: refused whole, nothing hashed or kept: " + J({ missing: missing.length, puts: h.st.puts }));
+  }
+  // (one name twice)
+  {
+    const h = harness(), ns = await names(2);
+    const done = h.ch.fetch(ns.map(([n]) => n));
+    await answer(h, () => ({ images: [ns[0], ns[0]].map(([n, b]) => ({ name: n, type: "image/png", bytes: b.buffer.slice(0) })), missing: [], more: [] }));
+    check((await done).length === 2 && h.st.puts === 0, "one name twice: refused whole");
+  }
+  // (each picture within its bound, together past 8 MiB)
+  {
+    const h = harness(), ns = await names(5, 1_900_000);
+    const done = h.ch.fetch(ns.map(([n]) => n));
+    await answer(h, () => ({ images: ns.map(([n, b]) => ({ name: n, type: "image/png", bytes: b.buffer.slice(0) })), missing: [], more: [] }));
+    check((await done).length === 5 && h.st.puts === 0, "five pictures of 1.9 MB in one answer (9.5 MB): refused whole");
+  }
+  // (a huge more)
+  {
+    const h = harness(), ns = await names(1);
+    const done = h.ch.fetch(ns.map(([n]) => n));
+    const t0 = performance.now();
+    await answer(h, () => ({ images: [], missing: [], more: new Array(1_000_000).fill(ns[0][0]) }));
+    const missing = await done;
+    check(missing.length === 1 && performance.now() - t0 < 200, "a more of a million names: refused at once: " + Math.round(performance.now() - t0) + " ms");
+  }
+  // (store.put held while the host answers every get at once: still 2 answers held, never more)
+  {
+    const h = harness(), ns = await names(128);
+    const release = h.st.hold();
+    // (two fetches at once, as a board's and a remote change's are: their answers still held 2 at most, in all)
+    const d1 = h.ch.fetch(ns.slice(0, 64).map(([n]) => n)), d2 = h.ch.fetch(ns.slice(64).map(([n]) => n));
+    const done = Promise.all([d1, d2]).then(([a, b]) => [...a, ...b]);
+    const byName = new Map(ns);
+    let answered = new Set();
+    for (let k = 0; k < 30; k++) {
+      await sleep(10);
+      for (const g of h.sent.filter((x) => x.msg.sagebrush === "imageGet")) {
+        if (answered.has(g.msg.id)) continue;
+        answered.add(g.msg.id);
+        h.ch.receive({ sagebrush: "images", version: 1, id: g.msg.id, images: g.msg.names.map((n) => ({ name: n, type: "image/png", bytes: byName.get(n).buffer.slice(0) })), missing: [], more: [] });
+      }
+    }
+    // (and a fetch begun now, while those answers are still being kept, waits for their places too)
+    const late = await names(8, 77);
+    for (const [n, b] of late) byName.set(n, b);
+    const d3 = h.ch.fetch(late.map(([n]) => n));
+    await sleep(30);
+    const gets = h.sent.filter((x) => x.msg.sagebrush === "imageGet").length;
+    check(gets === 2, "store.put held, three fetches, the host answering at once: 2 gets sent in all, no more (their places kept while their answers are kept): " + gets);
+    release();
+    for (let k = 0; k < 50 && answered.size < 5; k++) {
+      await sleep(10);
+      for (const g of h.sent.filter((x) => x.msg.sagebrush === "imageGet")) {
+        if (answered.has(g.msg.id)) continue;
+        answered.add(g.msg.id);
+        h.ch.receive({ sagebrush: "images", version: 1, id: g.msg.id, images: g.msg.names.map((n) => ({ name: n, type: "image/png", bytes: byName.get(n).buffer.slice(0) })), missing: [], more: [] });
+      }
+    }
+    for (let k = 0; k < 50; k++) {
+      await sleep(10);
+      for (const g of h.sent.filter((x) => x.msg.sagebrush === "imageGet")) {
+        if (answered.has(g.msg.id)) continue;
+        answered.add(g.msg.id);
+        h.ch.receive({ sagebrush: "images", version: 1, id: g.msg.id, images: g.msg.names.map((n) => ({ name: n, type: "image/png", bytes: byName.get(n).buffer.slice(0) })), missing: [], more: [] });
+      }
+    }
+    const missing = [...(await done), ...(await d3)];
+    check(missing.length === 0 && ns.every(([n]) => h.st.m.has(n)), "released: all 136 kept: " + missing.length);
+  }
+}
+
+// 8. CORR-PICREF-3: through PictureChannel, byReference and EditChannel: busy and no answer tried again, the action
+// kept, never dropped; quota and too-large take it out; busy every time: kept for download, its text and all
+{
+  const board0 = J({ format: "sagebrush-board", version: 1, nodes: [{ id: "a", text: "a0" }] });
+  const setup = async (answerPut, seed) => {
+    const st = store(), sent = [], shown = [], said = [];
+    let kept = [];
+    const pc = new PictureChannel((msg) => { sent.push(msg); queueMicrotask(() => answerPut(msg, pc)); }, st);
+    const ch = new EditChannel(board0, "r0", (m) => sent.push(m), { show: (d, note) => { shown.push(d); if (note) said.push(note); }, allowed: () => {}, kept: (c) => (kept = [...c]), say: (x) => said.push(x) }, undefined, { pictures: byReference(pc, { tries: 2, maxWaitMs: 50 }) });
+    const name = await st.put(new Blob([png(seed)], { type: "image/png" }));
+    ch.save({ format: "sagebrush-board", version: 1, images: { [name]: { w: 1, h: 1 } }, nodes: [{ id: "a", text: "a with a picture", image: name }] });
+    return { st, sent, shown, said, ch, name, kept: () => kept };
+  };
+  const settle = async (h) => { for (let k = 0; k < 60; k++) { await sleep(10); h.ch.flush(); if (h.sent.some((m) => m.sagebrush === "edit") || h.kept().length || !h.ch.pending) break; } };
+  // (busy once, then saved)
+  let tries = 0;
+  let h = await setup((m, pc) => { if (m.sagebrush !== "imagePut") return; pc.receive(++tries === 1 ? { sagebrush: "refused", version: 1, id: m.id, message: "busy", reason: "busy", retryAfter: 5 } : { sagebrush: "imageSaved", version: 1, id: m.id, name: m.name }); }, 1);
+  await settle(h);
+  check(tries === 2 && h.sent.some((m) => m.sagebrush === "edit" && J(m.changes).includes("a with a picture")), "busy once: tried again, saved, the edit sent with its text: " + J({ tries }));
+  // (no answer once, then saved)
+  const was = PICTURE_BOUNDS.answerMs;
+  PICTURE_BOUNDS.answerMs = 20;
+  tries = 0;
+  h = await setup((m, pc) => { if (m.sagebrush !== "imagePut") return; if (++tries > 1) pc.receive({ sagebrush: "imageSaved", version: 1, id: m.id, name: m.name }); }, 2);
+  await settle(h);
+  PICTURE_BOUNDS.answerMs = was;
+  check(tries === 2 && h.sent.some((m) => m.sagebrush === "edit"), "no answer once: tried again, saved, the edit sent: " + J({ tries }));
+  // (busy every time: kept for download, its text in it)
+  h = await setup((m, pc) => { if (m.sagebrush === "imagePut") pc.receive({ sagebrush: "refused", version: 1, id: m.id, message: "busy", reason: "busy", retryAfter: 5 }); }, 3);
+  await settle(h);
+  const k = h.kept();
+  const dl = k.length ? JSON.parse(await h.ch.download(k[0].id).blob.text()) : null;
+  check(k.length === 1 && h.ch.pending === 0 && !h.sent.some((m) => m.sagebrush === "edit") && J(dl?.transactions).includes("a with a picture"), "busy every time: never sent, kept for download with its text: " + J({ copies: k.length }));
+  // (quota, too-large: that action taken out, said)
+  for (const reason of ["quota", "too-large"]) {
+    h = await setup((m, pc) => { if (m.sagebrush === "imagePut") pc.receive({ sagebrush: "refused", version: 1, id: m.id, message: reason + " refusal", reason }); }, reason === "quota" ? 4 : 5);
+    await settle(h);
+    check(h.ch.pending === 0 && !h.kept().length && h.said.some((x) => x.includes(reason + " refusal")), `refused (${reason}): the action taken out, said`);
+  }
 }
 
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ") : `ok: the frame's pictures by reference, ${checks} checks`);

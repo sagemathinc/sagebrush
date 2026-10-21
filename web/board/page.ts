@@ -389,11 +389,14 @@ if (fromParent) {
             // changes may name pictures this browser doesn't hold, fetched before they are shown)
             const p = m.pictures === "by-reference" ? (pics = new PictureChannel((x, t) => port.postMessage(x, t ?? []), { blob: (n) => host.images.blob(n), put: (b) => host.images.put(b) })) : null;
             const ch = (editCh = new EditChannel(m.text, revision, (x) => port.postMessage(x), {
+              // (resolved once the editor shows it: the channel takes the user's actions against what they see)
               show: (d, note) => {
-                if (!p) { for (const f of editSubs) void f(d, note); return; }
+                const toEditor = () => Promise.all([...editSubs].map((f) => f(d, note)));
+                if (!p) return toEditor();
+                // (the pictures the host has: its own board's, never the unsaved ones over it: CORR-PICREF-1)
+                for (const n of editCh?.hostPictures() ?? []) p.hostHas.add(n);
                 const names = Object.keys(d.images ?? {});
-                for (const n of names) p.hostHas.add(n);
-                editShowing = editShowing.then(() => p.fetch(names)).then(() => { for (const f of editSubs) void f(d, note); }).catch((e) => console.warn("board: pictures not fetched:", e));
+                return (editShowing = editShowing.then(() => p.fetch(names)).then(toEditor).then(() => {}, (e) => console.warn("board: pictures not fetched:", e)));
               },
               allowed: (on, why) => setEditing({ allowed: on, ...(why ? { why } : {}) }),
               kept: (c) => showKept(c),
