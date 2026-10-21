@@ -199,9 +199,10 @@ export function admitImages(m: any, batch: readonly string[]): { images: { name:
 /** By reference: each picture an action adds that the host doesn't have is put, and saved by the host, before the
  * edit naming it is sent (the action taken when it is made: edit-channel.ts).  A picture refused for the user's
  * quota, or as too large, takes that action out (web/board-host-protocol.md, Pictures, Order).  Busy, or no answer:
- * tried again after `retryAfter`, a few times (astra's CORR-PICREF-3); still not saved, or refused for another
- * reason: the action kept for download, its text and all, never dropped. */
-export function byReference(p: PictureChannel, retry = { tries: 4, maxWaitMs: 60_000 }): PicturePrep {
+ * tried again after `retryAfter`, at most `retries` times after the first attempt (4: five attempts in all; each wait
+ * at most `maxWaitMs`) (astra's CORR-PICREF-3); still not saved, or refused for another reason: the action kept for
+ * download, its text and all, never dropped. */
+export function byReference(p: PictureChannel, retry = { retries: 4, maxWaitMs: 60_000 }): PicturePrep {
   return {
     inline: false,
     needs: (entries) => Object.keys(entries ?? {}).filter((n) => !p.hostHas.has(n)),
@@ -212,7 +213,7 @@ export function byReference(p: PictureChannel, retry = { tries: 4, maxWaitMs: 60
           const r = await p.put(n);
           if (r.ok) break;
           if (r.reason === "quota" || r.reason === "too-large") return { ok: false, keep: false, why: r.message };
-          if (r.reason === "busy" && attempt < retry.tries) {
+          if (r.reason === "busy" && attempt < retry.retries) {
             await new Promise((ok) => setTimeout(ok, Math.min(Math.max(r.retryAfter ?? 1000, 0), retry.maxWaitMs)));
             continue;
           }
