@@ -81,45 +81,65 @@ export function utf8Length(s: string): number {
 // (a transaction of changes already admitted: its JSON as an array, and the separator a download puts after it)
 const txOf = (changes: Change[]): Tx => ({ changes, bytes: jsonBytes(changes, Infinity) + 1, ready: true });
 
+/** How much a walk may do: every key and array entry it visits counts, those JSON leaves out too. */
+export interface WalkStats { work: number; maxStack: number }
+// (an object's own enumerable keys, one at a time: never all of them made at once, as Object.keys would)
+function* ownKeys(o: object): Generator<string> {
+  for (const k in o) if (Object.prototype.hasOwnProperty.call(o, k)) yield k;
+}
+const omitted = (v: unknown) => v === undefined || typeof v === "function" || typeof v === "symbol";
+type Frame = { a: unknown[]; i: number; d: number } | { o: Record<string, unknown>; it: Generator<string>; k: number; d: number };
+
 /**
  * The UTF-8 bytes of `x` as JSON.stringify writes it (strings escaped as it escapes them, `undefined` and functions
- * left out of objects and written null in arrays), without writing it: an explicit stack, so no recursion.  -1 once
- * past `cap` bytes, or `depth` levels: stopped there, the rest never walked (daybreak2's LIMIT-BFE-1: what an
- * action may be is bounded before it is serialized, compared or kept).
+ * left out of objects and written null in arrays), without writing it.  -1 once past `cap` bytes, `depth` levels,
+ * or `budget` steps (each key and array entry visited, those left out too: default, `cap`): stopped there, the rest
+ * never walked (daybreak2's LIMIT-BFE-1 and 1b).  Containers are walked a key or an entry at a time, so what it
+ * holds besides `x` is one frame a level, never one a sibling; keys are never all listed at once, and a key or a
+ * string longer than what is left is refused unread.
  */
-export function jsonBytes(x: unknown, cap: number, depth = 64): number {
-  let n = 0;
-  const stack: [unknown, number][] = [[x, 0]];
-  while (stack.length) {
-    const [v, d] = stack.pop()!;
+export function jsonBytes(x: unknown, cap: number, depth = 64, budget = cap, stats?: WalkStats): number {
+  let n = 0, work = 0;
+  const stack: Frame[] = [];
+  // (a value: a primitive counted, a container opened; false: past a bound)
+  const value = (v: unknown, d: number): boolean => {
     if (v === null) n += 4;
-    else if (typeof v === "string") { if (v.length > cap) return -1; n += stringBytes(v); }
+    else if (typeof v === "string") { if (v.length > cap - n) return false; n += stringBytes(v); }
     else if (typeof v === "number") n += Number.isFinite(v) ? String(v).length : 4;
     else if (typeof v === "boolean") n += v ? 4 : 5;
     else if (typeof v !== "object") n += 4;
     else {
-      if (d >= depth) return -1;
-      if (Array.isArray(v)) {
-        if (v.length > cap) return -1;
-        n += 2 + Math.max(0, v.length - 1);
-        for (let i = v.length - 1; i >= 0; i--) { const e = v[i]; stack.push([e === undefined || typeof e === "function" || typeof e === "symbol" ? null : e, d + 1]); }
-      } else {
-        let k = 0;
-        for (const key of Object.keys(v)) {
-          const e = (v as Record<string, unknown>)[key];
-          if (e === undefined || typeof e === "function" || typeof e === "symbol") continue;
-          n += (k++ ? 1 : 0) + stringBytes(key) + 1;
-          stack.push([e, d + 1]);
-          if (n > cap) return -1;
-        }
-        n += 2;
-      }
+      if (d >= depth) return false;
+      n += 2;
+      stack.push(Array.isArray(v) ? { a: v, i: 0, d } : { o: v as Record<string, unknown>, it: ownKeys(v), k: 0, d });
+      if (stats && stack.length > stats.maxStack) stats.maxStack = stack.length;
     }
-    if (n > cap) return -1;
+    return n <= cap;
+  };
+  if (!value(x, 0)) return -1;
+  while (stack.length) {
+    const f = stack[stack.length - 1];
+    if ("a" in f) {
+      if (f.i >= f.a.length) { stack.pop(); continue; }
+      if (++work > budget) return -1;
+      const e = f.a[f.i];
+      n += f.i++ ? 1 : 0;
+      if (!value(omitted(e) ? null : e, f.d + 1)) return -1;
+    } else {
+      const r = f.it.next();
+      if (r.done) { stack.pop(); continue; }
+      if (++work > budget) return -1;
+      const key = r.value, e = f.o[key];
+      if (omitted(e)) continue;
+      if (key.length > cap - n) return -1;
+      n += (f.k++ ? 1 : 0) + stringBytes(key) + 1;
+      if (!value(e, f.d + 1)) return -1;
+    }
   }
+  if (stats) stats.work = work;
   return n;
 }
-// (a string's bytes as JSON writes it: its quotes, its escapes, its UTF-8; a lone surrogate as \uXXXX)
+// (a string's bytes as JSON writes it: its quotes, its escapes, its UTF-8; a lone surrogate as \\uXXXX)
 function stringBytes(s: string): number {
   let n = 2;
   for (let i = 0; i < s.length; i++) {
@@ -134,25 +154,52 @@ function stringBytes(s: string): number {
   }
   return n;
 }
-/** Whether two JSON values are the same, whatever the order of their objects' keys: no string made, an explicit
- * stack. */
-export function sameJson(a: unknown, b: unknown): boolean {
-  const stack: [unknown, unknown][] = [[a, b]];
-  while (stack.length) {
-    const [x, y] = stack.pop()!;
-    if (x === y) continue;
+/**
+ * Whether two JSON values are the same, whatever the order of their objects' keys.  Its contract is JSON values
+ * (as records are, made by a JSON round trip: toRecords): it doesn't take NaN for null, nor undefined for null or
+ * absent in an array (astra's note on fcb3842d).  Bounded as jsonBytes is: a frame a level, keys one at a time,
+ * `depth` levels and `budget` steps; past either, not the same (fails closed: such a change is then counted, and
+ * refused, by diffWithin's bound).
+ */
+export function sameJson(a: unknown, b: unknown, depth = 64, budget = 1 << 24, stats?: WalkStats): boolean {
+  type SFrame = { x: unknown[]; y: unknown[]; i: number; d: number } | { xo: Record<string, unknown>; yo: Record<string, unknown>; it: Generator<string>; d: number; phase: 0 | 1; nx: number; ny: number };
+  const stack: SFrame[] = [];
+  let work = 0;
+  const open = (x: unknown, y: unknown, d: number): boolean => {
+    if (x === y) return true;
     if (x === null || y === null || typeof x !== "object" || typeof y !== "object") return false;
-    if (Array.isArray(x) !== Array.isArray(y)) return false;
-    if (Array.isArray(x)) {
-      const ya = y as unknown[];
-      if (x.length !== ya.length) return false;
-      for (let i = 0; i < x.length; i++) stack.push([x[i], ya[i]]);
+    if (Array.isArray(x) !== Array.isArray(y) || d >= depth) return false;
+    if (Array.isArray(x)) { if (x.length !== (y as unknown[]).length) return false; stack.push({ x, y: y as unknown[], i: 0, d }); }
+    else stack.push({ xo: x as Record<string, unknown>, yo: y as Record<string, unknown>, it: ownKeys(x), d, phase: 0, nx: 0, ny: 0 });
+    if (stats && stack.length > stats.maxStack) stats.maxStack = stack.length;
+    return true;
+  };
+  if (!open(a, b, 0)) return false;
+  while (stack.length) {
+    if (++work > budget) return false;
+    const f = stack[stack.length - 1];
+    if ("x" in f) {
+      if (f.i >= f.x.length) { stack.pop(); continue; }
+      const i = f.i++;
+      if (!open(f.x[i], f.y[i], f.d + 1)) return false;
+      continue;
+    }
+    const r = f.it.next();
+    if (f.phase === 0) {
+      // (each of x's keys: in y, and the same there)
+      if (r.done) { f.phase = 1; f.it = ownKeys(f.yo); continue; }
+      const xv = f.xo[r.value];
+      if (xv === undefined) continue;
+      f.nx++;
+      const yv = Object.prototype.hasOwnProperty.call(f.yo, r.value) ? f.yo[r.value] : undefined;
+      if (yv === undefined || !open(xv, yv, f.d + 1)) return false;
     } else {
-      const xo = x as Record<string, unknown>, yo = y as Record<string, unknown>, xk = Object.keys(xo).filter((k) => xo[k] !== undefined), yk = Object.keys(yo).filter((k) => yo[k] !== undefined);
-      if (xk.length !== yk.length) return false;
-      for (const k of xk) { if (!Object.prototype.hasOwnProperty.call(yo, k)) return false; stack.push([xo[k], yo[k]]); }
+      // (then y has no others)
+      if (r.done) { stack.pop(); if (f.ny !== f.nx) return false; continue; }
+      if (f.yo[r.value] !== undefined) f.ny++;
     }
   }
+  if (stats) stats.work = work;
   return true;
 }
 
@@ -332,7 +379,9 @@ export class EditChannel {
     if (this.ended) return undo("**Not saved:** editing here has ended.");
     // (the document the editor kept, its size bounded before anything of it is copied or compared: one past an
     // editable board and an edit can't be saved here, LIMIT-BFE-1)
-    if (jsonBytes(doc, EDIT_BOUNDS.boardBytes + EDIT_BOUNDS.messageBytes) < 0) return undo("**That change is too large to save here**, so it was undone.");
+    // (and its walk's steps: half that, as each key or entry JSON writes is at least two bytes: LIMIT-BFE-1b)
+    const docCap = EDIT_BOUNDS.boardBytes + EDIT_BOUNDS.messageBytes;
+    if (jsonBytes(doc, docCap, 64, docCap / 2) < 0) return undo("**That change is too large to save here**, so it was undone.");
     const next = recordsOf(cleanDoc(doc));
     if (this.pictures?.inline) carryPictures(this.view, next);
     // (the action's changes, counted as they are made, within one edit message: never compared or counted past it)
