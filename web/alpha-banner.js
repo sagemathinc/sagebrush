@@ -5,7 +5,9 @@
 // and the frame other sites embed (/frame/board/, CoCalc's chat cards) are
 // made from, nor in the runner or the notebook component.  And it never
 // shows in a frame, whatever page it is in: a page another site embeds keeps
-// its own look.  Dismissed, it stays away in this browser.
+// its own look.  Dismissed, it stays away in this browser.  While it shows,
+// --sb-alpha-banner on the root is its height, so a page that fills the
+// window can keep clear of it (the site's board page: web/board/index.html).
 (() => {
   const KEY = "sagebrush-alpha-banner-dismissed";
   try {
@@ -41,8 +43,10 @@
     close.textContent = "×";
     close.style.cssText =
       "position:absolute;right:.4em;top:50%;transform:translateY(-50%);border:0;background:none;color:inherit;font:16px/1 system-ui,sans-serif;cursor:pointer;padding:2px 6px";
+    const root = document.documentElement;
     close.addEventListener("click", () => {
       bar.remove();
+      root.style.removeProperty("--sb-alpha-banner");
       try {
         localStorage.setItem(KEY, "1");
       } catch {
@@ -51,6 +55,7 @@
     });
     bar.append(text, more, close);
     document.body.append(bar);
+    root.style.setProperty("--sb-alpha-banner", `${bar.offsetHeight}px`);
   };
   if (document.body) show();
   else document.addEventListener("DOMContentLoaded", show, { once: true });
