@@ -1047,7 +1047,10 @@ function openChannel(me) {
   file) is built apart, with `editState`.
 - Pictures in an edit, to a host that keeps them inline (no
   `pictures: "by-reference"` yet): the frame sends them as `data:` URLs, as
-  posted. Its editor names pictures by their content, so the first edit of a
+  posted. An action is taken when it is made (its changes and their `was`,
+  counted in the bound); a picture's bytes are read into it after, and it is
+  sent once they are, in its turn. One that can't be read is kept for
+  download with the actions after it. Its editor names pictures by their content, so the first edit of a
   board whose pictures have other names adds them under those, and an edit
   never removes a picture from the board's map: the bytes of every picture
   the board names stay with the host. Sent by reference (above), a picture

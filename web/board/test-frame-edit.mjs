@@ -26,6 +26,7 @@ const BOARD = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Ed
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const BOARD_PIC = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Editing", images: { pic: { w: 1, h: 1, src: PNG } }, nodes: [
   { id: "a", text: "with a picture", image: "pic", x: 0, y: 0, w: 200, h: 120 },
+  { id: "b", text: "b0", x: 300, y: 0, w: 200, h: 120 },
 ] });
 const NONCE = crypto.randomUUID();
 // (the host's merge, for the page)
@@ -181,6 +182,40 @@ try {
   check(!!(await until(() => top(`st.board().nodes[0].text === "edited"`), 10000)), "a board with a picture: the edit saved");
   const pics = await top(`(() => { const b = st.board(); return { refs: b.nodes.map((n) => n.image).filter(Boolean), images: Object.fromEntries(Object.entries(b.images ?? {}).map(([k, v]) => [k, String(v.src ?? "").slice(0, 22)])) }; })()`);
   check(pics.refs.length === 1 && pics.refs.every((r) => pics.images[r]?.startsWith("data:image/png")), "every picture the host's board names has its bytes: " + JSON.stringify(pics));
+
+  // astra's CORR-FRAMEEDIT-1, in the real frame: an action on a board whose picture is still being read (held: the
+  // first action after a load reads the board's picture, which the editor renamed by its content), then (a) a
+  // disjoint remote change: only the user's changes sent, the host keeps both; (b) keepUnsaved: the action kept in
+  // the download
+  // (held where any way of reading a picture as a data: URL goes: FileReader)
+  const hold = `(() => { window.__hold = new Promise((r) => (window.__release = r)); const orig = FileReader.prototype.readAsDataURL; FileReader.prototype.readAsDataURL = function (b) { window.__hold.then(() => orig.call(this, b)); }; })()`;
+  const freshPictureBoard = async () => {
+    contexts.clear();
+    await send("Page.navigate", { url: parentUrl + "?pic=1" });
+    const f = await frameEval();
+    await until(() => f("!!window.sagebrushEdit && !!document.querySelector('img')"));
+    return f;
+  };
+  frame = await freshPictureBoard();
+  await frame(hold);
+  const editsBefore = (await edits()).length;
+  await frame(`sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "a").text = "user edit"; })`);
+  await sleep(500);
+  await top(`remote([{ op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote edit" } }])`);
+  await until(() => frame(`${textOf("b")} === "remote edit"`), 10000);
+  await frame(`__release()`);
+  check(!!(await until(() => top(`st.board().nodes.find((n) => n.id === "a").text === "user edit" && st.board().nodes.find((n) => n.id === "b").text === "remote edit"`), 10000)), "(a) a remote change while the action's picture is read: the host keeps both edits");
+  const sentA = (await edits()).slice(editsBefore);
+  check(sentA.length >= 1 && !sentA.some((e) => e.changes.some((c) => c.key.id === "b")), "...and the edit holds only the user's changes: " + JSON.stringify(sentA.map((e) => e.changes.map((c) => c.key.id))));
+  frame = await freshPictureBoard();
+  await frame(hold);
+  await frame(`sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "a").text = "kept edit"; })`);
+  await sleep(500);
+  await top(`post({ sagebrush: "editing", version: 1, allowed: false, message: "The history is full.", reason: "history-full", keepUnsaved: true })`);
+  await frame(`__release()`);
+  await until(() => frame(`!!document.getElementById("sbb-unsaved")`), 10000);
+  const keptB = await frame(`(async () => { const c = sagebrushEdit.copies().at(-1); if (!c) return null; const t = JSON.parse(await sagebrushEdit.download(c.id).blob.text()); return { n: t.transactions.length, a: t.transactions.flat().find((x) => x.key.id === "a")?.fields?.text, view: t.view?.nodes?.find((x) => x.id === "a")?.text }; })()`);
+  check(keptB?.n >= 1 && keptB.a === "kept edit" && keptB.view === "kept edit", "(b) keepUnsaved while the action's picture is read: the action kept, in the download and its view: " + JSON.stringify(keptB));
 
   // a host that never answers, the same near-limit field changed over and over (LIMIT-9B5-1's acceptance):
   // Edit paused before the bound, nothing lost, the totals exact, the heap within a constant times the bound

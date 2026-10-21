@@ -11,7 +11,7 @@
 // - the bound on what is held (LIMIT-9B5-1): counted exactly, Edit paused before it with nothing lost,
 //   resumed below half; a refusal's copy moves without the totals changing (daybreak2's check 1); copies count
 //   until discarded.
-import { EditChannel, EDIT_BOUNDS, diff, utf8Length } from "./edit-channel.ts";
+import { EditChannel, EDIT_BOUNDS, diff, utf8Length, inlinePictures } from "./edit-channel.ts";
 import { editState } from "./edit-state.ts";
 import { toRecords } from "./history.ts";
 
@@ -64,7 +64,7 @@ function harness(d0, opts = {}) {
     allowed(on, why) { allowed.push([on, why]); },
     kept(c) { kept = [...c]; },
     say(md) { said.push(md); },
-  }, () => t);
+  }, () => t, opts.pictures ? { pictures: opts.pictures } : {});
   host.ch = ch;
   host.tick = (ms) => { t += ms; };
   return host;
@@ -306,6 +306,106 @@ function doAct(h, view, f) { const d = JSON.parse(J(view)); f(d); h.ch.save(d); 
   h.answer(h.sent[0]);
   const b = h.st.board();
   check(b.images.pic?.src === PNG && b.nodes[0].image === "ihash" && b.images.ihash?.src === PNG, "the host's board: every picture it names has its bytes: " + J(b.images && Object.keys(b.images)));
+}
+
+// A picture store whose reads can be held (the browser reading a picture's bytes, slow), as page.ts gives inlinePictures.
+const PNG2 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+function heldPictures() {
+  let release, fail = null;
+  const gate = new Promise((r) => (release = r));
+  const store = {
+    sizeOf: (n) => (n === "inew" ? { size: atob(PNG2.split(",")[1]).length, type: "image/png" } : undefined),
+    dataUrl: async (n) => { await gate; if (fail) throw new Error(fail); return n === "inew" ? PNG2 : undefined; },
+  };
+  return { prep: inlinePictures(store), release: () => release(), failWith: (m) => { fail = m; } };
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+// (the board, and an action on it adding a picture "inew" (bytes not in it yet) and changing a)
+const B0 = { nodes: [{ id: "a", text: "a0" }, { id: "b", text: "b0" }] };
+const actOn = (v, text = "user edit") => { const d = JSON.parse(J(v)); d.images = { ...(d.images ?? {}), inew: { w: 1, h: 1 } }; d.nodes[0].text = text; d.nodes[0].image = "inew"; return d; };
+
+// 15. astra's CORR-FRAMEEDIT-1 (1): keepUnsaved while the action's picture is being read: the action kept
+{
+  const p = heldPictures();
+  const h = harness(B0, { manual: true, pictures: p.prep });
+  h.ch.save(actOn(board(B0)));
+  check(h.ch.pending === 1 && h.ch.totals().changes >= 1, "the action taken at once, before its picture is read: " + J(h.ch.totals()));
+  h.ch.receive({ sagebrush: "editing", version: 1, allowed: false, keepUnsaved: true, message: "history full" });
+  p.release();
+  await tick(); await tick();
+  const k = h.kept();
+  const dl = JSON.parse(await h.ch.download(k[0].id).blob.text());
+  const tx = dl.transactions[0] ?? [];
+  const a = tx.find((c) => c.key.id === "a"), docc = tx.find((c) => c.key.type === "doc");
+  check(k.length === 1 && dl.transactions.length === 1 && a?.fields.text === "user edit" && a?.was.text === "a0" && dl.view.nodes[0].text === "user edit", "keepUnsaved during the read: the action in the download, with its was, and in the view: " + J({ n: dl.transactions.length, a, view: dl.view.nodes[0].text }));
+  check(docc?.fields.images?.inew?.src === PNG2, "...its picture's bytes filled in once read: " + J(docc?.fields.images?.inew?.src?.slice(0, 30)));
+}
+
+// 16. astra's CORR-FRAMEEDIT-1 (2): a remote change to b while a's picture is read: only the user's changes sent,
+// and the host keeps both
+{
+  const p = heldPictures();
+  const h = harness(B0, { manual: true, pictures: p.prep });
+  h.ch.save(actOn(board(B0)));
+  h.remote([{ op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote edit" } }]);
+  p.release();
+  await tick(); await tick();
+  h.ch.flush();
+  const e = h.sent.find((m) => m.sagebrush === "edit");
+  check(e && !e.changes.some((c) => c.key.id === "b") && e.changes.some((c) => c.key.id === "a" && c.was.text === "a0"), "a remote change during the read: the edit holds only the user's changes, a's was as the user saw it: " + J(e?.changes.map((c) => [c.key.type, c.key.id])));
+  h.answer(e);
+  const b = h.st.board();
+  check(b.nodes.find((n) => n.id === "b").text === "remote edit" && b.nodes.find((n) => n.id === "a").text === "user edit" && b.images?.inew?.src === PNG2, "the host keeps both edits, and the picture's bytes: " + J(b.nodes));
+}
+
+// 17. a picture that can't be read: the action and those after it kept for download (not dropped, not sent), counted
+{
+  const p = heldPictures();
+  const h = harness(B0, { manual: true, pictures: p.prep });
+  let v = actOn(board(B0));
+  h.ch.save(v);
+  v = JSON.parse(J(v)); v.nodes[1].text = "b after";
+  h.ch.save(v);
+  const t0 = h.ch.totals();
+  h.ch.flush();
+  check(!h.sent.some((m) => m.sagebrush === "edit"), "while the first action's picture is read, nothing is sent (the second doesn't overtake it)");
+  p.failWith("the disk went away");
+  p.release();
+  await tick(); await tick();
+  const k = h.kept();
+  check(k.length === 1 && k[0].txs.length === 2 && h.ch.pending === 0 && J(h.ch.totals()) === J(t0) && h.said.some((x) => /kept for you to download/.test(x) && /disk went away/.test(x)), "a read that fails: both actions kept for download, moved without the totals changing, said: " + J({ copies: k.length, txs: k[0]?.txs.length, t0, t: h.ch.totals() }));
+}
+
+// 18. a preparation that takes the action out (a picture the host refused, by reference): released, said; the next sent
+{
+  const take = { inline: false, needs: (e) => Object.keys(e ?? {}).filter((n) => n === "inew"), extraBytes: () => 0, prepare: async () => ({ ok: false, keep: false, why: "Your picture quota is spent." }) };
+  const h = harness(B0, { manual: true, pictures: take });
+  let v = actOn(board(B0));
+  h.ch.save(v);
+  const w = JSON.parse(J(board(B0))); w.nodes[1].text = "b2";
+  await tick(); await tick();
+  check(h.ch.pending === 0 && h.ch.totals().bytes === 0 && h.said.some((x) => /quota/.test(x)) && h.shown.at(-1)?.nodes[0].text === "a0", "taken out: released, the view without it, said: " + J({ p: h.ch.pending, t: h.ch.totals() }));
+}
+
+// 19. the bytes counted at the action are the bytes sent: predicted exactly, for an inline picture
+{
+  const p = heldPictures();
+  const h = harness(B0, { manual: true, pictures: p.prep });
+  h.ch.save(actOn(board(B0)));
+  const predicted = h.ch.totals().bytes;
+  p.release();
+  await tick(); await tick();
+  const after = h.ch.totals().bytes, recount = h.ch["unsaved"].reduce((s, x) => s + utf8Length(J(x.changes)) + 1, 0);
+  check(predicted === after && after === recount, "counted at the action as it is sent: " + J({ predicted, after, recount }));
+  // (a picture whose size isn't at hand: counted as it turns out, once read)
+  const q = heldPictures(), prep = { ...q.prep, extraBytes: () => 0 };
+  const h2 = harness(B0, { manual: true, pictures: prep });
+  h2.ch.save(actOn(board(B0)));
+  const under = h2.ch.totals().bytes;
+  q.release();
+  await tick(); await tick();
+  const recount2 = h2.ch["unsaved"].reduce((s, x) => s + utf8Length(J(x.changes)) + 1, 0);
+  check(under < recount2 && h2.ch.totals().bytes === recount2, "its size not at hand: recounted once read: " + J({ under, after: h2.ch.totals().bytes, recount2 }));
 }
 
 // 12. diff: unchanged fields not sent; a removed field sent as null with its was
