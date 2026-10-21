@@ -492,6 +492,58 @@ const actOn = (v, text = "user edit") => { const d = JSON.parse(J(v)); d.images 
   check(r2 === null && to2.n < 300, "past 1 MiB: refused at the record that passes it: " + to2.n);
 }
 
+// 23. LIMIT-BFE-1b: the walks' own work and memory bounded: one shared work budget (keys left out of JSON count too),
+// one frame a level, keys one at a time, a huge key refused unread; sameJson bounded the same way
+{
+  const time = (f) => { const t = performance.now(); const r = f(); return [r, performance.now() - t]; };
+  // (an object of only keys JSON leaves out: 1.5 million of them, no bytes at all)
+  const om = {};
+  for (let i = 0; i < 1_500_000; i++) om["k" + i] = undefined;
+  let st = { work: 0, maxStack: 0 };
+  const [r1, ms1] = time(() => jsonBytes(om, 2 ** 20, 64, undefined, st));
+  check(r1 === -1 && ms1 < 1000, "an object of 1.5 million omitted keys: refused once its budget (1 MiB of steps) is spent: " + J({ r1, ms: Math.round(ms1) }));
+  // (a wide array, dense and sparse: one frame however wide)
+  const dense = new Array(5_000_000).fill(0);
+  st = { work: 0, maxStack: 0 };
+  const [r2, ms2] = time(() => jsonBytes(dense, 2 ** 20, 64, undefined, st));
+  check(r2 === -1 && st.maxStack <= 2 && ms2 < 200, "a dense array of 5 million: refused at its cap, one frame held: " + J({ r2, maxStack: st.maxStack, ms: Math.round(ms2) }));
+  const sparse = new Array(1_000_000_000);
+  st = { work: 0, maxStack: 0 };
+  const [r3, ms3] = time(() => jsonBytes(sparse, 2 ** 20, 64, undefined, st));
+  check(r3 === -1 && st.maxStack <= 2 && ms3 < 200, "a sparse array of a billion: refused, one frame held: " + J({ r3, maxStack: st.maxStack, ms: Math.round(ms3) }));
+  // (within its bounds, a wide array still counted exactly, with one frame)
+  const fine = new Array(100_000).fill(7);
+  st = { work: 0, maxStack: 0 };
+  check(jsonBytes(fine, Infinity, 64, Infinity, st) === utf8Length(J(fine)) && st.maxStack === 1 && st.work === 100_000, "a wide array within bounds: exact, one frame, a step an entry: " + J(st));
+  // (a huge key, refused before it is read)
+  const hk = { ["k".repeat(10_000_000)]: 1 };
+  const [r4, ms4] = time(() => jsonBytes(hk, 2 ** 20));
+  check(r4 === -1 && ms4 < 5, "a 10-million-character key: refused unread: " + J({ r4, ms: ms4.toFixed(2) }));
+  // (sameJson: wide omitted-only objects past its budget: not the same, at once; deep: not the same, nothing thrown;
+  // equal wide arrays: the same, one frame)
+  const om2 = {};
+  for (let i = 0; i < 1_500_000; i++) om2["k" + i] = undefined;
+  const [r5, ms5] = time(() => sameJson({ a: om }, { a: om2 }, 64, 1_000_000));
+  check(r5 === false && ms5 < 1000, "sameJson past its budget: not the same (fails closed): " + J({ r5, ms: Math.round(ms5) }));
+  let deep = 0, deep2 = 0; for (let i = 0; i < 100_000; i++) { deep = [deep]; deep2 = [deep2]; }
+  let threw = null, r6;
+  try { r6 = sameJson(deep, deep2); } catch (e) { threw = String(e); }
+  check(!threw && r6 === false, "sameJson past its depth: not the same, nothing thrown");
+  st = { work: 0, maxStack: 0 };
+  check(sameJson(fine, fine.slice(), 64, 1 << 24, st) && st.maxStack === 1, "equal wide arrays: the same, one frame: " + J(st));
+  // (its contract: JSON values, as records are; it doesn't take NaN for null, nor undefined for null in an array)
+  check(!sameJson(NaN, null) && !sameJson([undefined], [null]) && sameJson({ a: undefined, b: 1 }, { b: 1 }), "sameJson's contract is JSON values (records are a JSON round trip): NaN isn't null, [undefined] isn't [null]");
+  // (through save: an action whose document holds such an object, past the document walk's step budget (half its
+  // byte bound: here lowered to an editable board of 1 MiB, so 1 MiB of steps): refused at once)
+  const was = EDIT_BOUNDS.boardBytes;
+  EDIT_BOUNDS.boardBytes = 2 ** 20;
+  const h = harness({ nodes: [{ id: "a", text: "" }] }, { manual: true });
+  const d = board({ nodes: [{ id: "a", text: "x", preview: om }] });
+  const [, ms7] = time(() => h.ch.save(d));
+  EDIT_BOUNDS.boardBytes = was;
+  check(h.ch.pending === 0 && /too large/.test(h.said.at(-1) ?? "") && ms7 < 2000, "a document holding 1.5 million omitted keys: the action refused, its walk bounded: " + J({ ms: Math.round(ms7) }));
+}
+
 // 22. the envelope, exactly: a 200-character revision, and edits filled to the bound, each message within 1 MiB;
 // a revision past 200 characters refused (resync)
 {
