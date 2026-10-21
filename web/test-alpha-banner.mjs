@@ -6,6 +6,7 @@
 // Run after `bun web/build.ts` and `node scripts/build-cli.mjs`:
 //   node web/test-alpha-banner.mjs
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
@@ -86,6 +87,24 @@ if (!existsSync(join(dist, "index.html"))) {
     ["runner/index.html", "the runner"],
   ]) ok(read(join(dist, p)) !== null && !read(join(dist, p)).includes("alpha-banner"), `${what} (${p}) has no notice`);
   ok(read(join(dist, "alpha-banner.js")) === script && read(join(here, "site", "public", "alpha-banner.js")) === script, "the script is served from the site's root");
+}
+// a board made from the site's board page (exportHtml fetches the page beside it, /board/index.html, which
+// carries the notice), the frame, and a file exported again: assemble() takes the notice out (astra on #41)
+{
+  const code = `import { assemble, unescapeInline, ALPHA_BANNER_TAG } from ${JSON.stringify(join(here, "board", "export.ts"))};
+import { readFileSync } from "node:fs";
+const site = readFileSync(${JSON.stringify(join(here, "board", "index.html"))}, "utf8").replace("</head>", ALPHA_BANNER_TAG + "</head>");
+const once = assemble(site, { doc: "{}", board: "/*board*/", title: "t", generator: "test" });
+const tpl = /<script type="text\\/plain" id="sb-template">([\\s\\S]*?)<\\/script>/.exec(once)[1];
+const again = assemble(unescapeInline(tpl), { doc: "{}", board: "/*board*/", title: "t", generator: "test" });
+const tpl2 = /<script type="text\\/plain" id="sb-template">([\\s\\S]*?)<\\/script>/.exec(again)[1];
+const old = assemble(unescapeInline(tpl).replace("</head>", ALPHA_BANNER_TAG + "</head>"), { doc: "{}", board: "/*board*/", title: "t", generator: "test" });
+console.log(JSON.stringify({ tag: ALPHA_BANNER_TAG, siteHas: site.includes("alpha-banner"), once: once.includes("alpha-banner"), tpl: tpl.includes("alpha-banner"), again: again.includes("alpha-banner"), tpl2: tpl2.includes("alpha-banner"), old: old.includes("alpha-banner") }));`;
+  const r = JSON.parse(execFileSync("bun", ["-e", code], { encoding: "utf8" }));
+  ok(r.siteHas && !r.once && !r.tpl, "a board downloaded from the site's board page carries no notice, nor does the template it carries for exporting again: " + JSON.stringify(r));
+  ok(!r.again && !r.tpl2, "a board exported again from that download (from its carried template) carries none either");
+  ok(!r.old, "nor one exported again from a file whose carried template had the tag");
+  ok(read(join(here, "build.ts")).includes(`const ALPHA_BANNER_TAG = '${r.tag.replace("\n", "\\n")}';`), "build.ts puts in exactly the tag assemble() takes out");
 }
 const atlas = read(join(here, "atlas", "render.ts"));
 ok(atlas.includes(TAG), "the atlas's pages (rendered by its Worker) load the notice");

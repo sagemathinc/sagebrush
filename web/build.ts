@@ -8,9 +8,11 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
+// (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
+const ALPHA_BANNER_TAG = '<script src="/alpha-banner.js" defer></script>\n';
 function withAlphaBanner(html: string): string {
   if (!html.includes("</head>")) throw new Error("build: a page without </head> for the early-alpha notice");
-  return html.replace("</head>", '<script src="/alpha-banner.js" defer></script>\n</head>');
+  return html.replace("</head>", ALPHA_BANNER_TAG + "</head>");
 }
 const here = import.meta.dir;
 const shims: Record<string, string> = {
