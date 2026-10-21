@@ -74,6 +74,14 @@ const webDir = join(root, "web", "dist");
 for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
+// (the site's early-alpha notice is for sagebrush.space, not the page `sagebrush notebook` serves on this
+// machine: its script tag and comment are taken out, web/alpha-banner.js)
+if (web["index.html"]) {
+  const page = Buffer.from(web["index.html"], "base64").toString("utf8");
+  const without = page.replace(/<!-- the early-alpha notice[^\n]*-->\n<script src="\/alpha-banner\.js" defer><\/script>\n/, "");
+  if (page.includes("alpha-banner") && without.includes("alpha-banner")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
+  web["index.html"] = Buffer.from(without, "utf8").toString("base64");
+}
 const katexDir = join(webDir, "katex");
 const walkKatex = (dir) => {
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
