@@ -53,8 +53,9 @@ export interface Kept { id: number; why: string; revision: string; txs: Tx[]; vi
 
 /** What the frame shows: the page's side of the channel. */
 export interface EditUi {
-  /** show this board (the host's state with the frame's unsaved changes over it), with a note for the caption */
-  show(doc: BoardDoc, note?: string): void;
+  /** show this board (the host's state with the frame's unsaved changes over it), with a note for the caption;
+   * a promise: resolved once the editor shows it (the channel's view of what the user sees moves only then) */
+  show(doc: BoardDoc, note?: string): void | Promise<unknown>;
   /** Edit allowed or not: paused at the bound, or ended by the host (`why` said) */
   allowed(on: boolean, why: string): void;
   /** the copies kept for download changed */
@@ -351,6 +352,10 @@ export class EditChannel {
   private answered: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private retryAt = 0;
+  // (refreshes shown, and actions taken: an action taken while a refresh is still being shown was made on the board
+  // shown before it: astra's CORR-PICREF-2)
+  private showGen = 0;
+  private saves = 0;
   /** what happened, the latest 200: for tests */
   readonly log: { what: string; id?: string; n?: number }[] = [];
 
@@ -399,6 +404,7 @@ export class EditChannel {
     // (both margins, before it is taken: daybreak2's check 4; paused, nothing new is taken, and what is held fits)
     if (this.paused || this.held.bytes + tx.bytes > EDIT_BOUNDS.heldBytes || this.held.changes + changes.length > EDIT_BOUNDS.heldChanges) return undo("**Not saved:** waiting for the host to save your earlier changes.");
     this.unsaved.push(tx);
+    this.saves++;
     this.held.bytes += tx.bytes;
     this.held.changes += changes.length;
     this.view = next;
@@ -538,8 +544,24 @@ export class EditChannel {
   private refresh(note?: string) {
     const m = this.viewMap(), d = boardOf(m), shown = recordsOf(cleanDoc(d));
     const same = shown.size === this.view.size && [...shown].every(([k, r]) => { const o = this.view.get(k); return !!o && sameJson(o, r); });
-    this.view = shown;
-    if (!same || note) this.ui.show(d, note);
+    if (same && !note) return;
+    // (the view, what the user's actions are taken against, becomes this board only once the editor shows it: an
+    // action meanwhile was made on the board shown before, and is taken against that; this board is then shown
+    // again, with it: astra's CORR-PICREF-2)
+    const g = ++this.showGen, savesAt = this.saves;
+    const r = this.ui.show(d, note);
+    if (!r || typeof (r as Promise<unknown>).then !== "function") { this.view = shown; return; }
+    void (r as Promise<unknown>).then(() => {
+      if (g !== this.showGen) return;
+      this.view = shown;
+      if (this.saves !== savesAt) this.refresh();
+    }, () => {});
+  }
+  /** The pictures the host's board names (its own state, never the frame's unsaved changes over it): those the host
+   * has (astra's CORR-PICREF-1). */
+  hostPictures(): string[] {
+    const im = this.host.get(keyOf({ type: "doc", page: "", id: "" }))?.images;
+    return im && typeof im === "object" && !Array.isArray(im) ? Object.keys(im) : [];
   }
   // (the host's changes, from `base`: applied if base is the latest revision; else resync, and changes ignored
   // until a replace)

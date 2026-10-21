@@ -34,6 +34,7 @@ const nameOfBytes = async (b) => "i" + [...new Uint8Array(await crypto.subtle.di
 const REF_NAME = await nameOfBytes(Buffer.from(PNG_REF, "base64"));
 const BOARD_REF = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Editing", images: { [REF_NAME]: { w: 1, h: 1 } }, nodes: [
   { id: "a", text: "a picture by reference", image: REF_NAME, x: 0, y: 0, w: 200, h: 120 },
+  { id: "b", text: "b0", x: 300, y: 0, w: 200, h: 120 },
 ] });
 const NONCE = crypto.randomUUID();
 // (the host's merge, for the page)
@@ -62,6 +63,11 @@ document.body.append(f);
 window.post = (m, t) => port.postMessage(m, t ?? []);
 // (a change made elsewhere, sent as a remote)
 window.remote = (changes) => { const r = st.remote(changes); if (!r.ok) throw new Error(r.message); const base = "r" + rev; post({ sagebrush: "remote", version: 1, base, revision: "r" + ++rev, changes }); };
+window.holdGets = false;
+const heldGets = [];
+window.releaseGets = () => { window.holdGets = false; for (const m of heldGets.splice(0)) answer(m); };
+// (a picture the host has, by its own rules, given to this channel: for a remote change naming it)
+window.hostPicture = async (b64) => { const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer; const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), name = "i" + [...d.slice(0, 16)].map((x) => x.toString(16).padStart(2, "0")).join(""); pictures.set(name, { type: "image/png", bytes }); allowed.add(name); return name; };
 window.answer = async (m) => {
   if (m.sagebrush === "imagePut") {
     if (mode === "refusePut") return post({ sagebrush: "refused", version: 1, id: m.id, message: "Your picture quota is spent.", reason: "quota" });
@@ -71,6 +77,7 @@ window.answer = async (m) => {
     allowed.add(name);
     return post({ sagebrush: "imageSaved", version: 1, id: m.id, name });
   }
+  if (m.sagebrush === "imageGet" && window.holdGets) return heldGets.push(m);
   if (m.sagebrush === "imageGet") {
     const images = [], missing = [];
     for (const n of m.names) { const p = allowed.has(n) && pictures.get(n); if (p) images.push({ name: n, type: p.type, bytes: p.bytes.slice(0) }); else missing.push(n); }
@@ -254,6 +261,28 @@ try {
   check(!!(await until(() => top(`!!st.board().images?.[${JSON.stringify(added)}] && !st.board().images[${JSON.stringify(added)}].src`), 10000)), "a picture added: the edit naming it saved, the board naming it only");
   const order = await top(`(() => { const i = got.findIndex((g) => g.port?.sagebrush === "imagePut" && g.port.name === ${JSON.stringify(added)}), e = got.findIndex((g) => g.port?.sagebrush === "edit" && JSON.stringify(g.port.changes).includes(${JSON.stringify(added)})); return { i, e, dataUrl: got.some((g) => g.port?.sagebrush === "edit" && JSON.stringify(g.port).includes("data:")) }; })()`);
   check(order.i >= 0 && order.e > order.i && !order.dataUrl, "its imagePut came before the edit naming it, and no edit carries a data: URL: " + JSON.stringify(order));
+  // CORR-PICREF-1: a picture of the user's, its bytes still being read, and a remote change meanwhile: its imagePut
+  // still sent, the edit taken by the host (never marked as the host's by the board the frame shows)
+  const PNG_P1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const p1 = await frame(`(async () => { const b = await (await fetch("data:image/png;base64,${PNG_P1}")).blob(); const n = await sagebrushImages.put(b); const im = sagebrushImages, orig = im.blob.bind(im); window.__p1 = new Promise((r) => (window.__p1go = r)); im.blob = async (x) => { if (x === n) await window.__p1; return orig(x); }; await sagebrush.board.edit((d) => { d.images = { ...(d.images ?? {}), [n]: { w: 1, h: 1 } }; const a = d.nodes.find((x) => x.id === "a"); a.text = "a with a new picture"; a.image = n; }); return n; })()`);
+  await sleep(400);
+  await top(`remote([{ op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote while reading" } }])`);
+  await until(() => frame(`${textOf("b")} === "remote while reading"`), 10000);
+  await frame(`__p1go()`);
+  check(!!(await until(() => top(`!!st.board().images?.[${JSON.stringify(p1)}] && st.board().nodes.find((n) => n.id === "a").text === "a with a new picture"`), 10000)), "a remote change while a new picture is read: its imagePut sent, the edit taken");
+  check(await top(`got.some((g) => g.port?.sagebrush === "imagePut" && g.port.name === ${JSON.stringify(p1)}) && st.board().nodes.find((n) => n.id === "b").text === "remote while reading"`), "...and the host keeps the remote change");
+  // CORR-PICREF-2: a remote change naming a picture this browser doesn't hold, its imageGet held: the user, on the
+  // board still shown, changes only a; the host keeps both
+  const P2 = await top(`hostPicture(${JSON.stringify(PNG_REF.slice(0, 40) + "AAAAAElFTkSuQmCC")})`);
+  await top(`(() => { window.holdGets = true; const b = st.board(); remote([{ op: "set", key: { type: "doc", page: "", id: "" }, fields: { images: { ...(b.images ?? {}), [${JSON.stringify(P2)}]: { w: 1, h: 1 } } } }, { op: "set", key: { type: "item", page: "", id: "b" }, fields: { text: "remote with a picture", image: ${JSON.stringify(P2)} } }]); })()`);
+  await until(() => top(`got.some((g) => g.port?.sagebrush === "imageGet" && g.port.names.includes(${JSON.stringify(P2)}))`), 10000);
+  check(await frame(`${textOf("b")} !== "remote with a picture"`), "while its picture is fetched (held), the frame still shows the board before the remote change");
+  await frame(`sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "a").text = "edited while fetching"; })`);
+  await sleep(600);
+  await top(`releaseGets()`);
+  check(!!(await until(() => top(`st.board().nodes.find((n) => n.id === "a").text === "edited while fetching" && st.board().nodes.find((n) => n.id === "b").text === "remote with a picture"`), 10000)), "the host keeps both: the user's change to a, and the remote change to b");
+  check(!!(await until(() => frame(`${textOf("b")} === "remote with a picture" && ${textOf("a")} === "edited while fetching"`), 10000)), "...and the frame then shows both");
+
   await top(`mode = "refusePut"`);
   const edits0 = (await edits()).length;
   const refused = await frame(`(async () => { const b = new Blob([Uint8Array.from(atob("${PNG_REF}"), (c) => c.charCodeAt(0)).slice(0, 60), new Uint8Array([1, 2, 3])], { type: "image/png" }); const n = await sagebrushImages.put(b); await sagebrush.board.edit((d) => { d.images = { ...(d.images ?? {}), [n]: { w: 1, h: 1 } }; d.nodes.push({ id: "r", image: n, text: "", x: 500, y: 0, w: 100, h: 100 }); }); return n; })()`);

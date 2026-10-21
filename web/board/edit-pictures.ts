@@ -22,6 +22,8 @@ export const PICTURE_BOUNDS = {
   putBytes: 8 * 2 ** 20,
   /** one picture */
   pictureBytes: 2_000_000,
+  /** the pictures one `images` answer may carry, in all */
+  getBytes: 8 * 2 ** 20,
   /** an answer not come in this long: given up on */
   answerMs: 60_000,
 };
@@ -35,7 +37,7 @@ export interface PictureStore {
   /** keep these bytes; resolves to the name they have (their content's), for the caller to check */
   put(blob: Blob): Promise<string>;
 }
-export type PutResult = { ok: true } | { ok: false; reason: string; message: string };
+export type PutResult = { ok: true } | { ok: false; reason: string; message: string; retryAfter?: number };
 
 export class PictureChannel {
   /** the pictures the host has for this channel, as far as the frame knows: the board's as posted, those put
@@ -60,14 +62,15 @@ export class PictureChannel {
         if (m.name !== put.name) return true;
         this.hostHas.add(put.name);
         this.finishPut(m.id, { ok: true });
-      } else this.finishPut(m.id, { ok: false, reason: typeof m.reason === "string" ? m.reason : "refused", message: typeof m.message === "string" ? m.message.slice(0, 500) : "refused" });
+      } else this.finishPut(m.id, { ok: false, reason: typeof m.reason === "string" ? m.reason : "refused", message: typeof m.message === "string" ? m.message.slice(0, 500) : "refused", ...(typeof m.retryAfter === "number" && m.retryAfter >= 0 ? { retryAfter: m.retryAfter } : {}) });
       return true;
     }
     if (get && (m.sagebrush === "images" || m.sagebrush === "refused")) {
+      // (answered: its place kept, as processing, until what it brought is checked and kept: daybreak2's LIMIT-BPR-1)
       this.gets.delete(m.id);
+      this.processing++;
       clearTimeout(get.timer);
       get.done(m);
-      this.wake();
       return true;
     }
     return false;
@@ -92,6 +95,8 @@ export class PictureChannel {
   // (places taken by puts and gets not yet sent)
   private putsTaken = 0;
   private getsTaken = 0;
+  // (answers to gets still being checked and kept: they hold their get's place)
+  private processing = 0;
 
   /** Send the picture `name` (held in this browser) to the host, and resolve once it says it has it.  A name it has
    * already: at once. */
@@ -123,31 +128,37 @@ export class PictureChannel {
     const missing: string[] = [];
     const queue = [...want], asked = new Set<string>(want);
     const one = async (batch: string[]) => {
-      await this.room(() => this.gets.size + this.getsTaken < PICTURE_BOUNDS.gets, () => { this.getsTaken++; });
+      await this.room(() => this.gets.size + this.getsTaken + this.processing < PICTURE_BOUNDS.gets, () => { this.getsTaken++; });
       this.getsTaken--;
       const id = uuid();
       const m: any = await new Promise((done) => {
-        const timer = setTimeout(() => { this.gets.delete(id); done(null); this.wake(); }, PICTURE_BOUNDS.answerMs);
+        const timer = setTimeout(() => { this.gets.delete(id); this.processing++; done(null); }, PICTURE_BOUNDS.answerMs);
         this.gets.set(id, { done, timer });
         this.note("get", { n: batch.length });
         this.post({ sagebrush: "imageGet", version: 1, id, names: batch });
       });
-      if (!m || m.sagebrush !== "images") { missing.push(...batch); return; }
-      const got = new Set<string>();
-      for (const im of Array.isArray(m.images) ? m.images : []) {
-        if (!im || !batch.includes(im.name) || !TYPES.has(im.type) || !(im.bytes instanceof ArrayBuffer) || im.bytes.byteLength > PICTURE_BOUNDS.pictureBytes) continue;
-        // (kept only under the name its bytes give: a host's bytes for another name are never kept as that one)
-        const kept = await this.store.put(new Blob([im.bytes], { type: im.type }));
-        if (kept === im.name) { got.add(im.name); this.hostHas.add(im.name); }
+      try {
+        // (the answer admitted whole, or not at all, before anything of it is hashed or kept: LIMIT-BPR-1)
+        const ok = m && m.sagebrush === "images" ? admitImages(m, batch) : null;
+        if (!ok) { this.note("answer refused", { n: batch.length }); missing.push(...batch); return; }
+        const got = new Set<string>();
+        for (const im of ok.images) {
+          // (kept only under the name its bytes give: a host's bytes for another name are never kept as that one)
+          const kept = await this.store.put(new Blob([im.bytes], { type: im.type }));
+          if (kept === im.name) { got.add(im.name); this.hostHas.add(im.name); }
+        }
+        // (`more`: asked again, once each; a host that keeps saying more is given up on)
+        const more = new Set(ok.more), again: string[] = [];
+        for (const n of batch) {
+          if (got.has(n)) continue;
+          if (more.has(n) && !asked.has("again:" + n)) { asked.add("again:" + n); again.push(n); }
+          else missing.push(n);
+        }
+        queue.push(...again);
+      } finally {
+        this.processing--;
+        this.wake();
       }
-      // (`more`: asked again, once each; a host that keeps saying more is given up on)
-      const more = new Set(Array.isArray(m.more) ? m.more : []), again: string[] = [];
-      for (const n of batch) {
-        if (got.has(n)) continue;
-        if (more.has(n) && !asked.has("again:" + n)) { asked.add("again:" + n); again.push(n); }
-        else missing.push(n);
-      }
-      queue.push(...again);
     };
     const running: Promise<void>[] = [];
     while (queue.length || running.length) {
@@ -161,18 +172,52 @@ export class PictureChannel {
   }
 }
 
+/** An `images` answer to an imageGet of `batch`, admitted whole or not at all (daybreak2's LIMIT-BPR-1): at most one
+ * picture for each name asked, each name asked at most once, each picture of a type it may be and at most 2,000,000
+ * bytes, 8 MiB of them in all; `more`, if given, at most the names asked, each once.  null: refused. */
+export function admitImages(m: any, batch: readonly string[]): { images: { name: string; type: string; bytes: ArrayBuffer }[]; more: string[] } | null {
+  const images = m.images, more = m.more === undefined ? [] : m.more;
+  if (!Array.isArray(images) || images.length > batch.length || !Array.isArray(more) || more.length > batch.length) return null;
+  const asked = new Set(batch), seen = new Set<string>(), out: { name: string; type: string; bytes: ArrayBuffer }[] = [];
+  let bytes = 0;
+  for (const im of images) {
+    if (!im || typeof im !== "object" || typeof im.name !== "string" || !asked.has(im.name) || seen.has(im.name)) return null;
+    if (!TYPES.has(im.type) || !(im.bytes instanceof ArrayBuffer) || im.bytes.byteLength > PICTURE_BOUNDS.pictureBytes) return null;
+    bytes += im.bytes.byteLength;
+    if (bytes > PICTURE_BOUNDS.getBytes) return null;
+    seen.add(im.name);
+    out.push({ name: im.name, type: im.type, bytes: im.bytes });
+  }
+  const moreSeen = new Set<string>();
+  for (const n of more) {
+    if (typeof n !== "string" || !asked.has(n) || moreSeen.has(n) || seen.has(n)) return null;
+    moreSeen.add(n);
+  }
+  return { images: out, more: [...moreSeen] };
+}
+
 /** By reference: each picture an action adds that the host doesn't have is put, and saved by the host, before the
- * edit naming it is sent (the action taken when it is made: edit-channel.ts).  One refused takes that action out
- * (web/board-host-protocol.md, Pictures, Order). */
-export function byReference(p: PictureChannel): PicturePrep {
+ * edit naming it is sent (the action taken when it is made: edit-channel.ts).  A picture refused for the user's
+ * quota, or as too large, takes that action out (web/board-host-protocol.md, Pictures, Order).  Busy, or no answer:
+ * tried again after `retryAfter`, a few times (astra's CORR-PICREF-3); still not saved, or refused for another
+ * reason: the action kept for download, its text and all, never dropped. */
+export function byReference(p: PictureChannel, retry = { tries: 4, maxWaitMs: 60_000 }): PicturePrep {
   return {
     inline: false,
     needs: (entries) => Object.keys(entries ?? {}).filter((n) => !p.hostHas.has(n)),
     extraBytes: () => 0,
     async prepare(_changes, names) {
       for (const n of names) {
-        const r = await p.put(n);
-        if (!r.ok) return { ok: false, keep: false, why: r.message };
+        for (let attempt = 0; ; attempt++) {
+          const r = await p.put(n);
+          if (r.ok) break;
+          if (r.reason === "quota" || r.reason === "too-large") return { ok: false, keep: false, why: r.message };
+          if (r.reason === "busy" && attempt < retry.tries) {
+            await new Promise((ok) => setTimeout(ok, Math.min(Math.max(r.retryAfter ?? 1000, 0), retry.maxWaitMs)));
+            continue;
+          }
+          return { ok: false, keep: true, why: r.message };
+        }
       }
       return { ok: true };
     },
