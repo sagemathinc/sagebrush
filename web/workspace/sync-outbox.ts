@@ -24,7 +24,7 @@ import { TRASH, within, type Kind } from "./paths";
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { jsonTextSize } from "../notebook/stores.js";
-import { RELEASE_STORES, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
+import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -94,7 +94,7 @@ export function wireOf(o: Op, dseq: number): WireOp | null {
  * starts the next generation, in one transaction, so every lease taken before is fenced. */
 export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
   checkNs(ns);
-  return inTx(w.ws, "meta", "readwrite", async (tx) => {
+  const lease = await inTx(w.ws, "meta", "readwrite", async (tx) => {
     const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
     const lease = { ns, gen: (cur?.gen ?? 0) + 1 };
     metaWrite(meta, CURRENT, lease);
@@ -103,6 +103,9 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
     if (cur && cur.ns !== ns) await newEpoch(meta);
     return lease;
   });
+  // (another namespace: the old one's purge, begun)
+  afterReleases(w);
+  return lease;
 }
 /** The current lease, if any. */
 export async function currentLease(w: Workspace): Promise<Lease | undefined> {
@@ -155,7 +158,7 @@ export class Outbox {
    * `full`: it stopped at a bound (said in status() until a page goes on); `more`: ops may remain. */
   async scanPage(): Promise<{ made: number; full: boolean; more: boolean }> {
     const cut = (at: number) => OUTBOX.cut?.(at);
-    return inTx(this.w.ws, ["ops", "outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
+    const r = await inTx(this.w.ws, ["ops", "outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), out = tx.objectStore("outbox");
       await fence(meta, this.lease);
       cut(0);
@@ -268,6 +271,9 @@ export class Outbox {
       cut(5);
       return { made, full, more: full || ops.length === OUTBOX.page };
     });
+    // (a pin released by the scan: its version prunable again, its file due; the cleanup begun)
+    afterReleases(this.w);
+    return r;
   }
 
   /** Pages scanned until nothing is left past the watermark or the outbox is full. */
@@ -327,6 +333,7 @@ export class Outbox {
       }
       meta.put(t, key(this.ns, "outbox"));
     });
+    afterReleases(this.w);
   }
 
   /** Records confirmed (their echo in an `index`, or the confirmed index past their seq: C3), removed under the
@@ -349,6 +356,7 @@ export class Outbox {
       }
       meta.put(t, key(this.ns, "outbox"));
     });
+    afterReleases(this.w);
   }
 
   // (a record's decision, for its identity's pending state and its pin, in the deciding transaction: C2)

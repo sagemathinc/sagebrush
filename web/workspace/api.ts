@@ -31,7 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
-import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, type Pin } from "./sync-pins";
+import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfill, afterReleases, type Pin } from "./sync-pins";
 
 export type Entry = {
   path: string;
@@ -1091,7 +1091,7 @@ export class Workspace {
           if (still && v && (await room())) {
             const vid = await this.putVersion(tx, { ...v, pinned: true }, old!);
             kept = await charge(tx, still, { version: vid }, cap, true);
-          } else if (still) await release(tx, still, true);
+          } else if (still) await release(tx, still, true, true);
         }
         if (version && !kept) await this.putVersion(tx, version, old!);
         tx.objectStore("fileBytes").put(b, fid);
@@ -1355,6 +1355,9 @@ export class Workspace {
         const meta = tx.objectStore("meta"), total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
         meta.put(all ? 0 : Math.max(0, total - f), "versionBytes");
       };
+      // (versions kept before database v5 and not yet in the prunable store: put there first, a bounded page at
+      // a time, so the drop covers them all, however far the backfill had got (astra's CORR-FB0-1))
+      await finishBackfill(this);
       let freed = 0;
       if (fids) {
         // (each file's not kept for sync, from its oldest, up to its newest `keep` of them and the fence (those kept
@@ -1565,6 +1568,8 @@ export class Workspace {
         } catch (err) { console.warn("workspace: emptying Trash:", err); }
       }
       if (fids.size) {
+        // (every version first in the prunable store, as for dropVersions (astra's CORR-FB0-1))
+        await finishBackfill(this);
         // (their versions not kept for sync, a transaction at most DROP_REQUESTS requests, each going on from the
         // last id looked at; those kept for sync stay until their pins go: design/sync-client.md C2)
         const list = [...fids];
@@ -1587,6 +1592,7 @@ export class Workspace {
       }
       hdb?.close();
       bdb?.close();
+      afterReleases(this);
       this.tell({ ops });
       return gone.length;
     });
@@ -1743,6 +1749,8 @@ export class Workspace {
   }
   /** (after a change that kept a version: the cleanup begun if it left versions due) */
   private versionsLeft() {
+    // (a pin released in the change: its version prunable again, its file due: the cleanup begun)
+    afterReleases(this);
     if (!this.versionsDue) return;
     this.versionsDue = false;
     scheduleClean(this);
