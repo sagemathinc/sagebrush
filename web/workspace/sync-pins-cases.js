@@ -319,6 +319,9 @@ async function cleanup() {
   await put(w.ws, "fileBytes", enc("old"), "0ddba11000000000");
   const oldSlice = W.PINS.slice;
   W.PINS.slice = { examine: 2, requests: 400 };
+  // (the cleanup turning sync off begins, held back: this test runs it, cut)
+  let release;
+  W.PINS.cleanAfter = new Promise((r) => (release = r));
   await W.syncOff(w);
   let pages = 0;
   const realGet = IDBObjectStore.prototype.getAll;
@@ -330,6 +333,9 @@ async function cleanup() {
   const mid = await totalRight(w);
   await W.cleanPins(w);
   W.PINS.slice = oldSlice;
+  release();
+  W.PINS.cleanAfter = null;
+  await w.pinsCleaning;
   check(e && mid && (await all(w.ws, "pins")).length === 0 && (await pinBytes(w)) === 0 && (await get(w.ws, "fileBytes", "deadbeefdeadbeef")) === undefined && dec(await get(w.ws, "fileBytes", "0ddba11000000000")) === "old" && (await Promise.all(fids.map((fid) => get(w.ws, "fileBytes", fid)))).every((b) => b !== undefined), "the cleanup cut part way: nothing half done (the total right), then finished: every pin released, the total 0, the leaked bytes swept, the files' own bytes kept: " + J({ pages }));
   w.close();
 }
@@ -806,23 +812,29 @@ async function versionScale() {
     await sleep(100);
     globalThis.gc?.();
     const heap0 = performance.memory?.usedJSHeapSize ?? 0;
-    let longest = 0;
-    const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
+    // (long tasks counted only where they overlap a save: the insert's garbage, collected later, is no save's)
+    const tasks = [], spans = [];
+    const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) tasks.push(e); });
     obs.observe({ type: "longtask", buffered: false });
     const times = [], recs = [], calls = [];
     for (let k = 0; k < 10; k++) {
       const t0 = performance.now();
       calls.push(await counting(() => w.write("/v.bin", "w" + k)));
-      times.push(performance.now() - t0);
+      const t1 = performance.now();
+      times.push(t1 - t0);
+      spans.push([t0, t1]);
       recs.push(lastRecords);
     }
+    await sleep(0);
+    for (const e of obs.takeRecords()) tasks.push(e);
     obs.disconnect();
+    const longest = Math.max(0, ...tasks.filter((e) => spans.some(([a, b]) => e.startTime < b && e.startTime + e.duration > a)).map((e) => e.duration));
     open();
     W.PINS.cleanAfter = null;
     globalThis.gc?.();
     const heap = Math.max(0, (performance.memory?.usedJSHeapSize ?? 0) - heap0);
     const sorted = [...times].sort((x, y) => x - y);
-    out.push({ n, pinned, other: !!other, median: Math.round(sorted[5] * 10) / 10, ms: Math.round(Math.max(...times)), first: Math.round(times[0]), records: Math.max(...recs), calls: Math.max(...calls), longest: Math.round(longest), heapKB: Math.round(heap / 1024) });
+    out.push({ n, pinned, other: !!other, median: Math.round(sorted[5] * 10) / 10, ms: Math.round(Math.max(...times)), first: Math.round(times[0]), records: Math.max(...recs), calls: Math.max(...calls), longest: Math.round(longest), tasks: tasks.length, heapKB: Math.round(heap / 1024) });
     w.close();
   }
   // (exact counts, not times: a save reads at most maxVersions + PRUNE_STEP of its file's prunable versions (the
@@ -839,6 +851,9 @@ async function bulkDrop() {
   await on(w);
   await w.create("/bulk.bin", { content: "b0" });
   for (let i = 1; i <= 1000; i++) await w.write("/bulk.bin", "b" + i);
+  // (the purge turning sync off begins, held back: the versions stay pinned for this test)
+  let release;
+  W.PINS.cleanAfter = new Promise((r) => (release = r));
   await W.syncOff(w);
   // (sync off: the next versions aren't pinned)
   await w.create("/free.bin", { content: "f0" });
@@ -848,7 +863,8 @@ async function bulkDrop() {
   const after = await all(w.ws, "versions");
   const sum = after.reduce((t, v) => t + v.size, 0);
   check(after.length === before.filter((v) => v.pinned).length && after.length >= 1000 && after.every((v) => v.pinned) && (await get(w.ws, "meta", "versionBytes")) === sum && lastPerTx <= 400, "dropVersions(\"/\") past 1,000 versions kept for sync: it ends, the pinned kept, every other one gone, the total exact, each transaction within its requests: " + J({ before: before.length, after: after.length, perTx: lastPerTx, calls: n }));
-  // (a file's: its newest `keep`, counted with those kept for sync)
+  release();
+  W.PINS.cleanAfter = null;
   w.close();
 }
 
@@ -934,15 +950,27 @@ async function dueDrain() {
     const f = await w.create("/due.bin", { content: "d" });
     await prunableVersions(w, f.fid, n);
     await put(w.ws, "meta", 1, W.VDUE + f.fid);
-    let longest = 0;
+    // (the insert's garbage collected first, so its collection isn't taken for the drain's)
+    await sleep(300);
+    globalThis.gc?.();
+    await sleep(100);
+    // (long tasks as the browser reports them (it must: asserted), one task yielded before the last are read; and a
+    // 10 ms timer's lateness besides)
+    const observed = !!PerformanceObserver.supportedEntryTypes?.includes("longtask");
+    let longest = 0, late = 0;
     const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longest = Math.max(longest, e.duration); });
-    obs.observe({ type: "longtask", buffered: false });
+    if (observed) obs.observe({ type: "longtask", buffered: false });
+    let next = performance.now() + 10;
+    const tick = setInterval(() => { const t = performance.now(); late = Math.max(late, t - next); next = t + 10; }, 10);
     const r = await timedSlices(() => W.cleanPins(w));
+    await sleep(0);
+    for (const e of obs.takeRecords()) longest = Math.max(longest, e.duration);
     obs.disconnect();
-    out.push({ n, ...r, longest: Math.round(longest), left: (await all(w.ws, "versions")).length, exact: await bytesExact(w) });
+    clearInterval(tick);
+    out.push({ n, ...r, observed, longest: Math.round(longest), timerLate: Math.round(late), left: (await all(w.ws, "versions")).length, exact: await bytesExact(w) });
     w.close();
   }
-  check(out.every((x) => x.left === W.LIMITS.maxVersions && x.exact && x.longest < 50 && x.perTx <= W.PINS.slice.requests && x.records <= W.PINS.slice.examine + W.LIMITS.maxVersions + 10) && out[2].perTx === out[0].perTx && out[2].records === out[0].records, "a due file with 1,000 to 50,000 versions: drained by the cleanup, every slice within its requests and records, the same at every size, no long task (slice times reported): " + J(out));
+  check(out.every((x) => x.left === W.LIMITS.maxVersions && x.exact && x.observed && x.longest < 50 && x.perTx <= W.PINS.slice.requests && x.records <= W.PINS.slice.examine + W.LIMITS.maxVersions + 10) && out[2].perTx === out[0].perTx && out[2].records === out[0].records, "a due file with 1,000 to 50,000 versions: drained by the cleanup, every slice within its requests and records, the same at every size, no long task (observed; slice times and a 10 ms timer's lateness reported): " + J(out));
 }
 
 async function upgradeOpen() {
@@ -1049,6 +1077,188 @@ async function backfill() {
   conds.alone = (await get(w2.ws, "meta", "versionBytes")) <= 200 && (await bytesExact(w2)) && (await get(w2.ws, "meta", W.VOVER)) === undefined;
   w2.close();
   check(Object.values(conds).every(Boolean), "the backfill cut at every page and reloaded: each page whole or not at all, going on from its marker; ended as v5 makes them; a save meanwhile kept the old ones; the bytes bound past during it, kept after it: " + J({ marks, n: vs.length, total, conds, oks }));
+  w.close();
+}
+
+async function backfillLive() {
+  // (daybreak2's round 4: versions saved faster than a page a slice while the backfill runs: it ends all the same
+  // (its end fixed when it began), and the purge and the version cleanup queued behind it then run, every slice
+  // within its bounds)
+  const w = await fresh();
+  await on(w);
+  await w.create("/live.bin", { content: "l0" });
+  await w.write("/live.bin", "l1");
+  await legacyVersions(w, "f0000000legacy01", 200, 1);
+  // (a purge queued: sync turned off, its pins to go; the cleanup that begins held back, so this run, with the
+  // writer between its slices, is the one that does the backfill)
+  let hold;
+  W.PINS.cleanAfter = new Promise((r) => (hold = r));
+  await W.syncOff(w);
+  const pinsBefore = (await all(w.ws, "pins")).length;
+  // (and a due file)
+  const g = await w.create("/due2.bin", { content: "d" });
+  await prunableVersions(w, g.fid, 300);
+  await put(w.ws, "meta", 1, W.VDUE + g.fid);
+  W.PINS.slice = { examine: 10, requests: 400 };
+  // (its end: every version there when it begins, a page of 10 a slice; so it clears within that many slices)
+  const atStart = (await all(w.ws, "versions")).length, bound = Math.ceil(atStart / 10) + 2;
+  let slices = 0, cleared = null, added = 0;
+  // (between slices, 20 versions saved: two pages' worth; for the first 400 slices)
+  W.PINS.afterSlice = async () => {
+    slices++;
+    if (cleared === null && (await get(w.ws, "meta", W.BACKFILL)) === undefined) cleared = slices;
+    if (slices <= 400) { await prunableVersions(w, "f0000000writer01", 20); added += 20; }
+  };
+  try { await counting(() => W.cleanPins(w)); } finally { W.PINS.afterSlice = null; hold(); restore(); }
+  await w.pinsCleaning;
+  const pinsAfter = (await all(w.ws, "pins")).length, dueLeft = (await get(w.ws, "meta", W.VDUE + g.fid)) !== undefined;
+  const gLeft = (await all(w.ws, "prunable")).filter((p) => p.fid === g.fid).length;
+  check(cleared !== null && cleared <= bound && pinsBefore > 0 && pinsAfter === 0 && !dueLeft && gLeft === W.LIMITS.maxVersions && lastPerTx <= 400, "versions saved faster than a page a slice while the backfill runs: it ends (its end fixed when it began), then the purge and the due file's cleanup run, every slice within its bounds: " + J({ cleared, bound, slices, added, pinsBefore, pinsAfter, gLeft, perTx: lastPerTx }));
+  w.close();
+}
+
+// (the cleanup idle, the end state: no file has more versions not kept for sync than maxVersions; every prunable
+// record has its version, and its file)
+async function idleInvariant(w, max = W.LIMITS.maxVersions) {
+  await W.cleanPins(w);
+  const pr = await all(w.ws, "prunable"), vs = new Map((await all(w.ws, "versions")).map((v) => [v.id, v]));
+  const idents = new Set((await all(w.ws, "entries")).map((e) => e.ident).filter(Boolean));
+  const per = {};
+  for (const p of pr) per[p.fid] = (per[p.fid] ?? 0) + 1;
+  const over = Object.entries(per).filter(([, n]) => n > max);
+  const free = [...vs.values()].filter((v) => !v.pinned), freeOver = Object.entries(free.reduce((o, v) => ((o[v.fid] = (o[v.fid] ?? 0) + 1), o), {})).filter(([, n]) => n > max);
+  const orphans = pr.filter((p) => !vs.has(p.id) || !idents.has(p.fid));
+  return { ok: !over.length && !freeOver.length && !orphans.length && (await bytesExact(w)), over, freeOver, orphans: orphans.length };
+}
+
+async function deleteDuringBackfill() {
+  // (astra's CORR-FB0-1: a deletion the person asks for while the backfill hasn't reached every version: complete all
+  // the same (the backfill finished first, a bounded page at a time), done only when every matching version is gone;
+  // dropVersions("/"), with a reload part way through the backfill; emptyTrash, deleting a file for good)
+  const out = {};
+  let nm = names();
+  localStorage.clear();
+  let w = await W.Workspace.open(nm);
+  const f = await w.create("/bf.bin", { content: "b" });
+  await legacyVersions(w, f.fid, 30, 10);
+  W.PINS.slice = { examine: 10, requests: 400 };
+  try {
+    // (one page done, then a reload)
+    let puts = 0;
+    const realPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...a) { if (this.name === "prunable" && ++puts === 11) throw new Error("cut"); return realPut.apply(this, a); };
+    try { await W.cleanPins(w); } catch {} finally { IDBObjectStore.prototype.put = realPut; }
+    out.reached = (await get(w.ws, "meta", W.BACKFILL))?.after;
+    w.close();
+    w = await W.Workspace.open(nm);
+    const freed = await w.dropVersions("/");
+    out.drop = { freed, left: (await all(w.ws, "versions")).length, prunable: (await all(w.ws, "prunable")).length, marker: (await get(w.ws, "meta", W.BACKFILL)) ?? null, total: await get(w.ws, "meta", "versionBytes") };
+    out.dropInv = await idleInvariant(w);
+    w.close();
+    // (emptyTrash: the file deleted for good, its versions with it, whatever the backfill had reached)
+    nm = names();
+    localStorage.clear();
+    w = await W.Workspace.open(nm);
+    const g = await w.create("/gone.bin", { content: "g" });
+    await legacyVersions(w, g.fid, 30, 10);
+    await w.remove("/gone.bin");
+    await w.emptyTrash();
+    out.empty = { left: (await all(w.ws, "versions")).filter((v) => v.fid === g.fid).length, prunable: (await all(w.ws, "prunable")).filter((p) => p.fid === g.fid).length };
+    out.emptyInv = await idleInvariant(w);
+    w.close();
+  } finally { restore(); }
+  check(out.reached === 10 && out.drop.freed === 300 && out.drop.left === 0 && out.drop.prunable === 0 && out.drop.marker === null && out.drop.total === 0 && out.dropInv.ok && out.empty.left === 0 && out.empty.prunable === 0 && out.emptyInv.ok, "deletions during an unfinished backfill (a reload part way): dropVersions(\"/\") and emptying Trash delete every version, done only then; nothing prunable left behind: " + J(out));
+}
+
+async function lateRelease() {
+  // (astra's CORR-FB0-2: versions kept for sync released behind the cleanup's cursor for their file, and after its due
+  // mark has gone: each release marks the file due from its oldest, so the cleanup ends with the file within its
+  // count; the release of a version of a file deleted for good deletes it)
+  const out = {};
+  const w = await fresh({ maxVersions: 2 });
+  const ob = await on(w);
+  let open;
+  try {
+    await w.create("/late.bin", { content: "0" });
+    for (let i = 1; i <= 20; i++) await w.write("/late.bin", String(i));
+    await ob.scan();
+    const recs = await ob.records(), dseqs = recs.map((r) => r.dseq);
+    W.PINS.cleanAfter = new Promise((r) => (open = r));
+    await ob.confirmed(dseqs.slice(6));
+    await w.write("/late.bin", "21");
+    // (one bounded slice of the versions step: the due cursor moves past the low ids, still pinned)
+    const fid = (await w.stat("/late.bin")).fid;
+    W.PINS.slice = { examine: 4, requests: 400 };
+    await new Promise((ok, no) => {
+      const tx = w.ws.transaction(["meta", "versions", "versionBytes", "prunable"], "readwrite");
+      w.versionsSlice(tx, 20).then(() => {}, no);
+      tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+    });
+    out.cursor = await get(w.ws, "meta", W.VDUE + fid);
+    await ob.confirmed(dseqs.slice(0, 6));
+    out.afterRelease = await get(w.ws, "meta", W.VDUE + fid);
+    open();
+    W.PINS.cleanAfter = null;
+    out.inv1 = await idleInvariant(w, 2);
+    // (the due mark gone, then more released: the release marks it again)
+    for (let i = 22; i <= 26; i++) await w.write("/late.bin", String(i));
+    await ob.scan();
+    const more = (await ob.records()).map((r) => r.dseq).filter((d) => !dseqs.includes(d));
+    out.markBefore = (await get(w.ws, "meta", W.VDUE + fid)) ?? null;
+    await ob.confirmed(more);
+    // (the cleanup begun by the release itself, not by this test)
+    await w.pinsCleaning;
+    out.byItself = (await all(w.ws, "prunable")).filter((p) => p.fid === fid).length;
+    out.inv2 = await idleInvariant(w, 2);
+    // (a file deleted for good while versions of it are kept for sync: their release deletes them)
+    const g = await w.create("/doomed.bin", { content: "a" });
+    await w.write("/doomed.bin", "b");
+    await w.write("/doomed.bin", "c");
+    await ob.scan();
+    const gd = (await ob.records()).filter((r) => r.id === g.fid).map((r) => r.dseq);
+    await w.remove("/doomed.bin");
+    await w.emptyTrash();
+    const kept = (await all(w.ws, "versions")).filter((v) => v.fid === g.fid).length;
+    await ob.confirmed(gd);
+    out.doomed = { keptWhilePinned: kept, after: (await all(w.ws, "versions")).filter((v) => v.fid === g.fid).length, prunable: (await all(w.ws, "prunable")).filter((p) => p.fid === g.fid).length };
+    out.inv3 = await idleInvariant(w, 2);
+    // (sync turned off: its purge begun by itself)
+    await w.write("/late.bin", "27");
+    const before = (await all(w.ws, "pins")).length;
+    await W.syncOff(w);
+    await w.pinsCleaning;
+    out.offPurge = { before, after: (await all(w.ws, "pins")).length };
+  } finally {
+    open?.();
+    restore();
+  }
+  check(out.cursor?.after > 0 && out.afterRelease === 1 && out.inv1.ok && out.byItself <= 2 && out.inv2.ok && out.offPurge.before > 0 && out.offPurge.after === 0 && out.doomed.keptWhilePinned > 0 && out.doomed.after === 0 && out.doomed.prunable === 0 && out.inv3.ok, "versions released behind the due cursor, and after the due mark has gone: each release marks the file due from its oldest, the file within its count once idle; a released version of a file deleted for good is deleted: " + J(out));
+  w.close();
+}
+
+async function backfillRewind() {
+  // (a file already due, its cleanup's cursor past every prunable version of it; the backfill then makes older ones
+  // prunable: it rewinds that cursor, so the cleanup ends with the file within its count (astra's round 3))
+  const w = await fresh({ maxVersions: 2 });
+  const f = await w.create("/rw.bin", { content: "r" });
+  await legacyVersions(w, f.fid, 10, 1);
+  await prunableVersions(w, f.fid, 10);
+  const last = Math.max(...(await all(w.ws, "versions")).map((v) => v.id));
+  await put(w.ws, "meta", { after: last }, W.VDUE + f.fid);
+  const inv = await idleInvariant(w, 2);
+  check(inv.ok && (await all(w.ws, "prunable")).filter((p) => p.fid === f.fid).length === 2, "the backfill under a file already due: its cursor rewound, the file within its count once idle: " + J(inv));
+  w.close();
+}
+
+async function backfillGone() {
+  // (the backfill never makes prunable a version of a file deleted for good: it deletes it, once every entry has its
+  // identity)
+  const w = await fresh();
+  await legacyVersions(w, "f00000000gone001", 12, 10);
+  await put(w.ws, "meta", { done: true }, "migration");
+  await W.cleanPins(w);
+  const left = (await all(w.ws, "versions")).filter((v) => v.fid === "f00000000gone001").length, pr = (await all(w.ws, "prunable")).length;
+  check(left === 0 && pr === 0 && (await bytesExact(w)), "the backfill and a file deleted for good: its versions deleted, none made prunable: " + J({ left, pr }));
   w.close();
 }
 
@@ -1166,7 +1376,7 @@ async function upgradeV5() {
 }
 
 export async function run() {
-  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
+  for (const f of [pinning, exemptions, lifecycle, held, successorGate, gone, baseEdge, quota, cleanup, tipBase, collapseInSave, deferredClean, txCache, pruneStep, ordering, slicedCleanup, versionScale, unpinPrunable, caughtUp, bulkDrop, dueDrain, upgradeOpen, backfill, backfillLive, deleteDuringBackfill, lateRelease, backfillRewind, backfillGone, rangeEdges, storageInvariant, manyPins, upgradeV5, tail]) {
     try { await f(); } catch (e) { check(false, `${f.name} threw: ${e?.stack ?? e}`); } finally { restore(); }
   }
   return results;

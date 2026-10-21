@@ -45,11 +45,13 @@ export const PINS = {
   failAfterPin: false,
   /** (tests: the cleanup a collapsing save begins waits for this first) */
   cleanAfter: null as Promise<unknown> | null,
+  /** (tests: awaited between the cleanup's slices) */
+  afterSlice: null as null | (() => Promise<unknown>),
 };
 /** The stores a local change's transaction takes for this, besides its own. */
 export const SYNC_STORES = ["pending", "pins", "meta"];
 /** The stores release needs: a pin kept apart has a version, an orphan has bytes, an owner has its pending record. */
-export const RELEASE_STORES = ["pending", "pins", "meta", "versions", "prunable", "entries", "fileBytes"];
+export const RELEASE_STORES = ["pending", "pins", "meta", "versions", "versionBytes", "prunable", "entries", "fileBytes"];
 
 type Storage = { fileBytes: string } | { version: number };
 export type Pin = { id: string; seq: number; path: string; sha256: string; size: number; epoch: number; storage: Storage; skey: string; orphan?: boolean; owner?: { ns: string; dseq: number } };
@@ -213,8 +215,9 @@ export async function charge(tx: IDBTransaction, p: Pin, how: { version: number 
 }
 
 /** Pin `p` released, in `tx` (RELEASE_STORES), with everything it implies, all in this transaction (see above).
- * `skipped`: its bytes let go before upload, said in `sync:skipped` even if no record owns it yet. */
-export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
+ * `skipped`: its bytes let go before upload, said in `sync:skipped` even if no record owns it yet.  `present`: the
+ * caller knows its file is there (the save of it). */
+export async function release(tx: IDBTransaction, p: Pin, skipped = false, present = false) {
   const pins = tx.objectStore("pins"), meta = tx.objectStore("meta");
   pins.delete([p.id, p.seq]);
   if (own(p)) setTotal(meta, (await pinTotal(meta)) - p.size);
@@ -222,7 +225,7 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
   const left = await refs(pins, p.storage);
   if ("version" in p.storage) {
     const vs = tx.objectStore("versions"), v = (await req(vs.get(p.storage.version))) as Version | undefined;
-    if (v?.pinned && left === 0) unpin(tx, v);
+    if (v?.pinned && left === 0) await unpinOrDrop(tx, v, true, present);
   } else if (p.orphan && left === 0) {
     // (orphaned bytes go with the last reference to them: no pin naming them, no entry (from step 4, no journal
     // record either))
@@ -238,11 +241,43 @@ export async function release(tx: IDBTransaction, p: Pin, skipped = false) {
   if (p.owner || skipped) await noteSkipped(meta, p.path);
 }
 
-/** `v` no longer kept for sync, in `tx`: exempt no more, and prunable (db.ts, version 5): two writes. */
-export function unpin(tx: IDBTransaction, v: Version) {
+/** `v` no longer kept for sync, in `tx`: exempt no more, and prunable (db.ts, version 5); its file marked due from
+ * its oldest (`due`), since a version prunable again may be behind the cleanup's cursor for that file, or past its
+ * count (astra's round 3): three writes. */
+export function unpin(tx: IDBTransaction, v: Version, due = true) {
   const { pinned: _p, ...rest } = v;
   tx.objectStore("versions").put(rest);
   tx.objectStore("prunable").put(prunableOf(v));
+  if (due) markDue(tx, v.fid);
+}
+/** `fid`'s versions due for the cleanup from its oldest, and the bytes bound checked again (a version prunable
+ * again may be what it needs), in `tx`, once a transaction each; the cleanup begun after it commits (afterReleases). */
+export function markDue(tx: IDBTransaction, fid: string) {
+  let m = marked.get(tx);
+  if (!m) marked.set(tx, (m = new Set()));
+  if (m.has(fid)) return;
+  m.add(fid);
+  const meta = tx.objectStore("meta");
+  meta.put(1, VDUE + fid);
+  if (!m.has("")) { m.add(""); meta.put(1, VOVER); }
+  dueIn.add(tx.db);
+}
+const marked = new WeakMap<IDBTransaction, Set<string>>();
+const dueIn = new WeakSet<IDBDatabase>();
+/** (after a change that may have left the cleanup work (versions due, a purge recorded): the cleanup begun) */
+export function afterReleases(w: Workspace) {
+  if (!dueIn.has(w.ws)) return;
+  dueIn.delete(w.ws);
+  void scheduleClean(w);
+}
+/** A pinned version released, in `tx`: prunable, if its file is still there; else deleted, as the file's deletion
+ * would have deleted it but for the pin (it never becomes prunable for a file deleted for good: astra's round 3). */
+export async function unpinOrDrop(tx: IDBTransaction, v: Version, due = true, present = false) {
+  if (present || (await req(tx.objectStore("entries").index("byIdent").count(v.fid))) > 0) return unpin(tx, v, due);
+  const meta = tx.objectStore("meta");
+  tx.objectStore("versions").delete(v.id!);
+  tx.objectStore("versionBytes").delete(v.id!);
+  meta.put(Math.max(0, (((await req(meta.get("versionBytes"))) as number | undefined) ?? 0) - v.size), "versionBytes");
 }
 /** The prunable record of version `v`. */
 export const prunableOf = (v: Version) => ({ fid: v.fid, id: v.id!, t: v.t, size: v.size });
@@ -278,10 +313,12 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
     if ("version" in p.storage) {
       // (one pin per storage: its version no longer exempt)
       const v = (await req(vs.get(p.storage.version))) as Version | undefined;
-      if (v?.pinned) unpin(tx, v);
+      // (the file is the one being saved: there; its due mark written once, below)
+      if (v?.pinned) unpin(tx, v, false);
     } else await dropCurrent(meta, p);
   }
   if (freed) setTotal(meta, (await pinTotal(meta)) - freed);
+  if (list.some((p) => "version" in p.storage)) markDue(tx, list[0].id);
   await noteSkipped(meta, list[0].path);
 }
 
@@ -297,10 +334,13 @@ export async function syncOff(w: Workspace): Promise<void> {
     metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true });
     await newEpoch(meta);
   });
+  afterReleases(w);
 }
 /** The lifecycle epoch moved on (off, sign-out, a namespace switch), in `meta`'s transaction, and the purge of
  * every pin of an older one recorded. */
 export async function newEpoch(meta: IDBObjectStore) {
+  // (the purge recorded: the cleanup begun after this change commits (afterReleases))
+  dueIn.add(meta.transaction.db);
   const e = (await epochOf(meta)) + 1;
   metaWrite(meta, "sync:epoch", e);
   meta.put({ epoch: e } satisfies Purge, "sync:purge");
@@ -311,9 +351,9 @@ export async function newEpoch(meta: IDBObjectStore) {
 export const VDUE = "versions:due:", VOVER = "versions:over", BACKFILL = "versions:backfill";
 
 /** The most requests one release makes (release, above): the pin's delete; the total's read and write; the
- * pointer's read and delete; the storage count; a version's read and two writes, or an orphan's entry count and
- * two deletes; an owner's pending read and write; the skipped note's read and write. */
-export const RELEASE_COST = 14;
+ * pointer's read and delete; the storage count; a version's read, its file's count, and three writes (or two
+ * deletes and the total's read and write), or an orphan's entry count and two deletes; an owner's pending read and write; the skipped note's read and write. */
+export const RELEASE_COST = 18;
 /** The most requests one orphan marker costs the sweep: the storage count, the entry count, two deletes. */
 const SWEEP_COST = 4;
 type Tag = { ns: string; epoch: number };
@@ -329,7 +369,10 @@ type Tag = { ns: string; epoch: number };
  * namespace, checked in each slice's transaction, so a run that starts after a later save, or after sync was
  * turned off and on, never takes a pin made since. */
 export async function cleanPins(w: Workspace, tag?: Tag): Promise<void> {
-  while (!w.closed && (await cleanSlice(w, tag))) await new Promise((r) => setTimeout(r, 0));
+  while (!w.closed && (await cleanSlice(w, tag))) {
+    await new Promise((r) => setTimeout(r, 0));
+    if (PINS.afterSlice) await PINS.afterSlice();
+  }
 }
 /** The cleanup begun after whatever cleanup is under way (one at a time; the same one asked again while it
  * waits, not twice), for the workspace's tests to wait for as `w.pinsCleaning`. */
@@ -347,6 +390,67 @@ export function scheduleClean(w: Workspace, tag?: Tag): Promise<unknown> {
   return run;
 }
 
+/** One page of the backfill, in `tx` (the cleanup's stores), within `left` requests: the versions kept before
+ * database v5 made prunable, from the last id done (BACKFILL's `after`) up to its end, fixed when it began
+ * (`through`, the newest version's id then: those saved since have prunable records of their own and are never its
+ * to walk, so however fast they come it ends: daybreak2's round 4).  Each one not pinned is put in the prunable
+ * store (a put: one there already is the same after), and a file already due has its cursor rewound to its oldest
+ * (it may be past it: astra's round 3); one whose file is gone for good is deleted instead, as the deletion would
+ * have (never made prunable: astra's round 3), once the migrator has given every entry its identity (until then a
+ * file's absence can't be told).  At the end, the bytes bound checked again.  Saves go on meanwhile: a version not
+ * yet done has no prunable record, so it is kept.  Whether there was a page to do (false: the backfill is over). */
+export async function backfillPage(tx: IDBTransaction, w: Workspace, n: number, left: number): Promise<boolean> {
+  const meta = tx.objectStore("meta");
+  const bf = (await req(meta.get(BACKFILL))) as { after: number; through?: number } | undefined;
+  if (!bf) return false;
+  const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable"), byIdent = tx.objectStore("entries").index("byIdent");
+  // (the marker, the end's key cursor, the migration's state, the page, the marker's write, the total's read and write)
+  left -= 8;
+  if (bf.through === undefined) bf.through = await new Promise<number>((ok, no) => { const c = vs.openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
+  const identities = !!((await req(meta.get("migration"))) as { done?: boolean } | undefined)?.done;
+  // (each version at most: its file's count and due read, and three writes (prunable, its due marks) or two deletes)
+  const want = Math.max(1, Math.min(n, Math.floor(left / 5)));
+  const list = bf.after >= bf.through ? [] : ((await req(vs.getAll(IDBKeyRange.bound(bf.after, bf.through, true, false), want))) as Version[]);
+  const there = new Map<string, boolean>(), due = new Set<string>();
+  let gone = 0;
+  for (const v of list) {
+    if (v.pinned) continue;
+    if (!there.has(v.fid)) there.set(v.fid, !identities || (await req(byIdent.count(v.fid))) > 0);
+    if (!there.get(v.fid)) {
+      vs.delete(v.id!);
+      vb.delete(v.id!);
+      gone += v.size;
+      continue;
+    }
+    pr.put(prunableOf(v));
+    // (a file already due: its cursor rewound to its oldest, so the version just made prunable isn't passed by;
+    // one not due stays so, an idle file's versions pruned only on its next save, as before v5)
+    if (!due.has(v.fid)) {
+      due.add(v.fid);
+      if ((await req(meta.get(VDUE + v.fid))) !== undefined) markDue(tx, v.fid);
+    }
+  }
+  const total = Math.max(0, (((await req(meta.get("versionBytes"))) as number | undefined) ?? 0) - gone);
+  if (gone) meta.put(total, "versionBytes");
+  const at = list.length ? list[list.length - 1].id! : bf.after;
+  if (list.length === want && at < bf.through) meta.put({ after: at, through: bf.through }, BACKFILL);
+  else {
+    meta.delete(BACKFILL);
+    if (total > w.limits.maxVersionBytes) meta.put(1, VOVER);
+  }
+  return true;
+}
+/** The backfill finished, a page a transaction (a timer between), before a deletion the person asked for reads
+ * the prunable store: so it covers every version, however far the backfill had got (astra's round 3).  Its end is
+ * fixed, and each page bounded, so this ends. */
+export async function finishBackfill(w: Workspace): Promise<void> {
+  for (;;) {
+    const more = await inTx(w.ws, [...RELEASE_STORES], "readwrite", (tx) => backfillPage(tx, w, PINS.slice.examine, PINS.slice.requests));
+    if (!more || w.closed) return;
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
 /** One slice of the cleanup, in one transaction: whether there may be more. */
 async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
   return inTx(w.ws, [...RELEASE_STORES, "versionBytes"], "readwrite", async (tx) => {
@@ -355,23 +459,10 @@ async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
     let left = PINS.slice.requests;
     const spend = (c: number) => { left -= c; };
     const fits = (c: number) => left >= c;
-    // (0) the versions kept before database v5 made prunable, from the last id done: a page, each one not pinned
-    // put in the prunable store (one request each; a put, so one there already is the same after); at the end,
-    // the bytes bound checked again, since until now the oldest weren't candidates (daybreak2's LIMIT-563-2).
-    // Saves go on meanwhile: a version not yet there is in no prunable record, so kept
-    spend(3);
-    const bf = (await req(meta.get(BACKFILL))) as { after: number } | undefined;
-    if (bf) {
-      const vs = tx.objectStore("versions"), pr = tx.objectStore("prunable"), want = Math.min(n, left - 2);
-      const list = (await req(vs.getAll(IDBKeyRange.lowerBound(bf.after, true), want))) as Version[];
-      for (const v of list) if (!v.pinned) { pr.put(prunableOf(v)); spend(1); }
-      if (list.length === want) meta.put({ after: list[want - 1].id! }, BACKFILL);
-      else {
-        meta.delete(BACKFILL);
-        if ((((await req(meta.get("versionBytes"))) as number | undefined) ?? 0) > w.limits.maxVersionBytes) meta.put(1, VOVER);
-      }
-      return true;
-    }
+    // (0) the versions kept before database v5 made prunable (backfillPage)
+    const bf = await backfillPage(tx, w, n, left);
+    if (bf) return true;
+    spend(1);
     // (1) the purge: its read, the page, the cursor's write; each pin begun only while its release fits
     spend(3);
     const purge = (await req(meta.get("sync:purge"))) as Purge | undefined;
