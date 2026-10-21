@@ -49,7 +49,7 @@ import { mountBoard, type BoardHost } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
 import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistoryRefused } from "../notebook/stores.js";
-import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, type Entry } from "../workspace/index";
+import { Workspace, migrate, freePath, nameOf, splitExt, safeName, LIMITS, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, type Entry } from "../workspace/index";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m: string) => showBusyNotice(m));
 import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
@@ -178,6 +178,9 @@ if (ws) {
   ws.onDurability(() => showLossNotice(ws!));
   // (a long deletion of old versions: said as it goes, so it never looks stuck)
   ws.onDeleting((done) => (done < 1 ? showBusyNotice(`Deleting old versions… ${Math.floor(done * 100)}%`) : hideBusyNotice()));
+  // (old copies that cleanups keep leaving: said, closable, as the last full cleanup found them)
+  void showStaleNotice(ws);
+  ws.onStaleStuck(() => void showStaleNotice(ws!));
   void startMigrator(ws);
 }
 const PENDING = "sagebrush-workspace-pending:", PENDING_UNREAD = "sagebrush-workspace-pending-unread:";

@@ -181,7 +181,16 @@ const withSync = (...stores: string[]) => [...new Set([...stores, ...SYNC_STORES
 const STALE = "stale:";
 const staleKey = (where: "files" | "trash", key: string) => STALE + where + ":" + key;
 /** A stale old copy's mark: the bytes moved, by their size and SHA-256, and the file they went to. */
-type StaleMark = { fid: string; size: number; sha256: string };
+/** An old copy's mark: the bytes it should hold (their file's id, size and SHA-256); and, once cleanups have left it
+ * in place, how many (`fails`, at most STALE_FAILS_CAP) and why the last one did (`why`; `folder`, the full one) */
+type StaleMark = { fid: string; size: number; sha256: string; fails?: number; why?: StaleWhy; folder?: string };
+/** Why an old copy is still there after a cleanup: the folder it would be kept in as a file of its own is full; another of
+ * the workspace's limits (its entries, a free name); an error each time (storage); it kept changing (its rounds ran out). */
+export type StaleWhy = "folder-full" | "limit" | "storage" | "rounds";
+export const STALE_FAILS_CAP = 1000;
+/** The old copies that cleanups keep leaving (migrator.ts, after a full lap): how many, a few of them, and why. */
+export type StaleStuck = { count: number; paths: { path: string; why: StaleWhy; folder?: string }[]; reasons: Partial<Record<StaleWhy, number>> };
+const STUCK_KEY = "staleStuck";
 /** The most a value kept the old way can be (design/capabilities.md §2b, LIMIT-CAP1A-1): the page's
  * writes were bounded by FILE_QUEUE_MAX (256 MiB) and uploads by maxFileBytes (200 MB).  Its size isn't
  * known until it is read, so reading one reserves this × COPIES, exclusively, first. */
@@ -309,6 +318,37 @@ export class Workspace {
   private onHidden: (() => void) | null = null;
   get quarantined(): boolean { const s = this.durability.state; return s === "confirmed" || s === "suspected" || s === "resetting" || s === "purging"; }
   private durabilitySubs = new Set<() => void>();
+  private stuckSubs = new Set<() => void>();
+  /** `f` called when the old copies cleanups keep leaving are counted again (staleStuck). */
+  onStaleStuck(f: () => void): () => void {
+    this.stuckSubs.add(f);
+    return () => this.stuckSubs.delete(f);
+  }
+  /** The old copies cleanups keep leaving, as the last full lap found them (migrator.ts), or undefined if none. */
+  async staleStuck(): Promise<StaleStuck | undefined> {
+    return (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(STUCK_KEY)))) as StaleStuck | undefined;
+  }
+  /** (the migrator's, after a full lap: `s`, or none) */
+  async setStaleStuck(s: StaleStuck | null) {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { if (s && s.count) tx.objectStore("meta").put(s, STUCK_KEY); else tx.objectStore("meta").delete(STUCK_KEY); });
+    for (const f of this.stuckSubs) try { f(); } catch (e) { console.warn("workspace onStaleStuck:", e); }
+  }
+  /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;
+   * the mark as written, or undefined if it went) */
+  async noteStaleFailure(where: "files" | "trash", key: string, why: StaleWhy, folder?: string): Promise<StaleMark | undefined> {
+    const mk = staleKey(where, key);
+    return inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const meta = tx.objectStore("meta"), m = (await req(meta.get(mk))) as StaleMark | undefined;
+      if (m === undefined) return undefined;
+      // (a mark of the old shape: no count yet, so 0; one that isn't a record (older still) becomes one, and still
+      // compares as no bytes, as dropStale reads it)
+      const was = typeof m === "object" && m ? m : ({} as StaleMark);
+      const { folder: _f, ...rest } = was;
+      const next: StaleMark = { ...rest, fails: Math.min(STALE_FAILS_CAP, (was.fails ?? 0) + 1), why, ...(folder !== undefined ? { folder } : {}) };
+      meta.put(next, mk);
+      return next;
+    });
+  }
   /** `f()` whenever what this page knows of the workspace's durability changes (a quarantine learnt from
    * another tab, a witness found unwritable): the pages show it.  Returns how to stop. */
   onDurability(f: () => void): () => void {
@@ -2467,7 +2507,8 @@ export class Workspace {
     if (under + 1 <= max) return;
     const keys = (await req(st.getAllKeys(subtree(folder)))) as string[];
     const direct = keys.filter((k) => k.indexOf("/", folder === "/" ? 1 : folder.length + 1) === -1).length;
-    if (direct + 1 > max) throw new WorkspaceError("limit", `a folder holds at most ${max} entries: ${folder} is full`);
+    // (the folder named, for the old copies' notice: one that couldn't be kept for want of room here, migrator.ts)
+    if (direct + 1 > max) throw new WorkspaceError("limit", `a folder holds at most ${max} entries: ${folder} is full`, { folderFull: folder });
   }
 
   /** The op recorded in `tx`, with its identity (design/sync-client.md §3): `now`, the entry as the op left it
