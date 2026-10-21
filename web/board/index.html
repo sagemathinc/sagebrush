@@ -10,7 +10,8 @@
 <style>
   /* the page; the board's own rules come with its script (board.css, put in by mount.ts) */
   html, body { margin: 0; height: 100%; background: #fafaf7; color: #1d241a; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #board { position: fixed; inset: 0; }
+  /* (bottom: clear of the site's early-alpha notice while it shows, web/alpha-banner.js; 0 everywhere else) */
+  #board { position: fixed; inset: 0; bottom: var(--sb-alpha-banner, 0px); }
 </style>
 </head>
 <body>

@@ -38,7 +38,9 @@ function page({ framed = false, crossOrigin = false, dismissed = false, storage 
     return e;
   };
   const body = { append: (e) => els.push(e) };
-  const document = { body, createElement: el, getElementById: (id) => els.find((e) => e.id === id) ?? null, addEventListener: () => {} };
+  const vars = new Map();
+  const documentElement = { style: { setProperty: (k, v) => vars.set(k, v), removeProperty: (k) => vars.delete(k) } };
+  const document = { body, documentElement, createElement: (t) => Object.assign(el(t), { offsetHeight: 22 }), getElementById: (id) => els.find((e) => e.id === id) ?? null, addEventListener: () => {} };
   const localStorage = {
     getItem: (k) => {
       if (!storage) throw new Error("no storage");
@@ -53,16 +55,17 @@ function page({ framed = false, crossOrigin = false, dismissed = false, storage 
   if (crossOrigin) Object.defineProperty(window, "top", { get: () => { throw new Error("cross-origin"); } });
   else window.top = framed ? {} : window;
   vm.runInNewContext(script, { window, document, localStorage });
-  return { els, store };
+  return { els, store, vars };
 }
 {
   const p = page();
   const bar = p.els[0];
   ok(p.els.length === 1 && bar.id === "sb-alpha-banner" && /not yet security-hardened/.test(bar.children[0].textContent), "a page of the site's own shows the notice");
   ok(/position:fixed/.test(bar.style.cssText) && /bottom:0/.test(bar.style.cssText), "fixed at the window's foot: it moves nothing on the page");
+  ok(p.vars.get("--sb-alpha-banner") === "22px", "and says its height (--sb-alpha-banner), so a page that fills the window keeps clear of it");
   const close = bar.children.find((c) => c.tag === "button");
   close.listeners.click();
-  ok(p.els.length === 0 && p.store.get("sagebrush-alpha-banner-dismissed") === "1", "dismissed, it goes, and this browser remembers");
+  ok(p.els.length === 0 && p.store.get("sagebrush-alpha-banner-dismissed") === "1" && !p.vars.has("--sb-alpha-banner"), "dismissed, it goes (and its height with it), and this browser remembers");
   ok(page({ dismissed: true }).els.length === 0, "and it isn't shown again once dismissed");
   ok(page({ framed: true }).els.length === 0, "never in a frame (a page another site embeds)");
   ok(page({ crossOrigin: true }).els.length === 0, "never in a cross-origin frame either");
@@ -71,8 +74,11 @@ function page({ framed = false, crossOrigin = false, dismissed = false, storage 
 
 // ---- where it is put
 const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+// (whether a page loads the notice: a script element for it, not the words in an inline script's text,
+// such as the board's code, which knows the tag to take it out: board/export.ts)
+const loads = (html) => /<script\b[^>]*\bsrc="\/alpha-banner\.js"/.test(html.replace(/(<script\b[^>]*>)[\s\S]*?(<\/script>)/g, "$1$2"));
 const dist = join(here, "dist");
-ok(!read(join(here, "board", "index.html")).includes("alpha-banner"), "the board template (frame and downloads are made from it) has no notice");
+ok(!loads(read(join(here, "board", "index.html"))), "the board template (frame and downloads are made from it) loads no notice");
 if (!existsSync(join(dist, "index.html"))) {
   console.log("note: no web/dist (run `bun web/build.ts`): the built pages aren't checked");
 } else {
@@ -85,7 +91,7 @@ if (!existsSync(join(dist, "index.html"))) {
     ["frame/board/index.html", "the frame CoCalc and other sites embed"],
     ["embed/index.html", "the notebook component's page"],
     ["runner/index.html", "the runner"],
-  ]) ok(read(join(dist, p)) !== null && !read(join(dist, p)).includes("alpha-banner"), `${what} (${p}) has no notice`);
+  ]) ok(read(join(dist, p)) !== null && !loads(read(join(dist, p))), `${what} (${p}) has no notice`);
   ok(read(join(dist, "alpha-banner.js")) === script && read(join(here, "site", "public", "alpha-banner.js")) === script, "the script is served from the site's root");
 }
 // a board made from the site's board page (exportHtml fetches the page beside it, /board/index.html, which
@@ -99,7 +105,8 @@ const tpl = /<script type="text\\/plain" id="sb-template">([\\s\\S]*?)<\\/script
 const again = assemble(unescapeInline(tpl), { doc: "{}", board: "/*board*/", title: "t", generator: "test" });
 const tpl2 = /<script type="text\\/plain" id="sb-template">([\\s\\S]*?)<\\/script>/.exec(again)[1];
 const old = assemble(unescapeInline(tpl).replace("</head>", ALPHA_BANNER_TAG + "</head>"), { doc: "{}", board: "/*board*/", title: "t", generator: "test" });
-console.log(JSON.stringify({ tag: ALPHA_BANNER_TAG, siteHas: site.includes("alpha-banner"), once: once.includes("alpha-banner"), tpl: tpl.includes("alpha-banner"), again: again.includes("alpha-banner"), tpl2: tpl2.includes("alpha-banner"), old: old.includes("alpha-banner") }));`;
+const has = (h) => h.includes('src="/alpha-banner.js"');
+console.log(JSON.stringify({ tag: ALPHA_BANNER_TAG, siteHas: has(site), once: has(once), tpl: has(tpl), again: has(again), tpl2: has(tpl2), old: has(old) }));`;
   const r = JSON.parse(execFileSync("bun", ["-e", code], { encoding: "utf8" }));
   ok(r.siteHas && !r.once && !r.tpl, "a board downloaded from the site's board page carries no notice, nor does the template it carries for exporting again: " + JSON.stringify(r));
   ok(!r.again && !r.tpl2, "a board exported again from that download (from its carried template) carries none either");
