@@ -1,18 +1,11 @@
 """R0a live-preflight and cache-policy regression checks.
 
-This imports the native Python adapter directly so spies can prove that a
-one-byte live-budget refusal happens before the operation's allocator, while
-the exact boundary reaches it.  It also inspects the private reviewed cache
-ledgers; neither detail is exposed as a Magma intrinsic.
+This runs through Sagebrush's Node CLI so spies can prove that a one-byte
+live-budget refusal happens before the operation's allocator, while the exact
+boundary reaches it.  It also inspects the private reviewed cache ledgers;
+neither detail is exposed as a Magma intrinsic.
 """
 import gc
-import pathlib
-import sys
-
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "engine/py/python"))
-import sagebrush  # load the native package before lib/sagebrush shadows it
-sys.path.insert(0, str(ROOT / "lib"))
 
 import _magma as m
 
