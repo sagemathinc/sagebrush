@@ -153,7 +153,7 @@ fn json_str_eq(b: &[u8], i: &mut usize, want: &str) -> Option<bool> {
     *i += 1;
     let mut w = want.chars();
     let mut eq = true;
-    let mut hex = |b: &[u8], i: &mut usize| -> Option<u32> {
+    let hex = |b: &[u8], i: &mut usize| -> Option<u32> {
         let h = std::str::from_utf8(b.get(*i..*i + 4)?).ok()?;
         *i += 4;
         u32::from_str_radix(h, 16).ok()
