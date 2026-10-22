@@ -21,4 +21,6 @@ F!1 in {T!1};
 3 in {E!1}; 0 in {E!1}; 1/3 in {E!1}; 2 in [E | 0]; 1/2 in {T!2}; 4 in {T!1};
 1/2 in {E!1};
 {a} eq {t};
+{F|a} eq {T|t};
+{{a}} eq {{t}};
 "end";

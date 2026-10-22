@@ -28,9 +28,19 @@ P!1 in {E!1}; P!1 in [K | 1]; 1 in {E!1}; E!1 in [P!1]; b^0 in [P!1]; Index([c, 
 X := {a} join {b^5}; #X; X; Universe(X); Y := {a} join {c}; #Y; Universe(Y); #({P!1} join {a}); {P!1} join {a};
 #({F!1} join {E!1}); {F!1} meet {E!1}; {a} diff {b^5}; {a} sdiff {b^5}; #({a, b} diff {b^5});
 {a} subset {b^5, b}; {a} subset {c}; {F!1} subset {E!1}; {a} notsubset {b};
+// declared universes and nested collections too (astra CORR-PR45-2)
+{F|a} eq {K|b^5}; #({F|a} join {K|b^5}); {F|a} meet {K|b^5}; Universe({F|a} join {K|b^5}); {F|a} diff {K|b^5};
+{F|a} subset {K|b^5, b}; {F|1} eq {E|1}; Universe({F|1} join {E|1}); {F|a} eq {b^5}; {a} eq {K|b^5};
+{{a}} eq {{b^5}}; #({{a}} join {{b^5}}); {a} in {{b^5}}; {{F!1}} eq {{E!1}}; {F!1} in {{E!1}}; [a] in {[b^5]}; {[a]} eq {[b^5]};
+<a, 1> in {<b^5, 1>}; {<a>} eq {<b^5>}; {{a}} eq {{b}}; {{a}, {b}} eq {{b^5}, {b}};
+// the prime field's elements with one extension: the extension's (astra CORR-PR45-3)
+S := {P!1, F!1}; Universe(S); Include(S, a);
 // larger fields
 G<g> := GF(2^12); a in G; c in G; G!a; G!c; Parent(a + c); a + c;
 Q := GF(3^6); R := GF(9); T := GF(27); R.1 + Q.1; T.1 * Q.1; R.1 in Q; Q!T.1;
+// each tuple coordinate its own universe; nested literals keyed in the common field (CORR-PR45-2)
+h := R.1; <a, c> in {<b^5, c>}; {<a, c>} eq {<b^5, c>}; {<a, h>} eq {<b^5, h>}; #({<a, h>} join {<b^5, h>}); <a, h> in {<b^5, h>};
+#{{a}, {b^5}}; #{<a>, <b^5>}; #[{a}, {b^5}]; #{[a], [b^5]};
 // a descent from GF(2^20) (q - 1 = 3 * 5^2 * 11 * 31 * 41)
 // (GF(2^5), not GF(16): with GF(4) already in GF(16), Magma picks either of
 // two embeddings of GF(16) into GF(2^20) at random, run to run)
