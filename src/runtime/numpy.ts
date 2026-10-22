@@ -1832,7 +1832,13 @@ function sumType(dt: DType): DType {
 
 function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
+  const axs = axesArg(axis, a.ndim);
+  const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
   if (a.dt.cplx) {
+    // (the whole complex sum admitted first: the real and imaginary sums,
+    // each with its accumulator, and the combined result; daybreak2's
+    // LIMIT-PR56-1; the parts are views, not copies)
+    admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
     const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
@@ -1840,8 +1846,6 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   // (a float sum of another dtype sums a converted copy: that copy, the
   // output and its accumulator admitted first; LIMIT-PR55-3)
   const widen = rt !== a.dt && rt.kind === "f";
-  const axs = axesArg(axis, a.ndim);
-  const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
   admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
   const src = widen ? copy(a, rt) : a;
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
