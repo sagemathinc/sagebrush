@@ -179,8 +179,9 @@ test("scripts/catalog-run.py: a MATLAB example that does not finish times out, a
     mkdirSync(join(dir, "matlab"));
     writeFileSync(join(dir, "schema.json"), "{}");
     const entry = (name: string, code: string, expected: string) => ({ name, kind: "function", signature: "()", summary: "S.", examples: [{ code, expected }], differs: [], status: "partial" });
-    writeFileSync(join(dir, "matlab", "t.json"), JSON.stringify([entry("loop", "while true, end", "TimeoutError: the example ran for more than 5 seconds\n"), entry("after", "disp(1 + 2)", "     3\n")]));
-    const out = execFileSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", "matlab", "--timeout", "5"], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_CATALOG: dir }, timeout: 120e3 });
+    // Cold restart measured 2.42–3.58 s normally but crossed 5 s at ~50% CPU contention.
+    writeFileSync(join(dir, "matlab", "t.json"), JSON.stringify([entry("loop", "while true, end", "TimeoutError: the example ran for more than 10 seconds\n"), entry("after", "disp(1 + 2)", "     3\n")]));
+    const out = execFileSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", "matlab", "--timeout", "10"], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_CATALOG: dir }, timeout: 120e3 });
     assert.match(out, /^matlab on node: 2 examples, 0 differ$/m, out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
