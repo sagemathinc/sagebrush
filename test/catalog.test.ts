@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -179,9 +179,26 @@ test("scripts/catalog-run.py: a MATLAB example that does not finish times out, a
     mkdirSync(join(dir, "matlab"));
     writeFileSync(join(dir, "schema.json"), "{}");
     const entry = (name: string, code: string, expected: string) => ({ name, kind: "function", signature: "()", summary: "S.", examples: [{ code, expected }], differs: [], status: "partial" });
-    // Cold restart measured 2.42–3.58 s normally but crossed 5 s at ~50% CPU contention.
-    writeFileSync(join(dir, "matlab", "t.json"), JSON.stringify([entry("loop", "while true, end", "TimeoutError: the example ran for more than 10 seconds\n"), entry("after", "disp(1 + 2)", "     3\n")]));
-    const out = execFileSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", "matlab", "--timeout", "10"], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_CATALOG: dir }, timeout: 120e3 });
+    writeFileSync(join(dir, "matlab", "t.json"), JSON.stringify([entry("loop", "while true, end", "TimeoutError: the example ran for more than 1 seconds\n"), entry("after", "disp(1 + 2)", "     3\n")]));
+    // This fake `node` isolates catalog-run.py's kill-and-continue contract
+    // from a cold WebAssembly engine competing with the heavy catalog suites.
+    // The real MATLAB runner and its outputs are covered by gate 3 above.
+    const fake = join(dir, "node");
+    writeFileSync(fake, [
+      "#!/usr/bin/env python3",
+      "import json, sys, time",
+      "path = sys.argv[sys.argv.index('--entries') + 1]",
+      "entries = json.load(open(path, encoding='utf-8'))",
+      "if any('while true' in x['code'] for e in entries for x in e['examples']): time.sleep(60)",
+      "print(json.dumps([{'name': e['name'], 'signature': e['signature'], 'index': i, 'got': '     3\\n'} for e in entries for i, _ in enumerate(e['examples'])]))",
+      "",
+    ].join("\n"));
+    chmodSync(fake, 0o700);
+    const out = execFileSync("python3", [__dirname + "/../../scripts/catalog-run.py", "--runtime", "node", "--mode", "matlab", "--timeout", "1"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: dir + ":" + process.env.PATH, SAGEBRUSH_CATALOG: dir },
+      timeout: 30e3,
+    });
     assert.match(out, /^matlab on node: 2 examples, 0 differ$/m, out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
