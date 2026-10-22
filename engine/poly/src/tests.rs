@@ -311,6 +311,10 @@ fn timings() {
     }
     let a = random_poly(&mut seed, 400, 4);
     cases.push(("square (deg 400)^2 * x^2+1".into(), prod(&[a.clone(), a, z(&[1, 0, 1])])));
+    // the wasm comparison's case (the same polynomial in the Sage script)
+    let a: ZPoly = (0..300).map(|i| BigInt::from((i * 7919) % 13 - 6)).chain([BigInt::one()]).collect();
+    let c: ZPoly = (0..300).map(|i| BigInt::from((i * 104729) % 11 - 5)).chain([BigInt::one()]).collect();
+    cases.push(("dense300 (wasm comparison)".into(), prod(&[a, c])));
     for (name, f) in cases {
         let b = Budget::default();
         let t = std::time::Instant::now();
