@@ -4541,7 +4541,7 @@ def _tuple_str(v, indent, col, tail, cont=None):
 def _extra(v):
     """Continuation indent of a wrapped value: polynomials (and tuples
     holding one) indent 4 more, as Magma's polynomial printer does."""
-    if isinstance(v, (_sp.Polynomial, _MFFPoly)):
+    if isinstance(v, (_sp.Polynomial, _MFFPoly, _MFunRatElt)):
         return 4
     if isinstance(v, MTuple):
         return max([_extra(x) for x in v] + [0])
@@ -5456,7 +5456,40 @@ def _fun_poly_meta(p):
     return int(p.degree()), len(cs), max(_fun_coeff_bits(c) for c in cs), sum(_fun_coeff_bits(c) for c in cs)
 
 
-def _fun_admit_poly(F, p, result, budget, what):
+def _fun_presentation_meta(F, v):
+    """Closed envelope for the two public numerator/denominator polynomials."""
+    dn, _, bn, tn = _fun_poly_meta(v.numerator())
+    dd, _, bd, td = _fun_poly_meta(v.denominator())
+    B = max(bn, bd)
+    if F._ground is _ZZ:
+        # Clearing all coefficient denominators uses an lcm whose bit length
+        # is at most their summed bit lengths; multiplication adds B bits.
+        B += tn + td + 1
+    return max(0, dn, dd), B
+
+
+def _fun_poly_live(degree, bits):
+    """Reviewed live reservation for one dense polynomial and its copies."""
+    n = max(1, int(degree) + 1)
+    total = n * max(1, int(bits))
+    return 4 * (64 * n + (total + 7) // 8)
+
+
+def _fun_preflight_result(F, degree, bits, budget, what, work=0, copies=1, extra_live=0):
+    """Admit a closed result envelope before arithmetic materializes it."""
+    degree, bits = max(0, int(degree)), max(1, int(bits))
+    cap = _FUN_Q_RESULT_DEG if F._char == 0 else _FUN_FP_RESULT_DEG
+    if degree > cap:
+        raise MagmaError("%s x-degree envelope %d exceeds the R0a limit of %d" % (what, degree, cap),
+                         "'FunctionField'", True)
+    _fun_check_output_bits(F, degree, bits, what)
+    # A normalized fraction has two dense polynomials.  ``copies`` covers
+    # simultaneous old/new derivative states or another proved transient.
+    live = int(copies) * 2 * _fun_poly_live(degree, bits) + int(extra_live)
+    budget.charge(work=work, live=live, what=what)
+
+
+def _fun_admit_poly(F, p, result, budget, what, charge_live=True):
     d, n, b, total = _fun_poly_meta(p)
     cap = (_FUN_Q_RESULT_DEG if result else _FUN_Q_INPUT_DEG) if F._char == 0 else (
         _FUN_FP_RESULT_DEG if result else _FUN_FP_INPUT_DEG)
@@ -5471,13 +5504,14 @@ def _fun_admit_poly(F, p, result, budget, what):
                          "'FunctionField'", True)
     # Four copies cover the input/output polynomial, normalization work and
     # reply conversion.  This is intentionally pessimistic.
-    budget.charge(live=4 * (64 * n + (total + 7) // 8), what=what)
+    if charge_live:
+        budget.charge(live=4 * (64 * n + (total + 7) // 8), what=what)
     return max(0, d), n, b
 
 
-def _fun_admit_fraction(F, v, result, budget, what, normalize=True):
-    dn, nn, bn = _fun_admit_poly(F, v.numerator(), result, budget, what + " numerator")
-    dd, nd, bd = _fun_admit_poly(F, v.denominator(), result, budget, what + " denominator")
+def _fun_admit_fraction(F, v, result, budget, what, normalize=True, charge_live=True):
+    dn, nn, bn = _fun_admit_poly(F, v.numerator(), result, budget, what + " numerator", charge_live)
+    dd, nd, bd = _fun_admit_poly(F, v.denominator(), result, budget, what + " denominator", charge_live)
     D = max(dn, dd)
     if nn + nd > _FUN_INPUT_COEFFS_MAX:
         raise MagmaError("%s has more than %d dense coefficients" % (what, _FUN_INPUT_COEFFS_MAX),
@@ -5508,7 +5542,17 @@ _FUN_LRU = []
 _FUN_CACHE_BYTES_MAX = 4 << 20
 _FUN_CACHE_ENTRY_BYTES = 1 << 16  # reviewed reservation for one R0a parent
 _FUN_CACHE_COUNT = min(64, _FUN_CACHE_BYTES_MAX // _FUN_CACHE_ENTRY_BYTES)
-_FUN_POLY_BY_BASE = {}
+_FUN_POLY_BY_BASE = _weakref.WeakValueDictionary()
+_FUN_POLY_LRU = []
+
+
+def _fun_remember_poly(key, ring):
+    """Remember at most 64 source presentations, without retaining values."""
+    _FUN_POLY_LRU[:] = [k for k in _FUN_POLY_LRU if k in _FUN_POLY_BY_BASE and k != key]
+    while len(_FUN_POLY_LRU) >= _FUN_CACHE_COUNT:
+        _FUN_POLY_BY_BASE.pop(_FUN_POLY_LRU.pop(0), None)
+    _FUN_POLY_BY_BASE[key] = ring
+    _FUN_POLY_LRU.append(key)
 
 
 def _fun_cache_get(key):
@@ -5567,7 +5611,9 @@ class _MFunRat:
     def _magma_gen(self, i):
         if i != 1:
             raise MagmaError("Value for name index (%d) should be in the range [1..1]" % i, "'.'", True)
-        return self._wrap(self._frac.gen(), _FunBudget(), "generator", normalize=False)
+        budget = _FunBudget()
+        _fun_preflight_result(self, 1, 1, budget, "generator result")
+        return self._wrap(self._frac.gen(), budget, "generator", normalize=False, prepaid=True)
 
     def _magma_eq(self, o, op):
         if isinstance(o, _MFunRat):
@@ -5577,7 +5623,8 @@ class _MFunRat:
     def _magma_coerce(self, x):
         budget = _FunBudget()
         try:
-            return self._wrap(self._coerce_value(x, budget), budget, "coercion", normalize=False)
+            return self._wrap(self._coerce_value(x, budget), budget,
+                              "coercion", normalize=False, prepaid=True)
         except ZeroDivisionError:
             raise MagmaError("Division by zero", "'!'", False)
         except MagmaError:
@@ -5623,29 +5670,55 @@ class _MFunRat:
                 Bd = max(_fun_poly_meta(d.numerator())[2], _fun_poly_meta(d.denominator())[2])
                 Dout, Bout = _fun_mul_envelope(Dn, Bn, Dd, Bd)
                 Bout = _fun_norm_bits(Dout, Bout)
-                _fun_check_output_bits(self, Dout, Bout, "coercion")
-                budget.charge(work=8 * (Dout + 1) ** 3 * _fun_scalar_cost(self, Bout),
-                              what="coercion normalization")
+                work = 8 * (Dout + 1) ** 3 * _fun_scalar_cost(self, Bout)
+                _fun_preflight_result(self, Dout, Bout, budget, "coercion result", work=work)
                 return n / d
-            cs = []
+            # First pass validates and sizes without building the converted
+            # coefficient vector or backend polynomial.  Their entire live
+            # envelope is charged before the second pass materializes them.
+            B, total = 1, 0
             for c in a:
                 if isinstance(c, bool) or isinstance(c, (_sp.Polynomial, _MFFPoly, _MFunRatElt)):
                     raise MagmaError("Illegal coercion", "'!'", False)
-                cs.append(self._constant(c))
+                self._constant(c)  # validate one scalar; do not retain it
+                cb = _fun_coeff_bits(c)
+                B, total = max(B, cb), total + cb
+            D = max(0, len(a) - 1)
+            cap = _FUN_Q_INPUT_DEG if self._char == 0 else _FUN_FP_INPUT_DEG
+            if D > cap:
+                raise MagmaError("coercion polynomial of x-degree %d exceeds the rational-function R0a limit of %d" % (D, cap),
+                                 "'FunctionField'", True)
+            if self._char == 0 and (B > _FUN_Q_COEFF_BITS or total > _FUN_Q_TOTAL_BITS):
+                raise MagmaError("coercion polynomial has rational coefficients beyond the R0a bit limit",
+                                 "'FunctionField'", True)
+            # A dense coefficient sequence becomes a polynomial over 1; no
+            # gcd/content normalization can grow its coefficients.
+            Bout = B
+            work = 8 * (D + 1) ** 3 * _fun_scalar_cost(self, B)
+            _fun_preflight_result(self, D, Bout, budget, "coercion result", work=work,
+                                  extra_live=64 * len(a))
+            cs = [self._constant(c) for c in a]
             p = self._backend_ring(cs)
-            D, _, B = _fun_admit_poly(self, p, False, budget, "coercion polynomial")
-            budget.charge(work=8 * (D + 1) ** 3 * _fun_scalar_cost(self, B), what="coercion normalization")
+            _fun_admit_poly(self, p, False, budget, "coercion polynomial", charge_live=False)
             return self._frac(p)
         p = self._coerce_poly(x, budget)
         if p is not None:
             D, _, B = _fun_admit_poly(self, p, False, budget, "coercion polynomial")
-            budget.charge(work=8 * (D + 1) ** 3 * _fun_scalar_cost(self, B), what="coercion normalization")
+            work = 8 * (D + 1) ** 3 * _fun_scalar_cost(self, B)
+            _fun_preflight_result(self, D, B, budget,
+                                  "coercion result", work=work)
             return self._frac(p)
         if isinstance(x, bool):
             raise MagmaError("Illegal coercion", "'!'", False)
+        B = _fun_coeff_bits(x)
+        if self._char == 0 and B > _FUN_Q_COEFF_BITS:
+            raise MagmaError("coercion constant has rational coefficients beyond the R0a bit limit",
+                             "'FunctionField'", True)
+        work = 8 * _fun_scalar_cost(self, B)
+        _fun_preflight_result(self, 0, B, budget,
+                              "coercion result", work=work)
         p = self._backend_ring([self._constant(x)])
-        _, _, B = _fun_admit_poly(self, p, False, budget, "coercion constant")
-        budget.charge(work=8 * _fun_scalar_cost(self, B), what="coercion normalization")
+        _fun_admit_poly(self, p, False, budget, "coercion constant", charge_live=False)
         return self._frac(p)
 
     def _constant(self, x):
@@ -5655,11 +5728,32 @@ class _MFunRat:
             return _Rational(x)
         return self._ground._magma_coerce(x)
 
-    def _wrap(self, v, budget, what="result", normalize=True):
+    def _wrap(self, v, budget, what="result", normalize=True, prepaid=False):
         if not isinstance(v, _sfrac.FractionFieldElement):
             v = self._frac(v)
-        _fun_admit_fraction(self, v, True, budget, what, normalize)
+        _fun_admit_fraction(self, v, True, budget, what, normalize, charge_live=not prepaid)
         return _MFunRatElt(self, v)
+
+    def _display(self, v):
+        """Print Z-ground values using Magma's integral presentation."""
+        if self._ground is not _ZZ:
+            return repr(v)
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(self, v)
+        _fun_preflight_result(self, D, B, budget, "printed integral presentation")
+        n, d = self._parts(v)
+        # Re-home only the presentation coefficients in the private ring so
+        # the live field name is used without renaming the source Z[u].
+        n = self._backend_ring(n._c)
+        d = self._backend_ring(d._c)
+        if d == 1:
+            return repr(n)
+        ns, ds = repr(n), repr(d)
+        if "+" in ns[1:] or "-" in ns[1:]:
+            ns = "(" + ns + ")"
+        if any(c in ds[1:] for c in "+-*/"):
+            ds = "(" + ds + ")"
+        return ns + "/" + ds
 
     def _poly_out(self, p):
         if self._ground is _ZZ:
@@ -5688,7 +5782,7 @@ class _MFunRatElt:
         self.F, self.v = F, v
 
     def __repr__(self):
-        return repr(self.v)
+        return self.F._display(self.v)
 
     __str__ = __repr__
 
@@ -5757,11 +5851,9 @@ def _fun_binary(op, a, b, pos=None, budget=None):
         if op in ("+", "-"):
             Bout += 1
         Bout = _fun_norm_bits(Dout, Bout)
-        cap = _FUN_Q_RESULT_DEG if F._char == 0 else _FUN_FP_RESULT_DEG
-        if Dout > cap:
-            raise MagmaError("result x-degree envelope %d exceeds the R0a limit of %d" % (Dout, cap), "'%s'" % op, True, pos)
-        _fun_check_output_bits(F, Dout, Bout, "rational-function %s result" % op)
-        budget.charge(work=8 * (Dout + 1) ** 3 * _fun_scalar_cost(F, Bout), what="rational-function %s" % op)
+        work = 8 * (Dout + 1) ** 3 * _fun_scalar_cost(F, Bout)
+        _fun_preflight_result(F, Dout, Bout, budget,
+                              "rational-function %s result" % op, work=work)
         if op == "+":
             v = av + bv
         elif op == "-":
@@ -5772,7 +5864,7 @@ def _fun_binary(op, a, b, pos=None, budget=None):
             if not bv:
                 raise MagmaError("Division by zero", "'/'", True, pos)
             v = av / bv
-        return F._wrap(v, budget, "result", normalize=False)
+        return F._wrap(v, budget, "result", normalize=False, prepaid=True)
     except ZeroDivisionError:
         raise MagmaError("Division by zero", "'%s'" % op, True, pos)
     except MagmaError:
@@ -5783,8 +5875,10 @@ def _fun_binary(op, a, b, pos=None, budget=None):
 
 def _fun_unary(op, a, pos=None):
     budget = _FunBudget()
-    _fun_admit_fraction(a.F, a.v, False, budget, "operand", normalize=False)
-    return a.F._wrap(-a.v, budget, "result", normalize=False)
+    D = _fun_admit_fraction(a.F, a.v, False, budget, "operand", normalize=False)
+    B = max(_fun_poly_meta(a.v.numerator())[2], _fun_poly_meta(a.v.denominator())[2])
+    _fun_preflight_result(a.F, D, B, budget, "unary result")
+    return a.F._wrap(-a.v, budget, "result", normalize=False, prepaid=True)
 
 
 def _fun_power(a, n, pos=None):
@@ -5797,15 +5891,11 @@ def _fun_power(a, n, pos=None):
     B = max(_fun_poly_meta(a.v.numerator())[2], _fun_poly_meta(a.v.denominator())[2])
     Dout = D * abs(n)
     Bout = 1 if n == 0 else abs(n) * B + max(0, abs(n) - 1) * ((D + 1).bit_length() + 2)
-    cap = _FUN_Q_RESULT_DEG if a.F._char == 0 else _FUN_FP_RESULT_DEG
-    if Dout > cap:
-        raise MagmaError("power result x-degree envelope %d exceeds the R0a limit of %d" % (Dout, cap), "'^'", True, pos)
-    _fun_check_output_bits(a.F, Dout, Bout, "power result")
     steps = max(1, abs(n).bit_length() + bin(abs(n)).count("1") - 1)
-    budget.charge(work=steps * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(a.F, Bout),
-                  what="rational-function power")
+    work = steps * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(a.F, Bout)
+    _fun_preflight_result(a.F, Dout, Bout, budget, "power result", work=work)
     try:
-        return a.F._wrap(a.v ** n, budget, "power result", normalize=False)
+        return a.F._wrap(a.v ** n, budget, "power result", normalize=False, prepaid=True)
     except ZeroDivisionError:
         raise MagmaError("Division by zero", "'^'", True, pos)
 
@@ -5882,13 +5972,13 @@ def PolynomialRing(R, n=1):
         out = _ffpoly_ring(R)
         key = _fun_base_key(R)
         if key is not None:
-            _FUN_POLY_BY_BASE[key] = out
+            _fun_remember_poly(key, out)
         return out
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
     out = _sp.PolynomialRing_(base, "$.1")
-    _FUN_POLY_BY_BASE[_fun_base_key(R)] = out
+    _fun_remember_poly(_fun_base_key(R), out)
     return out
 
 
@@ -5949,6 +6039,8 @@ def _poly_parts(f):
 
 def Degree(f):
     if isinstance(f, _MFunRatElt):
+        if not f.v:
+            return -1
         return max(f.v.numerator().degree(), f.v.denominator().degree())
     if isinstance(f, _sp.Polynomial):
         return f.degree()
@@ -6001,15 +6093,13 @@ def Evaluate(f, x):
             structured = isinstance(x, (_MFunRatElt, _sp.Polynomial, _MFFPoly))
             Dout = D * Dx if structured else 0
             Bout = (D + 1) * (B + Bx + (Dout + 1).bit_length() + 3)
-            cap = _FUN_Q_RESULT_DEG if f.F._char == 0 else _FUN_FP_RESULT_DEG
-            if Dout > cap:
-                raise MagmaError("evaluation result x-degree envelope %d exceeds the R0a limit of %d" % (Dout, cap),
-                                 "'Evaluate'", True)
-            _fun_check_output_bits(f.F, Dout, Bout, "evaluation result")
-            budget.charge(work=8 * (D + 1) * (Dx + 1) ** 2 * _fun_scalar_cost(f.F, Bout),
-                          what="rational-function evaluation")
+            work = 8 * (D + 1) * (Dx + 1) ** 2 * _fun_scalar_cost(f.F, Bout)
+            if structured:
+                _fun_preflight_result(f.F, Dout, Bout, budget, "evaluation result", work=work)
+            else:
+                budget.charge(work=work, what="rational-function evaluation")
             y = f.v(xv if structured else x)
-            return f.F._wrap(y, budget, "evaluation result", normalize=False) if isinstance(y, _sfrac.FractionFieldElement) else y
+            return f.F._wrap(y, budget, "evaluation result", normalize=False, prepaid=True) if structured else y
         except ZeroDivisionError:
             raise MagmaError("Evaluated denominator is not invertible", "'Evaluate'", True)
     if isinstance(f, _MFFPoly):
@@ -6029,19 +6119,16 @@ def Derivative(f, k=1):
         D = _fun_admit_fraction(f.F, v, False, budget, "derivative input", normalize=False)
         B = max(_fun_poly_meta(v.numerator())[2], _fun_poly_meta(v.denominator())[2])
         if k > D and v.denominator().degree() <= 0:
-            return f.F._wrap(f.F._frac(0), budget, "derivative result", normalize=False)
+            _fun_preflight_result(f.F, 0, 1, budget, "derivative result")
+            return f.F._wrap(f.F._frac(0), budget, "derivative result", normalize=False, prepaid=True)
         Dout = D if v.denominator().degree() <= 0 else (k + 1) * D
-        cap = _FUN_Q_RESULT_DEG if f.F._char == 0 else _FUN_FP_RESULT_DEG
-        if Dout > cap:
-            raise MagmaError("derivative result x-degree envelope %d exceeds the R0a limit of %d" % (Dout, cap),
-                             "'Derivative'", True)
         Bout = B + k * (B + (Dout + 1).bit_length() + 3)
-        _fun_check_output_bits(f.F, Dout, Bout, "derivative result")
-        budget.charge(work=max(1, k) * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(f.F, Bout),
-                      what="rational-function derivative")
+        work = max(1, k) * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(f.F, Bout)
+        _fun_preflight_result(f.F, Dout, Bout, budget, "derivative result",
+                              work=work, copies=2)
         for _ in range(k):
             v = v.derivative()
-        return f.F._wrap(v, budget, "derivative result", normalize=False)
+        return f.F._wrap(v, budget, "derivative result", normalize=False, prepaid=True)
     if isinstance(f, _MFFPoly):
         return _ffp_derivative(f, k)
     for _ in range(k):
@@ -7238,12 +7325,18 @@ def Valuation(n, p):
 
 def Numerator(x):
     if isinstance(x, _MFunRatElt):
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(x.F, x.v)
+        _fun_preflight_result(x.F, D, B, budget, "numerator presentation")
         return x.F._parts(x.v)[0]
     return x.numerator if isinstance(x, _Fraction) else x
 
 
 def Denominator(x):
     if isinstance(x, _MFunRatElt):
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(x.F, x.v)
+        _fun_preflight_result(x.F, D, B, budget, "denominator presentation")
         return x.F._parts(x.v)[1]
     return x.denominator if isinstance(x, _Fraction) else 1
 
@@ -8913,8 +9006,6 @@ def BaseField(x):
         if x._ground is _ZZ:
             raise MagmaError("Rational function field is not defined over a field", "'BaseField'", True)
         return x._ground
-    if isinstance(x, _MNumberField):
-        return _QQ
     raise _bad_types("BaseField", (x,))
 
 
@@ -10130,6 +10221,7 @@ _FF_SIGS = {
     "IsZero": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN + (MSeq, MTuple)) for x in a) else False),
     "IsOne": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN + (MSeq, MTuple)) for x in a) else False),
     "Characteristic": lambda a: (len(a) == 1 and isinstance(a[0], _MFFPolyRing)) or None,
+    "FieldOfFractions": lambda a: len(a) == 1 and isinstance(a[0], _MFFPolyRing),
     "AssignNames": lambda a: len(a) == 2 and isinstance(a[0], _MFFPolyRing),
     "Determinant": _M1, "Rank": _M1, "Transpose": _M1, "NumberOfRows": _M1, "NumberOfColumns": _M1,
     "Nrows": _M1, "Ncols": _M1, "CharacteristicPolynomial": _M1, "Trace": lambda a: _M1(a) or None,

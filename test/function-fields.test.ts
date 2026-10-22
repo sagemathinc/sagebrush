@@ -43,12 +43,29 @@ test("R0a work, coefficient and exponent limits are closed at their boundary", (
   assert.equal(r.signal, null);
   const flat = r.stdout.replace(/\s+/g, " ");
   assert.match(r.stdout, /^127\n/m);
-  assert.match(flat, /coercion normalization exceeds the rational-function R0a work or memory limit/);
+  assert.match(flat, /coercion result exceeds the rational-function R0a work or memory limit/);
   assert.match(r.stdout, /^1\n/m);
   assert.match(flat, /rational coefficients beyond the R0a bit limit/);
   assert.match(r.stdout, /^0\n/m);
   assert.match(flat, /exponent limit of 4096/);
   assert.match(r.stdout, /\n1\n$/);
+});
+
+test("R0a zero degrees and integer presentations match Magma", () => {
+  const r = run([
+    "F<x> := FunctionField(Rationals()); f := (x^2+1)/(x-1);",
+    "Degree(F!0); Degree(Derivative(F!7)); Degree(f-f);",
+    "Degree(x/(x+1) - x/(x+1));",
+    "K<t> := FunctionField(GF(5)); Degree(K!0);",
+    "Z<z> := FunctionField(Integers()); q := 1/(2*z+1); q; Derivative(q);",
+    "(123456789012345678901234567890123456789012345678901234567890123456789*z+1)/(z+1);",
+  ].join("\n") + "\n");
+  assert.equal(r.signal, null);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^-1\n-1\n-1\n-1\n-1\n/m);
+  assert.match(r.stdout, /1\/\(2\*z \+ 1\)\n-2\/\(4\*z\^2 \+ 4\*z \+ 1\)\n/);
+  assert.match(r.stdout,
+    /123456789012345678901234567890123456789012345678901234567890123456789\*z \+ 1\)\/\(z\n    \+ 1\)\n$/);
 });
 
 test("an R0a refusal commits neither the canonical parent name nor an element", () => {
