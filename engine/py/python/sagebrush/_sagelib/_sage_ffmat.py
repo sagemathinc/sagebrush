@@ -1928,7 +1928,7 @@ class FFMatrix:
 
 # engine/web nmod_charpoly's admission (NMOD_MAX_N): larger matrices keep
 # the Python path
-_ENGINE_CHARPOLY_MAX_N = 1024
+_ENGINE_CHARPOLY_MAX_N = 512
 
 
 def _engine_prime(base):
