@@ -65,5 +65,5 @@ test("nmod_charpoly's largest admitted request stays within its memory bound in 
   const huge = `{"fn":"nmod_charpoly","p":"7","m":"${"0".repeat(n * n * 20 + n + 4097)}"}`;
   const before2 = e.memory.buffer.byteLength;
   assert.match(call(e, huge), /the request has \d+ bytes/);
-  console.log(`nmod_charpoly wasm: grew ${grown} bytes for n = ${n}; the oversized request grew ${e.memory.buffer.byteLength - before2} (its own bytes)`);
+  console.log(`nmod_charpoly wasm: the oversized request grew ${e.memory.buffer.byteLength - before2} bytes (its own bytes)`);
 });
