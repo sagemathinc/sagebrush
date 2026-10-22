@@ -214,7 +214,7 @@ fn limits_refuse_and_never_return_a_residual() {
 }
 
 /// Bytes this thread allocates while running `f`.
-fn allocated_by<T>(f: impl FnOnce() -> T) -> (T, u64) {
+pub(crate) fn allocated_by<T>(f: impl FnOnce() -> T) -> (T, u64) {
     let before = crate::alloc_spy::allocated();
     let r = f();
     (r, crate::alloc_spy::allocated() - before)
@@ -345,7 +345,18 @@ fn timings() {
         ("x^60-1".into(), xn(60, -1)),
         ("x^120-1".into(), xn(120, -1)),
         ("x^240-1".into(), xn(240, -1)),
+        // binomials (plan factor-binomial r3, section 6 item 5)
+        ("x^1000-1".into(), xn(1000, -1)),
+        ("x^5040-1".into(), xn(5040, -1)),
+        ("x^10000-1".into(), xn(10000, -1)),
+        ("x^9240+1".into(), xn(9240, 1)),
     ];
+    // Stage B: 2^4080 x^9240 - 1 (the perfect-power search finds g = 120
+    // under the 4096-bit cap; pieces of degree up to 32 * 77 go on to the
+    // general path)
+    let mut f = xn(9240, -1);
+    f[9240] = BigInt::one() << 4080u32;
+    cases.push(("2^4080 x^9240 - 1".into(), f));
     for &(d, bits) in &[(100usize, 20u32), (300, 20), (600, 8), (1000, 4)] {
         let a = random_poly(&mut seed, d, bits);
         let c = random_poly(&mut seed, d, bits);
