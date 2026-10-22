@@ -2216,13 +2216,15 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     "def refuse(): return Refused()",
     "def attempt(label, f):",
     "    for k in calls: calls[k] = 0",
-    "    n0 = len(m._FF_IMAGES)",
+    "    n0, snap = len(m._FF_IMAGES), list(m._FF_IMAGES.items())",
     "    try:",
     "        f()",
     "        r = 'admitted'",
     "    except (Refused, m.MagmaError):",
     "        r = 'refused'",
-    "    print(label, r, 'up=%(up)d image=%(image)d GF=%(GF)d dlog=%(dlog)d' % calls, 'cached=%d' % (len(m._FF_IMAGES) - n0))",
+    // (the whole ordered cache, keys and values: a refusal leaves it exactly as it was)
+    "    same = list(m._FF_IMAGES.items()) == snap",
+    "    print(label, r, 'up=%(up)d image=%(image)d GF=%(GF)d dlog=%(dlog)d' % calls, 'cached=%d' % (len(m._FF_IMAGES) - n0), 'order=' + ('same' if same else 'changed'))",
     // the plan's formulas, independently: M(n) = 2 n^2 w(p); an embedding m M(n) + m n; an image 2 bits(e) M(n)
     "def M(p, n): return 2 * n * n * (-(-p.bit_length() // 30)) ** 2",
     "def UP(p, k, n): return k * (M(p, n) + n)",
@@ -2264,7 +2266,7 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     "b = [10 ** 15]",
     "sff._conway(5, 6, b); C = 10 ** 15 - b[0]; sff._CONWAY.pop((5, 6))",
     "print('straddle', 0 < R < C)",
-    "m._FF_IMAGES.clear()",
+    "m._FF_IMAGES.clear(); image(F(4), F(16)); image(F(8), F(64))",
     "m._FF_WORK = R + C - 1",
     "attempt('cold-short', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
     "print('conway kept', (5, 6) in sff._CONWAY)",
@@ -2272,14 +2274,16 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     "attempt('cold', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
     // a collection, admitted whole before its first element goes in
     "a, c = F(4).K.gen(), F(8).K.gen()",
-    "m._FF_IMAGES.clear()",
-    "R = 5 * UP(2, 2, 6) + IMG(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
+    // (GF(4)'s image in GF(64) cached and the OLDEST entry: counted free, and a
+    // refusal must not make it the most recent)
+    "m._FF_IMAGES.clear(); image(F(4), F(64)); image(F(4), F(16))",
+    "R = 5 * UP(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
     "m._FF_WORK = R - 1",
     "attempt('literal-short', lambda: m._seq([a] * 5 + [c]))",
     "m._FF_WORK = R",
     "attempt('literal', lambda: m._seq([a] * 5 + [c]))",
-    "m._FF_IMAGES.clear()",
-    "R = 5 * UP(2, 2, 6) + IMG(2, 2, 6)",
+    "m._FF_IMAGES.clear(); image(F(4), F(64)); image(F(4), F(16))",
+    "R = 5 * UP(2, 2, 6)",
     "m._FF_WORK = R - 1",
     "attempt('declared-short', lambda: m._into_universe([a] * 5, F(64), 'seq'))",
     "m._FF_WORK = R",
@@ -2297,28 +2301,29 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     "",
   ].join("\n"));
   const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
-  const none = "up=0 image=0 GF=0 dlog=0 cached=0";
+  const none = "up=0 image=0 GF=0 dlog=0 cached=0 order=same";
   assert.deepEqual(r.stdout.trim().split("\n"), [
     // (the plan's numbers: 1,331,648 at 2^20; at 2^19, q - 1 = 524,287 prime,
     // ceil(sqrt) = 725, a table of at most 726)
     "D 1331648 1331648 1269880 1269880",
     "Dmax (1331648, 2, 20)",
     "descent-short refused " + none,
-    "descent admitted up=0 image=0 GF=0 dlog=1 cached=0",
+    "descent admitted up=0 image=0 GF=0 dlog=1 cached=0 order=same",
     "cover-2^110 refused " + none,
     "cover-3^14 refused " + none,
     "embed-short refused " + none,
-    "embed admitted up=0 image=1 GF=0 dlog=0 cached=1",
+    "embed admitted up=0 image=1 GF=0 dlog=0 cached=1 order=changed",
     "straddle True",
     "cold-short refused " + none,
     "conway kept False",
     // (GF(5^6) and, inside it, its prime field GF(5); two images, two embeddings)
-    "cold admitted up=2 image=2 GF=2 dlog=0 cached=2",
+    "cold admitted up=2 image=2 GF=2 dlog=0 cached=2 order=changed",
     "literal-short refused " + none,
-    // (GF(64) found, not made: it exists, its Conway polynomial cached)
-    "literal admitted up=6 image=6 GF=1 dlog=0 cached=2",
+    // (GF(64) found, not made: it exists, its Conway polynomial cached; the
+    // free image made the most recent, GF(8)'s added)
+    "literal admitted up=6 image=6 GF=1 dlog=0 cached=1 order=changed",
     "declared-short refused " + none,
-    "declared admitted up=5 image=5 GF=0 dlog=0 cached=1",
+    "declared admitted up=5 image=5 GF=0 dlog=0 cached=0 order=changed",
     "literal-2^110 refused " + none,
     "cache 3 [True, False, False, True, True]",
   ], r.stdout + r.stderr);

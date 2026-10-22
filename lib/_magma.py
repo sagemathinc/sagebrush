@@ -668,7 +668,7 @@ def _ff_into(U, x, budget=None):
     return None
 
 
-def _ff_into_cost(U, x, seen, where):
+def _ff_into_cost(U, x, seen, where, hits=None):
     """The cops _ff_into(U, x) takes (embedding up, or a descent), for the
     aggregate admission of a collection before its first element goes in;
     refused here for fields past F1's bounds, as _ff_into would be."""
@@ -681,7 +681,7 @@ def _ff_into_cost(U, x, seen, where):
     if U.n % Kx.n == 0:
         if U.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
             raise refuse()
-        return _ff_up_cost(Kx, U.p, U.n, seen)
+        return _ff_up_cost(Kx, U.p, U.n, seen, hits)
     if Kx.n % U.n == 0:
         if Kx.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
             raise refuse()
@@ -740,10 +740,11 @@ def _into_universe(items, universe, kind):
     if ff:
         # (the whole collection's embeddings and descents admitted under one
         # budget before the first element goes in, then paid from it)
-        seen = set()
-        total = sum(_ff_into_cost(universe, x, seen, _UNIVERSE_FAIL[kind]) for x in items)
+        seen, hits = set(), set()
+        total = sum(_ff_into_cost(universe, x, seen, _UNIVERSE_FAIL[kind], hits) for x in items)
         first = next((_ffwrap(x.parent()) for x in items if _is_ff(x)), universe)
         _ff_charge([_FF_WORK], total, _ff_refuse("a collection", first, universe, _UNIVERSE_FAIL[kind]))
+        _ff_keep(hits)
         paid = [total]
     for k, x in enumerate(items):
         if ff:
@@ -7083,11 +7084,12 @@ def _ff_cover(Ws, refuse):
     return L
 
 
-def _ff_up_cost(S, p, n, seen):
+def _ff_up_cost(S, p, n, seen, hits=None):
     """The cops of putting an element of S (S.n | n) into GF(p^n): its
     Horner work, m M(n) + m n, and the image of S's generator unless cached
     or already counted in seen (one per (p, m, n)); an element of the prime
-    field, n."""
+    field, n.  Read-only: a cached image counted free is only recorded in
+    hits, for _ff_keep once every refusal point has passed (daybreak2)."""
     if S.n == n:
         return 0
     if S.n == 1:
@@ -7096,13 +7098,21 @@ def _ff_up_cost(S, p, n, seen):
     c = S.n * (mn + n)
     key = (p, S.n, n)
     if key in _FF_IMAGES:
-        # (counted free: kept the most recent, so that no image this
-        # operation makes evicts it before it is used)
-        _FF_IMAGES.move_to_end(key)
+        if hits is not None:
+            hits.add(key)
     elif key not in seen:
         seen.add(key)
         c += 2 * ((p ** n - 1) // (p ** S.n - 1)).bit_length() * mn
     return c
+
+
+def _ff_keep(hits):
+    """The cached images an admitted operation counted free, made the most
+    recent (after its last refusal point, before its work), so that no image
+    it makes evicts them before they are used."""
+    for key in hits:
+        if key in _FF_IMAGES:
+            _FF_IMAGES.move_to_end(key)
 
 
 def _ff_image(S, U):
@@ -7152,8 +7162,8 @@ def _ff_promote(xs, what, where, pos=None):
     Ws = list({id(x.parent()): _ffwrap(x.parent()) for x in xs if _is_ff(x)}.values())
     refuse = _ff_refuse(what, Ws[0], Ws[1] if len(Ws) > 1 else Ws[0], where, pos)
     L = _ff_cover(Ws, refuse)
-    p, seen = Ws[0].p, set()
-    cost = sum(_ff_up_cost(_ffwrap(x.parent()), p, L, seen) for x in xs if _is_ff(x))
+    p, seen, hits = Ws[0].p, set(), set()
+    cost = sum(_ff_up_cost(_ffwrap(x.parent()), p, L, seen, hits) for x in xs if _is_ff(x))
     budget = [_FF_WORK]
     _ff_charge(budget, cost, refuse)
     U = next((W for W in Ws if W.n == L), None)
@@ -7163,6 +7173,7 @@ def _ff_promote(xs, what, where, pos=None):
         except _sff.ConwayBudgetExceeded:
             raise refuse()
         U = _ffwrap(_sff.GF(p ** L))
+    _ff_keep(hits)
     paid = [cost]
     return [_ff_up(x, U, paid, refuse) if _is_ff(x) else x for x in xs], U
 
