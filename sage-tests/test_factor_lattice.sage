@@ -17,7 +17,8 @@ print((x^60 + 1).factor())
 print((x^2 - x - 1)(x^5 + x + 3).factor())          # a composition
 f = -6 * (2*x + 3)^2 * S4 * (3*x^3 - 2)
 print(f.factor())
-print(prod(x - k for k in range(1, 41)).factor() == Factorization([(x - k, 1) for k in range(1, 41)]))
+F = prod(x - k for k in range(1, 41)).factor()
+print(len(F), all(e == 1 and g.degree() == 1 for g, e in F), sorted(-g[0] for g, e in F) == list(range(1, 41)))
 g = x * (x - 1) * S5
 F = g.factor()
 print(len(F), sorted(h.degree() for h, e in F))
