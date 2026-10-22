@@ -2196,7 +2196,7 @@ test("IsIsomorphic as Magma's for quadratic fields and the symmetric and dihedra
   }
 });
 
-test("subfields of finite fields: work bounds from the plan's formulas, each refusal before the work it would pay for (F1)", () => {
+test("subfields of finite fields: one budget per operation, every deterministic cost reserved before any work, each refusal before it (F1; LIMIT-PR45-1/2)", () => {
   const { mkdtempSync, writeFileSync } = require("node:fs");
   const { join } = require("node:path");
   const { tmpdir } = require("node:os");
@@ -2204,27 +2204,29 @@ test("subfields of finite fields: work bounds from the plan's formulas, each ref
   const f = join(mkdtempSync(join(tmpdir(), "magma-ffsub-")), "check.py");
   writeFileSync(f, [
     "import _magma as m, _sage_ff as sff",
-    "calls = {'dlog': 0, 'GF': 0, 'up': 0}",
-    "dlog, gf, up = sff._dlog, sff.GF, m._ff_up",
-    "def spy_dlog(*a):",
-    "    calls['dlog'] += 1",
-    "    return dlog(*a)",
-    "def spy_gf(*a, **k):",
-    "    calls['GF'] += 1",
-    "    return gf(*a, **k)",
-    "def spy_up(*a):",
-    "    calls['up'] += 1",
-    "    return up(*a)",
-    "sff._dlog, sff.GF, m._ff_up = spy_dlog, spy_gf, spy_up",
+    "calls = {'up': 0, 'image': 0, 'GF': 0, 'dlog': 0}",
+    "dlog, gf, up, image = sff._dlog, sff.GF, m._ff_up, m._ff_image",
+    "def spy(name, fn):",
+    "    def g(*a, **k):",
+    "        calls[name] += 1",
+    "        return fn(*a, **k)",
+    "    return g",
+    "sff._dlog, sff.GF, m._ff_up, m._ff_image = spy('dlog', dlog), spy('GF', gf), spy('up', up), spy('image', image)",
     "class Refused(Exception): pass",
     "def refuse(): return Refused()",
     "def attempt(label, f):",
     "    for k in calls: calls[k] = 0",
+    "    n0 = len(m._FF_IMAGES)",
     "    try:",
-    "        r = f()",
-    "        print(label, 'admitted', calls)",
-    "    except (Refused, m.MagmaError) as e:",
-    "        print(label, 'refused', calls)",
+    "        f()",
+    "        r = 'admitted'",
+    "    except (Refused, m.MagmaError):",
+    "        r = 'refused'",
+    "    print(label, r, 'up=%(up)d image=%(image)d GF=%(GF)d dlog=%(dlog)d' % calls, 'cached=%d' % (len(m._FF_IMAGES) - n0))",
+    // the plan's formulas, independently: M(n) = 2 n^2 w(p); an embedding m M(n) + m n; an image 2 bits(e) M(n)
+    "def M(p, n): return 2 * n * n * (-(-p.bit_length() // 30)) ** 2",
+    "def UP(p, k, n): return k * (M(p, n) + n)",
+    "def IMG(p, k, n): return 2 * ((p ** n - 1) // (p ** k - 1)).bit_length() * M(p, n)",
     // D(q, n) from the plan: M(n) [2 b + sum (6 b + e (8 b + 2 (ceil(sqrt r) + 1)))] + 2^11, b = bits(q - 1)
     "def D(p, n):",
     "    N = p ** n - 1; b = N.bit_length(); s = 2 * b",
@@ -2232,58 +2234,111 @@ test("subfields of finite fields: work bounds from the plan's formulas, each ref
     "        c = 1",
     "        while c * c < r: c += 1",
     "        s += 6 * b + e * (8 * b + 2 * (c + 1))",
-    "    return 2 * n * n * s + 2 ** 11",
+    "    return M(p, n) * s + 2 ** 11",
     "W = {}",
     "def F(q):",
     "    if q not in W: W[q] = m.GF(q)",
     "    return W[q]",
     "for q in (2 ** 20, 2 ** 19, 2 ** 11, 2 ** 10, 3 ** 7, 4, 8, 9, 16, 25, 64, 81, 125, 256): F(q)",
     "print('D', m._ff_dlog_cost(F(2 ** 20)), D(2, 20), m._ff_dlog_cost(F(2 ** 19)), D(2, 19))",
-    // the largest D over the fields with a proper subfield of degree > 1 (n >= 4), all p^n <= 2^20
-    "best = max((D(p, n), p, n) for p in range(2, 33) if sff._is_prime_power(p) == (p, 1) for n in range(4, 21) if p ** n <= 2 ** 20)",
-    "print('Dmax', best)",
-    // a descent from GF(2^20) to GF(2^10): refused with one cop too few, before the discrete log
-    "H, M = F(2 ** 20), F(2 ** 10)",
+    "print('Dmax', max((D(p, n), p, n) for p in range(2, 33) if sff._is_prime_power(p) == (p, 1) for n in range(4, 21) if p ** n <= 2 ** 20))",
+    // a descent from GF(2^20) to GF(2^10): refused one cop short, before the discrete log
+    "H, M10 = F(2 ** 20), F(2 ** 10)",
     "x = H.K.gen() ** (1025 * 7)",
-    "need = m._ff_dlog_cost(H) + 2 * M.q.bit_length() * m._ff_m(M)",
-    "attempt('descent-short', lambda: m._ff_down(x, M, [need - 1], refuse))",
-    "attempt('descent', lambda: m._ff_down(x, M, [need], refuse))",
-    // a common field past 2^20 elements: refused before any field is made
-    "attempt('common-large', lambda: m._ff_common(F(2 ** 11), F(2 ** 10), refuse, [m._FF_WORK]))",
-    "attempt('common-3^14', lambda: m._ff_common(F(3 ** 7), F(9), refuse, [m._FF_WORK]))",
-    // a cold Conway search for GF(5^6) within too small a budget: refused before the field is made
+    "need = m._ff_dlog_cost(H) + 2 * M10.q.bit_length() * M(2, 10)",
+    "attempt('descent-short', lambda: m._ff_down(x, M10, [need - 1], refuse))",
+    "attempt('descent', lambda: m._ff_down(x, M10, [need], refuse))",
+    // a common field past 2^20 elements: refused structurally (nothing made)
+    "attempt('cover-2^110', lambda: m._ff_cover([F(2 ** 11), F(2 ** 10)], refuse))",
+    "attempt('cover-3^14', lambda: m._ff_cover([F(3 ** 7), F(9)], refuse))",
+    // one embedding: one cop short leaves the cache, the output and the Horner work untouched
+    "m._FF_IMAGES.clear()",
+    "a4 = F(4).K.gen()",
+    "need = UP(2, 2, 4) + IMG(2, 2, 4)",
+    "attempt('embed-short', lambda: up(a4, F(16), [need - 1], refuse))",
+    "attempt('embed', lambda: up(a4, F(16), [need], refuse))",
+    // a cold common field: Conway search C plus embeddings R, each within _FF_WORK, together in ONE budget
+    "x5, y5 = F(25).K.gen(), F(125).K.gen()",
+    "R = UP(5, 2, 6) + IMG(5, 2, 6) + UP(5, 3, 6) + IMG(5, 3, 6)",
     "sff._CONWAY.pop((5, 6), None)",
-    "attempt('conway-short', lambda: m._ff_common(F(25), F(125), refuse, [1000]))",
-    "attempt('conway', lambda: m._ff_common(F(25), F(125), refuse, [m._FF_WORK]))",
-    // a collection whose common field is too large: refused before any element goes in
-    "a, b = F(2 ** 11).K.gen(), F(2 ** 10).K.gen()",
-    "attempt('collection', lambda: m._seq([a, b]))",
+    "b = [10 ** 15]",
+    "sff._conway(5, 6, b); C = 10 ** 15 - b[0]; sff._CONWAY.pop((5, 6))",
+    "print('straddle', 0 < R < C)",
+    "m._FF_IMAGES.clear()",
+    "m._FF_WORK = R + C - 1",
+    "attempt('cold-short', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
+    "print('conway kept', (5, 6) in sff._CONWAY)",
+    "m._FF_WORK = R + C",
+    "attempt('cold', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
+    // a collection, admitted whole before its first element goes in
+    "a, c = F(4).K.gen(), F(8).K.gen()",
+    "m._FF_IMAGES.clear()",
+    "R = 5 * UP(2, 2, 6) + IMG(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
+    "m._FF_WORK = R - 1",
+    "attempt('literal-short', lambda: m._seq([a] * 5 + [c]))",
+    "m._FF_WORK = R",
+    "attempt('literal', lambda: m._seq([a] * 5 + [c]))",
+    "m._FF_IMAGES.clear()",
+    "R = 5 * UP(2, 2, 6) + IMG(2, 2, 6)",
+    "m._FF_WORK = R - 1",
+    "attempt('declared-short', lambda: m._into_universe([a] * 5, F(64), 'seq'))",
+    "m._FF_WORK = R",
+    "attempt('declared', lambda: m._into_universe([a] * 5, F(64), 'seq'))",
+    "m._FF_WORK = 10 ** 7",
+    "attempt('literal-2^110', lambda: m._seq([F(2 ** 11).K.gen(), F(2 ** 10).K.gen()]))",
     // the image cache keeps at most _FF_IMAGES_MAX, the least recently used dropped first
     "m._FF_IMAGES_MAX = 3",
     "m._FF_IMAGES.clear()",
     "pairs = [(F(4), F(16)), (F(4), F(64)), (F(8), F(64)), (F(9), F(81)), (F(4), F(256))]",
-    "for S, U in pairs[:3]: m._ff_image(S, U, [m._FF_WORK], refuse)",
-    "m._ff_image(*pairs[0], [m._FF_WORK], refuse)",
-    "for S, U in pairs[3:]: m._ff_image(S, U, [m._FF_WORK], refuse)",
-    "print('cache', len(m._FF_IMAGES), [(id(S), id(U)) in m._FF_IMAGES for S, U in pairs])",
+    "for S, U in pairs[:3]: image(S, U)",
+    "image(*pairs[0])",
+    "for S, U in pairs[3:]: image(S, U)",
+    "print('cache', len(m._FF_IMAGES), [(S.p, S.n, U.n) in m._FF_IMAGES for S, U in pairs])",
     "",
   ].join("\n"));
   const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
-  const lines = r.stdout.trim().split("\n");
-  const none = "{'dlog': 0, 'GF': 0, 'up': 0}";
-  assert.deepEqual(lines, [
+  const none = "up=0 image=0 GF=0 dlog=0 cached=0";
+  assert.deepEqual(r.stdout.trim().split("\n"), [
     // (the plan's numbers: 1,331,648 at 2^20; at 2^19, q - 1 = 524,287 prime,
     // ceil(sqrt) = 725, a table of at most 726)
     "D 1331648 1331648 1269880 1269880",
     "Dmax (1331648, 2, 20)",
     "descent-short refused " + none,
-    "descent admitted {'dlog': 1, 'GF': 0, 'up': 0}",
-    "common-large refused " + none,
-    "common-3^14 refused " + none,
-    "conway-short refused " + none,
-    // (GF(5^6) and, inside it, its prime field GF(5))
-    "conway admitted {'dlog': 0, 'GF': 2, 'up': 0}",
-    "collection refused " + none,
+    "descent admitted up=0 image=0 GF=0 dlog=1 cached=0",
+    "cover-2^110 refused " + none,
+    "cover-3^14 refused " + none,
+    "embed-short refused " + none,
+    "embed admitted up=0 image=1 GF=0 dlog=0 cached=1",
+    "straddle True",
+    "cold-short refused " + none,
+    "conway kept False",
+    // (GF(5^6) and, inside it, its prime field GF(5); two images, two embeddings)
+    "cold admitted up=2 image=2 GF=2 dlog=0 cached=2",
+    "literal-short refused " + none,
+    // (GF(64) found, not made: it exists, its Conway polynomial cached)
+    "literal admitted up=6 image=6 GF=1 dlog=0 cached=2",
+    "declared-short refused " + none,
+    "declared admitted up=5 image=5 GF=0 dlog=0 cached=1",
+    "literal-2^110 refused " + none,
     "cache 3 [True, False, False, True, True]",
   ], r.stdout + r.stderr);
+});
+
+test("finite fields: Include, Exclude and Index of an element that doesn't go into the collection's field keep Magma's words (astra CORR-PR45-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (Magma 2.18-5 for the same lines; their carets point into the call,
+  // which Sagebrush doesn't place yet, so only the words are compared)
+  const run = (src: string) => (spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "F<a> := GF(4); E<c> := GF(8);\n" + src + "\n\"end\";\n", encoding: "utf8" }).stdout as string).replace(/\s+/g, " ");
+  for (const [src, said] of [
+    ["Index([E!1], a);", "Runtime error in 'Index': Cannot coerce element into the universe"],
+    ["Include({E!1}, a);", "Runtime error in 'Include': No embedding known into LHS field"],
+    ["Exclude({E!1}, a);", "Runtime error in 'Exclude': No embedding known into LHS field"],
+    ["Include({E | }, a);", "Runtime error in 'Include': No embedding known into LHS field"],
+    ["Include([E!1], F!1);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["Include([E | ], a);", "Runtime error in 'Include': Cannot lift element into sequence"],
+  ]) {
+    const o = run(src);
+    assert.ok(o.includes(said) && !/Traceback|Error: /.test(o.replace(/Runtime error/g, "")), src + " => " + o);
+  }
 });

@@ -18,6 +18,16 @@ a + c; [a, c]; a in {d^21}; a in [d^21]; c in {d^21};
 Include({d^21}, a); Exclude({d^21}, a); #{a, d^21};
 S := {d^21}; Include(~S, a); S; Index([d^9, d^21], a);
 [K | a]; [F | b^5]; [P | b^0]; w := [K | b]; Append(~w, a); w;
+// in: x coerced into the collection's field first (false where it doesn't
+// go in, though equal in a larger field), literal and declared
+F!1 in {E!1}; F!1 in [E!1]; F!1 in {E | 1}; F!1 in [E | 1]; F!1 in {F!1, E!1}; F!1 in [F!1, E!1];
+a in {L | d^21}; b^5 in [a]; b in [a]; b^5 in {F | a}; c in [d^9]; a in [d^21, d^9];
+P!1 in {E!1}; P!1 in [K | 1]; 1 in {E!1}; E!1 in [P!1]; b^0 in [P!1]; Index([c, a], a); Index([F | 1, a], b^5);
+// set equality and operations by value in the common field (astra CORR-PR45-2)
+{a} eq {b^5}; {a, b^5} eq {a}; {F!1} eq {E!1}; {a} eq {d^21}; {c} eq {d^9}; {a} ne {b^5}; {P!1} eq {F!1}; {a} eq {b};
+X := {a} join {b^5}; #X; X; Universe(X); Y := {a} join {c}; #Y; Universe(Y); #({P!1} join {a}); {P!1} join {a};
+#({F!1} join {E!1}); {F!1} meet {E!1}; {a} diff {b^5}; {a} sdiff {b^5}; #({a, b} diff {b^5});
+{a} subset {b^5, b}; {a} subset {c}; {F!1} subset {E!1}; {a} notsubset {b};
 // larger fields
 G<g> := GF(2^12); a in G; c in G; G!a; G!c; Parent(a + c); a + c;
 Q := GF(3^6); R := GF(9); T := GF(27); R.1 + Q.1; T.1 * Q.1; R.1 in Q; Q!T.1;
