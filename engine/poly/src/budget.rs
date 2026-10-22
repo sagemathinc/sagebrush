@@ -97,11 +97,16 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// Provisional: the work constant awaits the VM 1 calibration (native
-    /// and wasm, from the slowest measured throughput per charged unit),
-    /// which will pin it with a test; no wall-clock bound is claimed yet.
+    /// The work constant, calibrated on VM 1 (Oct 22, at 01b3343e; tests::
+    /// timings, the wasm comparison in the PR): the slowest sustained
+    /// throughput measured (cases of 0.2 s or more) was 3.3e8 units/s
+    /// natively (S_6, lattice-bound; dense Hensel/modular cases ran at
+    /// 6.6e8 to 3.4e9) and 1.9e8 units/s in wasm (S_6; wasm was 1.4x to
+    /// 2.1x native).  W = 2^34 is then at most about 52 s native and 90 s
+    /// in wasm at the slowest measured rates (10 to 25 s natively on the
+    /// dense cases).  Pinned by tests::default_work_is_calibrated.
     pub const DEFAULT: Limits = Limits {
-        work: 1 << 36,
+        work: 1 << 34,
         memory: 512 << 20,
         subsets: 1 << 20,
         divisions: 4096,
