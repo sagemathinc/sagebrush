@@ -11,6 +11,32 @@ use crate::ntt;
 
 pub type Poly = Vec<u64>;
 
+/// Where products get their transform tables: the shared cache, or a
+/// computation's own ([`ntt::LocalTables`], bounded by its sizes).
+#[derive(Clone, Copy)]
+enum Tabs<'a> {
+    Shared,
+    Local(&'a ntt::LocalTables),
+}
+
+/// Asks for Stop (check_coarse, which asks the wasm host at every call)
+/// about every 2^16 multiply-adds.
+pub(crate) struct Poll(u64);
+
+impl Poll {
+    pub(crate) fn new() -> Poll {
+        Poll(0)
+    }
+    #[inline]
+    pub(crate) fn add(&mut self, work: usize) {
+        self.0 += work as u64;
+        if self.0 >= 1 << 16 {
+            self.0 = 0;
+            sagebrush_interrupt::check_coarse();
+        }
+    }
+}
+
 /// Products with a factor shorter than this are schoolbook.
 const MUL_CUTOFF: usize = 40;
 /// Divisions with divisor and quotient both at least this long use Newton.
@@ -42,7 +68,9 @@ fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let len = a.len() + b.len() - 1;
     let k = batch(m);
     let mut c = Vec::with_capacity(len);
+    let mut poll = Poll::new();
     for i in 0..len {
+        poll.add(a.len().min(b.len()));
         let lo = i.saturating_sub(b.len() - 1);
         let hi = i.min(a.len() - 1);
         let mut acc = 0u128;
@@ -64,24 +92,51 @@ fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 
 /// a * b mod n.
 pub fn mul(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
+    mul_t(a, b, m, Tabs::Shared)
+}
+
+/// [`mul`] with the caller's transform tables (for products of length at
+/// least a.len() + b.len() - 1).
+pub fn mul_in(a: &[u64], b: &[u64], m: &Modulus, lt: &ntt::LocalTables) -> Poly {
+    mul_t(a, b, m, Tabs::Local(lt))
+}
+
+fn mul_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> Poly {
     if a.is_empty() || b.is_empty() {
         return vec![];
     }
+    let square = std::ptr::eq(a, b);
     let c = if a.len().min(b.len()) < MUL_CUTOFF {
         mul_classical(a, b, m)
-    } else if std::ptr::eq(a, b) {
-        ntt::mul_mod(a, a, m)
     } else {
-        ntt::mul_mod(a, b, m)
+        let b = if square { a } else { b };
+        match t {
+            Tabs::Shared => ntt::mul_mod(a, b, m),
+            Tabs::Local(lt) => ntt::mul_mod_in(a, b, m, lt),
+        }
     };
     trim(c)
 }
 
+/// The longest product [`mul_in`] transforms for factors of these lengths
+/// (0 when the product is schoolbook): the LocalTables to build.
+pub fn mul_table_len(la: usize, lb: usize) -> usize {
+    if la == 0 || lb == 0 || la.min(lb) < MUL_CUTOFF {
+        0
+    } else {
+        la + lb - 1
+    }
+}
+
 /// a * b mod (n, x^k).
 pub fn mullow(a: &[u64], b: &[u64], k: usize, m: &Modulus) -> Poly {
+    mullow_t(a, b, k, m, Tabs::Shared)
+}
+
+fn mullow_t(a: &[u64], b: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
     let a = &a[..a.len().min(k)];
     let b = &b[..b.len().min(k)];
-    let mut c = mul(a, b, m);
+    let mut c = mul_t(a, b, m, t);
     c.truncate(k);
     trim(c)
 }
@@ -132,17 +187,23 @@ pub fn eval(a: &[u64], x: u64, m: &Modulus) -> u64 {
 
 /// The inverse of f modulo x^k (f[0] a unit), by Newton iteration.
 pub fn inv_series(f: &[u64], k: usize, m: &Modulus) -> Poly {
+    inv_series_t(f, k, m, Tabs::Shared)
+}
+
+fn inv_series_t(f: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
+    let _phase = sagebrush_interrupt::enter("newton-inverse");
     let mut g = vec![m.inv(f[0]).expect("constant term not a unit")];
     let mut len = 1;
     while len < k {
+        sagebrush_interrupt::check_coarse();
         len = (2 * len).min(k);
         // g <- g (2 - f g) mod x^len
-        let mut h = neg(&mullow(f, &g, len, m), m);
+        let mut h = neg(&mullow_t(f, &g, len, m, t), m);
         if h.is_empty() {
             h.push(0);
         }
         h[0] = m.add(h[0], 2 % m.n);
-        g = mullow(&g, &trim(h), len, m);
+        g = mullow_t(&g, &trim(h), len, m, t);
     }
     g
 }
@@ -169,7 +230,8 @@ fn axpy(dst: &mut [u64], src: &[u64], c: u64, m: &Modulus) {
 }
 
 /// r <- r mod b in place, recording the quotient if asked.
-fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&mut Poly>) {
+/// (Stop is polled through `poll`, a row of db multiply-adds at a time.)
+fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&mut Poly>, poll: &mut Poll) {
     let db = b.len() - 1;
     if r.len() <= db {
         return;
@@ -182,6 +244,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         // the usual Euclid step: both quotient coefficients first, then one
         // fused pass (row by row, each row would wait on the previous one)
         let ql = r.len() - db;
+        poll.add(2 * db);
         let q1 = m.mul(r[r.len() - 1], linv);
         let q0 = if ql == 2 { m.mul(m.sub(r[db], m.mul(q1, b[db - 1])), linv) } else { 0 };
         let (q0, q1) = if ql == 2 { (q0, q1) } else { (q1, 0) };
@@ -210,6 +273,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         return;
     }
     for i in (0..r.len() - db).rev() {
+        poll.add(db + 1);
         let c = m.mul(r[i + db], linv);
         if let Some(q) = q.as_deref_mut() {
             q[i] = c;
@@ -225,30 +289,65 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
 }
 
 fn divrem_classical(a: &[u64], b: &[u64], linv: u64, m: &Modulus) -> (Poly, Poly) {
+    let _phase = sagebrush_interrupt::enter("classical-divide");
     let mut r = a.to_vec();
     let mut q = vec![];
-    rem_in_place(&mut r, b, linv, m, Some(&mut q));
+    rem_in_place(&mut r, b, linv, m, Some(&mut q), &mut Poll::new());
     (trim(q), r)
 }
 
-/// The monic gcd by Euclid's algorithm, in place.
+/// The monic gcd by Euclid's algorithm, in place: at most
+/// lb (la + lb) + 129 lb + 128 multiply-adds for inputs of lengths la >=
+/// lb (the quotient rows of all steps number at most la + lb), polled
+/// every 2^16 of them.
 fn gcd_euclid(mut a: Poly, mut b: Poly, m: &Modulus) -> Poly {
-    let mut steps = 0;
+    let _phase = sagebrush_interrupt::enter("euclid");
+    let mut poll = Poll::new();
     while !b.is_empty() {
+        poll.add(128);
         let linv = m.inv(*b.last().unwrap()).expect("modulus not prime");
-        rem_in_place(&mut a, &b, linv, m, None);
+        rem_in_place(&mut a, &b, linv, m, None, &mut poll);
         std::mem::swap(&mut a, &mut b);
-        steps += 1;
-        if steps % 64 == 0 {
-            sagebrush_interrupt::check();
-        }
     }
     monic(&a, m)
+}
+
+/// The monic gcd by Euclid's algorithm alone (n prime), of a and b taken
+/// by value (no copies); gcd(0, 0) = 0.  The same gcd as [`gcd`].
+pub fn gcd_classical(a: Poly, b: Poly, m: &Modulus) -> Poly {
+    let (mut a, mut b) = (trim(a), trim(b));
+    if a.len() < b.len() {
+        std::mem::swap(&mut a, &mut b);
+    }
+    gcd_euclid(a, b, m)
 }
 
 /// Quotient and remainder of a by b (b nonzero with unit leading
 /// coefficient).
 pub fn divrem(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly) {
+    divrem_t(a, b, m, Tabs::Shared)
+}
+
+/// [`divrem`] with the caller's transform tables, for products up to
+/// length a.len() (see [`divrem_table_len`]).
+pub fn divrem_in(a: &[u64], b: &[u64], m: &Modulus, lt: &ntt::LocalTables) -> (Poly, Poly) {
+    divrem_t(a, b, m, Tabs::Local(lt))
+}
+
+/// The longest product [`divrem_in`] computes for these lengths (0 when
+/// it computes none): the LocalTables to build.
+pub fn divrem_table_len(la: usize, lb: usize) -> usize {
+    if lb == 0 || la < lb || lb < DIV_CUTOFF || la - lb + 1 < DIV_CUTOFF {
+        return 0;
+    }
+    // inv_series and the quotient: factors cut to at most ql, products
+    // shorter than 2 ql; the remainder: factors cut to lb - 1, shorter
+    // than 2 lb
+    let ql = la - lb + 1;
+    2 * ql.max(lb)
+}
+
+fn divrem_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
     assert!(!b.is_empty(), "division by zero polynomial");
     if a.len() < b.len() {
         return (vec![], a.to_vec());
@@ -258,23 +357,30 @@ pub fn divrem(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly) {
     if b.len() < DIV_CUTOFF || ql < DIV_CUTOFF {
         return divrem_classical(a, b, linv, m);
     }
-    let binv = inv_series(&rev(b, b.len()), ql, m);
-    divrem_with_inverse(a, b, &binv, m)
+    let binv = inv_series_t(&rev(b, b.len()), ql, m, t);
+    divrem_with_inverse_t(a, b, &binv, m, t)
 }
 
 /// Division given binv = 1/rev(b) mod x^k with k >= the quotient length.
 fn divrem_with_inverse(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus) -> (Poly, Poly) {
+    divrem_with_inverse_t(a, b, binv, m, Tabs::Shared)
+}
+
+fn divrem_with_inverse_t(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
+    let _phase = sagebrush_interrupt::enter("newton-divide");
+    sagebrush_interrupt::check_coarse();
     if a.len() < b.len() {
         return (vec![], a.to_vec());
     }
     let ql = a.len() - b.len() + 1;
     let ra = rev(a, a.len());
-    let mut q = mullow(&ra[..ql], binv, ql, m);
+    let mut q = mullow_t(&ra[..ql], binv, ql, m, t);
     q.resize(ql, 0);
     q.reverse();
     let q = trim(q);
+    sagebrush_interrupt::check_coarse();
     let db = b.len() - 1;
-    let r = sub(&a[..db.min(a.len())], &mullow(&q, b, db, m), m);
+    let r = sub(&a[..db.min(a.len())], &mullow_t(&q, b, db, m, t), m);
     (q, r)
 }
 

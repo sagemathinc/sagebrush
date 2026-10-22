@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 
 mod hmf;
 mod hmfq;
+pub mod nmod_ops;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -43,6 +44,9 @@ pub extern "C" fn sb_reply_len() -> usize {
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    // the previous reply is freed first (the host copied it after the last
+    // call), so it never coexists with this call's memory
+    drop(std::mem::take(r));
     *r = call(req).into_bytes();
     r.as_ptr()
 }
@@ -53,6 +57,7 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = sagebrush_sym::api::call(req).into_bytes();
     r.as_ptr()
 }
@@ -63,6 +68,7 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = sagebrush_mpoly::call_framed(req);
     r.as_ptr()
 }
@@ -72,6 +78,7 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
 #[no_mangle]
 pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = match sagebrush_sym::err::take_last_error() {
         Some((k, m)) => format!("err\x1f{}\x1f{}", k, m),
         None => String::new(),
@@ -82,10 +89,16 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
-    // nmod_charpoly's request size is admitted before serde copies anything
-    // (the fn name is read without allocating: every other value skipped)
-    if req.len() > NMOD_MAX_REQUEST && fn_name_is(req, "nmod_charpoly") {
-        return json!({ "error": format!("nmod_charpoly: the request has {} bytes, more than {}", req.len(), NMOD_MAX_REQUEST) }).to_string();
+    // the capped ops' request sizes are admitted before serde copies
+    // anything (the last top-level fn name is read by one scan that owns no
+    // text: every other value skipped); unknown names go on as before
+    if let Some(op) = capped_op(req) {
+        if req.len() > op.max_request {
+            return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
+        }
+        if let Some(f) = op.run {
+            return nmod_ops::run(op, req, f);
+        }
     }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
@@ -94,11 +107,30 @@ pub fn call(req: &str) -> String {
     .to_string()
 }
 
-/// Whether the request's top-level "fn" is `name` (the last "fn", as
+/// The row of [`nmod_ops::OPS`] named exactly by the request's last
+/// top-level "fn" (as serde keeps it), if any.
+fn capped_op(req: &str) -> Option<&'static nmod_ops::Op> {
+    static NAMES: [&str; 5] = [
+        nmod_ops::OPS[0].name,
+        nmod_ops::OPS[1].name,
+        nmod_ops::OPS[2].name,
+        nmod_ops::OPS[3].name,
+        nmod_ops::OPS[4].name,
+    ];
+    last_fn(req, &NAMES).map(|i| &nmod_ops::OPS[i])
+}
+
+#[cfg(test)]
+fn fn_name_is(req: &str, name: &str) -> bool {
+    last_fn(req, &[name]) == Some(0)
+}
+
+/// Which of `names` the request's top-level "fn" is (the last "fn", as
 /// serde keeps it), by a scan of the raw bytes that owns no text: strings
 /// are compared while their escapes are decoded, other values skipped.
-/// Malformed input gives false (serde then reports it).
-fn fn_name_is(req: &str, name: &str) -> bool {
+/// None for no match, a non-string fn, or malformed input (serde then
+/// reports it).
+fn last_fn(req: &str, names: &[&str]) -> Option<usize> {
     let b = req.as_bytes();
     let mut i = 0;
     let ws = |b: &[u8], i: &mut usize| {
@@ -108,52 +140,53 @@ fn fn_name_is(req: &str, name: &str) -> bool {
     };
     ws(b, &mut i);
     if b.get(i) != Some(&b'{') {
-        return false;
+        return None;
     }
     i += 1;
-    let mut found = false;
+    let mut found = None;
     loop {
         ws(b, &mut i);
         match b.get(i) {
             Some(b'}') => return found,
             Some(b'"') => {}
-            _ => return false,
+            _ => return None,
         }
-        let Some(is_fn) = json_str_eq(b, &mut i, "fn") else { return false };
+        let is_fn = json_str_match(b, &mut i, &["fn"])?.is_some();
         ws(b, &mut i);
         if b.get(i) != Some(&b':') {
-            return false;
+            return None;
         }
         i += 1;
         ws(b, &mut i);
         if is_fn && b.get(i) == Some(&b'"') {
-            let Some(eq) = json_str_eq(b, &mut i, name) else { return false };
-            found = eq;
+            found = json_str_match(b, &mut i, names)?;
         } else {
             if is_fn {
-                found = false;
+                found = None;
             }
             if !json_skip(b, &mut i) {
-                return false;
+                return None;
             }
         }
         ws(b, &mut i);
         match b.get(i) {
             Some(b',') => i += 1,
             Some(b'}') => return found,
-            _ => return false,
+            _ => return None,
         }
     }
 }
 
-/// The JSON string at b[*i] (an opening quote) equals `want`: decoded
-/// char by char (escapes included) and compared, never stored; *i ends
-/// past the closing quote.  None if malformed.
-fn json_str_eq(b: &[u8], i: &mut usize, want: &str) -> Option<bool> {
+/// Which of `names` (ASCII, at most 64) the JSON string at b[*i] (an
+/// opening quote) equals: decoded char by char (escapes included) and
+/// compared with all of them at once, never stored; *i ends past the
+/// closing quote.  None if malformed, Some(None) if it equals none.
+fn json_str_match(b: &[u8], i: &mut usize, names: &[&str]) -> Option<Option<usize>> {
     *i += 1;
-    let mut w = want.chars();
-    let mut eq = true;
-    let mut hex = |b: &[u8], i: &mut usize| -> Option<u32> {
+    debug_assert!(names.len() <= 64 && names.iter().all(|n| n.is_ascii()));
+    let mut alive: u64 = if names.len() >= 64 { u64::MAX } else { (1u64 << names.len()) - 1 };
+    let mut k = 0usize;
+    let hex = |b: &[u8], i: &mut usize| -> Option<u32> {
         let h = std::str::from_utf8(b.get(*i..*i + 4)?).ok()?;
         *i += 4;
         u32::from_str_radix(h, 16).ok()
@@ -162,7 +195,7 @@ fn json_str_eq(b: &[u8], i: &mut usize, want: &str) -> Option<bool> {
         let c: char = match *b.get(*i)? {
             b'"' => {
                 *i += 1;
-                return Some(eq && w.next().is_none());
+                return Some((0..names.len()).find(|&j| alive >> j & 1 == 1 && names[j].len() == k));
             }
             b'\\' => {
                 *i += 1;
@@ -202,9 +235,12 @@ fn json_str_eq(b: &[u8], i: &mut usize, want: &str) -> Option<bool> {
                 c
             }
         };
-        if eq && w.next() != Some(c) {
-            eq = false;
+        for (j, n) in names.iter().enumerate() {
+            if alive >> j & 1 == 1 && n.as_bytes().get(k).map(|&x| x as u32) != Some(c as u32) {
+                alive &= !(1u64 << j);
+            }
         }
+        k = k.saturating_add(1);
     }
 }
 
@@ -217,7 +253,7 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
         match b.get(*i) {
             None => return false,
             Some(b'"') => {
-                if json_str_eq(b, i, "").is_none() {
+                if json_str_match(b, i, &[]).is_none() {
                     return false;
                 }
                 if depth == 0 {
@@ -971,6 +1007,12 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let c = sagebrush_arith::nmod_mat::Mat { rows: n, cols: n, m, d }.charpoly();
             let s = c.iter().map(|x| x.to_string()).collect::<Vec<_>>();
             Ok(if csv(v) { json!(s.join(",")) } else { json!(s) })
+        }
+        "ntt_cache_stats" => {
+            // (the shared transform cache: calls so far, tables, bytes; the
+            // tests check that the nmod ops leave it alone)
+            let (calls, count, bytes) = sagebrush_bigint::ntt::cache_stats();
+            Ok(json!([calls, count, bytes]))
         }
         "mat_kernel" => Ok(zrows(&sagebrush_arith::zmat::kernel(&zmat(v.get("m"))?), v)),
         "mat_mul" => {
