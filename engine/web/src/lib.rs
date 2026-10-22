@@ -745,6 +745,30 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(zvec(&sagebrush_arith::zmat::charpoly(&a), v))
         }
+        "nmod_charpoly" => {
+            // m: rows "a,b;c,d" of entries in [0, p), p a prime below 2^63
+            // (decimal string) -> the coefficients of det(x I - m) mod p,
+            // constant term first
+            let p = v.get("p").and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok());
+            let Some(p) = p.filter(|&p| p < 1 << 63 && sagebrush_bigint::nmod::is_prime(p)) else {
+                return Err("nmod_charpoly needs a prime p below 2^63".into());
+            };
+            let Some(Value::String(s)) = v.get("m") else {
+                return Err("nmod_charpoly needs the rows of m".into());
+            };
+            let mut rows: Vec<Vec<u64>> = vec![];
+            for r in s.split(';').filter(|_| !s.is_empty()) {
+                let row: Option<Vec<u64>> = r.split(',').map(|t| t.parse::<u64>().ok().filter(|&x| x < p)).collect();
+                rows.push(row.ok_or("nmod_charpoly: entries must be integers in [0, p)")?);
+            }
+            if rows.iter().any(|r| r.len() != rows.len()) {
+                return Err("nmod_charpoly of a non-square matrix".into());
+            }
+            let m = sagebrush_bigint::nmod::Modulus::new(p);
+            let c = sagebrush_arith::nmod_mat::Mat::from_rows(&rows, m).charpoly();
+            let s = c.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+            Ok(if csv(v) { json!(s.join(",")) } else { json!(s) })
+        }
         "mat_kernel" => Ok(zrows(&sagebrush_arith::zmat::kernel(&zmat(v.get("m"))?), v)),
         "mat_mul" => {
             let (a, b) = (zmat(v.get("a"))?, zmat(v.get("b"))?);
@@ -928,5 +952,41 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!([count, m]))
         }
         _ => Err(format!("unknown fn '{}'", f)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::call;
+
+    fn ok(req: &str) -> serde_json::Value {
+        let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
+        r.get("ok").cloned().unwrap_or_else(|| panic!("{} -> {}", req, r))
+    }
+
+    fn err(req: &str) -> String {
+        let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
+        r.get("error").and_then(|e| e.as_str()).unwrap_or_else(|| panic!("{} -> {}", req, r)).to_string()
+    }
+
+    #[test]
+    fn nmod_charpoly() {
+        // [[1, 2], [3, 4]] over GF(7): x^2 - 5x - 2 = x^2 + 2x + 5
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"7","wire":"csv"}"#), "5,2,1");
+        // the largest prime below 2^63 (Krylov); the 0 x 0 matrix
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"0,1;1,0","p":"9223372036854775783","wire":"csv"}"#), "9223372036854775782,0,1");
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"","p":"5","wire":"csv"}"#), "1");
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"1,1;0,1","p":"2"}"#), serde_json::json!(["1", "0", "1"]));
+        for bad in [
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"9"}"#,                   // not prime
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"9223372036854775837"}"#, // a prime past 2^63
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,7","p":"7"}"#,                   // an entry not reduced
+            r#"{"fn":"nmod_charpoly","m":"1,2;-3,4","p":"7"}"#,
+            r#"{"fn":"nmod_charpoly","m":"1,2,3;4,5,6","p":"7"}"#,               // not square
+            r#"{"fn":"nmod_charpoly","m":"1,2;3","p":"7"}"#,
+            r#"{"fn":"nmod_charpoly","p":"7"}"#,
+        ] {
+            assert!(err(bad).starts_with("nmod_charpoly"), "{}", bad);
+        }
     }
 }

@@ -1763,6 +1763,13 @@ class FFMatrix:
             raise ArithmeticError("charpoly of non-square matrix not defined")
         n = self.nrows()
         R = _ff.PolynomialRing_ff(self._base, var)
+        p = _engine_prime(self._base)
+        if p and n:
+            # in Rust (engine/arith nmod_mat: Krylov or Hessenberg)
+            from sagebrush._engine import call
+            rows = ";".join(",".join(str(int(x)) for x in r) for r in self._rows)
+            c = call("nmod_charpoly", m=rows, p=str(p), wire="csv").split(",")
+            return R([self._base(int(t)) for t in c])
         h = _hessenberg([list(r) for r in self._rows], self._base)
         # p_k(x) = (x - h_kk) p_{k-1} - sum_i h_ik (prod h_{j+1,j}) p_{i-1}
         x = R.gen()
@@ -1917,6 +1924,16 @@ class FFMatrix:
             Integer Ring
         """
         return _sa().matrix(_sa().ZZ, [[int(x) for x in r] for r in self._rows])
+
+
+def _engine_prime(base):
+    """p when base is the prime field GF(p) with p < 2^63 (the engine's
+    word-size arithmetic), else None."""
+    is_prime_field = getattr(base, "is_prime_field", None)
+    if is_prime_field is None or not is_prime_field():
+        return None
+    p = int(base.characteristic())
+    return p if p < 1 << 63 else None
 
 
 def _hessenberg(a, base):
