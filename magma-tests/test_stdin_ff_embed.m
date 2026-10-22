@@ -1,0 +1,17 @@
+F<a> := GF(4); K<b> := GF(16); E<c> := GF(8); P := GF(2); T<t> := GF(9);
+F!b;
+F!c;
+T!a;
+P!a;
+GF(3)!a;
+E!(F!1);
+F!(E!0);
+a + t;
+a eq t;
+t in F;
+[F | c];
+[F | E!1];
+[F | b];
+[E | a];
+[a, t];
+"end";

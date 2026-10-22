@@ -5,6 +5,7 @@ with value semantics, sets, tuples, multiple return values, reference
 arguments) and its printing, checked against Magma by magma-tests/.
 """
 
+import collections as _collections
 import itertools as _itertools
 import math as _math
 import re as _re
@@ -609,27 +610,33 @@ def _sortkey(x):
 
 def _ff_universe(items, where):
     """Finite fields' elements in one collection (CORR-581-4): another
-    characteristic has no common universe, as Magma says; two fields of one
-    characteristic, neither the prime field, are refused (Magma finds a
-    field containing both)."""
+    characteristic has no common universe, as Magma says; fields of one
+    characteristic meet in the smallest field containing them all, into
+    which their elements go (Magma's [a, c] = [ d^21, d^9 ] for a in
+    GF(4), c in GF(8) and GF(64)<d>)."""
     fields = {}
     for x in items:
         if _is_ff(x):
             fields.setdefault(id(x.parent()), _ffwrap(x.parent()))
-    if len(fields) > 1:
-        Ks = list(fields.values())
-        if len({K.p for K in Ks}) > 1:
-            raise MagmaError("No valid universe containing all elements", where)
-        if sum(1 for K in Ks if K.n > 1) > 1:
-            raise MagmaError("a collection of elements of finite fields of characteristic %d, neither the prime field, is not supported yet" % Ks[0].p, where)
-    return items
+    if len(fields) < 2:
+        return items
+    Ks = list(fields.values())
+    if len({K.p for K in Ks}) > 1:
+        raise MagmaError("No valid universe containing all elements", where)
+    budget, U = [_FF_WORK], Ks[0]
+    for K in Ks[1:]:
+        refuse = _ff_refuse("a collection", U, K, where)
+        U = _ff_common(U, K, refuse, budget)
+    refuse = _ff_refuse("a collection", Ks[0], Ks[1], where)
+    return [_ff_up(x, U, budget, refuse) if _is_ff(x) else x for x in items]
 
 
 def _ff_into(U, x):
     """x coerced into the finite field U (a declared universe), or None
     where Magma's coercion fails: an integer, a rational with a denominator
-    prime to p, an element of U, of its prime field, or of another field of
-    characteristic p lying in the prime field (checked against Magma)."""
+    prime to p, an element of U, of a subfield of U, or of a field over U
+    lying in U (checked against Magma: [F | E!1] fails for fields neither
+    in the other)."""
     if isinstance(x, bool):
         return None
     if isinstance(x, int):
@@ -646,10 +653,15 @@ def _ff_into(U, x):
             return None
         if Kx.n == 1:
             return U.K(int(x))
-        if x ** U.p == x:
-            return U.K(int(x.list()[0]))
+        # (as U!x: up from a subfield, down by value, else none, even an
+        # element of the prime field from a field neither in the other)
+        refuse, budget = _ff_refuse("coercion", Kx, U, "'!'"), [_FF_WORK]
         if U.n % Kx.n == 0:
-            raise MagmaError("an element of a subfield of a finite field in a collection over it is not supported yet")
+            return _ff_up(x, U, budget, refuse)
+        if U.n == 1:
+            return U.K(int(x.list()[0])) if x ** U.p == x else None
+        if Kx.n % U.n == 0:
+            return _ff_down(x, U, budget, refuse)
         return None
     if isinstance(x, (MSeq, MSet, MTuple, MRange, list, tuple)):
         raise MagmaError("a collection in a collection over a finite field is not supported yet")
@@ -786,7 +798,7 @@ def _seq(items, universe=None):
     if universe is None and any(isinstance(x, _MResElt) for x in items):
         items = _res_items(items, None, "seq")
     if universe is None:
-        _ff_universe(items, "[ ... ]")
+        items = _ff_universe(items, "[ ... ]")
         if any(isinstance(x, _MFFPoly) for x in items):
             items = _ffp_items(items)
         elif any(isinstance(x, _FFLIN) for x in items):
@@ -813,7 +825,7 @@ def _as_inferred(items, inf):
 def _set_universe(items):
     """Magma refuses a set of values with no hashing algorithm (records,
     Rationals(), real fields, polynomial rings)."""
-    _ff_universe(items, "{ ... }")
+    items = _ff_universe(items, "{ ... }")
     for x in items:
         if isinstance(x, (MRec, _RationalField, RealField_, _sp.PolynomialRing_)):
             raise MagmaError("Invalid set universe (no hashing algorithm)", "{ ... }")
@@ -2437,7 +2449,9 @@ def _ff_operands(a, b):
         if a.parent() is b.parent():
             return a, b
         Ka, Kb = _ffwrap(a.parent()), _ffwrap(b.parent())
-        return (Kb._magma_coerce(a), b) if Ka.n == 1 else (a, Ka._magma_coerce(b))
+        refuse, budget = _ff_refuse("arithmetic", Ka, Kb, None), [_FF_WORK]
+        U = _ff_common(Ka, Kb, refuse, budget)
+        return _ff_up(a, U, budget, refuse), _ff_up(b, U, budget, refuse)
     if fa and isinstance(b, _Fraction):
         return a, _ffwrap(a.parent())._magma_coerce(b)
     if fb and isinstance(a, _Fraction):
@@ -2447,12 +2461,13 @@ def _ff_operands(a, b):
 
 def _ff_eq(a, b):
     """a eq b for a finite field's element and what it meets (_ff_check):
-    in the larger field."""
+    in the smallest field containing both (never by descent)."""
     x, y = (a, b) if _is_ff(a) else (b, a)
     if _is_ff(y) and x.parent() is not y.parent():
         Kx, Ky = _ffwrap(x.parent()), _ffwrap(y.parent())
-        x, y = (Ky._magma_coerce(x), y) if Kx.n == 1 else (x, Kx._magma_coerce(y))
-        return x == y
+        refuse, budget = _ff_refuse("a comparison", Kx, Ky, None), [_FF_WORK]
+        U = _ff_common(Kx, Ky, refuse, budget)
+        return _ff_up(x, U, budget, refuse) == _ff_up(y, U, budget, refuse)
     return x == _ffwrap(x.parent())._magma_coerce(y)
 
 
@@ -2485,8 +2500,11 @@ def _ff_check(op, a, b, pos):
             return True
         if Kx.p != Ky.p:
             raise _incompatible("C", o, a, b, pos)
-        # (Magma computes in a field containing both)
-        raise MagmaError("arithmetic of two finite fields of characteristic %d, neither the prime field, is not supported yet" % Kx.p, "'%s'" % o, True, pos)
+        # (Magma computes in the smallest field containing both: admitted
+        # here, made before the operation goes ahead)
+        what = "a comparison" if o in ("eq", "ne") else "arithmetic"
+        _ff_common(Kx, Ky, _ff_refuse(what, Kx, Ky, "'%s'" % o, pos), [_FF_WORK])
+        return True
     if isinstance(y, int) and not isinstance(y, bool):
         return True
     if isinstance(y, _Fraction):
@@ -3439,8 +3457,9 @@ def _in(x, s, pos=None, op="in"):
             x = ""
         if isinstance(x, _smat.Matrix) and w and w[0] == "elt" and not isinstance(w[1], _smat.Matrix):
             return False  # Magma: a matrix is never in a collection of scalars
-        if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None):
-            return x in s  # a keyed lookup
+        if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None) and not (
+                _is_ff(x) and w and w[0] == "elt" and _is_ff(w[1]) and w[1].parent() is not x.parent()):
+            return x in s  # a keyed lookup (another field's element: by value, below)
         return any(_cmpeq(x, y) for y in s)
     return x in s
 
@@ -6826,11 +6845,15 @@ class _MFinField:
                 return True
             if Kx.p != self.p:
                 raise MagmaError("Arguments have no covering structure", "'in'")
-            if Kx.n == 1:
-                return True
+            if Kx.n == 1 or self.n % Kx.n == 0:
+                return True  # (x's field lies in F)
             if self.n == 1:
                 return x ** self.p == x
-            raise MagmaError("membership between finite fields of characteristic %d, neither the prime field, is not supported yet" % self.p, "'in'")
+            if Kx.n % self.n == 0:
+                # (F lies in x's field: by value; fields neither in the
+                # other: false, even for 0 or 1, as Magma)
+                return _ff_in_sub(x, self, [_FF_WORK], _ff_refuse("membership", Kx, self, "'in'"))
+            return False
         if isinstance(x, (_Fraction, MReal)):
             raise MagmaError("Bad argument types", "'in'")
         raise MagmaError("membership of a %s in a finite field is not supported yet" % _type_of(x), "'in'")
@@ -6839,9 +6862,24 @@ class _MFinField:
         if _is_ff(x):
             if x.parent() is self.K:
                 return x
-            if _ffwrap(x.parent()).n == 1 and int(x.parent().order()) == self.p:
-                return self.K(int(x))  # from the prime field
-            raise MagmaError("Illegal coercion")
+            # (Magma's rules, section 2B of the plan: up from a subfield,
+            # down by value from a field over F, else no embedding: fields
+            # neither in the other, another characteristic)
+            Kx = _ffwrap(x.parent())
+            y = None
+            if Kx.p == self.p:
+                refuse, budget = _ff_refuse("coercion", Kx, self, "'!'"), [_FF_WORK]
+                if Kx.n == 1:
+                    y = self.K(int(x))  # from the prime field
+                elif self.n % Kx.n == 0:
+                    y = _ff_up(x, self, budget, refuse)
+                elif self.n == 1:
+                    y = self.K(int(x.list()[0])) if x ** self.p == x else None
+                elif Kx.n % self.n == 0:
+                    y = _ff_down(x, self, budget, refuse)
+            if y is None:
+                raise MagmaError("No embedding known into LHS field\nLHS: FldFin\nRHS: FldFinElt", "'!'", False)
+            return y
         if isinstance(x, bool):
             raise MagmaError("Illegal coercion")
         if isinstance(x, int):
@@ -6894,6 +6932,160 @@ def _ffwrap(K):
     if w is None:
         w = _FF[id(K)] = _MFinField(K)
     return w
+
+
+# Subfields and common fields (design/plan-finite-fields F1).  Every field
+# here is defined by its Conway polynomial, so GF(p^m) lies in GF(p^n) for
+# m | n with its generator a sent to g^((p^n - 1)/(p^m - 1)), as in Magma.
+# Work is counted in prime-field coefficient operations (cops), a product
+# in GF(p^n) costing M(n) = 2 n^2 w(p), and each public call has at most
+# _FF_WORK of them, checked before the work it pays for.  Embedding and
+# descent are for fields of at most _FF_EMBED_MAX elements (the common
+# field too); larger ones are refused in words.
+_FF_WORK = 10 ** 7
+_FF_EMBED_MAX = 2 ** 20
+_FF_IMAGES = _collections.OrderedDict()  # (id(small K), id(large K)) -> image of the small generator
+_FF_IMAGES_MAX = 64                      # entries, of at most 20 coefficients each (1280 in all)
+
+
+def _ff_refuse(what, A, B, where, pos=None):
+    """The refusal (a function making it) for subfield work past F1's
+    bounds: fields of more than _FF_EMBED_MAX elements, or the work."""
+    return lambda: MagmaError("%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)" % (what, _ff_desc(A), _ff_desc(B)), where, where != "'!'", pos)
+
+
+def _ff_desc(W):
+    return "GF(%d)" % W.p if W.n == 1 else "GF(%d^%d)" % (W.p, W.n)
+
+
+def _ff_m(K):
+    """M(n): the cops of one product in K."""
+    return 2 * K.n * K.n * (-(-K.p.bit_length() // 30)) ** 2
+
+
+def _ff_charge(budget, cops, refuse):
+    """Takes cops from budget (a one-element list), or raises refuse()
+    first."""
+    if cops > budget[0]:
+        raise refuse()
+    budget[0] -= cops
+
+
+def _ff_conway(W):
+    """Whether W is defined by its Conway polynomial (every field GF makes;
+    a prime field trivially)."""
+    return W.n == 1 or getattr(W.K, "_f", None) == _sff._CONWAY.get((W.p, W.n))
+
+
+def _ff_common(A, B, refuse, budget):
+    """The smallest field containing the fields A and B of one
+    characteristic (Magma's covering field): one of them when nested, else
+    GF(p^lcm), made (its Conway polynomial found within the budget) as the
+    one object GF(p^lcm) is.  refuse() past _FF_EMBED_MAX elements or the
+    budget; never for a prime field with an extension."""
+    if A is B or B.n == 1:
+        return A
+    if A.n == 1:
+        return B
+    if not (_ff_conway(A) and _ff_conway(B)):
+        raise refuse()
+    L = A.n * B.n // _math.gcd(A.n, B.n)
+    # (L log2 p <= 20 before p^L is computed)
+    if L * (A.p.bit_length() - 1) > 20 or A.p ** L > _FF_EMBED_MAX:
+        raise refuse()
+    if L == A.n:
+        return A
+    if L == B.n:
+        return B
+    try:
+        _sff._conway(A.p, L, budget)
+    except _sff.ConwayBudgetExceeded:
+        raise refuse()
+    return _ffwrap(_sff.GF(A.p ** L))
+
+
+def _ff_image(S, U, budget, refuse):
+    """The image in U of the generator of its subfield S (S.n | U.n):
+    g^((q_U - 1)/(q_S - 1)), kept in a bounded LRU cache."""
+    key = (id(S), id(U))
+    img = _FF_IMAGES.get(key)
+    if img is not None:
+        _FF_IMAGES.move_to_end(key)
+        return img
+    e = (U.q - 1) // (S.q - 1)
+    _ff_charge(budget, 2 * e.bit_length() * _ff_m(U), refuse)
+    img = U.K.gen() ** e
+    _FF_IMAGES[key] = img
+    if len(_FF_IMAGES) > _FF_IMAGES_MAX:
+        _FF_IMAGES.popitem(last=False)
+    return img
+
+
+def _ff_up(x, U, budget, refuse):
+    """x, an element of a subfield of U (Conway-compatible, S.n | U.n), as
+    an element of U: Horner in the image of S's generator, m M(n) + m n
+    cops."""
+    if x.parent() is U.K:
+        return x
+    S = _ffwrap(x.parent())
+    if S.n == 1:
+        return U.K(int(x))
+    if U.q > _FF_EMBED_MAX or U.n % S.n or not (_ff_conway(S) and _ff_conway(U)):
+        raise refuse()
+    img = _ff_image(S, U, budget, refuse)
+    c = [int(v) for v in x.list()]
+    _ff_charge(budget, S.n * (_ff_m(U) + U.n), refuse)
+    r = U.K(0)
+    for v in reversed(c):
+        r = r * img + v
+    return r
+
+
+def _ff_dlog_cost(W):
+    """D(q, n) of the plan (2A): the cops of the discrete log in W's
+    multiplicative group (Pohlig-Hellman, baby-step giant-step on each
+    prime-power part), from the factors of N = q - 1, with 2^11 for their
+    trial factoring (N <= 2^20)."""
+    N = W.q - 1
+    b = N.bit_length()
+    s = 2 * b
+    for r, e in _sff._factor_int(N):
+        s += 6 * b + e * (8 * b + 2 * (_math.isqrt(r - 1) + 2))
+    return _ff_m(W) * s + 2 ** 11
+
+
+def _ff_down(x, S, budget, refuse):
+    """x, an element of a field W over S (Conway-compatible, S.n | W.n),
+    as an element of S, or None when it isn't one: for S prime by
+    x^p = x; else by the discrete log k of x to W's generator (the plan's
+    descent, D(q, n) + 2 bits(p^m) M(m), charged before it), x lying in S
+    when (q_W - 1)/(q_S - 1) divides k."""
+    W = _ffwrap(x.parent())
+    if W is S:
+        return x
+    if W.q > _FF_EMBED_MAX or W.n % S.n or not (_ff_conway(S) and _ff_conway(W)):
+        raise refuse()
+    if not x:
+        return S.K(0)
+    if S.n == 1:
+        _ff_charge(budget, 2 * S.p.bit_length() * _ff_m(W), refuse)
+        return S.K(int(x.list()[0])) if x ** S.p == x else None
+    _ff_charge(budget, _ff_dlog_cost(W) + 2 * S.q.bit_length() * _ff_m(S), refuse)
+    k = _sff._dlog(x, W.K.gen(), None, W.q - 1, lambda u, v: u * v, W.K.one())
+    e = (W.q - 1) // (S.q - 1)
+    if k is None or k % e:
+        return None
+    return S.K.gen() ** (k // e)
+
+
+def _ff_in_sub(x, S, budget, refuse):
+    """Whether x, an element of a field W over S, lies in S: x^(q_S) = x,
+    2 bits(q_S) M(n) cops (cheaper than the descent, by value as Magma)."""
+    W = _ffwrap(x.parent())
+    if W.q > _FF_EMBED_MAX or W.n % S.n or not (_ff_conway(S) and _ff_conway(W)):
+        raise refuse()
+    _ff_charge(budget, 2 * S.q.bit_length() * _ff_m(W), refuse)
+    return x ** S.q == x
 
 
 def GF(q, n=None):
@@ -7361,6 +7553,11 @@ def Universe(s):
         return _ZZ
     if all(isinstance(x, (int, _Fraction)) and not isinstance(x, bool) for x in items):
         return _QQ
+    # (finite fields' elements, integers among them: their one field, the
+    # smallest containing them all, which a literal's items were put in)
+    fields = {id(x.parent()): x.parent() for x in items if _is_ff(x)}
+    if len(fields) == 1 and all(_is_ff(x) or (isinstance(x, int) and not isinstance(x, bool)) for x in items):
+        return _ffwrap(fields.popitem()[1])
     # (never None, which printed nothing: a set of sets is Magma's "Set of
     # subsets of Integer Ring", which Sagebrush doesn't model)
     raise MagmaError("Universe of this %s is not supported yet" % _type_of(s), "'Universe'")
