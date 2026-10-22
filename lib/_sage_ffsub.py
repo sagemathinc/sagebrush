@@ -50,6 +50,18 @@ def is_element(x):
     return isinstance(x, _sff.IntegerMod) and getattr(x.parent(), "_prime", False)
 
 
+def prime_value(x):
+    """The integer value of x in its field's prime field, if x lies there,
+    else None: its coefficients past the constant all zero (the power
+    basis; the same test as x^p = x, without the power).  No budget and no
+    size bound: O(n) for a field of degree n (at most GF's 1024 bits).
+    Both front ends' one prime-field test (astra on 67c8dc48)."""
+    if pnq(x.parent())[1] == 1:
+        return int(x)
+    v = x.list()
+    return None if any(int(c) for c in v[1:]) else int(v[0])
+
+
 def mn(p, n):
     """M(n): the cops of one product in GF(p^n)."""
     return 2 * n * n * (-(-p.bit_length() // 30)) ** 2
@@ -130,17 +142,21 @@ def keep(hits):
 
 def image(S, U):
     """The image in U of the generator of its subfield S (deg S | deg U):
-    g^((q_U - 1)/(q_S - 1)), kept in the bounded LRU cache IMAGES.  (Its
-    cost was reserved by the caller, up_cost.)"""
+    g^((q_U - 1)/(q_S - 1)), kept in the bounded LRU cache IMAGES as its
+    coefficients, parent-neutral (every Conway GF(p^n), however named, has
+    the same basis), and made an element of U on each use: at most 20
+    coefficients copied, a bounded constant within the Horner charge's
+    m n term (astra CORR-FFSHARED-1).  (Its cost was reserved by the
+    caller, up_cost.)"""
     p, un, uq = pnq(U)
     _, sn, sq = pnq(S)
     key = (p, sn, un)
-    img = IMAGES.get(key)
-    if img is not None:
+    c = IMAGES.get(key)
+    if c is not None:
         IMAGES.move_to_end(key)
-        return img
+        return U._make(list(c))
     img = U.gen() ** ((uq - 1) // (sq - 1))
-    IMAGES[key] = img
+    IMAGES[key] = tuple(int(v) for v in img.list())
     if len(IMAGES) > IMAGES_MAX:
         IMAGES.popitem(last=False)
     return img
@@ -192,9 +208,10 @@ def reserve(counts, Ks, refuse):
     return L, cost, hits
 
 
-def common_field(Ks, L, budget, refuse):
+def common_field(Ks, L, budget, refuse, prefix=None):
     """The field of degree L over Ks's prime field: one of Ks, or GF(p^L)
-    made (its cold Conway search within what budget has left)."""
+    made (its cold Conway search within what budget has left), the prefix
+    field of that prefix (z when None)."""
     U = next((K for K in Ks if pnq(K)[1] == L), None)
     if U is None:
         p = pnq(Ks[0])[0]
@@ -202,11 +219,11 @@ def common_field(Ks, L, budget, refuse):
             _sff._conway(p, L, budget)
         except _sff.ConwayBudgetExceeded:
             raise refuse()
-        U = _sff.GF(p ** L)
+        U = _sff.GF(p ** L) if prefix is None else _sff.GF(p ** L, prefix=prefix)
     return U
 
 
-def admit(counts, Ks, budget, refuse):
+def admit(counts, Ks, budget, refuse, prefix=None):
     """Admits putting counts[id(K)] elements of each field K of Ks into
     their smallest common field, from budget, before anything is made: the
     work reserved first, then the common field's cold Conway search with
@@ -215,7 +232,7 @@ def admit(counts, Ks, budget, refuse):
     image cache untouched."""
     L, cost, hits = reserve(counts, Ks, refuse)
     charge(budget, cost, refuse)
-    U = common_field(Ks, L, budget, refuse)
+    U = common_field(Ks, L, budget, refuse, prefix)
     keep(hits)
     return U, [cost]
 
@@ -272,7 +289,8 @@ def down(x, S, budget, refuse):
     _, _, wq = pnq(W)
     if sn == 1:
         charge(budget, 2 * p.bit_length() * m(W), refuse)
-        return S(int(x.list()[0])) if x ** p == x else None
+        v = prime_value(x)
+        return None if v is None else S(v)
     charge(budget, dlog_cost(W) + 2 * sq.bit_length() * m(S), refuse)
     k = _sff._dlog(x, W.gen(), None, wq - 1, lambda u, v: u * v, W.one())
     e = (wq - 1) // (sq - 1)
@@ -331,3 +349,43 @@ def into_cost(U, x, seen, hits, refuse):
             raise refuse()
         return 0 if not x else dlog_cost(W) + 2 * pnq(U)[2].bit_length() * m(U)
     return 0
+
+
+def conjugates(S, U, budget, refuse):
+    """The roots in U of the defining (Conway) polynomial of its subfield S
+    (deg S | deg U): the image of S's generator (image) and its Frobenius
+    conjugates, sorted by their integer representations (as Sage lists the
+    embeddings of S into U); its cost, the image's if not cached and
+    deg S - 1 powers x^p, charged before any of it."""
+    p, un, _ = pnq(U)
+    sn = pnq(S)[1]
+    if sn == 1:
+        return [U(1)]
+    if not embeddable(S, U):
+        raise refuse()
+    key = (p, sn, un)
+    cost = (sn - 1) * 2 * p.bit_length() * mn(p, un)
+    if key not in IMAGES:
+        cost += 2 * ((p ** un - 1) // (p ** sn - 1)).bit_length() * mn(p, un)
+    charge(budget, cost, refuse)
+    roots, c = [], image(S, U)
+    for _ in range(sn):
+        roots.append(c)
+        c = c ** p
+    return sorted(roots, key=lambda r: r.to_integer())
+
+
+def apply(x, U, img, budget, refuse):
+    """The image in U of x, an element of a field S, under the map sending
+    S's generator to img (a root in U of S's defining polynomial): Horner,
+    deg S (M(n) + n) cops, charged first."""
+    S = x.parent()
+    p, un, _ = pnq(U)
+    sn = pnq(S)[1]
+    if sn == 1:
+        return U(int(x))
+    charge(budget, sn * (mn(p, un) + un), refuse)
+    r = U(0)
+    for v in reversed([int(v) for v in x.list()]):
+        r = r * img + v
+    return r
