@@ -623,9 +623,9 @@ def _ff_universe(items, where):
     Ks = list(fields.values())
     if len({K.p for K in Ks}) > 1:
         raise MagmaError("No valid universe containing all elements", where)
-    if sum(1 for K in Ks if K.n > 1) < 2:
-        return items  # (one extension with its prime field: as before)
-    # (the whole collection admitted at once, before the first element goes in)
+    # (the whole collection admitted at once, before the first element goes
+    # in; the prime field's elements with one extension too: {P!1, F!1} is
+    # over GF(4), astra CORR-PR45-3)
     return _ff_promote(items, "a collection", where)[0]
 
 
@@ -3496,6 +3496,31 @@ def _in(x, s, pos=None, op="in"):
             x = _ff_into(U, x)
             if x is None:
                 return False
+    if isinstance(x, (MSet, MSeq, MTuple)) and isinstance(s, (MSeq, MSet)):
+        # (a collection of finite fields' elements in a collection of them:
+        # its elements coerced into theirs first, as Magma does: {a} in
+        # {{b^5}} is true, {F!1} in {{E!1}} false; CORR-PR45-2)
+        w = _universe(s)
+        y = w[1] if w and w[0] == "elt" and isinstance(w[1], (MSet, MSeq, MTuple)) else None
+        if y is not None:
+            refuse = lambda: MagmaError("membership of collections this large is not supported yet", "'%s'" % op, True, pos)
+            budget, ly, lx = [_FF_WORK], [], []
+            _ff_leaves([y], ly, budget, refuse)
+            _ff_leaves([x], lx, budget, refuse)
+            if len({id(v.parent()) for v in ly}) == 1 and lx:
+                U = _ffwrap(ly[0].parent())
+                if any(_ffwrap(v.parent()).p != U.p for v in lx):
+                    raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
+                if any(v.parent() is not U.K for v in lx):
+                    seen, hits = set(), set()
+                    total = sum(_ff_into_cost(U, v, seen, "'%s'" % op, hits) for v in lx)
+                    _ff_charge(budget, total, refuse)
+                    _ff_keep(hits)
+                    paid = [total]
+                    conv = [_ff_into(U, v, paid) for v in lx]
+                    if any(c is None for c in conv):
+                        return False
+                    x = _ff_rebuild(x, iter(conv), U)
     if isinstance(s, (MSeq, MRange, MSet)):
         code = _meets(x, s)
         if code == "N":
@@ -3553,24 +3578,68 @@ def _set_pair(op, a, b, pos, message):
         raise MagmaError(message, "'%s'" % op, True, pos)
 
 
+def _ff_walk(x):
+    """The members of x, in the order _ff_leaves and _ff_rebuild both use:
+    a multiset's with their multiplicities."""
+    if isinstance(x, MSet):
+        return list(x) if x.kind == "multi" else x.items
+    return x
+
+
+def _ff_leaves(xs, out, budget, refuse):
+    """The finite fields' elements in the list xs, at any depth of sets,
+    sequences and tuples, appended to out in order; a read-only walk, each
+    node one cop of budget, refused before anything is made."""
+    for x in xs:
+        _ff_charge(budget, 1, refuse)
+        if _is_ff(x):
+            out.append(x)
+        elif isinstance(x, (MSet, MSeq, MTuple)):
+            _ff_leaves(_ff_walk(x), out, budget, refuse)
+
+
+def _ff_rebuild(x, it, U):
+    """x with its finite fields' elements replaced, in _ff_leaves's order, by
+    those of it (in U); a declared finite-field universe becomes U."""
+    if _is_ff(x):
+        return next(it)
+    if isinstance(x, MSet):
+        return MSet([_ff_rebuild(y, it, U) for y in _ff_walk(x)], x.kind, U if isinstance(x.universe, _MFinField) else x.universe)
+    if isinstance(x, MSeq):
+        return MSeq([_ff_rebuild(y, it, U) for y in x], U if isinstance(x.universe, _MFinField) else x.universe)
+    if isinstance(x, MTuple):
+        return MTuple(_ff_rebuild(y, it, U) for y in x)
+    return x
+
+
 def _ff_sets(a, b, op, pos, message):
-    """The sets a and b, their finite fields' elements put into the
-    smallest field containing them all when they hold elements of
-    different fields of one characteristic: Magma compares and combines
-    them there ({a} eq {b^5}, {F!1} eq {E!1}, #({a} join {b^5}) = 1;
-    astra CORR-PR45-2), under one budget (_ff_promote).  Another
-    characteristic is Magma's message.  Declared universes and multisets
-    are as before."""
-    if a.kind == "multi" or b.kind == "multi" or a.universe is not None or b.universe is not None:
+    """The sets a and b, their finite fields' elements (at any depth of sets,
+    sequences and tuples, declared universes too) put into the smallest
+    field containing them all when they hold elements of different fields
+    of one characteristic: Magma compares and combines them there ({a} eq
+    {b^5}, {F|a} eq {K|b^5}, {{a}} eq {{b^5}}, #({a} join {b^5}) = 1;
+    astra CORR-PR45-2), the walk and the promotion under one budget.
+    Another characteristic is Magma's message.  Multisets as before."""
+    if a.kind == "multi" or b.kind == "multi":
         return a, b
-    fa = {id(x.parent()): x.parent() for x in a.items if _is_ff(x)}
-    fb = {id(x.parent()): x.parent() for x in b.items if _is_ff(x)}
-    if not fa or not fb or (len(fa) == 1 and fa.keys() == fb.keys()):
+    leaves, budget = [], [_FF_WORK]
+    refuse = lambda: MagmaError("a set operation on collections this large is not supported yet", "'%s'" % op, True, pos)
+    _ff_leaves([a, b], leaves, budget, refuse)
+    fields = {id(x.parent()): _ffwrap(x.parent()) for x in leaves}
+    for u in (a.universe, b.universe):
+        if isinstance(u, _MFinField):
+            fields.setdefault(id(u.K), u)
+    if len(fields) < 2:
         return a, b
-    if len({_ffwrap(K).p for K in list(fa.values()) + list(fb.values())}) > 1:
+    if len({W.p for W in fields.values()}) > 1:
         raise MagmaError(message, "'%s'" % op, True, pos)
-    items = _ff_promote(a.items + b.items, "a set operation", "'%s'" % op, pos)[0]
-    return MSet(items[:len(a.items)], a.kind), MSet(items[len(a.items):], b.kind)
+    if not leaves:
+        return a, b
+    promoted, U = _ff_promote(leaves, "a set operation", "'%s'" % op, pos)
+    if any(U.n % W.n for W in fields.values()):
+        return a, b  # (a declared field the elements' field doesn't contain: as before)
+    it = iter(promoted)
+    return _ff_rebuild(a, it, U), _ff_rebuild(b, it, U)
 
 
 def _same_struct(u, v):

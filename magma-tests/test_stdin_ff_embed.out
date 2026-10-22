@@ -118,4 +118,14 @@ Runtime error in 'in': No valid universe containing all elements
        ^
 Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
 
+
+>> {F|a} eq {T|t};
+         ^
+Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
+
+
+>> {{a}} eq {{t}};
+         ^
+Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
+
 end
