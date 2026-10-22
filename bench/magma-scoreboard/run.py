@@ -33,6 +33,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="leave Magma pending when it is not installed on the benchmark host",
     )
+    parser.add_argument(
+        "--flint-backend",
+        choices=("rust", "python"),
+        default="rust",
+        help="FLINT adapter to use (the VM image has python-flint but no static FLINT prefix)",
+    )
     return parser.parse_args()
 
 
@@ -41,7 +47,9 @@ def child_cpu() -> float:
     return usage.ru_utime + usage.ru_stime
 
 
-def command(engine: str, case_id: str, n: int, repeats: int) -> list[str]:
+def command(
+    engine: str, case_id: str, n: int, repeats: int, flint_backend: str
+) -> list[str]:
     if engine == "sagebrush":
         if case_id.startswith("bigint_"):
             return [
@@ -60,7 +68,7 @@ def command(engine: str, case_id: str, n: int, repeats: int) -> list[str]:
             str(repeats),
         ]
     if engine == "flint":
-        if flint_rust_supported(case_id):
+        if flint_backend == "rust" and flint_rust_supported(case_id):
             return [str(FLINT_RUST_BINARY), case_id, str(n), str(repeats)]
         return [
             str(ROOT / "engine/.venv/bin/python"),
@@ -112,7 +120,14 @@ def build_flint_rust() -> None:
     )
 
 
-def invoke(engine: str, case_id: str, n: int, repeats: int, timeout: float) -> dict:
+def invoke(
+    engine: str,
+    case_id: str,
+    n: int,
+    repeats: int,
+    timeout: float,
+    flint_backend: str,
+) -> dict:
     env = os.environ.copy()
     env.update(
         {
@@ -123,7 +138,7 @@ def invoke(engine: str, case_id: str, n: int, repeats: int, timeout: float) -> d
             "MKL_NUM_THREADS": "1",
         }
     )
-    cmd = command(engine, case_id, n, repeats)
+    cmd = command(engine, case_id, n, repeats, flint_backend)
     cpu0, wall0 = child_cpu(), time.monotonic()
     try:
         proc = subprocess.run(
@@ -342,9 +357,9 @@ def write_results(path: Path, rows: list[dict], meta: dict) -> None:
         f"- Total child CPU used by this run: {meta['cpu']:.1f} s; elapsed wall time: {meta['wall']:.1f} s.",
         f"- Host: `{meta['host']}`. Sagebrush git revision: `{meta['git']}`.",
         (
-            "- Magma was used only through `/usr/local/bin/magma` (V2.18-5). FLINT uses the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations. Neither oracle is linked into shipped Sagebrush."
+            f"- Magma was used only through `/usr/local/bin/magma` (V2.18-5). FLINT uses {meta['flint_method']}. Neither oracle is linked into shipped Sagebrush."
             if meta["magma_enabled"]
-            else "- Magma is not installed on this host; its cells remain pending. FLINT uses the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations. FLINT is not linked into shipped Sagebrush."
+            else f"- Magma is not installed on this host; its cells remain pending. FLINT uses {meta['flint_method']}. FLINT is not linked into shipped Sagebrush."
         ),
         (
             "- Timings exclude input construction, answer-signature conversion, and process startup: each engine reports elapsed time around only the operation loop. Magma 2.18-5 reports hundredths of a second."
@@ -398,7 +413,7 @@ def main() -> int:
             print(case["id"], size["n"], state)
         return 0
 
-    if any(
+    if args.flint_backend == "rust" and any(
         not pending and flint_rust_supported(case["id"]) for case, _, pending in points
     ):
         build_flint_rust()
@@ -455,6 +470,7 @@ def main() -> int:
                     size["n"],
                     run_repeats,
                     min(timeout, remaining),
+                    args.flint_backend,
                 )
             return results
 
@@ -511,6 +527,11 @@ def main() -> int:
         "host": args.host_label,
         "profile": args.profile,
         "magma_enabled": not args.skip_magma,
+        "flint_method": (
+            "the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations"
+            if args.flint_backend == "rust"
+            else "the public `python-flint` 0.9.0 binding backed by FLINT 3.6.0"
+        ),
     }
     write_results(args.output, rows, meta)
     print(
