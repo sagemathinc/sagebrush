@@ -1,0 +1,198 @@
+[
+  {
+    "name": "FunctionField",
+    "kind": "function",
+    "signature": "(<Rng> k) -> FldFunRat",
+    "summary": "The univariate rational function field over k; F<x> := FunctionField(k) names its generator x.",
+    "doc": "R0a constructs rational functions in one variable over the integers, rationals or a prime field. Repeating a constructor for the same constants returns the same parent; a new generator name renames that shared parent.",
+    "examples": [
+      {
+        "code": "F<x> := FunctionField(Rationals()); F; (x^2 + 1)/(x - 1);",
+        "expected": "Univariate rational function field over Rational Field\nVariables: x\n(x^2 + 1)/(x - 1)\n"
+      }
+    ],
+    "differs": [
+      "Only rational function fields in one variable over the integers, rationals or a prime field are implemented; algebraic function fields, non-prime finite constants and more variables are refused."
+    ],
+    "status": "partial",
+    "domains": [
+      "Integer Ring",
+      "Rational Field",
+      "GF(p)"
+    ],
+    "see_also": [
+      "RationalFunctionField",
+      "FieldOfFractions"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields"
+    ]
+  },
+  {
+    "name": "RationalFunctionField",
+    "kind": "function",
+    "signature": "(<Rng> k) -> FldFunRat",
+    "summary": "The univariate rational function field over k: the same parent as FunctionField(k).",
+    "examples": [
+      {
+        "code": "F<t> := RationalFunctionField(GF(5)); F;",
+        "expected": "Univariate rational function field over GF(5)\nVariables: t\n"
+      }
+    ],
+    "differs": [
+      "Only one variable over the integers, rationals or a prime field is implemented."
+    ],
+    "status": "partial",
+    "domains": [
+      "Integer Ring",
+      "Rational Field",
+      "GF(p)"
+    ],
+    "see_also": [
+      "FunctionField",
+      "FieldOfFractions"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields"
+    ]
+  },
+  {
+    "name": "FieldOfFractions",
+    "kind": "function",
+    "signature": "(<RngUPol> P) -> FldFunRat",
+    "summary": "The fraction field of a univariate polynomial ring over the integers, rationals or a prime field.",
+    "examples": [
+      {
+        "code": "P<u> := PolynomialRing(Integers()); F<x> := FieldOfFractions(P); F;",
+        "expected": "Univariate rational function field over Integer Ring\nVariables: x\n"
+      }
+    ],
+    "differs": [
+      "Only univariate polynomial rings over the integers, rationals or a prime field are implemented."
+    ],
+    "status": "partial",
+    "domains": [
+      "Integer Ring[x]",
+      "Rational Field[x]",
+      "GF(p)[x]"
+    ],
+    "see_also": [
+      "FractionField",
+      "FunctionField"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields",
+      "polynomials"
+    ]
+  },
+  {
+    "name": "FractionField",
+    "kind": "function",
+    "signature": "(<RngUPol> P) -> FldFunRat",
+    "summary": "A Sagebrush compatibility alias for FieldOfFractions(P).",
+    "examples": [
+      {
+        "code": "P<u> := PolynomialRing(Rationals()); F<x> := FractionField(P); F;",
+        "expected": "Univariate rational function field over Rational Field\nVariables: x\n"
+      }
+    ],
+    "differs": [
+      "This compatibility alias is not bound by Magma 2.18; use FieldOfFractions for code intended for that version.",
+      "Only univariate polynomial rings over the integers, rationals or a prime field are implemented."
+    ],
+    "status": "partial",
+    "domains": [
+      "Integer Ring[x]",
+      "Rational Field[x]",
+      "GF(p)[x]"
+    ],
+    "see_also": [
+      "FieldOfFractions"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields",
+      "polynomials"
+    ]
+  },
+  {
+    "name": "BaseField",
+    "kind": "function",
+    "signature": "(<FldFunRat> F) -> Fld",
+    "summary": "The constant field of a rational function field whose ground structure is a field.",
+    "examples": [
+      {
+        "code": "F<x> := FunctionField(GF(5)); BaseField(F);",
+        "expected": "Finite field of size 5\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "domains": [
+      "Rational Field(x)",
+      "GF(p)(x)"
+    ],
+    "see_also": [
+      "BaseRing",
+      "CoefficientRing"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields",
+      "structures"
+    ]
+  },
+  {
+    "name": "PartialFractionDecomposition",
+    "kind": "function",
+    "signature": "(<FldFunRatElt> f) -> SeqEnum",
+    "summary": "The proper part of f as triples of an irreducible denominator, its power and a numerator.",
+    "doc": "The returned triples $<p,e,a>$ reconstruct the proper part as the sum of $a/p^e$. A polynomial part is omitted, as in Magma.",
+    "examples": [
+      {
+        "code": "F<x> := FunctionField(Rationals()); P<y> := IntegerRing(F); PartialFractionDecomposition(1/(x^2 - 1));",
+        "expected": "[\n    <y - 1, 1, 1/2>,\n    <y + 1, 1, -1/2>\n]\n"
+      }
+    ],
+    "differs": [
+      "Available only for the R0a rational function fields and subject to their degree, coefficient and factorization work limits."
+    ],
+    "status": "partial",
+    "see_also": [
+      "SquarefreePartialFractionDecomposition"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields",
+      "partial fractions"
+    ]
+  },
+  {
+    "name": "SquarefreePartialFractionDecomposition",
+    "kind": "function",
+    "signature": "(<FldFunRatElt> f) -> SeqEnum",
+    "summary": "The proper part of f grouped by squarefree denominator factors and their powers.",
+    "doc": "The returned triples $<p,e,a>$ reconstruct the proper part as the sum of $a/p^e$, with squarefree p.",
+    "examples": [
+      {
+        "code": "F<x> := FunctionField(Rationals()); P<y> := IntegerRing(F); SquarefreePartialFractionDecomposition(1/(x^2 - 1));",
+        "expected": "[\n    <y^2 - 1, 1, 1>\n]\n"
+      }
+    ],
+    "differs": [
+      "Available only for the R0a rational function fields and subject to their degree, coefficient and factorization work limits."
+    ],
+    "status": "partial",
+    "see_also": [
+      "PartialFractionDecomposition"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "function fields",
+      "partial fractions"
+    ]
+  }
+]
