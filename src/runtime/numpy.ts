@@ -3129,7 +3129,18 @@ newBuiltinModule("_numpy", (m) => {
     const isint = ws.every((w) => w && (w.kind === "i" || w.kind === "b") && (!w.dt || w.dt.isInt));
     const s0 = toNum(start), s1 = toNum(stop), st = toNum(step);
     if (st === 0) raise(T.ZeroDivisionError, "division by zero");
-    const n = Math.max(0, Math.ceil((s1 - s0) / st));
+    // (the length as NumPy's _calc_length: ceil((stop - start) / step); a
+    // quotient that underflows to 0 from a nonzero span is 1 element, or 0
+    // if negative; NaN or past intp refused)
+    const span = s1 - s0, q = span / st;
+    let n: number;
+    if (q === 0 && span !== 0) n = Object.is(q, -0) ? 0 : 1;
+    else {
+      const c = Math.ceil(q);
+      if (Number.isNaN(c)) raise(T.ValueError, "arange: cannot compute length");
+      if (!(c >= -9223372036854775808 && c <= 9223372036854775807)) raise(T.ValueError, "Maximum allowed size exceeded");
+      n = Math.max(0, c);
+    }
     const dt = dtype !== null ? toDtype(dtype) : isint ? D.int64 : D.float64;
     // (an integer progression into int64/uint64: computed exactly, each
     // value admitted: arange(2**53, 2**53 + 4) never rounds)
@@ -3144,21 +3155,63 @@ newBuiltinModule("_numpy", (m) => {
       for (let i = 0; i < N; i++) out.data[i] = admitWide(b0 + BigInt(i) * bs, dt);
       return out;
     }
+    // (the values as NumPy's: the first two set from start and start + step,
+    // the rest filled in the dtype's own arithmetic from them, start + i *
+    // delta with delta = second - first (arraytypes.c.src, @NAME@_fill): so
+    // arange(-1, 1, 0.1)[10] is -2.220446049250313e-16, and
+    // arange(0, 5, 0.5, dtype=int) is all zeros, as NumPy's)
+    if (dt.kind === "b" && n > 2) raise(T.TypeError, "arange() is only supported for booleans when the result has at most length 2.");
     const a = empty([n], dt);
-    for (let i = 0; i < n; i++) a.data[i] = castNum(dt, s0 + i * st);
+    const d = a.data, w = dt.cplx ? 2 : 1;
+    if (n > 0) d[0] = castNum(dt, s0);
+    if (n > 1) d[w] = castNum(dt, s0 + st);
+    if (n > 2) {
+      const x0 = d[0], x1 = d[w];
+      if (dt.cplx) {
+        // (the imaginary parts are 0 + i * 0: real arguments only reach here)
+        const del = x1 - x0;
+        const f32 = dt.ctor === Float32Array;
+        for (let i = 2; i < n; i++) d[2 * i] = f32 ? Math.fround(x0 + Math.fround(Math.fround(i) * Math.fround(del))) : x0 + i * del;
+      } else if (dt.kind === "f" && dt.ctor === Float32Array) {
+        // (float arithmetic, as C's: i converted to float, each operation rounded)
+        const del = Math.fround(x1 - x0);
+        for (let i = 2; i < n; i++) d[i] = Math.fround(x0 + Math.fround(Math.fround(i) * del));
+      } else if (dt.kind === "f") {
+        const del = x1 - x0;
+        for (let i = 2; i < n; i++) d[i] = x0 + i * del;
+      } else if (isWide(dt)) {
+        // (int64 and uint64: exact, and refused past what the store holds)
+        const b0 = BigInt(x0), del = BigInt(x1) - b0;
+        for (let i = 2; i < n; i++) d[i] = admitWide(b0 + BigInt(i) * del, dt);
+      } else {
+        // (a narrower integer: delta and each value wrap to the type, as C's store)
+        const wrap = new (dt.ctor as any)(1);
+        wrap[0] = x1 - x0;
+        const del = wrap[0];
+        for (let i = 2; i < n; i++) d[i] = x0 + i * del;
+      }
+    }
     return a;
   });
   fn("linspace", (start: any, stop: any, num: any = 50, endpoint: any = true, dtype: any = null) => {
-    const n = Number(num);
+    // (num as operator.index takes it: an int, not a float)
+    const n = Number(O.index(num));
     if (n < 0) raise(T.ValueError, `Number of samples, ${n}, must be non-negative.`);
     const a = toNum(start), b = toNum(stop);
-    const div = endpoint ? n - 1 : n;
-    const step = div > 0 ? (b - a) / div : NaN;
+    const div = O.truth(endpoint) ? n - 1 : n;
+    const delta = b - a;
+    const step = div > 0 ? delta / div : NaN;
     const dt = dtype !== null ? toDtype(dtype) : D.float64;
     const out = empty([n], dt);
-    // as NumPy: arange(num) * step + start, and the end point set exactly
-    for (let i = 0; i < n; i++) out.data[i] = castNum(dt, div > 0 ? i * step + a : a);
-    if (endpoint && n > 1) out.data[n - 1] = castNum(dt, b);
+    // as NumPy's linspace, in float64: arange(num) * step + start (with a
+    // step that underflows to 0, arange(num) / div * delta; with div <= 0,
+    // arange(num) * delta, so linspace(0, inf, 1) is nan); the end point set
+    // exactly; floored for an integer dtype before the cast
+    const y = new Float64Array(n);
+    for (let i = 0; i < n; i++) y[i] = (div > 0 ? (step === 0 ? (i / div) * delta : i * step) : i * delta) + a;
+    if (O.truth(endpoint) && n > 1) y[n - 1] = b;
+    const floor = dt.kind === "i" || dt.kind === "u";
+    for (let i = 0; i < n; i++) out.data[(dt.cplx ? 2 : 1) * i] = castNum(dt, floor ? Math.floor(y[i]) : y[i]);
     return out;
   });
   fn("eye", (n: any, mm: any = null, k: any = 0, dtype: any = null) => {

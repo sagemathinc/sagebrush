@@ -135,7 +135,10 @@ complex powers, `cmul`, `cdiv` and `cpow`, from `npy_cpow` in
 `numpy/_core/src/npymath/npy_math_complex.c.src`; the complex reciprocal,
 `crecip`, from `numpy/_core/src/umath/loops.c.src`; and the `**` operator's
 routes, `fastScalarPower`, from `fast_scalar_power` in
-`numpy/_core/src/multiarray/number.c`), `src/runtime/numpy_random.ts`,
+`numpy/_core/src/multiarray/number.c`; `arange`'s length and values, from
+`_calc_length` and `PyArray_ArangeObj` in `numpy/_core/src/multiarray/ctors.c`
+and the `@NAME@_fill` loops of `numpy/_core/src/multiarray/arraytypes.c.src`;
+and `linspace`'s arithmetic, from `numpy/_core/function_base.py`), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with
 NumPy's seeding, PCG64 with SeedSequence, and the distributions) follow
 NumPy's code so that their output and random streams match NumPy's
