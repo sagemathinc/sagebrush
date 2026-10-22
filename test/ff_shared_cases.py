@@ -41,7 +41,7 @@ print("sage z3 * z6", Z3.gen() * Z6.gen(), sorted(sub.IMAGES))
 
 # every Sage hook calls the bounded core
 calls = {}
-HOOKS = ("up", "down", "admit", "conjugates", "apply", "charge")
+HOOKS = ("up", "down", "admit", "conjugates", "apply", "charge", "subfields_admit")
 saved = {name: getattr(sub, name) for name in HOOKS}
 for name in HOOKS:
     def spy(*args, _f=saved[name], _n=name, **kw):
@@ -76,3 +76,68 @@ Z11, Z10, Z21 = s.GF(2 ** 11), s.GF(2 ** 10), s.GF(2 ** 21)
 t("common field past 2^20", lambda: Z11.gen() + Z10.gen())
 t("embedding past 2^20", lambda: Z21(Z3.gen()))
 t("GF(2^21) itself", lambda: Z21.order())
+
+# subfields: one shared admission before anything is made (daybreak2
+# LIMIT-PR53-1): the parent's size first (prime degree too), then the
+# degrees, then the aggregate work; a refusal leaves every cache as it was
+made = [0]
+gf = s.GF
+
+
+def gf_spy(*a, **k):
+    made[0] += 1
+    return gf(*a, **k)
+
+
+def state():
+    return (list(sub.IMAGES.items()), list(s._RINGS), list(s._CONWAY))
+
+
+def sub_attempt(label, f):
+    before, made[0] = state(), 0
+    try:
+        r = f()
+        print(label, "admitted", len(r), "made", made[0])
+    except (NotImplementedError, KeyError, ValueError) as e:
+        print(label, "refused", type(e).__name__, "made", made[0], "unchanged", state() == before, str(e).split(" (computed")[0])
+
+
+P13, P23, B21, F9 = s.GF(3 ** 13, "u"), s.GF(2 ** 23, "v"), s.GF(2 ** 21, "w"), s.GF(5 ** 9, "t")
+B20 = s.GF(2 ** 20, "r")
+s.GF = gf_spy
+sub_attempt("prime degree past 2^20", lambda: P13.subfields())
+sub_attempt("prime degree past 2^20, itself", lambda: P13.subfields(13))
+sub_attempt("prime degree past 2^20, characteristic 2", lambda: P23.subfields(1))
+sub_attempt("composite past 2^20", lambda: B21.subfields())
+sub_attempt("composite past 2^20, one proper", lambda: B21.subfields(7))
+sub_attempt("odd composite past 2^20", lambda: F9.subfields(3))
+sub_attempt("a name missing", lambda: B20.subfields(name={2: "u"}))
+# the aggregate: GF(2^20)'s proper subfields (degrees 2, 4, 5, 10), each
+# image cold, refused one cop short with nothing made, admitted at exactly it
+sub.IMAGES.clear()
+seen = set()
+need = sum(sub.degree_cost(d, 2, 20, seen) for d in (2, 4, 5, 10))
+work = sub.WORK
+sub.WORK = need - 1
+sub_attempt("aggregate one short", lambda: B20.subfields())
+sub.WORK = need
+sub_attempt("aggregate exact", lambda: B20.subfields())
+print("images", sorted(sub.IMAGES))
+sub.WORK = work
+# (fault injected: a subfield's Conway polynomial missing is refused, no
+# search started, nothing made)
+c10 = s._CONWAY.pop((2, 10))
+sub_attempt("conway missing", lambda: B20.subfields(10))
+s._CONWAY[(2, 10)] = c10
+# (fault injected at the reservation itself: nothing made, caches as they were)
+charge = sub.charge
+
+
+def failing(*a):
+    raise NotImplementedError("injected fault")
+
+
+sub.charge = failing
+sub_attempt("fault at the reservation", lambda: B20.subfields())
+sub.charge = charge
+s.GF = gf
