@@ -962,16 +962,84 @@ function formatOne(e: any, caught = false, limit: number | null = null): string[
     out.push("Traceback (most recent call last):\n");
     for (const f of frames) out.push(`  File "${f.file}", line ${f.line}, in ${f.name}\n` + (f.text ? `    ${f.text}\n` : ""));
   }
+  out.push(...exceptionOnly(e));
+  return out;
+}
+
+// The exception's own lines, as traceback.format_exception_only: its type and
+// message; a SyntaxError's with where it was found above (syntaxErrorLines).
+function exceptionOnly(e: any): string[] {
   const t = Obj.typeOf(e);
+  const mod = t.$module === "builtins" || t.$module === "__main__" ? "" : t.$module + ".";
+  const stype = `${mod}${t.$qualname}`;
+  if (Obj.isinstance(e, T.SyntaxError)) return syntaxErrorLines(e, stype);
   let msg: string;
   try {
-    // (a SyntaxError's line shows its message: the location is above it)
-    msg = Obj.isinstance(e, T.SyntaxError) && typeof e.msg === "string" ? e.msg : F.str(e);
+    msg = F.str(e);
   } catch {
     msg = "<exception str() failed>";
   }
-  const mod = t.$module === "builtins" || t.$module === "__main__" ? "" : t.$module + ".";
-  out.push(`${mod}${t.$qualname}${msg ? ": " + msg : ""}\n`);
+  return [`${stype}${msg ? ": " + msg : ""}\n`];
+}
+
+// (Python's str.isspace, for the caret line's alignment)
+const PY_SPACE_CODES = new Set([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]);
+const isPySpace = (c: string) => PY_SPACE_CODES.has(c.codePointAt(0)!);
+
+// A SyntaxError's lines, as CPython 3.14's TracebackException.
+// _format_syntax_error: `  File "name", line N`, the line's text stripped
+// of its indentation, carets under offset..end_offset (1-based, in code
+// points), then "Type: msg" (the file name after it when there is no line).
+// Not CPython's keyword-typo hint ("Did you mean 'for'?"), which needs the
+// compiler's metadata.
+function syntaxErrorLines(e: any, stype: string): string[] {
+  const out: string[] = [];
+  // (an offset is any int, as CPython's isinstance(offset, int): a bool, an
+  // int subclass's value too; astra's CORR-PR54-1)
+  const num = (v: any): number | null => (typeof v === "boolean" ? Number(v) : v !== null && v !== undefined && Obj.isinstance(v, T.int) ? Number(O.index(v)) : null);
+  const strOf = (v: any): string | null => (typeof v === "string" ? v : v !== null && v !== undefined && Obj.isinstance(v, T.str) ? F.str(v) : null);
+  let suffix = "";
+  if (e.lineno !== null && e.lineno !== undefined) {
+    const file = e.filename === null || e.filename === undefined || !O.truth(e.filename) ? "<string>" : F.str(e.filename);
+    out.push(`  File "${file}", line ${F.str(e.lineno)}\n`);
+  } else if (e.filename !== null && e.filename !== undefined) {
+    suffix = ` (${F.str(e.filename)})`;
+  }
+  const text = strOf(e.text);
+  if (text !== null) {
+    const rtext = Array.from(text.replace(/\n+$/, ""));
+    let i = 0;
+    while (i < rtext.length && (rtext[i] === " " || rtext[i] === "\n" || rtext[i] === "\f")) i++;
+    const ltext = rtext.slice(i);
+    const spaces = rtext.length - ltext.length;
+    const len = Array.from(text).length;
+    let offset = num(e.offset);
+    if (e.offset === null || e.offset === undefined) {
+      out.push(`    ${ltext.join("")}\n`);
+    } else if (offset !== null) {
+      const endOffsetAttr = num(e.end_offset);
+      let endOffset: number;
+      if (O.truth(O.eq(e.lineno, e.end_lineno))) endOffset = endOffsetAttr !== null && endOffsetAttr !== 0 ? endOffsetAttr : offset;
+      else endOffset = rtext.length + 1;
+      if (len && offset > len) offset = rtext.length + 1;
+      if (len && endOffset > len) endOffset = rtext.length + 1;
+      if (offset >= endOffset || endOffset < 0) endOffset = offset + 1;
+      const colno = offset - 1 - spaces;
+      const endColno = endOffset - 1 - spaces;
+      out.push(`    ${ltext.join("")}\n`);
+      if (colno >= 0) {
+        const caretspace = ltext.slice(0, colno).map((c) => (isPySpace(c) ? c : " ")).join("");
+        out.push(`    ${caretspace}${"^".repeat(Math.max(0, endColno - colno))}\n`);
+      }
+    }
+  }
+  let msg: string;
+  try {
+    msg = O.truth(e.msg ?? null) ? F.str(e.msg) : "<no detail available>";
+  } catch {
+    msg = "<exception str() failed>";
+  }
+  out.push(`${stype}: ${msg}${suffix}\n`);
   return out;
 }
 
@@ -1251,6 +1319,8 @@ M.newBuiltinModule("traceback", (m) => {
   }, true);
   fn("format_exception_only", (a: any, b: any = undefined) => {
     const e = exc(a, b);
+    // (a SyntaxError's location lines too, as CPython's)
+    if (Obj.isinstance(e, T.SyntaxError)) return exceptionOnly(e);
     const s = F.str(e);
     return [`${typeName(e)}${s ? ": " + s : ""}\n`];
   });
