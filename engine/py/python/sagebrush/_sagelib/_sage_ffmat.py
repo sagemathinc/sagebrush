@@ -993,9 +993,13 @@ def _rhs_entries(b, n, what):
 
 # ------------------------------------------------------------------ elimination
 
-def _echelon(rows, base, ncols):
+def _echelon(rows, base, ncols, want_rows=True):
     """(reduced row echelon form, pivot columns, determinant factor) by
-    Gauss-Jordan elimination over the field."""
+    Gauss-Jordan elimination over the field; the form is None when
+    want_rows is false and the engine computed the rest."""
+    p = _engine_echelon_prime(base, len(rows), ncols)
+    if p:
+        return _engine_echelon(rows, base, ncols, p, want_rows)
     m = [list(r) for r in rows]
     one = base.one()
     pivots = []
@@ -1518,7 +1522,7 @@ class FFMatrix:
             sage: matrix(GF(2), [[1, 1, 0], [0, 1, 1], [1, 0, 1]]).pivots()
             (0, 1)
         """
-        return tuple(_echelon(self._rows, self._base, self._ncols)[1])
+        return tuple(_echelon(self._rows, self._base, self._ncols, want_rows=False)[1])
 
     def rank(self):
         """The rank.
@@ -1531,7 +1535,7 @@ class FFMatrix:
         if _double_field(self._base):
             import _sage_rdf
             return _sage_rdf._rank(self)
-        return _sa().Integer(len(_echelon(self._rows, self._base, self._ncols)[1]))
+        return _sa().Integer(len(_echelon(self._rows, self._base, self._ncols, want_rows=False)[1]))
 
     def __getattr__(self, name):
         # numerical matrices (RDF, CDF, RR, CC): eigenvalues, SVD, ... by numpy
@@ -1575,7 +1579,7 @@ class FFMatrix:
             return _sage_rdf._det(self)
         if not self.is_square():
             raise ValueError("self must be a square matrix")
-        m, piv, d = _echelon(self._rows, self._base, self._ncols)
+        m, piv, d = _echelon(self._rows, self._base, self._ncols, want_rows=False)
         return d if len(piv) == self.nrows() else self._base.zero()
 
     determinant = det
@@ -1718,6 +1722,19 @@ class FFMatrix:
             return _sage_rdf._solve_right(self, b)
         if isinstance(b, FFMatrix):
             _admit_size(self._base, self._ncols, b.ncols())
+            n, k = self._ncols, b.ncols()
+            if k and _engine_echelon_prime(self._base, self.nrows(), n + k):
+                # all right-hand sides in one [A | B] (in Rust): a pivot in
+                # any of B's columns means that column has no solution
+                aug = [list(r) + [self._base(x) for x in br] for r, br in zip(self._rows, b._rows)]
+                m, piv, d = _echelon(aug, self._base, n + k)
+                if piv and piv[-1] >= n:
+                    raise ValueError("matrix equation has no solutions")
+                zero = self._base.zero()
+                x = [[zero] * k for _ in range(n)]
+                for i, c in enumerate(piv):
+                    x[c] = m[i][n:]
+                return FFMatrix(self._base, x, k)
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
         b = [self._base(x) for x in b]
@@ -1930,15 +1947,37 @@ class FFMatrix:
 # the Python path
 _ENGINE_CHARPOLY_MAX_N = 512
 
+# engine/web nmod_echelon's admission (nmod_ops.rs ECH_MAX_DIM,
+# ECH_MAX_ENTRIES), for the matrix actually eliminated ([A | B] when
+# solving, [A | I] when inverting); empty and larger ones keep the Python
+# path
+_ENGINE_ECHELON_MAX_DIM = 1024
+_ENGINE_ECHELON_MAX_ENTRIES = 400 * 401
 
-def _engine_prime(base):
-    """p when base is the prime field GF(p) with p < 2^63 (the engine's
-    word-size arithmetic), else None."""
-    is_prime_field = getattr(base, "is_prime_field", None)
-    if is_prime_field is None or not is_prime_field():
+_engine_prime = _ff._engine_prime
+
+
+def _engine_echelon_prime(base, nrows, ncols):
+    """p when the engine's nmod_echelon admits an nrows x ncols matrix over
+    base, else None."""
+    if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM
+            and nrows * ncols <= _ENGINE_ECHELON_MAX_ENTRIES):
         return None
-    p = int(base.characteristic())
-    return p if p < 1 << 63 else None
+    return _engine_prime(base)
+
+
+def _engine_echelon(rows, base, ncols, p, want_rows):
+    """_echelon in Rust (engine/arith nmod_mat: the same pivots, the first
+    nonzero entry of each column from the current row down)."""
+    from sagebrush._engine import call
+    text = ";".join(",".join(str(int(x)) for x in r) for r in rows)
+    r = call("nmod_echelon", p=str(p), rows=len(rows), cols=ncols, m=text, reduced=bool(want_rows), want_rows=bool(want_rows))
+    piv = [int(t) for t in r["pivots"].split(",")] if r["pivots"] else []
+    det = _ff._elt(base, int(r["det"]))
+    m = None
+    if want_rows:
+        m = [[_ff._elt(base, int(t)) for t in row.split(",")] for row in r["rows"].split(";")]
+    return m, piv, det
 
 
 def _hessenberg(a, base):
@@ -2476,7 +2515,7 @@ class FFSubspace(FFVectorSpace):
         if not isinstance(v, (FFVector, list, tuple)) or len(v) != self._n:
             return False
         rows = self._basis + [[self._base(x) for x in v]]
-        return len(_echelon(rows, self._base, self._n)[1]) == len(self._basis)
+        return len(_echelon(rows, self._base, self._n, want_rows=False)[1]) == len(self._basis)
 
     def __iter__(self):
         els = _field_elements(self._base)

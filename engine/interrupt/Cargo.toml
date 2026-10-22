@@ -12,3 +12,6 @@ libc = "0.2"
 # WebAssembly: poll the host's flag through the import `sagebrush.interrupted`
 # (engine/web, whose hosts provide it)
 wasm-host = []
+# Tests only: count checks per phase and request Stop at a chosen check
+# (sagebrush_interrupt::hooks)
+test-hooks = []
