@@ -6,6 +6,7 @@
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { wasmFFT, wasmRfftRows } from "./kernels";
+import { admitWork } from "./numpy";
 import * as FD from "./fdlibm";
 
 // cos/sin of 2 pi/3, 4 pi/3, 2 pi/5, 4 pi/5, for the WebAssembly kernels
@@ -344,10 +345,21 @@ function rfftEven(x: Float64Array, xo: number, n: number, outRe: Float64Array, o
   }
 }
 
+// A transform's scratch: rows x n real (rfft) or complex values copied into
+// WebAssembly, a row's re and im, the twiddle tables, and for a length with
+// a prime factor past 5 Bluestein's chirp buffers (powers of two past 2n),
+// all admitted before any is allocated (LIMIT-PR55-3)
+function admitFFT(rows: number, n: number, real: boolean): void {
+  let m = 1;
+  if (factorize(real ? n / 2 : n) === null) while (m < 2 * n) m *= 2;
+  admitWork(8 * (2 * rows * n + 8 * n + 16 * m), "the FFT");
+}
+
 newBuiltinModule("_npfft", (m) => {
   // rows of a contiguous real float64 buffer (rows x n, n even) -> rows x (n/2+1) complex (out buffer)
   m.rfft_rows = Obj.builtin((data: any, rows: any, n: any, out: any) => {
     const R = Number(rows), N = Number(n), H = N / 2 + 1;
+    admitFFT(R, N, true);
     const d = data.data as Float64Array, od = out.data as Float64Array;
     const f = factorize(N / 2);
     if (f && wasmRfftRows(d, data.offset, R, N, od, 2 * out.offset, f, twiddle(N / 2), twiddle(N), RADIX_CONSTS)) return null;
@@ -364,6 +376,7 @@ newBuiltinModule("_npfft", (m) => {
   // transform the rows of an interleaved complex buffer (rows x n), in place
   m.rows = Obj.builtin((data: any, rows: any, n: any, inverse: any) => {
     const R = Number(rows), N = Number(n);
+    admitFFT(1, N, false);
     const d = data.data as Float64Array; // an ndarray's buffer (contiguous complex128)
     const f = factorize(N);
     if (f && N > 1) {
