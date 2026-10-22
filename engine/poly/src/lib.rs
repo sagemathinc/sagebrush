@@ -33,7 +33,7 @@ pub mod nf;
 mod vanhoeij;
 
 pub use budget::{Budget, FactorLimit, Limits, Phase};
-use budget::{div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
+use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;
 
@@ -94,6 +94,12 @@ fn trim(mut v: ZPoly) -> ZPoly {
     v
 }
 
+/// v without its trailing zeros (no copy).
+fn trimmed(v: &[BigInt]) -> &[BigInt] {
+    let n = v.iter().rposition(|c| !c.is_zero()).map_or(0, |i| i + 1);
+    &v[..n]
+}
+
 fn deg(v: &[BigInt]) -> usize {
     v.len().saturating_sub(1)
 }
@@ -102,6 +108,8 @@ fn deg(v: &[BigInt]) -> usize {
 fn content(b: &Budget, v: &[BigInt]) -> FResult<BigInt> {
     let w: Option<u64> = v.iter().try_fold(0u64, |acc, c| acc.checked_add(limbs(c.bits()).checked_mul(limbs(c.bits()))?));
     b.debit(w)?;
+    // the gcd's transients: a few integers of the largest coefficient's size
+    let _t = b.reserve(big_bytes(maxbits(v)).and_then(|x| x.checked_mul(4)))?;
     let mut g = BigInt::zero();
     for c in v {
         g = g.gcd(c);
@@ -114,16 +122,18 @@ fn content(b: &Budget, v: &[BigInt]) -> FResult<BigInt> {
 
 /// The primitive part, with a positive leading coefficient.
 fn prim<'b>(b: &'b Budget, v: &[BigInt]) -> FResult<Held<'b>> {
-    let v = trim(v.to_vec());
+    let v = trimmed(v);
     if v.is_empty() {
-        return Held::copy(b, &v);
+        return Held::copy(b, v);
     }
-    let mut c = content(b, &v)?;
+    // the result's room first, then the content
+    let r = b.reserve(poly_bytes(v.len() as u64, maxbits(v)))?;
+    let mut c = content(b, v)?;
     if v.last().unwrap().is_negative() {
         c = -c;
     }
-    b.debit(div_work(v.len() as u64, maxbits(&v), 1, c.bits()))?;
-    Held::build(b, v.len(), maxbits(&v), || v.iter().map(|x| x / &c).collect())
+    b.debit(div_work(v.len() as u64, maxbits(v), 1, c.bits()))?;
+    Ok(Held { v: v.iter().map(|x| x / &c).collect(), _r: r })
 }
 
 fn derivative<'b>(b: &'b Budget, v: &[BigInt]) -> FResult<Held<'b>> {
@@ -168,7 +178,7 @@ fn zmul<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Held<'b>> {
 /// larger than a factor of x can have (Mignotte) proves y does not divide
 /// x, which bounds the working storage reserved first.
 fn divexact<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Option<Held<'b>>> {
-    let (x, y) = (trim(x.to_vec()), trim(y.to_vec()));
+    let (x, y) = (trimmed(x), trimmed(y));
     if y.is_empty() {
         return Ok(None);
     }
@@ -180,12 +190,13 @@ fn divexact<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Option<Hel
     }
     let lq = x.len() - y.len() + 1;
     // a factor q of x: |q|_inf <= 2^deg(q) |x|_2 <= 2^deg(q) sqrt(len x) |x|_inf
-    let qbits = (lq as u64 - 1) + maxbits(&x) + clog2(x.len() as u64) + 1;
-    let wbits = maxbits(&x).max(qbits + maxbits(&y) + clog2(y.len() as u64) + 1) + 1;
-    b.debit(div_work(x.len() as u64, wbits, y.len() as u64, maxbits(&y)))?;
-    let _work = b.reserve(poly_bytes(x.len() as u64, wbits))?;
+    let qbits = (lq as u64 - 1) + maxbits(x) + clog2(x.len() as u64) + 1;
+    let wbits = maxbits(x).max(qbits + maxbits(y) + clog2(y.len() as u64) + 1) + 1;
+    b.debit(div_work(x.len() as u64, wbits, y.len() as u64, maxbits(y)))?;
+    // the working copy and the quotient, reserved before either exists
+    let _work = b.reserve(poly_bytes(x.len() as u64, wbits).and_then(|w| w.checked_add(poly_bytes(lq as u64, qbits)?)))?;
     let ly = y.last().unwrap().clone();
-    let mut r = x;
+    let mut r = x.to_vec();
     let mut q = vec![BigInt::zero(); lq];
     for i in (0..lq).rev() {
         sagebrush_interrupt::check();
@@ -213,11 +224,12 @@ fn divexact<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Option<Hel
 /// subtracts, adding at most bits(y) + 1 bits, so the working storage is
 /// bounded (and reserved) first.
 fn prem<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Held<'b>> {
-    let mut r = trim(x.to_vec());
-    let steps = (r.len() + 1).saturating_sub(y.len()) as u64;
-    let bits = maxbits(&r) + steps * (maxbits(y) + 1) + 1;
-    b.debit(mul_work(steps, bits, r.len() as u64, maxbits(y)))?;
-    let held = b.reserve(poly_bytes(r.len() as u64, bits))?;
+    let x = trimmed(x);
+    let steps = (x.len() + 1).saturating_sub(y.len()) as u64;
+    let bits = maxbits(x) + steps * (maxbits(y) + 1) + 1;
+    b.debit(mul_work(steps, bits, x.len() as u64, maxbits(y)))?;
+    let held = b.reserve(poly_bytes(x.len() as u64, bits))?;
+    let mut r = x.to_vec();
     let ly = y.last().unwrap().clone();
     while r.len() >= y.len() && !r.is_empty() {
         sagebrush_interrupt::check();
@@ -678,7 +690,9 @@ pub(crate) fn symmetric(c: &BigInt, m: &BigInt) -> BigInt {
 
 /// The modular data of a square-free part: the prime, its factors mod p,
 /// the degrees possible for a factor over Q, and the lifting exponent.
-pub(crate) struct Modular {
+pub(crate) struct Modular<'b> {
+    /// The reservation of the data below, made before it was built.
+    pub _r: Reservation<'b>,
     pub p: u64,
     pub modfs: Vec<FPoly>,
     pub possible: Vec<bool>,
@@ -701,10 +715,13 @@ pub(crate) fn mignotte_exponent(f: &[BigInt], p: u64) -> u32 {
 }
 
 /// Factor f modulo a few good primes; None when that proves f irreducible.
-fn modular(b: &Budget, f: &[BigInt]) -> FResult<Option<Modular>> {
+fn modular<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Modular<'b>>> {
     let _p = b.enter(Phase::Modular);
     let n = deg(f);
     let lc = f.last().unwrap().clone();
+    // what is returned: the factors mod p (n words in all, plus one vector
+    // header each, at most n + 1) and the n + 1 degree flags
+    let keep = b.reserve(words_bytes(3 * (n as u64 + 1)))?;
     let _m = b.reserve(modular_bytes(n).and_then(|x| x.checked_mul(2)))?;
     // keep the prime with the fewest factors, and the degrees possible for
     // a factor over Q modulo every one of them
@@ -756,12 +773,17 @@ fn modular(b: &Budget, f: &[BigInt]) -> FResult<Option<Modular>> {
         edf(b, g, *d, p, &mut rng, &mut modfs)?;
     }
     let k = mignotte_exponent(f, p);
-    Ok(Some(Modular { p, modfs, possible, k }))
+    Ok(Some(Modular { _r: keep, p, modfs, possible, k }))
 }
 
 /// Lift the modular factors of f to p^k (within the call's budget).
 pub(crate) fn lift<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, k: u32) -> FResult<Vec<Held<'b>>> {
     let _p = b.enter(Phase::Hensel);
+    // the F_p[x] temporaries of the factor tree (the products of each node's
+    // halves and the Bezout pair: four of at most n + 1 words a level) and
+    // a Hensel step's few
+    let n = deg(f) as u64;
+    let _w = b.reserve(words_bytes((4 * (clog2(m.modfs.len() as u64) + 1) + 8) * (n + 1)))?;
     let pk = BigInt::from(m.p).pow(k);
     let fk = mreduce(b, f, &pk)?;
     hensel(b, &fk, &m.modfs, m.p, k)
@@ -923,7 +945,7 @@ pub fn try_factor(f: &[BigInt]) -> Result<(BigInt, Vec<(ZPoly, u32)>), FactorLim
 /// made with it: nested users pass one budget through all their calls).
 pub fn try_factor_with(f: &[BigInt], b: &Budget) -> Result<(BigInt, Vec<(ZPoly, u32)>), FactorLimit> {
     admit(b, f)?;
-    let f = Held::copy(b, &trim(f.to_vec()))?;
+    let f = Held::copy(b, trimmed(f))?;
     assert!(!f.is_empty(), "factor(0)");
     let _p = b.enter(Phase::Squarefree);
     let mut c = content(b, &f)?;
@@ -931,15 +953,18 @@ pub fn try_factor_with(f: &[BigInt], b: &Budget) -> Result<(BigInt, Vec<(ZPoly, 
         c = -c;
     }
     let g = prim(b, &f)?;
-    let mut out: Vec<(ZPoly, u32)> = vec![];
     if deg(&g) == 0 {
-        return Ok((c, out));
+        return Ok((c, vec![]));
     }
+    // (the factors stay reserved until the call returns them)
+    let mut held: Vec<(Held, u32)> = vec![];
     for (part, e) in squarefree_with(b, &g)? {
         for h in factor_squarefree(b, &part)? {
-            out.push((h.into_vec(), e));
+            held.push((h, e));
         }
     }
+    let _o = b.reserve(words_bytes(4 * held.len() as u64))?;
+    let mut out: Vec<(ZPoly, u32)> = held.into_iter().map(|(h, e)| (h.into_vec(), e)).collect();
     out.sort_by(|x, y| x.0.len().cmp(&y.0.len()).then_with(|| x.0.iter().rev().cmp(y.0.iter().rev())));
     Ok((c, out))
 }
@@ -1017,3 +1042,41 @@ pub fn is_irreducible(f: &[BigInt]) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// The tests' allocation spy: bytes allocated by the current thread (so
+/// parallel tests do not disturb each other), to check that refusals come
+/// before the allocations they refuse.
+#[cfg(test)]
+pub(crate) mod alloc_spy {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static BYTES: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub struct Spy;
+
+    unsafe impl GlobalAlloc for Spy {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            let _ = BYTES.try_with(|b| b.set(b.get() + l.size() as u64));
+            System.alloc(l)
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            System.dealloc(p, l)
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+            let _ = BYTES.try_with(|b| b.set(b.get() + n as u64));
+            System.realloc(p, l, n)
+        }
+    }
+
+    /// Bytes allocated by this thread so far.
+    pub fn allocated() -> u64 {
+        BYTES.with(|b| b.get())
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static SPY: alloc_spy::Spy = alloc_spy::Spy;
