@@ -262,7 +262,47 @@ const cStrides = (shape: number[]): number[] => {
 };
 const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 
+// Every array's storage is admitted before it is allocated (empty, which
+// every constructor uses; daybreak2's LIMIT-PR55-1): at most ARRAY_MAX_ELEMENTS
+// elements and ARRAY_MAX_BYTES bytes, both inclusive, the bytes counting any
+// scratch the caller reserves too. Counted exactly (BigInt), so no product
+// overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
+// machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
+export const ARRAY_MAX_ELEMENTS = 2 ** 32;
+export const ARRAY_MAX_BYTES = 2 ** 32;
+export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
+  let n = 1n;
+  for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
+  const bytes = n * BigInt(dt.itemsize);
+  if (bytes > 2n ** 63n - 1n) raise(T.ValueError, "array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.");
+  if (n > BigInt(ARRAY_MAX_ELEMENTS) || bytes + BigInt(scratch) > BigInt(ARRAY_MAX_BYTES)) {
+    const dims = shape.map((d) => String(typeof d === "bigint" ? d : BigInt(d)));
+    raise(T.MemoryError, `Unable to allocate ${sizeString(bytes)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type ${dt.name}`);
+  }
+}
+
+// NumPy's _ArrayMemoryError._size_to_string: binary units, 3 significant
+// digits (Python's "#.3g", which keeps a trailing point), whole bytes below 1 KiB
+function sizeString(bytes: bigint): string {
+  const units = ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+  let unit = Math.floor(Math.max(bytes.toString(2).length - 1, 1) / 10);
+  let v = Number(bytes) / 2 ** (unit * 10);
+  if (Math.round(v) === 1024) {
+    unit += 1;
+    v /= 1024;
+  }
+  if (unit >= units.length) {
+    v *= 2 ** ((unit - (units.length - 1)) * 10);
+    unit = units.length - 1;
+  }
+  if (unit === 0) return `${v.toFixed(0)} ${units[unit]}`;
+  let t = Math.round(v) < 1000 ? v.toPrecision(3) : v.toFixed(0);
+  if (!t.includes(".")) t += ".";
+  return `${t} ${units[unit]}`;
+}
+
 export function empty(shape: number[], dt: DType): NDArray {
+  admitArray(shape, dt);
   const n = prod(shape);
   return new NDArray(dt, new dt.ctor(dt.cplx ? 2 * n : n), shape.slice(), cStrides(shape));
 }
@@ -3149,7 +3189,8 @@ newBuiltinModule("_numpy", (m) => {
       const [b0, b1, bs] = ws.map((w) => big(w!));
       const span = b1 - b0;
       const nb = span <= 0n === bs > 0n ? 0n : (span + bs - (bs > 0n ? 1n : -1n)) / bs;
-      if (nb > 2n ** 32n) raise(T.MemoryError);
+      // (the same admission as every array's, before the length is a number)
+      admitArray([nb < 0n ? 0n : nb], dt);
       const N = Number(nb < 0n ? 0n : nb);
       const out = empty([N], dt);
       for (let i = 0; i < N; i++) out.data[i] = admitWide(b0 + BigInt(i) * bs, dt);
@@ -3194,24 +3235,41 @@ newBuiltinModule("_numpy", (m) => {
     return a;
   });
   fn("linspace", (start: any, stop: any, num: any = 50, endpoint: any = true, dtype: any = null) => {
-    // (num as operator.index takes it: an int, not a float)
-    const n = Number(O.index(num));
-    if (n < 0) raise(T.ValueError, `Number of samples, ${n}, must be non-negative.`);
+    // (num as operator.index takes it: an int, not a float; admitted before
+    // anything is allocated or computed)
+    // (a NumPy scalar refused by its NumPy name, as NumPy's TypeError says it,
+    // 'numpy.float32'; NumPy 2's bool has no __index__; astra's CORR-PR55-1)
+    const nt = Obj.typeOf(num);
+    const npName = nt.$module === "numpy" ? `numpy.${nt.$qualname}` : null;
+    const notIndex = () => raise(T.TypeError, `'${npName}' object cannot be interpreted as an integer`);
+    if (npName !== null && nt.$qualname === "bool") notIndex();
+    let ni: number | bigint;
+    try {
+      ni = O.index(num);
+    } catch (e) {
+      if (npName !== null && Obj.isinstance(e, T.TypeError)) notIndex();
+      throw e;
+    }
+    if (ni < 0) raise(T.ValueError, `Number of samples, ${ni}, must be non-negative.`);
+    const dt = dtype !== null ? toDtype(dtype) : D.float64;
+    admitArray([typeof ni === "bigint" ? ni : BigInt(ni)], dt);
+    const n = Number(ni);
     const a = toNum(start), b = toNum(stop);
     const div = O.truth(endpoint) ? n - 1 : n;
     const delta = b - a;
     const step = div > 0 ? delta / div : NaN;
-    const dt = dtype !== null ? toDtype(dtype) : D.float64;
     const out = empty([n], dt);
     // as NumPy's linspace, in float64: arange(num) * step + start (with a
     // step that underflows to 0, arange(num) / div * delta; with div <= 0,
     // arange(num) * delta, so linspace(0, inf, 1) is nan); the end point set
     // exactly; floored for an integer dtype before the cast
-    const y = new Float64Array(n);
-    for (let i = 0; i < n; i++) y[i] = (div > 0 ? (step === 0 ? (i / div) * delta : i * step) : i * delta) + a;
-    if (O.truth(endpoint) && n > 1) y[n - 1] = b;
+    // (each value computed and stored in one pass: no scratch array)
+    const last = O.truth(endpoint) && n > 1 ? n - 1 : -1;
     const floor = dt.kind === "i" || dt.kind === "u";
-    for (let i = 0; i < n; i++) out.data[(dt.cplx ? 2 : 1) * i] = castNum(dt, floor ? Math.floor(y[i]) : y[i]);
+    for (let i = 0; i < n; i++) {
+      const y = i === last ? b : (div > 0 ? (step === 0 ? (i / div) * delta : i * step) : i * delta) + a;
+      out.data[(dt.cplx ? 2 : 1) * i] = castNum(dt, floor ? Math.floor(y) : y);
+    }
     return out;
   });
   fn("eye", (n: any, mm: any = null, k: any = 0, dtype: any = null) => {
