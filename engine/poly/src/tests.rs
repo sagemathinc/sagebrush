@@ -248,6 +248,36 @@ fn refusals_come_before_allocations() {
 }
 
 #[test]
+fn live_memory_stays_within_the_budget() {
+    // a low-degree polynomial with huge coefficients, where the p-adic
+    // moduli (sized by the precision, not the degree) dominate, and a
+    // lattice case: for every memory limit, whether the call refuses or
+    // succeeds, the live bytes it allocates never exceed the limit (plus a
+    // small slack for the bounded bookkeeping vectors)
+    let c = (BigInt::one() << 1u32 << 150_000u32) + BigInt::from(12345);
+    let f = prod(&[vec![-c.clone(), BigInt::one()], vec![c + 1u32, BigInt::from(3)], z(&[5, 0, 1])]);
+    for input in [f, swinnerton_dyer(5)] {
+        let mut limit: u64 = 16 << 10;
+        while limit <= 64 << 20 {
+            let b = Budget::new(Limits { memory: limit, ..Limits::DEFAULT });
+            let (r, peak) = crate::alloc_spy::peak_during(|| try_factor_with(&input, &b).map(|x| x.1.len()));
+            assert!(peak <= limit as i64 + (32 << 10), "limit {}: peak {} ({:?})", limit, peak, r);
+            if let Err(e) = &r {
+                assert!(e.what == "memory" || e.what == "work", "limit {}: {}", limit, e);
+            }
+            limit *= 2;
+        }
+        // and with room, it factors
+        assert!(try_factor(&input).is_ok());
+    }
+    // p^k itself is refused before it exists
+    let b = Budget::new(Limits { memory: 4096, ..Limits::DEFAULT });
+    let (r, used) = allocated_by(|| power(&b, 13, 200_000).map(|x| x.bits()));
+    assert_eq!(r.unwrap_err().what, "memory");
+    assert!(used < 1024, "power: {} bytes before refusing", used);
+}
+
+#[test]
 fn work_is_aggregate_across_square_free_parts() {
     // S_4^2 * S_4(x + 1): two square-free parts; find the work one part
     // needs, then give the whole call slightly more than that: refused
@@ -328,3 +358,4 @@ fn timings() {
         }
     }
 }
+
