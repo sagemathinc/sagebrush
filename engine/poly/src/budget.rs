@@ -102,11 +102,12 @@ impl Limits {
     /// throughput measured (cases of 0.2 s or more) was 3.3e8 units/s
     /// natively (S_6, lattice-bound; dense Hensel/modular cases ran at
     /// 6.6e8 to 3.4e9) and 1.9e8 units/s in wasm (S_6; wasm was 1.4x to
-    /// 2.1x native).  W = 2^34 is then at most about 52 s native and 90 s
-    /// in wasm at the slowest measured rates (10 to 25 s natively on the
-    /// dense cases).  Pinned by tests::default_work_is_calibrated.
+    /// 2.1x native).  W = 2^33 (the common bound, under the 60 s board and
+    /// MCP default) is then at most about 26 s native and 45 s in wasm at
+    /// the slowest measured rates.  Pinned by
+    /// tests::default_work_is_calibrated.
     pub const DEFAULT: Limits = Limits {
-        work: 1 << 34,
+        work: 1 << 33,
         memory: 512 << 20,
         subsets: 1 << 20,
         divisions: 4096,

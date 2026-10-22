@@ -254,7 +254,7 @@ fn live_memory_stays_within_the_budget() {
     // lattice case: for every memory limit, whether the call refuses or
     // succeeds, the live bytes it allocates never exceed the limit (plus a
     // small slack for the bounded bookkeeping vectors)
-    let c = (BigInt::one() << 1u32 << 60_000u32) + BigInt::from(12345);
+    let c = (BigInt::one() << 1u32 << 30_000u32) + BigInt::from(12345);
     let f = prod(&[vec![-c.clone(), BigInt::one()], vec![c + 1u32, BigInt::from(3)], z(&[5, 0, 1])]);
     for input in [f, swinnerton_dyer(5)] {
         let mut limit: u64 = 16 << 10;
@@ -280,12 +280,12 @@ fn live_memory_stays_within_the_budget() {
 #[test]
 fn default_work_is_calibrated() {
     // the constant of the VM 1 calibration (budget.rs), and what it admits:
-    // the lattice cases and a dense degree-600 product fit with room
-    assert_eq!(Limits::DEFAULT.work, 1 << 34);
+    // S_6 (about 1/126 of it) and x^120 - 1 (about 1/209) fit far below it
+    assert_eq!(Limits::DEFAULT.work, 1 << 33);
     for f in [swinnerton_dyer(6), xn(120, -1)] {
         let b = Budget::default();
         try_factor_with(&f, &b).unwrap();
-        assert!(Limits::DEFAULT.work - b.work_left() < Limits::DEFAULT.work / 64);
+        assert!(Limits::DEFAULT.work - b.work_left() < Limits::DEFAULT.work / 100);
     }
 }
 
