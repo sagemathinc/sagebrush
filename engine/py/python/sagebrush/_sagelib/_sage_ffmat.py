@@ -1764,7 +1764,7 @@ class FFMatrix:
         n = self.nrows()
         R = _ff.PolynomialRing_ff(self._base, var)
         p = _engine_prime(self._base)
-        if p and n:
+        if p and 0 < n <= _ENGINE_CHARPOLY_MAX_N:
             # in Rust (engine/arith nmod_mat: Krylov or Hessenberg)
             from sagebrush._engine import call
             rows = ";".join(",".join(str(int(x)) for x in r) for r in self._rows)
@@ -1924,6 +1924,11 @@ class FFMatrix:
             Integer Ring
         """
         return _sa().matrix(_sa().ZZ, [[int(x) for x in r] for r in self._rows])
+
+
+# engine/web nmod_charpoly's admission (NMOD_MAX_N): larger matrices keep
+# the Python path
+_ENGINE_CHARPOLY_MAX_N = 1024
 
 
 def _engine_prime(base):

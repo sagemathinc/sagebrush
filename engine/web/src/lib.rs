@@ -270,6 +270,51 @@ fn zvec(x: &[BigInt], v: &Value) -> Value {
     json!(big(x))
 }
 
+/// nmod_charpoly's admission: at most this many rows and columns.  The
+/// peak live memory is then closed-form and small enough for the smallest
+/// wasm heap: the request text (checked first, at most
+/// NMOD_MAX_BYTES = 21 MiB), the flat entries (8 n^2 bytes), the charpoly's
+/// one working matrix (Hessenberg: 8 n^2; Krylov: 8 n (n + 1)) and its
+/// vectors and result (O(n) words): at most 8 n (2n + 1) + 21 MiB + O(n),
+/// under 38 MiB at n = 1024; the work is cubic, at most about n^3 = 2^30
+/// multiply-adds, polled for Stop every 2^16 (sagebrush-arith).
+pub const NMOD_MAX_N: usize = 1024;
+/// At most 19 digits and one separator per entry below 2^63.
+pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N;
+
+/// The square matrix of nmod_charpoly's request: checked sizes first (the
+/// text, then the row count by a scan that allocates nothing), then the
+/// entries parsed into one flat vector of n^2 words reserved up front,
+/// polling for Stop row by row.
+fn nmod_square(s: &str, p: u64) -> Result<(usize, Vec<u64>), String> {
+    if s.len() > NMOD_MAX_BYTES {
+        return Err(format!("nmod_charpoly: the matrix text has {} bytes, more than {}", s.len(), NMOD_MAX_BYTES));
+    }
+    let n = if s.is_empty() { 0 } else { s.bytes().filter(|&c| c == b';').count() + 1 };
+    if n > NMOD_MAX_N {
+        return Err(format!("nmod_charpoly: {} rows, more than {}", n, NMOD_MAX_N));
+    }
+    let mut d: Vec<u64> = Vec::with_capacity(n * n);
+    for r in s.split(';').filter(|_| n > 0) {
+        sagebrush_interrupt::check_coarse();
+        let mut count = 0;
+        for t in r.split(',') {
+            count += 1;
+            if count > n {
+                return Err("nmod_charpoly of a non-square matrix".into());
+            }
+            match t.parse::<u64>() {
+                Ok(x) if x < p => d.push(x),
+                _ => return Err("nmod_charpoly: entries must be integers in [0, p)".into()),
+            }
+        }
+        if count != n {
+            return Err("nmod_charpoly of a non-square matrix".into());
+        }
+    }
+    Ok((n, d))
+}
+
 fn csv(v: &Value) -> bool {
     v.get("wire").and_then(Value::as_str) == Some("csv")
 }
@@ -756,16 +801,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             let Some(Value::String(s)) = v.get("m") else {
                 return Err("nmod_charpoly needs the rows of m".into());
             };
-            let mut rows: Vec<Vec<u64>> = vec![];
-            for r in s.split(';').filter(|_| !s.is_empty()) {
-                let row: Option<Vec<u64>> = r.split(',').map(|t| t.parse::<u64>().ok().filter(|&x| x < p)).collect();
-                rows.push(row.ok_or("nmod_charpoly: entries must be integers in [0, p)")?);
-            }
-            if rows.iter().any(|r| r.len() != rows.len()) {
-                return Err("nmod_charpoly of a non-square matrix".into());
-            }
+            let (n, d) = nmod_square(s, p)?;
             let m = sagebrush_bigint::nmod::Modulus::new(p);
-            let c = sagebrush_arith::nmod_mat::Mat::from_rows(&rows, m).charpoly();
+            let c = sagebrush_arith::nmod_mat::Mat { rows: n, cols: n, m, d }.charpoly();
             let s = c.iter().map(|x| x.to_string()).collect::<Vec<_>>();
             Ok(if csv(v) { json!(s.join(",")) } else { json!(s) })
         }
@@ -989,4 +1027,28 @@ mod tests {
             assert!(err(bad).starts_with("nmod_charpoly"), "{}", bad);
         }
     }
+
+    /// A square matrix text of zeros with n rows.
+    fn zeros(n: usize) -> String {
+        vec![vec!["0"; n].join(","); n].join(";")
+    }
+
+    #[test]
+    fn nmod_charpoly_admission() {
+        use super::{nmod_square, NMOD_MAX_BYTES, NMOD_MAX_N};
+        // at the row limit: admitted (the parse alone; the cubic work of the
+        // largest case belongs to the slow tests), one more: refused before
+        // anything is parsed
+        let (n, d) = nmod_square(&zeros(NMOD_MAX_N), 7).unwrap();
+        assert_eq!((n, d.len()), (NMOD_MAX_N, NMOD_MAX_N * NMOD_MAX_N));
+        assert!(nmod_square(&zeros(NMOD_MAX_N + 1), 7).unwrap_err().contains("rows, more than"));
+        // a text past the byte limit is refused before it is scanned
+        let long = "0".repeat(NMOD_MAX_BYTES + 1);
+        assert!(nmod_square(&long, 7).unwrap_err().contains("bytes, more than"));
+        // (at the limit: admitted, one entry with leading zeros)
+        assert_eq!(nmod_square(&"0".repeat(NMOD_MAX_BYTES), 7).unwrap(), (1, vec![0]));
+        // a long row is refused as soon as it passes n entries
+        assert!(nmod_square(&format!("{};0", vec!["0"; 5].join(",")), 7).unwrap_err().contains("non-square"));
+    }
+
 }
