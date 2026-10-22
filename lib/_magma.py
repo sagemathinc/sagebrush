@@ -623,15 +623,13 @@ def _ff_universe(items, where):
     Ks = list(fields.values())
     if len({K.p for K in Ks}) > 1:
         raise MagmaError("No valid universe containing all elements", where)
-    budget, U = [_FF_WORK], Ks[0]
-    for K in Ks[1:]:
-        refuse = _ff_refuse("a collection", U, K, where)
-        U = _ff_common(U, K, refuse, budget)
-    refuse = _ff_refuse("a collection", Ks[0], Ks[1], where)
-    return [_ff_up(x, U, budget, refuse) if _is_ff(x) else x for x in items]
+    if sum(1 for K in Ks if K.n > 1) < 2:
+        return items  # (one extension with its prime field: as before)
+    # (the whole collection admitted at once, before the first element goes in)
+    return _ff_promote(items, "a collection", where)[0]
 
 
-def _ff_into(U, x):
+def _ff_into(U, x, budget=None):
     """x coerced into the finite field U (a declared universe), or None
     where Magma's coercion fails: an integer, a rational with a denominator
     prime to p, an element of U, of a subfield of U, or of a field over U
@@ -655,7 +653,9 @@ def _ff_into(U, x):
             return U.K(int(x))
         # (as U!x: up from a subfield, down by value, else none, even an
         # element of the prime field from a field neither in the other)
-        refuse, budget = _ff_refuse("coercion", Kx, U, "'!'"), [_FF_WORK]
+        refuse = _ff_refuse("coercion", Kx, U, "'!'")
+        if budget is None:
+            budget = [_FF_WORK]
         if U.n % Kx.n == 0:
             return _ff_up(x, U, budget, refuse)
         if U.n == 1:
@@ -666,6 +666,27 @@ def _ff_into(U, x):
     if isinstance(x, (MSeq, MSet, MTuple, MRange, list, tuple)):
         raise MagmaError("a collection in a collection over a finite field is not supported yet")
     return None
+
+
+def _ff_into_cost(U, x, seen, where):
+    """The cops _ff_into(U, x) takes (embedding up, or a descent), for the
+    aggregate admission of a collection before its first element goes in;
+    refused here for fields past F1's bounds, as _ff_into would be."""
+    if not _is_ff(x) or x.parent() is U.K:
+        return 0
+    Kx = _ffwrap(x.parent())
+    if Kx.p != U.p or Kx.n == 1 or U.n == 1:
+        return 0
+    refuse = _ff_refuse("coercion", Kx, U, where)
+    if U.n % Kx.n == 0:
+        if U.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
+            raise refuse()
+        return _ff_up_cost(Kx, U.p, U.n, seen)
+    if Kx.n % U.n == 0:
+        if Kx.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
+            raise refuse()
+        return 0 if not x else _ff_dlog_cost(Kx) + 2 * U.q.bit_length() * _ff_m(U)
+    return 0
 
 
 # where Magma reports a failed coercion into a declared universe, by kind
@@ -716,9 +737,17 @@ def _into_universe(items, universe, kind):
         # (the rationals' elements are rationals, the integral ones too)
         return [_qelt(x) for x in items] if universe is _QQ and all(_num(x) for x in items) else items
     out = []
+    if ff:
+        # (the whole collection's embeddings and descents admitted under one
+        # budget before the first element goes in, then paid from it)
+        seen = set()
+        total = sum(_ff_into_cost(universe, x, seen, _UNIVERSE_FAIL[kind]) for x in items)
+        first = next((_ffwrap(x.parent()) for x in items if _is_ff(x)), universe)
+        _ff_charge([_FF_WORK], total, _ff_refuse("a collection", first, universe, _UNIVERSE_FAIL[kind]))
+        paid = [total]
     for k, x in enumerate(items):
         if ff:
-            y = _ff_into(universe, x)
+            y = _ff_into(universe, x, paid)
         elif not _is_ff(x):
             y = _qelt(x) if universe is _QQ and _num(x) else x
         elif universe is _ZZ and _ffwrap(x.parent()).n == 1:
@@ -2438,7 +2467,7 @@ def _value_base(x):
     return None
 
 
-def _ff_operands(a, b):
+def _ff_operands(a, b, op=None, pos=None):
     """a and b, a finite field's element's partner coerced into its field
     (a rational, or the prime field's element into an extension), once
     _ff_check has let them meet; others as they are."""
@@ -2449,9 +2478,10 @@ def _ff_operands(a, b):
         if a.parent() is b.parent():
             return a, b
         Ka, Kb = _ffwrap(a.parent()), _ffwrap(b.parent())
-        refuse, budget = _ff_refuse("arithmetic", Ka, Kb, None), [_FF_WORK]
-        U = _ff_common(Ka, Kb, refuse, budget)
-        return _ff_up(a, U, budget, refuse), _ff_up(b, U, budget, refuse)
+        if 1 in (Ka.n, Kb.n):
+            return (Kb.K(int(a)), b) if Ka.n == 1 else (a, Ka.K(int(b)))  # (the prime field's element)
+        a, b = _ff_promote([a, b], "arithmetic", "'%s'" % op if op else None, pos)[0]
+        return a, b
     if fa and isinstance(b, _Fraction):
         return a, _ffwrap(a.parent())._magma_coerce(b)
     if fb and isinstance(a, _Fraction):
@@ -2459,15 +2489,16 @@ def _ff_operands(a, b):
     return a, b
 
 
-def _ff_eq(a, b):
+def _ff_eq(a, b, op="eq", pos=None):
     """a eq b for a finite field's element and what it meets (_ff_check):
     in the smallest field containing both (never by descent)."""
     x, y = (a, b) if _is_ff(a) else (b, a)
     if _is_ff(y) and x.parent() is not y.parent():
         Kx, Ky = _ffwrap(x.parent()), _ffwrap(y.parent())
-        refuse, budget = _ff_refuse("a comparison", Kx, Ky, None), [_FF_WORK]
-        U = _ff_common(Kx, Ky, refuse, budget)
-        return _ff_up(x, U, budget, refuse) == _ff_up(y, U, budget, refuse)
+        if 1 in (Kx.n, Ky.n):
+            return (Ky.K(int(x)) == y) if Kx.n == 1 else (x == Kx.K(int(y)))
+        x, y = _ff_promote([x, y], "a comparison", "'%s'" % op, pos)[0]
+        return x == y
     return x == _ffwrap(x.parent())._magma_coerce(y)
 
 
@@ -2503,7 +2534,9 @@ def _ff_check(op, a, b, pos):
         # (Magma computes in the smallest field containing both: admitted
         # here, made before the operation goes ahead)
         what = "a comparison" if o in ("eq", "ne") else "arithmetic"
-        _ff_common(Kx, Ky, _ff_refuse(what, Kx, Ky, "'%s'" % o, pos), [_FF_WORK])
+        # (structural only: the field, its Conway search and the embeddings
+        # come in the operation itself, under its one budget, _ff_promote)
+        _ff_cover([Kx, Ky], _ff_refuse(what, Kx, Ky, "'%s'" % o, pos))
         return True
     if isinstance(y, int) and not isinstance(y, bool):
         return True
@@ -2758,7 +2791,7 @@ def _add(a, b, pos=None, op="+"):
         return _ffpoly_op("+", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("+", a, b, pos)
-    a, b = _ff_operands(a, b)
+    a, b = _ff_operands(a, b, "+", pos)
     try:
         return _mod_result(a + b, "+", a, b)
     except TypeError:
@@ -2773,7 +2806,7 @@ def _sub(a, b, pos=None, op="-"):
         return _ffpoly_op("-", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("-", a, b, pos)
-    a, b = _ff_operands(a, b)
+    a, b = _ff_operands(a, b, "-", pos)
     try:
         return _mod_result(a - b, "-", a, b)
     except TypeError:
@@ -2790,7 +2823,7 @@ def _mul(a, b, pos=None, op="*"):
         return _ffpoly_op("*", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("*", a, b, pos)
-    a, b = _ff_operands(a, b)
+    a, b = _ff_operands(a, b, "*", pos)
     try:
         return _mod_result(a * b, "*", a, b)
     except TypeError:
@@ -2828,7 +2861,7 @@ def _div(a, b, pos=None, op="/"):
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
         return a / b
-    a, b = _ff_operands(a, b)
+    a, b = _ff_operands(a, b, "/", pos)
     return _mod_result(a / b, "/", a, b)
 
 
@@ -3202,7 +3235,7 @@ def _eq(a, b, pos=None, op="eq"):
         # Magma has no equality of record formats
         raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_type_of(a), _type_of(b)), "'%s'" % op, True, pos)
     if _ff_check(op, a, b, pos):
-        return _ff_eq(a, b)
+        return _ff_eq(a, b, op, pos)
     da, db = _desc(a), _desc(b)
     if da is not None and db is not None:
         code = _common(da, db)
@@ -3233,6 +3266,8 @@ def _eq(a, b, pos=None, op="eq"):
             if (d is None) != (e is None) or (d is not None and _common(d, e)) or (d is None and _eq_kind(a[0]) != _eq_kind(b[0])):
                 raise MagmaError("Incompatible sequences", "'%s'" % op, True, pos)
         return len(a) == len(b) and all(_cmpeq(x, y) for x, y in zip(a, b))
+    if ka == "set" and isinstance(a, MSet) and isinstance(b, MSet):
+        a, b = _ff_sets(a, b, op, pos, "Arguments 1 and 2 have incompatible universal sets")
     return a == b
 
 
@@ -3446,6 +3481,20 @@ def _in(x, s, pos=None, op="in"):
         if y is _NOCOERCE:
             raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
         return any(_cmpeq(y, z) for z in (s.items if isinstance(s, MSet) else s))  # (in any order)
+    if (_is_ff(x) or (isinstance(x, (int, _Fraction)) and not isinstance(x, bool))) and isinstance(s, (MSeq, MSet)):
+        # (a finite field's element is coerced into the collection's field
+        # first, as Magma does: false where it doesn't go in, even if equal
+        # in a larger field (GF(4)!1 in {GF(8)!1}); astra CORR-PR45-1)
+        w = _universe(s)
+        U = w[1] if w and w[0] == "struct" and isinstance(w[1], _MFinField) else (
+            _ffwrap(w[1].parent()) if w and w[0] == "elt" and _is_ff(w[1]) else None)
+        # (an integer, or a rational prime to p, goes into the field too: 1 in {E!1})
+        if U is not None and not (_is_ff(x) and x.parent() is U.K):
+            if (_is_ff(x) and _ffwrap(x.parent()).p != U.p) or (isinstance(x, _Fraction) and x.denominator % U.p == 0):
+                raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
+            x = _ff_into(U, x)
+            if x is None:
+                return False
     if isinstance(s, (MSeq, MRange, MSet)):
         code = _meets(x, s)
         if code == "N":
@@ -3457,9 +3506,8 @@ def _in(x, s, pos=None, op="in"):
             x = ""
         if isinstance(x, _smat.Matrix) and w and w[0] == "elt" and not isinstance(w[1], _smat.Matrix):
             return False  # Magma: a matrix is never in a collection of scalars
-        if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None) and not (
-                _is_ff(x) and w and w[0] == "elt" and _is_ff(w[1]) and w[1].parent() is not x.parent()):
-            return x in s  # a keyed lookup (another field's element: by value, below)
+        if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None):
+            return x in s  # a keyed lookup
         return any(_cmpeq(x, y) for y in s)
     return x in s
 
@@ -3494,10 +3542,34 @@ def _set_pair(op, a, b, pos, message):
     types", then `message`)."""
     if not isinstance(a, MSet) or not isinstance(b, MSet) or (a.kind == "multi") != (b.kind == "multi"):
         raise _bad_types(op, (a, b), pos)
-    if a.items and b.items and not _compatible(a.items[0], b.items[0]):
+    x, y = (a.items[0], b.items[0]) if a.items and b.items else (None, None)
+    # (finite fields' elements of one characteristic meet in a common field:
+    # _ff_sets puts them there)
+    same_ff = _is_ff(x) and _is_ff(y) and _ffwrap(x.parent()).p == _ffwrap(y.parent()).p
+    if a.items and b.items and not same_ff and not _compatible(x, y):
         if op == "join" and _eq_kind(a.items[0]) == "set" and _eq_kind(b.items[0]) == "mset":
             raise MagmaError("joining sets of sets with sets of multisets is not supported yet", "'join'", True, pos)
         raise MagmaError(message, "'%s'" % op, True, pos)
+
+
+def _ff_sets(a, b, op, pos, message):
+    """The sets a and b, their finite fields' elements put into the
+    smallest field containing them all when they hold elements of
+    different fields of one characteristic: Magma compares and combines
+    them there ({a} eq {b^5}, {F!1} eq {E!1}, #({a} join {b^5}) = 1;
+    astra CORR-PR45-2), under one budget (_ff_promote).  Another
+    characteristic is Magma's message.  Declared universes and multisets
+    are as before."""
+    if a.kind == "multi" or b.kind == "multi" or a.universe is not None or b.universe is not None:
+        return a, b
+    fa = {id(x.parent()): x.parent() for x in a.items if _is_ff(x)}
+    fb = {id(x.parent()): x.parent() for x in b.items if _is_ff(x)}
+    if not fa or not fb or (len(fa) == 1 and fa.keys() == fb.keys()):
+        return a, b
+    if len({_ffwrap(K).p for K in list(fa.values()) + list(fb.values())}) > 1:
+        raise MagmaError(message, "'%s'" % op, True, pos)
+    items = _ff_promote(a.items + b.items, "a set operation", "'%s'" % op, pos)[0]
+    return MSet(items[:len(a.items)], a.kind), MSet(items[len(a.items):], b.kind)
 
 
 def _same_struct(u, v):
@@ -3704,6 +3776,7 @@ def _set_result(t, op, a, b, pos, message, mode="any"):
 
 def _subset(a, b, pos=None, op="subset"):
     _set_pair(op, a, b, pos, "Arguments 1 and 2 have incompatible universal sets")
+    a, b = _ff_sets(a, b, op, pos, "Arguments 1 and 2 have incompatible universal sets")
     return all(_cmpeq_in(x, b) for x in a)
 
 
@@ -3747,24 +3820,28 @@ def _cat(a, b, pos=None):
 
 def _join(a, b, pos=None):
     _set_pair("join", a, b, pos, "No valid universe containing all elements")
+    a, b = _ff_sets(a, b, "join", pos, "No valid universe containing all elements")
     k = a.kind if a.kind == b.kind else "set"
     return _set_result(MSet(list(a) + list(b), k), "join", a, b, pos, "No valid universe containing all elements")
 
 
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
+    a, b = _ff_sets(a, b, "meet", pos, "No valid universe containing all elements")
     return _set_result(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "meet", a, b, pos,
                        "No valid universe containing all elements", mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
+    a, b = _ff_sets(a, b, "diff", pos, "No valid universe containing all elements")
     return _set_result(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "diff", a, b, pos,
                        "No valid universe containing all elements", mode="first")
 
 
 def _sdiff(a, b, pos=None):
     _set_pair("sdiff", a, b, pos, "No valid universe containing all elements")
+    a, b = _ff_sets(a, b, "sdiff", pos, "No valid universe containing all elements")
     return _set_result(MSet([x for x in a if not _cmpeq_in(x, b)] + [x for x in b if not _cmpeq_in(x, a)],
                             a.kind if a.kind == b.kind else "set"), "sdiff", a, b, pos, "No valid universe containing all elements")
 
@@ -6938,13 +7015,16 @@ def _ffwrap(K):
 # here is defined by its Conway polynomial, so GF(p^m) lies in GF(p^n) for
 # m | n with its generator a sent to g^((p^n - 1)/(p^m - 1)), as in Magma.
 # Work is counted in prime-field coefficient operations (cops), a product
-# in GF(p^n) costing M(n) = 2 n^2 w(p), and each public call has at most
-# _FF_WORK of them, checked before the work it pays for.  Embedding and
+# in GF(p^n) costing M(n) = 2 n^2 w(p).  Each public operation has ONE
+# budget of _FF_WORK, from which all its deterministic work (generator
+# images, embeddings, descents) is reserved before any of it is done or
+# any common field is made; a cold Conway search for the common field is
+# charged to what is left (daybreak2, LIMIT-PR45-1/2).  Embedding and
 # descent are for fields of at most _FF_EMBED_MAX elements (the common
 # field too); larger ones are refused in words.
 _FF_WORK = 10 ** 7
 _FF_EMBED_MAX = 2 ** 20
-_FF_IMAGES = _collections.OrderedDict()  # (id(small K), id(large K)) -> image of the small generator
+_FF_IMAGES = _collections.OrderedDict()  # (p, m, n) -> image of GF(p^m)'s generator in GF(p^n)
 _FF_IMAGES_MAX = 64                      # entries, of at most 20 coefficients each (1280 in all)
 
 
@@ -6958,9 +7038,13 @@ def _ff_desc(W):
     return "GF(%d)" % W.p if W.n == 1 else "GF(%d^%d)" % (W.p, W.n)
 
 
+def _ff_mn(p, n):
+    """M(n): the cops of one product in GF(p^n)."""
+    return 2 * n * n * (-(-p.bit_length() // 30)) ** 2
+
+
 def _ff_m(K):
-    """M(n): the cops of one product in K."""
-    return 2 * K.n * K.n * (-(-K.p.bit_length() // 30)) ** 2
+    return _ff_mn(K.p, K.n)
 
 
 def _ff_charge(budget, cops, refuse):
@@ -6977,44 +7061,60 @@ def _ff_conway(W):
     return W.n == 1 or getattr(W.K, "_f", None) == _sff._CONWAY.get((W.p, W.n))
 
 
-def _ff_common(A, B, refuse, budget):
-    """The smallest field containing the fields A and B of one
-    characteristic (Magma's covering field): one of them when nested, else
-    GF(p^lcm), made (its Conway polynomial found within the budget) as the
-    one object GF(p^lcm) is.  refuse() past _FF_EMBED_MAX elements or the
-    budget; never for a prime field with an extension."""
-    if A is B or B.n == 1:
-        return A
-    if A.n == 1:
-        return B
-    if not (_ff_conway(A) and _ff_conway(B)):
+def _ff_cover(Ws, refuse):
+    """The degree L of the smallest field containing the fields Ws (one
+    characteristic, Magma's covering field), checked without making it or
+    anything else: refuse() when two of them are not prime fields and that
+    field would have more than _FF_EMBED_MAX elements (L log2 p <= 20
+    before p^L is computed).  One extension with prime fields: its degree,
+    any size."""
+    ext = {id(W): W for W in Ws if W.n > 1}
+    if len(ext) < 2:
+        return max(W.n for W in Ws)
+    if not all(_ff_conway(W) for W in ext.values()):
         raise refuse()
-    L = A.n * B.n // _math.gcd(A.n, B.n)
-    # (L log2 p <= 20 before p^L is computed)
-    if L * (A.p.bit_length() - 1) > 20 or A.p ** L > _FF_EMBED_MAX:
+    L, p = 1, Ws[0].p
+    for W in ext.values():
+        L = L * W.n // _math.gcd(L, W.n)
+        if L * (p.bit_length() - 1) > 20:
+            raise refuse()
+    if p ** L > _FF_EMBED_MAX:
         raise refuse()
-    if L == A.n:
-        return A
-    if L == B.n:
-        return B
-    try:
-        _sff._conway(A.p, L, budget)
-    except _sff.ConwayBudgetExceeded:
-        raise refuse()
-    return _ffwrap(_sff.GF(A.p ** L))
+    return L
 
 
-def _ff_image(S, U, budget, refuse):
+def _ff_up_cost(S, p, n, seen):
+    """The cops of putting an element of S (S.n | n) into GF(p^n): its
+    Horner work, m M(n) + m n, and the image of S's generator unless cached
+    or already counted in seen (one per (p, m, n)); an element of the prime
+    field, n."""
+    if S.n == n:
+        return 0
+    if S.n == 1:
+        return n
+    mn = _ff_mn(p, n)
+    c = S.n * (mn + n)
+    key = (p, S.n, n)
+    if key in _FF_IMAGES:
+        # (counted free: kept the most recent, so that no image this
+        # operation makes evicts it before it is used)
+        _FF_IMAGES.move_to_end(key)
+    elif key not in seen:
+        seen.add(key)
+        c += 2 * ((p ** n - 1) // (p ** S.n - 1)).bit_length() * mn
+    return c
+
+
+def _ff_image(S, U):
     """The image in U of the generator of its subfield S (S.n | U.n):
-    g^((q_U - 1)/(q_S - 1)), kept in a bounded LRU cache."""
-    key = (id(S), id(U))
+    g^((q_U - 1)/(q_S - 1)), kept in a bounded LRU cache.  (Its cost was
+    reserved by the caller, _ff_up_cost.)"""
+    key = (U.p, S.n, U.n)
     img = _FF_IMAGES.get(key)
     if img is not None:
         _FF_IMAGES.move_to_end(key)
         return img
-    e = (U.q - 1) // (S.q - 1)
-    _ff_charge(budget, 2 * e.bit_length() * _ff_m(U), refuse)
-    img = U.K.gen() ** e
+    img = U.K.gen() ** ((U.q - 1) // (S.q - 1))
     _FF_IMAGES[key] = img
     if len(_FF_IMAGES) > _FF_IMAGES_MAX:
         _FF_IMAGES.popitem(last=False)
@@ -7022,23 +7122,49 @@ def _ff_image(S, U, budget, refuse):
 
 
 def _ff_up(x, U, budget, refuse):
-    """x, an element of a subfield of U (Conway-compatible, S.n | U.n), as
-    an element of U: Horner in the image of S's generator, m M(n) + m n
-    cops."""
+    """x, an element of a subfield S of U (Conway-compatible, S.n | U.n),
+    as an element of U: Horner in the image of S's generator.  Its whole
+    cost (_ff_up_cost) is taken from budget before the image or the
+    element is made."""
     if x.parent() is U.K:
         return x
     S = _ffwrap(x.parent())
+    if S.n > 1 and (U.q > _FF_EMBED_MAX or U.n % S.n or not (_ff_conway(S) and _ff_conway(U))):
+        raise refuse()
+    _ff_charge(budget, _ff_up_cost(S, U.p, U.n, set()), refuse)
     if S.n == 1:
         return U.K(int(x))
-    if U.q > _FF_EMBED_MAX or U.n % S.n or not (_ff_conway(S) and _ff_conway(U)):
-        raise refuse()
-    img = _ff_image(S, U, budget, refuse)
-    c = [int(v) for v in x.list()]
-    _ff_charge(budget, S.n * (_ff_m(U) + U.n), refuse)
+    img = _ff_image(S, U)
     r = U.K(0)
-    for v in reversed(c):
+    for v in reversed([int(v) for v in x.list()]):
         r = r * img + v
     return r
+
+
+def _ff_promote(xs, what, where, pos=None):
+    """xs (finite fields' elements of one characteristic, and integers) with
+    their finite fields' elements put into the smallest field containing
+    them all, and that field: under one budget of _FF_WORK, the images and
+    embeddings of every element reserved first (aggregate admission), then
+    a cold Conway search for that field, if it must be made, with what is
+    left, then the prepaid work.  refuse() (in words) past _FF_EMBED_MAX
+    elements or the budget, before anything is made or cached."""
+    Ws = list({id(x.parent()): _ffwrap(x.parent()) for x in xs if _is_ff(x)}.values())
+    refuse = _ff_refuse(what, Ws[0], Ws[1] if len(Ws) > 1 else Ws[0], where, pos)
+    L = _ff_cover(Ws, refuse)
+    p, seen = Ws[0].p, set()
+    cost = sum(_ff_up_cost(_ffwrap(x.parent()), p, L, seen) for x in xs if _is_ff(x))
+    budget = [_FF_WORK]
+    _ff_charge(budget, cost, refuse)
+    U = next((W for W in Ws if W.n == L), None)
+    if U is None:
+        try:
+            _sff._conway(p, L, budget)
+        except _sff.ConwayBudgetExceeded:
+            raise refuse()
+        U = _ffwrap(_sff.GF(p ** L))
+    paid = [cost]
+    return [_ff_up(x, U, paid, refuse) if _is_ff(x) else x for x in xs], U
 
 
 def _ff_dlog_cost(W):
@@ -7337,6 +7463,11 @@ def _lift(name, s, x, cannot="Cannot lift element into sequence"):
                 y = _NOCOERCE
     if y is _NOCOERCE:
         if isinstance(s, MSet):
+            u = w[1] if w[0] == "struct" else (_ffwrap(w[1].parent()) if _is_ff(w[1]) else None)
+            if _is_ff(x) and isinstance(u, _MFinField) and u.p == _ffwrap(x.parent()).p:
+                # (a field's element into a set over a field it doesn't go
+                # into: Magma's words for K!x, Include({E!1}, a))
+                raise MagmaError("No embedding known into LHS field", "'%s'" % name, False)
             raise MagmaError("Illegal coercion", "'%s'" % name, False)
         raise MagmaError(cannot, "'%s'" % name)
     return y
