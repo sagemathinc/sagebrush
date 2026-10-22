@@ -994,7 +994,9 @@ const isPySpace = (c: string) => PY_SPACE_CODES.has(c.codePointAt(0)!);
 // compiler's metadata.
 function syntaxErrorLines(e: any, stype: string): string[] {
   const out: string[] = [];
-  const num = (v: any): number | null => (O.isPyInt(v) && typeof v !== "boolean" ? Number(v) : null);
+  // (an offset is any int, as CPython's isinstance(offset, int): a bool, an
+  // int subclass's value too; astra's CORR-PR54-1)
+  const num = (v: any): number | null => (typeof v === "boolean" ? Number(v) : v !== null && v !== undefined && Obj.isinstance(v, T.int) ? Number(O.index(v)) : null);
   const strOf = (v: any): string | null => (typeof v === "string" ? v : v !== null && v !== undefined && Obj.isinstance(v, T.str) ? F.str(v) : null);
   let suffix = "";
   if (e.lineno !== null && e.lineno !== undefined) {

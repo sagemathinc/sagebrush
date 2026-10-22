@@ -59,3 +59,17 @@ except SyntaxError as e:
     tb = traceback.format_exception(e)
     print(tb[0], end="")
     print("".join(tb[-4:]), end="")
+# offsets that are a bool or an int subclass, as CPython takes them (astra's
+# CORR-PR54-1), for SyntaxError and its subclasses; a str subclass as the text
+class I(int):
+    pass
+class S(str):
+    pass
+class CustomSyntax(SyntaxError):
+    pass
+for cls in (SyntaxError, IndentationError, TabError, CustomSyntax):
+    for off, end in ((True, 2), (1, True), (I(1), 3), (1, I(3)), (False, 2), (I(2), I(4))):
+        e = cls("m", ("f.py", 1, off, "abc\n", 1, end))
+        print(cls.__name__, type(off).__name__, type(end).__name__, repr(traceback.format_exception_only(e)))
+    e = cls("m", ("f.py", I(3), 2, S("\U0001F600abc\n"), I(3), 3))
+    print(cls.__name__, repr(traceback.format_exception_only(e)))
