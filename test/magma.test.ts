@@ -2277,7 +2277,8 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     // (GF(4)'s image in GF(64) cached and the OLDEST entry: counted free, and a
     // refusal must not make it the most recent)
     "m._FF_IMAGES.clear(); image(F(4), F(64)); image(F(4), F(16))",
-    "R = 5 * UP(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
+    // (plus the checked walk of the literal: 6 nodes, one cop each)
+    "R = 6 + 5 * UP(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
     "m._FF_WORK = R - 1",
     "attempt('literal-short', lambda: m._seq([a] * 5 + [c]))",
     "m._FF_WORK = R",
@@ -2346,4 +2347,72 @@ test("finite fields: Include, Exclude and Index of an element that doesn't go in
     const o = run(src);
     assert.ok(o.includes(said) && !/Traceback|Error: /.test(o.replace(/Runtime error/g, "")), src + " => " + o);
   }
+});
+
+test("finite fields in nested collections: the walk is checked (nodes and depth) before anything is made, deep nesting refused in words (LIMIT-PR45-3)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-ffnest-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m",
+    "calls = {'leaves': 0, 'up': 0}",
+    "leaves, up = m._ff_leaves, m._ff_up",
+    "def spy(name, fn):",
+    "    def g(*a, **k):",
+    "        calls[name] += 1",
+    "        return fn(*a, **k)",
+    "    return g",
+    "m._ff_leaves, m._ff_up = spy('leaves', leaves), spy('up', up)",
+    "F, K = m.GF(4), m.GF(16)",
+    "x, y = F.K.gen(), K.K.gen() ** 5",
+    "msg = 'Arguments 1 and 2 have incompatible universal sets'",
+    "def attempt(label, f):",
+    "    for k in calls: calls[k] = 0",
+    "    snap = list(m._FF_IMAGES.items())",
+    "    try:",
+    "        r = 'admitted ' + str(f())",
+    "    except m.MagmaError as e:",
+    "        r = 'refused ' + str(e).split(' (')[0]",
+    "    except RecursionError:",
+    "        r = 'RecursionError'",
+    "    print(label, r, 'leaves=%(leaves)d up=%(up)d' % calls, 'cache=' + ('same' if list(m._FF_IMAGES.items()) == snap else 'changed'))",
+    "eq = lambda a, b: m._eq(a, b)",
+    // {x} eq {y}: the walk meets 4 nodes (the two sets and their elements)
+    // (the image of GF(4) in GF(16) cached, free, and the OLDEST entry)
+    "m._FF_IMAGES.clear(); m._ff_image(F, K); m._ff_image(m.GF(8), m.GF(64))",
+    "lim = m._COLLECT_MAX",
+    "m._COLLECT_MAX = 4",
+    "attempt('nodes-at', lambda: eq(m.MSet([x]), m.MSet([y])))",
+    "m._COLLECT_MAX = 3",
+    "attempt('nodes-over', lambda: eq(m.MSet([x]), m.MSet([y])))",
+    "m._COLLECT_MAX = lim",
+    // {{x}} eq {{y}}: nested 2 deep
+    "nest = m._NEST_MAX",
+    "m._FF_IMAGES.clear(); m._ff_image(F, K); m._ff_image(m.GF(8), m.GF(64))",
+    "m._NEST_MAX = 2",
+    "attempt('depth-at', lambda: eq(m.MSet([m.MSet([x])]), m.MSet([m.MSet([y])])))",
+    "m._NEST_MAX = 1",
+    "attempt('depth-over', lambda: eq(m.MSet([m.MSet([x])]), m.MSet([m.MSet([y])])))",
+    "m._NEST_MAX = nest",
+    // 3000 deep: refused in words, never a RecursionError (membership and a literal)
+    "deep = m.MSeq([x])",
+    "for _ in range(3000): deep = m.MSeq([deep])",
+    "attempt('deep-in', lambda: m._in(deep, m.MSeq([m.MSeq([y])])))",
+    "attempt('deep-literal', lambda: len(m._seq([deep, y])))",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  const deep = "refused a value nested more than 100 deep is not supported yet leaves=0 up=0 cache=same";
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    // (leaves counts _ff_leaves's calls, one per collection walked, made
+    // only on admission; the free cached image made the most recent)
+    "nodes-at admitted True leaves=3 up=2 cache=changed",
+    "nodes-over refused a set operation of collections this large is not supported yet leaves=0 up=0 cache=same",
+    "depth-at admitted True leaves=5 up=2 cache=changed",
+    "depth-over refused a value nested more than 1 deep is not supported yet leaves=0 up=0 cache=same",
+    "deep-in " + deep,
+    "deep-literal " + deep,
+  ], r.stdout + r.stderr);
 });
