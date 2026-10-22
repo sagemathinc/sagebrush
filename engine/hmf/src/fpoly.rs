@@ -324,7 +324,7 @@ pub fn factor_squarefree(f: &[FInt], root_bound: &BigInt) -> Result<Vec<FPoly>, 
         // |w| < 2 under both embeddings
         let bound = root_bound + BigInt::from(2 * k.abs());
         let mut out = vec![];
-        for (h, e) in sagebrush_poly::factor(&n).1 {
+        for (h, e) in sagebrush_poly::try_factor(&n).map_err(|e| e.to_string())?.1 {
             if e != 1 {
                 return Err("the norm is not squarefree".into());
             }
@@ -388,6 +388,17 @@ mod tests {
         assert_eq!(got, want);
         // x^2 - 5 = (x - (2w - 1))(x + (2w - 1)) over F
         let g = vec![fi(-5, 0), fi(0, 0), fi(1, 0)];
+        assert_eq!(factor_squarefree(&g, &BigInt::from(3)).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn factor_refusal_is_an_error() {
+        // a factorization over Z refused (here by admission) is this
+        // function's error, not a panic, and the next call works
+        let g = vec![fi(-5, 0), fi(0, 0), fi(1, 0)];
+        let tight = sagebrush_poly::Limits { max_degree: 0, ..sagebrush_poly::Limits::DEFAULT };
+        let e = sagebrush_poly::with_default_limits(tight, || factor_squarefree(&g, &BigInt::from(3))).unwrap_err();
+        assert!(e.starts_with("factor: resource limit exceeded"), "{}", e);
         assert_eq!(factor_squarefree(&g, &BigInt::from(3)).unwrap().len(), 2);
     }
 }

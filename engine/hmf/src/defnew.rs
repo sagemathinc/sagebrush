@@ -447,7 +447,7 @@ impl Newspaces {
             return Ok(o.clone());
         }
         let (op, cp) = self.separating_operator()?;
-        let mut orbits: Vec<Vec<BigInt>> = if cp.len() <= 1 { vec![] } else { sagebrush_poly::factor(&cp).1.into_iter().map(|(g, e)| {
+        let mut orbits: Vec<Vec<BigInt>> = if cp.len() <= 1 { vec![] } else { sagebrush_poly::try_factor(&cp).map_err(|e| e.to_string())?.1.into_iter().map(|(g, e)| {
             debug_assert_eq!(e, 1);
             g
         }).collect() };

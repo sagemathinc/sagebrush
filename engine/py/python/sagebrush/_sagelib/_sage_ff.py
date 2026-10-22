@@ -878,6 +878,37 @@ def _elt(R, v):
     return cls(R, v)
 
 
+def _engine_prime(base):
+    """p when base is the prime field GF(p) with p < 2^63 (the engine's
+    word-size arithmetic), else None."""
+    is_prime_field = getattr(base, "is_prime_field", None)
+    if is_prime_field is None or not is_prime_field():
+        return None
+    p = int(base.characteristic())
+    return p if p < 1 << 63 else None
+
+
+# engine/web's GF(p)[x] ops (nmod_ops.rs MUL_MAX_LEN, DIV_MAX_LEN,
+# GCD_MAX_LEN): longer polynomials keep the Python paths, and so do small
+# products (below _ENGINE_POLY_MIN_WORK coefficient products, where one
+# engine call costs more than the arithmetic)
+_ENGINE_POLY_MUL_MAX = 1 << 15
+_ENGINE_POLY_DIV_MAX = 1 << 15
+_ENGINE_POLY_GCD_MAX = 1 << 14
+_ENGINE_POLY_MIN_WORK = 256
+
+
+def _engine_poly(f, p, a, b):
+    """The engine's nmod_poly_<f> of coefficient lists a and b (IntegerMod
+    elements, no trailing zeros, both nonzero) modulo p."""
+    from sagebrush._engine import call
+    return call("nmod_poly_" + f, p=str(p), a=",".join(str(c._v) for c in a), b=",".join(str(c._v) for c in b))
+
+
+def _engine_coeffs(B, text):
+    return [_elt(B, int(t)) for t in text.split(",")] if text else []
+
+
 def Mod(a, n):
     """a modulo n.
 
@@ -2733,6 +2764,11 @@ class Polynomial_ff:
             return Polynomial_ff(self._ring, [])
         B = self._ring._base
         if isinstance(B, IntegerModRing_):
+            la, lb = len(self._c), len(b._c)
+            p = _engine_prime(B)
+            if p and la <= _ENGINE_POLY_MUL_MAX and lb <= _ENGINE_POLY_MUL_MAX and la * lb >= _ENGINE_POLY_MIN_WORK:
+                # in Rust (engine/arith nmod_poly: schoolbook or NTT)
+                return Polynomial_ff(self._ring, _engine_coeffs(B, _engine_poly("mul", p, self._c, b._c)))
             n = B._n
             prod = [0] * (len(self._c) + len(b._c) - 1)
             bv = [int(y._v) for y in b._c]
@@ -2783,6 +2819,13 @@ class Polynomial_ff:
         b = self._coerce(b)
         if not b._c:
             raise ZeroDivisionError("division by zero polynomial")
+        B = self._ring._base
+        la, lb = len(self._c), len(b._c)
+        p = _engine_prime(B) if isinstance(B, IntegerModRing_) else None
+        if p and lb <= la <= _ENGINE_POLY_DIV_MAX and (la - lb + 1) * lb >= _ENGINE_POLY_MIN_WORK:
+            # in Rust (engine/arith nmod_poly: classical or Newton division)
+            r = _engine_poly("divrem", p, self._c, b._c)
+            return Polynomial_ff(self._ring, _engine_coeffs(B, r["q"])), Polynomial_ff(self._ring, _engine_coeffs(B, r["r"]))
         inv = 1 / b._c[-1]
         a = list(self._c)
         db = len(b._c) - 1
@@ -2885,6 +2928,13 @@ class Polynomial_ff:
             x + 1
         """
         a, b = self, self._coerce(b)
+        B = self._ring._base
+        p = _engine_prime(B) if b is not None and isinstance(B, IntegerModRing_) else None
+        if p and a._c and b._c:
+            la, lb = len(a._c), len(b._c)
+            if la <= _ENGINE_POLY_GCD_MAX and lb <= _ENGINE_POLY_GCD_MAX and la * lb >= _ENGINE_POLY_MIN_WORK:
+                # in Rust (engine/arith nmod_poly: Euclid's algorithm)
+                return Polynomial_ff(self._ring, _engine_coeffs(B, _engine_poly("gcd", p, a._c, b._c)))
         while b:
             a, b = b, a % b
         return a.monic()

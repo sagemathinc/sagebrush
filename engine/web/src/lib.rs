@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 
 mod hmf;
 mod hmfq;
+pub mod nmod_ops;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -43,6 +44,9 @@ pub extern "C" fn sb_reply_len() -> usize {
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    // the previous reply is freed first (the host copied it after the last
+    // call), so it never coexists with this call's memory
+    drop(std::mem::take(r));
     *r = call(req).into_bytes();
     r.as_ptr()
 }
@@ -53,6 +57,7 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = sagebrush_sym::api::call(req).into_bytes();
     r.as_ptr()
 }
@@ -63,6 +68,7 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = sagebrush_mpoly::call_framed(req);
     r.as_ptr()
 }
@@ -72,6 +78,7 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
 #[no_mangle]
 pub unsafe extern "C" fn sb_last_error() -> *const u8 {
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
     *r = match sagebrush_sym::err::take_last_error() {
         Some((k, m)) => format!("err\x1f{}\x1f{}", k, m),
         None => String::new(),
@@ -82,11 +89,194 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
+    // the capped ops' request sizes are admitted before serde copies
+    // anything (the last top-level fn name is read by one scan that owns no
+    // text: every other value skipped); unknown names go on as before
+    if let Some(op) = capped_op(req) {
+        if req.len() > op.max_request {
+            return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
+        }
+        if let Some(f) = op.run {
+            return nmod_ops::run(op, req, f);
+        }
+    }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
         Err(e) => json!({ "error": e }),
     }
     .to_string()
+}
+
+/// The row of [`nmod_ops::OPS`] named exactly by the request's last
+/// top-level "fn" (as serde keeps it), if any.
+fn capped_op(req: &str) -> Option<&'static nmod_ops::Op> {
+    static NAMES: [&str; 5] = [
+        nmod_ops::OPS[0].name,
+        nmod_ops::OPS[1].name,
+        nmod_ops::OPS[2].name,
+        nmod_ops::OPS[3].name,
+        nmod_ops::OPS[4].name,
+    ];
+    last_fn(req, &NAMES).map(|i| &nmod_ops::OPS[i])
+}
+
+#[cfg(test)]
+fn fn_name_is(req: &str, name: &str) -> bool {
+    last_fn(req, &[name]) == Some(0)
+}
+
+/// Which of `names` the request's top-level "fn" is (the last "fn", as
+/// serde keeps it), by a scan of the raw bytes that owns no text: strings
+/// are compared while their escapes are decoded, other values skipped.
+/// None for no match, a non-string fn, or malformed input (serde then
+/// reports it).
+fn last_fn(req: &str, names: &[&str]) -> Option<usize> {
+    let b = req.as_bytes();
+    let mut i = 0;
+    let ws = |b: &[u8], i: &mut usize| {
+        while *i < b.len() && matches!(b[*i], b' ' | b'\t' | b'\n' | b'\r') {
+            *i += 1;
+        }
+    };
+    ws(b, &mut i);
+    if b.get(i) != Some(&b'{') {
+        return None;
+    }
+    i += 1;
+    let mut found = None;
+    loop {
+        ws(b, &mut i);
+        match b.get(i) {
+            Some(b'}') => return found,
+            Some(b'"') => {}
+            _ => return None,
+        }
+        let is_fn = json_str_match(b, &mut i, &["fn"])?.is_some();
+        ws(b, &mut i);
+        if b.get(i) != Some(&b':') {
+            return None;
+        }
+        i += 1;
+        ws(b, &mut i);
+        if is_fn && b.get(i) == Some(&b'"') {
+            found = json_str_match(b, &mut i, names)?;
+        } else {
+            if is_fn {
+                found = None;
+            }
+            if !json_skip(b, &mut i) {
+                return None;
+            }
+        }
+        ws(b, &mut i);
+        match b.get(i) {
+            Some(b',') => i += 1,
+            Some(b'}') => return found,
+            _ => return None,
+        }
+    }
+}
+
+/// Which of `names` (ASCII, at most 64) the JSON string at b[*i] (an
+/// opening quote) equals: decoded char by char (escapes included) and
+/// compared with all of them at once, never stored; *i ends past the
+/// closing quote.  None if malformed, Some(None) if it equals none.
+fn json_str_match(b: &[u8], i: &mut usize, names: &[&str]) -> Option<Option<usize>> {
+    *i += 1;
+    debug_assert!(names.len() <= 64 && names.iter().all(|n| n.is_ascii()));
+    let mut alive: u64 = if names.len() >= 64 { u64::MAX } else { (1u64 << names.len()) - 1 };
+    let mut k = 0usize;
+    let hex = |b: &[u8], i: &mut usize| -> Option<u32> {
+        let h = std::str::from_utf8(b.get(*i..*i + 4)?).ok()?;
+        *i += 4;
+        u32::from_str_radix(h, 16).ok()
+    };
+    loop {
+        let c: char = match *b.get(*i)? {
+            b'"' => {
+                *i += 1;
+                return Some((0..names.len()).find(|&j| alive >> j & 1 == 1 && names[j].len() == k));
+            }
+            b'\\' => {
+                *i += 1;
+                let e = *b.get(*i)?;
+                *i += 1;
+                match e {
+                    b'"' => '"',
+                    b'\\' => '\\',
+                    b'/' => '/',
+                    b'b' => '\u{8}',
+                    b'f' => '\u{c}',
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'u' => {
+                        let mut u = hex(b, i)?;
+                        if (0xD800..0xDC00).contains(&u) && b.get(*i) == Some(&b'\\') && b.get(*i + 1) == Some(&b'u') {
+                            *i += 2;
+                            let lo = hex(b, i)?;
+                            u = 0x10000 + ((u - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF);
+                        }
+                        char::from_u32(u).unwrap_or('\u{FFFD}')
+                    }
+                    _ => return None,
+                }
+            }
+            _ => {
+                // one UTF-8 character (req is a &str: boundaries are valid)
+                let len = match b[*i] {
+                    x if x < 0x80 => 1,
+                    x if x >= 0xF0 => 4,
+                    x if x >= 0xE0 => 3,
+                    _ => 2,
+                };
+                let c = std::str::from_utf8(b.get(*i..*i + len)?).ok()?.chars().next()?;
+                *i += len;
+                c
+            }
+        };
+        for (j, n) in names.iter().enumerate() {
+            if alive >> j & 1 == 1 && n.as_bytes().get(k).map(|&x| x as u32) != Some(c as u32) {
+                alive &= !(1u64 << j);
+            }
+        }
+        k = k.saturating_add(1);
+    }
+}
+
+/// Skip one JSON value at b[*i] (strings, objects and arrays by their
+/// brackets, outside strings; scalars to the next delimiter), owning
+/// nothing.  False if malformed.
+fn json_skip(b: &[u8], i: &mut usize) -> bool {
+    let mut depth = 0usize;
+    loop {
+        match b.get(*i) {
+            None => return false,
+            Some(b'"') => {
+                if json_str_match(b, i, &[]).is_none() {
+                    return false;
+                }
+                if depth == 0 {
+                    return true;
+                }
+                continue;
+            }
+            Some(b'{') | Some(b'[') => depth += 1,
+            Some(b'}') | Some(b']') => {
+                if depth == 0 {
+                    return true; // (a scalar ended by the enclosing bracket)
+                }
+                depth -= 1;
+                if depth == 0 {
+                    *i += 1;
+                    return true;
+                }
+            }
+            Some(b',') if depth == 0 => return true,
+            _ => {}
+        }
+        *i += 1;
+    }
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
@@ -268,6 +458,62 @@ fn zvec(x: &[BigInt], v: &Value) -> Value {
         return json!(x.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(","));
     }
     json!(big(x))
+}
+
+/// nmod_charpoly's admission (checked in this order): the whole request at
+/// most NMOD_MAX_REQUEST bytes, before serde parses it (`call`); its matrix
+/// text at most NMOD_MAX_BYTES; at most NMOD_MAX_N rows, counted without
+/// allocating; then exactly n entries per row.  The peak live memory of an
+/// admitted call, everything that coexists in sb_call (n <= 512):
+///   the request bytes (sb_alloc)                       <= 5.25 MiB
+///   serde's Value, its "m" string and the rest           <= 5.25 MiB + 4 KiB
+///   the flat entries, 8 n^2                             = 2 MiB
+///   the charpoly, doubled for allocator rounding: Krylov, its
+///     n x (n + 1) matrix and two vectors, 2 * 8 n (n + 3) ~ 4 MiB; or
+///     Hessenberg, its copy 8 n^2 plus the n + 1 prefix polynomials
+///     8 n (n + 1) / 2 + 24 (n + 1), 2 * (2 + 1) MiB      <= 6.1 MiB
+///   the result, its strings and the reply, ~60 (n + 1)  < 32 KiB
+/// in all under 19 MiB beyond the engine's resident heap (the wasm test
+/// test/nmod-charpoly-wasm.test.ts measures the growth on both paths); the
+/// work is cubic, at most about n^3 = 2^27 multiply-adds, polled for Stop
+/// every 2^16.
+pub const NMOD_MAX_N: usize = 512;
+/// At most 19 digits and one separator per entry below 2^63.
+pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N;
+/// The matrix text plus the other fields.
+pub const NMOD_MAX_REQUEST: usize = NMOD_MAX_BYTES + 4096;
+
+/// The square matrix of nmod_charpoly's request: checked sizes first (the
+/// text, then the row count by a scan that allocates nothing), then the
+/// entries parsed into one flat vector of n^2 words reserved up front,
+/// polling for Stop row by row.
+fn nmod_square(s: &str, p: u64) -> Result<(usize, Vec<u64>), String> {
+    if s.len() > NMOD_MAX_BYTES {
+        return Err(format!("nmod_charpoly: the matrix text has {} bytes, more than {}", s.len(), NMOD_MAX_BYTES));
+    }
+    let n = if s.is_empty() { 0 } else { s.bytes().filter(|&c| c == b';').count() + 1 };
+    if n > NMOD_MAX_N {
+        return Err(format!("nmod_charpoly: {} rows, more than {}", n, NMOD_MAX_N));
+    }
+    let mut d: Vec<u64> = Vec::with_capacity(n * n);
+    for r in s.split(';').filter(|_| n > 0) {
+        sagebrush_interrupt::check_coarse();
+        let mut count = 0;
+        for t in r.split(',') {
+            count += 1;
+            if count > n {
+                return Err("nmod_charpoly of a non-square matrix".into());
+            }
+            match t.parse::<u64>() {
+                Ok(x) if x < p => d.push(x),
+                _ => return Err("nmod_charpoly: entries must be integers in [0, p)".into()),
+            }
+        }
+        if count != n {
+            return Err("nmod_charpoly of a non-square matrix".into());
+        }
+    }
+    Ok((n, d))
 }
 
 fn csv(v: &Value) -> bool {
@@ -687,7 +933,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
                 return Err("factor of the zero polynomial".into());
             }
-            let (c, fs) = sagebrush_poly::factor(&f);
+            let (c, fs) = sagebrush_poly::try_factor(&f).map_err(|e| e.to_string())?;
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
         }
         // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----
@@ -745,6 +991,29 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(zvec(&sagebrush_arith::zmat::charpoly(&a), v))
         }
+        "nmod_charpoly" => {
+            // m: rows "a,b;c,d" of entries in [0, p), p a prime below 2^63
+            // (decimal string) -> the coefficients of det(x I - m) mod p,
+            // constant term first
+            let p = v.get("p").and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok());
+            let Some(p) = p.filter(|&p| p < 1 << 63 && sagebrush_bigint::nmod::is_prime(p)) else {
+                return Err("nmod_charpoly needs a prime p below 2^63".into());
+            };
+            let Some(Value::String(s)) = v.get("m") else {
+                return Err("nmod_charpoly needs the rows of m".into());
+            };
+            let (n, d) = nmod_square(s, p)?;
+            let m = sagebrush_bigint::nmod::Modulus::new(p);
+            let c = sagebrush_arith::nmod_mat::Mat { rows: n, cols: n, m, d }.charpoly();
+            let s = c.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+            Ok(if csv(v) { json!(s.join(",")) } else { json!(s) })
+        }
+        "ntt_cache_stats" => {
+            // (the shared transform cache: calls so far, tables, bytes; the
+            // tests check that the nmod ops leave it alone)
+            let (calls, count, bytes) = sagebrush_bigint::ntt::cache_stats();
+            Ok(json!([calls, count, bytes]))
+        }
         "mat_kernel" => Ok(zrows(&sagebrush_arith::zmat::kernel(&zmat(v.get("m"))?), v)),
         "mat_mul" => {
             let (a, b) = (zmat(v.get("a"))?, zmat(v.get("b"))?);
@@ -771,7 +1040,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "newspace" | "newforms" => {
             let (n, k) = (level(v)?, weight(v)?);
             let eps = character(n, v)?;
-            let fac = |f: &[BigInt]| sagebrush_poly::factor(f).1;
+            // (a refusal gives no factors, which checked_factor rejects as
+            // an error: never a successful unfactored answer)
+            let fac = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1).unwrap_or_default();
             let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &fac)?;
             let mut out = json!({ "dim": r.dim, "order": r.m, "orbit_dims": r.dims, "orbit_charpolys": r.orbits.iter().map(|o| big(o)).collect::<Vec<_>>(),
                                   "T": r.ops, "status": r.status, "checks": r.checks });
@@ -929,4 +1200,77 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         _ => Err(format!("unknown fn '{}'", f)),
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::call;
+
+    fn ok(req: &str) -> serde_json::Value {
+        let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
+        r.get("ok").cloned().unwrap_or_else(|| panic!("{} -> {}", req, r))
+    }
+
+    fn err(req: &str) -> String {
+        let r: serde_json::Value = serde_json::from_str(&call(req)).unwrap();
+        r.get("error").and_then(|e| e.as_str()).unwrap_or_else(|| panic!("{} -> {}", req, r)).to_string()
+    }
+
+    #[test]
+    fn nmod_charpoly() {
+        // [[1, 2], [3, 4]] over GF(7): x^2 - 5x - 2 = x^2 + 2x + 5
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"7","wire":"csv"}"#), "5,2,1");
+        // the largest prime below 2^63 (Krylov); the 0 x 0 matrix
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"0,1;1,0","p":"9223372036854775783","wire":"csv"}"#), "9223372036854775782,0,1");
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"","p":"5","wire":"csv"}"#), "1");
+        assert_eq!(ok(r#"{"fn":"nmod_charpoly","m":"1,1;0,1","p":"2"}"#), serde_json::json!(["1", "0", "1"]));
+        for bad in [
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"9"}"#,                   // not prime
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,4","p":"9223372036854775837"}"#, // a prime past 2^63
+            r#"{"fn":"nmod_charpoly","m":"1,2;3,7","p":"7"}"#,                   // an entry not reduced
+            r#"{"fn":"nmod_charpoly","m":"1,2;-3,4","p":"7"}"#,
+            r#"{"fn":"nmod_charpoly","m":"1,2,3;4,5,6","p":"7"}"#,               // not square
+            r#"{"fn":"nmod_charpoly","m":"1,2;3","p":"7"}"#,
+            r#"{"fn":"nmod_charpoly","p":"7"}"#,
+        ] {
+            assert!(err(bad).starts_with("nmod_charpoly"), "{}", bad);
+        }
+    }
+
+    /// A square matrix text of zeros with n rows.
+    fn zeros(n: usize) -> String {
+        vec![vec!["0"; n].join(","); n].join(";")
+    }
+
+    #[test]
+    fn nmod_charpoly_admission() {
+        use super::{nmod_square, NMOD_MAX_BYTES, NMOD_MAX_N};
+        // at the row limit: admitted (the parse alone; the cubic work of the
+        // largest case belongs to the slow tests), one more: refused before
+        // anything is parsed
+        let (n, d) = nmod_square(&zeros(NMOD_MAX_N), 7).unwrap();
+        assert_eq!((n, d.len()), (NMOD_MAX_N, NMOD_MAX_N * NMOD_MAX_N));
+        assert!(nmod_square(&zeros(NMOD_MAX_N + 1), 7).unwrap_err().contains("rows, more than"));
+        // a text past the byte limit is refused before it is scanned
+        let long = "0".repeat(NMOD_MAX_BYTES + 1);
+        assert!(nmod_square(&long, 7).unwrap_err().contains("bytes, more than"));
+        // (at the limit: admitted, one entry with leading zeros)
+        assert!(super::fn_name_is(r#"{"m": [1, {"fn": "x"}], "fn": "nmod_charpoly"}"#, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "mat_det", "m": "nmod_charpoly"}"#, "nmod_charpoly"));
+        // escapes decoded without storing: an escaped "fn" and value, a huge
+        // escaped key first, duplicate keys (the last wins, as in serde)
+        assert!(super::fn_name_is(r#"{"\u0066n": "nmod\u005fcharpoly"}"#, "nmod_charpoly"));
+        let huge_key = format!(r#"{{"{}": 1, "fn": "nmod_charpoly"}}"#, "\\u0041".repeat(1 << 20));
+        assert!(super::fn_name_is(&huge_key, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "nmod_charpoly", "fn": "mat_det"}"#, "nmod_charpoly"));
+        assert!(super::fn_name_is(r#"{"a": [1, {"fn": "x", "s": "}]\""}], "fn": "nmod_charpoly", "b": 2.5e3}"#, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "nmod_charpoly""#, "nmod_charpoly"));
+        // a whole request past NMOD_MAX_REQUEST is refused before serde
+        let big = format!(r#"{{"fn":"nmod_charpoly","p":"7","m":"{}"}}"#, "0".repeat(super::NMOD_MAX_REQUEST));
+        assert!(err(&big).contains("the request has"));
+        assert_eq!(nmod_square(&"0".repeat(NMOD_MAX_BYTES), 7).unwrap(), (1, vec![0]));
+        // a long row is refused as soon as it passes n entries
+        assert!(nmod_square(&format!("{};0", vec!["0"; 5].join(",")), 7).unwrap_err().contains("non-square"));
+    }
+
 }
