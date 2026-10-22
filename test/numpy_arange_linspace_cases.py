@@ -53,8 +53,18 @@ for args in LINSPACE:
     if len(args) > 4:
         kw["dtype"] = args[4]
     show("linspace%r" % (args,), lambda: np.linspace(args[0], args[1], args[2], **kw))
+# sizes NumPy refuses on any machine: past intp, its ValueError; 6.94 EiB, its MemoryError
+show("arange 1e18", lambda: np.arange(0, 1e18))
+show("arange 2e18", lambda: np.arange(0, 2e18))
+show("arange int 2**61..", lambda: np.arange(0, 2**61, dtype=np.int64))
+show("linspace 2**62", lambda: np.linspace(0, 1, 2**62))
+show("linspace 2**60", lambda: np.linspace(0, 1, 2**60))
+show("zeros 2**61 complex", lambda: np.zeros(2**61, complex))
 show("linspace retstep", lambda: np.linspace(0, 1, 5, retstep=True))
 show("linspace float num", lambda: np.linspace(0, 1, 2.5))
+# num as a NumPy scalar: an integer one taken, the others refused by their NumPy names (astra's CORR-PR55-1)
+for v in (np.float32(5), np.float64(5), np.complex64(5), np.complex128(5), np.bool_(True), np.int8(5), np.int64(5), np.uint16(5), True):
+    show("linspace num %s" % type(v).__name__, lambda: np.linspace(0, 1, v))
 
 # many float progressions, every element to the bit
 rng = random.Random(20261023)
