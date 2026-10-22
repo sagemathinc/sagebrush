@@ -465,6 +465,8 @@ class PolynomialRing_:
         self._name = name
 
     def __repr__(self):
+        if self._name == "$.1":
+            return "Univariate Polynomial Ring over %r" % (self._base,)
         return "Univariate Polynomial Ring in %s over %r" % (self._name, self._base)
 
     def _latex_(self):
