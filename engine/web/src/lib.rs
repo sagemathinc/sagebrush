@@ -94,31 +94,153 @@ pub fn call(req: &str) -> String {
     .to_string()
 }
 
-/// Whether the request's top-level "fn" is `name`, read by a scan that
-/// allocates nothing but the (short) keys: other values are skipped.
+/// Whether the request's top-level "fn" is `name` (the last "fn", as
+/// serde keeps it), by a scan of the raw bytes that owns no text: strings
+/// are compared while their escapes are decoded, other values skipped.
+/// Malformed input gives false (serde then reports it).
 fn fn_name_is(req: &str, name: &str) -> bool {
-    use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
-    struct V<'n>(&'n str);
-    impl<'de> Visitor<'de> for V<'_> {
-        type Value = bool;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("a request object")
+    let b = req.as_bytes();
+    let mut i = 0;
+    let ws = |b: &[u8], i: &mut usize| {
+        while *i < b.len() && matches!(b[*i], b' ' | b'\t' | b'\n' | b'\r') {
+            *i += 1;
         }
-        fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<bool, A::Error> {
-            // (to the end of the object: serde checks it was all consumed)
-            let mut found = false;
-            while let Some(k) = m.next_key::<std::borrow::Cow<'de, str>>()? {
-                if k == "fn" {
-                    let f: std::borrow::Cow<'de, str> = m.next_value()?;
-                    found = f == self.0;
-                } else {
-                    m.next_value::<IgnoredAny>()?;
-                }
+    };
+    ws(b, &mut i);
+    if b.get(i) != Some(&b'{') {
+        return false;
+    }
+    i += 1;
+    let mut found = false;
+    loop {
+        ws(b, &mut i);
+        match b.get(i) {
+            Some(b'}') => return found,
+            Some(b'"') => {}
+            _ => return false,
+        }
+        let Some(is_fn) = json_str_eq(b, &mut i, "fn") else { return false };
+        ws(b, &mut i);
+        if b.get(i) != Some(&b':') {
+            return false;
+        }
+        i += 1;
+        ws(b, &mut i);
+        if is_fn && b.get(i) == Some(&b'"') {
+            let Some(eq) = json_str_eq(b, &mut i, name) else { return false };
+            found = eq;
+        } else {
+            if is_fn {
+                found = false;
             }
-            Ok(found)
+            if !json_skip(b, &mut i) {
+                return false;
+            }
+        }
+        ws(b, &mut i);
+        match b.get(i) {
+            Some(b',') => i += 1,
+            Some(b'}') => return found,
+            _ => return false,
         }
     }
-    serde_json::Deserializer::from_str(req).deserialize_map(V(name)).unwrap_or(false)
+}
+
+/// The JSON string at b[*i] (an opening quote) equals `want`: decoded
+/// char by char (escapes included) and compared, never stored; *i ends
+/// past the closing quote.  None if malformed.
+fn json_str_eq(b: &[u8], i: &mut usize, want: &str) -> Option<bool> {
+    *i += 1;
+    let mut w = want.chars();
+    let mut eq = true;
+    let mut hex = |b: &[u8], i: &mut usize| -> Option<u32> {
+        let h = std::str::from_utf8(b.get(*i..*i + 4)?).ok()?;
+        *i += 4;
+        u32::from_str_radix(h, 16).ok()
+    };
+    loop {
+        let c: char = match *b.get(*i)? {
+            b'"' => {
+                *i += 1;
+                return Some(eq && w.next().is_none());
+            }
+            b'\\' => {
+                *i += 1;
+                let e = *b.get(*i)?;
+                *i += 1;
+                match e {
+                    b'"' => '"',
+                    b'\\' => '\\',
+                    b'/' => '/',
+                    b'b' => '\u{8}',
+                    b'f' => '\u{c}',
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'u' => {
+                        let mut u = hex(b, i)?;
+                        if (0xD800..0xDC00).contains(&u) && b.get(*i) == Some(&b'\\') && b.get(*i + 1) == Some(&b'u') {
+                            *i += 2;
+                            let lo = hex(b, i)?;
+                            u = 0x10000 + ((u - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF);
+                        }
+                        char::from_u32(u).unwrap_or('\u{FFFD}')
+                    }
+                    _ => return None,
+                }
+            }
+            _ => {
+                // one UTF-8 character (req is a &str: boundaries are valid)
+                let len = match b[*i] {
+                    x if x < 0x80 => 1,
+                    x if x >= 0xF0 => 4,
+                    x if x >= 0xE0 => 3,
+                    _ => 2,
+                };
+                let c = std::str::from_utf8(b.get(*i..*i + len)?).ok()?.chars().next()?;
+                *i += len;
+                c
+            }
+        };
+        if eq && w.next() != Some(c) {
+            eq = false;
+        }
+    }
+}
+
+/// Skip one JSON value at b[*i] (strings, objects and arrays by their
+/// brackets, outside strings; scalars to the next delimiter), owning
+/// nothing.  False if malformed.
+fn json_skip(b: &[u8], i: &mut usize) -> bool {
+    let mut depth = 0usize;
+    loop {
+        match b.get(*i) {
+            None => return false,
+            Some(b'"') => {
+                if json_str_eq(b, i, "").is_none() {
+                    return false;
+                }
+                if depth == 0 {
+                    return true;
+                }
+                continue;
+            }
+            Some(b'{') | Some(b'[') => depth += 1,
+            Some(b'}') | Some(b']') => {
+                if depth == 0 {
+                    return true; // (a scalar ended by the enclosing bracket)
+                }
+                depth -= 1;
+                if depth == 0 {
+                    *i += 1;
+                    return true;
+                }
+            }
+            Some(b',') if depth == 0 => return true,
+            _ => {}
+        }
+        *i += 1;
+    }
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
@@ -310,14 +432,15 @@ fn zvec(x: &[BigInt], v: &Value) -> Value {
 ///   the request bytes (sb_alloc)                       <= 5.25 MiB
 ///   serde's Value, its "m" string and the rest           <= 5.25 MiB + 4 KiB
 ///   the flat entries, 8 n^2                             = 2 MiB
-///   the charpoly: Krylov, its n x (n + 1) matrix and two vectors,
-///     <= 8 n (n + 3); or Hessenberg, the copy 8 n^2 plus the n + 1 prefix
-///     polynomials, 8 n (n + 1) / 2 + 24 (n + 1), both doubled for
-///     allocator rounding                                <= 4.1 MiB
+///   the charpoly, doubled for allocator rounding: Krylov, its
+///     n x (n + 1) matrix and two vectors, 2 * 8 n (n + 3) ~ 4 MiB; or
+///     Hessenberg, its copy 8 n^2 plus the n + 1 prefix polynomials
+///     8 n (n + 1) / 2 + 24 (n + 1), 2 * (2 + 1) MiB      <= 6.1 MiB
 ///   the result, its strings and the reply, ~60 (n + 1)  < 32 KiB
-/// in all under 17 MiB beyond the engine's resident heap (the wasm test
-/// test/nmod-charpoly-wasm.test.ts measures the growth); the work is cubic,
-/// at most about n^3 = 2^27 multiply-adds, polled for Stop every 2^16.
+/// in all under 19 MiB beyond the engine's resident heap (the wasm test
+/// test/nmod-charpoly-wasm.test.ts measures the growth on both paths); the
+/// work is cubic, at most about n^3 = 2^27 multiply-adds, polled for Stop
+/// every 2^16.
 pub const NMOD_MAX_N: usize = 512;
 /// At most 19 digits and one separator per entry below 2^63.
 pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N;
@@ -1090,6 +1213,14 @@ mod tests {
         // (at the limit: admitted, one entry with leading zeros)
         assert!(super::fn_name_is(r#"{"m": [1, {"fn": "x"}], "fn": "nmod_charpoly"}"#, "nmod_charpoly"));
         assert!(!super::fn_name_is(r#"{"fn": "mat_det", "m": "nmod_charpoly"}"#, "nmod_charpoly"));
+        // escapes decoded without storing: an escaped "fn" and value, a huge
+        // escaped key first, duplicate keys (the last wins, as in serde)
+        assert!(super::fn_name_is(r#"{"\u0066n": "nmod\u005fcharpoly"}"#, "nmod_charpoly"));
+        let huge_key = format!(r#"{{"{}": 1, "fn": "nmod_charpoly"}}"#, "\\u0041".repeat(1 << 20));
+        assert!(super::fn_name_is(&huge_key, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "nmod_charpoly", "fn": "mat_det"}"#, "nmod_charpoly"));
+        assert!(super::fn_name_is(r#"{"a": [1, {"fn": "x", "s": "}]\""}], "fn": "nmod_charpoly", "b": 2.5e3}"#, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "nmod_charpoly""#, "nmod_charpoly"));
         // a whole request past NMOD_MAX_REQUEST is refused before serde
         let big = format!(r#"{{"fn":"nmod_charpoly","p":"7","m":"{}"}}"#, "0".repeat(super::NMOD_MAX_REQUEST));
         assert!(err(&big).contains("the request has"));
