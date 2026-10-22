@@ -2401,6 +2401,30 @@ test("finite fields in nested collections: the walk is checked (nodes and depth)
     "for _ in range(3000): deep = m.MSeq([deep])",
     "attempt('deep-in', lambda: m._in(deep, m.MSeq([m.MSeq([y])])))",
     "attempt('deep-literal', lambda: len(m._seq([deep, y])))",
+    // (LIMIT-PR45-4: nothing deeper than _NEST_MAX is ever pushed, and the
+    // slots are interned integers, O(1) per node, never copied paths)
+    "slots = [0]",
+    "slot = m._ff_slot",
+    "def spy_slot(*a):",
+    "    slots[0] += 1",
+    "    return slot(*a)",
+    "m._ff_slot = spy_slot",
+    "m._NEST_MAX = 3",
+    "chain = m.MTuple([x])",
+    "for _ in range(9): chain = m.MTuple([chain])",
+    "try:",
+    "    m._ff_nest_scan([chain], {}); print('chain admitted')",
+    "except m.MagmaError as e:",
+    "    print('chain refused', str(e), 'slots', slots[0])",
+    "chain = m.MTuple([m.MTuple([m.MTuple([x])])])",
+    "n, f, c, tall = m._ff_nest_scan([chain], {})",
+    "print('chain-at nodes', n, 'tallest', tall)",
+    "m._NEST_MAX = 5",
+    "wide = m.MTuple([m.MTuple([m.MTuple([m.MTuple([m.MTuple([x]) for _ in range(200)])])])])",
+    "intern = {}",
+    "n, f, c, tall = m._ff_nest_scan([wide], intern)",
+    "print('wide nodes', n, 'slots', len(intern), 'tallest', tall, 'elements', sum(c.values()))",
+    "m._NEST_MAX = nest",
     "",
   ].join("\n"));
   const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
@@ -2414,6 +2438,15 @@ test("finite fields in nested collections: the walk is checked (nodes and depth)
     "depth-over refused a value nested more than 1 deep is not supported yet leaves=0 up=0 cache=same",
     "deep-in " + deep,
     "deep-literal " + deep,
+    // (10 deep with _NEST_MAX = 3: refused at the 4th level, 3 slots made:
+    // at most _NEST_MAX + 1 levels visited)
+    "chain refused a value nested more than 3 deep is not supported yet slots 3",
+    // (exactly 3 deep: admitted, the stack at most _NEST_MAX + 1)
+    "chain-at nodes 4 tallest 4",
+    // (200 sibling tuples at the depth limit: 404 nodes, 403 interned slots,
+    // at most one per node, never a copied path; the stack at most
+    // _NEST_MAX + 1)
+    "wide nodes 404 slots 403 tallest 6 elements 200",
   ], r.stdout + r.stderr);
 });
 

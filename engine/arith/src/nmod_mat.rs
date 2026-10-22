@@ -281,6 +281,7 @@ impl Mat {
         let mut col = 0;
         let mut acc = vec![0u128; cols];
         let mut poll = Poll::new();
+        let phase = sagebrush_interrupt::enter("eliminate");
         while col < cols && r < rows {
             let blk = &pivots[block_start..];
             poll.add((rows - r) * (blk.len() + 1));
@@ -349,7 +350,9 @@ impl Mat {
                 *x = 0;
             }
         }
+        drop(phase);
         if reduced {
+            let _phase = sagebrush_interrupt::enter("back-substitute");
             self.back_substitute(&pivots, batch, &mut acc);
         }
         (pivots, det)
@@ -391,11 +394,18 @@ impl Mat {
             }
             let (head, tail) = self.d.split_at_mut((i + 1) * cols);
             let row = &mut head[i * cols..];
-            update_row(row, piv[i] + 1, later, |t| &tail[t * cols..(t + 1) * cols], &m, batch, acc);
+            // in chunks of about 2^16 multiply-adds, polled between them
+            // (exact: R_t is zero in the other pivot columns, so a chunk
+            // leaves the multipliers of the later chunks as they were)
+            let step = ((1usize << 16) / cols.max(1)).max(1);
+            for (s, chunk) in later.chunks(step).enumerate() {
+                let off = s * step;
+                update_row(row, piv[i] + 1, chunk, |t| &tail[(off + t) * cols..(off + t + 1) * cols], &m, batch, acc);
+                poll.add(cols * chunk.len());
+            }
             for &ct in later {
                 row[ct] = 0;
             }
-            poll.add(cols * later.len());
         }
     }
 

@@ -1,0 +1,9 @@
+[package]
+name = "magma-scoreboard-flint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+sagebrush-bigint = { path = "../../../engine/bigint" }
+sagebrush-flint = { path = "../../../engine/flint" }

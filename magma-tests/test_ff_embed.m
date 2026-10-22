@@ -41,6 +41,8 @@ Q := GF(3^6); R := GF(9); T := GF(27); R.1 + Q.1; T.1 * Q.1; R.1 in Q; Q!T.1;
 // each tuple coordinate its own universe; nested literals keyed in the common field (CORR-PR45-2)
 h := R.1; <a, c> in {<b^5, c>}; {<a, c>} eq {<b^5, c>}; {<a, h>} eq {<b^5, h>}; #({<a, h>} join {<b^5, h>}); <a, h> in {<b^5, h>};
 #{{a}, {b^5}}; #{<a>, <b^5>}; #[{a}, {b^5}]; #{[a], [b^5]};
+// every member is evidence, not just the first (which may be empty)
+{a} in {{}, {b^5}}; {a} in {{b^5}, {}}; {a} in {{}, {b^5}, {}, {b}}; {a} in {{}, {}}; {b} in {{}, {a}}; [a] in [[], [b^5]]; {F!1} in {{}, {E!1}};
 // a descent from GF(2^20) (q - 1 = 3 * 5^2 * 11 * 31 * 41)
 // (GF(2^5), not GF(16): with GF(4) already in GF(16), Magma picks either of
 // two embeddings of GF(16) into GF(2^20) at random, run to run)
