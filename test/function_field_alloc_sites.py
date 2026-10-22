@@ -24,6 +24,7 @@ MATERIALIZERS = {
 PUBLIC = {
     "FunctionField", "RationalFunctionField", "FieldOfFractions",
     "PartialFractionDecomposition", "SquarefreePartialFractionDecomposition",
+    "Evaluate", "Derivative", "Numerator", "Denominator",
 }
 
 

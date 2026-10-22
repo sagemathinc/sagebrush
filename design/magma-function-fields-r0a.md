@@ -38,7 +38,7 @@ normalization, gcd, factorization or result allocation.
 | one Q coefficient / total Q input bits | `2^16` / `2^23` bits |
 | absolute exponent | 4096, also subject to the result envelope |
 | partial-fraction factors/output terms | 1024 / 4096 |
-| parent cache | 64 strong LRU entries, at most 4 MiB charged |
+| parent/source discovery | 64 strong parent LRU entries (4 MiB); at most 64 weak source-ring entries |
 
 The normalization charge is `8*(D+1)^3*C`, with the roadmap's
 `C_Q(B)=(1+ceil(B/30))^2` (and its prime-field analogue).  Therefore the aggregate work
@@ -47,7 +47,9 @@ inputs: with unit-size rational coefficients, degree 127 is admitted exactly
 at `2^26` and degree 128 is refused before normalization.  Tests pin this intersection of
 the limits, the coefficient and exponent boundaries, and post-refusal cache
 and name atomicity.  `test/function-field-alloc-sites.json` registers every
-new R0 iteration/materialization site as a change detector.
+new R0 iteration/materialization site as a change detector.  Direct live
+spies pin every result family one byte below and exactly at its preflight
+envelope; the source-ring discovery table is both weak-valued and bounded.
 
 ## Clean-room oracle provenance
 
