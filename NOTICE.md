@@ -96,6 +96,10 @@ Copyright (c) 2001 Python Software Foundation. See
   `map`'s and `zip`'s strict, and `src/runtime/builtins.ts`, `min` and
   `max`, follow `Python/bltinmodule.c` (`map_next`, `zip_next`, `min_max`)
   (no code of them is used).
+- `src/runtime/index.ts`, `syntaxErrorLines`: a SyntaxError's location lines
+  (the file and line, the stripped line, carets from `offset` to `end_offset`)
+  are ported from CPython 3.14's `Lib/traceback.py`
+  (`TracebackException._format_syntax_error`).
 - `src/runtime/pygamma.ts`: `math.gamma` and `math.lgamma`, ported from
   CPython 3.14's `Modules/mathmodule.c` (`m_tgamma`, `m_lgamma`, `m_sinpi`,
   `lanczos_sum` and their Lanczos coefficients).
