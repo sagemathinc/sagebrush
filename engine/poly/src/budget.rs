@@ -291,10 +291,11 @@ pub fn limbs(bits: u64) -> u64 {
     bits.div_ceil(64).max(1)
 }
 
-/// Bytes charged for one big integer of `bits` bits: limbs plus header and
-/// capacity slack.
+/// Bytes charged for one big integer of `bits` bits: twice its limbs (an
+/// integer grown in place, an accumulator, can hold up to about twice the
+/// capacity it needs) plus its header.
 pub fn big_bytes(bits: u64) -> Option<u64> {
-    limbs(bits).checked_mul(8)?.checked_add(32)
+    limbs(bits).checked_mul(16)?.checked_add(32)
 }
 
 /// Bytes charged for a vector of `len` big integers of `bits` bits each

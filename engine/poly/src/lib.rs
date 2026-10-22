@@ -71,6 +71,39 @@ impl<'b> Held<'b> {
     }
 }
 
+/// A big integer whose memory is reserved in the call's budget for as long
+/// as it lives (a p-adic modulus p^k: its size grows with the precision,
+/// not the degree).
+pub(crate) struct HeldInt<'b> {
+    pub v: BigInt,
+    _r: Reservation<'b>,
+}
+
+impl Deref for HeldInt<'_> {
+    type Target = BigInt;
+    fn deref(&self) -> &BigInt {
+        &self.v
+    }
+}
+
+/// p^k, reserved first: the power (at most k bitlen(p) bits) and, of the
+/// same size, the two transients of its computation and two working
+/// integers its users keep beside it (a leading coefficient mod p^k and its
+/// inverse).
+pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u32) -> FResult<HeldInt<'b>> {
+    let bits = (k as u64).checked_mul(64 - p.leading_zeros() as u64);
+    let r = b.reserve(bits.and_then(big_bytes).and_then(|x| x.checked_mul(5)))?;
+    let l = limbs(bits.unwrap_or(u64::MAX));
+    b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(k as u64) + 1)))?;
+    Ok(HeldInt { v: BigInt::from(p).pow(k), _r: r })
+}
+
+/// Room for `count` transient integers of `bits` bits (an operation's
+/// intermediate products, sums and quotients, freed when it returns).
+pub(crate) fn transients(b: &Budget, count: u64, bits: u64) -> FResult<Reservation<'_>> {
+    b.reserve(big_bytes(bits).and_then(|x| x.checked_mul(count)))
+}
+
 /// The largest bit length of the coefficients.
 pub(crate) fn maxbits(a: &[BigInt]) -> u64 {
     a.iter().map(|c| c.bits()).max().unwrap_or(0)
@@ -138,6 +171,7 @@ fn prim<'b>(b: &'b Budget, v: &[BigInt]) -> FResult<Held<'b>> {
 
 fn derivative<'b>(b: &'b Budget, v: &[BigInt]) -> FResult<Held<'b>> {
     b.debit(mul_work(v.len() as u64, maxbits(v), 1, 64))?;
+    let _t = transients(b, 2, maxbits(v) + 64)?;
     Held::build(b, v.len(), maxbits(v) + clog2(v.len() as u64 + 1), || {
         trim(v.iter().enumerate().skip(1).map(|(i, c)| c * BigInt::from(i)).collect())
     })
@@ -146,6 +180,7 @@ fn derivative<'b>(b: &'b Budget, v: &[BigInt]) -> FResult<Held<'b>> {
 fn zsub<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Held<'b>> {
     let n = x.len().max(y.len());
     b.debit(mul_work(n as u64, maxbits(x).max(maxbits(y)), 1, 64))?;
+    let _t = transients(b, 3, maxbits(x).max(maxbits(y)) + 1)?;
     Held::build(b, n, maxbits(x).max(maxbits(y)) + 1, || {
         trim((0..n).map(|i| x.get(i).cloned().unwrap_or_default() - y.get(i).cloned().unwrap_or_default()).collect())
     })
@@ -159,6 +194,7 @@ fn zmul<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Held<'b>> {
     let (bx, by) = (maxbits(x), maxbits(y));
     b.debit(mul_work(x.len() as u64, bx, y.len() as u64, by))?;
     let bits = bx + by + clog2(x.len().min(y.len()) as u64) + 1;
+    let _t = transients(b, 2, bits)?;
     Held::build(b, x.len() + y.len() - 1, bits, || {
         let mut r = vec![BigInt::zero(); x.len() + y.len() - 1];
         for (i, u) in x.iter().enumerate() {
@@ -195,6 +231,7 @@ fn divexact<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Option<Hel
     b.debit(div_work(x.len() as u64, wbits, y.len() as u64, maxbits(y)))?;
     // the working copy and the quotient, reserved before either exists
     let _work = b.reserve(poly_bytes(x.len() as u64, wbits).and_then(|w| w.checked_add(poly_bytes(lq as u64, qbits)?)))?;
+    let _t = transients(b, 3, wbits + maxbits(y))?;
     let ly = y.last().unwrap().clone();
     let mut r = x.to_vec();
     let mut q = vec![BigInt::zero(); lq];
@@ -229,6 +266,7 @@ fn prem<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt]) -> FResult<Held<'b>> {
     let bits = maxbits(x) + steps * (maxbits(y) + 1) + 1;
     b.debit(mul_work(steps, bits, x.len() as u64, maxbits(y)))?;
     let held = b.reserve(poly_bytes(x.len() as u64, bits))?;
+    let _t = transients(b, 3, bits + maxbits(y))?;
     let mut r = x.to_vec();
     let ly = y.last().unwrap().clone();
     while r.len() >= y.len() && !r.is_empty() {
@@ -482,6 +520,8 @@ fn edf(b: &Budget, g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPo
                 }
                 s
             } else {
+                // (p^d - 1) / 2: d bitlen(p) bits, reserved with its transients
+                let _e = b.reserve(big_bytes((d as u64).saturating_mul(64 - p.leading_zeros() as u64)).and_then(|x| x.checked_mul(3)))?;
                 let e = (BigUint::from(p).pow(d as u32) - 1u32) / 2u32;
                 fsub(&fpowmod(b, &a, &e, &g, p)?, &[1], p)
             };
@@ -544,6 +584,8 @@ fn factor_mod_with(b: &Budget, f: &[BigInt], p: u64) -> FResult<Vec<(Vec<u64>, u
     assert!(p >= 2 && p < 1 << 32);
     let _p = b.enter(Phase::Modular);
     let _m = b.reserve(modular_bytes(f.len()))?;
+    // (reducing a coefficient mod p makes a quotient of its size)
+    let _t = transients(b, 2, maxbits(f))?;
     let fp = fmonic(&reduce_p(f, p), p);
     let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ p);
     let mut out = vec![];
@@ -562,6 +604,7 @@ fn factor_mod_with(b: &Budget, f: &[BigInt], p: u64) -> FResult<Vec<(Vec<u64>, u
 
 pub(crate) fn mreduce<'b>(b: &'b Budget, x: &[BigInt], m: &BigInt) -> FResult<Held<'b>> {
     b.debit(div_work(x.len() as u64, maxbits(x), 1, m.bits()))?;
+    let _t = transients(b, 3, maxbits(x).max(m.bits()) + 1)?;
     Held::build(b, x.len(), m.bits(), || trim(x.iter().map(|c| c.mod_floor(m)).collect()))
 }
 
@@ -572,6 +615,7 @@ pub(crate) fn mmul<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt], m: &BigInt) ->
 fn madd<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt], m: &BigInt) -> FResult<Held<'b>> {
     let n = x.len().max(y.len());
     b.debit(mul_work(n as u64, m.bits() + 1, 1, 64))?;
+    let _t = transients(b, 3, maxbits(x).max(maxbits(y)) + 1)?;
     let s = Held::build(b, n, maxbits(x).max(maxbits(y)) + 1, || {
         (0..n).map(|i| x.get(i).cloned().unwrap_or_default() + y.get(i).cloned().unwrap_or_default()).collect()
     })?;
@@ -590,6 +634,7 @@ fn mdivrem<'b>(b: &'b Budget, x: &[BigInt], y: &[BigInt], m: &BigInt) -> FResult
     }
     let mb = m.bits();
     b.debit(div_work(r.len() as u64, mb, y.len() as u64, mb))?;
+    let _t = transients(b, 4, 2 * mb + maxbits(y) + 1)?;
     let lq = r.len() - y.len() + 1;
     let mut q = Held::build(b, lq, mb, || vec![BigInt::zero(); lq])?;
     for i in (0..lq).rev() {
@@ -615,18 +660,18 @@ fn to_z<'b>(b: &'b Budget, x: &[u64]) -> FResult<Held<'b>> {
 /// to monic G, H with f = u G H (mod p^k): quadratic Hensel steps
 /// (von zur Gathen-Gerhard, Algorithm 15.10).  f is given modulo p^k.
 fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k: u32) -> FResult<(Held<'b>, Held<'b>)> {
-    let pk = BigInt::from(p).pow(k);
+    let pk = power(b, p, k)?;
     let u = f.last().unwrap().mod_floor(&pk);
     // work with G = u g so that f = G H
     let up = u.mod_floor(&BigInt::from(p)).to_u64().unwrap();
     let gu: FPoly = g.iter().map(|&x| x * up % p).collect();
     let (s0, t0) = fxgcd(b, &gu, h, p)?;
     let (mut gg, mut hh, mut s, mut t) = (to_z(b, &gu)?, to_z(b, h)?, to_z(b, &s0)?, to_z(b, &t0)?);
-    let mut m = BigInt::from(p);
+    let mut m = power(b, p, 1)?;
     let mut e_now = 1u32;
     while e_now < k {
         let e_next = (2 * e_now).min(k);
-        let m2 = BigInt::from(p).pow(e_next);
+        let m2 = power(b, p, e_next)?;
         let e = msub(b, f, &mmul(b, &gg, &hh, &m2)?, &m2)?;
         let (q, r) = mdivrem(b, &mmul(b, &s, &e, &m2)?, &hh, &m2)?;
         let g2 = madd(b, &madd(b, &gg, &mmul(b, &t, &e, &m2)?, &m2)?, &mmul(b, &q, &gg, &m2)?, &m2)?;
@@ -650,7 +695,7 @@ fn hensel_pair<'b>(b: &'b Budget, f: &[BigInt], g: &[u64], h: &[u64], p: u64, k:
 /// Lift the monic factors fs of f (mod p) to monic factors mod p^k, by a
 /// factor tree.  f is given modulo p^k; its leading coefficient is a unit.
 pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u32) -> FResult<Vec<Held<'b>>> {
-    let pk = BigInt::from(p).pow(k);
+    let pk = power(b, p, k)?;
     if fs.len() == 1 {
         let u = f.last().unwrap().mod_floor(&pk);
         let uinv = u.modinv(&pk).unwrap();
@@ -701,17 +746,15 @@ pub(crate) struct Modular<'b> {
 
 /// The exponent k with p^k > 2 |lc| 2^n (n + 1) |f|_inf (twice the
 /// Mignotte bound for lc times a factor).
+/// Computed from bit lengths, allocating nothing: 2 |lc| 2^n (n + 1)
+/// |f|_inf < 2^B with B = bits(lc) + n + bits(n + 1) + bits(|f|_inf) + 1, and
+/// p^k >= 2^(k floor(log2 p)) >= 2^B for k = ceil(B / floor(log2 p)).
 pub(crate) fn mignotte_exponent(f: &[BigInt], p: u64) -> u32 {
-    let n = deg(f);
+    let n = deg(f) as u64;
     let lc = f.last().unwrap();
-    let norm = f.iter().map(|c| c.abs()).max().unwrap();
-    let bound = BigInt::from(2u32).pow(n as u32) * BigInt::from(n + 1) * norm * lc.abs();
-    let mut k = 1u32;
-    let pb = BigInt::from(p);
-    while pb.pow(k) <= &bound * 2 {
-        k += 1;
-    }
-    k
+    let bb = lc.bits() + n + (64 - (n + 1).leading_zeros() as u64) + maxbits(f) + 1;
+    let lp = 63 - p.leading_zeros() as u64; // floor(log2 p) >= 1 for p >= 3
+    bb.div_ceil(lp).max(1) as u32
 }
 
 /// Factor f modulo a few good primes; None when that proves f irreducible.
@@ -723,6 +766,8 @@ fn modular<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Modular<'b>>> {
     // header each, at most n + 1) and the n + 1 degree flags
     let keep = b.reserve(words_bytes(3 * (n as u64 + 1)))?;
     let _m = b.reserve(modular_bytes(n).and_then(|x| x.checked_mul(2)))?;
+    // (reducing a coefficient mod p makes a quotient of its size)
+    let _t = transients(b, 2, maxbits(f))?;
     // keep the prime with the fewest factors, and the degrees possible for
     // a factor over Q modulo every one of them
     let mut best: Option<(u64, Vec<(FPoly, usize)>, usize)> = None;
@@ -784,7 +829,7 @@ pub(crate) fn lift<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, k: u32) -> FRes
     // a Hensel step's few
     let n = deg(f) as u64;
     let _w = b.reserve(words_bytes((4 * (clog2(m.modfs.len() as u64) + 1) + 8) * (n + 1)))?;
-    let pk = BigInt::from(m.p).pow(k);
+    let pk = power(b, m.p, k)?;
     let fk = mreduce(b, f, &pk)?;
     hensel(b, &fk, &m.modfs, m.p, k)
 }
@@ -799,7 +844,7 @@ fn factor_squarefree<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Vec<Held<'b>>> 
         return Ok(vec![Held::copy(b, f)?]);
     };
     let lifted = lift(b, f, &m, m.k)?;
-    let pk = BigInt::from(m.p).pow(m.k);
+    let pk = power(b, m.p, m.k)?;
     if lifted.len() <= vanhoeij::ZASSENHAUS_MAX {
         let _p = b.enter(Phase::Zassenhaus);
         return Ok(zassenhaus(b, f, lifted, &pk, &m.possible, usize::MAX)?.found);
@@ -990,6 +1035,8 @@ fn squarefree_with<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Vec<(Held<'b>, u3
     let lc = f.last().unwrap();
     {
         let _m = b.reserve(modular_bytes(f.len()))?;
+        // (reducing a coefficient mod p makes a quotient of its size)
+        let _t = transients(b, 2, maxbits(f))?;
         for p in small_primes().take(200) {
             b.debit(Some(f.len() as u64))?;
             if (lc % BigInt::from(p)).is_zero() || (deg(f) as u64) % p == 0 {
@@ -1053,6 +1100,20 @@ pub(crate) mod alloc_spy {
 
     thread_local! {
         static BYTES: Cell<u64> = const { Cell::new(0) };
+        static LIVE: Cell<i64> = const { Cell::new(0) };
+        static PEAK: Cell<i64> = const { Cell::new(0) };
+    }
+
+    fn grow(n: i64) {
+        let _ = LIVE.try_with(|l| {
+            let v = l.get() + n;
+            l.set(v);
+            let _ = PEAK.try_with(|p| {
+                if v > p.get() {
+                    p.set(v)
+                }
+            });
+        });
     }
 
     pub struct Spy;
@@ -1060,13 +1121,16 @@ pub(crate) mod alloc_spy {
     unsafe impl GlobalAlloc for Spy {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + l.size() as u64));
+            grow(l.size() as i64);
             System.alloc(l)
         }
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            grow(-(l.size() as i64));
             System.dealloc(p, l)
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
             let _ = BYTES.try_with(|b| b.set(b.get() + n as u64));
+            grow(n as i64 - l.size() as i64);
             System.realloc(p, l, n)
         }
     }
@@ -1074,6 +1138,15 @@ pub(crate) mod alloc_spy {
     /// Bytes allocated by this thread so far.
     pub fn allocated() -> u64 {
         BYTES.with(|b| b.get())
+    }
+
+    /// Run f; the peak of this thread's live bytes during it, above the
+    /// live bytes at its start.
+    pub fn peak_during<T>(f: impl FnOnce() -> T) -> (T, i64) {
+        let start = LIVE.with(|l| l.get());
+        PEAK.with(|p| p.set(start));
+        let r = f();
+        (r, PEAK.with(|p| p.get()) - start)
     }
 }
 

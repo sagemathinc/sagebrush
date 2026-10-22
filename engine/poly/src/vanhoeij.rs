@@ -37,7 +37,7 @@ const LEVELS: u32 = 3;
 /// The irreducible factors of f (primitive, square-free, degree >= 2), from
 /// its modular data and the factors lifted to p^k.
 pub fn recombine<'b>(b: &'b Budget, f: &[BigInt], m: &Modular, lifted: Vec<Held<'b>>) -> FResult<Vec<Held<'b>>> {
-    let pk = BigInt::from(m.p).pow(m.k);
+    let pk = crate::power(b, m.p, m.k)?;
     // the pre-pass: subsets of sizes 1, then 2 (all singletons first)
     let z = {
         let _p = b.enter(Phase::Prepass);
@@ -93,7 +93,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
         let us: &[Held<'b>] = if level == 0 {
             rest0
         } else {
-            let pa = BigInt::from(p).pow(a);
+            let pa = crate::power(b, p, a)?;
             // g = lc(g) prod u_i (mod p): relift the same factors to p^a
             let gl = {
                 let _p = b.enter(Phase::Hensel);
@@ -107,7 +107,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             };
             &lifted_here
         };
-        let pa = BigInt::from(p).pow(a);
+        let pa = crate::power(b, p, a)?;
         // the retained p-adic digits per entry: e = floor(E / ceil(log2 p)), E = 2r + 64
         let ebits = 2 * r as u64 + 64;
         let edig = (ebits / pbits) as u32;
@@ -161,13 +161,13 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                     if bj >= a {
                         continue; // no information at this precision
                     }
-                    let scale = BigInt::from(p).pow(bj);
-                    let modulus = BigInt::from(p).pow(a - bj);
+                    let scale = crate::power(b, p, bj)?;
+                    let modulus = crate::power(b, p, a - bj)?;
                     // a column whose modulus is not above the cut bound B
                     // (counting it) carries too little information: its
                     // modulus row alone would survive the cut
                     let nb = BigInt::from(r as u64) + BigInt::from((cols.len() + 1) as u64) * BigInt::from(r as u64 + 1).pow(2);
-                    if &modulus * &modulus <= nb {
+                    if &modulus.v * &modulus.v <= nb {
                         continue;
                     }
                     let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
@@ -180,7 +180,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                     }
                     let w = rows.first().map_or(r + 1, |x| x.len());
                     let mut mrow = vec![BigInt::zero(); w];
-                    mrow[w - 1] = modulus;
+                    mrow[w - 1] = modulus.v.clone();
                     rows.push(mrow);
                     cols.push(j);
                     added += 1;
