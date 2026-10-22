@@ -82,11 +82,43 @@ pub unsafe extern "C" fn sb_last_error() -> *const u8 {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
+    // nmod_charpoly's request size is admitted before serde copies anything
+    // (the fn name is read without allocating: every other value skipped)
+    if req.len() > NMOD_MAX_REQUEST && fn_name_is(req, "nmod_charpoly") {
+        return json!({ "error": format!("nmod_charpoly: the request has {} bytes, more than {}", req.len(), NMOD_MAX_REQUEST) }).to_string();
+    }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
         Err(e) => json!({ "error": e }),
     }
     .to_string()
+}
+
+/// Whether the request's top-level "fn" is `name`, read by a scan that
+/// allocates nothing but the (short) keys: other values are skipped.
+fn fn_name_is(req: &str, name: &str) -> bool {
+    use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
+    struct V<'n>(&'n str);
+    impl<'de> Visitor<'de> for V<'_> {
+        type Value = bool;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a request object")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<bool, A::Error> {
+            // (to the end of the object: serde checks it was all consumed)
+            let mut found = false;
+            while let Some(k) = m.next_key::<std::borrow::Cow<'de, str>>()? {
+                if k == "fn" {
+                    let f: std::borrow::Cow<'de, str> = m.next_value()?;
+                    found = f == self.0;
+                } else {
+                    m.next_value::<IgnoredAny>()?;
+                }
+            }
+            Ok(found)
+        }
+    }
+    serde_json::Deserializer::from_str(req).deserialize_map(V(name)).unwrap_or(false)
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
@@ -270,17 +302,27 @@ fn zvec(x: &[BigInt], v: &Value) -> Value {
     json!(big(x))
 }
 
-/// nmod_charpoly's admission: at most this many rows and columns.  The
-/// peak live memory is then closed-form and small enough for the smallest
-/// wasm heap: the request text (checked first, at most
-/// NMOD_MAX_BYTES = 21 MiB), the flat entries (8 n^2 bytes), the charpoly's
-/// one working matrix (Hessenberg: 8 n^2; Krylov: 8 n (n + 1)) and its
-/// vectors and result (O(n) words): at most 8 n (2n + 1) + 21 MiB + O(n),
-/// under 38 MiB at n = 1024; the work is cubic, at most about n^3 = 2^30
-/// multiply-adds, polled for Stop every 2^16 (sagebrush-arith).
-pub const NMOD_MAX_N: usize = 1024;
+/// nmod_charpoly's admission (checked in this order): the whole request at
+/// most NMOD_MAX_REQUEST bytes, before serde parses it (`call`); its matrix
+/// text at most NMOD_MAX_BYTES; at most NMOD_MAX_N rows, counted without
+/// allocating; then exactly n entries per row.  The peak live memory of an
+/// admitted call, everything that coexists in sb_call (n <= 512):
+///   the request bytes (sb_alloc)                       <= 5.25 MiB
+///   serde's Value, its "m" string and the rest           <= 5.25 MiB + 4 KiB
+///   the flat entries, 8 n^2                             = 2 MiB
+///   the charpoly: Krylov, its n x (n + 1) matrix and two vectors,
+///     <= 8 n (n + 3); or Hessenberg, the copy 8 n^2 plus the n + 1 prefix
+///     polynomials, 8 n (n + 1) / 2 + 24 (n + 1), both doubled for
+///     allocator rounding                                <= 4.1 MiB
+///   the result, its strings and the reply, ~60 (n + 1)  < 32 KiB
+/// in all under 17 MiB beyond the engine's resident heap (the wasm test
+/// test/nmod-charpoly-wasm.test.ts measures the growth); the work is cubic,
+/// at most about n^3 = 2^27 multiply-adds, polled for Stop every 2^16.
+pub const NMOD_MAX_N: usize = 512;
 /// At most 19 digits and one separator per entry below 2^63.
 pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N;
+/// The matrix text plus the other fields.
+pub const NMOD_MAX_REQUEST: usize = NMOD_MAX_BYTES + 4096;
 
 /// The square matrix of nmod_charpoly's request: checked sizes first (the
 /// text, then the row count by a scan that allocates nothing), then the
@@ -1046,6 +1088,11 @@ mod tests {
         let long = "0".repeat(NMOD_MAX_BYTES + 1);
         assert!(nmod_square(&long, 7).unwrap_err().contains("bytes, more than"));
         // (at the limit: admitted, one entry with leading zeros)
+        assert!(super::fn_name_is(r#"{"m": [1, {"fn": "x"}], "fn": "nmod_charpoly"}"#, "nmod_charpoly"));
+        assert!(!super::fn_name_is(r#"{"fn": "mat_det", "m": "nmod_charpoly"}"#, "nmod_charpoly"));
+        // a whole request past NMOD_MAX_REQUEST is refused before serde
+        let big = format!(r#"{{"fn":"nmod_charpoly","p":"7","m":"{}"}}"#, "0".repeat(super::NMOD_MAX_REQUEST));
+        assert!(err(&big).contains("the request has"));
         assert_eq!(nmod_square(&"0".repeat(NMOD_MAX_BYTES), 7).unwrap(), (1, vec![0]));
         // a long row is refused as soon as it passes n entries
         assert!(nmod_square(&format!("{};0", vec!["0"; 5].join(",")), 7).unwrap_err().contains("non-square"));
