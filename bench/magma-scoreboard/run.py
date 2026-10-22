@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=HERE / "results.md")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--host-label", default=socket.gethostname())
+    parser.add_argument(
+        "--skip-magma",
+        action="store_true",
+        help="leave Magma pending when it is not installed on the benchmark host",
+    )
     return parser.parse_args()
 
 
@@ -217,7 +222,11 @@ def escape(value: object) -> str:
 def write_results(path: Path, rows: list[dict], meta: dict) -> None:
     measured = [r for r in rows if r["status"] == "ok"]
     mismatches = [r for r in rows if r["status"] == "mismatch"]
-    failures = [r for r in rows if r["status"] not in ("ok", "pending VM", "mismatch")]
+    failures = [
+        r
+        for r in rows
+        if r["status"] not in ("ok", "pending VM", "pending reference", "mismatch")
+    ]
     gaps = [r for r in measured if (ratio_value(r) or 0) > 10]
     gaps.sort(
         key=lambda r: (r["importance"], -(ratio_value(r) or 0), r["case"], r["n"])
@@ -263,7 +272,7 @@ def write_results(path: Path, rows: list[dict], meta: dict) -> None:
         for r in mismatches:
             out.append(
                 f"- **{r['case']} n={r['n']}:** Sagebrush `{escape(r.get('sagebrush_signature'))}`, "
-                f"Magma `{escape(r.get('magma_signature'))}`, "
+                f"Magma `{escape(r.get('magma_signature', 'pending'))}`, "
                 f"FLINT `{escape(r.get('flint_signature', 'N/A'))}`."
             )
 
@@ -305,7 +314,11 @@ def write_results(path: Path, rows: list[dict], meta: dict) -> None:
                 n=r["n"],
                 repeats=r["repeats"],
                 sage=fmt_seconds(r.get("sagebrush_seconds")),
-                magma=fmt_seconds(r.get("magma_seconds")),
+                magma=(
+                    fmt_seconds(r.get("magma_seconds"))
+                    if r.get("magma_applicable", True)
+                    else "pending (not on host)"
+                ),
                 flint="N/A"
                 if not r.get("flint_applicable")
                 else fmt_seconds(r.get("flint_seconds")),
@@ -320,13 +333,29 @@ def write_results(path: Path, rows: list[dict], meta: dict) -> None:
         "## Method",
         "",
         "- Each point ran alone; no benchmark subprocesses overlapped.",
-        "- Before timing a point, Sagebrush, Magma, and (where it exposes the operation) FLINT evaluated it once and compact deterministic answer signatures were compared. A mismatch suppresses timing.",
+        (
+            "- Before timing a point, Sagebrush, Magma, and (where it exposes the operation) FLINT evaluated it once and compact deterministic answer signatures were compared. A mismatch suppresses timing."
+            if meta["magma_enabled"]
+            else "- Before timing a point, Sagebrush and FLINT evaluated it once and compact deterministic answer signatures were compared. A mismatch suppresses timing; operations without a FLINT oracle were not timed."
+        ),
         f"- Each subprocess had a {meta['timeout']} s timeout. Thread-related environment variables were fixed at 1.",
         f"- Total child CPU used by this run: {meta['cpu']:.1f} s; elapsed wall time: {meta['wall']:.1f} s.",
         f"- Host: `{meta['host']}`. Sagebrush git revision: `{meta['git']}`.",
-        "- Magma was used only through `/usr/local/bin/magma` (V2.18-5). FLINT uses the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations. Neither oracle is linked into shipped Sagebrush.",
-        "- Timings exclude input construction, answer-signature conversion, and process startup: each engine reports elapsed time around only the operation loop. Magma 2.18-5 reports hundredths of a second.",
-        "- The large size in every family is deliberately marked `pending VM` in the local profile.",
+        (
+            "- Magma was used only through `/usr/local/bin/magma` (V2.18-5). FLINT uses the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations. Neither oracle is linked into shipped Sagebrush."
+            if meta["magma_enabled"]
+            else "- Magma is not installed on this host; its cells remain pending. FLINT uses the existing bench-only `sagebrush-flint` Rust oracle where it exposes the operation and the public `python-flint` 0.9.0 binding for the remaining FLINT 3.6.0 operations. FLINT is not linked into shipped Sagebrush."
+        ),
+        (
+            "- Timings exclude input construction, answer-signature conversion, and process startup: each engine reports elapsed time around only the operation loop. Magma 2.18-5 reports hundredths of a second."
+            if meta["magma_enabled"]
+            else "- Timings exclude input construction, answer-signature conversion, and process startup: each engine reports elapsed time around only the operation loop."
+        ),
+        (
+            "- The large size in every family is deliberately marked `pending VM` in the local profile."
+            if meta["profile"] == "local"
+            else "- This VM profile contains only the large size from each family. Operations without a same-host FLINT oracle remain `pending reference` when Magma is unavailable."
+        ),
         "",
         "Inputs and exact commands are documented in [README.md](README.md); structured case sizes are in [cases.json](cases.json).",
         "",
@@ -355,16 +384,18 @@ def main() -> int:
             elif pending:
                 points.append((case, size, False))
     if args.dry_run:
-        runnable = sum(not pending for _, _, pending in points)
+        runnable = sum(
+            not pending and (not args.skip_magma or flint_supported(case["id"]))
+            for case, _, pending in points
+        )
         print(
             f"profile={args.profile} runnable={runnable} listed={len(points)} sequential=true timeout={timeout}s"
         )
         for case, size, pending in points:
-            print(
-                case["id"],
-                size["n"],
-                "pending VM" if pending else f"repeats={size['repeats']}",
-            )
+            state = "pending VM" if pending else f"repeats={size['repeats']}"
+            if args.skip_magma and not flint_supported(case["id"]):
+                state = "pending reference"
+            print(case["id"], size["n"], state)
         return 0
 
     if any(
@@ -384,9 +415,17 @@ def main() -> int:
             "n": size["n"],
             "repeats": size["repeats"],
             "flint_applicable": flint_supported(case["id"]),
+            "magma_applicable": not args.skip_magma,
         }
         if pending:
             row["status"] = "pending VM"
+            rows.append(row)
+            continue
+        if args.skip_magma and not row["flint_applicable"]:
+            row.update(
+                status="pending reference",
+                detail="Magma is not installed on this host and FLINT does not expose this operation",
+            )
             rows.append(row)
             continue
         if child_cpu() - cpu0 >= budget:
@@ -394,9 +433,11 @@ def main() -> int:
             rows.append(row)
             continue
         print(f"[{index}/{len(points)}] check {case['id']} n={size['n']}", flush=True)
-        engines = ["sagebrush", "magma"] + (
-            ["flint"] if row["flint_applicable"] else []
-        )
+        engines = ["sagebrush"]
+        if row["magma_applicable"]:
+            engines.append("magma")
+        if row["flint_applicable"]:
+            engines.append("flint")
 
         def run_engines(run_repeats: int) -> dict:
             results = {}
@@ -428,7 +469,8 @@ def main() -> int:
             rows.append(row)
             continue
         row["sagebrush_signature"] = checks["sagebrush"]["signature"]
-        row["magma_signature"] = checks["magma"]["signature"]
+        if row["magma_applicable"]:
+            row["magma_signature"] = checks["magma"]["signature"]
         if row["flint_applicable"]:
             row["flint_signature"] = checks["flint"]["signature"]
         signatures = [checks[engine]["signature"] for engine in engines]
@@ -449,7 +491,7 @@ def main() -> int:
             row.update(
                 status="ok",
                 sagebrush_seconds=timed["sagebrush"]["seconds"],
-                magma_seconds=timed["magma"]["seconds"],
+                magma_seconds=timed.get("magma", {}).get("seconds"),
                 flint_seconds=timed.get("flint", {}).get("seconds"),
             )
         rows.append(row)
@@ -467,6 +509,8 @@ def main() -> int:
         "wall": time.monotonic() - wall0,
         "git": git,
         "host": args.host_label,
+        "profile": args.profile,
+        "magma_enabled": not args.skip_magma,
     }
     write_results(args.output, rows, meta)
     print(
