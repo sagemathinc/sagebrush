@@ -112,7 +112,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
-    "H<h> := GF(9); J<j> := GF(81); h + j;",
+    "H<h> := GF(2^11); J<j> := GF(2^10); h + j;",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -132,7 +132,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
-    "Runtime error in '+': arithmetic of two finite fields of characteristic 3, neither the prime field, is not supported yet",
+    "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 2^20 elements",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -2194,4 +2194,96 @@ test("IsIsomorphic as Magma's for quadratic fields and the symmetric and dihedra
     const o = run(e).replace(/\s+/g, " ");
     assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|AttributeError/.test(o), e + " => " + o);
   }
+});
+
+test("subfields of finite fields: work bounds from the plan's formulas, each refusal before the work it would pay for (F1)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-ffsub-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m, _sage_ff as sff",
+    "calls = {'dlog': 0, 'GF': 0, 'up': 0}",
+    "dlog, gf, up = sff._dlog, sff.GF, m._ff_up",
+    "def spy_dlog(*a):",
+    "    calls['dlog'] += 1",
+    "    return dlog(*a)",
+    "def spy_gf(*a, **k):",
+    "    calls['GF'] += 1",
+    "    return gf(*a, **k)",
+    "def spy_up(*a):",
+    "    calls['up'] += 1",
+    "    return up(*a)",
+    "sff._dlog, sff.GF, m._ff_up = spy_dlog, spy_gf, spy_up",
+    "class Refused(Exception): pass",
+    "def refuse(): return Refused()",
+    "def attempt(label, f):",
+    "    for k in calls: calls[k] = 0",
+    "    try:",
+    "        r = f()",
+    "        print(label, 'admitted', calls)",
+    "    except (Refused, m.MagmaError) as e:",
+    "        print(label, 'refused', calls)",
+    // D(q, n) from the plan: M(n) [2 b + sum (6 b + e (8 b + 2 (ceil(sqrt r) + 1)))] + 2^11, b = bits(q - 1)
+    "def D(p, n):",
+    "    N = p ** n - 1; b = N.bit_length(); s = 2 * b",
+    "    for r, e in sff._factor_int(N):",
+    "        c = 1",
+    "        while c * c < r: c += 1",
+    "        s += 6 * b + e * (8 * b + 2 * (c + 1))",
+    "    return 2 * n * n * s + 2 ** 11",
+    "W = {}",
+    "def F(q):",
+    "    if q not in W: W[q] = m.GF(q)",
+    "    return W[q]",
+    "for q in (2 ** 20, 2 ** 19, 2 ** 11, 2 ** 10, 3 ** 7, 4, 8, 9, 16, 25, 64, 81, 125, 256): F(q)",
+    "print('D', m._ff_dlog_cost(F(2 ** 20)), D(2, 20), m._ff_dlog_cost(F(2 ** 19)), D(2, 19))",
+    // the largest D over the fields with a proper subfield of degree > 1 (n >= 4), all p^n <= 2^20
+    "best = max((D(p, n), p, n) for p in range(2, 33) if sff._is_prime_power(p) == (p, 1) for n in range(4, 21) if p ** n <= 2 ** 20)",
+    "print('Dmax', best)",
+    // a descent from GF(2^20) to GF(2^10): refused with one cop too few, before the discrete log
+    "H, M = F(2 ** 20), F(2 ** 10)",
+    "x = H.K.gen() ** (1025 * 7)",
+    "need = m._ff_dlog_cost(H) + 2 * M.q.bit_length() * m._ff_m(M)",
+    "attempt('descent-short', lambda: m._ff_down(x, M, [need - 1], refuse))",
+    "attempt('descent', lambda: m._ff_down(x, M, [need], refuse))",
+    // a common field past 2^20 elements: refused before any field is made
+    "attempt('common-large', lambda: m._ff_common(F(2 ** 11), F(2 ** 10), refuse, [m._FF_WORK]))",
+    "attempt('common-3^14', lambda: m._ff_common(F(3 ** 7), F(9), refuse, [m._FF_WORK]))",
+    // a cold Conway search for GF(5^6) within too small a budget: refused before the field is made
+    "sff._CONWAY.pop((5, 6), None)",
+    "attempt('conway-short', lambda: m._ff_common(F(25), F(125), refuse, [1000]))",
+    "attempt('conway', lambda: m._ff_common(F(25), F(125), refuse, [m._FF_WORK]))",
+    // a collection whose common field is too large: refused before any element goes in
+    "a, b = F(2 ** 11).K.gen(), F(2 ** 10).K.gen()",
+    "attempt('collection', lambda: m._seq([a, b]))",
+    // the image cache keeps at most _FF_IMAGES_MAX, the least recently used dropped first
+    "m._FF_IMAGES_MAX = 3",
+    "m._FF_IMAGES.clear()",
+    "pairs = [(F(4), F(16)), (F(4), F(64)), (F(8), F(64)), (F(9), F(81)), (F(4), F(256))]",
+    "for S, U in pairs[:3]: m._ff_image(S, U, [m._FF_WORK], refuse)",
+    "m._ff_image(*pairs[0], [m._FF_WORK], refuse)",
+    "for S, U in pairs[3:]: m._ff_image(S, U, [m._FF_WORK], refuse)",
+    "print('cache', len(m._FF_IMAGES), [(id(S), id(U)) in m._FF_IMAGES for S, U in pairs])",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  const lines = r.stdout.trim().split("\n");
+  const none = "{'dlog': 0, 'GF': 0, 'up': 0}";
+  assert.deepEqual(lines, [
+    // (the plan's numbers: 1,331,648 at 2^20; at 2^19, q - 1 = 524,287 prime,
+    // ceil(sqrt) = 725, a table of at most 726)
+    "D 1331648 1331648 1269880 1269880",
+    "Dmax (1331648, 2, 20)",
+    "descent-short refused " + none,
+    "descent admitted {'dlog': 1, 'GF': 0, 'up': 0}",
+    "common-large refused " + none,
+    "common-3^14 refused " + none,
+    "conway-short refused " + none,
+    // (GF(5^6) and, inside it, its prime field GF(5))
+    "conway admitted {'dlog': 0, 'GF': 2, 'up': 0}",
+    "collection refused " + none,
+    "cache 3 [True, False, False, True, True]",
+  ], r.stdout + r.stderr);
 });
