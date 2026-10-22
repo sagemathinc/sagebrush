@@ -263,19 +263,19 @@ const cStrides = (shape: number[]): number[] => {
 const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 
 // Every array's storage is admitted before it is allocated (empty, which
-// every constructor uses; daybreak2's LIMIT-PR55-1): at most ARRAY_MAX_ELEMENTS
-// elements and ARRAY_MAX_BYTES bytes, both inclusive, the bytes counting any
+// every constructor uses; daybreak2's LIMIT-PR55-1): at most ARRAY_LIMITS.elements
+// elements and ARRAY_LIMITS.bytes bytes, both inclusive, the bytes counting any
 // scratch the caller reserves too. Counted exactly (BigInt), so no product
 // overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
 // machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
-export const ARRAY_MAX_ELEMENTS = 2 ** 32;
-export const ARRAY_MAX_BYTES = 2 ** 32;
+// (one object, so a test can lower the caps to check the boundary cheaply)
+export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
   let n = 1n;
   for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
   const bytes = n * BigInt(dt.itemsize);
   if (bytes > 2n ** 63n - 1n) raise(T.ValueError, "array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.");
-  if (n > BigInt(ARRAY_MAX_ELEMENTS) || bytes + BigInt(scratch) > BigInt(ARRAY_MAX_BYTES)) {
+  if (n > BigInt(ARRAY_LIMITS.elements) || bytes + BigInt(scratch) > BigInt(ARRAY_LIMITS.bytes)) {
     const dims = shape.map((d) => String(typeof d === "bigint" ? d : BigInt(d)));
     raise(T.MemoryError, `Unable to allocate ${sizeString(bytes)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type ${dt.name}`);
   }
@@ -3362,16 +3362,23 @@ newBuiltinModule("_numpy", (m) => {
       n = (raw.length - off) / isz;
     }
     if (off + n * isz > raw.length) raise(T.ValueError, "buffer is smaller than requested size");
-    const bytes = raw.slice(off, off + n * isz); // aligned copy
+    // (admitted before anything is allocated, as every array: daybreak2's
+    // LIMIT-PR55-2; int64 and uint64 in one allocation, the output, read
+    // from the buffer in place, each value kept only if a double holds it
+    // exactly (admitWide), never rounded)
+    if (isWide(dt)) {
+      const out = empty([n], dt);
+      const dv = new DataView(raw.buffer, raw.byteOffset + off, n * isz);
+      for (let i = 0; i < n; i++) out.data[i] = admitWide(dt.name === "int64" ? dv.getBigInt64(8 * i, !big) : dv.getBigUint64(8 * i, !big), dt);
+      return out;
+    }
+    admitArray([n], dt);
+    const bytes = raw.slice(off, off + n * isz); // aligned copy: the array's own storage
     if (big) {
       const w = dt.cplx ? isz / 2 : isz;
       for (let i = 0; i < bytes.length; i += w) bytes.subarray(i, i + w).reverse();
     }
-    let data: any;
-    if (dt.name === "int64") data = Float64Array.from(new BigInt64Array(bytes.buffer), Number);
-    else if (dt.name === "uint64") data = Float64Array.from(new BigUint64Array(bytes.buffer), Number);
-    else data = new dt.ctor(bytes.buffer);
-    return new NDArray(dt, data, [n], [1]);
+    return new NDArray(dt, new dt.ctor(bytes.buffer), [n], [1]);
   });
   fn("_tobytes", (a: any) => {
     const c = ascontig(asarray(a));
@@ -3456,6 +3463,9 @@ newBuiltinModule("_numpy", (m) => {
   fn("hist_uniform", (x: any, lo: any, hi: any, nb: any, edges: any) => {
     const a = ascontig(asarray(x, D.float64));
     const L = toNum(lo), H = toNum(hi), N = Number(nb), e = ascontig(edges).data;
+    // (the counts and the output admitted together before either is allocated: LIMIT-PR55-2)
+    if (!Number.isSafeInteger(N) || N < 0) raise(T.ValueError, "`bins` must be a positive integer");
+    admitArray([N], D.int64, 8 * N);
     const counts = new Float64Array(N);
     const d = a.data, norm = N / (H - L);
     for (let i = 0; i < a.size; i++) {
