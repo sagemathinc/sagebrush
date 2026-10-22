@@ -2342,3 +2342,62 @@ test("finite fields: Include, Exclude and Index of an element that doesn't go in
     assert.ok(o.includes(said) && !/Traceback|Error: /.test(o.replace(/Runtime error/g, "")), src + " => " + o);
   }
 });
+
+test("top-level GF's cold Conway search is bounded by ceil(1.1 C_max), C_max measured over every field GF admits (daybreak2's ruling)", () => {
+  const { mkdtempSync, writeFileSync, readFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  // test/conway_cold_oracle.json: the cold charge of every p^n <= 10^7 with
+  // n >= 2 (the domain GF admits), each found equal to master's polynomial
+  const fields: [number, number, number][] = JSON.parse(readFileSync(join(__dirname, "..", "..", "test", "conway_cold_oracle.json"), "utf8")).fields;
+  const isPrime = (p: number) => { for (let d = 2; d * d <= p; d++) if (p % d === 0) return false; return p > 1; };
+  const domain: string[] = [];
+  for (let p = 2; p * p <= 1e7; p++) if (isPrime(p)) for (let n = 2, q = p * p; q <= 1e7; n++, q *= p) domain.push(p + "^" + n);
+  assert.deepEqual(fields.map(([p, n]) => p + "^" + n).sort(), domain.sort());
+  assert.equal(fields.length, 555);
+  const cmax = Math.max(...fields.map((f) => f[2]));
+  assert.deepEqual(fields.filter((f) => f[2] === cmax), [[11, 6, 594117177]]);
+  const cap = Math.floor((11 * cmax + 9) / 10);  // ceil(1.1 C_max), exactly
+  assert.equal(cap, 653528895);
+  // every field below the cap; those within 10% of it pinned
+  assert.ok(fields.every((f) => f[2] < cap));
+  assert.deepEqual(fields.filter((f) => 10 * f[2] >= 9 * cap).sort((a, b) => a[2] - b[2]), [[3, 14, 593382146], [11, 6, 594117177]]);
+  const f = join(mkdtempSync(join(tmpdir(), "magma-conway-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m, _sage_ff as sff",
+    "print('cap', m._CONWAY_WORK)",
+    // representative live charges, each cold, as in the fixture
+    "BIG = 10 ** 15",
+    "for p, n in ((3, 6), (2, 12), (113, 2), (7, 6)):",
+    "    sff._CONWAY.clear()",
+    "    b = [BIG]",
+    "    sff._conway(p, n, b)",
+    "    print('charge', p, n, BIG - b[0])",
+    // refused one cop below GF(2^12)'s charge, before the field is made, and
+    // nothing partial kept; admitted at exactly its charge, the same polynomial
+    "gf, calls = sff.GF, [0]",
+    "def spy(*a, **k):",
+    "    calls[0] += 1",
+    "    return gf(*a, **k)",
+    "sff.GF = spy",
+    "def attempt(label, cap):",
+    "    sff._CONWAY.clear()",
+    "    m._CONWAY_WORK, calls[0] = cap, 0",
+    "    try:",
+    "        F = m.GF(2 ** 12)",
+    "        print(label, 'admitted', calls[0] > 0, F.K._f)",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused', calls[0], (2, 12) in sff._CONWAY, str(e))",
+    "attempt('short', 1770107 - 1)",
+    "attempt('exact', 1770107)",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    "cap " + cap,
+    ...[[3, 6], [2, 12], [113, 2], [7, 6]].map(([p, n]) => `charge ${p} ${n} ${fields.find((x) => x[0] === p && x[1] === n)![2]}`),
+    "short refused 0 False GF(4096): the search for its Conway polynomial is beyond the work allowed here, and is not supported yet",
+    "exact admitted True [1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1]",
+  ], r.stdout + r.stderr);
+});
