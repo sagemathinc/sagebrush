@@ -1318,6 +1318,24 @@ def _conway(p, n, budget=None):
     key = (p, n)
     if key in _CONWAY:
         return _CONWAY[key]
+    # (transactional: every polynomial the search finds, the subfields'
+    # too, is staged and committed only once the target is found, so a
+    # refusal, an error or an interrupt leaves _CONWAY as it was;
+    # daybreak2 LIMIT-PR48-1)
+    stage = {}
+    c = _conway_search(p, n, budget, stage)
+    _CONWAY.update(stage)
+    return c
+
+
+def _conway_search(p, n, budget, stage):
+    """_conway's search, reading _CONWAY and the operation's stage and
+    writing found polynomials into the stage only."""
+    key = (p, n)
+    if key in _CONWAY:
+        return _CONWAY[key]
+    if key in stage:
+        return stage[key]
     w = max(1, -(-p.bit_length() // 30)) ** 2
     if n == 1:
         if p == 2:
@@ -1339,14 +1357,14 @@ def _conway(p, n, budget=None):
                 if all(pow(g, (p - 1) // r, p) != 1 for r in fs):
                     break
         c = [(-g) % p, 1]
-        _CONWAY[key] = c
+        stage[key] = c
         return c
     if p ** n > 10 ** 7:
         raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
     _conway_charge(budget, 3163 * w, p, n)  # (trial factoring of p^n - 1 <= 10^7)
     primes = [r for r, e in _factor_int(p ** n - 1)]
     subs = [m_ for m_ in range(1, n) if n % m_ == 0]
-    sub_polys = [(m_, _conway(p, m_, budget)) for m_ in subs]
+    sub_polys = [(m_, _conway_search(p, m_, budget, stage)) for m_ in subs]
     q1 = p ** n - 1
     mn = 2 * n * n * w                  # one product mod the candidate, M(n)
     expo = 2 * q1.bit_length() * mn     # one power x^e, e < p^n
@@ -1390,7 +1408,7 @@ def _conway(p, n, budget=None):
                 ok = False
                 break
         if ok:
-            _CONWAY[key] = coeffs
+            stage[key] = coeffs
             return coeffs
     raise ArithmeticError("no Conway polynomial found")
 
