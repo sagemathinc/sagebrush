@@ -2474,7 +2474,7 @@ test("top-level GF's cold Conway search is bounded by ceil(1.1 C_max), C_max mea
   const f = join(mkdtempSync(join(tmpdir(), "magma-conway-")), "check.py");
   writeFileSync(f, [
     "import _magma as m, _sage_ff as sff",
-    "print('cap', m._CONWAY_WORK)",
+    "print('cap', sff.CONWAY_WORK)",
     // representative live charges, each cold, as in the fixture
     "BIG = 10 ** 15",
     "for p, n in ((3, 6), (2, 12), (113, 2), (7, 6)):",
@@ -2496,7 +2496,7 @@ test("top-level GF's cold Conway search is bounded by ceil(1.1 C_max), C_max mea
     "    sff._CONWAY.clear()",
     "    for k, v in seed: sff._CONWAY[k] = list(v)",
     "    before = [(k, list(v)) for k, v in sff._CONWAY.items()]",
-    "    m._CONWAY_WORK, calls[0] = cap, 0",
+    "    sff.CONWAY_WORK, calls[0] = cap, 0",
     "    try:",
     "        F = m.GF(2 ** 12)",
     "        print(label, 'admitted', calls[0] > 0, F.K._f, sorted(sff._CONWAY))",

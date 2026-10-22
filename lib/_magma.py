@@ -7823,14 +7823,8 @@ _FF = {}  # id(_sage_ff field) -> its _MFinField
 # in it (checked against Magma: GF(2^20) and GF(1021^2) by powers,
 # GF(1031^2) and GF(3^13) by polynomials).
 _FF_POWERS_MAX = 2 ** 20
-# a cold search for the Conway polynomial of GF(p^n) by GF(q) does at most
-# this much work, counted by _sage_ff._conway's budget (prime-field
-# coefficient operations).  Measured cold over every p^n <= 10^7 that GF
-# admits (all 555 with n >= 2), the most is C_max = 594,117,177, for
-# GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
-# field admitted before is admitted still.  A common field made inside
-# another call (_ff_common) has that call's _FF_WORK instead.
-_CONWAY_WORK = 653528895
+# (a cold search for the Conway polynomial of GF(p^n) by GF(q) is bounded by
+# the shared _sage_ff.CONWAY_WORK, as in Sage mode)
 # GF(q) and GF(p, n) of more bits are refused before any work on q (its
 # power, its prime-power test, its tables) (HARD-581-1)
 _FF_BITS = 1024
@@ -8047,9 +8041,9 @@ def GF(q, n=None):
     try:
         pn = _sff._is_prime_power(q)
         if pn[1] > 1:
-            # (the cold search's work bounded, before GF(q) is made; a cache
-            # hit is free)
-            _sff._conway(pn[0], pn[1], [_CONWAY_WORK])
+            # (the cold search's work bounded by CONWAY_WORK, before GF(q)
+            # is made; a cache hit is free)
+            _sff._conway(pn[0], pn[1])
         K = _sff.GF(q)
     except _sff.ConwayBudgetExceeded:
         raise MagmaError("GF(%d): the search for its Conway polynomial is beyond the work allowed here, and is not supported yet" % q, "'GF'")

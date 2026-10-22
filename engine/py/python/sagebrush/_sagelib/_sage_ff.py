@@ -1341,10 +1341,20 @@ def _conway_charge(budget, cops, p, n):
         budget[0] -= cops
 
 
+# a cold search for one Conway polynomial (GF, conway_polynomial, in Sage and
+# Magma modes alike) does at most this much work, counted by _conway's budget
+# (prime-field coefficient operations).  Measured cold over every p^n <= 10^7
+# that GF admits (all 555 with n >= 2), the most is C_max = 594,117,177, for
+# GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
+# field admitted before is admitted still.  A common field made inside an
+# embedding (_sage_ffsub) has that operation's budget instead.
+CONWAY_WORK = 653528895
+
+
 def _conway(p, n, budget=None):
     """Coefficients (constant first) of the Conway polynomial C_{p,n}.
 
-    budget: None (unbounded but for the p^n <= 10^7 cutoff, as before), or a
+    budget: None (a fresh CONWAY_WORK; the p^n <= 10^7 cutoff too), or a
     one-element list holding the caller's remaining work in prime-field
     coefficient operations, charged before each step of a cold search (the
     factoring of p^n - 1, each primitive-root candidate, each polynomial
@@ -1354,6 +1364,8 @@ def _conway(p, n, budget=None):
     key = (p, n)
     if key in _CONWAY:
         return _CONWAY[key]
+    if budget is None:
+        budget = [CONWAY_WORK]
     # (transactional: every polynomial the search finds, the subfields'
     # too, is staged and committed only once the target is found, so a
     # refusal, an error or an interrupt leaves _CONWAY as it was;
