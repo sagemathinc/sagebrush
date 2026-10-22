@@ -515,6 +515,13 @@ fn lift_univariate(g: &[BigInt], us: Vec<U>, p: &BigInt, m: &BigInt) -> Option<V
 /// The factorization of f over Z: (unit content, [(irreducible, e)]) with
 /// primitive factors of positive leading coefficient (lex).
 pub fn factor_z(f: &ZPoly) -> Result<(BigInt, Vec<(ZPoly, u32)>), String> {
+    factor_z_with(f, &sagebrush_poly::Budget::default())
+}
+
+/// As [`factor_z`], every univariate factorization (of images, contents and
+/// leading coefficients, recursively) drawing from one budget: a refusal is
+/// an error.
+pub fn factor_z_with(f: &ZPoly, b: &sagebrush_poly::Budget) -> Result<(BigInt, Vec<(ZPoly, u32)>), String> {
     let n = f.n;
     if f.is_zero() {
         return Err("factor(0)".into());
@@ -538,7 +545,7 @@ pub fn factor_z(f: &ZPoly) -> Result<(BigInt, Vec<(ZPoly, u32)>), String> {
         }
         (e, c)
     }).collect());
-    factor_rec(&g, &mut out)?;
+    factor_rec(&g, &mut out, b)?;
     // equal factors merged
     let mut merged: Vec<(ZPoly, u32)> = vec![];
     for (h, e) in out {
@@ -561,7 +568,7 @@ fn normalize(h: ZPoly) -> ZPoly {
 }
 
 /// Factors of a primitive g (no monomial content) appended to out.
-fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>) -> Result<(), String> {
+fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>, b: &sagebrush_poly::Budget) -> Result<(), String> {
     if is_constant(g) {
         return Ok(());
     }
@@ -570,7 +577,7 @@ fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>) -> Result<(), String> {
     // the content in v (a polynomial in the other variables)
     let cont = content_in(g, v)?;
     if !is_constant(&cont) {
-        factor_rec(&normalize(cont.clone()), out)?;
+        factor_rec(&normalize(cont.clone()), out, b)?;
     }
     let pp = normalize(if is_constant(&cont) { g.clone() } else { divexact(g, &cont).ok_or("content does not divide")? });
     if !uses(&pp, v) {
@@ -578,7 +585,7 @@ fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>) -> Result<(), String> {
     }
     // Yun in v
     for (part, e) in squarefree(&pp, v)? {
-        for h in factor_squarefree(&part, v)? {
+        for h in factor_squarefree(&part, v, b)? {
             out.push((h, e));
         }
     }
@@ -648,30 +655,30 @@ fn surely_squarefree(f: &ZPoly, v: usize) -> bool {
 /// The irreducible factors of s, square-free and primitive in v: in the
 /// main variable with the simplest leading coefficient (a constant if
 /// possible), then the largest degree (the fewest lifting steps).
-fn factor_squarefree(s: &ZPoly, v: usize) -> Result<Vec<ZPoly>, String> {
+fn factor_squarefree(s: &ZPoly, v: usize, b: &sagebrush_poly::Budget) -> Result<Vec<ZPoly>, String> {
     let n = s.n;
     let w = (0..n).filter(|&j| uses(s, j)).min_by_key(|&j| {
         let l = lc_in(s, j);
         (!is_constant(&l), l.len(), u64::MAX - deg_in(s, j))
     }).unwrap();
     if w == v {
-        return factor_sqfree_in(s, v);
+        return factor_sqfree_in(s, v, b);
     }
     let cont = content_in(s, w)?;
     if is_constant(&cont) {
-        return factor_sqfree_in(s, w);
+        return factor_sqfree_in(s, w, b);
     }
-    let mut out: Vec<ZPoly> = factor_z(&cont)?.1.into_iter().map(|(h, _)| h).collect();
+    let mut out: Vec<ZPoly> = factor_z_with(&cont, b)?.1.into_iter().map(|(h, _)| h).collect();
     let rest = divexact(s, &cont).ok_or("content does not divide")?;
-    out.extend(factor_sqfree_in(&normalize(rest), w)?);
+    out.extend(factor_sqfree_in(&normalize(rest), w, b)?);
     Ok(out)
 }
 
-fn factor_sqfree_in(s: &ZPoly, v: usize) -> Result<Vec<ZPoly>, String> {
+fn factor_sqfree_in(s: &ZPoly, v: usize, b: &sagebrush_poly::Budget) -> Result<Vec<ZPoly>, String> {
     let n = s.n;
     let ys: Vec<usize> = (0..n).filter(|&j| j != v && uses(s, j)).collect();
     if ys.is_empty() {
-        let (_, fs) = sagebrush_poly::factor(&univ(s, v));
+        let (_, fs) = sagebrush_poly::try_factor_with(&univ(s, v), b).map_err(|e| e.to_string())?;
         let mut out = vec![];
         for (h, e) in fs {
             for _ in 0..e {
@@ -686,7 +693,7 @@ fn factor_sqfree_in(s: &ZPoly, v: usize) -> Result<Vec<ZPoly>, String> {
     }
     let lc = lc_in(s, v);
     // Wang: lc = omega * prod F_j^e_j, the F_j distributed over the factors
-    let (omega, lfacs) = if is_constant(&lc) { (lc.coeffs.big(0), vec![]) } else { factor_z(&lc)? };
+    let (omega, lfacs) = if is_constant(&lc) { (lc.coeffs.big(0), vec![]) } else { factor_z_with(&lc, b)? };
     let lf: Vec<ZPoly> = lfacs.iter().map(|(h, _)| h.clone()).collect();
     let le: Vec<u32> = lfacs.iter().map(|(_, e)| *e).collect();
     let mut rng = 0x9E3779B97F4A7C15u64;
@@ -744,7 +751,7 @@ fn factor_sqfree_in(s: &ZPoly, v: usize) -> Result<Vec<ZPoly>, String> {
                 g
             };
             let Some(ds) = distinct_parts(&(&omega * &delta), &ft) else { continue };
-            let (_, fs) = sagebrush_poly::factor(&uu);
+            let (_, fs) = sagebrush_poly::try_factor_with(&uu, b).map_err(|e| e.to_string())?;
             let facs: Vec<Vec<BigInt>> = fs.into_iter().flat_map(|(h, e)| std::iter::repeat(h).take(e as usize)).collect();
             found += 1;
             if facs.len() == 1 {

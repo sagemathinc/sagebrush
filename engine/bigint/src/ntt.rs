@@ -14,6 +14,7 @@
 //! transform per prime suffices for 64-bit pieces at any feasible length.
 
 use crate::nmod::{mul_shoup, mul_shoup_lazy, shoup, Modulus};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
 /// (p, primitive root); 2^50 divides p - 1.
@@ -76,6 +77,10 @@ fn primitive_root(p: u64) -> u64 {
     let mut c = (p - 1) >> (p - 1).trailing_zeros();
     let mut d = 3;
     while d * d <= c {
+        // (trial division to 2^23 for an NTT prime near 2^62 with 2^16 | p - 1)
+        if d & 0x1ffff == 1 {
+            sagebrush_interrupt::check_coarse();
+        }
         if c % d == 0 {
             qs.push(d);
             while c % d == 0 {
@@ -103,8 +108,18 @@ fn root_cached(p: u64) -> u64 {
 
 /// The table for p of length at least 2^log (cached; at most a few primes
 /// are kept, the most recently used).
+static CACHE: Mutex<Vec<Arc<Table>>> = Mutex::new(Vec::new());
+static TABLE_FOR_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// (calls of the shared table cache so far, its tables, their bytes): the
+/// tests check that the op-local paths ([`LocalTables`]) never use it.
+pub fn cache_stats() -> (usize, usize, usize) {
+    let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    (TABLE_FOR_CALLS.load(Relaxed), cache.len(), cache.iter().map(|t| t.tw.len() * 32).sum())
+}
+
 fn table_for(p: u64, log: u32) -> Arc<Table> {
-    static CACHE: Mutex<Vec<Arc<Table>>> = Mutex::new(Vec::new());
+    TABLE_FOR_CALLS.fetch_add(1, Relaxed);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(i) = cache.iter().position(|t| t.p == p && t.log >= log) {
         let t = cache.remove(i);
@@ -172,7 +187,9 @@ fn dif(a: &mut [u64], t: &Table) {
     }
     if n > BLOCK {
         let m = n / 2;
-        crate::check_interrupt(); // (once per large block: Ctrl-C in long products)
+        // once per large block (at most 2^15 butterflies apart), asking the
+        // wasm host each time
+        sagebrush_interrupt::check_coarse();
         let (lo, hi) = a.split_at_mut(m);
         dif_layer(lo, hi, &t.tw[m..2 * m], &t.twp[m..2 * m], t.p);
         dif(lo, t);
@@ -198,7 +215,7 @@ fn dit(a: &mut [u64], t: &Table) {
     }
     if n > BLOCK {
         let m = n / 2;
-        crate::check_interrupt();
+        sagebrush_interrupt::check_coarse();
         let (lo, hi) = a.split_at_mut(m);
         dit(lo, t);
         dit(hi, t);
@@ -250,13 +267,17 @@ fn conv_table(a: &[u64], b: &[u64], t: &Table) -> Vec<u64> {
         }
         f
     };
+    let _phase = sagebrush_interrupt::enter("ntt");
+    sagebrush_interrupt::check_coarse();
     let mut fa = load(a);
+    sagebrush_interrupt::check_coarse();
     dif(&mut fa, t);
     let square = std::ptr::eq(a, b);
     let fb = if square {
         None
     } else {
         let mut fb = load(b);
+        sagebrush_interrupt::check_coarse();
         dif(&mut fb, t);
         Some(fb)
     };
@@ -276,7 +297,9 @@ fn conv_table(a: &[u64], b: &[u64], t: &Table) -> Vec<u64> {
             }
         }
     }
+    sagebrush_interrupt::check_coarse();
     dit(&mut fa, t);
+    sagebrush_interrupt::check_coarse();
     fa.truncate(len);
     for x in fa.iter_mut() {
         let mut y = *x;
@@ -344,11 +367,30 @@ pub fn mul_mod(a: &[u64], b: &[u64], m: &Modulus) -> Vec<u64> {
     if is_ntt_prime(m, len) {
         return if square { conv_ntt_prime(a, a, m.n) } else { conv_ntt_prime(a, b, m.n) };
     }
-    let conv = |i| if square { conv_prime(a, a, i) } else { conv_prime(a, b, i) };
+    let log = log2_len(len);
+    combine(a, b, m, |i| {
+        let t = table(i, log);
+        if square {
+            conv_table(a, a, &t)
+        } else {
+            conv_table(a, b, &t)
+        }
+    })
+}
+
+/// The products modulo the primes needed, combined modulo m.n (CRT).
+fn combine(a: &[u64], b: &[u64], m: &Modulus, conv: impl Fn(usize) -> Vec<u64>) -> Vec<u64> {
+    let len = a.len() + b.len() - 1;
     match primes_needed(m.n, a.len().min(b.len())) {
-        1 => conv(0).into_iter().map(|x| m.reduce(x)).collect(),
+        1 => {
+            let mut r = conv(0);
+            sagebrush_interrupt::check_coarse();
+            r.iter_mut().for_each(|x| *x = m.reduce(*x));
+            r
+        }
         2 => {
             let (r0, r1) = (conv(0), conv(1));
+            sagebrush_interrupt::check_coarse();
             let (p0, p1) = (PRIMES[0].0, PRIMES[1].0);
             let m1 = Modulus::new(p1);
             let c01 = m1.inv(p0 % p1).unwrap();
@@ -362,6 +404,7 @@ pub fn mul_mod(a: &[u64], b: &[u64], m: &Modulus) -> Vec<u64> {
         }
         _ => {
             let (r0, r1, r2) = (conv(0), conv(1), conv(2));
+            sagebrush_interrupt::check_coarse();
             let c = crt();
             let p01n = m.reduce_u128(c.p01);
             (0..len)
@@ -372,6 +415,73 @@ pub fn mul_mod(a: &[u64], b: &[u64], m: &Modulus) -> Vec<u64> {
                 .collect()
         }
     }
+}
+
+/// The transform tables of one computation modulo m with products of
+/// length at most `max_len`, owned by the caller and freed with it: built
+/// once at that length (a table serves every shorter transform), without
+/// the shared cache ([`table_for`]) or its primitive-root list, so a
+/// computation's memory is bounded by its own sizes, whatever other
+/// computations left in the cache.  Either m's own table (when m is an NTT
+/// prime at max_len: [`is_ntt_prime`]) or the tables of the primes that
+/// products of that length need; 32 2^log bytes each, at most three.
+pub struct LocalTables {
+    own: bool,
+    tabs: Vec<Table>,
+}
+
+impl LocalTables {
+    pub fn new(m: &Modulus, max_len: usize) -> LocalTables {
+        let max_len = max_len.max(1);
+        let log = log2_len(max_len);
+        let _phase = sagebrush_interrupt::enter("ntt");
+        if is_ntt_prime(m, max_len) {
+            let t = Table::new(m.n, primitive_root(m.n), log);
+            return LocalTables { own: true, tabs: vec![t] };
+        }
+        // (primes_needed grows with the shorter factor, at most max_len)
+        let k = primes_needed(m.n, max_len);
+        let mut tabs = Vec::with_capacity(k);
+        for &(p, g) in &PRIMES[..k] {
+            sagebrush_interrupt::check_coarse();
+            tabs.push(Table::new(p, g, log));
+        }
+        LocalTables { own: false, tabs }
+    }
+
+    /// The bytes the tables hold.
+    pub fn bytes(&self) -> usize {
+        self.tabs.iter().map(|t| t.tw.len() * 32).sum()
+    }
+
+    fn get(&self, i: usize, len: usize) -> &Table {
+        let t = &self.tabs[i];
+        assert!(log2_len(len) <= t.log, "LocalTables: a product longer than its tables");
+        t
+    }
+}
+
+/// [`mul_mod`] with the caller's tables (built for products at least this
+/// long): the same product.
+pub fn mul_mod_in(a: &[u64], b: &[u64], m: &Modulus, lt: &LocalTables) -> Vec<u64> {
+    if a.is_empty() || b.is_empty() {
+        return vec![];
+    }
+    let len = a.len() + b.len() - 1;
+    let square = std::ptr::eq(a, b);
+    let conv = |i: usize| {
+        let t = lt.get(i, len);
+        if square {
+            conv_table(a, a, t)
+        } else {
+            conv_table(a, b, t)
+        }
+    };
+    if lt.own {
+        // (exact modulo m.n itself: conv_table reduces into [0, p))
+        return conv(0);
+    }
+    combine(a, b, m, conv)
 }
 
 /// The product of two nonnegative integers given as little-endian 64-bit
@@ -459,6 +569,26 @@ mod tests {
                 assert_eq!(mul_mod(&a, &b, &m), naive_mod(&a, &b, &m), "n={n} {la}x{lb}");
                 assert_eq!(mul_mod(&a, &a, &m), naive_mod(&a, &a, &m));
             }
+        }
+    }
+
+    #[test]
+    fn local_tables_same_products_without_the_cache() {
+        let mut s = 31u64;
+        for n in [2u64, 65537, (1 << 61) - 1, 4601552919265804289, (1 << 20) * 4097 + 1] {
+            let m = Modulus::new(n);
+            let lt = LocalTables::new(&m, 5000);
+            assert!(lt.bytes() <= 3 * 32 * 8192);
+            let calls = cache_stats().0;
+            for (la, lb) in [(1, 1), (40, 40), (1000, 999), (4000, 1001), (2500, 2500)] {
+                let a: Vec<u64> = (0..la).map(|_| rng(&mut s) % n).collect();
+                let b: Vec<u64> = (0..lb).map(|_| rng(&mut s) % n).collect();
+                assert_eq!(mul_mod_in(&a, &b, &m, &lt), naive_mod(&a, &b, &m), "n={n} {la}x{lb}");
+                assert_eq!(mul_mod_in(&a, &a, &m, &lt), naive_mod(&a, &a, &m));
+            }
+            // (other tests may use the cache meanwhile: only this thread's
+            // calls are certain, so the count cannot have gone down)
+            assert!(cache_stats().0 >= calls);
         }
     }
 

@@ -302,7 +302,7 @@ pub fn factor_squarefree(fld: &QuadField, f: &[QElt], root_bound: &BigInt) -> Re
         }
         let bound = root_bound + &wb * BigInt::from(k.abs());
         let mut out = vec![];
-        for (h, e) in sagebrush_poly::factor(&n).1 {
+        for (h, e) in sagebrush_poly::try_factor(&n).map_err(|e| e.to_string())?.1 {
             if e != 1 {
                 return Err("the norm is not squarefree".into());
             }
@@ -398,5 +398,15 @@ mod tests {
         // x^2 - 2 splits over Q(sqrt 2)
         let f = QuadField::new(2).unwrap();
         assert_eq!(factor_squarefree(&f, &[q(-2, 0), q(0, 0), q(1, 0)], &BigInt::from(3)).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn factor_refusal_is_an_error() {
+        let f = QuadField::new(2).unwrap();
+        let g = [q(-2, 0), q(0, 0), q(1, 0)];
+        let tight = sagebrush_poly::Limits { max_degree: 0, ..sagebrush_poly::Limits::DEFAULT };
+        let e = sagebrush_poly::with_default_limits(tight, || factor_squarefree(&f, &g, &BigInt::from(3))).unwrap_err();
+        assert!(e.starts_with("factor: resource limit exceeded"), "{}", e);
+        assert_eq!(factor_squarefree(&f, &g, &BigInt::from(3)).unwrap().len(), 2);
     }
 }
