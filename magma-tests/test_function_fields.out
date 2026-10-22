@@ -1,0 +1,89 @@
+true
+true
+c
+c
+c
+t
+FldFunRat
+FldFunRatUElt
+true
+true
+true
+true
+true
+true
+true
+Univariate rational function field over Rational Field
+Variables: c
+Rational Field
+Rational Field
+Rational Field
+Univariate Polynomial Ring in t over Rational Field
+0
+(c^2 + 1)/(c - 1)
+t^2 + 1
+t - 1
+2
+3
+5
+(c^2 - 2*c - 1)/(c^2 - 2*c + 1)
+6*c
+c/(c - 1)
+c
+1/2
+3*c^2 + 2*c + 1
+Univariate rational function field over GF(5)
+Variables: x
+FldFunRat
+FldFunRatUElt
+Finite field of size 5
+Finite field of size 5
+Finite field of size 5
+Univariate Polynomial Ring in u over GF(5)
+5
+true
+(x + 1)/(x^2 + 1)
+u + 1
+u^2 + 1
+(4*x^2 + 3*x + 1)/(x^4 + 2*x^2 + 1)
+3
+x/(x + 4)
+true
+true
+n
+n
+n
+z
+Univariate rational function field over Integer Ring
+Variables: n
+Integer Ring
+Integer Ring
+Univariate Polynomial Ring in z over Integer Ring
+0
+1
+2
+n/(n - 1)
+[
+    <y^4 + 2*y^3 - y - 2, 1, 467/196*y^3 + 1371/196*y^2 + 1391/196*y + 234/49>,
+    <y^2 - y - 2, 1, -271/196*y + 505/98>,
+    <y^2 - y - 2, 2, 271/14*y + 139/7>
+]
+true
+[
+    <y - 2, 1, -3683/2646>,
+    <y - 2, 2, 410/63>,
+    <y - 1, 1, 85/36>,
+    <y + 1, 1, 1/108>,
+    <y + 1, 2, 1/18>,
+    <y + 2, 1, 1/18>,
+    <y^2 + y + 1, 1, -5/147*y - 8/147>
+]
+true
+[
+    <q^2 - 1, 1, 1>
+]
+[
+    <2*q - 2, 1, 1>,
+    <2*q + 2, 1, -1>
+]
+end
