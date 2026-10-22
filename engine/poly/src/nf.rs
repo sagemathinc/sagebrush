@@ -31,7 +31,7 @@
 //!   bounding the roots of T (Cauchy).
 //! * factor() checks its result by multiplying it back.
 
-use super::{factor as zfactor, fdivrem, fgcd, fmul, ftrim, finv, FPoly};
+use super::{fdivrem_u as fdivrem, fgcd_u as fgcd, fmul_u as fmul, ftrim, finv, try_factor, FPoly};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -340,7 +340,7 @@ impl Field {
         if t.len() < 2 || !t.last().unwrap().is_one() {
             return Err("the defining polynomial must be monic of degree >= 1".into());
         }
-        if !super::is_irreducible(&t) {
+        if !super::try_is_irreducible(&t).map_err(|e| e.to_string())? {
             return Err("the defining polynomial must be irreducible".into());
         }
         let n = t.len() - 1;
@@ -659,7 +659,7 @@ impl Field {
             if !certified_squarefree(&nrm) {
                 continue;
             }
-            let (_, fs) = zfactor(&nrm);
+            let (_, fs) = try_factor(&nrm).map_err(|e| e.to_string())?;
             if fs.len() == 1 {
                 return Ok(vec![h.clone()]);
             }

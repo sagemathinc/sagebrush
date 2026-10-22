@@ -89,7 +89,7 @@ fn hermite(a: &QPoly, d: &QPoly) -> (Vec<(QPoly, QPoly, u32)>, QPoly, QPoly) {
 
 /// The integral of a/d, d monic and square-free, deg a < deg d.
 fn log_part(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
-    let factors = d.factor();
+    let factors = d.try_factor().ok()?;
     // x^n + c with an irreducible factor beyond the quadratics (x^5 - 1):
     // the roots of the whole binomial at once
     if factors.iter().any(|(f, _)| f.deg() > 2) && (1..d.deg() as usize).all(|k| d.coeff(k).is_zero()) {
@@ -169,7 +169,7 @@ fn rothstein_trager(a: &QPoly, d: &QPoly, x: &Expr) -> Option<Expr> {
     let vals: Vec<Q> = pts.iter().map(|t| d.resultant(&a.sub(&dd.scale(t)))).collect();
     let rt = interpolate(&pts, &vals);
     let mut out = vec![];
-    for (f, _) in rt.factor() {
+    for (f, _) in rt.try_factor().ok()? {
         if f.deg() != 1 {
             return None;
         }
