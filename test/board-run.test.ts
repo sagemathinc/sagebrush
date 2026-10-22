@@ -39,7 +39,8 @@ test("board run: what fails, says why, and what reads it is not run; the others 
   assert.equal(item(report, "a").stdout, "42\n");
   assert.match(item(report, "b").error, /ZeroDivisionError/);
   assert.match(item(report, "c").error, /item 2 "Raises", which it depends on, raised an error/);
-  assert.match(item(report, "d").error, /^SyntaxError/);
+  // (with where it is, as CPython's: the line and a caret under it)
+  assert.match(item(report, "d").error, /^File "<cell>", line 1\n {4}def f\(:\n {10}\^\nSyntaxError: invalid syntax$/);
   assert.match(item(report, "h").error, /ran out of time: stopped after 2 s[\s\S]*KeyboardInterrupt/);
   assert.match(item(report, "k").error, /item 5 "Forever", which it depends on, ran out of time/);
   assert.equal(item(report, "j").stdout, "43\n", "a last expression's value, as the board shows it");
