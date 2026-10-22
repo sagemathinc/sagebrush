@@ -6,12 +6,14 @@ import { join } from "node:path";
 // engine/web's GF(p) ops (nmod_echelon, nmod_poly_mul, nmod_poly_divrem,
 // nmod_poly_gcd: engine/web/src/nmod_ops.rs) through the real WebAssembly
 // ABI (sb_alloc, sb_call, sb_free):
-// - each op's largest admitted request, after a large reply from another
-//   op is left in the reply buffer, grows the instance's memory by less
-//   than the op's closed-form peak (8, 12, 14, 2 MiB) with a quarter of
-//   allocator headroom: the previous reply is freed at entry;
-// - the shared transform cache, filled by other ops first, is neither used
-//   nor grown by them, and 100 NTT primes in a row do not grow memory;
+// - each op's largest admitted request, right after a reply from another
+//   op longer than any nmod reply (> 20 * 400 * 401 bytes), grows the
+//   instance's memory by less than the op's closed-form peak (8, 12, 14,
+//   2 MiB) with a quarter of allocator headroom: the previous reply is
+//   freed at entry;
+// - the shared transform cache, filled by other ops to its 64-table policy
+//   and to its 2^28-byte policy, is neither used nor changed by them, and
+//   100 NTT primes in a row do not grow memory;
 // - Stop: the host's interrupt flag is asked at least once per 2^16
 //   multiply-adds, and a Stop at the middle of a run traps;
 // - the caps, at the cap and one past it.
@@ -76,40 +78,82 @@ function stats(e: any): number[] {
   return JSON.parse(call(e, '{"fn":"ntt_cache_stats"}')).ok;
 }
 
-// fill the shared transform cache through integer polynomial products
-function fillCache(e: any) {
-  for (const len of [100, 1000, 5000, 20000]) {
-    const a = Array.from({ length: len }, () => `"${rand(1n << 62n)}${rand(1n << 62n)}"`).join(",");
-    const r = call(e, `{"fn":"poly_mul","a":[${a}],"b":[${a}]}`);
-    assert.ok(r.startsWith('{"ok"'), r.slice(0, 200));
-  }
+const digits = (k: number) => Array.from({ length: k }, () => String(rand(10n ** 19n)).padStart(19, "0")).join("");
+
+// Both fills are integer polynomial products (another op) whose replies
+// are longer than any nmod reply can be (20 bytes for each of the 400 * 401
+// echelon entries, about 3.2 MB), so each leaves the shared cache at a
+// policy limit AND a maximal prior reply in the reply buffer.
+const LONGEST_NMOD_REPLY = 20 * 400 * 401;
+
+// the table-count policy (64 tables): 1400 x 1400 coefficients of 608
+// digits, whose multimodular path needs 67 primes; a reply of about 3.4 MB
+const COUNT_FILL = (() => {
+  const a = Array.from({ length: 1400 }, () => digits(32)).join(",");
+  return `{"fn":"poly_mul","a":"${a}","b":"${a}","wire":"csv"}`;
+})();
+function fillCount(e: any) {
+  const n = call(e, COUNT_FILL).length;
+  assert.ok(n > LONGEST_NMOD_REPLY, `the prior reply has ${n} bytes`);
+  assert.equal(stats(e)[1], 64, "the shared cache at its 64-table policy");
+}
+
+// the byte policy (2^28 bytes): a product of length 2^20 (32 MiB tables)
+// needing 9 primes leaves 8 tables; a reply of about 180 MB
+const BYTE_FILL = (() => {
+  const a = Array.from({ length: 1 << 19 }, () => digits(4) + "7").join(",");
+  return `{"fn":"poly_mul","a":"${a}","b":"${a}","wire":"csv"}`;
+})();
+function fillBytes(e: any) {
+  const n = call(e, BYTE_FILL).length;
+  assert.ok(n > LONGEST_NMOD_REPLY, `the prior reply has ${n} bytes`);
+  assert.deepEqual(stats(e).slice(1), [8, 1 << 28], "the shared cache at its 2^28-byte policy");
 }
 
 test("the nmod ops' largest requests stay within their peaks in wasm, after a large reply and a filled cache", (t) => {
   const e0 = instance();
   if (call(e0, preq("gcd", 7n, "1,1", "1")).includes("unknown fn")) return t.skip("this engine build predates the nmod ops");
-  const big = `{"fn":"nmod_echelon","p":"7","rows":400,"cols":401,"m":"${Array(400).fill(Array(401).fill("6").join(",")).join(";")}","reduced":true,"want_rows":true}`;
   const grew: Record<string, number> = {};
-  for (const [label, peak, req] of worst()) {
-    // a fresh instance with a large reply (about 0.8 MB) left in the reply
-    // buffer, then the memory's size: the op may reuse the freed reply,
-    // never add to it
+  const replies: Record<string, string> = {};
+  const cases = worst();
+  // (page growth is the evidence only on an instance that has not grown
+  // for something else first: here after a small seed reply; the exact
+  // live-byte peaks after a maximal prior reply are the native ABI test's,
+  // engine/web/tests/nmod_alloc.rs)
+  const small = `{"fn":"nmod_echelon","p":"7","rows":400,"cols":401,"m":"${Array(400).fill(Array(401).fill("6").join(",")).join(";")}","reduced":true,"want_rows":true}`;
+  for (const [label, peak, req] of cases) {
     const e = instance();
-    assert.ok(call(e, big).startsWith('{"ok":'));
+    assert.ok(call(e, small).startsWith('{"ok":'));
     const before = e.memory.buffer.byteLength;
     const reply = call(e, req);
     grew[label] = e.memory.buffer.byteLength - before;
+    replies[label] = reply;
     assert.ok(reply.startsWith('{"ok":'), `${label}: ${reply.slice(0, 200)}`);
     assert.ok(grew[label] < peak * 1.25, `${label}: grew by ${grew[label]} bytes, peak ${peak}`);
-    // and after other ops filled the shared transform cache: the same
-    // reply, the cache neither used nor grown
-    const f = instance();
-    fillCache(f);
-    const cache = stats(f);
-    assert.equal(call(f, req), reply, label);
-    assert.deepEqual(stats(f), cache, `${label}: the shared cache`);
   }
   console.log(`nmod ops wasm: grew ${JSON.stringify(grew)} bytes`);
+  // with the shared cache at its 64-table policy and a prior reply past
+  // every nmod reply: the same replies, the cache unchanged, no growth
+  // past the op's peak
+  for (const [label, peak, req] of cases) {
+    const e = instance();
+    fillCount(e);
+    const cache = stats(e);
+    const before = e.memory.buffer.byteLength;
+    assert.ok(call(e, req) === replies[label], `${label}: a different reply with the cache at its count policy`);
+    assert.ok(e.memory.buffer.byteLength - before < peak * 1.25, label);
+    assert.deepEqual(stats(e), cache, `${label}: the shared cache at its count policy`);
+  }
+  // and with the cache at its byte policy (one long-lived instance, every
+  // op right after the fill): the same replies, the cache unchanged
+  const f = instance();
+  for (const [label, , req] of cases) {
+    fillBytes(f);
+    const cache = stats(f);
+    // (compared without printing megabytes on a failure)
+    assert.ok(call(f, req) === replies[label], `${label}: a different reply with the cache at its byte policy`);
+    assert.deepEqual(stats(f), cache, `${label}: the shared cache at its byte policy`);
+  }
 });
 
 function isPrime(n: bigint): boolean {
@@ -142,7 +186,7 @@ function isPrime(n: bigint): boolean {
 test("100 NTT primes in a row: no memory growth, the shared cache untouched", (t) => {
   const e = instance();
   if (call(e, preq("gcd", 7n, "1,1", "1")).includes("unknown fn")) return t.skip("this engine build predates the nmod ops");
-  fillCache(e);
+  fillCount(e);
   const primes: bigint[] = [];
   for (let c = 1n << 21n; primes.length < 100; c++) if (isPrime((c << 20n) + 1n)) primes.push((c << 20n) + 1n);
   const run = (p: bigint) => {
