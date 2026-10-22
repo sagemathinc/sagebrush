@@ -69,8 +69,13 @@ fn checked_factor_signed(factor: Factorer, f: &[BigInt]) -> Result<Vec<(Vec<BigI
             prod = poly_mul_z(&prod, g);
         }
     }
-    if prod != f || fs.iter().any(|(g, _)| g.len() > 2 && !sagebrush_poly::is_irreducible(g)) {
+    if prod != f {
         return Err("the factor callback did not return an irreducible factorization".into());
+    }
+    for (g, _) in &fs {
+        if g.len() > 2 && !sagebrush_poly::try_is_irreducible(g).map_err(|e| e.to_string())? {
+            return Err("the factor callback did not return an irreducible factorization".into());
+        }
     }
     Ok(fs)
 }

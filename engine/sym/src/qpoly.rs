@@ -205,16 +205,22 @@ impl QPoly {
         }
         out
     }
-    /// Irreducible factors over Q, monic, with multiplicities.
-    pub fn factor(&self) -> Vec<(QPoly, u32)> {
+    /// Irreducible factors over Q, monic, with multiplicities; a resource
+    /// refusal is an error.
+    pub fn try_factor(&self) -> Result<Vec<(QPoly, u32)>, sagebrush_poly::FactorLimit> {
         if self.deg() <= 0 {
-            return vec![];
+            return Ok(vec![]);
         }
         let (_, z) = crate::poly::to_zpoly(&self.0);
-        let (_, fs) = sagebrush_poly::factor(&z);
-        fs.into_iter()
+        let (_, fs) = sagebrush_poly::try_factor(&z)?;
+        Ok(fs.into_iter()
             .map(|(g, e)| (QPoly::new(g.into_iter().map(Q::from_integer).collect()).monic(), e))
-            .collect()
+            .collect())
+    }
+    /// [`QPoly::try_factor`] where there is no error channel: a refusal
+    /// panics (the bindings report it as an error, never as a result).
+    pub fn factor(&self) -> Vec<(QPoly, u32)> {
+        self.try_factor().unwrap_or_else(|e| panic!("{e}"))
     }
     pub fn to_expr(&self, x: &Expr) -> Expr {
         add(self.0.iter().enumerate().map(|(k, c)| mul2(&qnum(c.clone()), &pow(x, &int(k as i64)))).collect())
