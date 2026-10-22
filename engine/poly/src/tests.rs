@@ -213,6 +213,40 @@ fn limits_refuse_and_never_return_a_residual() {
     assert_eq!(b.live(), 0);
 }
 
+/// Bytes this thread allocates while running `f`.
+fn allocated_by<T>(f: impl FnOnce() -> T) -> (T, u64) {
+    let before = crate::alloc_spy::allocated();
+    let r = f();
+    (r, crate::alloc_spy::allocated() - before)
+}
+
+#[test]
+fn refusals_come_before_allocations() {
+    // a large input (degree 5000, 2000-bit coefficients: over a megabyte
+    // when copied) under a 64 KiB budget: refused before its copy exists
+    let mut seed = 99u64;
+    let f = random_poly(&mut seed, 5000, 60).into_iter().map(|c| c << 1940u32).collect::<Vec<_>>();
+    let b = Budget::new(Limits { memory: 64 << 10, ..Limits::DEFAULT });
+    let (r, used) = allocated_by(|| try_factor_with(&f, &b));
+    assert_eq!(r.unwrap_err().what, "memory");
+    assert!(used < 8 << 10, "public copy: {} bytes before refusing", used);
+    // exact division and pseudo-remainder: their working copies refused
+    // before they are made
+    let x = random_poly(&mut seed, 3000, 60).into_iter().map(|c| c << 900u32).collect::<Vec<_>>();
+    let y = z(&[3, 1]);
+    let b = Budget::new(Limits { memory: 4 << 10, ..Limits::DEFAULT });
+    let (r, used) = allocated_by(|| divexact(&b, &x, &y).map(|q| q.is_some()));
+    assert_eq!(r.unwrap_err().what, "memory");
+    assert!(used < 1024, "divexact: {} bytes before refusing", used);
+    let (r, used) = allocated_by(|| prem(&b, &x, &y).map(|q| q.len()));
+    assert_eq!(r.unwrap_err().what, "memory");
+    assert!(used < 1024, "prem: {} bytes before refusing", used);
+    let (r, used) = allocated_by(|| prim(&b, &x).map(|q| q.len()));
+    assert_eq!(r.unwrap_err().what, "memory");
+    assert!(used < 1024, "prim: {} bytes before refusing", used);
+    assert_eq!(b.live(), 0);
+}
+
 #[test]
 fn work_is_aggregate_across_square_free_parts() {
     // S_4^2 * S_4(x + 1): two square-free parts; find the work one part

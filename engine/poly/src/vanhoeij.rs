@@ -75,7 +75,9 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
     let n = deg(g);
     let p = m.p;
     let pbits = 64 - (p - 1).leading_zeros() as u64; // ceil(log2 p) for p >= 3
-    // the modular factors of g mod p, in the order of rest0 (for relifting)
+    // the modular factors of g mod p, in the order of rest0 (for relifting):
+    // n words and r headers, reserved first
+    let _modfs = b.reserve(crate::budget::words_bytes(2 * (n as u64 + r as u64 + 1)))?;
     let modfs: Vec<FPoly> = rest0.iter().map(|u| u.iter().map(|c| c.mod_floor(&BigInt::from(p)).to_u64().unwrap()).collect()).collect();
     let bounds = cld_bounds(b, g)?;
     // the basis: rows (indicator part | auxiliary columns); starts as I_r
@@ -99,6 +101,8 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             };
             lifted_here = {
                 let _p = b.enter(Phase::Hensel);
+                // the F_p[x] temporaries of the factor tree, as in lift()
+                let _w = b.reserve(crate::budget::words_bytes((4 * (clog2(r as u64) + 1) + 8) * (n as u64 + 1)))?;
                 hensel(b, &gl, &modfs, p, a)?
             };
             &lifted_here
@@ -127,13 +131,14 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
             if want.is_empty() {
                 break;
             }
+            // the c_ij of these columns (values below p^a), reserved before
+            // cld_columns builds them, held until the pass ends
+            let _cld = b.reserve(rows_bytes(want.len(), r, pa.bits()))?;
             let cld = {
                 let _p = b.enter(Phase::Cld);
                 cld_columns(b, g, us, &pa, &want)?
             };
             let mut added = 0;
-            // the cld values, held until the pass ends
-            let _cld = b.reserve(rows_bytes(want.len(), r, pa.bits()))?;
             {
                 let _p = b.enter(Phase::Lattice);
                 // room for the rows with every new column, before appending:
@@ -165,6 +170,7 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> 
                     if &modulus * &modulus <= nb {
                         continue;
                     }
+                    let _q = b.reserve(rows_bytes(1, r, pa.bits()))?;
                     let q: Vec<BigInt> = cld[t].iter().map(|c| c.div_floor(&scale)).collect();
                     // append: each row (u | aux) gets sum u_i q_i; then the modulus row
                     b.debit(mul_work(rows.len() as u64, maxbits(&q), r as u64, 64))?;
@@ -266,12 +272,13 @@ fn certify<'b>(b: &'b Budget, g: &[BigInt], us: &[Held<'b>], pa: &BigInt, rows: 
     }
     // the rows are independent iff the s x s matrix of class representatives
     // is nonsingular: fraction-free (Bareiss) elimination, bits checked
-    let mut a: Vec<Vec<BigInt>> = rows.iter().map(|x| classes.iter().map(|c| x[c[0]].clone()).collect()).collect();
-    let mut prev = BigInt::one();
-    let entry = a.iter().map(|x| maxbits(x)).max().unwrap_or(0);
+    let entry = rows.iter().map(|x| classes.iter().map(|c| x[c[0]].bits()).max().unwrap_or(0)).max().unwrap_or(0);
     // Hadamard: every Bareiss value is a minor, at most s (entry + log2 s) bits
     let cap = (s as u64).checked_mul(entry + clog2(s as u64) + 1).ok_or_else(|| b.refuse("echelon bits (overflow)", u64::MAX, 0))? + 64;
+    // (the s x s matrix and its values, reserved before it is built)
     let _e = b.reserve(poly_bytes((s * s) as u64, cap))?;
+    let mut a: Vec<Vec<BigInt>> = rows.iter().map(|x| classes.iter().map(|c| x[c[0]].clone()).collect()).collect();
+    let mut prev = BigInt::one();
     for k in 0..s {
         let piv = (k..s).find(|&i| !a[i][k].is_zero());
         let Some(pi) = piv else { return Ok(None) };
@@ -347,6 +354,26 @@ fn root_exp(a: &[BigInt]) -> i64 {
     }
 }
 
+/// root_exp of the reverse of a (no copy).
+fn root_exp_rev(a: &[BigInt]) -> i64 {
+    let n = a.len() - 1;
+    let ln = a[0].bits() as i64 - 1;
+    let mut t = i64::MIN;
+    for k in 1..=n {
+        let c = &a[k];
+        if c.is_zero() {
+            continue;
+        }
+        let num = c.bits() as i64 - ln;
+        t = t.max(Integer::div_ceil(&num, &(k as i64)));
+    }
+    if t == i64::MIN {
+        0
+    } else {
+        t
+    }
+}
+
 /// The bounds B_j (section 3.1): n min(sum_{k>j} |a_k| R^(k-j-1),
 /// sum_{k<=j} |a_k| rho^(k-j-1)), R = 2^(t+1) above every root, rho =
 /// 2^-(t'+1) below every root (t' from the reverse; a_0 != 0).
@@ -354,10 +381,12 @@ fn cld_bounds(b: &Budget, g: &[BigInt]) -> FResult<Vec<BigInt>> {
     let _p = b.enter(Phase::Cld);
     let n = g.len() - 1;
     b.debit((n as u64 + 1).checked_mul(n as u64 + 1).and_then(|x| x.checked_mul(limbs(maxbits(g) + 2 * n as u64))))?;
-    let _r = b.reserve(poly_bytes(n as u64, maxbits(g) + 64 * n as u64))?;
     let t = root_exp(g) + 1;
-    let rev: Vec<BigInt> = g.iter().rev().cloned().collect();
-    let tr = root_exp(&rev) + 1;
+    let tr = root_exp_rev(g) + 1;
+    // the two vectors (absolute values, bounds): a bound is a
+    // sum of n + 1 terms |a_k| 2^(e) with e <= (|t| + |tr|) n
+    let ebits = (t.unsigned_abs() + tr.unsigned_abs()).checked_mul(n as u64 + 1).and_then(|e| e.checked_add(maxbits(g) + clog2(n as u64 + 2) + 2 * clog2(n as u64 + 2) + 2));
+    let _r = b.reserve(ebits.and_then(|e| poly_bytes(2 * (n as u64 + 1), e)))?;
     let abs: Vec<BigInt> = g.iter().map(|c| c.abs()).collect();
     let nn = BigInt::from(n as u64);
     let mut out = vec![];
@@ -530,6 +559,26 @@ pub(crate) mod tests {
                 assert_eq!(cols[j][i], full.get(j).cloned().unwrap_or_default());
             }
         }
+    }
+
+    #[test]
+    fn cld_columns_refuse_before_allocating() {
+        // a budget too small for the prefix tables: refused before they
+        // exist (the counting allocator of lib.rs's tests)
+        let b = Budget::default();
+        let m = BigInt::from(7).pow(200);
+        let us: Vec<Held> = (0..40).map(|i| Held::copy(&b, &[BigInt::from(i), BigInt::from(3), BigInt::one()]).unwrap()).collect();
+        let mut g = vec![BigInt::one()];
+        for u in &us {
+            g = zmul(&b, &g, u).unwrap().into_vec();
+        }
+        let small = Budget::new(crate::Limits { memory: 4096, ..crate::Limits::DEFAULT });
+        let want: Vec<usize> = (0..8).collect();
+        let before = crate::alloc_spy::allocated();
+        let e = cld_columns(&small, &g, &us, &m, &want).err().unwrap();
+        let used = crate::alloc_spy::allocated() - before;
+        assert_eq!(e.what, "memory");
+        assert!(used < 1024, "allocated {} bytes before refusing", used);
     }
 
     #[test]

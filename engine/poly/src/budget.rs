@@ -97,8 +97,9 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// Calibrated on VM 1 (see the PR): about 60 s native for the worst
-    /// admitted call.
+    /// Provisional: the work constant awaits the VM 1 calibration (native
+    /// and wasm, from the slowest measured throughput per charged unit),
+    /// which will pin it with a test; no wall-clock bound is claimed yet.
     pub const DEFAULT: Limits = Limits {
         work: 1 << 36,
         memory: 512 << 20,
@@ -297,9 +298,10 @@ pub fn big_bytes(bits: u64) -> Option<u64> {
 }
 
 /// Bytes charged for a vector of `len` big integers of `bits` bits each
-/// (twice the length: capacity doubling while pushing).
+/// (twice the length: capacity doubling while pushing), plus its header
+/// and the slot of a reservation-carrying holder in an outer vector.
 pub fn poly_bytes(len: u64, bits: u64) -> Option<u64> {
-    len.checked_mul(2)?.checked_mul(big_bytes(bits)?)?.checked_add(24)
+    len.checked_mul(2)?.checked_mul(big_bytes(bits)?)?.checked_add(64)
 }
 
 /// Bytes charged for a vector of `len` words.
