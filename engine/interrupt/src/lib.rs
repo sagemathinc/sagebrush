@@ -62,6 +62,8 @@ pub fn requested() -> bool {
 #[inline]
 pub fn check() {
     poll_host();
+    #[cfg(feature = "test-hooks")]
+    hooks::count();
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -72,8 +74,181 @@ pub fn check() {
 #[inline]
 pub fn check_coarse() {
     poll_host_now();
+    #[cfg(feature = "test-hooks")]
+    hooks::count();
     if REQUESTED.load(Relaxed) {
         interrupt()
+    }
+}
+
+/// Names the phase of a computation that the following checks belong to
+/// (for the tests' phase-targeted Stop, feature `test-hooks`; otherwise
+/// nothing).
+#[inline]
+pub fn phase(_name: &'static str) {
+    #[cfg(feature = "test-hooks")]
+    hooks::set_phase(_name);
+}
+
+/// The phase `name` until the returned guard drops, then the previous one
+/// again (nested computations: a product inside a division).
+#[inline]
+pub fn enter(_name: &'static str) -> PhaseGuard {
+    #[cfg(feature = "test-hooks")]
+    {
+        let prev = hooks::current();
+        hooks::set_phase(_name);
+        PhaseGuard { prev }
+    }
+    #[cfg(not(feature = "test-hooks"))]
+    PhaseGuard {}
+}
+
+/// See [`enter`].
+pub struct PhaseGuard {
+    #[cfg(feature = "test-hooks")]
+    prev: &'static str,
+}
+
+#[cfg(feature = "test-hooks")]
+impl Drop for PhaseGuard {
+    fn drop(&mut self) {
+        hooks::set_phase(self.prev);
+    }
+}
+
+/// Test hooks (feature `test-hooks`, for tests only): every check is
+/// counted, per phase; [`hooks::arm_after`] requests Stop at the k-th check
+/// from now, so a test can interrupt a chosen phase of a computation.
+#[cfg(feature = "test-hooks")]
+pub mod hooks {
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+
+    const MAX_PHASES: usize = 32;
+    static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    static CURRENT: AtomicUsize = AtomicUsize::new(0);
+    static COUNTS: [AtomicU64; MAX_PHASES] = [const { AtomicU64::new(0) }; MAX_PHASES];
+    static TOTAL: AtomicU64 = AtomicU64::new(0);
+    static ARMED: AtomicU64 = AtomicU64::new(0);
+    static STOPPED: AtomicUsize = AtomicUsize::new(0);
+    static TRACING: AtomicBool = AtomicBool::new(false);
+    static TRACE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    static MAX_GAP_NS: AtomicU64 = AtomicU64::new(0);
+
+    fn now_ns() -> u64 {
+        static START: OnceLock<Instant> = OnceLock::new();
+        START.get_or_init(Instant::now).elapsed().as_nanos() as u64
+    }
+
+    pub(crate) fn count() {
+        let cur = CURRENT.load(Relaxed);
+        COUNTS[cur].fetch_add(1, Relaxed);
+        let t = TOTAL.fetch_add(1, Relaxed) + 1;
+        if TRACING.load(Relaxed) {
+            TRACE.lock().unwrap_or_else(|e| e.into_inner()).push(cur as u8);
+            let n = now_ns();
+            let last = LAST_NS.swap(n, Relaxed);
+            if last != 0 {
+                MAX_GAP_NS.fetch_max(n - last, Relaxed);
+            }
+        }
+        let a = ARMED.load(Relaxed);
+        if a != 0 && t >= a && !super::REQUESTED.load(Relaxed) {
+            STOPPED.store(cur, Relaxed);
+            super::request();
+        }
+    }
+
+    /// Record the phase of every check (and the longest time between two
+    /// checks) until [`reset`].
+    pub fn trace() {
+        TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        LAST_NS.store(0, Relaxed);
+        MAX_GAP_NS.store(0, Relaxed);
+        TRACING.store(true, Relaxed);
+    }
+
+    /// The (1-based) indices of the traced checks made in phase `name`.
+    pub fn traced(name: &str) -> Vec<u64> {
+        let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(i) = names.iter().position(|&n| n == name) else { return vec![] };
+        let tr = TRACE.lock().unwrap_or_else(|e| e.into_inner());
+        tr.iter().enumerate().filter(|x| *x.1 as usize == i + 1).map(|x| x.0 as u64 + 1).collect()
+    }
+
+    /// The longest wall time between two traced checks, in nanoseconds.
+    pub fn max_gap_ns() -> u64 {
+        MAX_GAP_NS.load(Relaxed)
+    }
+
+    /// The phase that was current when an armed Stop was requested.
+    pub fn stopped_in() -> &'static str {
+        let i = STOPPED.load(Relaxed);
+        if i == 0 {
+            return "";
+        }
+        NAMES.lock().unwrap_or_else(|e| e.into_inner()).get(i - 1).copied().unwrap_or("")
+    }
+
+    pub(crate) fn set_phase(name: &'static str) {
+        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let i = match names.iter().position(|&n| n == name) {
+            Some(i) => i,
+            None if names.len() + 1 < MAX_PHASES => {
+                names.push(name);
+                names.len() - 1
+            }
+            None => MAX_PHASES - 2,
+        };
+        // (index 0 of COUNTS is shared by "no phase" and the first name:
+        // names start at 1)
+        CURRENT.store(i + 1, Relaxed);
+    }
+
+    /// Forget the counts, the phase and any arming.
+    pub fn reset() {
+        CURRENT.store(0, Relaxed);
+        TOTAL.store(0, Relaxed);
+        ARMED.store(0, Relaxed);
+        STOPPED.store(0, Relaxed);
+        TRACING.store(false, Relaxed);
+        for c in COUNTS.iter() {
+            c.store(0, Relaxed);
+        }
+    }
+
+    /// Request Stop at the k-th check from now (k >= 1).
+    pub fn arm_after(k: u64) {
+        ARMED.store(TOTAL.load(Relaxed) + k.max(1), Relaxed);
+    }
+
+    /// Request Stop at the check with this (1-based) index since the last
+    /// reset.
+    pub fn arm_at(index: u64) {
+        ARMED.store(index.max(1), Relaxed);
+    }
+
+    /// The checks counted since the last reset.
+    pub fn total() -> u64 {
+        TOTAL.load(Relaxed)
+    }
+
+    /// The current phase's name ("" before any).
+    pub fn current() -> &'static str {
+        let i = CURRENT.load(Relaxed);
+        if i == 0 {
+            return "";
+        }
+        NAMES.lock().unwrap_or_else(|e| e.into_inner()).get(i - 1).copied().unwrap_or("")
+    }
+
+    /// The checks counted in each named phase since the last reset.
+    pub fn counts() -> Vec<(&'static str, u64)> {
+        let names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        names.iter().enumerate().map(|(i, &n)| (n, COUNTS[i + 1].load(Relaxed))).filter(|x| x.1 > 0).collect()
     }
 }
 
