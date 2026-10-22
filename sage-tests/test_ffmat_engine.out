@@ -1,0 +1,924 @@
+p = 2
+1 1 0 () Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 2
+[0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 1 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1]
+left kernel Vector space of degree 1 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1]
+2 2 1 (0,) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[1 0]
+[0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 2 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[0 1]
+left kernel Vector space of degree 2 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1 0]
+3 3 0 () Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 2
+[0 0 0]
+[0 0 0]
+[0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 3 over Finite Field of size 2
+Basis matrix:
+[1 0 0]
+[0 1 0]
+[0 0 1]
+left kernel Vector space of degree 3 and dimension 3 over Finite Field of size 2
+Basis matrix:
+[1 0 0]
+[0 1 0]
+[0 0 1]
+3 5 1 (0,) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 2
+[1 0 1 0 1]
+[0 0 0 0 0]
+[0 0 0 0 0]
+right kernel Vector space of degree 5 and dimension 4 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0 1]
+[0 1 0 0 0]
+[0 0 1 0 1]
+[0 0 0 1 0]
+left kernel Vector space of degree 3 and dimension 2 over Finite Field of size 2
+Basis matrix:
+[1 0 0]
+[0 0 1]
+5 3 1 (0,) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 2
+[1 0 1]
+[0 0 0]
+[0 0 0]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 2 over Finite Field of size 2
+Basis matrix:
+[1 0 1]
+[0 1 0]
+left kernel Vector space of degree 5 and dimension 4 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0 0]
+[0 1 0 1 0]
+[0 0 1 0 0]
+[0 0 0 0 1]
+4 6 0 () Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 2
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+right kernel Vector space of degree 6 and dimension 6 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0 0 0]
+[0 1 0 0 0 0]
+[0 0 1 0 0 0]
+[0 0 0 1 0 0]
+[0 0 0 0 1 0]
+[0 0 0 0 0 1]
+left kernel Vector space of degree 4 and dimension 4 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 1 0]
+[0 0 0 1]
+6 6 0 () Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 2
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 6 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0 0 0]
+[0 1 0 0 0 0]
+[0 0 1 0 0 0]
+[0 0 0 1 0 0]
+[0 0 0 0 1 0]
+[0 0 0 0 0 1]
+left kernel Vector space of degree 6 and dimension 6 over Finite Field of size 2
+Basis matrix:
+[1 0 0 0 0 0]
+[0 1 0 0 0 0]
+[0 0 1 0 0 0]
+[0 0 0 1 0 0]
+[0 0 0 0 1 0]
+[0 0 0 0 0 1]
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (0, 0, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[1 0 0 0]
+Vector space of degree 4 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1 0 1 0]
+True False
+30 30 2 2 975 0
+40 25 0 0 0 -
+25 60 0 0 0 -
+60 60 0 0 0 0
+p = 3
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 3
+[1]
+det 1 True
+inverse [1]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 3
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 3
+Basis matrix:
+[]
+2 2 1 (0,) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3
+[1 2]
+[0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 2 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[1 1]
+left kernel Vector space of degree 2 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[0 1]
+3 3 2 (0, 2) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 3
+[1 1 0]
+[0 0 1]
+[0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[1 2 0]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[1 1 0]
+3 5 2 (0, 1) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 3
+[1 0 1 0 1]
+[0 1 0 1 0]
+[0 0 0 0 0]
+right kernel Vector space of degree 5 and dimension 3 over Finite Field of size 3
+Basis matrix:
+[1 0 0 0 2]
+[0 1 0 2 0]
+[0 0 1 0 2]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[0 1 0]
+5 3 2 (0, 1) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 3
+[1 0 1]
+[0 1 0]
+[0 0 0]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 3
+Basis matrix:
+[1 0 2]
+left kernel Vector space of degree 5 and dimension 3 over Finite Field of size 3
+Basis matrix:
+[1 0 0 2 0]
+[0 1 0 0 0]
+[0 0 0 0 1]
+4 6 2 (0, 2) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 3
+[1 1 0 0 2 2]
+[0 0 1 1 2 2]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 3
+Basis matrix:
+[1 0 0 1 0 1]
+[0 1 0 1 0 1]
+[0 0 1 2 0 0]
+[0 0 0 0 1 2]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 3
+Basis matrix:
+[1 0 0 2]
+[0 1 0 1]
+6 6 2 (0, 2) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 3
+[1 0 0 2 2 1]
+[0 0 1 1 2 2]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 3
+Basis matrix:
+[1 0 0 0 2 1]
+[0 1 0 0 0 0]
+[0 0 1 0 2 2]
+[0 0 0 1 0 1]
+left kernel Vector space of degree 6 and dimension 4 over Finite Field of size 3
+Basis matrix:
+[1 0 0 0 0 0]
+[0 1 0 0 2 0]
+[0 0 1 0 0 2]
+[0 0 0 1 0 0]
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (0, 2, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 3
+Basis matrix:
+[1 0 0 2]
+[0 1 2 0]
+True False
+30 30 2 2 975 0
+40 25 1 1 467 -
+25 60 2 2 4450 -
+60 60 1 1 2230 0
+p = 7
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 7
+[1]
+det 4 True
+inverse [2]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+[1 0]
+[0 1]
+det 6 True
+inverse [5 1]
+[2 3]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+3 3 1 (0,) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 7
+[1 4 2]
+[0 0 0]
+[0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 0 3]
+[0 1 5]
+left kernel Vector space of degree 3 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 3 0]
+[0 0 1]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 7
+[1 0 0 1 3]
+[0 1 0 3 5]
+[0 0 1 2 6]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 0 2 3 1]
+[0 1 0 1 2]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 7
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 7
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 0 1 5 2]
+[0 1 2 6 5]
+4 6 2 (0, 3) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 7
+[1 4 2 0 0 4]
+[0 0 0 1 4 5]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 7
+Basis matrix:
+[1 0 0 0 6 5]
+[0 1 0 0 3 6]
+[0 0 1 0 5 3]
+[0 0 0 1 5 0]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 0 5 3]
+[0 1 3 6]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 7
+[1 0 0 0 4 6]
+[0 1 0 0 6 5]
+[0 0 1 0 0 3]
+[0 0 0 1 4 5]
+[0 0 0 0 0 0]
+[0 0 0 0 0 0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 0 2 5 6 4]
+[0 1 1 2 4 2]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 2 0 6 4 0]
+[0 0 1 4 5 2]
+solve (5, 1, 2, 2) True True
+[4 1 5]
+[5 5 1]
+[4 4 1]
+[2 5 3] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (3, 0, 1, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 7
+Basis matrix:
+[1 2 0 3]
+[0 0 1 3]
+True False
+30 30 7 7 16270 0
+40 25 6 6 10669 -
+25 60 7 7 53612 -
+60 60 5 5 44750 0
+p = 65537
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 65537
+[1]
+det 4 True
+inverse [49153]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 65537
+[1 0]
+[0 1]
+det 48 True
+inverse [24577 54614]
+[12288 38230]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+3 3 2 (0, 1) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 65537
+[    1     0 14544]
+[    0     1 61905]
+[    0     0     0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 65537
+Basis matrix:
+[    1 46575 41605]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 65537
+Basis matrix:
+[    1 32768     0]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 65537
+[    1     0     0 51673 17859]
+[    0     1     0 13088 52282]
+[    0     0     1 62461 18551]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0 48540 62519 59007]
+[    0     1  4969 61624 58059]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 65537
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 65537
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0 55260 42859 23957]
+[    0     1 16449  5751 10541]
+4 6 2 (0, 1) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 65537
+[    1     0 14544  8144 46644 56143]
+[    0     1 61905 63517 53940 35373]
+[    0     0     0     0     0     0]
+[    0     0     0     0     0     0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 65537
+Basis matrix:
+[    1     0     0     0 30806 25131]
+[    0     1     0     0 63617   736]
+[    0     0     1     0 58050 19280]
+[    0     0     0     1 20145 15444]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0 52429 26215]
+[    0     1 39321 52430]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 65537
+[    1     0     0     0  6759 27572]
+[    0     1     0     0   773 61000]
+[    0     0     1     0 37843 13695]
+[    0     0     0     1 34422 61982]
+[    0     0     0     0     0     0]
+[    0     0     0     0     0     0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0  6500 18040  6895 50360]
+[    0     1 31727 49599 24409 50975]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0 15615 18702 56191 31204]
+[    0     1  3121 56172 37452  6241]
+solve (26629, 41581, 34367, 13837) True True
+[52493  6923  5038]
+[25501  8241 41902]
+[51189 41231 62331]
+[15313  2547 64401] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (60724, 2431, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 65537
+Basis matrix:
+[    1     0 60850 18696]
+[    0     1 35114 56193]
+True False
+30 30 30 30 12245 8175
+40 25 20 20 1020485627 -
+25 60 25 25 18187967259 -
+60 60 45 45 29683391797 0
+inverse 9588413977 True True
+solve 667430400
+p = 2147483647
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 2147483647
+[1]
+det 4 True
+inverse [536870912]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2147483647
+[1 0]
+[0 1]
+det 48 True
+inverse [1342177280  357913941]
+[1744830463  894784853]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+3 3 2 (0, 1) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 2147483647
+[         1          0 1670265039]
+[         0          1  119304656]
+[         0          0          0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 2147483647
+Basis matrix:
+[         1 1031516021 1218516002]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 2147483647
+Basis matrix:
+[         1 1073741823          0]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 2147483647
+[         1          0          0 1819044986 1970632178]
+[         0          1          0  429496710 1717986770]
+[         0          0          1  404232224 1869574045]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0 1908828331  255637037  871369406]
+[         0          1  532314839  612004675  903096232]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 2147483647
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 2147483647
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0  765836977  455315381 1908486685]
+[         0          1 1711357803  973432881 1784626946]
+4 6 2 (0, 1) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 2147483647
+[         1          0 1670265039  340870242  886261884  988516905]
+[         0          1  119304656  988524279 1925918240 1363483765]
+[         0          0          0          0          0          0]
+[         0          0          0          0          0          0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0          0          0   55645915  520862281]
+[         0          1          0          0    9468300 2136727964]
+[         0          0          1          0  654401201 1413458003]
+[         0          0          0          1  817340842  735188885]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0 1717986917  858993459]
+[         0          1 1288490187 1717986918]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 2147483647
+[         1          0          0          0 1382656339 1863253341]
+[         0          1          0          0  344379192   98536160]
+[         0          0          1          0 1617360744 1250099850]
+[         0          0          0          1 2136223376 1900350153]
+[         0          0          0          0          0          0]
+[         0          0          0          0          0          0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0  744329967  220980189 1188893955 1185187381]
+[         0          1  428298563 1631504854   44003318   39721504]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0  102261137 1840700246 1227133529  204522248]
+[         0          1 1738439143 1227133510 1533916893 1329394638]
+solve (131631851, 2087638206, 1374006531, 648754834) True True
+[ 719493084 1676021464 1686842752]
+[1294870339  144348516  115463276]
+[1975878881 1402014237 1270329061]
+[2074088624 1636929894 1488413910] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (1687308448, 230087624, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 2147483647
+Basis matrix:
+[         1          0 1687308574 1840700240]
+[         0          1 1303829362 1227133531]
+True False
+30 30 30 30 12245 1946448733
+40 25 20 20 33795789160224 -
+25 60 25 25 618317593799643 -
+60 60 45 45 987763577003598 0
+inverse 316422984579278 True True
+solve 22508739924734
+p = 2305843009213693951
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 2305843009213693951
+[1]
+det 4 True
+inverse [576460752303423488]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2305843009213693951
+[1 0]
+[0 1]
+det 48 True
+inverse [1441151880758558720  384307168202282325]
+[1873497444986126335  960767920505705813]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+3 3 2 (0, 1) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 2305843009213693951
+[                  1                   0 1793433451610650831]
+[                  0                   1  128102389400760784]
+[                  0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1 2066190786345978568 1645180124551343437]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1 1152921504606846975                   0]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 2305843009213693951
+[                  1                   0                   0  786699379614083833 2197332749956579067]
+[                  0                   1                   0  922337203685477561 1383505805528216223]
+[                  0                   0                   1 2224460314770857702  488296166657017589]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0 1617665746357408265  982856243319368854  689422510585378098]
+[                  0                   1 1622202005941959198 1610283206249217532 1959842033058730617]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 2305843009213693951
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 2305843009213693951
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0   73052702972651553  316561712881490073  964670308485014122]
+[                  0                   1 1507882715204730811 1153858077721880971 1346792139418883794]
+4 6 2 (0, 1) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 2305843009213693951
+[                  1                   0 1793433451610650831  366006826859316322  951617749834221692 1061419797892010537]
+[                  0                   1  128102389400760784 1061419797892017911 2067938571755138592 1464027307437268085]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0                   0                   0 1612327871449837249 1324048489234125903]
+[                  0                   1                   0                   0 2081333892034227234  623580832343549175]
+[                  0                   0                   1                   0  819375855270825480 2064970248377023613]
+[                  0                   0                   0                   1  967232569851761564 1919919678674897688]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0 1383505805528216370 1844674407370955161]
+[                  0                   1  461168601842738789 1383505805528216371]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 2305843009213693951
+[                  1                   0                   0                   0  915481371288293278 1038862072666755041]
+[                  0                   1                   0                   0  704384866059188086  410734526535966664]
+[                  0                   0                   1                   0  746170444439920557  114216426147994462]
+[                  0                   0                   0                   1 1844799165434851170 1046435473256968444]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0 2218328255819966729  959785363583501713  844352798214323172 1529480684378740489]
+[                  0                   1 1462917720214215608 1750128814904105104 1700474054134141380 2027706532267275670]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0  109802048057794961 1976436865040309078 1317624576693539417  219604096115589896]
+[                  0                   1 1866634816982514151 1317624576693539398 1647030720866924253 1427426624751334350]
+solve (1723835636013290689, 657900555797370062, 998823830470389659, 1272023670867155790) True True
+[1673523021307228270 1209730771475678814 1026512686923731492]
+[ 584552936427642218 1246118270368112942 1251709139296650018]
+[1979906803111678361 1282890987417634417  723210650375979401]
+[ 577392043226435859  640178438311046324 1320040593583008850] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (1811733792953616544, 247054608130038728, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 2305843009213693951
+Basis matrix:
+[                  1                   0 1811733792953616670 1976436865040309072]
+[                  0                   1 1399976112736885618 1317624576693539419]
+True False
+30 30 30 30 12245 81721251991649326
+40 25 20 20 28593506682332009162416 -
+25 60 25 25 640310794615060218223726 -
+60 60 45 45 1061297686279877081649705 0
+inverse 348503340277881287246833 True True
+solve 25894692471268265294736
+p = 9223372036854775783
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 9223372036854775783
+[1]
+det 4 True
+inverse [2305843009213693946]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[1 0]
+[0 1]
+det 48 True
+inverse [5764607523034234865 1537228672809129297]
+[2882303761517117432 3843071682022823243]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+3 3 2 (0, 1) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 9223372036854775783
+[                  1                   0 7173733806442603367]
+[                  0                   1  512409557603043108]
+[                  0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1 2254026312377431160 3471718688029606615]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1 4611686018427387891                   0]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 9223372036854775783
+[                  1                   0                   0 9006351518340545779 1302123111085380236]
+[                  0                   1                   0 7378697629483820607 1844674407370955009]
+[                  0                   0                   1  976592333314035091 3363818036970565332]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0 8377670936268299851 8538130000788493645 4589271559303724457]
+[                  0                   1 1591782382845558819 1336328705848886663 4698497574398401828]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 9223372036854775783
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 9223372036854775783
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0  651854888063660025 2824704514942526785 3641396271252169805]
+[                  0                   1 1393620795170583504 6039023445739195193 4922628292618673996]
+4 6 2 (0, 1) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 9223372036854775783
+[                  1                   0 7173733806442603367 8052150190904962807 2488846422643350987  292805461487445886]
+[                  0                   1  512409557603043108  292805461487453260 1683631403552856263 4538484653055526676]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0                   0                   0 5868622144368882178 2775235312890786676]
+[                  0                   1                   0                   0 1744056863331083087  392648115603400490]
+[                  0                   0                   1                   0 7649731743185556214 6013902408375683885]
+[                  0                   0                   0                   1  675924843497646567 6172087064463246709]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0 1844674407370955156 5534023222112865470]
+[                  0                   1 3689348814741910312 1844674407370955157]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 9223372036854775783
+[                  1                   0                   0                   0 4691003678782198474 3439856131418301437]
+[                  0                   1                   0                   0 4830230328880352847  670227112927409314]
+[                  0                   0                   1                   0 7574639797810554697 7504323138709981029]
+[                  0                   0                   0                   1 6089834630911007979 3072313851366086223]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0 3320222126701489913 6851187757661347755 5534555617403683139 2811019803276109036]
+[                  0                   1  968338165774717725 7554136674393188179 2125524047127654774 8889274342443373254]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0 7027331075698876798 6588122883467696965 1317624576693539414 4831290114542977787]
+[                  0                   1 8784163844623595984 1317624576693539395 3952873730080618195 8344955652392416184]
+solve (4815414367018847709, 4613331004071166032, 7289597710879685655, 2017227154622356344) True True
+[3081828547110631535 2150683382319860915 5686111515051543445]
+[8484669369782961749 8366855081523509613 4136285167375505290]
+[6877414282796289591 1770421004766995048  846771977087112122]
+[8348631139302818120 3018802692090534371 7317162672844666696] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (658812288346769567, 8893965892681391024, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 9223372036854775783
+Basis matrix:
+[                  1                   0  658812288346769693 6588122883467696959]
+[                  0                   1 4282279874254003047 1317624576693539416]
+True False
+30 30 30 30 12245 5907795284169998972
+40 25 20 20 137637693477488506794838 -
+25 60 25 25 2527242794528859532881462 -
+60 60 45 45 4057592718488640640324295 0
+inverse 1386890134206336696551851 True True
+solve 96040773119623990888319
+p = 9223372036854775837
+1 1 1 (0,) Full MatrixSpace of 1 by 1 dense matrices over Finite Field of size 9223372036854775837
+[1]
+det 4 True
+inverse [6917529027641081878]
+right kernel Vector space of degree 1 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+left kernel Vector space of degree 1 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+2 2 2 (0, 1) Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775837
+[1 0]
+[0 1]
+det 48 True
+inverse [8070450532247928858 1537228672809129306]
+[8646911284551352347 8454757700450211184]
+right kernel Vector space of degree 2 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+left kernel Vector space of degree 2 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+3 3 2 (0, 1) Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 9223372036854775837
+[                  1                   0 7173733806442603409]
+[                  0                   1  512409557603043111]
+[                  0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 3 and dimension 1 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1 2409476402886219530 6891620679222950485]
+left kernel Vector space of degree 3 and dimension 1 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1 4611686018427387918                   0]
+3 5 3 (0, 1, 2) Full MatrixSpace of 3 by 5 dense matrices over Finite Field of size 9223372036854775837
+[                  1                   0                   0 4557430888798830428  325530777771345155]
+[                  0                   1                   0 1844674407370955148 7378697629483820522]
+[                  0                   0                   1 7161677110969590658 3146797518456335332]
+right kernel Vector space of degree 5 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 7930093323925941159 8121149904075262817 8368420524566470547]
+[                  0                   1 8010144963653310568 6172159315512908935 5287677642791840707]
+left kernel Vector space of degree 3 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+5 3 3 (0, 1, 2) Full MatrixSpace of 5 by 3 dense matrices over Finite Field of size 9223372036854775837
+[1 0 0]
+[0 1 0]
+[0 0 1]
+[0 0 0]
+[0 0 0]
+right kernel Vector space of degree 3 and dimension 0 over Finite Field of size 9223372036854775837
+Basis matrix:
+[]
+left kernel Vector space of degree 5 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 5237316859270096107 4248295649794198133 3176856006195308655]
+[                  0                   1 4518028706923988487 1131380322961065112 3611425931571082009]
+4 6 2 (0, 1) Full MatrixSpace of 4 by 6 dense matrices over Finite Field of size 9223372036854775837
+[                  1                   0 7173733806442603409 2781651884130805233 9076969306111048028 1610430038180985293]
+[                  0                   1  512409557603043111 1610430038180992667 6954129710327013894 1903235499668447892]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+right kernel Vector space of degree 6 and dimension 4 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0                   0                   0 7196083646516712176 3290046667299482452]
+[                  0                   1                   0                   0 3685909119467713319 7905577989779243858]
+[                  0                   0                   1                   0 5938016575926492946 1541914805611350085]
+[                  0                   0                   0                   1 1786427621573524989 4741539865337430161]
+left kernel Vector space of degree 4 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 7378697629483820669 3689348814741910335]
+[                  0                   1 5534023222112865501 7378697629483820670]
+6 6 4 (0, 1, 2, 3) Full MatrixSpace of 6 by 6 dense matrices over Finite Field of size 9223372036854775837
+[                  1                   0                   0                   0 7032754403231995967 3378414878205633268]
+[                  0                   1                   0                   0 1777710307249173938 5035218712793221486]
+[                  0                   0                   1                   0 1762839815874725256 3737969292958767549]
+[                  0                   0                   0                   1 6688170956146394877 5039087050076427154]
+[                  0                   0                   0                   0                   0                   0]
+[                  0                   0                   0                   0                   0                   0]
+det 0 False
+inverse ZeroDivisionError 
+right kernel Vector space of degree 6 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 5001913535839458168 2605300702081473759 3214227767144365406    9299178141021072]
+[                  0                   1 5955558663314510525 1843065641550415581 7911242134887263179 2749887451165057636]
+left kernel Vector space of degree 6 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 1756832768924719218 3952873730080618193 2635249153387078827 3513665537849438410]
+[                  0                   1 2196040961155899009 2635249153387078808 7905747460161236434 4392081922311798017]
+solve (2849177602832996574, 4060116085287651702, 6968887978152205717, 1452193326327342347) True True
+[2003884030564976207 4361793958794711219 2079470079766427747]
+[3328826264914382195 5588661732610002716 7218072069279965261]
+[2738672048256659978 5656793289906737855 1298164366781068173]
+[6422048940433563089 2028013263020800365 4591242386717750219] True
+singular solve ValueError matrix equation has no solutions
+singular inverse ZeroDivisionError 
+free variables zero (5929310595120927192, 1647030720866924347, 0, 0) True
+one bad column ValueError matrix equation has no solutions
+solve_left matrix [1 0 0 0]
+[0 1 0 0]
+Vector space of degree 4 and dimension 2 over Finite Field of size 9223372036854775837
+Basis matrix:
+[                  1                   0 5929310595120927318 3952873730080618187]
+[                  0                   1 6258716739294312180 2635249153387078829]
+True False
+30 30 30 30 12245 6157489916894423460
+40 25 20 20 143706788210545685916249 -
+25 60 25 25 2470019575378924744915823 -
+60 60 45 45 4263149074473196249850727 0
+inverse 1393699362239340172758991 True True
+solve 89499236289333294201926
+0 0 0 () (0, 0) 0 0
+0 3 0 () (0, 3) 3 0
+3 0 0 () (3, 0) 0 3
+1 (0, 0)
+non-square det ValueError self must be a square matrix
+non-square inverse ArithmeticError 
+wrong size ValueError number of rows of self must equal degree of right-hand side
+2 (0, 1) 60347839759
+400 True 477356337956933820235

@@ -53,7 +53,7 @@ fn monic(f: &[BigInt]) -> Result<(), String> {
     if f.len() < 2 || !f.last().unwrap().is_one() {
         return Err("the defining polynomial must be monic with integer coefficients, of degree >= 1".into());
     }
-    if !sagebrush_poly::is_irreducible(f) {
+    if !sagebrush_poly::try_is_irreducible(f).map_err(|e| e.to_string())? {
         return Err("the defining polynomial must be irreducible".into());
     }
     Ok(())

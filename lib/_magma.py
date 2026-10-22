@@ -3515,14 +3515,15 @@ def _in(x, s, pos=None, op="in"):
         w = _universe(s)
         y = w[1] if w and w[0] == "elt" and isinstance(w[1], (MSet, MSeq, MTuple)) else None
         if y is not None:
-            ny, dy, fy, _ = _ff_nest_scan([y])
-            nx, dx, fx, cx = _ff_nest_scan([x])
+            # (the evidence of every member, not just the first, which may
+            # be empty: {a} in {{}, {b^5}}; astra CORR-PR45-2)
+            intern = {}  # (one slot numbering for both)
+            ny, fy, _, _ = _ff_nest_scan(_ff_walk(s), intern)
+            nx, fx, cx, _ = _ff_nest_scan([x], intern)
             if cx:
                 refuse = lambda: MagmaError("membership of collections this large is not supported yet", "'%s'" % op, True, pos)
                 if nx > _COLLECT_MAX or ny > _COLLECT_MAX:
                     raise refuse()
-                if max(dx, dy) > _NEST_MAX:
-                    raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
                 budget = [_FF_WORK]
                 _ff_charge(budget, nx + ny, refuse)
                 Us = {sl: next(iter(f.values())) for sl, f in fy.items() if len(f) == 1}
@@ -3538,11 +3539,11 @@ def _in(x, s, pos=None, op="in"):
                 _ff_charge(budget, total, refuse)
                 _ff_keep(hits)
                 paid, lx = [total], []
-                _ff_leaves([x], lx)
+                _ff_leaves([x], lx, intern)
                 conv = [v if sl not in Us else _ff_into(Us[sl], v, paid) for v, sl in lx]
                 if any(c is None for c in conv):
                     return False
-                x = _ff_rebuild(x, iter(conv), {})
+                x = _ff_rebuild(x, iter(conv), {}, intern)
     if isinstance(s, (MSeq, MRange, MSet)):
         code = _meets(x, s)
         if code == "N":
@@ -3611,19 +3612,32 @@ def _ff_walk(x):
 _FF_SCAN_END = object()
 
 
-def _ff_nest_scan(xs):
-    """The preflight of nested collections (LIMIT-PR45-3): an iterative walk
-    (an explicit stack, never recursion, any depth) over the list xs and its
-    sets, sequences and tuples, at most _COLLECT_MAX + 1 nodes, allocating
-    nothing but per-slot field counts.  An element's slot is the path of
-    tuple coordinates down to it (sets and sequences share their elements'
-    slot: each tuple coordinate has its own universe, as in Magma); a set's
-    or sequence's declared finite-field universe counts in its elements'
-    slot.  Returns (nodes, deepest nesting, {slot: {id: field}},
-    {(slot, id): number of elements}); nodes > _COLLECT_MAX when it stopped
-    early."""
-    fields, counts, nodes, deepest = {}, {}, 0, 0
-    stack = [(iter(xs), 1, (), False)]
+def _ff_slot(intern, parent, i):
+    """The slot of coordinate i of a tuple in the slot parent: a small
+    integer, interned in intern (parent-linked, O(1) per distinct slot, so
+    no path is ever copied; the top slot is 0)."""
+    k = (parent, i)
+    s = intern.get(k)
+    if s is None:
+        s = intern[k] = len(intern) + 1
+    return s
+
+
+def _ff_nest_scan(xs, intern):
+    """The preflight of nested collections (LIMIT-PR45-3/4): an iterative
+    walk (an explicit stack, never recursion) over the list xs and its sets,
+    sequences and tuples, allocating nothing but O(1) per node: per-slot
+    field counts and the interned slots (_ff_slot).  An element's slot is
+    that of the tuple coordinate it is in (sets and sequences share their
+    elements' slot: each tuple coordinate has its own universe, as in
+    Magma); a set's or sequence's declared finite-field universe counts in
+    its elements' slot.  A collection deeper than _NEST_MAX is never pushed:
+    the walk refuses in words there and then, whatever it holds (fail
+    closed), so the stack holds at most _NEST_MAX + 1 entries.  It stops
+    after _COLLECT_MAX + 1 nodes.  Returns (nodes, {slot: {id: field}},
+    {(slot, id): number of elements}, the tallest stack)."""
+    fields, counts, nodes, tallest = {}, {}, 0, 1
+    stack = [(iter(xs), 1, 0, False)]
     while stack:
         it, d, slot, tup = stack[-1]
         x = next(it, _FF_SCAN_END)
@@ -3632,7 +3646,7 @@ def _ff_nest_scan(xs):
             continue
         if tup:
             i, x = x
-            here = slot + (i,)
+            here = _ff_slot(intern, slot, i)
         else:
             here = slot
         nodes += 1
@@ -3643,32 +3657,31 @@ def _ff_nest_scan(xs):
             fields.setdefault(here, {}).setdefault(k, _ffwrap(x.parent()))
             counts[(here, k)] = counts.get((here, k), 0) + 1
         elif isinstance(x, (MSet, MSeq, MTuple)):
-            deepest = max(deepest, d)
+            if d > _NEST_MAX:
+                raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
             u = getattr(x, "universe", None)
             if isinstance(u, _MFinField):
                 fields.setdefault(here, {}).setdefault(id(u.K), u)
-            if isinstance(x, MTuple):
-                stack.append((iter(enumerate(x)), d + 1, here, True))
-            else:
-                stack.append((_ff_walk(x), d + 1, here, False))
-    return nodes, deepest, fields, counts
+            stack.append((iter(enumerate(x)), d + 1, here, True) if isinstance(x, MTuple) else (_ff_walk(x), d + 1, here, False))
+            tallest = max(tallest, len(stack))
+    return nodes, fields, counts, tallest
 
 
-def _ff_leaves(xs, out, slot=()):
+def _ff_leaves(xs, out, intern, slot=0):
     """The finite fields' elements in the list xs, at any depth of sets,
     sequences and tuples, appended to out with their slots, in order (only
-    after _ff_scan has checked the depth: at most _NEST_MAX)."""
+    after _ff_nest_scan has checked the depth: at most _NEST_MAX)."""
     for x in xs:
         if _is_ff(x):
             out.append((x, slot))
         elif isinstance(x, MTuple):
             for i, y in enumerate(x):
-                _ff_leaves([y], out, slot + (i,))
+                _ff_leaves([y], out, intern, _ff_slot(intern, slot, i))
         elif isinstance(x, (MSet, MSeq)):
-            _ff_leaves(_ff_walk(x), out, slot)
+            _ff_leaves(_ff_walk(x), out, intern, slot)
 
 
-def _ff_rebuild(x, it, Us, slot=()):
+def _ff_rebuild(x, it, Us, intern, slot=0):
     """x with its finite fields' elements replaced, in _ff_leaves's order, by
     those of it; a declared finite-field universe becomes its slot's common
     field (Us[slot]) when there is one."""
@@ -3676,12 +3689,12 @@ def _ff_rebuild(x, it, Us, slot=()):
         return next(it)
     if isinstance(x, MSet):
         u = Us.get(slot, x.universe) if isinstance(x.universe, _MFinField) else x.universe
-        return MSet([_ff_rebuild(y, it, Us, slot) for y in _ff_walk(x)], x.kind, u)
+        return MSet([_ff_rebuild(y, it, Us, intern, slot) for y in _ff_walk(x)], x.kind, u)
     if isinstance(x, MSeq):
         u = Us.get(slot, x.universe) if isinstance(x.universe, _MFinField) else x.universe
-        return MSeq([_ff_rebuild(y, it, Us, slot) for y in x], u)
+        return MSeq([_ff_rebuild(y, it, Us, intern, slot) for y in x], u)
     if isinstance(x, MTuple):
-        return MTuple(_ff_rebuild(y, it, Us, slot + (i,)) for i, y in enumerate(x))
+        return MTuple(_ff_rebuild(y, it, Us, intern, _ff_slot(intern, slot, i)) for i, y in enumerate(x))
     return x
 
 
@@ -3698,15 +3711,14 @@ def _ff_norm(xs, what, where, pos, message):
     the collections rebuilt.  A slot holding two characteristics is
     `message`.  Values with no finite field's element are as they were,
     whatever their size."""
-    nodes, deepest, fields, counts = _ff_nest_scan(xs)
+    intern = {}
+    nodes, fields, counts, _ = _ff_nest_scan(xs, intern)
     if not counts:
         return None
     budget = [_FF_WORK]
     size = lambda: MagmaError("%s of collections this large is not supported yet" % what, where, True, pos)
     if nodes > _COLLECT_MAX:
         raise size()
-    if deepest > _NEST_MAX:
-        raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
     todo = {sl: list(f.values()) for sl, f in fields.items() if len(f) >= 2}
     if not todo:
         return None
@@ -3723,9 +3735,9 @@ def _ff_norm(xs, what, where, pos, message):
     for pl in plans.values():
         _ff_keep(pl[2])
     paid, leaves = [total], []
-    _ff_leaves(xs, leaves)
+    _ff_leaves(xs, leaves, intern)
     it = iter([_ff_up(x, Us[sl], paid, plans[sl][3]) if sl in Us else x for x, sl in leaves])
-    return [_ff_rebuild(x, it, Us) for x in xs]
+    return [_ff_rebuild(x, it, Us, intern) for x in xs]
 
 
 def _ff_sets(a, b, op, pos, message):
