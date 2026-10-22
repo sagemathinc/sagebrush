@@ -350,7 +350,7 @@ impl Newspaces {
 
     fn compute_newform_orbits(&self) -> Result<NewformOrbits, String> {
         let (op, cp) = self.separating_operator()?;
-        let factors = if cp.new.len() <= 1 { vec![] } else { sagebrush_poly::factor(&cp.new).1 };
+        let factors = if cp.new.len() <= 1 { vec![] } else { sagebrush_poly::try_factor(&cp.new).map_err(|e| e.to_string())?.1 };
         let orbits: Vec<Vec<BigInt>> = factors.into_iter().map(|(g, e)| {
             debug_assert_eq!(e, 1);
             g
