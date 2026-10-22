@@ -4,9 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // engine/web's nmod_charpoly through the real WebAssembly ABI (sb_alloc,
-// sb_call, sb_free): the largest admitted request (NMOD_MAX_N = 512) grows
+// sb_call, sb_free): the largest admitted request (NMOD_MAX_N = 512), on each of the
+// charpoly's two paths, grows
 // the instance's memory by less than the closed-form bound of
-// engine/web/src/lib.rs (17 MiB), with headroom: 24 MiB; and a request
+// engine/web/src/lib.rs (19 MiB), with headroom: 24 MiB; and a request
 // past NMOD_MAX_REQUEST is refused without parsing it.
 function instance() {
   const bytes = readFileSync(join(__dirname, "..", "..", "wasm", "sagebrush-engine.wasm"));
@@ -28,25 +29,35 @@ test("nmod_charpoly's largest admitted request stays within its memory bound in 
   const small = call(e, '{"fn":"nmod_charpoly","m":"1,2;3,4","p":"7","wire":"csv"}');
   if (small.includes("unknown fn")) return t.skip("this engine build predates nmod_charpoly (rebuilt at merge)");
   assert.equal(small, '{"ok":"5,2,1"}');
-  const n = 512, p = 9223372036854775783n; // the largest prime below 2^63: 19-digit entries
-  let seed = 1n;
-  const rows: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const row: string[] = [];
-    for (let j = 0; j < n; j++) {
-      seed = (seed * 6364136223846793005n + 1442695040888963407n) % p;
-      row.push(String(seed));
+  const n = 512;
+  // both charpoly paths, each with the longest admitted text (19 characters
+  // an entry): Krylov (p >= 2^20: the largest prime below 2^63) and
+  // Hessenberg with its prefix polynomials (p = 65521, entries written
+  // with leading zeros)
+  const grew: Record<string, number> = {};
+  for (const [path, p] of [["krylov", 9223372036854775783n], ["hessenberg", 65521n]] as const) {
+    let seed = 1n;
+    const rows: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const row: string[] = [];
+      for (let j = 0; j < n; j++) {
+        seed = (seed * 6364136223846793005n + 1442695040888963407n) % (1n << 63n);
+        row.push(String(seed % p).padStart(19, "0"));
+      }
+      rows.push(row.join(","));
     }
-    rows.push(row.join(","));
+    const req = `{"fn":"nmod_charpoly","m":"${rows.join(";")}","p":"${p}","wire":"csv"}`;
+    const e2 = instance();
+    call(e2, '{"fn":"nmod_charpoly","m":"1","p":"7"}');
+    const before = e2.memory.buffer.byteLength;
+    const reply = call(e2, req);
+    grew[path] = e2.memory.buffer.byteLength - before;
+    assert.ok(reply.startsWith('{"ok":"'), reply.slice(0, 200));
+    assert.equal(reply.split(",").length, n + 1);
+    // (memory never shrinks: the growth bounds the peak above what was resident)
+    assert.ok(grew[path] < 24 << 20, `${path}: grew by ${grew[path]} bytes`);
   }
-  const req = `{"fn":"nmod_charpoly","m":"${rows.join(";")}","p":"${p}","wire":"csv"}`;
-  const before = e.memory.buffer.byteLength;
-  const reply = call(e, req);
-  const grown = e.memory.buffer.byteLength - before;
-  assert.ok(reply.startsWith('{"ok":"'), reply.slice(0, 200));
-  assert.equal(reply.split(",").length, n + 1);
-  // (memory never shrinks: the growth bounds the peak above what was resident)
-  assert.ok(grown < 24 << 20, `grew by ${grown} bytes`);
+  console.log(`nmod_charpoly wasm, n = ${n}: grew ${JSON.stringify(grew)} bytes`);
   // 513 rows: refused
   const over = `{"fn":"nmod_charpoly","m":"${Array(n + 1).fill("0").join(";")}","p":"7"}`;
   assert.match(call(e, over), /rows, more than 512/);
