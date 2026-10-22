@@ -115,7 +115,11 @@ def up_cost(S, p, n, seen, hits=None):
     or already counted in seen (one per (p, m, n)); an element of the prime
     field, n.  Read-only: a cached image counted free is only recorded in
     hits, for keep() once every refusal point has passed."""
-    sn = pnq(S)[1]
+    return degree_cost(pnq(S)[1], p, n, seen, hits)
+
+
+def degree_cost(sn, p, n, seen, hits=None):
+    """up_cost for a subfield given by its degree sn alone."""
     if sn == n:
         return 0
     if sn == 1:
@@ -354,8 +358,9 @@ def into_cost(U, x, seen, hits, refuse):
 def conjugates(S, U, budget, refuse):
     """The roots in U of the defining (Conway) polynomial of its subfield S
     (deg S | deg U): the image of S's generator (image) and its Frobenius
-    conjugates, sorted by their integer representations (as Sage lists the
-    embeddings of S into U); its cost, the image's if not cached and
+    conjugates, sorted by the integer representations of their negatives
+    (as Sage 10.9 lists the embeddings of S into U, black-box: the identity
+    in characteristic 2; astra CORR-PR53-3); its cost, the image's if not cached and
     deg S - 1 powers x^p, charged before any of it."""
     p, un, _ = pnq(U)
     sn = pnq(S)[1]
@@ -372,7 +377,35 @@ def conjugates(S, U, budget, refuse):
     for _ in range(sn):
         roots.append(c)
         c = c ** p
-    return sorted(roots, key=lambda r: r.to_integer())
+    return sorted(roots, key=lambda r: (-r).to_integer())
+
+
+def subfields_admit(K, degrees, budget, refuse):
+    """Admits enumerating the subfields of K of the given degrees (each
+    dividing deg K) with their embeddings, from budget, before any field,
+    map or result is made or any cache touched (daybreak2 LIMIT-PR53-1):
+    first K itself (Conway, of at most EMBED_MAX elements: refuse()
+    otherwise, whatever the degrees), then the degrees (their Conway
+    polynomials already known, as every Conway field's subfields' are:
+    refuse() otherwise, so no search is ever started here), then the
+    aggregate work, each proper subfield's generator put into K (up_cost:
+    its Horner work and its image unless cached, counted once per degree),
+    reserved as a whole.  The cached images counted free are then made the
+    most recent.  Returns the prepaid budget for the up() calls; refuse()s
+    with every cache unchanged."""
+    p, n, q = pnq(K)
+    if q > EMBED_MAX or not conway_ok(K):
+        raise refuse()
+    if any(d < 1 or n % d for d in degrees):
+        raise refuse()
+    proper = sorted(set(d for d in degrees if 1 < d < n))
+    if any((p, d) not in _sff._CONWAY for d in proper):
+        raise refuse()
+    seen, hits = set(), set()
+    cost = sum(degree_cost(d, p, n, seen, hits) for d in proper)
+    charge(budget, cost, refuse)
+    keep(hits)
+    return [cost]
 
 
 def apply(x, U, img, budget, refuse):

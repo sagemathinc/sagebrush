@@ -2552,8 +2552,8 @@ class FiniteFieldHomomorphism:
 
 class FiniteFieldHomset:
     """Hom(F, K) for finite fields F and K: the field embeddings, Sage's
-    order (by the images' integer representations), computed by the shared
-    core (bounded).
+    order (by the integer representations of the images' negatives),
+    computed by the shared core (bounded).
 
     EXAMPLES::
 
@@ -2643,6 +2643,10 @@ def _ff_hom(self, im_gens, codomain=None, check=True):
     if len(imgs) != 1:
         raise ValueError("number of images must equal number of generators")
     C = codomain if codomain is not None else imgs[0].parent()
+    # (no field map unless C has a subfield of this degree, check or not:
+    # astra CORR-PR53-1; a Horner check alone would admit GF(4) -> GF(9))
+    if not _is_finite_field(C) or _ff_char(C) != self._p or _ff_degree(C) % self._n:
+        raise ValueError("No embedding of %r into %r" % (self, C))
     img = C(imgs[0])
     if check:
         S = _ffsub()
@@ -2656,25 +2660,73 @@ def _ff_hom(self, im_gens, codomain=None, check=True):
     return FiniteFieldHomomorphism(self, C, img)
 
 
+def _ff_var_name(name):
+    """name as a variable name, or Sage's ValueError."""
+    s = str(name)
+    if not s.replace("_", "").isalnum():
+        raise ValueError("variable name %r is not alphanumeric" % s)
+    if not s[0].isalpha():
+        raise ValueError("variable name %r does not start with a letter" % s)
+    return s
+
+
 def _ff_subfields(self, degree=0, name=None):
     """The subfields of this field with their embeddings, by degree (Sage's
-    list): the prime field, each proper subfield (of a prefix field, the
-    prefix field; of a named one, the field named with its degree appended)
-    by its Conway embedding, and this field by the identity; computed by
-    the shared core, for fields of at most 2^20 elements."""
-    S = _ffsub()
-    budget, refuse = [S.WORK], _ff_bounded("subfields", self, self)
+    list): the prime field, each proper subfield by its Conway embedding,
+    and this field by the identity; computed by the shared core, for fields
+    of at most 2^20 elements, admitted as a whole before anything is made
+    (daybreak2 LIMIT-PR53-1).  A proper subfield is named as Sage names it
+    (astra CORR-PR53-2): for one degree, name itself; else name with its
+    degree appended, or name[degree] for a dict (which must have every
+    degree); with no name, the prefix field of a prefix field, else this
+    field's name with the degree appended.
+
+    EXAMPLES::
+
+        sage: K.<b> = GF(16)
+        sage: [S for S, f in K.subfields()]
+        [Finite Field of size 2, Finite Field in b2 of size 2^2, Finite Field in b of size 2^4]
+        sage: K.subfields(2, name='v')[0][1]
+        Ring morphism:
+          From: Finite Field in v of size 2^2
+          To:   Finite Field in b of size 2^4
+          Defn: v |--> b^2 + b
+        sage: [S for S, f in GF(16).subfields(name={1: 'p', 2: 'u', 4: 'v'})]
+        [Finite Field of size 2, Finite Field in u of size 2^2, Finite Field in z4 of size 2^4]
+    """
+    S, n, degree = _ffsub(), self._n, int(degree)
+    if degree < 0:
+        raise KeyError(degree)
+    if degree:
+        degrees = [degree] if n % degree == 0 else []
+    else:
+        degrees = [m for m in range(1, n + 1) if n % m == 0]
+    # (the names first: pure, and Sage's errors before anything is made)
+    names = {}
+    for m in degrees:
+        if degree and name is not None:
+            given = name
+        elif isinstance(name, dict):
+            given = name[m]
+        elif name is not None:
+            given = str(name) + str(m)
+        else:
+            given = None if self._prefix is not None else self._name + str(m)
+        if 1 < m < n:
+            names[m] = None if given is None else _ff_var_name(given)
+    if not degrees:
+        return []
+    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most 2^20 elements, within a bounded amount of work)" % self)
+    budget = S.subfields_admit(self, degrees, [S.WORK], refuse)
     out = []
-    for m in range(1, self._n + 1):
-        if self._n % m or (degree and m != degree):
-            continue
+    for m in degrees:
         if m == 1:
             P = self._prime_field
             out.append((P, FiniteFieldHomomorphism(P, self, self(1))))
-        elif m == self._n:
+        elif m == n:
             out.append((self, FiniteFieldHomomorphism(self, self, self.gen(), identity=True)))
         else:
-            sub = GF(self._p ** m, prefix=self._prefix) if self._prefix is not None else GF(self._p ** m, (name or self._name) + str(m))
+            sub = GF(self._p ** m, prefix=self._prefix) if names[m] is None else GF(self._p ** m, names[m])
             out.append((sub, FiniteFieldHomomorphism(sub, self, S.up(sub.gen(), self, budget, refuse))))
     return out
 
@@ -2698,6 +2750,56 @@ def _zmod_coerce_map_from(self, S):
     return None
 
 
+def _zmod_hom(self, im_gens, codomain=None, check=True):
+    """The homomorphism from this prime field sending 1 to the one image in
+    im_gens (1, checked), or, for a field, the coercion into it; Sage's
+    errors otherwise (No embedding into another characteristic, check or
+    not).  O(1): no budget.
+
+    EXAMPLES::
+
+        sage: B.<b> = GF(16)
+        sage: GF(2).hom([B(1)], B)
+        Ring morphism:
+          From: Finite Field of size 2
+          To:   Finite Field in b of size 2^4
+          Defn: 1 |--> 1
+    """
+    if not getattr(self, "_prime", False):
+        raise NotImplementedError("hom from %r is not supported yet" % self)
+    if _is_finite_field(im_gens):
+        if _ff_char(im_gens) != self._n:
+            raise TypeError("natural coercion morphism from %r to %r not defined" % (self, im_gens))
+        if im_gens is self:
+            return FiniteFieldHomomorphism(self, self, self(1), identity=True)
+        return FiniteFieldHomomorphism(self, im_gens, im_gens(1))
+    imgs = list(im_gens)
+    if len(imgs) != 1:
+        raise ValueError("number of images must equal number of generators")
+    C = codomain if codomain is not None else (imgs[0].parent() if hasattr(imgs[0], "parent") else self)
+    if not _is_finite_field(C) or _ff_char(C) != self._n:
+        raise ValueError("No embedding of %r into %r" % (self, C))
+    img = C(imgs[0])
+    if check and img != C(1):
+        raise ValueError("relations do not all (canonically) map to 0 under map determined by images of generators")
+    return FiniteFieldHomomorphism(self, C, img)
+
+
+def _zmod_subfields(self, degree=0, name=None):
+    """The subfields of this prime field: itself, by the identity (Sage's
+    list; KeyError for a negative degree).  O(1), any size."""
+    if not getattr(self, "_prime", False):
+        raise AttributeError("'IntegerModRing_' object has no attribute 'subfields'")
+    degree = int(degree)
+    if degree < 0:
+        raise KeyError(degree)
+    if degree > 1:
+        return []
+    return [(self, FiniteFieldHomomorphism(self, self, self(1), identity=True))]
+
+
+IntegerModRing_.hom = _zmod_hom
+IntegerModRing_.subfields = _zmod_subfields
 IntegerModRing_.has_coerce_map_from = _zmod_has_coerce_map_from
 IntegerModRing_.coerce_map_from = _zmod_coerce_map_from
 FiniteField_ext.has_coerce_map_from = _ff_has_coerce_map_from
