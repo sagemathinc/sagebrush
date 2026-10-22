@@ -135,10 +135,32 @@ pub struct Budget {
     peak: Cell<u64>,
 }
 
+thread_local! {
+    static DEFAULT_OVERRIDE: Cell<Option<Limits>> = const { Cell::new(None) };
+}
+
 impl Default for Budget {
+    /// Limits::DEFAULT, or the limits of an enclosing with_default_limits
+    /// on this thread.
     fn default() -> Budget {
-        Budget::new(Limits::DEFAULT)
+        Budget::new(DEFAULT_OVERRIDE.with(|o| o.get()).unwrap_or(Limits::DEFAULT))
     }
+}
+
+/// Run f with `limits` as the default of every call on this thread that
+/// makes its own budget (try_factor and the callers built on it): for
+/// tests of how callers propagate refusals, and for callers that want
+/// tighter limits.  The previous default is restored afterwards, also when
+/// f unwinds.
+pub fn with_default_limits<T>(limits: Limits, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Limits>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DEFAULT_OVERRIDE.with(|o| o.set(self.0));
+        }
+    }
+    let _r = Restore(DEFAULT_OVERRIDE.with(|o| o.replace(Some(limits))));
+    f()
 }
 
 impl Budget {
