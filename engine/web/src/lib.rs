@@ -687,7 +687,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if f.iter().all(|c| c.sign() == sagebrush_bigint::Sign::NoSign) {
                 return Err("factor of the zero polynomial".into());
             }
-            let (c, fs) = sagebrush_poly::factor(&f);
+            let (c, fs) = sagebrush_poly::try_factor(&f).map_err(|e| e.to_string())?;
             Ok(json!({ "content": c.to_string(), "factors": fs.iter().map(|(g, e)| json!([big(g), e])).collect::<Vec<_>>() }))
         }
         // ---- polynomials over a number field Q[y]/(T), T monic (poly/src/nf.rs) ----
@@ -771,7 +771,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "newspace" | "newforms" => {
             let (n, k) = (level(v)?, weight(v)?);
             let eps = character(n, v)?;
-            let fac = |f: &[BigInt]| sagebrush_poly::factor(f).1;
+            // (a refusal gives no factors, which checked_factor rejects as
+            // an error: never a successful unfactored answer)
+            let fac = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1).unwrap_or_default();
             let r = sagebrush_modsym::newspace::newspace_orbits(n, k, &eps, &fac)?;
             let mut out = json!({ "dim": r.dim, "order": r.m, "orbit_dims": r.dims, "orbit_charpolys": r.orbits.iter().map(|o| big(o)).collect::<Vec<_>>(),
                                   "T": r.ops, "status": r.status, "checks": r.checks });

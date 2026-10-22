@@ -1108,7 +1108,7 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
     // over Q: a nonzero constant multiple has the same roots
     let content = f.iter().fold(BigInt::zero(), |acc, c| acc.gcd(c));
     let f: Vec<BigInt> = f.iter().map(|c| c / &content).collect();
-    if !sagebrush_poly::is_irreducible(&f) {
+    if !sagebrush_poly::try_is_irreducible(&f).map_err(|e| e.to_string())? {
         return Err("the polynomial must be irreducible".into());
     }
     let mut log = vec![];

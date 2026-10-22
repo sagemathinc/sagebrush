@@ -648,7 +648,7 @@ pub fn partial_fraction(e: &Expr, x: &str) -> Option<Expr> {
     // r/d with d = lc * prod p_i^e_i (p_i monic): split off one p_i^e_i at a time
     let lc = dp.lc();
     let mut num = r.scale(&(Q::one() / lc));
-    let factors = dp.factor();
+    let factors = dp.try_factor().ok()?;
     let mut rest = dp.monic();
     for (p, ex) in &factors {
         let pe = p.pow(*ex);
