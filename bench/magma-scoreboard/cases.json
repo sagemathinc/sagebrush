@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "timeout_seconds": 60,
+  "budget_seconds": 1800,
+  "cases": [
+    {"id":"bigint_mul","category":"big integers","label":"integer multiply","importance":2,"sizes":[{"n":65536,"repeats":100},{"n":262144,"repeats":30},{"n":1048576,"repeats":1,"pending_vm":true}]},
+    {"id":"bigint_gcd","category":"big integers","label":"integer gcd","importance":2,"sizes":[{"n":65536,"repeats":100},{"n":262144,"repeats":30},{"n":1048576,"repeats":1,"pending_vm":true}]},
+
+    {"id":"poly_z_mul","category":"polynomials over Z","label":"multiply","importance":3,"sizes":[{"n":1000,"repeats":20},{"n":5000,"repeats":10},{"n":20000,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_z_gcd","category":"polynomials over Z","label":"gcd","importance":2,"sizes":[{"n":300,"repeats":20},{"n":1000,"repeats":10},{"n":5000,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_z_factor","category":"polynomials over Z","label":"factor x^n-1","importance":4,"sizes":[{"n":60,"repeats":1000},{"n":120,"repeats":100},{"n":240,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_z_factor_product","category":"polynomials over Z","label":"factor product of irreducible quadratics","importance":2,"sizes":[{"n":8,"repeats":10},{"n":16,"repeats":3},{"n":32,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_fp_mul","category":"polynomials over Fp","label":"multiply (p=65537)","importance":3,"sizes":[{"n":1000,"repeats":10},{"n":5000,"repeats":10},{"n":20000,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_fp_gcd","category":"polynomials over Fp","label":"gcd (p=65537)","importance":2,"sizes":[{"n":300,"repeats":100},{"n":1000,"repeats":20},{"n":5000,"repeats":1,"pending_vm":true}]},
+    {"id":"poly_fp_factor","category":"polynomials over Fp","label":"factor x^n-1 (p=65537)","importance":4,"sizes":[{"n":60,"repeats":10},{"n":120,"repeats":5},{"n":500,"repeats":1,"pending_vm":true}]},
+
+    {"id":"mat_z_det","category":"linear algebra over Z","label":"determinant","importance":1,"sizes":[{"n":30,"repeats":10},{"n":70,"repeats":3},{"n":150,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_z_rank","category":"linear algebra over Z","label":"rank","importance":2,"sizes":[{"n":50,"repeats":10},{"n":100,"repeats":3},{"n":250,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_z_hnf","category":"linear algebra over Z","label":"Hermite form","importance":2,"sizes":[{"n":20,"repeats":10},{"n":45,"repeats":5},{"n":100,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_z_smith","category":"linear algebra over Z","label":"Smith form","importance":2,"sizes":[{"n":12,"repeats":100},{"n":24,"repeats":5},{"n":60,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_z_charpoly","category":"linear algebra over Z","label":"characteristic polynomial","importance":2,"sizes":[{"n":30,"repeats":10},{"n":60,"repeats":5},{"n":120,"repeats":1,"pending_vm":true}]},
+
+    {"id":"mat_fp_det","category":"linear algebra over Fp","label":"determinant (p=65537)","importance":2,"sizes":[{"n":60,"repeats":10},{"n":160,"repeats":2},{"n":400,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_fp_rank","category":"linear algebra over Fp","label":"rank (p=65537)","importance":2,"sizes":[{"n":60,"repeats":10},{"n":160,"repeats":2},{"n":400,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_fp_solve","category":"linear algebra over Fp","label":"solve (p=65537)","importance":1,"sizes":[{"n":60,"repeats":10},{"n":160,"repeats":2},{"n":400,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_fp_charpoly","category":"linear algebra over Fp","label":"characteristic polynomial (p=65537)","importance":2,"sizes":[{"n":60,"repeats":10},{"n":160,"repeats":2},{"n":400,"repeats":1,"pending_vm":true}]},
+
+    {"id":"mat_q_det","category":"linear algebra over Q","label":"determinant","importance":1,"sizes":[{"n":15,"repeats":10},{"n":35,"repeats":5},{"n":80,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_q_rank","category":"linear algebra over Q","label":"rank","importance":2,"sizes":[{"n":20,"repeats":10},{"n":50,"repeats":5},{"n":100,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_q_solve","category":"linear algebra over Q","label":"solve","importance":1,"sizes":[{"n":15,"repeats":100},{"n":35,"repeats":5},{"n":80,"repeats":1,"pending_vm":true}]},
+    {"id":"mat_q_charpoly","category":"linear algebra over Q","label":"characteristic polynomial","importance":2,"sizes":[{"n":15,"repeats":10},{"n":35,"repeats":5},{"n":80,"repeats":1,"pending_vm":true}]},
+
+    {"id":"groebner_cyclic","category":"Groebner bases","label":"cyclic over GF(32003)","importance":2,"sizes":[{"n":5,"repeats":20},{"n":6,"repeats":20},{"n":7,"repeats":1,"pending_vm":true}]},
+    {"id":"groebner_katsura","category":"Groebner bases","label":"Katsura over GF(32003)","importance":2,"sizes":[{"n":6,"repeats":20},{"n":7,"repeats":10},{"n":9,"repeats":1,"pending_vm":true}]},
+    {"id":"class_group","category":"number fields","label":"imaginary quadratic class group","importance":1,"sizes":[{"n":12,"repeats":1},{"n":24,"repeats":1},{"n":40,"repeats":1,"pending_vm":true}]},
+    {"id":"galois_group","category":"number fields","label":"Galois group of x^n-x-1","importance":3,"sizes":[{"n":3,"repeats":1},{"n":5,"repeats":1},{"n":7,"repeats":1,"pending_vm":true}]},
+
+    {"id":"modsym_charpoly","category":"modular forms","label":"exact T2 modular-symbol charpoly","importance":1,"sizes":[{"n":389,"repeats":1},{"n":1009,"repeats":1},{"n":5003,"repeats":1,"pending_vm":true}]},
+    {"id":"newforms","category":"modular forms","label":"weight-2 newform decomposition","importance":1,"sizes":[{"n":37,"repeats":1},{"n":389,"repeats":1},{"n":997,"repeats":1,"pending_vm":true}]},
+    {"id":"ec_aplist","category":"elliptic curves","label":"Frobenius traces for 5077a1","importance":1,"sizes":[{"n":1000,"repeats":2},{"n":10000,"repeats":1},{"n":100000,"repeats":1,"pending_vm":true}]}
+  ]
+}
