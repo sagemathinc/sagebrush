@@ -30,7 +30,7 @@ __all__ = [
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
-    "conway_polynomial", "VectorSpace", "random_matrix",
+    "conway_polynomial", "Hom", "VectorSpace", "random_matrix",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
@@ -117,7 +117,7 @@ from _sage_hmf import HilbertModularForms
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
-                      conway_polynomial)
+                      conway_polynomial, Hom)
 from _sage_qqbar import QQbar, AA
 from _sage_mpoly import ideal, Ideal, TermOrder
 from _sage_real import RealField, ComplexField, RealIntervalField, RIF
