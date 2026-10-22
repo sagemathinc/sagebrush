@@ -25,10 +25,10 @@ FLINT coverage reuses the bench-only `sagebrush-flint` Rust oracle from `bench/l
 The large points must not run in the project. After the coordinator confirms that a Sagebrush test VM has been started, use the repository checkout on that VM:
 
 ```sh
-python3 bench/magma-scoreboard/run.py --profile vm --host-label sagebrush --output bench/magma-scoreboard/results-vm.md
+python3 bench/magma-scoreboard/run.py --profile vm --skip-magma --host-label sagebrush --output bench/magma-scoreboard/results-vm.md
 ```
 
-The VM profile runs only the large points marked `pending_vm`. It remains sequential and retains the per-subprocess timeout and aggregate CPU budget. Do not start it until the coordinator has allocated an exclusive timing window on the VM.
+The VM profile runs only the large points marked `pending_vm`. VM 1 does not have the licensed Magma installation, so `--skip-magma` records its cells as pending and compares Sagebrush with FLINT on the same host. Large operations that FLINT does not expose remain `pending reference`: the runner will not time them without an answer oracle. It remains sequential and retains the per-subprocess timeout and aggregate CPU budget. Do not start it until the coordinator has allocated an exclusive timing window on the VM.
 
 ## Files
 
