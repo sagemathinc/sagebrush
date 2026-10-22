@@ -243,18 +243,50 @@ fn every_phase_debits() {
     assert_eq!(b.live(), 0);
 }
 
+/// A pseudo-random polynomial of degree d with coefficients below 2^bits.
+fn random_poly(seed: &mut u64, d: usize, bits: u32) -> ZPoly {
+    let mut v: ZPoly = (0..d)
+        .map(|_| {
+            *seed ^= *seed << 13;
+            *seed ^= *seed >> 7;
+            *seed ^= *seed << 17;
+            BigInt::from(*seed % (1u64 << bits)) - BigInt::from(1u64 << (bits - 1))
+        })
+        .collect();
+    v.push(BigInt::one());
+    v
+}
+
+/// The calibration of W (plan r3, 5.1): units debited per second on cases
+/// that stress each helper; W = 60 s times the slowest throughput.
 #[test]
 #[ignore]
 fn timings() {
-    for (name, f) in [("S_5", swinnerton_dyer(5)), ("S_6", swinnerton_dyer(6)), ("x^60-1", xn(60, -1)), ("x^120-1", xn(120, -1)), ("x^240-1", xn(240, -1)), ("x^360-1", xn(360, -1))] {
+    let mut seed = 0x1234_5678_9abc_def1u64;
+    let mut cases: Vec<(String, ZPoly)> = vec![
+        ("S_5".into(), swinnerton_dyer(5)),
+        ("S_6".into(), swinnerton_dyer(6)),
+        ("x^60-1".into(), xn(60, -1)),
+        ("x^120-1".into(), xn(120, -1)),
+        ("x^240-1".into(), xn(240, -1)),
+    ];
+    for &(d, bits) in &[(100usize, 20u32), (300, 20), (600, 8), (1000, 4)] {
+        let a = random_poly(&mut seed, d, bits);
+        let c = random_poly(&mut seed, d, bits);
+        cases.push((format!("dense {}x{} ({} bits)", d, d, bits), prod(&[a, c])));
+    }
+    let a = random_poly(&mut seed, 400, 4);
+    cases.push(("square (deg 400)^2 * x^2+1".into(), prod(&[a.clone(), a, z(&[1, 0, 1])])));
+    for (name, f) in cases {
         let b = Budget::default();
         let t = std::time::Instant::now();
         let r = try_factor_with(&f, &b);
         let dt = t.elapsed().as_secs_f64();
+        let used = Limits::DEFAULT.work - b.work_left();
+        let rate = used as f64 / dt.max(1e-9);
         match r {
-            Ok((_, fs)) => println!("TIMING {} {:.4} s, {} factors, work {} peak {} KiB, lll {}", name, dt, fs.len(), Limits::DEFAULT.work - b.work_left(), b.peak() / 1024, b.debited(Phase::Lll)),
-            Err(e) => println!("TIMING {} {:.4} s refused: {}", name, dt, e),
+            Ok((_, fs)) => println!("TIMING {:32} {:9.4} s {:3} factors  work {:14}  {:.3e} units/s  peak {} KiB  lll {}", name, dt, fs.len(), used, rate, b.peak() / 1024, b.debited(Phase::Lll)),
+            Err(e) => println!("TIMING {:32} {:9.4} s refused ({})  work {}  {:.3e} units/s", name, dt, e, used, rate),
         }
     }
 }
-
