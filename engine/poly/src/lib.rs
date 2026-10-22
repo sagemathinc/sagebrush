@@ -17,7 +17,9 @@
 //!   * recombination: Zassenhaus' subsets for few modular factors (r <= 8),
 //!     else a pre-pass over subsets of sizes 1 and 2, then van Hoeij's
 //!     lattice of CLD (logarithmic derivative) columns (vanhoeij.rs), with
-//!     Zassenhaus as a budgeted fallback.
+//!     Zassenhaus as a budgeted fallback;
+//!   * binomials x^k (a x^m + b) skip all of this: their factors come from
+//!     cyclotomic polynomials, proved (binomial.rs).
 //! Every call runs within one [`Budget`] (work and live memory, budget.rs):
 //! exhausting it is the error [`FactorLimit`], never a partial answer.
 //! Polynomials are coefficient vectors, constant term first.
@@ -27,6 +29,7 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::{BigInt, BigUint};
 use std::ops::Deref;
 
+mod binomial;
 pub mod budget;
 mod lll;
 pub mod nf;
@@ -1003,9 +1006,14 @@ pub fn try_factor_with(f: &[BigInt], b: &Budget) -> Result<(BigInt, Vec<(ZPoly, 
     }
     // (the factors stay reserved until the call returns them)
     let mut held: Vec<(Held, u32)> = vec![];
-    for (part, e) in squarefree_with(b, &g)? {
-        for h in factor_squarefree(b, &part)? {
-            held.push((h, e));
+    // binomials x^k (a x^m + b): from their cyclotomic structure
+    if let Some(fs) = binomial::factor(b, &g)? {
+        held = fs;
+    } else {
+        for (part, e) in squarefree_with(b, &g)? {
+            for h in factor_squarefree(b, &part)? {
+                held.push((h, e));
+            }
         }
     }
     let _o = b.reserve(words_bytes(4 * held.len() as u64))?;
