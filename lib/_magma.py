@@ -16,6 +16,7 @@ import sage_all as _sa
 from sage_all import Rational as _Rational, _intdiv
 import _sage_poly as _sp
 import _sage_ff as _sff
+import _sage_frac as _sfrac
 
 __all__ = []  # filled at the end: every intrinsic
 
@@ -2796,6 +2797,8 @@ def _rule_pow(A, B, a, b, err, pos, unsupported):
 def _add(a, b, pos=None, op="+"):
     if type(a) is int and type(b) is int:
         return a + b
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        return _fun_binary("+", a, b, pos)
     _arith(op, (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("+", a, b, pos)
@@ -2811,6 +2814,8 @@ def _add(a, b, pos=None, op="+"):
 def _sub(a, b, pos=None, op="-"):
     if type(a) is int and type(b) is int:
         return a - b
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        return _fun_binary("-", a, b, pos)
     _arith(op, (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("-", a, b, pos)
@@ -2828,6 +2833,8 @@ def _mul(a, b, pos=None, op="*"):
         return a * b
     if type(a) is str and type(b) is str:
         return a + b  # Magma's * joins strings
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        return _fun_binary("*", a, b, pos)
     _arith(op, (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("*", a, b, pos)
@@ -2850,6 +2857,8 @@ def _uplus(a, pos=None):
 def _neg(a, pos=None):
     if type(a) is int:
         return -a
+    if isinstance(a, _MFunRatElt):
+        return _fun_unary("-", a, pos)
     _arith("-", (a,), pos)
     try:
         return _mod_result(-a, "-", a)
@@ -2860,6 +2869,8 @@ def _neg(a, pos=None):
 def _div(a, b, pos=None, op="/"):
     if _int(a) and _int(b):
         return _intdiv(a, b)
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        return _fun_binary("/", a, b, pos)
     _arith(op, (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("/", a, b, pos)
@@ -2913,6 +2924,8 @@ def _pow(a, b, pos=None, op="^"):
         if b < 0:
             raise MagmaError("Argument 2 (%d) should be >= 0" % b, "'%s'" % op, True, pos)
         return a * b
+    if isinstance(a, _MFunRatElt):
+        return _fun_power(a, b, pos)
     _arith(op, (a, b), pos)
     if isinstance(a, _MFFPoly):
         return _ffpoly_op("^", a, b, pos)
@@ -2968,7 +2981,7 @@ def _rat_pow(a, b, op, pos):
 def _is_struct(x):
     """A structure (a ring or field, a polynomial ring, a matrix space)."""
     return isinstance(x, (_IntegerRing, _RationalField, RealField_, _sp.PolynomialRing_, _snf.NumberField_absolute,
-                          _smat.MatrixSpace_))
+                          _smat.MatrixSpace_, _MFunRat))
 
 
 def _struct_cat(x):
@@ -2976,7 +2989,7 @@ def _struct_cat(x):
     sequence, and compare by their defining data."""
     for cls, cat in ((_IntegerRing, "RngInt"), (_RationalField, "FldRat"), (RealField_, "FldRe"),
                      (_sp.PolynomialRing_, "RngUPol"), (_snf.NumberField_absolute, "FldNum"),
-                     (_smat.MatrixSpace_, "ModMat")):
+                     (_smat.MatrixSpace_, "ModMat"), (_MFunRat, "FldFunRat")):
         if isinstance(x, cls):
             return cat
     return None
@@ -3210,6 +3223,8 @@ def _struct_eq(a, b, op, pos):
 
 
 def _eq(a, b, pos=None, op="eq"):
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        return _fun_equal(a, b, pos)
     if _cyc_elt(a) or _cyc_elt(b):
         _cyc_check(op, a, b, pos)
     if isinstance(a, _MModSpace) or isinstance(b, _MModSpace):
@@ -4800,7 +4815,7 @@ def _tuple_str(v, indent, col, tail, cont=None):
 def _extra(v):
     """Continuation indent of a wrapped value: polynomials (and tuples
     holding one) indent 4 more, as Magma's polynomial printer does."""
-    if isinstance(v, (_sp.Polynomial, _MFFPoly)):
+    if isinstance(v, (_sp.Polynomial, _MFFPoly, _MFunRatElt)):
         return 4
     if isinstance(v, MTuple):
         return max([_extra(x) for x in v] + [0])
@@ -5271,6 +5286,8 @@ def Integers(K=None):
     """Integers(): the ring of integers; Integers(K): K's maximal order."""
     if K is None:
         return _ZZ
+    if isinstance(K, _MFunRat):
+        return K._integer_ring
     if isinstance(K, (_MNumberField, _MOrder)):
         return MaximalOrder(K)
     if isinstance(K, int) and not isinstance(K, bool):
@@ -5326,7 +5343,7 @@ _CATEGORIES = ("BoolElt RngIntElt FldRatElt FldReElt MonStgElt SeqEnum SetEnum S
                "List Rec RecFrmt RngUPolElt RngUPol RngInt FldRat Map FldFin FldFinElt "
                # (and those of signatures: ISA(AlgMatElt, MtrxS))
                "GrpPermElt GrpPerm RngIntResElt RngIntRes ModTupRngElt ModTupFldElt ModTupRng ModTupFld AlgMatElt ModMatRngElt ModMatFldElt MtrxS Mtrx RngElt FldElt FldAlgElt FldNumElt FldQuadElt "
-               "FldNum FldQuad FldCyc FldCycElt FldAlg FldRe RngOrd RngQuad Rng Fld Str Cat Any").split()
+               "FldNum FldQuad FldCyc FldCycElt FldAlg FldRe FldFunRat FldFunRatUElt FldFunRatElt RngOrd RngQuad Rng Fld Str Cat Any").split()
 for _c in _CATEGORIES:
     globals()[_c] = _Cat(_c)
 
@@ -5344,6 +5361,10 @@ def _type_name(x):
         return "FldFinElt"
     if isinstance(x, _MFinField):
         return "FldFin"
+    if isinstance(x, _MFunRat):
+        return "FldFunRat"
+    if isinstance(x, _MFunRatElt):
+        return "FldFunRatUElt"
     if x is _ZZ:
         return "RngInt"
     if x is _QQ:
@@ -5447,6 +5468,10 @@ def _ext_type(x):
         return "RngUPolElt[FldFin]"
     if isinstance(x, _MFFPolyRing):
         return "RngUPol[FldFin]"
+    if isinstance(x, _MFunRat):
+        return "FldFunRat"
+    if isinstance(x, _MFunRatElt):
+        return "FldFunRatUElt[%s]" % ("RngInt" if x.F._ground is _ZZ else "FldRat" if x.F._ground is _QQ else "FldFin")
     if isinstance(x, (_MFFMat, _MFFVec)):
         return "%s[FldFin]" % _type_name(x)
     if isinstance(x, _MVector):
@@ -5534,6 +5559,7 @@ def _bad_types(name, args, pos=None):
 _ISA_UP = {t: frozenset(s.split()) for t, s in {
     "RngIntElt": "RngElt", "FldRatElt": "FldElt RngElt", "FldReElt": "FldElt RngElt",
     "FldFinElt": "FldElt RngElt", "FldNumElt": "FldAlgElt FldElt RngElt",
+    "FldFunRatUElt": "FldFunRatElt FldElt RngElt", "FldFunRatElt": "FldElt RngElt",
     "FldQuadElt": "FldNumElt FldAlgElt FldElt RngElt", "RngUPolElt": "RngElt",
     "AlgMatElt": "MtrxS Mtrx RngElt", "ModMatRngElt": "MtrxS Mtrx", "ModMatFldElt": "ModMatRngElt MtrxS Mtrx",
     "ModTupRngElt": "Mtrx", "ModTupFldElt": "ModTupRngElt Mtrx",
@@ -5542,7 +5568,7 @@ _ISA_UP = {t: frozenset(s.split()) for t, s in {
     "BoolElt": "", "MonStgElt": "", "Tup": "", "List": "", "Rec": "", "Cat": "", "RecFrmt": "",
     "SeqEnum": "Str", "SetEnum": "Str", "SetIndx": "Str", "SetMulti": "Str", "Map": "Str",
     "RngInt": "Rng Str", "FldRat": "Fld Rng Str", "FldRe": "Fld Rng Str", "FldFin": "Fld Rng Str",
-    "FldNum": "FldAlg Fld Rng Str", "FldQuad": "FldNum FldAlg Fld Rng Str",
+    "FldNum": "FldAlg Fld Rng Str", "FldQuad": "FldNum FldAlg Fld Rng Str", "FldFunRat": "Fld Rng Str",
     "RngOrd": "Rng Str", "RngQuad": "RngOrd Rng Str", "RngUPol": "Rng Str",
 }.items()}
 # (every type the table names: ISA of another is not known here)
@@ -5616,6 +5642,599 @@ def _dispatcher(name):
     return intrinsic
 
 
+# ------------------------------------------------------------------ one-variable rational function fields
+
+# R0a's public admission limits.  These are deliberately repeated here,
+# beside every allocation site they govern, rather than being implicit in
+# the (larger) limits of the polynomial implementations underneath.
+_FUN_WORK_MAX = 1 << 26
+_FUN_LIVE_MAX = 16 << 20
+_FUN_INPUT_COEFFS_MAX = 32768
+_FUN_Q_INPUT_DEG = 512
+_FUN_Q_RESULT_DEG = 1024
+_FUN_FP_INPUT_DEG = 2048
+_FUN_FP_RESULT_DEG = 4096
+_FUN_EXP_MAX = 4096
+_FUN_PF_FACTORS_MAX = 1024
+_FUN_PF_TERMS_MAX = 4096
+_FUN_Q_COEFF_BITS = 1 << 16
+_FUN_Q_TOTAL_BITS = 1 << 23
+
+
+class _FunBudget:
+    """One non-resetting R0a work/live ledger for a public operation."""
+
+    __slots__ = ("work", "live")
+
+    def __init__(self):
+        self.work = 0
+        self.live = 0
+
+    def charge(self, work=0, live=0, what="operation"):
+        work, live = int(work), int(live)
+        if work < 0 or live < 0 or self.work + work > _FUN_WORK_MAX or self.live + live > _FUN_LIVE_MAX:
+            raise MagmaError("%s exceeds the rational-function R0a work or memory limit" % what,
+                             "'FunctionField'", True)
+        self.work += work
+        self.live += live
+
+
+def _fun_coeff_bits(c):
+    """Allocation-free coefficient size used by R0a admission."""
+    if _is_ff(c):
+        return 1
+    try:
+        q = _Fraction(c)
+        return max(1, abs(int(q.numerator)).bit_length(), int(q.denominator).bit_length())
+    except (TypeError, ValueError, AttributeError):
+        return 1
+
+
+def _fun_scalar_cost(F, bits):
+    """The approved scalar-cost model C_Q(B) or C_{p,1}."""
+    if F._char == 0:
+        return (1 + (max(1, int(bits)) + 29) // 30) ** 2
+    return 2 * (1 + (max(1, int(F._char).bit_length()) + 29) // 30) ** 2
+
+
+def _fun_check_output_bits(F, degree, bits, what):
+    """Refuse a conservative Q result envelope before its allocation."""
+    if F._char != 0:
+        return
+    degree, bits = max(0, int(degree)), max(1, int(bits))
+    if bits > _FUN_Q_COEFF_BITS or 2 * (degree + 1) * bits > _FUN_Q_TOTAL_BITS:
+        raise MagmaError("%s has a rational coefficient envelope beyond the R0a bit limit" % what,
+                         "'FunctionField'", True)
+
+
+def _fun_mul_envelope(d1, b1, d2, b2):
+    """The allocation-free product envelope M from the approved plan."""
+    m = 1 + min(max(0, d1), max(0, d2))
+    return max(0, d1) + max(0, d2), max(1, b1) + max(1, b2) + (m - 1).bit_length() + 2
+
+
+def _fun_norm_bits(degree, bits):
+    """Conservative cleared/subresultant normalization coefficient bound."""
+    degree, bits = max(0, int(degree)), max(1, int(bits))
+    return (degree + 1) * (bits + (degree + 1).bit_length() + 3)
+
+
+def _fun_poly_meta(p):
+    # Every polynomial admitted by R0a is one of the two dense Sagebrush
+    # polynomial implementations and exposes its already-normalized backing
+    # coefficients.  Inspect that storage directly: calling list() here
+    # would allocate a second, unadmitted dense copy merely to measure it.
+    cs = getattr(p, "_c", ())
+    if not cs:
+        return -1, 1, 1, 1
+    return int(p.degree()), len(cs), max(_fun_coeff_bits(c) for c in cs), sum(_fun_coeff_bits(c) for c in cs)
+
+
+def _fun_presentation_meta(F, v):
+    """Closed envelope for the two public numerator/denominator polynomials."""
+    dn, _, bn, tn = _fun_poly_meta(v.numerator())
+    dd, _, bd, td = _fun_poly_meta(v.denominator())
+    B = max(bn, bd)
+    if F._ground is _ZZ:
+        # Clearing all coefficient denominators uses an lcm whose bit length
+        # is at most their summed bit lengths; multiplication adds B bits.
+        B += tn + td + 1
+    return max(0, dn, dd), B
+
+
+def _fun_poly_live(degree, bits):
+    """Reviewed live reservation for one dense polynomial and its copies."""
+    n = max(1, int(degree) + 1)
+    total = n * max(1, int(bits))
+    return 4 * (64 * n + (total + 7) // 8)
+
+
+def _fun_preflight_result(F, degree, bits, budget, what, work=0, copies=1, extra_live=0):
+    """Admit a closed result envelope before arithmetic materializes it."""
+    degree, bits = max(0, int(degree)), max(1, int(bits))
+    cap = _FUN_Q_RESULT_DEG if F._char == 0 else _FUN_FP_RESULT_DEG
+    if degree > cap:
+        raise MagmaError("%s x-degree envelope %d exceeds the R0a limit of %d" % (what, degree, cap),
+                         "'FunctionField'", True)
+    _fun_check_output_bits(F, degree, bits, what)
+    # A normalized fraction has two dense polynomials.  ``copies`` covers
+    # simultaneous old/new derivative states or another proved transient.
+    live = int(copies) * 2 * _fun_poly_live(degree, bits) + int(extra_live)
+    budget.charge(work=work, live=live, what=what)
+
+
+def _fun_admit_poly(F, p, result, budget, what, charge_live=True):
+    d, n, b, total = _fun_poly_meta(p)
+    cap = (_FUN_Q_RESULT_DEG if result else _FUN_Q_INPUT_DEG) if F._char == 0 else (
+        _FUN_FP_RESULT_DEG if result else _FUN_FP_INPUT_DEG)
+    if d > cap:
+        raise MagmaError("%s of x-degree %d exceeds the rational-function R0a limit of %d" % (what, d, cap),
+                         "'FunctionField'", True)
+    if n > _FUN_INPUT_COEFFS_MAX:
+        raise MagmaError("%s has more than %d dense coefficients" % (what, _FUN_INPUT_COEFFS_MAX),
+                         "'FunctionField'", True)
+    if F._char == 0 and (b > _FUN_Q_COEFF_BITS or total > _FUN_Q_TOTAL_BITS):
+        raise MagmaError("%s has rational coefficients beyond the R0a bit limit" % what,
+                         "'FunctionField'", True)
+    # Four copies cover the input/output polynomial, normalization work and
+    # reply conversion.  This is intentionally pessimistic.
+    if charge_live:
+        budget.charge(live=4 * (64 * n + (total + 7) // 8), what=what)
+    return max(0, d), n, b
+
+
+def _fun_admit_fraction(F, v, result, budget, what, normalize=True, charge_live=True):
+    dn, nn, bn = _fun_admit_poly(F, v.numerator(), result, budget, what + " numerator", charge_live)
+    dd, nd, bd = _fun_admit_poly(F, v.denominator(), result, budget, what + " denominator", charge_live)
+    D = max(dn, dd)
+    if nn + nd > _FUN_INPUT_COEFFS_MAX:
+        raise MagmaError("%s has more than %d dense coefficients" % (what, _FUN_INPUT_COEFFS_MAX),
+                         "'FunctionField'", True)
+    if normalize:
+        B = max(1, bn, bd)
+        budget.charge(work=8 * (D + 1) ** 3 * _fun_scalar_cost(F, B), what=what + " normalization")
+    return D
+
+
+def _fun_base_key(k):
+    if k is _QQ:
+        return ("Q",)
+    if k is _ZZ:
+        return ("Z",)
+    if isinstance(k, _MFinField) and k.n == 1:
+        return ("Fp", k.p)
+    return None
+
+
+# A 64-entry/4 MiB strong LRU plus weak live identity registry.  Eviction
+# drops only the derived strong retention: a live alias still resolves to
+# the same canonical parent and mutable generator name.
+import weakref as _weakref
+_FUN_LIVE = _weakref.WeakValueDictionary()
+_FUN_CACHE = {}
+_FUN_LRU = []
+_FUN_CACHE_BYTES_MAX = 4 << 20
+_FUN_CACHE_ENTRY_BYTES = 1 << 16  # reviewed reservation for one R0a parent
+_FUN_CACHE_COUNT = min(64, _FUN_CACHE_BYTES_MAX // _FUN_CACHE_ENTRY_BYTES)
+_FUN_POLY_BY_BASE = _weakref.WeakValueDictionary()
+_FUN_POLY_LRU = []
+
+
+def _fun_remember_poly(key, ring):
+    """Remember at most 64 source presentations, without retaining values."""
+    _FUN_POLY_LRU[:] = [k for k in _FUN_POLY_LRU if k in _FUN_POLY_BY_BASE and k != key]
+    while len(_FUN_POLY_LRU) >= _FUN_CACHE_COUNT:
+        _FUN_POLY_BY_BASE.pop(_FUN_POLY_LRU.pop(0), None)
+    _FUN_POLY_BY_BASE[key] = ring
+    _FUN_POLY_LRU.append(key)
+
+
+def _fun_cache_get(key):
+    F = _FUN_LIVE.get(key)
+    if F is not None:
+        # A live identity may have outlived its strong-LRU slot.  Re-retain
+        # it through the same bounded insertion path, including eviction.
+        _fun_cache_put(key, F)
+    return F
+
+
+def _fun_cache_put(key, F):
+    # Commit only after F is complete.  A failure before here publishes no
+    # parent, cache entry or generator-name mutation.
+    while key not in _FUN_CACHE and len(_FUN_CACHE) >= _FUN_CACHE_COUNT:
+        old = _FUN_LRU.pop(0)
+        _FUN_CACHE.pop(old, None)
+    _FUN_LIVE[key] = F
+    _FUN_CACHE[key] = F
+    if key in _FUN_LRU:
+        _FUN_LRU.remove(key)
+    _FUN_LRU.append(key)
+
+
+class _MFunRat:
+    """Magma's FldFunRat presentation over Q, Z, or an admitted GF(p)."""
+
+    def __init__(self, ground, source=None):
+        self._ground = ground
+        self._char = ground.p if isinstance(ground, _MFinField) else 0
+        self._name = "$.1"
+        if ground is _ZZ:
+            self._backend_ring = _sp.PolynomialRing_(_sp.QQ, self._name)
+            self._integer_ring = source or _sp.PolynomialRing_(_sp.ZZ, "$.1")
+        elif ground is _QQ:
+            self._backend_ring = _sp.PolynomialRing_(_sp.QQ, self._name)
+            self._integer_ring = source or _sp.PolynomialRing_(_sp.QQ, "$.1")
+        else:
+            self._backend_ring = _sff.PolynomialRing_ff(ground.K, self._name)
+            self._integer_ring = source or _MFFPolyRing(ground)
+        self._frac = _sfrac.FractionField_(self._backend_ring)
+
+    def __repr__(self):
+        base = "Integer Ring" if self._ground is _ZZ else "Rational Field" if self._ground is _QQ else _gf_name(self._ground)
+        return "Univariate rational function field over %s\nVariables: %s" % (base, self._name)
+
+    def _magma_names(self, names):
+        if len(names) != 1:
+            raise _arg_error("AssignNames", "Argument 2 must have length 1")
+        name = str(names[0])
+        # The private arithmetic ring, never the public source ring, follows
+        # the field generator.  Commit both only after validation.
+        self._name = name
+        self._backend_ring._name = name
+
+    def _magma_gen(self, i):
+        if i != 1:
+            raise MagmaError("Value for name index (%d) should be in the range [1..1]" % i, "'.'", True)
+        budget = _FunBudget()
+        _fun_preflight_result(self, 1, 1, budget, "generator result")
+        return self._wrap(self._frac.gen(), budget, "generator", normalize=False, prepaid=True)
+
+    def _magma_eq(self, o, op):
+        if isinstance(o, _MFunRat):
+            return self is o
+        raise _bad_types(op, (self, o))
+
+    def _magma_coerce(self, x):
+        budget = _FunBudget()
+        try:
+            return self._wrap(self._coerce_value(x, budget), budget,
+                              "coercion", normalize=False, prepaid=True)
+        except ZeroDivisionError:
+            raise MagmaError("Division by zero", "'!'", False)
+        except MagmaError:
+            raise
+        except (TypeError, ValueError, ArithmeticError):
+            raise MagmaError("Illegal coercion", "'!'", False)
+
+    def _coerce_poly(self, x, budget):
+        if isinstance(x, _sp.Polynomial):
+            _fun_admit_poly(self, x, False, budget, "coercion source polynomial")
+            return self._backend_ring(x._c)
+        if isinstance(x, _MFFPoly) and isinstance(self._ground, _MFinField) and x.R.F is self._ground:
+            _fun_admit_poly(self, x.p, False, budget, "coercion source polynomial")
+            return self._backend_ring(x.p._c)
+        if hasattr(x, "parent") and x.parent() is self._backend_ring:
+            return x
+        return None
+
+    def _coerce_value(self, x, budget):
+        if isinstance(x, _MFunRatElt):
+            if x.F is not self:
+                raise MagmaError("Arguments are not compatible", "'!'", True)
+            return x.v
+        if isinstance(x, (MSeq, MRange)):
+            if len(x) > _FUN_INPUT_COEFFS_MAX:
+                raise MagmaError("coercion sequence has more than %d entries" % _FUN_INPUT_COEFFS_MAX,
+                                 "'!'", True)
+            if isinstance(x, MRange):
+                # Reserve the dense conversion before making it.  An MSeq is
+                # already dense and can be inspected without a second copy.
+                budget.charge(live=64 * len(x), what="coercion sequence")
+                a = list(x)
+            else:
+                a = x
+            if len(a) == 2:
+                n = self._coerce_value(a[0], budget)
+                d = self._coerce_value(a[1], budget)
+                if not d:
+                    raise ZeroDivisionError("division by zero")
+                Dn = _fun_admit_fraction(self, n, False, budget, "coercion numerator", normalize=False)
+                Dd = _fun_admit_fraction(self, d, False, budget, "coercion denominator", normalize=False)
+                Bn = max(_fun_poly_meta(n.numerator())[2], _fun_poly_meta(n.denominator())[2])
+                Bd = max(_fun_poly_meta(d.numerator())[2], _fun_poly_meta(d.denominator())[2])
+                Dout, Bout = _fun_mul_envelope(Dn, Bn, Dd, Bd)
+                Bout = _fun_norm_bits(Dout, Bout)
+                work = 8 * (Dout + 1) ** 3 * _fun_scalar_cost(self, Bout)
+                _fun_preflight_result(self, Dout, Bout, budget, "coercion result", work=work)
+                return n / d
+            # First pass validates and sizes without building the converted
+            # coefficient vector or backend polynomial.  Their entire live
+            # envelope is charged before the second pass materializes them.
+            B, total = 1, 0
+            for c in a:
+                if isinstance(c, bool) or isinstance(c, (_sp.Polynomial, _MFFPoly, _MFunRatElt)):
+                    raise MagmaError("Illegal coercion", "'!'", False)
+                self._constant(c)  # validate one scalar; do not retain it
+                cb = _fun_coeff_bits(c)
+                B, total = max(B, cb), total + cb
+            D = max(0, len(a) - 1)
+            cap = _FUN_Q_INPUT_DEG if self._char == 0 else _FUN_FP_INPUT_DEG
+            if D > cap:
+                raise MagmaError("coercion polynomial of x-degree %d exceeds the rational-function R0a limit of %d" % (D, cap),
+                                 "'FunctionField'", True)
+            if self._char == 0 and (B > _FUN_Q_COEFF_BITS or total > _FUN_Q_TOTAL_BITS):
+                raise MagmaError("coercion polynomial has rational coefficients beyond the R0a bit limit",
+                                 "'FunctionField'", True)
+            # A dense coefficient sequence becomes a polynomial over 1; no
+            # gcd/content normalization can grow its coefficients.
+            Bout = B
+            work = 8 * (D + 1) ** 3 * _fun_scalar_cost(self, B)
+            _fun_preflight_result(self, D, Bout, budget, "coercion result", work=work,
+                                  extra_live=64 * len(a))
+            cs = [self._constant(c) for c in a]
+            p = self._backend_ring(cs)
+            _fun_admit_poly(self, p, False, budget, "coercion polynomial", charge_live=False)
+            return self._frac(p)
+        p = self._coerce_poly(x, budget)
+        if p is not None:
+            D, _, B = _fun_admit_poly(self, p, False, budget, "coercion polynomial")
+            work = 8 * (D + 1) ** 3 * _fun_scalar_cost(self, B)
+            _fun_preflight_result(self, D, B, budget,
+                                  "coercion result", work=work)
+            return self._frac(p)
+        if isinstance(x, bool):
+            raise MagmaError("Illegal coercion", "'!'", False)
+        B = _fun_coeff_bits(x)
+        if self._char == 0 and B > _FUN_Q_COEFF_BITS:
+            raise MagmaError("coercion constant has rational coefficients beyond the R0a bit limit",
+                             "'FunctionField'", True)
+        work = 8 * _fun_scalar_cost(self, B)
+        _fun_preflight_result(self, 0, B, budget,
+                              "coercion result", work=work)
+        p = self._backend_ring([self._constant(x)])
+        _fun_admit_poly(self, p, False, budget, "coercion constant", charge_live=False)
+        return self._frac(p)
+
+    def _constant(self, x):
+        if self._ground is _QQ or self._ground is _ZZ:
+            if _is_ff(x) or isinstance(x, (_MFinField, MReal, str)):
+                raise TypeError("not a rational constant")
+            return _Rational(x)
+        return self._ground._magma_coerce(x)
+
+    def _wrap(self, v, budget, what="result", normalize=True, prepaid=False):
+        if not isinstance(v, _sfrac.FractionFieldElement):
+            v = self._frac(v)
+        _fun_admit_fraction(self, v, True, budget, what, normalize, charge_live=not prepaid)
+        return _MFunRatElt(self, v)
+
+    def _display(self, v):
+        """Print Z-ground values using Magma's integral presentation."""
+        if self._ground is not _ZZ:
+            return repr(v)
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(self, v)
+        _fun_preflight_result(self, D, B, budget, "printed integral presentation")
+        n, d = self._parts(v)
+        # Re-home only the presentation coefficients in the private ring so
+        # the live field name is used without renaming the source Z[u].
+        n = self._backend_ring(n._c)
+        d = self._backend_ring(d._c)
+        if d == 1:
+            return repr(n)
+        ns, ds = repr(n), repr(d)
+        if "+" in ns[1:] or "-" in ns[1:]:
+            ns = "(" + ns + ")"
+        if any(c in ds[1:] for c in "+-*/"):
+            ds = "(" + ds + ")"
+        return ns + "/" + ds
+
+    def _poly_out(self, p):
+        if self._ground is _ZZ:
+            return self._integer_ring([int(_Fraction(c)) for c in p.list()])
+        if self._ground is _QQ:
+            return self._integer_ring(p.list())
+        return _MFFPoly(self._integer_ring, self._integer_ring.P(p.list()))
+
+    def _parts(self, v):
+        n, d = v.numerator(), v.denominator()
+        if self._ground is not _ZZ:
+            return self._poly_out(n), self._poly_out(d)
+        qs = [_Fraction(c) for c in n.list()] + [_Fraction(c) for c in d.list()]
+        L = 1
+        for q in qs:
+            L = L * int(q.denominator) // _math.gcd(L, int(q.denominator))
+        ni = self._integer_ring([int(_Fraction(c) * L) for c in n.list()])
+        di = self._integer_ring([int(_Fraction(c) * L) for c in d.list()])
+        return ni, di
+
+
+class _MFunRatElt:
+    __slots__ = ("F", "v")
+
+    def __init__(self, F, v):
+        self.F, self.v = F, v
+
+    def __repr__(self):
+        return self.F._display(self.v)
+
+    __str__ = __repr__
+
+    def _magma_parent(self):
+        return self.F
+
+    def __bool__(self):
+        return bool(self.v)
+
+    def __neg__(self):
+        return _fun_unary("-", self)
+
+    def __add__(self, o):
+        return _fun_binary("+", self, o)
+
+    __radd__ = __add__
+
+    def __sub__(self, o):
+        return _fun_binary("-", self, o)
+
+    def __rsub__(self, o):
+        return _fun_binary("-", o, self)
+
+    def __mul__(self, o):
+        return _fun_binary("*", self, o)
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, o):
+        return _fun_binary("/", self, o)
+
+    def __rtruediv__(self, o):
+        return _fun_binary("/", o, self)
+
+    def __pow__(self, n):
+        return _fun_power(self, n)
+
+    def __eq__(self, o):
+        try:
+            return _fun_equal(self, o)
+        except MagmaError:
+            return False
+
+
+def _fun_parent_from(a, b=None):
+    fs = [x.F for x in (a, b) if isinstance(x, _MFunRatElt)]
+    if not fs:
+        return None
+    if any(F is not fs[0] for F in fs[1:]):
+        raise MagmaError("Arguments are not compatible", "'+'", True)
+    return fs[0]
+
+
+def _fun_binary(op, a, b, pos=None, budget=None):
+    F = _fun_parent_from(a, b)
+    if F is None:
+        return None
+    budget = budget or _FunBudget()
+    try:
+        av, bv = F._coerce_value(a, budget), F._coerce_value(b, budget)
+        Da = _fun_admit_fraction(F, av, False, budget, "left operand", normalize=False)
+        Db = _fun_admit_fraction(F, bv, False, budget, "right operand", normalize=False)
+        Ba = max(_fun_poly_meta(av.numerator())[2], _fun_poly_meta(av.denominator())[2])
+        Bb = max(_fun_poly_meta(bv.numerator())[2], _fun_poly_meta(bv.denominator())[2])
+        Dout, Bout = _fun_mul_envelope(Da, Ba, Db, Bb)
+        if op in ("+", "-"):
+            Bout += 1
+        Bout = _fun_norm_bits(Dout, Bout)
+        work = 8 * (Dout + 1) ** 3 * _fun_scalar_cost(F, Bout)
+        _fun_preflight_result(F, Dout, Bout, budget,
+                              "rational-function %s result" % op, work=work)
+        if op == "+":
+            v = av + bv
+        elif op == "-":
+            v = av - bv
+        elif op == "*":
+            v = av * bv
+        else:
+            if not bv:
+                raise MagmaError("Division by zero", "'/'", True, pos)
+            v = av / bv
+        return F._wrap(v, budget, "result", normalize=False, prepaid=True)
+    except ZeroDivisionError:
+        raise MagmaError("Division by zero", "'%s'" % op, True, pos)
+    except MagmaError:
+        raise
+    except (TypeError, ValueError, ArithmeticError):
+        raise _bad_types(op, (a, b), pos)
+
+
+def _fun_unary(op, a, pos=None):
+    budget = _FunBudget()
+    D = _fun_admit_fraction(a.F, a.v, False, budget, "operand", normalize=False)
+    B = max(_fun_poly_meta(a.v.numerator())[2], _fun_poly_meta(a.v.denominator())[2])
+    _fun_preflight_result(a.F, D, B, budget, "unary result")
+    return a.F._wrap(-a.v, budget, "result", normalize=False, prepaid=True)
+
+
+def _fun_power(a, n, pos=None):
+    if not isinstance(n, int) or isinstance(n, bool):
+        raise _bad_types("^", (a, n), pos)
+    if abs(n) > _FUN_EXP_MAX:
+        raise MagmaError("Argument 2 (%d) exceeds the rational-function exponent limit of %d" % (n, _FUN_EXP_MAX), "'^'", True, pos)
+    budget = _FunBudget()
+    D = _fun_admit_fraction(a.F, a.v, False, budget, "power operand", normalize=False)
+    B = max(_fun_poly_meta(a.v.numerator())[2], _fun_poly_meta(a.v.denominator())[2])
+    Dout = D * abs(n)
+    Bout = 1 if n == 0 else abs(n) * B + max(0, abs(n) - 1) * ((D + 1).bit_length() + 2)
+    steps = max(1, abs(n).bit_length() + bin(abs(n)).count("1") - 1)
+    work = steps * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(a.F, Bout)
+    _fun_preflight_result(a.F, Dout, Bout, budget, "power result", work=work)
+    try:
+        return a.F._wrap(a.v ** n, budget, "power result", normalize=False, prepaid=True)
+    except ZeroDivisionError:
+        raise MagmaError("Division by zero", "'^'", True, pos)
+
+
+def _fun_equal(a, b, pos=None):
+    F = _fun_parent_from(a, b)
+    if F is None:
+        return False
+    budget = _FunBudget()
+    try:
+        av, bv = F._coerce_value(a, budget), F._coerce_value(b, budget)
+    except (TypeError, ValueError, ArithmeticError):
+        raise _bad_types("eq", (a, b), pos)
+    Da = _fun_admit_fraction(F, av, False, budget, "left operand", normalize=False)
+    Db = _fun_admit_fraction(F, bv, False, budget, "right operand", normalize=False)
+    budget.charge(work=2 * (Da + 1) * (Db + 1), what="rational-function comparison")
+    return av == bv
+
+
+def _fun_field(ground, source=None, name="FunctionField"):
+    key = _fun_base_key(ground)
+    if key is None:
+        if isinstance(ground, _MFinField):
+            raise MagmaError("%s over a non-prime finite field waits for R0b" % name, "'%s'" % name, True)
+        raise MagmaError("%s of a %s is not supported yet" % (name, _type_of(ground)), "'%s'" % name, True)
+    if source is None:
+        source = _FUN_POLY_BY_BASE.get(key)
+    F = _fun_cache_get(key)
+    if F is None:
+        F = _MFunRat(ground, source)
+        _fun_cache_put(key, F)
+    elif source is not None:
+        # A source-ring presentation affects IntegerRing/Numerator but never
+        # the private arithmetic variable or the source ring's own name.
+        F._integer_ring = source
+    return F
+
+
+def FunctionField(k, n=None):
+    if n is not None:
+        raise MagmaError("FunctionField in more than one variable waits for the separate RM stage", "'FunctionField'", True)
+    return _fun_field(k, name="FunctionField")
+
+
+def RationalFunctionField(k, n=None):
+    if n is not None:
+        raise MagmaError("RationalFunctionField in more than one variable waits for the separate RM stage", "'RationalFunctionField'", True)
+    return _fun_field(k, name="RationalFunctionField")
+
+
+def FieldOfFractions(R):
+    if isinstance(R, _sp.PolynomialRing_):
+        k = _ZZ if R.base_ring() is _sp.ZZ else _QQ if R.base_ring() is _sp.QQ else None
+    elif isinstance(R, _MFFPolyRing):
+        k = R.F
+    else:
+        k = None
+    if k is None:
+        raise MagmaError("FieldOfFractions of a %s is not supported yet" % _type_of(R), "'FieldOfFractions'", True)
+    return _fun_field(k, R, "FieldOfFractions")
+
+
+FractionField = FieldOfFractions
+
+
 # ------------------------------------------------------------------ polynomials
 
 def PolynomialRing(R, n=1):
@@ -5624,11 +6243,17 @@ def PolynomialRing(R, n=1):
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
     if isinstance(R, _MFinField):
-        return _ffpoly_ring(R)
+        out = _ffpoly_ring(R)
+        key = _fun_base_key(R)
+        if key is not None:
+            _fun_remember_poly(key, out)
+        return out
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
-    return _sp.PolynomialRing_(base, "$.1")
+    out = _sp.PolynomialRing_(base, "$.1")
+    _fun_remember_poly(_fun_base_key(R), out)
+    return out
 
 
 # The procedure call being made with reference arguments (f(~x, y)), as the
@@ -5687,6 +6312,10 @@ def _poly_parts(f):
 
 
 def Degree(f):
+    if isinstance(f, _MFunRatElt):
+        if not f.v:
+            return -1
+        return max(f.v.numerator().degree(), f.v.denominator().degree())
     if isinstance(f, _sp.Polynomial):
         return f.degree()
     if hasattr(f, "_magma_degree"):
@@ -5727,6 +6356,26 @@ def LeadingCoefficient(f):
 
 
 def Evaluate(f, x):
+    if isinstance(f, _MFunRatElt):
+        budget = _FunBudget()
+        D = _fun_admit_fraction(f.F, f.v, False, budget, "evaluation input", normalize=False)
+        B = max(_fun_poly_meta(f.v.numerator())[2], _fun_poly_meta(f.v.denominator())[2])
+        try:
+            xv = f.F._coerce_value(x, budget)
+            Dx = _fun_admit_fraction(f.F, xv, False, budget, "evaluation argument", normalize=False)
+            Bx = max(_fun_poly_meta(xv.numerator())[2], _fun_poly_meta(xv.denominator())[2])
+            structured = isinstance(x, (_MFunRatElt, _sp.Polynomial, _MFFPoly))
+            Dout = D * Dx if structured else 0
+            Bout = (D + 1) * (B + Bx + (Dout + 1).bit_length() + 3)
+            work = 8 * (D + 1) * (Dx + 1) ** 2 * _fun_scalar_cost(f.F, Bout)
+            if structured:
+                _fun_preflight_result(f.F, Dout, Bout, budget, "evaluation result", work=work)
+            else:
+                budget.charge(work=work, what="rational-function evaluation")
+            y = f.v(xv if structured else x)
+            return f.F._wrap(y, budget, "evaluation result", normalize=False, prepaid=True) if structured else y
+        except ZeroDivisionError:
+            raise MagmaError("Evaluated denominator is not invertible", "'Evaluate'", True)
     if isinstance(f, _MFFPoly):
         return _ffp_eval(f, x, "'Evaluate'")
     return f(x)
@@ -5738,6 +6387,22 @@ def Derivative(f, k=1):
         raise _bad_types("Derivative", [f, k])
     if k < 0:
         raise _arg_error("Derivative", "Argument 2 (%d) should be >= 0" % k)
+    if isinstance(f, _MFunRatElt):
+        budget = _FunBudget()
+        v = f.v
+        D = _fun_admit_fraction(f.F, v, False, budget, "derivative input", normalize=False)
+        B = max(_fun_poly_meta(v.numerator())[2], _fun_poly_meta(v.denominator())[2])
+        if k > D and v.denominator().degree() <= 0:
+            _fun_preflight_result(f.F, 0, 1, budget, "derivative result")
+            return f.F._wrap(f.F._frac(0), budget, "derivative result", normalize=False, prepaid=True)
+        Dout = D if v.denominator().degree() <= 0 else (k + 1) * D
+        Bout = B + k * (B + (Dout + 1).bit_length() + 3)
+        work = max(1, k) * 8 * (Dout + 1) ** 2 * _fun_scalar_cost(f.F, Bout)
+        _fun_preflight_result(f.F, Dout, Bout, budget, "derivative result",
+                              work=work, copies=2)
+        for _ in range(k):
+            v = v.derivative()
+        return f.F._wrap(v, budget, "derivative result", normalize=False, prepaid=True)
     if isinstance(f, _MFFPoly):
         return _ffp_derivative(f, k)
     for _ in range(k):
@@ -6933,11 +7598,144 @@ def Valuation(n, p):
 
 
 def Numerator(x):
+    if isinstance(x, _MFunRatElt):
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(x.F, x.v)
+        _fun_preflight_result(x.F, D, B, budget, "numerator presentation")
+        return x.F._parts(x.v)[0]
     return x.numerator if isinstance(x, _Fraction) else x
 
 
 def Denominator(x):
+    if isinstance(x, _MFunRatElt):
+        budget = _FunBudget()
+        D, B = _fun_presentation_meta(x.F, x.v)
+        _fun_preflight_result(x.F, D, B, budget, "denominator presentation")
+        return x.F._parts(x.v)[1]
     return x.denominator if isinstance(x, _Fraction) else 1
+
+
+def _fun_factor_key(item):
+    g, e = item
+    try:
+        cs = list(reversed(g.list()))
+        return (g.degree(), tuple(int(c) if _is_ff(c) else _Fraction(c) for c in cs), e)
+    except Exception:
+        return (g.degree(), repr(g), e)
+
+
+def _fun_pf_data(f, budget):
+    """Polynomial part and primary numerators, using one caller budget."""
+    F, v = f.F, f.v
+    D = _fun_admit_fraction(F, v, False, budget, "partial-fraction input", normalize=False)
+    B = max(_fun_poly_meta(v.numerator())[2], _fun_poly_meta(v.denominator())[2])
+    if D > _FUN_PF_FACTORS_MAX:
+        raise MagmaError("partial fractions have more than %d possible factors" % _FUN_PF_FACTORS_MAX,
+                         "'PartialFractionDecomposition'", True)
+    Bout = _fun_norm_bits(D, B)
+    _fun_check_output_bits(F, D, Bout, "partial-fraction output")
+    budget.charge(work=16 * (D + 1) ** 3 * _fun_scalar_cost(F, Bout),
+                  live=128 * (D + 1) * (D + 1),
+                  what="partial-fraction factorization, xgcd and output")
+    q, r = v.numerator().quo_rem(v.denominator())
+    fac = [(g, int(e)) for g, e in v.denominator().factor()
+           if hasattr(g, "degree") and g.degree() > 0]
+    fac.sort(key=_fun_factor_key)
+    if len(fac) > _FUN_PF_FACTORS_MAX or sum(e for _, e in fac) > _FUN_PF_TERMS_MAX:
+        raise MagmaError("partial-fraction output exceeds the R0a factor or term limit",
+                         "'PartialFractionDecomposition'", True)
+    primary = []
+    powers = [g ** e for g, e in fac]
+    for k, ((g, e), pk) in enumerate(zip(fac, powers)):
+        other = F._backend_ring(1)
+        for j, pj in enumerate(powers):
+            if j != k:
+                other = other * pj
+        inv = _sfrac._inverse_mod(other % pk, pk)
+        a = (r * inv) % pk
+        primary.append((g, e, a))
+    return q, primary
+
+
+def _fun_z_term(F, g, e, n):
+    """Clear a Q[x] term n/g^e into Magma's Z[x] presentation."""
+    L = 1
+    for c in list(g.list()) + list(n.list()):
+        q = _Fraction(c)
+        L = L * int(q.denominator) // _math.gcd(L, int(q.denominator))
+    G = F._integer_ring([int(_Fraction(c) * L) for c in g.list()])
+    N = F._integer_ring([int(_Fraction(c) * (L ** e)) for c in n.list()])
+    return G, N
+
+
+def _fun_term_out(F, g, e, n):
+    if F._ground is _ZZ:
+        G, N = _fun_z_term(F, g, e, n)
+    else:
+        G, N = F._poly_out(g), F._poly_out(n)
+    return MTuple([G, e, N])
+
+
+def PartialFractionDecomposition(f):
+    if not isinstance(f, _MFunRatElt):
+        raise _bad_types("PartialFractionDecomposition", (f,))
+    budget = _FunBudget()
+    q, primary = _fun_pf_data(f, budget)
+    out = []
+    if q:
+        one = f.F._backend_ring(1)
+        out.append(_fun_term_out(f.F, one, 1, q))
+    for g, e, a in primary:
+        # g-adic digits: a/g^e = sum_j n_j/g^j, deg(n_j)<deg(g).
+        digits = []
+        h = a
+        for j in range(e, 0, -1):
+            h, n = h.quo_rem(g)
+            digits.append((j, n))
+        for j, n in reversed(digits):
+            if n:
+                out.append(_fun_term_out(f.F, g, j, n))
+    if len(out) > _FUN_PF_TERMS_MAX:
+        raise MagmaError("partial-fraction output exceeds the R0a term limit",
+                         "'PartialFractionDecomposition'", True)
+    return MSeq(out)
+
+
+def SquarefreePartialFractionDecomposition(f):
+    if not isinstance(f, _MFunRatElt):
+        raise _bad_types("SquarefreePartialFractionDecomposition", (f,))
+    budget = _FunBudget()
+    q, primary = _fun_pf_data(f, budget)
+    out = []
+    if q:
+        out.append(_fun_term_out(f.F, f.F._backend_ring(1), 1, q))
+    for e in sorted(set(e for _, e, _ in primary)):
+        group = [(g, a) for g, ee, a in primary if ee == e]
+        G = f.F._backend_ring(1)
+        for g, _ in group:
+            G = G * g
+        # For factors of this exact denominator multiplicity, combine equal
+        # g-adic layers.  Thus an exact-multiplicity-2 group contributes both
+        # <G,1,...> and <G,2,...>, as Magma's squarefree decomposition does.
+        layers = [f.F._backend_ring(0) for _ in range(e + 1)]
+        for g, a in group:
+            h = a
+            for j in range(e, 0, -1):
+                h, n = h.quo_rem(g)
+                if n:
+                    layers[j] = layers[j] + n * ((G // g) ** j)
+        # Canonical base-G digits: reduce the numerator of G^-j modulo G
+        # and carry its quotient into the next lower layer.
+        for j in range(e, 1, -1):
+            carry, layers[j] = layers[j].quo_rem(G)
+            layers[j - 1] = layers[j - 1] + carry
+        for j in range(1, e + 1):
+            if layers[j]:
+                out.append(_fun_term_out(f.F, G, j, layers[j]))
+    if len(out) > _FUN_PF_TERMS_MAX:
+        raise MagmaError("partial-fraction output exceeds the R0a term limit",
+                         "'SquarefreePartialFractionDecomposition'", True)
+    return MSeq(out)
 
 
 def Intseq(n, b=10, s=None):
@@ -7517,6 +8315,8 @@ def _ff_field(x, what):
 
 def Characteristic(F):
     """The characteristic of a ring."""
+    if isinstance(F, _MFunRat):
+        return F._char
     if isinstance(F, _MFinField):
         return F.p
     if isinstance(F, _MResRing):
@@ -8728,7 +9528,9 @@ def _base_ring(name, x):
     seen; refused for anything else.  Checked against Magma 2.18."""
     zq = lambda R: _ZZ if R == _sp.ZZ else _QQ if R == _sp.QQ else None
     r = None
-    if isinstance(x, _sp.PolynomialRing_):
+    if isinstance(x, _MFunRat):
+        r = x._ground
+    elif isinstance(x, _sp.PolynomialRing_):
         r = zq(x.base_ring())
     elif isinstance(x, _sp.Polynomial):
         r = zq(x.parent().base_ring())
@@ -8761,6 +9563,14 @@ def BaseRing(x):
 
 def CoefficientRing(x):
     return _base_ring("CoefficientRing", x)
+
+
+def BaseField(x):
+    if isinstance(x, _MFunRat):
+        if x._ground is _ZZ:
+            raise MagmaError("Rational function field is not defined over a field", "'BaseField'", True)
+        return x._ground
+    raise _bad_types("BaseField", (x,))
 
 
 def Basis(K):
@@ -9975,6 +10785,7 @@ _FF_SIGS = {
     "IsZero": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN + (MSeq, MTuple)) for x in a) else False),
     "IsOne": lambda a: _P1(a) or (None if any(isinstance(x, _FFLIN + (MSeq, MTuple)) for x in a) else False),
     "Characteristic": lambda a: (len(a) == 1 and isinstance(a[0], _MFFPolyRing)) or None,
+    "FieldOfFractions": lambda a: len(a) == 1 and isinstance(a[0], _MFFPolyRing),
     "AssignNames": lambda a: len(a) == 2 and isinstance(a[0], _MFFPolyRing),
     "Determinant": _M1, "Rank": _M1, "Transpose": _M1, "NumberOfRows": _M1, "NumberOfColumns": _M1,
     "Nrows": _M1, "Ncols": _M1, "CharacteristicPolynomial": _M1, "Trace": lambda a: _M1(a) or None,

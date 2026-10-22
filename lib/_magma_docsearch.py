@@ -143,6 +143,14 @@ TABLE = {
     "Resultant": (["polynomials"], "The resultant of two polynomials."),
     "IsIrreducible": (["polynomials"], "Whether a polynomial is irreducible."),
     "Roots": (["polynomials"], "The roots of a polynomial with their multiplicities."),
+    # rational function fields (R0a)
+    "FunctionField": (["function fields"], "The univariate rational function field over a supported constant ring or field."),
+    "RationalFunctionField": (["function fields"], "The univariate rational function field over a supported constant ring or field: the same as FunctionField."),
+    "FieldOfFractions": (["function fields"], "The fraction field of a univariate polynomial ring over the integers, rationals or a prime field."),
+    "FractionField": (["function fields"], "The same as FieldOfFractions (a Sagebrush compatibility alias)."),
+    "BaseField": (["function fields"], "The constant field of a rational function field when its ground structure is a field."),
+    "PartialFractionDecomposition": (["function fields"], "A rational function decomposed into partial fractions over its constant field."),
+    "SquarefreePartialFractionDecomposition": (["function fields"], "A rational function decomposed by squarefree denominator factors."),
     # modular forms and modular symbols
     "Gamma0": (["modular forms"], "The congruence subgroup Gamma_0(N)."),
     "ModularSymbols": (["modular forms"], "A space of modular symbols of level N, weight k and sign."),
@@ -709,6 +717,49 @@ true false""",
 > P<x> := PolynomialRing(Rationals());
 > Roots((x - 2)^2 * (x + 5));
 [ <-5, 1>, <2, 2> ]""",
+    "FunctionField": """\
+> F<x> := FunctionField(Rationals());
+> F;
+Univariate rational function field over Rational Field
+Variables: x
+> (x^2 + 1)/(x - 1);
+(x^2 + 1)/(x - 1)""",
+    "RationalFunctionField": """\
+> F<t> := RationalFunctionField(GF(5));
+> F;
+Univariate rational function field over GF(5)
+Variables: t""",
+    "FieldOfFractions": """\
+> P<u> := PolynomialRing(Integers());
+> F<x> := FieldOfFractions(P);
+> F;
+Univariate rational function field over Integer Ring
+Variables: x""",
+    "FractionField": """\
+> P<u> := PolynomialRing(Rationals());
+> F<x> := FieldOfFractions(P);
+> F;
+Univariate rational function field over Rational Field
+Variables: x""",
+    "BaseField": """\
+> F<x> := FunctionField(GF(5));
+> BaseField(F);
+Finite field of size 5""",
+    "PartialFractionDecomposition": """\
+> F<x> := FunctionField(Rationals());
+> P<y> := IntegerRing(F);
+> PartialFractionDecomposition(1/(x^2 - 1));
+[
+    <y - 1, 1, 1/2>,
+    <y + 1, 1, -1/2>
+]""",
+    "SquarefreePartialFractionDecomposition": """\
+> F<x> := FunctionField(Rationals());
+> P<y> := IntegerRing(F);
+> SquarefreePartialFractionDecomposition(1/(x^2 - 1));
+[
+    <y^2 - 1, 1, 1>
+]""",
     "Gamma0": """\
 > Gamma0(11);
 Gamma_0(11)""",

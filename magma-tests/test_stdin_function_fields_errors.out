@@ -1,0 +1,14 @@
+
+>> F![x,0];
+    ^
+Runtime error in '!': Division by zero
+
+>> F!true;
+    ^
+Runtime error in '!': Illegal coercion
+
+>> 1/(x-x);
+    ^
+Runtime error in '/': Division by zero
+
+1
