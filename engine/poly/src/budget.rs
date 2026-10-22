@@ -28,9 +28,14 @@ pub enum Phase {
     Echelon,
     Reconstruct,
     Fallback,
+    /// Binomials (binomial.rs): cyclotomic polynomials, perfect powers and
+    /// the homogenized pieces with their certificate.
+    Cyclotomic,
+    PerfectPower,
+    Homogenize,
 }
 
-pub const PHASES: usize = 12;
+pub const PHASES: usize = 15;
 
 impl Phase {
     fn index(self) -> usize {
@@ -50,6 +55,9 @@ impl Phase {
             Phase::Echelon => "echelon",
             Phase::Reconstruct => "reconstruction",
             Phase::Fallback => "fallback recombination",
+            Phase::Cyclotomic => "cyclotomic polynomials",
+            Phase::PerfectPower => "perfect powers",
+            Phase::Homogenize => "homogenized pieces",
         }
     }
 }
