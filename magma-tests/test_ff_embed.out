@@ -107,6 +107,29 @@ false
 true
 true
 true
+1
+{ b^5 }
+Finite field of size 2^4
+{}
+true
+true
+Finite field of size 2^6
+true
+true
+true
+1
+true
+true
+false
+true
+true
+true
+true
+false
+true
+Finite field of size 2^2
+{ 1, a }
+true
 true
 g^1365
 g^585
@@ -116,6 +139,15 @@ Q.1^706
 Q.1^29
 true
 Q.1^28
+true
+true
+true
+1
+true
+1
+1
+2
+1
 m
 m^7
 true

@@ -609,24 +609,15 @@ def _sortkey(x):
 
 
 def _ff_universe(items, where):
-    """Finite fields' elements in one collection (CORR-581-4): another
-    characteristic has no common universe, as Magma says; fields of one
-    characteristic meet in the smallest field containing them all, into
-    which their elements go (Magma's [a, c] = [ d^21, d^9 ] for a in
-    GF(4), c in GF(8) and GF(64)<d>)."""
-    fields = {}
-    for x in items:
-        if _is_ff(x):
-            fields.setdefault(id(x.parent()), _ffwrap(x.parent()))
-    if len(fields) < 2:
-        return items
-    Ks = list(fields.values())
-    if len({K.p for K in Ks}) > 1:
-        raise MagmaError("No valid universe containing all elements", where)
-    if sum(1 for K in Ks if K.n > 1) < 2:
-        return items  # (one extension with its prime field: as before)
-    # (the whole collection admitted at once, before the first element goes in)
-    return _ff_promote(items, "a collection", where)[0]
+    """Finite fields' elements in one collection (CORR-581-4), at any depth:
+    each slot's elements (a tuple coordinate's, or the collection's own) go
+    into the smallest field containing them, before the items are keyed,
+    as Magma does ([a, c] = [ d^21, d^9 ] for a in GF(4), c in GF(8) and
+    GF(64)<d>; {P!1, F!1} is over GF(4); #{{a}, {b^5}} = 1): _ff_norm,
+    under one budget.  Another characteristic in one slot has no common
+    universe, as Magma says."""
+    r = _ff_norm(items, "a collection", where, None, "No valid universe containing all elements")
+    return items if r is None else r
 
 
 def _ff_into(U, x, budget=None):
@@ -668,7 +659,7 @@ def _ff_into(U, x, budget=None):
     return None
 
 
-def _ff_into_cost(U, x, seen, where):
+def _ff_into_cost(U, x, seen, where, hits=None):
     """The cops _ff_into(U, x) takes (embedding up, or a descent), for the
     aggregate admission of a collection before its first element goes in;
     refused here for fields past F1's bounds, as _ff_into would be."""
@@ -681,11 +672,29 @@ def _ff_into_cost(U, x, seen, where):
     if U.n % Kx.n == 0:
         if U.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
             raise refuse()
-        return _ff_up_cost(Kx, U.p, U.n, seen)
+        return _ff_up_cost(Kx, U.p, U.n, seen, hits)
     if Kx.n % U.n == 0:
         if Kx.q > _FF_EMBED_MAX or not (_ff_conway(Kx) and _ff_conway(U)):
             raise refuse()
         return 0 if not x else _ff_dlog_cost(Kx) + 2 * U.q.bit_length() * _ff_m(U)
+    return 0
+
+
+def _ff_into_cost_n(U, W, k, seen, hits, where):
+    """An upper bound on the cops of _ff_into(U, x) for k elements x of the
+    field W (every descent charged, a zero's too), refused here past F1's
+    bounds as _ff_into would be: for admission from counts alone."""
+    if W is U or W.p != U.p or W.n == 1 or U.n == 1:
+        return 0
+    refuse = _ff_refuse("coercion", W, U, where)
+    if U.n % W.n == 0:
+        if U.q > _FF_EMBED_MAX or not (_ff_conway(W) and _ff_conway(U)):
+            raise refuse()
+        return _ff_up_cost(W, U.p, U.n, seen, hits) + (k - 1) * _ff_up_cost(W, U.p, U.n, {(U.p, W.n, U.n)})
+    if W.n % U.n == 0:
+        if W.q > _FF_EMBED_MAX or not (_ff_conway(W) and _ff_conway(U)):
+            raise refuse()
+        return k * (_ff_dlog_cost(W) + 2 * U.q.bit_length() * _ff_m(U))
     return 0
 
 
@@ -740,10 +749,11 @@ def _into_universe(items, universe, kind):
     if ff:
         # (the whole collection's embeddings and descents admitted under one
         # budget before the first element goes in, then paid from it)
-        seen = set()
-        total = sum(_ff_into_cost(universe, x, seen, _UNIVERSE_FAIL[kind]) for x in items)
+        seen, hits = set(), set()
+        total = sum(_ff_into_cost(universe, x, seen, _UNIVERSE_FAIL[kind], hits) for x in items)
         first = next((_ffwrap(x.parent()) for x in items if _is_ff(x)), universe)
         _ff_charge([_FF_WORK], total, _ff_refuse("a collection", first, universe, _UNIVERSE_FAIL[kind]))
+        _ff_keep(hits)
         paid = [total]
     for k, x in enumerate(items):
         if ff:
@@ -3495,6 +3505,44 @@ def _in(x, s, pos=None, op="in"):
             x = _ff_into(U, x)
             if x is None:
                 return False
+    if isinstance(x, (MSet, MSeq, MTuple)) and isinstance(s, (MSeq, MSet)):
+        # (a collection of finite fields' elements in a collection of them:
+        # its elements coerced, slot by slot, into the field of the same
+        # slot of the collection's elements, as Magma does: {a} in {{b^5}}
+        # and <a,c> in {<b^5,c>} are true, {F!1} in {{E!1}} false; CORR-PR45-2.
+        # The walks checked and the coercions admitted whole before anything
+        # is made, LIMIT-PR45-3)
+        w = _universe(s)
+        y = w[1] if w and w[0] == "elt" and isinstance(w[1], (MSet, MSeq, MTuple)) else None
+        if y is not None:
+            ny, dy, fy, _ = _ff_nest_scan([y])
+            nx, dx, fx, cx = _ff_nest_scan([x])
+            if cx:
+                refuse = lambda: MagmaError("membership of collections this large is not supported yet", "'%s'" % op, True, pos)
+                if nx > _COLLECT_MAX or ny > _COLLECT_MAX:
+                    raise refuse()
+                if max(dx, dy) > _NEST_MAX:
+                    raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
+                budget = [_FF_WORK]
+                _ff_charge(budget, nx + ny, refuse)
+                Us = {sl: next(iter(f.values())) for sl, f in fy.items() if len(f) == 1}
+                seen, hits, total = set(), set(), 0
+                for (sl, k), c in cx.items():
+                    U = Us.get(sl)
+                    if U is None:
+                        continue
+                    W = fx[sl][k]
+                    if W.p != U.p:
+                        raise MagmaError("No valid universe containing all elements", "'%s'" % op, True, pos)
+                    total += _ff_into_cost_n(U, W, c, seen, hits, "'%s'" % op)
+                _ff_charge(budget, total, refuse)
+                _ff_keep(hits)
+                paid, lx = [total], []
+                _ff_leaves([x], lx)
+                conv = [v if sl not in Us else _ff_into(Us[sl], v, paid) for v, sl in lx]
+                if any(c is None for c in conv):
+                    return False
+                x = _ff_rebuild(x, iter(conv), {})
     if isinstance(s, (MSeq, MRange, MSet)):
         code = _meets(x, s)
         if code == "N":
@@ -3552,24 +3600,142 @@ def _set_pair(op, a, b, pos, message):
         raise MagmaError(message, "'%s'" % op, True, pos)
 
 
+def _ff_walk(x):
+    """The members of x, lazily, in the order _ff_scan, _ff_leaves and
+    _ff_rebuild all use: a multiset's with their multiplicities."""
+    if isinstance(x, MSet):
+        return iter(x) if x.kind == "multi" else iter(x.items)
+    return iter(x)
+
+
+_FF_SCAN_END = object()
+
+
+def _ff_nest_scan(xs):
+    """The preflight of nested collections (LIMIT-PR45-3): an iterative walk
+    (an explicit stack, never recursion, any depth) over the list xs and its
+    sets, sequences and tuples, at most _COLLECT_MAX + 1 nodes, allocating
+    nothing but per-slot field counts.  An element's slot is the path of
+    tuple coordinates down to it (sets and sequences share their elements'
+    slot: each tuple coordinate has its own universe, as in Magma); a set's
+    or sequence's declared finite-field universe counts in its elements'
+    slot.  Returns (nodes, deepest nesting, {slot: {id: field}},
+    {(slot, id): number of elements}); nodes > _COLLECT_MAX when it stopped
+    early."""
+    fields, counts, nodes, deepest = {}, {}, 0, 0
+    stack = [(iter(xs), 1, (), False)]
+    while stack:
+        it, d, slot, tup = stack[-1]
+        x = next(it, _FF_SCAN_END)
+        if x is _FF_SCAN_END:
+            stack.pop()
+            continue
+        if tup:
+            i, x = x
+            here = slot + (i,)
+        else:
+            here = slot
+        nodes += 1
+        if nodes > _COLLECT_MAX:
+            break
+        if _is_ff(x):
+            k = id(x.parent())
+            fields.setdefault(here, {}).setdefault(k, _ffwrap(x.parent()))
+            counts[(here, k)] = counts.get((here, k), 0) + 1
+        elif isinstance(x, (MSet, MSeq, MTuple)):
+            deepest = max(deepest, d)
+            u = getattr(x, "universe", None)
+            if isinstance(u, _MFinField):
+                fields.setdefault(here, {}).setdefault(id(u.K), u)
+            if isinstance(x, MTuple):
+                stack.append((iter(enumerate(x)), d + 1, here, True))
+            else:
+                stack.append((_ff_walk(x), d + 1, here, False))
+    return nodes, deepest, fields, counts
+
+
+def _ff_leaves(xs, out, slot=()):
+    """The finite fields' elements in the list xs, at any depth of sets,
+    sequences and tuples, appended to out with their slots, in order (only
+    after _ff_scan has checked the depth: at most _NEST_MAX)."""
+    for x in xs:
+        if _is_ff(x):
+            out.append((x, slot))
+        elif isinstance(x, MTuple):
+            for i, y in enumerate(x):
+                _ff_leaves([y], out, slot + (i,))
+        elif isinstance(x, (MSet, MSeq)):
+            _ff_leaves(_ff_walk(x), out, slot)
+
+
+def _ff_rebuild(x, it, Us, slot=()):
+    """x with its finite fields' elements replaced, in _ff_leaves's order, by
+    those of it; a declared finite-field universe becomes its slot's common
+    field (Us[slot]) when there is one."""
+    if _is_ff(x):
+        return next(it)
+    if isinstance(x, MSet):
+        u = Us.get(slot, x.universe) if isinstance(x.universe, _MFinField) else x.universe
+        return MSet([_ff_rebuild(y, it, Us, slot) for y in _ff_walk(x)], x.kind, u)
+    if isinstance(x, MSeq):
+        u = Us.get(slot, x.universe) if isinstance(x.universe, _MFinField) else x.universe
+        return MSeq([_ff_rebuild(y, it, Us, slot) for y in x], u)
+    if isinstance(x, MTuple):
+        return MTuple(_ff_rebuild(y, it, Us, slot + (i,)) for i, y in enumerate(x))
+    return x
+
+
+def _ff_norm(xs, what, where, pos, message):
+    """The values xs (a collection's items, or a set operation's operands)
+    with the finite fields' elements of each slot (_ff_nest_scan) put into the
+    smallest field containing that slot's fields, as Magma does ({{a},
+    {b^5}} has one element; {<a,h>} eq {<b^5,h>}; {F|a} eq {K|b^5}; astra
+    CORR-PR45-2), or None when no slot holds two fields.  Under one budget
+    (LIMIT-PR45-3): the walk checked first (each node one cop, at most
+    _COLLECT_MAX nodes, nesting at most _NEST_MAX deep, refused in words,
+    never a RecursionError), then every slot's work reserved, then their
+    cold Conway searches, and only then are elements collected, promoted and
+    the collections rebuilt.  A slot holding two characteristics is
+    `message`.  Values with no finite field's element are as they were,
+    whatever their size."""
+    nodes, deepest, fields, counts = _ff_nest_scan(xs)
+    if not counts:
+        return None
+    budget = [_FF_WORK]
+    size = lambda: MagmaError("%s of collections this large is not supported yet" % what, where, True, pos)
+    if nodes > _COLLECT_MAX:
+        raise size()
+    if deepest > _NEST_MAX:
+        raise MagmaError("a value nested more than %d deep is not supported yet" % _NEST_MAX)
+    todo = {sl: list(f.values()) for sl, f in fields.items() if len(f) >= 2}
+    if not todo:
+        return None
+    for Ws in todo.values():
+        if len({W.p for W in Ws}) > 1:
+            raise MagmaError(message, where, True, pos)
+    _ff_charge(budget, nodes, size)
+    plans, total = {}, 0
+    for sl, Ws in todo.items():
+        plans[sl] = _ff_reserve({k: c for (t, k), c in counts.items() if t == sl}, Ws, what, where, pos) + (Ws,)
+        total += plans[sl][1]
+    _ff_charge(budget, total, next(iter(plans.values()))[3])
+    Us = {sl: _ff_common_field(pl[4], pl[0], budget, pl[3]) for sl, pl in plans.items()}
+    for pl in plans.values():
+        _ff_keep(pl[2])
+    paid, leaves = [total], []
+    _ff_leaves(xs, leaves)
+    it = iter([_ff_up(x, Us[sl], paid, plans[sl][3]) if sl in Us else x for x, sl in leaves])
+    return [_ff_rebuild(x, it, Us) for x in xs]
+
+
 def _ff_sets(a, b, op, pos, message):
-    """The sets a and b, their finite fields' elements put into the
-    smallest field containing them all when they hold elements of
-    different fields of one characteristic: Magma compares and combines
-    them there ({a} eq {b^5}, {F!1} eq {E!1}, #({a} join {b^5}) = 1;
-    astra CORR-PR45-2), under one budget (_ff_promote).  Another
-    characteristic is Magma's message.  Declared universes and multisets
-    are as before."""
-    if a.kind == "multi" or b.kind == "multi" or a.universe is not None or b.universe is not None:
+    """The sets a and b with their finite fields' elements in common fields,
+    slot by slot (_ff_norm): Magma compares and combines them there.
+    Multisets as before."""
+    if a.kind == "multi" or b.kind == "multi":
         return a, b
-    fa = {id(x.parent()): x.parent() for x in a.items if _is_ff(x)}
-    fb = {id(x.parent()): x.parent() for x in b.items if _is_ff(x)}
-    if not fa or not fb or (len(fa) == 1 and fa.keys() == fb.keys()):
-        return a, b
-    if len({_ffwrap(K).p for K in list(fa.values()) + list(fb.values())}) > 1:
-        raise MagmaError(message, "'%s'" % op, True, pos)
-    items = _ff_promote(a.items + b.items, "a set operation", "'%s'" % op, pos)[0]
-    return MSet(items[:len(a.items)], a.kind), MSet(items[len(a.items):], b.kind)
+    r = _ff_norm([a, b], "a set operation", "'%s'" % op, pos, message)
+    return (a, b) if r is None else (r[0], r[1])
 
 
 def _same_struct(u, v):
@@ -7091,11 +7257,12 @@ def _ff_cover(Ws, refuse):
     return L
 
 
-def _ff_up_cost(S, p, n, seen):
+def _ff_up_cost(S, p, n, seen, hits=None):
     """The cops of putting an element of S (S.n | n) into GF(p^n): its
     Horner work, m M(n) + m n, and the image of S's generator unless cached
     or already counted in seen (one per (p, m, n)); an element of the prime
-    field, n."""
+    field, n.  Read-only: a cached image counted free is only recorded in
+    hits, for _ff_keep once every refusal point has passed (daybreak2)."""
     if S.n == n:
         return 0
     if S.n == 1:
@@ -7104,13 +7271,21 @@ def _ff_up_cost(S, p, n, seen):
     c = S.n * (mn + n)
     key = (p, S.n, n)
     if key in _FF_IMAGES:
-        # (counted free: kept the most recent, so that no image this
-        # operation makes evicts it before it is used)
-        _FF_IMAGES.move_to_end(key)
+        if hits is not None:
+            hits.add(key)
     elif key not in seen:
         seen.add(key)
         c += 2 * ((p ** n - 1) // (p ** S.n - 1)).bit_length() * mn
     return c
+
+
+def _ff_keep(hits):
+    """The cached images an admitted operation counted free, made the most
+    recent (after its last refusal point, before its work), so that no image
+    it makes evicts them before they are used."""
+    for key in hits:
+        if key in _FF_IMAGES:
+            _FF_IMAGES.move_to_end(key)
 
 
 def _ff_image(S, U):
@@ -7149,29 +7324,63 @@ def _ff_up(x, U, budget, refuse):
     return r
 
 
-def _ff_promote(xs, what, where, pos=None):
-    """xs (finite fields' elements of one characteristic, and integers) with
-    their finite fields' elements put into the smallest field containing
-    them all, and that field: under one budget of _FF_WORK, the images and
-    embeddings of every element reserved first (aggregate admission), then
-    a cold Conway search for that field, if it must be made, with what is
-    left, then the prepaid work.  refuse() (in words) past _FF_EMBED_MAX
-    elements or the budget, before anything is made or cached."""
-    Ws = list({id(x.parent()): _ffwrap(x.parent()) for x in xs if _is_ff(x)}.values())
+def _ff_reserve(counts, Ws, what, where, pos):
+    """What putting counts[id(W.K)] elements of each field W of Ws into the
+    smallest field containing all of Ws costs, computed without touching
+    anything: (L, cops, hits, refuse) for _ff_admit and _ff_norm; their
+    Horner work, each image once, free when cached (recorded in hits)."""
     refuse = _ff_refuse(what, Ws[0], Ws[1] if len(Ws) > 1 else Ws[0], where, pos)
     L = _ff_cover(Ws, refuse)
-    p, seen = Ws[0].p, set()
-    cost = sum(_ff_up_cost(_ffwrap(x.parent()), p, L, seen) for x in xs if _is_ff(x))
-    budget = [_FF_WORK]
-    _ff_charge(budget, cost, refuse)
+    p, seen, hits, cost = Ws[0].p, set(), set(), 0
+    for W in Ws:
+        k = counts.get(id(W.K), 0)
+        if k:
+            first = _ff_up_cost(W, p, L, seen, hits)  # (one element, and the image if new)
+            cost += first + (k - 1) * _ff_up_cost(W, p, L, {(p, W.n, L)})
+    return L, cost, hits, refuse
+
+
+def _ff_common_field(Ws, L, budget, refuse):
+    """The field of degree L over Ws's prime field: one of Ws, or GF(p^L)
+    made (its cold Conway search within what budget has left)."""
     U = next((W for W in Ws if W.n == L), None)
     if U is None:
+        p = Ws[0].p
         try:
             _sff._conway(p, L, budget)
         except _sff.ConwayBudgetExceeded:
             raise refuse()
         U = _ffwrap(_sff.GF(p ** L))
-    paid = [cost]
+    return U
+
+
+def _ff_admit(counts, Ws, what, where, pos, budget):
+    """Admits putting counts[id(W.K)] elements of each field W of Ws into
+    their smallest common field, from budget, before anything is made: the
+    work reserved first, then the common field's cold Conway search with
+    what is left, then the cached images counted free made the most recent.
+    Returns that field and the prepaid budget for _ff_up; refuse()s in
+    words, the image cache untouched."""
+    L, cost, hits, refuse = _ff_reserve(counts, Ws, what, where, pos)
+    _ff_charge(budget, cost, refuse)
+    U = _ff_common_field(Ws, L, budget, refuse)
+    _ff_keep(hits)
+    return U, [cost]
+
+
+def _ff_promote(xs, what, where, pos=None):
+    """xs (finite fields' elements of one characteristic, and integers) with
+    their finite fields' elements put into the smallest field containing
+    them all, and that field: under one budget of _FF_WORK, admitted whole
+    first (_ff_admit), then the prepaid work."""
+    Ws, counts = {}, {}
+    for x in xs:
+        if _is_ff(x):
+            Ws.setdefault(id(x.parent()), _ffwrap(x.parent()))
+            counts[id(x.parent())] = counts.get(id(x.parent()), 0) + 1
+    Ws = list(Ws.values())
+    refuse = _ff_refuse(what, Ws[0], Ws[1] if len(Ws) > 1 else Ws[0], where, pos)
+    U, paid = _ff_admit(counts, Ws, what, where, pos, [_FF_WORK])
     return [_ff_up(x, U, paid, refuse) if _is_ff(x) else x for x in xs], U
 
 
