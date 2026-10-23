@@ -14,3 +14,5 @@ export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate
 export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, chargeOf, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
 export { SyncClient, CLIENT, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
+export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
+export { applyView, fetchKey, VIEW_STORES, type ListedWhy, type JournalRecord } from "./sync-view";
