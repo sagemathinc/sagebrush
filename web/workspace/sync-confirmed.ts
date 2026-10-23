@@ -13,6 +13,9 @@ import type { Workspace } from "./api";
 import { inTx, req } from "./db";
 import { parentOf } from "./paths";
 import { OVERLAY, runPage, rowsOf, type Store } from "./sync-overlay";
+import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
+import { capNow } from "./sync-pins";
+import type { Entry, Op } from "./api";
 import type { SyncEntry, SyncOp } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
@@ -85,9 +88,9 @@ export async function applyOps(
   w: Workspace,
   ns: string,
   ops: SyncOp[],
-  opts: { prefix?: string; cursorAt?: string; onPage?: (tx: IDBTransaction, changed: string[]) => Promise<void> } = {},
+  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string) => Promise<void> } = {},
 ): Promise<Applied> {
-  const stores = ["syncIndex", META, ...(opts.onPage ? ["entries", "outbox", "pending", "adoptJournal", "ops"] : [])];
+  const stores = [...new Set(["syncIndex", META, ...(opts.stores ?? [])])];
   let at = 0, pages = 0, carry = 0, cursor = 0;
   const changedAll: string[] = [];
   for (;;) {
@@ -106,7 +109,7 @@ export async function applyOps(
       cursor = ops[at + taken - 1].seq;
       meta.put(cursor, ck);
       const changed = [...page.changed];
-      if (opts.onPage) await opts.onPage(tx, changed);
+      if (opts.onPage) await opts.onPage(tx, changed, prefix);
       for (const id of changed) changedAll.push(id);
       at += taken;
       carry = page.carry;
@@ -116,6 +119,40 @@ export async function applyOps(
     if (done) return { applied: at, cursor, pages, changed: changedAll };
   }
 }
+
+/**
+ * An `index` page from the server applied as C3 says, holding the workspace's lock: each page of reduction, its
+ * rows, the cursor and the view's difference on the entries, in one transaction; then the changes told, and the
+ * contents of entries forgotten dropped (after their transaction, as emptying Trash does).
+ */
+export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[]): Promise<Applied & { listed: [string, ListedWhy][] }> {
+  const cap = await capNow();
+  return w.locked(async () => {
+    const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
+    const r = await applyOps(w, ns, ops, {
+      stores: VIEW_STORES,
+      onPage: async (tx, changed, prefix) => {
+        const v = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap }, changed);
+        // (kept only once the page's transaction commits: a page that aborts is run again whole)
+        tx.addEventListener("complete", () => {
+          told.push(...v.ops);
+          gone.push(...v.gone);
+          listed.push(...v.listed);
+        });
+      },
+    });
+    w.tell({ ops: told });
+    if (gone.length) await w.dropContents(gone).catch((err) => console.warn("sync: dropping forgotten contents:", err));
+    return { ...r, listed };
+    // (an ordinary change's hold: refused while quarantined or after a reset elsewhere, and the durability witness
+    // brought up to the commit, as every local change's)
+  });
+}
+
+/** The client's `onIndex` (sync-client.ts) for the confirmed index and its view (step 4). */
+export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[] }) => {
+  await applyConfirmed(w, page.ns, page.ops);
+};
 
 /** The durable cursor of `ns` (0 before any page). */
 export async function cursorOf(w: Workspace, ns: string): Promise<number> {
