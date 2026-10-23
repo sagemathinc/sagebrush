@@ -45,7 +45,7 @@ Root(P13!4, 25);
 // ext
 G := ext<F | 2>; G; DefiningPolynomial(G); G eq K;
 H<h> := ext<GF(3) | 4>; H; DefiningPolynomial(H); h^10; H eq Q;
-G2<g>, m := ext<F | 3>; G2; m; m(a); g^21 eq m(a); Degree(G2); PrimeField(G2);
+G2<g> := ext<F | 3>; X, m := ext<F | 3>; G2; m; m(a); g^21 eq m(a); Degree(G2); PrimeField(G2);
 ext<GF(7) | 1>;
 ext<F | 2>;
 ext<GF(5) | 2>;
