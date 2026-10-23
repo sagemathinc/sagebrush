@@ -15,6 +15,7 @@ const here = dirname(new URL(import.meta.url).pathname);
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
+// (web/build.ts imports this only when web/site/ is here: web/site-dir.mts)
 const { siteDir } = await import("./site-dir.mts");
 const out = join(siteDir, "public");
 
