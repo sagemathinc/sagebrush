@@ -13,3 +13,4 @@ export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace, LOCK_WAIT, HISTORY_BACKLOG, historyBacklog, onHistoryRefused } from "../notebook/stores.js";
 export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, chargeOf, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
+export { SyncClient, CLIENT, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";

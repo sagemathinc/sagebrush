@@ -193,6 +193,11 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     h.set("x-sync-session", who.session);
     return env.SYNC_DOC.get(env.SYNC_DOC.idFromName(`doc:${dg[1]}:${dg[2]}`)).fetch(new Request(req.url, { method: "GET", headers: h }));
   }
+  // (the client's binding on its blob requests: the account hash and generation whose outbox the bytes are for,
+  // checked by the account object before anything is reserved or answered, CORR-PR58-1)
+  const bindAccount = req.headers.get("x-sync-account"), bindGen = req.headers.get("x-sync-generation");
+  if ((bindAccount !== null && !/^[0-9a-f]{64}$/.test(bindAccount)) || (bindGen !== null && !/^\d{1,15}$/.test(bindGen))) return err(400, "invalid", { message: "x-sync-account is an account hash, x-sync-generation a number" });
+  const bind = { ...(bindAccount !== null ? { account: bindAccount } : {}), ...(bindGen !== null ? { generation: Number(bindGen) } : {}) };
   if (p === "/api/sync/v1/blobs/check" && m === "POST") {
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
     const text = await req.text();
@@ -209,10 +214,10 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     } catch (e) {
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
-    return answer(await stub.missing({ account: who.id, blobs }), (missing) => json({ missing }));
+    return answer(await stub.missing({ account: who.id, blobs, bind }), (missing) => json({ missing }));
   }
   const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
-  if (g && m === "PUT") return putBlob(req, env, stub, who.id, g[1]);
+  if (g && m === "PUT") return putBlob(req, env, stub, who.id, g[1], bind);
   if (g && m === "GET") {
     if (!env.SYNC_URL_KEY || !env.FILES_ORIGIN) return err(404, "reading blobs is not enabled here");
     const r = await stub.read({ account: who.id, sha256: g[1], who: "devices" });
@@ -524,11 +529,11 @@ const PRUNE_PAGE = 1000, PRUNE_PAGES = 10;
  * check, and finalize.  A failure between the two gives the reservation
  * and the object back at once (the alarm and the inventory catch the rest).
  */
-async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOUNT"]>["get"]>, account: string, sha256: string): Promise<Response> {
+async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOUNT"]>["get"]>, account: string, sha256: string, bind: { account?: string; generation?: number } = {}): Promise<Response> {
   const len = req.headers.get("content-length");
   if (!len || !/^\d{1,12}$/.test(len)) return err(411, "Content-Length is required");
   const size = Number(len);
-  const r = await stub.reserve({ account, sha256, size });
+  const r = await stub.reserve({ account, sha256, size, bind });
   if ("error" in r) return answer(r, json);
   if ("have" in r.ok) return json({ sha256, have: true });
   const { id, key, expires } = r.ok;
