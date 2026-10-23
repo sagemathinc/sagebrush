@@ -281,6 +281,18 @@ export function admitArray(shape: readonly (number | bigint)[], dt: DType, scrat
   }
 }
 
+// An operation's working memory: the outputs it makes and its scratch
+// together (typed arrays, JS arrays of indices, WebAssembly buffers),
+// admitted at its start, before any of them is allocated (daybreak2's
+// LIMIT-PR55-3): at most ARRAY_LIMITS.bytes. `bytes` is computed from the
+// operands' sizes, never less than what the operation allocates; an
+// infinite or NaN estimate is refused too.
+export function admitWork(bytes: number, what: string): void {
+  if (bytes <= ARRAY_LIMITS.bytes) return;
+  const need = Number.isFinite(bytes) ? sizeString(BigInt(Math.ceil(bytes))) : "an unbounded amount";
+  raise(T.MemoryError, `${what} needs ${need} of working memory, more than Sagebrush's limit of ${sizeString(BigInt(ARRAY_LIMITS.bytes))}`);
+}
+
 // NumPy's _ArrayMemoryError._size_to_string: binary units, 3 significant
 // digits (Python's "#.3g", which keeps a trailing point), whole bytes below 1 KiB
 function sizeString(bytes: bigint): string {
@@ -904,6 +916,10 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   const adv = ents.filter((e) => e.kind === "adv");
   const bshape = broadcastShapes(...adv.map((e) => e.idx!.shape));
   const bsize = prod(bshape);
+  // (the index arrays, the output's offsets (a JS array) and the output
+  // itself, admitted together first; LIMIT-PR55-3)
+  const basicN = prod(ents.filter((e) => e.kind !== "adv").map((e) => (e.kind === "slice" ? e.n! : 1)));
+  admitWork(8 * adv.length * bsize + bsize * basicN * (8 + a.dt.itemsize), "indexing");
   const idxs = adv.map((e) => {
     const s = bstrides(e.idx!, bshape);
     const out = new Array(bsize);
@@ -1755,6 +1771,8 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))];
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   const outShape = keep.map((i) => a.shape[i]);
+  // (the output and the row accumulator, a float64 (or float32) per output element)
+  admitWork(prod(outShape) * (rt.itemsize + 8), "the reduction");
   const out = empty(outShape, rt);
   const red = ax.slice().sort((x, y) => x - y);
   const rshape = red.map((i) => a.shape[i]), rstr = red.map((i) => a.strides[i]);
@@ -1814,12 +1832,22 @@ function sumType(dt: DType): DType {
 
 function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
+  const axs = axesArg(axis, a.ndim);
+  const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
   if (a.dt.cplx) {
+    // (the whole complex sum admitted first: the real and imaginary sums,
+    // each with its accumulator, and the combined result; daybreak2's
+    // LIMIT-PR56-1; the parts are views, not copies)
+    admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
     const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
-  const src = rt !== a.dt && rt.kind === "f" ? copy(a, rt) : a;
+  // (a float sum of another dtype sums a converted copy: that copy, the
+  // output and its accumulator admitted first; LIMIT-PR55-3)
+  const widen = rt !== a.dt && rt.kind === "f";
+  admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
+  const src = widen ? copy(a, rt) : a;
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
@@ -2121,27 +2149,32 @@ function ravel(a: NDArray): NDArray {
 
 export function nonzero(a: NDArray): NDArray[] {
   const nd = Math.max(1, a.ndim);
-  const coords: number[][] = Array.from({ length: nd }, () => []);
   const shape = a.ndim ? a.shape : [1];
   const strides = a.ndim ? a.strides : [0];
   const idx = new Array(nd).fill(0);
   const cplx = a.dt.cplx;
+  const isNz = (p: number) => (cplx ? a.data[2 * p] !== 0 || a.data[2 * p + 1] !== 0 : a.data[p] !== 0);
+  // (counted first, then the nd int64 outputs admitted together and filled
+  // in place: no JS arrays growing with the count; LIMIT-PR55-3)
+  let count = 0;
+  loop1(shape, strides, a.offset, (p) => {
+    if (isNz(p)) count++;
+  });
+  admitWork(nd * count * 8, "nonzero");
+  const outs = Array.from({ length: nd }, () => empty([count], D.int64));
+  let j = 0;
   loop1(shape, strides, a.offset, (p, k) => {
-    const nz = cplx ? a.data[2 * p] !== 0 || a.data[2 * p + 1] !== 0 : a.data[p] !== 0;
-    if (nz) {
+    if (isNz(p)) {
       let r = k;
       for (let d = nd - 1; d >= 0; d--) {
         idx[d] = r % shape[d];
         r = Math.floor(r / shape[d]);
       }
-      for (let d = 0; d < nd; d++) coords[d].push(idx[d]);
+      for (let d = 0; d < nd; d++) outs[d].data[j] = idx[d];
+      j++;
     }
   });
-  return coords.map((c) => {
-    const out = empty([c.length], D.int64);
-    out.data.set(c);
-    return out;
-  });
+  return outs;
 }
 
 // ------------------------------------------------------------------ linear algebra basics
@@ -2156,6 +2189,13 @@ function matmul(x: any, y: any): any {
   const batch = broadcastShapes(A.shape.slice(0, -2), B.shape.slice(0, -2));
   const rt = promote(a.dt, b.dt);
   const ct = rt.kind === "b" ? D.bool : rt;
+  // (the output, the row buffers or WebAssembly's GEMM buffers, and for
+  // complex two copies of each operand in its complex dtype, four real
+  // products, their two sums and the combined result; LIMIT-PR55-3)
+  const outN = prod(batch) * n * p;
+  admitWork(ct.cplx
+    ? 2 * (A.size + B.size) * ct.itemsize + 6 * outN * 8 + outN * ct.itemsize + 8 * (n * m + m * p + n * p + 5 * p)
+    : outN * ct.itemsize + 8 * (n * m + m * p + n * p + 5 * p), "matmul");
   if (ct.cplx) {
     // via real arithmetic on the parts
     const ar = realPart(copy(A, ct)), ai = imagPart(copy(A, ct)), br = realPart(copy(B, ct)), bi = imagPart(copy(B, ct));
@@ -2837,6 +2877,7 @@ export function arrayStr(a: NDArray): string {
 function argsortInts(a: NDArray): NDArray | null {
   const n = a.size;
   if (a.ndim !== 1 || !a.dt.isInt && a.dt.kind !== "b" || n >= 1 << 21) return null;
+  admitWork(16 * n, "argsort");
   const keys = new Float64Array(n), d = a.data, st = a.strides[0];
   for (let i = 0, p = a.offset; i < n; i++, p += st) {
     const v = d[p];
@@ -2853,6 +2894,12 @@ function argsortInts(a: NDArray): NDArray | null {
 }
 
 function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
+  // (every path's outputs and scratch, at most: two copies of a (contiguous,
+  // and the result moved back), the output (int64 for argsort), and per
+  // element float64 values, an index and WebAssembly's sort buffers: 40
+  // bytes; a uint8 array's argsort needs 2 * 1 + 8 + 40 = 50 bytes an
+  // element; LIMIT-PR55-3)
+  admitWork(a.size * (2 * a.dt.itemsize + (arg ? 8 : a.dt.itemsize) + 40), arg ? "argsort" : "sort");
   if (arg && a.ndim === 1 && !a.dt.cplx && a.size >= 64) {
     // the WebAssembly radix sort (stable, as the comparison sort below)
     const c = ascontig(a);
@@ -3381,7 +3428,10 @@ newBuiltinModule("_numpy", (m) => {
     return new NDArray(dt, new dt.ctor(bytes.buffer), [n], [1]);
   });
   fn("_tobytes", (a: any) => {
-    const c = ascontig(asarray(a));
+    // (a contiguous copy, a 64-bit integer staging buffer, and the bytes; LIMIT-PR55-3)
+    const a0 = asarray(a);
+    admitWork(a0.size * (2 * a0.dt.itemsize + 8), "tobytes");
+    const c = ascontig(a0);
     const dt = c.dt;
     const n = c.size * (dt.cplx ? 2 : 1);
     let view: Uint8Array;
