@@ -162,3 +162,20 @@ print(p2._repr_svg_())
   assert.equal(Buffer.byteLength(out), 9911);
   assert.equal(createHash("sha256").update(out).digest("hex").slice(0, 16), "66241ac9635ec66c");
 });
+
+test("importing pyplot does not import warnings or contextlib (they would join every scientific start's code); style's warnings and context still work", () => {
+  const out = run(`
+import sys
+import matplotlib.pyplot as plt
+print("imported", "warnings" in sys.modules, "contextlib" in sys.modules)
+import warnings
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    plt.style.use({"backend": "agg"})
+print("warned", [x.category.__name__ for x in w])
+with plt.style.context({"lines.linewidth": 3}):
+    print("in context", plt.rcParams["lines.linewidth"])
+print("after", plt.rcParams["lines.linewidth"])
+`);
+  assert.deepEqual(out.trim().split("\n"), ["imported False False", "warned ['UserWarning']", "in context 3.0", "after 1.5"]);
+});

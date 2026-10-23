@@ -11,9 +11,7 @@ Sagebrush draws are the colors, grid and line widths listed in
 matplotlib._VALIDATE, the font sizes, and the figure's size, dpi and color;
 a style that sets others has them kept, and says so in one warning."""
 
-import contextlib as _contextlib
 import os as _os
-import warnings as _warnings
 
 import matplotlib as _mpl
 
@@ -66,21 +64,33 @@ def use(style):
         settings = _resolve(st) if isinstance(st, str) else st
         for key, value in settings.items():
             if key in STYLE_BLACKLIST:
-                _warnings.warn("Style includes a parameter, %r, that is not related to style.  Ignoring this parameter."
-                               % (key,), UserWarning, stacklevel=2)
+                _warn("Style includes a parameter, %r, that is not related to style.  Ignoring this parameter."
+                      % (key,), UserWarning, stacklevel=3)
                 continue
             _mpl.rcParams[key] = value
             if key not in _mpl._DRAWN and value != _mpl._defaults()[key] and key not in undrawn:
                 undrawn.append(key)
     if undrawn:
-        _warnings.warn("Sagebrush does not draw %d of this style's settings yet (they are kept in rcParams): %s"
-                       % (len(undrawn), ", ".join(sorted(undrawn))), UserWarning, stacklevel=2)
+        _warn("Sagebrush does not draw %d of this style's settings yet (they are kept in rcParams): %s"
+              % (len(undrawn), ", ".join(sorted(undrawn))), UserWarning, stacklevel=3)
 
 
-@_contextlib.contextmanager
+def _warn(*args, **kw):
+    # (warnings and contextlib are imported when first used, not with
+    # matplotlib: they would otherwise join every scientific start's code;
+    # stacklevel counts this frame)
+    import warnings
+    warnings.warn(*args, **kw)
+
+
 def context(style, after_reset=False):
     """A with-block in which a style applies; rcParams are restored after it
     exactly as they were, even after an exception."""
+    import contextlib
+    return contextlib.contextmanager(_context)(style, after_reset)
+
+
+def _context(style, after_reset):
     orig = dict(_mpl.rcParams)
     try:
         if after_reset:
