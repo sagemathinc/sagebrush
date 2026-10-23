@@ -156,6 +156,8 @@ jobs:
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
+          node scripts/core-api-surface.mjs --check
+          node scripts/size-budget.mjs --check
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -344,6 +346,7 @@ jobs:
               node web/test-doclang.mjs
               node web/test-big-pictures.mjs
               node web/test-png.mjs
+              node web/test-pkgset.mjs
               ;;
             board-a)
               node web/board/bench.mjs

@@ -1,0 +1,58 @@
+# Optional packages (optional/<name>/; plan-modular-packages-r4 §7.1): their
+# own tier, never part of the default ones (scripts/ci-paths.mjs routes a
+# change to optional/ alone to no default suite).
+#
+#   - the packages' format and the contract lint (scripts/optional-packages.mjs check)
+#   - a package set built from them, with precompiled code for this build
+#   - each package's tests under that set (tests/test_*.py against their .out,
+#     or the oracle under CPython for packages that have one)
+#   - nightly against master, so a core change that breaks a package shows here
+name: optional
+
+on:
+  pull_request:
+    paths:
+      - "optional/**"
+      - "scripts/optional-packages.mjs"
+      - "scripts/core-api-surface.mjs"
+      - "core-api-surface.json"
+      - "src/pkgset.ts"
+      - "src/pkgcache.ts"
+      - ".github/workflows/optional.yml"
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: optional-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node scripts/build-cli.mjs
+      - name: format and contract lint
+        run: node scripts/optional-packages.mjs check
+      - name: build a package set (with this build's precompiled code)
+        run: |
+          out="$(mktemp -d "${RUNNER_TEMP}/sagebrush-pkgset.XXXXXX")"
+          S="$(node scripts/optional-packages.mjs build --out "$out" --pre)"
+          echo "PKGSET=$out/pkgset/$S.json" >> "$GITHUB_ENV"
+          echo "package set $S"
+      - name: package tests
+        run: node scripts/optional-packages.mjs test --pkgset "$PKGSET"
