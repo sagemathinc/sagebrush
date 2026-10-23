@@ -80,7 +80,11 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest) },
+  // (__dirname: Bun inlines a browser bundle's __dirname as the source's absolute directory, which made the
+  // engine worker, and so its hash, the engine id and sw.js, depend on where the checkout is.  The worker's
+  // only use is a Node-only fallback that looks for wasm/ beside the source (src/runtime/engine.ts, raster.ts),
+  // unreachable in a browser; undefined sends it to process.cwd(), as when __dirname doesn't exist)
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
