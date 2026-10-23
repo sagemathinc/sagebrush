@@ -259,10 +259,15 @@ _DEFAULTS = []
 def _defaults():
     """matplotlib's defaults, read on first use (not at engine startup)"""
     if not _DEFAULTS:
-        from matplotlib._rckeys import DEFAULTS
-        d = dict(DEFAULTS)
+        import json
+        from matplotlib import _rckeys
+        d = json.loads(_rckeys.DEFAULTS_JSON)
+        for k in _rckeys.TUPLES:
+            d[k] = tuple(d[k])
+        for k in _rckeys.ITEM_TUPLES:
+            d[k] = [tuple(v) if isinstance(v, list) else v for v in d[k]]
         d["backend"] = get_backend()
-        d["axes.prop_cycle"] = Cycler("color", DEFAULTS["axes.prop_cycle"])
+        d["axes.prop_cycle"] = Cycler("color", d["axes.prop_cycle"])
         _DEFAULTS.append(d)
     return _DEFAULTS[0]
 
