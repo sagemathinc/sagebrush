@@ -1548,9 +1548,9 @@ async function firstSyncRace() {
     check(await until(() => settled(w, c), 20_000), "first sync race: settled");
     const { mine } = await serverOps(w);
     const ops = mine.filter((o) => o.fid === f.fid);
-    const last = ops[ops.length - 1];
-    check(wrote && last?.sha256 === (await w.stat("/r.txt")).sha256, "first sync race: the server ends with the written bytes: " + J(ops.map((o) => [o.op, o.sha256?.slice(0, 6)])));
-    check(ops.filter((o) => o.sha256 === (await w.stat("/r.txt")).sha256).length === 1, "first sync race: …sent exactly once");
+    const last = ops[ops.length - 1], now = (await w.stat("/r.txt")).sha256;
+    check(wrote && last?.sha256 === now, "first sync race: the server ends with the written bytes: " + J(ops.map((o) => [o.op, o.sha256?.slice(0, 6)])));
+    check(ops.filter((o) => o.sha256 === now).length === 1, "first sync race: …sent exactly once");
   } finally {
     W.ADOPT.before = null;
     await stop(c);
