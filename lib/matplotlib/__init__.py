@@ -53,8 +53,23 @@ class RcParams(dict):
         v = dict.get(self, key)
         return None if v == _defaults()[key] else v
 
+    # (no key is ever removed, as matplotlib's: del, pop and popitem of one
+    # are its empty KeyError, and clear() leaves every key as it was)
     def __delitem__(self, key):
         raise KeyError()
+
+    def pop(self, key, *default):
+        if key in self:
+            raise KeyError()
+        if default:
+            return default[0]
+        raise KeyError(key)
+
+    def popitem(self):
+        raise KeyError()
+
+    def clear(self):
+        pass
 
     def update(self, *args, **kw):
         for k, v in dict(*args, **kw).items():

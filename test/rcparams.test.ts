@@ -41,6 +41,10 @@ t("after ctx exc", lambda: rc["font.size"])
 t("ctx bad", lambda: mpl.rc_context({"nosuch.key": 1}).__enter__())
 t("find_all", lambda: sorted(rc.find_all("^grid\\\\.").keys())[:4])
 t("copy", lambda: type(rc.copy()).__name__)
+t("pop", lambda: rc.pop("font.size"))
+t("pop default", lambda: rc.pop("nosuch.key", 5))
+t("popitem", lambda: rc.popitem())
+t("clear", lambda: (rc.clear(), len(rc), rc["font.size"])[1:])
 t("default type", lambda: type(mpl.rcParamsDefault).__name__)
 c = rc["axes.prop_cycle"]
 t("cycle", lambda: (len(c), sorted(c.keys), c.by_key()["color"][0] == (0.12156862745098039, 0.4666666666666667, 0.7058823529411765)))
@@ -67,6 +71,10 @@ t("cycler other", lambda: mpl.cycler(linestyle=["-"]))
     "ctx bad KeyError \"'nosuch.key' is not a valid value for rcParam.\"",
     "find_all ['grid.alpha', 'grid.color', 'grid.linestyle', 'grid.linewidth']",
     "copy 'RcParams'",
+    "pop KeyError ",
+    "pop default 5",
+    "popitem KeyError ",
+    "clear (339, 10.0)",
     "default type 'RcParams'",
     "cycle (10, ['color'], True)",
     "cycle iter True",
