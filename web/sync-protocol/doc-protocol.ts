@@ -229,16 +229,36 @@ function utf8Length(s: string): number {
   }
   return n;
 }
-function jcsString(s: string): string {
+/**
+ * The UTF-8 length of a string's JCS form (quotes and escapes included),
+ * computed without making it; a lone surrogate is refused.  So a string
+ * is charged before its escaped copy exists (LIMIT-PR62-1).
+ */
+function escapedLength(s: string): number {
+  let n = 2;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
-    if (c >= 0xd800 && c <= 0xdbff) {
+    if (c === 0x22 || c === 0x5c || c === 0x08 || c === 0x0c || c === 0x0a || c === 0x0d || c === 0x09) n += 2;
+    else if (c < 0x20) n += 6;
+    else if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) {
       const d = s.charCodeAt(i + 1);
       if (!(d >= 0xdc00 && d <= 0xdfff)) throw badValue("a lone surrogate");
+      n += 4;
       i++;
     } else if (c >= 0xdc00 && c <= 0xdfff) throw badValue("a lone surrogate");
+    else n += 3;
   }
-  // (ECMAScript's JSON string form is JCS's, RFC 8785 §3.2.2.2)
+  return n;
+}
+/** A string's JCS form, after its exact encoded length is charged to the budget (ECMAScript's JSON string form is JCS's, RFC 8785 §3.2.2.2). */
+function jcsString(s: string, b?: Budget): string {
+  const n = escapedLength(s);
+  if (b) {
+    if (b.bytes + n > b.max) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+    b.bytes += n;
+  }
   return JSON.stringify(s);
 }
 type Budget = { bytes: number; max: number };
@@ -255,9 +275,9 @@ function jcsInto(v: unknown, out: string[], b: Budget, depth: number) {
     return emit(out, JSON.stringify(v), b);
   }
   if (typeof v === "string") {
-    // (a string longer than what's left can't fit: refused before it is escaped)
-    if (v.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
-    return emit(out, jcsString(v), b);
+    // (charged by its exact encoded length, computed without copying it, before it is escaped)
+    out.push(jcsString(v, b));
+    return;
   }
   if (depth >= DOC_LIMITS.jcsDepth) throw badValue(`nested deeper than ${DOC_LIMITS.jcsDepth}`);
   if (Array.isArray(v)) {
@@ -280,8 +300,8 @@ function jcsInto(v: unknown, out: string[], b: Budget, depth: number) {
       if (o[k] === undefined) continue;
       if (!first) emit(out, ",", b);
       first = false;
-      if (k.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
-      emit(out, jcsString(k) + ":", b);
+      out.push(jcsString(k, b));
+      emit(out, ":", b);
       jcsInto(o[k], out, b, depth + 1);
     }
     return emit(out, "}", b);
@@ -512,20 +532,36 @@ export interface Outputs { t: "outputs"; req: number; doc: string; oreq: { clien
 export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
 export interface Progress { t: "progress"; claims: Uint8Array }
 
-/** `owner` names the document's owner on the account socket; a document socket's is its attachment's (sync-server §5.1). */
-function withOwner<T extends object>(m: T, o: Record<string, unknown>, what: string): T & { owner?: string } {
-  if (!has(o, "owner")) return m;
-  if (!isSha(o.owner)) throw invalid(`${what}: owner is an account hash`);
-  return { ...m, owner: o.owner as string };
+/**
+ * Which socket a message came on (CORR-PR62-2).  On the account socket a
+ * document message names its `doc` (and, optionally, its `owner`).  On a
+ * document socket the document is the attachment's: the message carries
+ * neither field (either one is refused as unknown, so it can't name
+ * another document), and the checked message is normalized with the
+ * attachment's `doc` and `owner`.  Default: the account socket.
+ */
+export type Via = { socket: "account" } | { socket: "document"; doc: string; owner: string };
+const ACCOUNT: Via = { socket: "account" };
+/** The fields allowed, and the document and owner, for the socket a message came on. */
+function docFields(v: unknown, own: readonly string[], via: Via, what: string): { o: Record<string, unknown>; doc: string; owner?: string } {
+  if (via.socket === "document") {
+    if (!isDocId(via.doc) || !isSha(via.owner)) throw invalid(`${what}: the attachment's doc and owner`);
+    return { o: fields(v, own, what), doc: via.doc, owner: via.owner };
+  }
+  const o = fields(v, [...own, "doc", "owner"], what);
+  if (!isDocId(o.doc)) throw invalid(`${what}: doc`);
+  if (has(o, "owner") && !isSha(o.owner)) throw invalid(`${what}: owner is an account hash`);
+  return { o, doc: o.doc, ...(has(o, "owner") ? { owner: o.owner as string } : {}) };
 }
-export function checkDocClaim(v: unknown): DocClaim {
-  const o = fields(v, ["t", "req", "doc", "client", "owner"], "doc_claim");
-  if (o.t !== "doc_claim" || !isNat(o.req) || !isDocId(o.doc) || !isClient(o.client)) throw invalid("doc_claim: t, req, doc and client");
-  return withOwner({ t: "doc_claim" as const, req: o.req, doc: o.doc, client: o.client }, o, "doc_claim");
+const withDoc = <T extends object>(m: T, d: { doc: string; owner?: string }) => ({ ...m, doc: d.doc, ...(d.owner !== undefined ? { owner: d.owner } : {}) });
+export function checkDocClaim(v: unknown, via: Via = ACCOUNT): DocClaim {
+  const d = docFields(v, ["t", "req", "client"], via, "doc_claim"), o = d.o;
+  if (o.t !== "doc_claim" || !isNat(o.req) || !isClient(o.client)) throw invalid("doc_claim: t, req and client");
+  return withDoc({ t: "doc_claim" as const, req: o.req, client: o.client }, d);
 }
-export function checkDocFence(v: unknown): DocFence {
-  const o = fields(v, ["t", "req", "doc", "clients", "owner"], "doc_fence");
-  if (o.t !== "doc_fence" || !isNat(o.req) || !isDocId(o.doc)) throw invalid("doc_fence: t, req and doc");
+export function checkDocFence(v: unknown, via: Via = ACCOUNT): DocFence {
+  const d = docFields(v, ["t", "req", "clients"], via, "doc_fence"), o = d.o;
+  if (o.t !== "doc_fence" || !isNat(o.req)) throw invalid("doc_fence: t and req");
   if (!Array.isArray(o.clients) || o.clients.length === 0) throw invalid("doc_fence: clients");
   if (o.clients.length > DOC_LIMITS.fenceClients) throw tooBig("fence_clients", DOC_LIMITS.fenceClients, "doc_fence: too many clients");
   const clients = o.clients.map((c) => {
@@ -534,7 +570,7 @@ export function checkDocFence(v: unknown): DocFence {
     return { client: x.client, target: x.target };
   });
   if (new Set(clients.map((c) => c.client)).size !== clients.length) throw invalid("doc_fence: a client named twice");
-  return withOwner({ t: "doc_fence" as const, req: o.req, doc: o.doc, clients }, o, "doc_fence");
+  return withDoc({ t: "doc_fence" as const, req: o.req, clients }, d);
 }
 /** A batch's `fgen` (§5.8): the fence generation each client in the batch was sent under, every one of them and no other. */
 export function checkFgen(v: unknown, clientsInBatch: ReadonlySet<string>): Map<string, number> {
@@ -552,17 +588,18 @@ export function checkUpto(o: Record<string, unknown>, after: number): number | u
   if (!isNat(o.upto) || (o.upto as number) < after) throw invalid("pull: upto is at least `after`");
   return o.upto as number;
 }
-export function checkSnapshot(v: unknown): Snapshot {
-  const o = fields(v, ["t", "req", "doc", "at_seq", "sha256", "bytes", "owner"], "snapshot");
-  if (o.t !== "snapshot" || !isNat(o.req) || !isDocId(o.doc) || !isNat(o.at_seq) || o.at_seq < 1 || !isSha(o.sha256) || !isNat(o.bytes))
-    throw invalid("snapshot: t, req, doc, at_seq, sha256 and bytes");
+/** §5.2: `snapshot{owner?, doc, at_seq, sha256, bytes}` on the account socket, `snapshot{at_seq, sha256, bytes}` on a document socket. */
+export function checkSnapshot(v: unknown, via: Via = ACCOUNT): Snapshot {
+  const d = docFields(v, ["t", "req", "at_seq", "sha256", "bytes"], via, "snapshot"), o = d.o;
+  if (o.t !== "snapshot" || !isNat(o.req) || !isNat(o.at_seq) || o.at_seq < 1 || !isSha(o.sha256) || !isNat(o.bytes))
+    throw invalid("snapshot: t, req, at_seq, sha256 and bytes");
   if (o.bytes > DOC_LIMITS.snapshotBytes) throw tooBig("snapshot_bytes", DOC_LIMITS.snapshotBytes, "snapshot: at most 32 MiB");
-  return withOwner({ t: "snapshot" as const, req: o.req, doc: o.doc, at_seq: o.at_seq, sha256: o.sha256, bytes: o.bytes }, o, "snapshot");
+  return withDoc({ t: "snapshot" as const, req: o.req, at_seq: o.at_seq, sha256: o.sha256, bytes: o.bytes }, d);
 }
 const CELL = /^[^\u0000-\u001f\u007f]{1,128}$/;
-export function checkOutputs(v: unknown): Outputs {
-  const o = fields(v, ["t", "req", "doc", "oreq", "set", "owner"], "outputs");
-  if (o.t !== "outputs" || !isNat(o.req) || !isDocId(o.doc)) throw invalid("outputs: t, req and doc");
+export function checkOutputs(v: unknown, via: Via = ACCOUNT): Outputs {
+  const d = docFields(v, ["t", "req", "oreq", "set"], via, "outputs"), o = d.o;
+  if (o.t !== "outputs" || !isNat(o.req)) throw invalid("outputs: t and req");
   const r = fields(o.oreq, ["client", "n"], "outputs oreq");
   if (!isClient(r.client) || !isNat(r.n) || r.n < 1) throw invalid("outputs: oreq is a client and a positive n");
   if (!Array.isArray(o.set) || o.set.length === 0) throw invalid("outputs: set");
@@ -587,7 +624,7 @@ export function checkOutputs(v: unknown): Outputs {
     return out;
   });
   if (new Set(set.map((s) => s.cell)).size !== set.length) throw invalid("outputs: a cell set twice");
-  return withOwner({ t: "outputs" as const, req: o.req, doc: o.doc, oreq: { client: r.client, n: r.n }, set }, o, "outputs");
+  return withDoc({ t: "outputs" as const, req: o.req, oreq: { client: r.client, n: r.n }, set }, d);
 }
 export function checkProgress(v: unknown): Progress {
   const o = fields(v, ["t", "claims"], "progress");
