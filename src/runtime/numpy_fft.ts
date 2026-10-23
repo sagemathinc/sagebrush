@@ -6,6 +6,7 @@
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { wasmFFT, wasmRfftRows } from "./kernels";
+import { admitWork, ARRAY_LIMITS } from "./numpy";
 import * as FD from "./fdlibm";
 
 // cos/sin of 2 pi/3, 4 pi/3, 2 pi/5, 4 pi/5, for the WebAssembly kernels
@@ -28,11 +29,40 @@ export function cs2pi(k: number, n: number): [number, number] {
   return q === 0 ? [c, s] : q === 1 ? [-s, c] : q === 2 ? [-c, -s] : [s, -c];
 }
 
+// The tables kept between transforms (bit-reversal tables, twiddles,
+// Bluestein's chirps), in one cache that counts their bytes (daybreak2's
+// LIMIT-PR56-2): before a transform is admitted, the oldest are dropped until
+// what stays cached and what the transform needs fit ARRAY_LIMITS.bytes
+// together (admitFFT). Least recently used first.
+const cache = new Map<string, { bytes: number; v: any }>();
+let cacheBytes = 0;
+function cached<V>(key: string, bytes: number, make: () => V): V {
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit.v;
+  }
+  const v = make();
+  cache.set(key, { bytes, v });
+  cacheBytes += bytes;
+  return v;
+}
+function cacheRoom(need: number): void {
+  for (const [key, e] of cache) {
+    if (cacheBytes + need <= ARRAY_LIMITS.bytes) break;
+    cache.delete(key);
+    cacheBytes -= e.bytes;
+  }
+}
+// (for tests: what is cached, in bytes and entries)
+export function fftCacheBytes(): [number, number] {
+  return [cacheBytes, cache.size];
+}
+
 // Per-size tables: twiddles cos/sin(2*pi*k/n) for k < n/2 and the bit-reversal permutation.
-const tables = new Map<number, { c: Float64Array; s: Float64Array; rev: Uint32Array }>();
 function table(n: number) {
-  let t = tables.get(n);
-  if (!t) {
+  return cached("t" + n, 12 * n, () => {
     const c = new Float64Array(n >> 1), s = new Float64Array(n >> 1);
     for (let k = 0; k < n >> 1; k++) {
       [c[k], s[k]] = cs2pi(k, n);
@@ -44,11 +74,8 @@ function table(n: number) {
       j ^= bit;
       rev[i] = j;
     }
-    t = { c, s, rev };
-    if (tables.size > 32) tables.clear();
-    tables.set(n, t);
-  }
-  return t;
+    return { c, s, rev };
+  });
 }
 
 function fft2(re: Float64Array, im: Float64Array, inverse: boolean) {
@@ -83,13 +110,10 @@ function fft2(re: Float64Array, im: Float64Array, inverse: boolean) {
 }
 
 // Bluestein's chirp z: per length n, the chirp and its transformed conjugate
-const chirps = new Map<string, { m: number; cr: Float64Array; ci: Float64Array; br: Float64Array; bi: Float64Array }>();
 function chirp(n: number, inverse: boolean) {
-  const key = n + (inverse ? "i" : "f");
-  let ch = chirps.get(key);
-  if (!ch) {
-    let m = 1;
-    while (m < 2 * n - 1) m <<= 1;
+  let m = 1;
+  while (m < 2 * n - 1) m <<= 1;
+  return cached("c" + n + (inverse ? "i" : "f"), 16 * n + 16 * m, () => {
     const sg = inverse ? 1 : -1;
     const cr = new Float64Array(n), ci = new Float64Array(n);
     for (let k = 0; k < n; k++) {
@@ -105,11 +129,8 @@ function chirp(n: number, inverse: boolean) {
       bi[k] = bi[m - k] = -ci[k];
     }
     dft(br, bi, false);
-    ch = { m, cr, ci, br, bi };
-    if (chirps.size > 16) chirps.clear();
-    chirps.set(key, ch);
-  }
-  return ch;
+    return { m, cr, ci, br, bi };
+  });
 }
 
 // Mixed-radix Stockham autosort FFT for lengths whose prime factors are
@@ -129,19 +150,14 @@ function factorize(n: number): number[] | null {
   }
   return n === 1 ? f : null;
 }
-const twiddles = new Map<number, { c: Float64Array; s: Float64Array }>();
 function twiddle(n: number) {
-  let t = twiddles.get(n);
-  if (!t) {
+  return cached("w" + n, 16 * n, () => {
     const c = new Float64Array(n), s = new Float64Array(n);
     for (let k = 0; k < n; k++) {
       [c[k], s[k]] = cs2pi(k, n);
     }
-    t = { c, s };
-    if (twiddles.size > 32) twiddles.clear();
-    twiddles.set(n, t);
-  }
-  return t;
+    return { c, s };
+  });
 }
 // x: interleaved complex (re, im, re, im ...) of length 2N; result back in x.
 function stockhamI(x: Float64Array, N: number, factors: number[], inverse: boolean) {
@@ -344,10 +360,24 @@ function rfftEven(x: Float64Array, xo: number, n: number, outRe: Float64Array, o
   }
 }
 
+// A transform's scratch: rows x n real (rfft) or complex values copied into
+// WebAssembly, a row's re and im, the twiddle tables, and for a length with
+// a prime factor past 5 Bluestein's chirp buffers (powers of two past 2n),
+// all admitted before any is allocated (LIMIT-PR55-3)
+function admitFFT(rows: number, n: number, real: boolean): void {
+  let m = 1;
+  if (factorize(real ? n / 2 : n) === null) while (m < 2 * n) m *= 2;
+  const need = 8 * (2 * rows * n + 8 * n + 16 * m);
+  // (the cached tables count too: the oldest dropped first to make room)
+  cacheRoom(need);
+  admitWork(cacheBytes + need, "the FFT");
+}
+
 newBuiltinModule("_npfft", (m) => {
   // rows of a contiguous real float64 buffer (rows x n, n even) -> rows x (n/2+1) complex (out buffer)
   m.rfft_rows = Obj.builtin((data: any, rows: any, n: any, out: any) => {
     const R = Number(rows), N = Number(n), H = N / 2 + 1;
+    admitFFT(R, N, true);
     const d = data.data as Float64Array, od = out.data as Float64Array;
     const f = factorize(N / 2);
     if (f && wasmRfftRows(d, data.offset, R, N, od, 2 * out.offset, f, twiddle(N / 2), twiddle(N), RADIX_CONSTS)) return null;
@@ -364,6 +394,7 @@ newBuiltinModule("_npfft", (m) => {
   // transform the rows of an interleaved complex buffer (rows x n), in place
   m.rows = Obj.builtin((data: any, rows: any, n: any, inverse: any) => {
     const R = Number(rows), N = Number(n);
+    admitFFT(1, N, false);
     const d = data.data as Float64Array; // an ndarray's buffer (contiguous complex128)
     const f = factorize(N);
     if (f && N > 1) {

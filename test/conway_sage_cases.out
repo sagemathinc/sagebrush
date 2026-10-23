@@ -1,0 +1,8 @@
+cap 653528895
+GF short refused ConwayBudgetExceeded True the Conway polynomial for 2^12 is beyond the bounded search here
+GF prefix short refused ConwayBudgetExceeded True the Conway polynomial for 2^12 is beyond the bounded search here
+conway_polynomial short refused ConwayBudgetExceeded True the Conway polynomial for 2^12 is beyond the bounded search here
+GF exact admitted Finite Field in z12 of size 2^12 [(2, 1), (2, 2), (2, 3), (2, 4), (2, 6), (2, 12)]
+conway_polynomial exact admitted x^12 + x^7 + x^6 + x^5 + x^3 + x + 1 [(2, 1), (2, 2), (2, 3), (2, 4), (2, 6), (2, 12)]
+hit True
+modulus Finite Field in c of size 2^3

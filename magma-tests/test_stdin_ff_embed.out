@@ -1,0 +1,131 @@
+
+>> F!b;
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> F!c;
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> T!a;
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> P!a;
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> GF(3)!a;
+        ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> E!(F!1);
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> F!(E!0);
+    ^
+Runtime error in '!': No embedding known into LHS field
+LHS: FldFin
+RHS: FldFinElt
+
+>> a + t;
+     ^
+Runtime error in '+': Arguments are not compatible
+Argument types given: FldFinElt, FldFinElt
+
+
+>> a eq t;
+     ^
+Runtime error in 'eq': Arguments are not compatible
+Argument types given: FldFinElt, FldFinElt
+
+
+>> t in F;
+     ^
+Runtime error in 'in': Arguments have no covering structure
+
+
+>> [F | c];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [F | E!1];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [F | b];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [E | a];
+   ^
+Runtime error in [ ... ]: Coerce failed for sequence element
+
+
+>> [a, t];
+   ^
+Runtime error in [ ... ]: No valid universe containing all elements
+
+
+>> t in [a];
+     ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> a in [t];
+     ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> F!1 in {T!1};
+       ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> {a} join {t};
+       ^
+Runtime error in 'join': No valid universe containing all elements
+
+true
+false
+true
+true
+true
+true
+
+>> 1/2 in {E!1};
+       ^
+Runtime error in 'in': No valid universe containing all elements
+
+
+>> {a} eq {t};
+       ^
+Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
+
+
+>> {F|a} eq {T|t};
+         ^
+Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
+
+
+>> {{a}} eq {{t}};
+         ^
+Runtime error in 'eq': Arguments 1 and 2 have incompatible universal sets
+
+end

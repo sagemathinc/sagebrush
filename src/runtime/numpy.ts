@@ -262,7 +262,59 @@ const cStrides = (shape: number[]): number[] => {
 };
 const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 
+// Every array's storage is admitted before it is allocated (empty, which
+// every constructor uses; daybreak2's LIMIT-PR55-1): at most ARRAY_LIMITS.elements
+// elements and ARRAY_LIMITS.bytes bytes, both inclusive, the bytes counting any
+// scratch the caller reserves too. Counted exactly (BigInt), so no product
+// overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
+// machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
+// (one object, so a test can lower the caps to check the boundary cheaply)
+export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
+export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
+  let n = 1n;
+  for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
+  const bytes = n * BigInt(dt.itemsize);
+  if (bytes > 2n ** 63n - 1n) raise(T.ValueError, "array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.");
+  if (n > BigInt(ARRAY_LIMITS.elements) || bytes + BigInt(scratch) > BigInt(ARRAY_LIMITS.bytes)) {
+    const dims = shape.map((d) => String(typeof d === "bigint" ? d : BigInt(d)));
+    raise(T.MemoryError, `Unable to allocate ${sizeString(bytes)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type ${dt.name}`);
+  }
+}
+
+// An operation's working memory: the outputs it makes and its scratch
+// together (typed arrays, JS arrays of indices, WebAssembly buffers),
+// admitted at its start, before any of them is allocated (daybreak2's
+// LIMIT-PR55-3): at most ARRAY_LIMITS.bytes. `bytes` is computed from the
+// operands' sizes, never less than what the operation allocates; an
+// infinite or NaN estimate is refused too.
+export function admitWork(bytes: number, what: string): void {
+  if (bytes <= ARRAY_LIMITS.bytes) return;
+  const need = Number.isFinite(bytes) ? sizeString(BigInt(Math.ceil(bytes))) : "an unbounded amount";
+  raise(T.MemoryError, `${what} needs ${need} of working memory, more than Sagebrush's limit of ${sizeString(BigInt(ARRAY_LIMITS.bytes))}`);
+}
+
+// NumPy's _ArrayMemoryError._size_to_string: binary units, 3 significant
+// digits (Python's "#.3g", which keeps a trailing point), whole bytes below 1 KiB
+function sizeString(bytes: bigint): string {
+  const units = ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+  let unit = Math.floor(Math.max(bytes.toString(2).length - 1, 1) / 10);
+  let v = Number(bytes) / 2 ** (unit * 10);
+  if (Math.round(v) === 1024) {
+    unit += 1;
+    v /= 1024;
+  }
+  if (unit >= units.length) {
+    v *= 2 ** ((unit - (units.length - 1)) * 10);
+    unit = units.length - 1;
+  }
+  if (unit === 0) return `${v.toFixed(0)} ${units[unit]}`;
+  let t = Math.round(v) < 1000 ? v.toPrecision(3) : v.toFixed(0);
+  if (!t.includes(".")) t += ".";
+  return `${t} ${units[unit]}`;
+}
+
 export function empty(shape: number[], dt: DType): NDArray {
+  admitArray(shape, dt);
   const n = prod(shape);
   return new NDArray(dt, new dt.ctor(dt.cplx ? 2 * n : n), shape.slice(), cStrides(shape));
 }
@@ -864,6 +916,10 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   const adv = ents.filter((e) => e.kind === "adv");
   const bshape = broadcastShapes(...adv.map((e) => e.idx!.shape));
   const bsize = prod(bshape);
+  // (the index arrays, the output's offsets (a JS array) and the output
+  // itself, admitted together first; LIMIT-PR55-3)
+  const basicN = prod(ents.filter((e) => e.kind !== "adv").map((e) => (e.kind === "slice" ? e.n! : 1)));
+  admitWork(8 * adv.length * bsize + bsize * basicN * (8 + a.dt.itemsize), "indexing");
   const idxs = adv.map((e) => {
     const s = bstrides(e.idx!, bshape);
     const out = new Array(bsize);
@@ -1715,6 +1771,8 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))];
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   const outShape = keep.map((i) => a.shape[i]);
+  // (the output and the row accumulator, a float64 (or float32) per output element)
+  admitWork(prod(outShape) * (rt.itemsize + 8), "the reduction");
   const out = empty(outShape, rt);
   const red = ax.slice().sort((x, y) => x - y);
   const rshape = red.map((i) => a.shape[i]), rstr = red.map((i) => a.strides[i]);
@@ -1774,12 +1832,22 @@ function sumType(dt: DType): DType {
 
 function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
+  const axs = axesArg(axis, a.ndim);
+  const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
   if (a.dt.cplx) {
+    // (the whole complex sum admitted first: the real and imaginary sums,
+    // each with its accumulator, and the combined result; daybreak2's
+    // LIMIT-PR56-1; the parts are views, not copies)
+    admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
     const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
-  const src = rt !== a.dt && rt.kind === "f" ? copy(a, rt) : a;
+  // (a float sum of another dtype sums a converted copy: that copy, the
+  // output and its accumulator admitted first; LIMIT-PR55-3)
+  const widen = rt !== a.dt && rt.kind === "f";
+  admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
+  const src = widen ? copy(a, rt) : a;
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
@@ -2081,27 +2149,32 @@ function ravel(a: NDArray): NDArray {
 
 export function nonzero(a: NDArray): NDArray[] {
   const nd = Math.max(1, a.ndim);
-  const coords: number[][] = Array.from({ length: nd }, () => []);
   const shape = a.ndim ? a.shape : [1];
   const strides = a.ndim ? a.strides : [0];
   const idx = new Array(nd).fill(0);
   const cplx = a.dt.cplx;
+  const isNz = (p: number) => (cplx ? a.data[2 * p] !== 0 || a.data[2 * p + 1] !== 0 : a.data[p] !== 0);
+  // (counted first, then the nd int64 outputs admitted together and filled
+  // in place: no JS arrays growing with the count; LIMIT-PR55-3)
+  let count = 0;
+  loop1(shape, strides, a.offset, (p) => {
+    if (isNz(p)) count++;
+  });
+  admitWork(nd * count * 8, "nonzero");
+  const outs = Array.from({ length: nd }, () => empty([count], D.int64));
+  let j = 0;
   loop1(shape, strides, a.offset, (p, k) => {
-    const nz = cplx ? a.data[2 * p] !== 0 || a.data[2 * p + 1] !== 0 : a.data[p] !== 0;
-    if (nz) {
+    if (isNz(p)) {
       let r = k;
       for (let d = nd - 1; d >= 0; d--) {
         idx[d] = r % shape[d];
         r = Math.floor(r / shape[d]);
       }
-      for (let d = 0; d < nd; d++) coords[d].push(idx[d]);
+      for (let d = 0; d < nd; d++) outs[d].data[j] = idx[d];
+      j++;
     }
   });
-  return coords.map((c) => {
-    const out = empty([c.length], D.int64);
-    out.data.set(c);
-    return out;
-  });
+  return outs;
 }
 
 // ------------------------------------------------------------------ linear algebra basics
@@ -2116,6 +2189,13 @@ function matmul(x: any, y: any): any {
   const batch = broadcastShapes(A.shape.slice(0, -2), B.shape.slice(0, -2));
   const rt = promote(a.dt, b.dt);
   const ct = rt.kind === "b" ? D.bool : rt;
+  // (the output, the row buffers or WebAssembly's GEMM buffers, and for
+  // complex two copies of each operand in its complex dtype, four real
+  // products, their two sums and the combined result; LIMIT-PR55-3)
+  const outN = prod(batch) * n * p;
+  admitWork(ct.cplx
+    ? 2 * (A.size + B.size) * ct.itemsize + 6 * outN * 8 + outN * ct.itemsize + 8 * (n * m + m * p + n * p + 5 * p)
+    : outN * ct.itemsize + 8 * (n * m + m * p + n * p + 5 * p), "matmul");
   if (ct.cplx) {
     // via real arithmetic on the parts
     const ar = realPart(copy(A, ct)), ai = imagPart(copy(A, ct)), br = realPart(copy(B, ct)), bi = imagPart(copy(B, ct));
@@ -2797,6 +2877,7 @@ export function arrayStr(a: NDArray): string {
 function argsortInts(a: NDArray): NDArray | null {
   const n = a.size;
   if (a.ndim !== 1 || !a.dt.isInt && a.dt.kind !== "b" || n >= 1 << 21) return null;
+  admitWork(16 * n, "argsort");
   const keys = new Float64Array(n), d = a.data, st = a.strides[0];
   for (let i = 0, p = a.offset; i < n; i++, p += st) {
     const v = d[p];
@@ -2813,6 +2894,12 @@ function argsortInts(a: NDArray): NDArray | null {
 }
 
 function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
+  // (every path's outputs and scratch, at most: two copies of a (contiguous,
+  // and the result moved back), the output (int64 for argsort), and per
+  // element float64 values, an index and WebAssembly's sort buffers: 40
+  // bytes; a uint8 array's argsort needs 2 * 1 + 8 + 40 = 50 bytes an
+  // element; LIMIT-PR55-3)
+  admitWork(a.size * (2 * a.dt.itemsize + (arg ? 8 : a.dt.itemsize) + 40), arg ? "argsort" : "sort");
   if (arg && a.ndim === 1 && !a.dt.cplx && a.size >= 64) {
     // the WebAssembly radix sort (stable, as the comparison sort below)
     const c = ascontig(a);
@@ -3129,7 +3216,18 @@ newBuiltinModule("_numpy", (m) => {
     const isint = ws.every((w) => w && (w.kind === "i" || w.kind === "b") && (!w.dt || w.dt.isInt));
     const s0 = toNum(start), s1 = toNum(stop), st = toNum(step);
     if (st === 0) raise(T.ZeroDivisionError, "division by zero");
-    const n = Math.max(0, Math.ceil((s1 - s0) / st));
+    // (the length as NumPy's _calc_length: ceil((stop - start) / step); a
+    // quotient that underflows to 0 from a nonzero span is 1 element, or 0
+    // if negative; NaN or past intp refused)
+    const span = s1 - s0, q = span / st;
+    let n: number;
+    if (q === 0 && span !== 0) n = Object.is(q, -0) ? 0 : 1;
+    else {
+      const c = Math.ceil(q);
+      if (Number.isNaN(c)) raise(T.ValueError, "arange: cannot compute length");
+      if (!(c >= -9223372036854775808 && c <= 9223372036854775807)) raise(T.ValueError, "Maximum allowed size exceeded");
+      n = Math.max(0, c);
+    }
     const dt = dtype !== null ? toDtype(dtype) : isint ? D.int64 : D.float64;
     // (an integer progression into int64/uint64: computed exactly, each
     // value admitted: arange(2**53, 2**53 + 4) never rounds)
@@ -3138,27 +3236,87 @@ newBuiltinModule("_numpy", (m) => {
       const [b0, b1, bs] = ws.map((w) => big(w!));
       const span = b1 - b0;
       const nb = span <= 0n === bs > 0n ? 0n : (span + bs - (bs > 0n ? 1n : -1n)) / bs;
-      if (nb > 2n ** 32n) raise(T.MemoryError);
+      // (the same admission as every array's, before the length is a number)
+      admitArray([nb < 0n ? 0n : nb], dt);
       const N = Number(nb < 0n ? 0n : nb);
       const out = empty([N], dt);
       for (let i = 0; i < N; i++) out.data[i] = admitWide(b0 + BigInt(i) * bs, dt);
       return out;
     }
+    // (the values as NumPy's: the first two set from start and start + step,
+    // the rest filled in the dtype's own arithmetic from them, start + i *
+    // delta with delta = second - first (arraytypes.c.src, @NAME@_fill): so
+    // arange(-1, 1, 0.1)[10] is -2.220446049250313e-16, and
+    // arange(0, 5, 0.5, dtype=int) is all zeros, as NumPy's)
+    if (dt.kind === "b" && n > 2) raise(T.TypeError, "arange() is only supported for booleans when the result has at most length 2.");
     const a = empty([n], dt);
-    for (let i = 0; i < n; i++) a.data[i] = castNum(dt, s0 + i * st);
+    const d = a.data, w = dt.cplx ? 2 : 1;
+    if (n > 0) d[0] = castNum(dt, s0);
+    if (n > 1) d[w] = castNum(dt, s0 + st);
+    if (n > 2) {
+      const x0 = d[0], x1 = d[w];
+      if (dt.cplx) {
+        // (the imaginary parts are 0 + i * 0: real arguments only reach here)
+        const del = x1 - x0;
+        const f32 = dt.ctor === Float32Array;
+        for (let i = 2; i < n; i++) d[2 * i] = f32 ? Math.fround(x0 + Math.fround(Math.fround(i) * Math.fround(del))) : x0 + i * del;
+      } else if (dt.kind === "f" && dt.ctor === Float32Array) {
+        // (float arithmetic, as C's: i converted to float, each operation rounded)
+        const del = Math.fround(x1 - x0);
+        for (let i = 2; i < n; i++) d[i] = Math.fround(x0 + Math.fround(Math.fround(i) * del));
+      } else if (dt.kind === "f") {
+        const del = x1 - x0;
+        for (let i = 2; i < n; i++) d[i] = x0 + i * del;
+      } else if (isWide(dt)) {
+        // (int64 and uint64: exact, and refused past what the store holds)
+        const b0 = BigInt(x0), del = BigInt(x1) - b0;
+        for (let i = 2; i < n; i++) d[i] = admitWide(b0 + BigInt(i) * del, dt);
+      } else {
+        // (a narrower integer: delta and each value wrap to the type, as C's store)
+        const wrap = new (dt.ctor as any)(1);
+        wrap[0] = x1 - x0;
+        const del = wrap[0];
+        for (let i = 2; i < n; i++) d[i] = x0 + i * del;
+      }
+    }
     return a;
   });
   fn("linspace", (start: any, stop: any, num: any = 50, endpoint: any = true, dtype: any = null) => {
-    const n = Number(num);
-    if (n < 0) raise(T.ValueError, `Number of samples, ${n}, must be non-negative.`);
-    const a = toNum(start), b = toNum(stop);
-    const div = endpoint ? n - 1 : n;
-    const step = div > 0 ? (b - a) / div : NaN;
+    // (num as operator.index takes it: an int, not a float; admitted before
+    // anything is allocated or computed)
+    // (a NumPy scalar refused by its NumPy name, as NumPy's TypeError says it,
+    // 'numpy.float32'; NumPy 2's bool has no __index__; astra's CORR-PR55-1)
+    const nt = Obj.typeOf(num);
+    const npName = nt.$module === "numpy" ? `numpy.${nt.$qualname}` : null;
+    const notIndex = () => raise(T.TypeError, `'${npName}' object cannot be interpreted as an integer`);
+    if (npName !== null && nt.$qualname === "bool") notIndex();
+    let ni: number | bigint;
+    try {
+      ni = O.index(num);
+    } catch (e) {
+      if (npName !== null && Obj.isinstance(e, T.TypeError)) notIndex();
+      throw e;
+    }
+    if (ni < 0) raise(T.ValueError, `Number of samples, ${ni}, must be non-negative.`);
     const dt = dtype !== null ? toDtype(dtype) : D.float64;
+    admitArray([typeof ni === "bigint" ? ni : BigInt(ni)], dt);
+    const n = Number(ni);
+    const a = toNum(start), b = toNum(stop);
+    const div = O.truth(endpoint) ? n - 1 : n;
+    const delta = b - a;
+    const step = div > 0 ? delta / div : NaN;
     const out = empty([n], dt);
-    // as NumPy: arange(num) * step + start, and the end point set exactly
-    for (let i = 0; i < n; i++) out.data[i] = castNum(dt, div > 0 ? i * step + a : a);
-    if (endpoint && n > 1) out.data[n - 1] = castNum(dt, b);
+    // as NumPy's linspace, in float64: arange(num) * step + start (with a
+    // step that underflows to 0, arange(num) / div * delta; with div <= 0,
+    // arange(num) * delta, so linspace(0, inf, 1) is nan); the end point set
+    // exactly; floored for an integer dtype before the cast
+    // (each value computed and stored in one pass: no scratch array)
+    const last = O.truth(endpoint) && n > 1 ? n - 1 : -1;
+    const floor = dt.kind === "i" || dt.kind === "u";
+    for (let i = 0; i < n; i++) {
+      const y = i === last ? b : (div > 0 ? (step === 0 ? (i / div) * delta : i * step) : i * delta) + a;
+      out.data[(dt.cplx ? 2 : 1) * i] = castNum(dt, floor ? Math.floor(y) : y);
+    }
     return out;
   });
   fn("eye", (n: any, mm: any = null, k: any = 0, dtype: any = null) => {
@@ -3251,19 +3409,29 @@ newBuiltinModule("_numpy", (m) => {
       n = (raw.length - off) / isz;
     }
     if (off + n * isz > raw.length) raise(T.ValueError, "buffer is smaller than requested size");
-    const bytes = raw.slice(off, off + n * isz); // aligned copy
+    // (admitted before anything is allocated, as every array: daybreak2's
+    // LIMIT-PR55-2; int64 and uint64 in one allocation, the output, read
+    // from the buffer in place, each value kept only if a double holds it
+    // exactly (admitWide), never rounded)
+    if (isWide(dt)) {
+      const out = empty([n], dt);
+      const dv = new DataView(raw.buffer, raw.byteOffset + off, n * isz);
+      for (let i = 0; i < n; i++) out.data[i] = admitWide(dt.name === "int64" ? dv.getBigInt64(8 * i, !big) : dv.getBigUint64(8 * i, !big), dt);
+      return out;
+    }
+    admitArray([n], dt);
+    const bytes = raw.slice(off, off + n * isz); // aligned copy: the array's own storage
     if (big) {
       const w = dt.cplx ? isz / 2 : isz;
       for (let i = 0; i < bytes.length; i += w) bytes.subarray(i, i + w).reverse();
     }
-    let data: any;
-    if (dt.name === "int64") data = Float64Array.from(new BigInt64Array(bytes.buffer), Number);
-    else if (dt.name === "uint64") data = Float64Array.from(new BigUint64Array(bytes.buffer), Number);
-    else data = new dt.ctor(bytes.buffer);
-    return new NDArray(dt, data, [n], [1]);
+    return new NDArray(dt, new dt.ctor(bytes.buffer), [n], [1]);
   });
   fn("_tobytes", (a: any) => {
-    const c = ascontig(asarray(a));
+    // (a contiguous copy, a 64-bit integer staging buffer, and the bytes; LIMIT-PR55-3)
+    const a0 = asarray(a);
+    admitWork(a0.size * (2 * a0.dt.itemsize + 8), "tobytes");
+    const c = ascontig(a0);
     const dt = c.dt;
     const n = c.size * (dt.cplx ? 2 : 1);
     let view: Uint8Array;
@@ -3345,6 +3513,9 @@ newBuiltinModule("_numpy", (m) => {
   fn("hist_uniform", (x: any, lo: any, hi: any, nb: any, edges: any) => {
     const a = ascontig(asarray(x, D.float64));
     const L = toNum(lo), H = toNum(hi), N = Number(nb), e = ascontig(edges).data;
+    // (the counts and the output admitted together before either is allocated: LIMIT-PR55-2)
+    if (!Number.isSafeInteger(N) || N < 0) raise(T.ValueError, "`bins` must be a positive integer");
+    admitArray([N], D.int64, 8 * N);
     const counts = new Float64Array(N);
     const d = a.data, norm = N / (H - L);
     for (let i = 0; i < a.size; i++) {
