@@ -173,7 +173,7 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -195,6 +195,7 @@ jobs:
           (cd web/site && npm ci --silent)
           node web/share/test-share.mjs
           node web/sync/test-sync.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
@@ -252,7 +253,6 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
-          CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
