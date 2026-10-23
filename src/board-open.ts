@@ -26,7 +26,7 @@
 // read in pieces, never past FILE_MAX (what the board opens).  The page reads
 // it again only when its revision (SHA-256 of its bytes) changed.
 import * as http from "http";
-import { existsSync, readFileSync, statSync, watchFile, unwatchFile, type Stats } from "fs";
+import { createReadStream, existsSync, readFileSync, statSync, watchFile, unwatchFile, type Stats } from "fs";
 import { basename, join, resolve } from "path";
 import { createHash, randomBytes } from "crypto";
 import { gunzipSync } from "zlib";
@@ -50,6 +50,42 @@ const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser]
 export const WATCH_MS = 250, QUIET_MS = 150;
 /** At most this many pages follow the file at once (each an event stream). */
 export const MAX_CLIENTS = 16;
+/** At most this many connections at once, whatever they ask for (those not yet past their headers too); one
+ * more is closed at once (daybreak2's LIM-BOARDOPEN-1).  The 16 event streams are among them. */
+export const MAX_CONNECTIONS = 64;
+/** How long a connection may take to send its headers, its whole request, and stay idle between requests (ms);
+ * checked every second. */
+export const HEADERS_MS = 10_000, REQUEST_MS = 30_000, KEEP_ALIVE_MS = 5_000;
+/** How many bytes may wait to be sent to one page following the file; a page that doesn't take them (stopped
+ * reading) is closed instead (daybreak2's LIM-BOARDOPEN-2).  An event is under 100 bytes. */
+export const PENDING_MAX = 64 * 1024;
+
+/** The pages following the file: each an event stream, sent to only while it keeps up. */
+export class Followers {
+  private set = new Set<{ writableLength: number; write(s: string): unknown; destroy(): unknown; end(): unknown }>();
+  constructor(readonly max = MAX_CLIENTS, readonly pendingMax = PENDING_MAX) {}
+  get size() { return this.set.size; }
+  /** Take this stream, if there is room. */
+  add(c: { writableLength: number; write(s: string): unknown; destroy(): unknown; end(): unknown }): boolean {
+    if (this.set.size >= this.max) return false;
+    this.set.add(c);
+    return true;
+  }
+  remove(c: object) { this.set.delete(c as any); }
+  /** `text` to one stream, or, if what waits for it would pass the bound, the stream closed and dropped. */
+  send(c: { writableLength: number; write(s: string): unknown; destroy(): unknown }, text: string): boolean {
+    if (c.writableLength + Buffer.byteLength(text) > this.pendingMax) {
+      this.set.delete(c as any);
+      c.destroy();
+      return false;
+    }
+    c.write(text);
+    return true;
+  }
+  /** `text` to every stream (each kept to the bound). */
+  broadcast(text: string) { for (const c of [...this.set]) this.send(c, text); }
+  close() { for (const c of [...this.set]) c.end(); this.set.clear(); }
+}
 /** The site the page's engine comes from, unless this checkout has it built (web/dist/engine/<id>/). */
 const ENGINE_SITE = "https://sagebrush.space/";
 
@@ -85,7 +121,8 @@ export function framePolicyOf(headers: string): string | null {
 export function localPage(frame: string, o: { key: string; name: string; engineSite: string }): string | null {
   const marks = frame.split('id="sb-doc" data-sb-from="parent"').length - 1;
   if (marks !== 1) return null;
-  const json = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
+  // (HTML-safe JSON: no "<", ">" or "&", so no "</script>" or "<!--", and no U+2028 or U+2029, each \uXXXX)
+  const json = (v: unknown) => JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
   const parts = `<script type="application/json" id="sb-local">${json({ key: o.key, name: o.name, engineSite: o.engineSite })}</script>`;
   const page = frame.replace('id="sb-doc" data-sb-from="parent"', 'id="sb-doc" data-sb-from="local"');
   const at = page.indexOf("</head>");
@@ -136,10 +173,10 @@ export async function boardOpen(argv: string[]): Promise<number> {
 
   const token = randomBytes(24).toString("hex"), key = randomBytes(24).toString("hex");
   // (named for its port, set once it listens: another server on 127.0.0.1, `sagebrush notebook`'s, keeps its own)
-  let cookieName = "";
+  let cookieName = "", page: Buffer | null = null;
 
   // ---- FILE: its bytes and revision, read when it has changed and been quiet; the pages following it told
-  const clients = new Set<http.ServerResponse>();
+  const clients = new Followers();
   let current: { stat: Stats | null; bytes: Buffer | null; revision: string; error: string | null } = { stat: null, bytes: null, revision: "", error: null };
   const read = () => {
     let stat: Stats | null = null;
@@ -157,7 +194,7 @@ export async function boardOpen(argv: string[]): Promise<number> {
     const revision = createHash("sha256").update(bytes ?? Buffer.from("error:" + error)).digest("hex");
     const changed = revision !== current.revision;
     current = { stat, bytes: error ? null : bytes, revision, error };
-    if (changed) for (const c of clients) c.write(`event: board\ndata: ${revision}\n\n`);
+    if (changed) clients.broadcast(`event: board\ndata: ${revision}\n\n`);
   };
   let quiet: NodeJS.Timeout | null = null, lastRead = 0;
   const changed = () => {
@@ -175,7 +212,8 @@ export async function boardOpen(argv: string[]): Promise<number> {
   watchFile(path, { interval: WATCH_MS, persistent: true }, (now, before) => { if (!sameStat(now, before)) changed(); });
 
   const forbidden = (res: http.ServerResponse, why: string) => res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end(why);
-  const server = http.createServer((req, res) => {
+  // (the timeouts below are checked every second: by default only every 30 s, so a connection could outlive them)
+  const server = http.createServer({ connectionsCheckingInterval: 1000 }, (req, res) => {
     try {
       // (its own host and port only: no DNS rebinding)
       const host = req.headers.host ?? "";
@@ -195,18 +233,25 @@ export async function boardOpen(argv: string[]): Promise<number> {
           if (c.error || !c.bytes) return res.writeHead(c.error?.startsWith("too large") ? 413 : 409, { ...api, "Content-Type": "text/plain; charset=utf-8", "X-Sagebrush-Revision": c.revision }).end(c.error ?? "unreadable");
           return res.writeHead(200, { ...api, "Content-Type": "text/plain; charset=utf-8", "Content-Length": String(c.bytes.length), "X-Sagebrush-Revision": c.revision }).end(req.method === "HEAD" ? undefined : c.bytes);
         }
-        if (clients.size >= MAX_CLIENTS) return res.writeHead(503, { ...api, "Content-Type": "text/plain" }).end(`at most ${MAX_CLIENTS} pages follow a board at once\n`);
+        if (!clients.add(res)) return res.writeHead(503, { ...api, "Content-Type": "text/plain" }).end(`at most ${MAX_CLIENTS} pages follow a board at once\n`);
         res.writeHead(200, { ...api, "Content-Type": "text/event-stream" });
-        res.write(`retry: 2000\n\nevent: board\ndata: ${current.revision}\n\n`);
-        clients.add(res);
-        req.on("close", () => clients.delete(res));
+        clients.send(res, `retry: 2000\n\nevent: board\ndata: ${current.revision}\n\n`);
+        req.on("close", () => clients.remove(res));
         return;
       }
       // the engine, from a checkout that built it (else the page fetches it from sagebrush.space): its files only
       const em = /^\/engine\/([0-9a-f]{20})\/([a-z0-9][a-z0-9./-]*)$/.exec(url.pathname);
       if (em && served && em[1] === served.id && !em[2].includes("..") && (em[2] === "manifest.json" || Object.hasOwn(served.files, em[2]))) {
         const p = join(served.dir, em[2]);
-        if (existsSync(p)) return res.writeHead(200, { ...api, "Cache-Control": "no-cache", "Content-Type": "application/octet-stream" }).end(readFileSync(p));
+        // (streamed, not read whole: an engine's wasm is megabytes)
+        if (existsSync(p)) {
+          res.writeHead(200, { ...api, "Cache-Control": "no-cache", "Content-Type": "application/octet-stream" });
+          if (req.method === "HEAD") return res.end();
+          const f = createReadStream(p);
+          f.on("error", () => res.destroy());
+          res.on("close", () => f.destroy());
+          return void f.pipe(res);
+        }
       }
       // the page: for whoever has the token (in the URL once, then its cookie)
       if (url.pathname !== "/") return res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" }).end("not found\n");
@@ -215,7 +260,6 @@ export async function boardOpen(argv: string[]): Promise<number> {
       }
       const cookie = new RegExp(`(?:^|;\\s*)${cookieName}=([0-9a-f]+)`).exec(req.headers.cookie ?? "")?.[1];
       if (cookie !== token) return forbidden(res, "Open the URL with the token that `sagebrush board open` printed.\n");
-      const page = localPage(frame.toString("utf8"), { key, name, engineSite: served ? `http://127.0.0.1:${port}/` : ENGINE_SITE });
       if (!page) return res.writeHead(500, { "Content-Type": "text/plain" }).end("this build's board page isn't one `sagebrush board open` knows how to serve\n");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": policy, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" });
       res.end(req.method === "HEAD" ? undefined : page);
@@ -223,8 +267,13 @@ export async function boardOpen(argv: string[]): Promise<number> {
       if (!res.headersSent) res.writeHead(500, { "Content-Type": "text/plain" }).end(String(e?.message ?? e));
     }
   });
+  // (its connections bounded, in number and in how long a request may take: LIM-BOARDOPEN-1)
+  server.maxConnections = MAX_CONNECTIONS;
+  server.headersTimeout = HEADERS_MS;
+  server.requestTimeout = REQUEST_MS;
+  server.keepAliveTimeout = KEEP_ALIVE_MS;
   // (event streams kept open: a comment now and then, through any idle timeout)
-  const beat = setInterval(() => { for (const c of clients) c.write(": .\n\n"); }, 25_000);
+  const beat = setInterval(() => clients.broadcast(": .\n\n"), 25_000);
   beat.unref();
 
   // the first free port from the one asked for
@@ -237,11 +286,14 @@ export async function boardOpen(argv: string[]): Promise<number> {
     port++;
   }
   cookieName = `sagebrush_board_${port}`;
+  // (the page, made once: the same for every request)
+  const made = localPage(frame.toString("utf8"), { key, name, engineSite: served ? `http://127.0.0.1:${port}/` : ENGINE_SITE });
+  page = made === null ? null : Buffer.from(made, "utf8");
   const open = `http://127.0.0.1:${port}/?token=${token}`;
   process.stdout.write(`Sagebrush board: showing ${path}, following its changes\n  ${open}\n(Ctrl-C stops it)\n`);
   if (browser) openBrowser(open);
   await new Promise<void>((done) => {
-    const stop = () => { unwatchFile(path); clearInterval(beat); for (const c of clients) c.end(); server.close(); server.closeAllConnections(); done(); };
+    const stop = () => { unwatchFile(path); clearInterval(beat); clients.close(); server.close(); server.closeAllConnections(); done(); };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });

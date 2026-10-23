@@ -13,9 +13,11 @@
 //   - a rewrite that isn't a board (half written), a file too large, a file
 //     deleted: the last good version still shown, with a bar saying why,
 //     until the file is a board again;
+//   - connections bounded, in number (any route, event streams among them) and in how long headers take;
 //   - Ctrl-C stops it.
 import { spawn } from "node:child_process";
 import { request } from "node:http";
+import { connect } from "node:net";
 import { mkdtempSync, writeFileSync, renameSync, rmSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,6 +72,47 @@ ok(text.status === 200 && (await text.text()) === board("First", ["alpha note"])
 for (const p of ["/secret.txt", "/talk.board.json", "/tree/", "/frame/board/index.html", "/_headers", "/board/../secret.txt", "/%2e%2e/secret.txt", "/..%2fsecret.txt", "/engine/0123456789abcdef0123/manifest.json", "/engine/x/../../secret.txt", "//etc/passwd", "/index.html"])
   ok([403, 404].includes((await get(p, { headers: { Cookie: cookie } })).status), `nothing else is served: ${p}`);
 ok((await get("/", { method: "POST", headers: { Cookie: cookie } })).status === 405 && (await get("/board?key=" + key, { method: "PUT", body: "x" })).status === 405, "only GET and HEAD");
+
+// ---- connections bounded, whatever they ask for (daybreak2's LIM-BOARDOPEN-1): 64 at once, those that never
+// send their headers among them, the 65th closed; then room again
+{
+  const MAX = 64;
+  const open = (n) => Promise.all(Array.from({ length: n }, () => new Promise((r) => { const s = connect(at, "127.0.0.1", () => r(s)); s.on("error", () => r(s)); })));
+  const idle = await open(MAX);
+  await sleep(300);
+  // (on a connection of its own: fetch() would reuse one it already has)
+  const refused = (p) => new Promise((r) => {
+    const q = request({ host: "127.0.0.1", port: at, path: p, agent: false, timeout: 3000 }, (res) => { res.resume(); r(false); });
+    q.on("error", () => r(true)).on("timeout", () => { q.destroy(); r(true); }).end();
+  });
+  ok(await refused("/board?key=" + key) && await refused("/"), `with ${MAX} connections open (none past its headers), another is closed, on any route`);
+  // (some kept as event streams: they count too)
+  for (const s of idle.slice(0, 32)) s.destroy();
+  await sleep(300);
+  const streams = await Promise.all(Array.from({ length: 16 }, () => new Promise((r) => request({ host: "127.0.0.1", port: at, path: "/events?key=" + key, agent: false }, (res) => r(res)).on("error", () => r(null)).end())));
+  ok(streams.every((x) => x && x.statusCode === 200), "16 pages following the file, beside 32 idle connections");
+  const more = await open(16);
+  await sleep(300);
+  ok(await refused("/board?key=" + key), "...and those 48 with 16 more make 64: the next is closed");
+  for (const s of [...idle, ...more]) s.destroy();
+  for (const r of streams) r?.destroy();
+  await sleep(500);
+  ok((await get("/board?key=" + key)).status === 200, "once they close, requests are answered again");
+  // (a connection that never finishes its headers is answered 408 and closed, after HEADERS_MS; tried again if
+  // it was refused at once, while the connections closed above were still being counted)
+  const slowOnce = () => new Promise((r) => {
+    const t0 = Date.now(), c = connect(at, "127.0.0.1");
+    let got = "";
+    c.on("data", (d) => (got += d));
+    c.on("error", () => {});
+    c.on("connect", () => c.write("GET / HTTP/1.1\r\nHost: 127.0.0.1:" + at + "\r\n"));
+    c.on("close", () => r({ ms: Date.now() - t0, got }));
+    setTimeout(() => { c.destroy(); r({ ms: Infinity, got }); }, 20000);
+  });
+  let slow = await slowOnce();
+  for (let i = 0; i < 5 && !slow.got && slow.ms < 1000; i++) { await sleep(1000); slow = await slowOnce(); }
+  ok(/^HTTP\/1\.1 408/.test(slow.got) && slow.ms < 15000, `a connection whose headers never end is answered 408 and closed: after ${slow.ms} ms`);
+}
 
 // ---- in Chromium
 const profile = mkdtempSync(join(tmpdir(), "sb-board-open-chrome-"));
