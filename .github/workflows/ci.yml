@@ -197,6 +197,8 @@ jobs:
           node web/sync/test-sync.mjs
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
+          bun web/sync-protocol/test-doc-protocol.mjs
+          python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
