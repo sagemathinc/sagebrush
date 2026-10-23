@@ -106,5 +106,23 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.axes",
+    "kind": "function",
+    "signature": "(arg=None, **kwargs)",
+    "summary": "A new Axes in the current figure: axes() fills it, axes([left, bottom, width, height]) places one; keywords set Axes properties.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nax = plt.axes(xlim=(0, 10), ylim=(-2, 2))\nax.plot([0, 5, 10], [0, 1, -1])\nplt.show()",
+        "expected": "[figure 1: Plot: line through 3 points; x from 0 to 10, y from -2 to 2]\n"
+      }
+    ],
+    "differs": [
+      "Rectilinear Axes only: projection='3d' or 'polar' raises NotImplementedError.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]
