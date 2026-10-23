@@ -7,7 +7,7 @@ import {
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
-  hooks, unbox, toPyExc, instanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
+  hooks, unbox, toPyExc, instanceDict, detachInstanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -3234,8 +3234,10 @@ getset(object, "__dict__", (o) => {
   if (!hasInstanceDict(o)) raise(T.AttributeError, `'${typeName(o)}' object has no attribute '__dict__'`);
   if (!(v instanceof PyDict)) raise(T.TypeError, `__dict__ must be set to a dictionary, not a '${typeName(v)}'`);
   const items = [...v.$m].map(([k, x]) => [dictKeyOf(v, k), x]);
+  // (the dict it had keeps what it had, as CPython's: whoever holds it, and
+  // an iterator over it, go on there; the instance has a new one)
+  detachInstanceDict(o);
   instanceDict(o).$m.clear();
-  instanceDict(o).$clears++;
   for (const [k, x] of items) instanceDict(o).$m.set(k, x);
 });
 

@@ -1595,6 +1595,10 @@ export class StrIter {
 // one ends: "dictionary keys changed during iteration", and then no more);
 // after clear(), it goes on in the new entries from the position it had
 // reached.
+// (an exhausted dict iterator's dict: empty, never changed, so the checks
+// at each step pass and it gives no more, whatever its dict does after)
+const ENDED = new PyDict();
+const NOTHING: Iterator<any> = [][Symbol.iterator]();
 export class DictIter {
   it: Iterator<any>;
   size: number;
@@ -1606,21 +1610,43 @@ export class DictIter {
     this.size = this.left = m.size;
     this.clears = d.$clears;
   }
-  // (the next entry from the Map, after the checks; undefined at the end)
-  step(): IteratorResult<any> {
+  // (each kind's $next has the checks written out: the hot path)
+  $next(): any {
     const d = this.d;
     // (one branch for both: the size changed, or the dict was cleared)
     if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
     const r = this.it.next();
-    if (!r.done && --this.left < 0) {
-      this.it = [][Symbol.iterator]();
-      raise(T.RuntimeError, "dictionary keys changed during iteration");
-    }
-    return r;
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return dictKeyOf(d, r.value);
   }
-  $next(): any {
-    const r = this.step();
-    return r.done ? DONE : dictKeyOf(this.d, r.value);
+  // (the rest at once, for list(d), tuple(d), sorted(d) and the like: no
+  // user code runs as it goes, so the same items, checks and errors as one
+  // $next at a time)
+  rest(): any[] {
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    const it = this.it;
+    const out: any[] = [];
+    if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
+    else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
+    else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    // (more than it may give: the same error one $next at a time meets)
+    if (out.length > this.left) this.keysChanged();
+    this.end();
+    return out;
+  }
+  // (exhausted: no more, as CPython's, whatever the dict does after)
+  end(): any {
+    this.d = ENDED;
+    this.size = this.left = 0;
+    this.clears = 0;
+    this.it = NOTHING;
+    return DONE;
+  }
+  keysChanged(): never {
+    this.end();
+    return raise(T.RuntimeError, "dictionary keys changed during iteration");
   }
   changed(): void {
     const d = this.d, m = d.$m;
@@ -1639,8 +1665,12 @@ export class DictValueIter extends DictIter {
     super(d, 1);
   }
   $next(): any {
-    const r = this.step();
-    return r.done ? DONE : r.value;
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return r.value;
   }
 }
 export class DictItemIter extends DictIter {
@@ -1648,8 +1678,12 @@ export class DictItemIter extends DictIter {
     super(d, 2);
   }
   $next(): any {
-    const r = this.step();
-    return r.done ? DONE : tuple([dictKeyOf(this.d, r.value[0]), r.value[1]]);
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return tuple([dictKeyOf(d, r.value[0]), r.value[1]]);
   }
 }
 // kind: 0 keys, 1 values, 2 items
@@ -1704,6 +1738,11 @@ export class DictRevIter {
       if (this.kind === 1) return d.$m.get(k);
       return tuple([dictKeyOf(d, k), d.$m.get(k)]);
     }
+    // (exhausted: no more, whatever the dict does after)
+    this.d = ENDED;
+    this.size = 0;
+    this.clears = 0;
+    this.keys = [];
     return DONE;
   }
 }
@@ -1933,8 +1972,9 @@ export function pollInterrupt() {
 
 export function toArray(x: any): any[] {
   if (Array.isArray(x)) return x.slice();
-  const out: any[] = [];
   const it = iter(x);
+  if (it instanceof DictIter) return it.rest();
+  const out: any[] = [];
   for (let v = it.$next(); v !== DONE; v = it.$next()) out.push(v);
   return out;
 }
