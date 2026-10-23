@@ -485,6 +485,43 @@ It holds that reservation until its last large reference is dropped. The same ho
 - Neither ever holds the whole tree in memory.
 - **Tests:** 100,000 entries, with the pages' counts and bytes bounded, and a crash and reload mid-way.
 
+### As built (step 3: web/workspace/sync-client.ts)
+
+@sagebrush approved deltas D1 to D4 before the code (Oct 23).
+
+- **D1. The namespace.** As built, `welcome` is `{v, state, generation, index_head, next_dseq, server_time}`. It carries no `limits`, `used_bytes` or account hash.
+  - The namespace is `accountHash(account_id) : generation : device`.
+    - `account_id` comes from `GET /api/share/me`, and is hashed the way the server hashes it (protocol.ts `accountHash`).
+    - `generation` comes from `GET /api/sync/v1/status`, because the Web Lock is per namespace and has to be taken before the socket is opened.
+    - The device is the workspace's.
+  - `welcome.generation` is then checked against it. If they differ, the socket is closed with nothing sent on it, and the status is read again, so a new generation gets a new namespace and its own outbox.
+  - A `storage_full` pause (`sync:<ns>:paused`) lifts on whichever comes first:
+    - its `retry_after`, when the server gives one;
+    - a `welcome` with another generation or state than when the pause began;
+    - the person's `resume()`.
+  - It doesn't wait for limits in `welcome`.
+- **D2. Steps 3 and 4.** Step 3 persists no cursor and applies nothing from the server.
+  - The cursor is kept in memory only, so `hello.index_after` is 0 on a page's first connection.
+  - Each `index` page goes, in order, to an `onIndex` hook, which step 3 leaves unset. Step 4 gives it, with the confirmed index and the durable cursor written in one transaction (C3).
+  - This device's echoes confirm their records (`Outbox.confirmed`), but only if each echo is the very op of its record.
+  - Tests assert, after every case, that there is no `sync:*:cursor` key, `syncIndex` is empty, and no op of the server's is applied.
+- **D3. The rebuild is asked for, not done.**
+  - A per-op refusal removes its record (`Outbox.acked`). It is listed in `sync:<ns>:refused` (the last 100: dseq, code, path, time) and sets `sync:<ns>:rebuild` `{why: "refused"}`. Sending goes on, because the server applied the ops after it as if it were absent (sync-server §5.2).
+  - Two cases halt sending until step 4's rebuild, the flag saying which:
+    - the server's top-level `invalid` "rebuild" (`why: "invalid"`);
+    - **a diverged log** (`why: "diverged"`): `welcome.next_dseq` above this namespace's next dseq, an echo that isn't its record's op, or an `order` naming a dseq this device has already decided. This is the case of a workspace restored, or reset with its device kept: step 4's rebuild must also take the server's `next_dseq` as the namespace's next dseq.
+  - No top-level error and no closed socket removes an undecided record. The sender waits for what is in flight, then sends again from the lowest record not accepted, after its timer.
+- **D4. Tests:** web/workspace/test-workspace-sync-client.mjs.
+  - It runs the cases in headless Chrome against web/sync/test-entry.ts in Miniflare.
+  - A front in the test serves the page and proxies the site's API (the socket too) on the page's origin. It keeps the session cookie, and it can drop acks, fake the server's errors, close sockets, rewrite `welcome` and hold uploads.
+  - A fake clock drives pace and backoff.
+  - It runs on the VMs (ci.yml's sync block).
+- **Also as built:**
+  - **Where a namespace's scan starts.** Until step 4's first sync, it starts at the latest op when the namespace first connects (`Outbox.begin`), so ops from before sync was on aren't sent.
+  - **Timers.** They are persisted as `sync:<ns>:retry:<kind>` `{at, n}`, one per kind: ops, index, check, upload, connect (and url, fetch, enable for later steps). Each is `retry_after` when the server gives one, else $1\,\text{s} \cdot 2^{n-1}$ capped at 60 s, $\pm 20\%$. Each is cleared by a success of its kind.
+  - **Uploads before ops.** The sender sends ops only up to the first data file whose bytes the server isn't known to hold, because a `missing` refusal would be final. A file whose bytes this device no longer has, or that the server refuses for good (413, 400: too large, not these bytes), is sent all the same, and the server decides it. A file over 95 MiB isn't uploaded, and its op is refused `missing` and listed (§2).
+  - **Echoes.** The server sends the log only on `hello` and `pull_index`; it pushes nothing when another device's ops are accepted. So after an ack that has accepted ops, the client pulls from its cursor to see its echoes. Live index updates for a second device need a server push (or polling): an open question for step 4.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |
