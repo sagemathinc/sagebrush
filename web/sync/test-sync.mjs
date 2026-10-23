@@ -2173,6 +2173,27 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const bad = await s.ask({ t: "ops", ops: [{ dseq: local.length + 1, t: 7, by: "person", op: "mkdir", path: "/Z", to: "/Y", kind: "folder", fid: "5555555555555555" }] });
   ok(bad?.ops?.[0]?.code === "invalid", "`to` on another op (mkdir) is still refused: " + JSON.stringify(bad?.ops));
   s.ws.close();
+  // (the client's binding, CORR-PR58-1: hello and blob requests name the account hash and generation they are for;
+  // a session of another account, or another generation, is refused before anything is sent or stored)
+  const mine = sha("sagebrush-account\n" + P2), other = sha("sagebrush-account\n" + P1);
+  const sb = await socket(sp);
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: other, generation: 1 });
+  const refusedHello = await sb.next((m) => m.t === "welcome" || m.t === "error");
+  ok(refusedHello?.t === "error" && refusedHello.code === "forbidden" && refusedHello.detail?.reason === "account", "hello bound to another account's hash: refused, no welcome: " + JSON.stringify(refusedHello));
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 2 });
+  const refusedGen = await sb.next((m) => m.t === "welcome" || m.t === "error");
+  ok(refusedGen?.t === "error" && refusedGen.code === "conflict" && refusedGen.detail?.reason === "generation", "hello bound to another generation: refused: " + JSON.stringify(refusedGen));
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 1 });
+  ok((await sb.next((m) => m.t === "welcome" || m.t === "error"))?.t === "welcome", "hello bound to its own account and generation: welcome");
+  sb.ws.close();
+  const bytes3 = Buffer.from("bound bytes");
+  const checkAs = (h) => fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", ...h }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes3), size: bytes3.length }] }) });
+  const putAs = (h) => fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes3)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", ...h }, body: bytes3 });
+  ok((await checkAs({ "x-sync-account": other })).status === 403 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 200, "blobs/check bound: another account 403, another generation 409, its own 200");
+  ok((await putAs({ "x-sync-account": other })).status === 403 && (await putAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409, "PUT bound to another account or generation: refused");
+  const still = await (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).json();
+  ok(still.missing?.includes(sha(bytes3)), "…and nothing stored by them");
+  ok((await putAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 201, "PUT bound to its own: stored");
 }
 
 // ---- the page's question: GET /api/sync/v1/status, which never creates or registers anything

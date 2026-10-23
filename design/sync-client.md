@@ -522,6 +522,29 @@ It holds that reservation until its last large reference is dropped. The same ho
   - **Uploads before ops.** The sender sends ops only up to the first data file whose bytes the server isn't known to hold, because a `missing` refusal would be final. A file whose bytes this device no longer has, or that the server refuses for good (413, 400: too large, not these bytes), is sent all the same, and the server decides it. A file over 95 MiB isn't uploaded, and its op is refused `missing` and listed (§2).
   - **Echoes.** The server sends the log only on `hello` and `pull_index`; it pushes nothing when another device's ops are accepted. So after an ack that has accepted ops, the client pulls from its cursor to see its echoes. Live index updates for a second device need a server push (or polling): an open question for step 4.
 
+- **After review** (daybreak3's LIMIT-PR58-1 to 3, astra's CORR-PR58-1 to 3):
+  - **Bound to the account** (CORR-PR58-1).
+    - `/api/share/me` is read again on every connection.
+    - `hello` carries the namespace's `account` hash and `generation`, and the server refuses a socket whose session is another account's or another generation (sync-server §5.2).
+    - Blob requests carry them as `x-sync-account` and `x-sync-generation` (§5.4).
+    - Bytes are PUT only while the connection they were read for is still the current one.
+    - Switching to another namespace keeps the old one's records; its pins go with the lifecycle epoch, as C2 has it.
+  - **One wake-up a kind** (LIMIT-PR58-1). Any kind of work (ops, pace, check, upload, index, pull, unpause) has at most one scheduled callback. The same deadline asked for again keeps it; another one replaces it. Callbacks end with the connection, on success of their kind, and on `stop()`.
+  - **Bytes checked against their record** (LIMIT-PR58-2).
+    - `bytesFor` reads only when the entry's (or pin's) stored size is the record's, and the reservation covers it ($\text{size} \cdot \text{COPIES}$, checked).
+    - Bytes whose length isn't the record's are let go unhashed and unsent.
+    - Such a record is marked (`sync:<ns>:mismatch`, at most 1,000 dseqs) so its bytes are never read twice. It is sent as bytes gone are, and the server decides it.
+    - Stored bytes longer than their metadata are read at most once a record. Metadata and bytes are written in one transaction, so that is the corruption case only.
+  - **The log is read only as far as it must be** (LIMIT-PR58-3).
+    - `hello.index_after` is just before the oldest record accepted and awaiting its echo (else the in-memory cursor).
+    - Each connection reads to a fixed target: the newest such record's seq, raised only by acks' accepted seqs, plus `welcome.index_head` once `onIndex` is given.
+    - Pulls are one at a time and paced (a bucket: 4, then 2 a second), at most `CLIENT.replayPages` (64) pages a connection.
+    - A `more` page that moves nothing ends the connection.
+  - **Deadlines re-armed** (CORR-PR58-2, 3).
+    - A blocked path schedules its own wake-up at its persisted deadline: a check timer, a storage_full pause (cleared durably once past) or the index timer.
+    - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
+  - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |
