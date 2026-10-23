@@ -1611,7 +1611,65 @@ async function firstSyncCollision() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, firstSync, firstSyncRace, firstSyncCollision };
+async function rebuildCapUnsupported() {
+  // (astra's CORR-PR65-IMPL-2: the server's refusal limit (its exact answer, `invalid` "too many refused ops"), then
+  // the rebuild's announce to core's real server, which has no `rebuilt` ("unknown message"): no reset, so a stable,
+  // said halt, never a fabricated ack; nothing sent, no rebuild again, across a reconnect too)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "cap, no reset: synced");
+  await stop(c0);
+  await w.mkdir("/capped");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { rebuiltReal: true, fakeOps: [{ code: "invalid", detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  const c = viewClient(w);
+  try {
+    check(await until(() => (c.status.reason ?? "").includes("can't reset"), 20_000), "cap, no reset: halted, said: " + J(c.status));
+    const ns = nsOf(c);
+    await sleep(3000);
+    const lg = await ctl("log");
+    check(opsMessages(lg).length === 1 && lg.rebuilt.length === 1 && c.stats.rebuildPasses === 1, "cap, no reset: one announce, no op sent after it, no second rebuild (no loop): " + J({ ops: opsMessages(lg).length, rebuilt: lg.rebuilt.length, passes: c.stats.rebuildPasses }));
+    check((await metaGet(w.ws, `sync:${ns}:rebuild`))?.why === "invalid" && (await all(w.ws, "outbox")).length === 1, "cap, no reset: the obligation kept, the record kept (nothing cleared by a made-up ack)");
+    await stop(c);
+    await ctl("log", { reset: true });
+    const c2 = viewClient(w);
+    check(await until(() => (c2.status.reason ?? "").includes("can't reset"), 20_000), "cap, no reset: a reconnect finds it halted");
+    await sleep(2500);
+    const lg2 = await ctl("log");
+    check(opsMessages(lg2).length === 0 && lg2.rebuilt.length === 0 && c2.stats.rebuildPasses === 0, "cap, no reset: …and neither rebuilds nor sends: " + J({ ops: opsMessages(lg2).length, rebuilt: lg2.rebuilt.length, passes: c2.stats.rebuildPasses }));
+    await stop(c2);
+  } finally {
+    await ctl("set", { set: { rebuiltReal: false } });
+  }
+}
+
+async function rebuildRefusalCoreServer() {
+  // (astra: an ordinary local rebuild against core's server (no `rebuilt`): a plain refusal needs no reset, so the
+  // pass completes on "unknown message" and sending resumes, once)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "core rebuild: synced");
+  await stop(c0);
+  const f = await w.create("/gone2.txt", { content: "bytes gone" });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").delete(f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { rebuiltReal: true } });
+  const c = viewClient(w);
+  try {
+    check(await until(() => c.stats.rebuildPasses >= 1 && c.status.state === "synced", 20_000), "core rebuild: refused, rebuilt, resumed: " + J({ passes: c.stats.rebuildPasses, status: c.status }));
+    await sleep(2000);
+    check(c.stats.rebuildPasses === 1 && (await ctl("log")).rebuilt.length === 1, "core rebuild: one pass, one announce (no loop)");
+    await w.mkdir("/after-core");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/after-core")), "core rebuild: a later op accepted");
+  } finally {
+    await ctl("set", { set: { rebuiltReal: false } });
+    await stop(c);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

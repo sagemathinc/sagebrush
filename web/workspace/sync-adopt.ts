@@ -122,6 +122,8 @@ export async function capture(w: Workspace, ns: string): Promise<void> {
           // (captured: the tree as of W1, the active journal; the watermark at W1, the scanner idle until it drains)
           meta.put(s.W1, `sync:${ns}:scanned`);
           meta.put(jp, `sync:${ns}:journal`);
+          // (the drain's position goes with the install (CORR-PR65-IMPL-1))
+          meta.delete(`sync:${ns}:journal:at`);
           meta.delete(stateKey(ns));
         } else meta.put({ ...s, at }, stateKey(ns));
       });

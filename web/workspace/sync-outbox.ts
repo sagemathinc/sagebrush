@@ -324,7 +324,11 @@ export class Outbox {
       const jp = (await req(meta.get(JOURNAL(this.ns)))) as string | undefined;
       if (!jp) return { made: 0, full: false, more: false };
       const posKey = JOURNAL(this.ns) + ":at";
-      const pos = ((await req(meta.get(posKey))) as { round: number; key: string; progress: boolean; gone: boolean } | undefined) ?? { round: 0, key: "", progress: false, gone: false };
+      // (the position is the journal's own: one recorded for another generation (an earlier journal a rebuild
+      // replaced) never applies, astra's CORR-PR65-IMPL-1; the installer also clears it with the switch)
+      const fresh = { jp, round: 0, key: "", progress: false, gone: false };
+      const saved = (await req(meta.get(posKey))) as typeof fresh | undefined;
+      const pos = saved && saved.jp === jp ? saved : fresh;
       const gp = genPrefix(this.ns, ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0);
       let dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };

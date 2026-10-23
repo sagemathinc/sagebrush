@@ -208,7 +208,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -663,9 +663,16 @@ export class SyncClient {
     if (p?.kind === "rebuilt") {
       // (rate: halted, retried at retry_after under its own timer; invalid (through >= next_dseq): server_next was
       // stale, so the pass ends and the next starts from a new connection's welcome (plan-sync-rebuilt r3 §4))
-      // (a server without `rebuilt` (no refusal reset: core's own, before the cloud half) answers "unknown message":
-      // the same compare-and-swap, with no new floor)
-      if (code === "invalid" && /unknown message/.test(detail.message ?? "")) return this.rebuiltAck(c, { rebuilt: { floor: 0, count: 0 } });
+      // (a server without `rebuilt` answers "unknown message": it can't reset this device's refusals.  An obligation
+      // that needs no reset (a refusal, a divergence) completes, with no new floor; the server's refusal limit
+      // (`invalid`) can't be lifted without one, so it halts, stably and said, recorded against its counter so no
+      // reconnect rebuilds or sends again (astra's CORR-PR65-IMPL-2))
+      if (code === "invalid" && /unknown message/.test(detail.message ?? "")) {
+        const ob = await this.metaGet<{ why: string; n: number }>(key(c.ns, "rebuild"));
+        if (ob?.why !== "invalid") return this.rebuiltAck(c, { rebuilt: { floor: 0, count: 0 } });
+        await this.metaPut(key(c.ns, "resetUnsupported"), { n: ob.n, at: this.clock.now() });
+        return this.haltUnsupported(c);
+      }
       if (code === "invalid") {
         await announceInvalid(this.w, c.ns);
         return c.end("closed");
@@ -743,7 +750,16 @@ export class SyncClient {
     if (this.conn !== c || !c.welcomed) return;
     // (an obligation recorded (a refusal, the server's invalid, a divergence): the rebuild runs before anything is
     // sent (D6); with the confirmed index only, step 3 has none)
-    if (this.opts.onIndex && !c.rebuilding && (await this.metaGet(rebuildKey(c.ns)))) c.rebuilding = true;
+    if (this.opts.onIndex && !c.rebuilding && c.halted !== "reset-unsupported") {
+      const ob = await this.metaGet<{ why: string; n: number }>(rebuildKey(c.ns));
+      if (ob) {
+        // (the refusal limit, already found unliftable on this server for this very obligation: halted, no rebuild)
+        const un = await this.metaGet<{ n: number }>(key(c.ns, "resetUnsupported"));
+        if (ob.why === "invalid" && un?.n === ob.n) return this.haltUnsupported(c);
+        c.rebuilding = true;
+      }
+    }
+    if (c.halted === "reset-unsupported") return;
     if (c.rebuilding) {
       this.rebuildRun(c);
       this.showWaiting(c, (await c.ob.status()).count);
@@ -824,6 +840,7 @@ export class SyncClient {
 
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
+    if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
     if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
@@ -1355,6 +1372,15 @@ export class SyncClient {
       c.next = undefined;
       this.kick();
     } else this.rebuildRun(c);
+  }
+
+  /** Halted for good on this server: its refusal limit needs a reset it doesn't support.  Said; nothing is sent and
+   * no rebuild runs until the obligation changes (another reason recorded) or the person deletes the synced data. */
+  private async haltUnsupported(c: Conn) {
+    c.rebuilding = false;
+    c.halted = "reset-unsupported";
+    this.stats.resetUnsupported++;
+    this.say({ state: "paused", ns: c.ns, waiting: (await c.ob.status()).count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
   }
 
   // ---- the rebuild's obligation

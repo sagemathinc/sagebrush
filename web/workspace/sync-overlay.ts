@@ -20,10 +20,13 @@ export const OVERLAY = {
   opUnits: 5_000_000,
   /** memory units a page may hold: base rows, dirty, the batch in hand, overlay clones, copied Set members */
   pageMemory: 200_000,
-  /** memory units an op running alone may hold (D10 r3 said 250,000; a maximum move measures about 300,000 (its
-   * 100,000 base rows, their 100,000 overlay clones and the ~100,000 members of the moved folders' copied children
-   * Sets, which r3's estimate left out): set to 350,000, the heap's growth measured under 256 MiB at that maximum) */
-  opMemory: 350_000,
+  /** memory units an op running alone may hold, every live population counted (daybreak3's LIMIT-PR65-IMPL-1): at a
+   * maximum move, ~100,000 base rows, ~100,000 overlay clones, ~100,000 members of the moved folders' copied children
+   * Sets, and the ~100,000 identities it changes held twice (the reducer's Set and the array it returns), plus a folder
+   * listing in hand (10,000): about 510,000.  D10 r3 said 250,000, which left out all but the first two */
+  opMemory: 520_000,
+  /** a folder listing's rows at most (the workspace's folder bound): reserved before one is read, the batch in hand */
+  listing: 10_000,
   /** retry rounds: the reducer's 1,000-candidate series, plus one */
   rounds: 1001,
 };
@@ -46,6 +49,10 @@ export class Miss extends Error {
 }
 /** An op that can't complete within its bounds: sync halts, and the person is told. */
 export class Halt extends Error {}
+/** An allocation that would pass the memory ceiling in force, refused before it is made. */
+export class OverLimit extends Error {
+  constructor() { super("sync: the partial index's memory ceiling"); }
+}
 
 const ABSENT = Symbol("absent");
 const copyEntry = (e: SyncEntry): SyncEntry => ({ ...e, ...(e.trashed ? { trashed: { ...e.trashed } } : {}) });
@@ -59,6 +66,10 @@ export class PartialIndex {
   readonly gone = new Map<string, string | typeof ABSENT>();
   /** rows held (each entry, each gone row): memory units; a folder's listing Set points at rows already counted */
   memory = 0;
+  /** the ceiling in force for loads (the op's or the page's), and what else is live beside the base (the page's
+   * dirty set): a listing is refused before it is read if its rows could pass it */
+  limit = Infinity;
+  extra = 0;
 
   /** An entry loaded: by identity and by its path's key. */
   putEntry(e: SyncEntry) {
@@ -73,6 +84,11 @@ export class PartialIndex {
     this.children.set(folderKey, s.size ? s : ABSENT);
   }
 
+  /** Room for `n` more rows within the ceiling in force, checked before they are read. */
+  room(n: number) {
+    if (this.memory + this.extra + n > this.limit) throw new OverLimit();
+  }
+
   /** The missed keys loaded from `store`.  Returns how many keys became known. */
   async load(store: Store, misses: Miss[]): Promise<number> {
     let learned = 0;
@@ -82,6 +98,7 @@ export class PartialIndex {
         // identity's probe (byId, then gone) costs one round per candidate, as D10 r2's 1,001 rounds count)
         if (this.byId.has(m.key) && this.gone.has(m.key)) continue;
         if (!this.byId.has(m.key)) {
+          this.room(1);
           const e = await store.byId(m.key);
           if (e) this.putEntry(e);
           else this.byId.set(m.key, ABSENT);
@@ -99,6 +116,7 @@ export class PartialIndex {
         // are its read set, so name probes never retry), the key absent if it isn't among them)
         const folderKey = m.map === "children" ? m.key : keyOf(parentOf(m.key));
         if (!this.children.has(folderKey)) {
+          this.room(OVERLAY.listing);
           this.putFolder(folderKey, await store.folder(folderKey));
           learned++;
         }
@@ -140,9 +158,12 @@ class OverlayMap<V> {
     const b = this.base.get(k)!;
     if (b === ABSENT) return undefined;
     if (!this.clone) return b as V;
+    // (its copy admitted before it is made: an entry is one unit, a Set its members)
+    const n = this.sizeOf(b as V);
+    this.ov.need(n);
     const c = this.clone(b as V);
     this.own.set(k, c);
-    this.ov.memory += this.sizeOf(c);
+    this.ov.memory += n;
     return c;
   }
   get(k: string): V | undefined {
@@ -153,6 +174,12 @@ class OverlayMap<V> {
   }
   set(k: string, v: V): this {
     this.ov.units++;
+    // (an identity the op changes is held twice until the op is merged: in the reducer's changed Set, and in the
+    // array it returns; admitted before either holds it)
+    if (this.name === "byId" && !this.own.has(k)) {
+      this.ov.need(2);
+      this.ov.changed++;
+    }
     this.own.set(k, v);
     return this;
   }
@@ -175,6 +202,23 @@ for (const m of ["size", "keys", "values", "entries", "forEach", "clear", Symbol
 export class Overlay {
   units = 0;
   memory = 0;
+  /** identities this op has changed (each two units: the reducer's Set and its returned array) */
+  changed = 0;
+  /** the ceiling in force, and whether an allocation was refused (the overlay is then discarded whole) */
+  limit = Infinity;
+  over = false;
+  /** Every live population, as D10 r3 counts them (daybreak3's LIMIT-PR65-IMPL-1): the base's rows, what else the
+   * page holds (its dirty set), this overlay's clones and copied Set members, and its changed identities. */
+  total(): number {
+    return this.base.memory + this.base.extra + this.memory + 2 * this.changed;
+  }
+  /** Room for `n` more units, refused (marked over, thrown) before the allocation is made. */
+  need(n: number) {
+    if (this.total() + n > this.limit) {
+      this.over = true;
+      throw new OverLimit();
+    }
+  }
   readonly missed: Miss[] = [];
   readonly index: SyncIndex;
   readonly maps: { byId: OverlayMap<SyncEntry>; byKey: OverlayMap<string>; children: OverlayMap<Set<string>>; gone: OverlayMap<string> };
@@ -258,11 +302,26 @@ export type OpResult = { outcome: Outcome; units: number; rounds: number; memory
  * merged (its overlay discarded, no changed identity kept: astra's proviso), and `null` is returned so the page
  * is cut before it.  Throws Halt past the op's own ceilings, or for a reducer fault.
  */
-export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: { carried?: number; budget?: number; alone?: boolean } = {}): Promise<OpResult | { trial: number }> {
+export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: { carried?: number; budget?: number; alone?: boolean; dirty?: number } = {}): Promise<OpResult | { trial: number }> {
   let units = opts.carried ?? 0;
-  await preload(base, store, op);
+  // (the ceiling in force, every live population counted against it before it is allocated (daybreak3's
+  // LIMIT-PR65-IMPL-1): alone, the op's own; in a page, the page's, with its dirty set beside the base)
+  const limit = opts.alone ? OVERLAY.opMemory : OVERLAY.pageMemory;
+  base.limit = limit;
+  base.extra = opts.dirty ?? 0;
+  const over = () => {
+    if (opts.alone) throw new Halt(`sync: an op (seq ${op.seq}) would hold more than ${OVERLAY.opMemory} memory units`);
+    return { trial: units };
+  };
+  try {
+    await preload(base, store, op);
+  } catch (e) {
+    if (e instanceof OverLimit) return over();
+    throw e;
+  }
   for (let round = 1; ; round++) {
     const ov = new Overlay(base);
+    ov.limit = limit;
     let outcome: Outcome | undefined, escaped: unknown;
     try {
       outcome = reduce(ov.index, op);
@@ -272,16 +331,24 @@ export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: 
     }
     units += ov.units;
     if (units > OVERLAY.opUnits) throw new Halt(`sync: an op (seq ${op.seq}) took more than ${OVERLAY.opUnits} units`);
+    // (an allocation refused: the overlay discarded whole, whatever reduce returned)
+    if (ov.over) return over();
     if (ov.dirty) {
       if (round >= OVERLAY.rounds) throw new Halt(`sync: an op (seq ${op.seq}) still missed after ${OVERLAY.rounds} rounds`);
-      if ((await base.load(store, ov.missed)) === 0) throw new Halt(`sync: an op (seq ${op.seq}) missed without anything to load`);
+      let learned: number;
+      try {
+        learned = await base.load(store, ov.missed);
+      } catch (e) {
+        if (e instanceof OverLimit) return over();
+        throw e;
+      }
+      if (learned === 0) throw new Halt(`sync: an op (seq ${op.seq}) missed without anything to load`);
       continue;
     }
     if (escaped !== undefined || !outcome) throw new Halt(`sync: the reducer failed on seq ${op.seq}: ${String(escaped).slice(0, 200)}`);
-    const memory = base.memory + ov.memory;
-    if (memory > (opts.alone ? OVERLAY.opMemory : Infinity)) throw new Halt(`sync: an op (seq ${op.seq}) held more than ${OVERLAY.opMemory} rows`);
-    // (a trial past the page's budget or memory: discarded, the page cut before it; its units go with it)
-    if (!opts.alone && ((opts.budget !== undefined && units - (opts.carried ?? 0) > opts.budget) || memory > OVERLAY.pageMemory)) return { trial: units };
+    const memory = ov.total();
+    // (a trial past the page's budget: discarded, the page cut before it; its units go with it)
+    if (!opts.alone && opts.budget !== undefined && units - (opts.carried ?? 0) > opts.budget) return { trial: units };
     ov.merge(outcome.changed);
     return { outcome, units, rounds: round, memory };
   }
@@ -295,12 +362,13 @@ export async function runPage(store: Store, ops: SyncOp[], carried = 0): Promise
   let units = 0, carry = carried;
   for (let i = 0; i < ops.length; i++) {
     const alone = i === 0;
-    const r = await runOp(base, store, ops[i], { carried: carry, budget: OVERLAY.pageUnits - units, alone });
+    const r = await runOp(base, store, ops[i], { carried: carry, budget: OVERLAY.pageUnits - units, alone, dirty: changed.size });
     carry = 0;
     if ("trial" in r) return { base, taken: i, changed, units, carry: r.trial, outcomes };
     units += r.units;
     for (const id of r.outcome.changed) changed.add(id);
-    outcomes.push(r.outcome);
+    // (its changed array let go at once: only whether it was skipped is kept)
+    outcomes.push({ changed: [], ...(r.outcome.skipped !== undefined ? { skipped: r.outcome.skipped } : {}) });
   }
   return { base, taken: ops.length, changed, units, carry: 0, outcomes };
 }

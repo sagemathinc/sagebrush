@@ -357,6 +357,8 @@ export async function done(w: Workspace, ns: string): Promise<"committed" | "fai
       const active = (await req(meta.get(journalKey(ns)))) as string | undefined;
       if (active) next.oldJournal = active;
       meta.put(jp, journalKey(ns));
+      // (the drain's position goes with the switch: the new journal is walked from its start (CORR-PR65-IMPL-1))
+      meta.delete(journalKey(ns) + ":at");
     }
     meta.put(next, passKey(ns));
     return "committed";
