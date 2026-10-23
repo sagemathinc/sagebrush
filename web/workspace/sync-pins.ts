@@ -73,10 +73,10 @@ export type NsState = {
   /** the current state to send once there is room, based on `base` (a held identity's, once its record was decided) */
   successor?: { base?: string };
 };
-/** `latest.moved`: an op past the scan watermark placed the identity (made, moved, put in Trash or out, removed for
- * good), sticky while its latest op is unscanned: the view (C3) then takes its placement from `after`; a write alone
- * leaves the placement to the confirmed index. */
-export type Pending = { id: string; latest?: { seq: number; by: string; after: OpAfter | null | undefined; moved?: true }; byNs?: Record<string, NsState> };
+/** `latest.movedAt`: the seq of the identity's last op that placed it (made, moved, put in Trash or out, removed for
+ * good).  Past the scan watermark, the view (C3) takes its placement from `after`; a write alone leaves the placement
+ * to the confirmed index.  Carried from op to op, so a save reads nothing more. */
+export type Pending = { id: string; latest?: { seq: number; by: string; after: OpAfter | null | undefined; movedAt?: number }; byNs?: Record<string, NsState> };
 const PLACING = new Set(["create", "adopt", "mkdir", "rename", "remove", "restore", "forget", "emptyTrash", "discard"]);
 export type Skipped = { count: number; files: string[] };
 type Purge = { epoch: number; cursor?: [string, number] };
@@ -172,10 +172,8 @@ export async function noteChange(tx: IDBTransaction, rec: Op, pin: boolean) {
   if (!id) return;
   const ps = tx.objectStore("pending");
   const cur = ((await req(ps.get(id))) as Pending | undefined) ?? { id };
-  const lease = await liveLease(meta);
-  const scanned = lease ? await readOnce<number>(meta, `sync:${lease.ns}:scanned`) : undefined;
-  const moved = PLACING.has(rec.op) || (!!cur.latest?.moved && (scanned === undefined || cur.latest.seq > scanned));
-  ps.put({ ...cur, latest: { seq: rec.seq!, by: rec.by, after: rec.after, ...(moved ? { moved: true } : {}) } });
+  const movedAt = PLACING.has(rec.op) ? rec.seq! : cur.latest?.movedAt;
+  ps.put({ ...cur, latest: { seq: rec.seq!, by: rec.by, after: rec.after, ...(movedAt !== undefined ? { movedAt } : {}) } });
   if (pin && rec.sha256 && rec.size !== undefined && rec.fid) await pinPresent(tx, id, rec.seq!, rec.path, rec.sha256, rec.size, rec.fid);
   // (tests: a save failing after its pin, as one meeting the quota would: the whole change refused)
   if (PINS.failAfterPin) throw new DOMException("the quota (a test's)", "QuotaExceededError");
