@@ -188,6 +188,8 @@ Supported:
   size allows, in its default subplot layout), autoscaled limits have 5%
   margins, and lines (`plot`, `hist`, `errorbar`) and patches (`bar`,
   `scatter`, `fill_between`, `pie`) take colors from separate cycles.
+- `plt.axes()`: a new Axes each call, a `[left, bottom, width, height]`
+  rect, or an Axes made current; keywords are Axes properties.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
