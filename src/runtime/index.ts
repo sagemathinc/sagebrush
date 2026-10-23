@@ -620,6 +620,9 @@ B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   }
   return null;
 }, "displayhook");
+// Sage code's (src/compile.ts): until sage_all sets its own, the hook a
+// host has set for all code, looked up at each call
+B.builtins.__pyjs_sage_displayhook__ = Obj.builtin((v: any) => Obj.callObj(B.builtins.__pyjs_displayhook__, [v]), "displayhook");
 
 // ------------------------------------------------------------------ rich display
 // Jupyter's display protocol: _repr_mimebundle_, _repr_svg_, ... make a MIME
