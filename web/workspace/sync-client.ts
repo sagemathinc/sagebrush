@@ -756,10 +756,10 @@ export class SyncClient {
     }
     // (a committed journal first (a rebuild's reissue, C3/D6): drained into records as the outbox has room; the scan
     // stays idle until it has drained, so what it makes for ops after W1 comes after the journal's)
-    for (;;) {
-      const d = await c.ob.drainJournal();
-      if (!d.more || d.full || this.conn !== c) break;
-    }
+    // (one page a run, then what it made is sent: the drain goes on on the next run (kicked again below), so the
+    // first records go up at once rather than after the outbox fills)
+    const d = await c.ob.drainJournal();
+    if (d.more && !d.full) this.again = true;
     // (the scan: local changes made into records, as the outbox has room)
     await c.ob.scan();
     if (c.resync) {

@@ -860,6 +860,17 @@ Where the code settles what the plan left open, or differs from it:
 - **The journals' drain** goes in rounds over key order. A record goes once its folder has gone. Gone identities (forget) go after every present one, in key order rather than deepest-first: a forget of a folder already forgotten is a no-op on the server.
   - A record under a folder in Trash, gone, or not adopted itself is not adopted.
 - **Downloads:** the signed URL is taken from the followed redirect's final URL (`fetch` can't read a 303's Location). A 403 from the files host drops it, and the next attempt asks for a fresh one.
+- **Rebuild pages commit with `durability: "relaxed"`** (clean, capture, view, retire). Each records its own position with its effect, so a page that an OS crash loses (committed to the browser, not yet flushed) is redone from the previous position. A tab's crash loses nothing committed. `done` and the announce's ack keep the default durability.
+- **Requests per transaction:**
+  - a rebuild view page reads its range in five requests;
+  - the confirmed index is memoized for the page, and listings take one request each;
+  - room is counted once a page;
+  - the op's parent folder is passed to the log;
+  - the fetch queue is the entries' sparse index `byFetch` (DB v6, unreleased), so queuing a file costs no write of its own;
+  - retire reads its records by range, and pending states only where they exist.
+- **D10's read set is loaded before an op runs** (r1's list, plus a move's destination listings), so rounds miss only on derived-identity candidates. A derived identity's entry and gone row are one stored row, learned from one miss.
+- **D10 r3's single-op memory ceiling is 350,000 units, not 250,000.** A maximum move measures about 300,000: r3's estimate left out the moved folders' copied `children` Sets. The heap growth at that maximum is measured (the view test).
+- **Long write loops await a cheap read every 200 writes**, which ends the task while the transaction stays alive. A 100,000-entry move is then many short tasks, apart from the reducer's own synchronous move.
 - **Page counts are exact:** view and retire read one past their page. A retire page takes 100 items across its steps (staged confirmations, replaced records, the old journal's records), so the walks end on their last full page.
 
 Measured on VM 1 (Chrome, the timed fixture of D6 r6; see the PR for the run): the figures are in #65's description.
