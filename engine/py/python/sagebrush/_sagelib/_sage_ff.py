@@ -1341,10 +1341,20 @@ def _conway_charge(budget, cops, p, n):
         budget[0] -= cops
 
 
+# a cold search for one Conway polynomial (GF, conway_polynomial, in Sage and
+# Magma modes alike) does at most this much work, counted by _conway's budget
+# (prime-field coefficient operations).  Measured cold over every p^n <= 10^7
+# that GF admits (all 555 with n >= 2), the most is C_max = 594,117,177, for
+# GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
+# field admitted before is admitted still.  A common field made inside an
+# embedding (_sage_ffsub) has that operation's budget instead.
+CONWAY_WORK = 653528895
+
+
 def _conway(p, n, budget=None):
     """Coefficients (constant first) of the Conway polynomial C_{p,n}.
 
-    budget: None (unbounded but for the p^n <= 10^7 cutoff, as before), or a
+    budget: None (a fresh CONWAY_WORK; the p^n <= 10^7 cutoff too), or a
     one-element list holding the caller's remaining work in prime-field
     coefficient operations, charged before each step of a cold search (the
     factoring of p^n - 1, each primitive-root candidate, each polynomial
@@ -1354,6 +1364,26 @@ def _conway(p, n, budget=None):
     key = (p, n)
     if key in _CONWAY:
         return _CONWAY[key]
+    if budget is None:
+        budget = [CONWAY_WORK]
+    # (transactional: every polynomial the search finds, the subfields'
+    # too, is staged and committed only once the target is found, so a
+    # refusal, an error or an interrupt leaves _CONWAY as it was;
+    # daybreak2 LIMIT-PR48-1)
+    stage = {}
+    c = _conway_search(p, n, budget, stage)
+    _CONWAY.update(stage)
+    return c
+
+
+def _conway_search(p, n, budget, stage):
+    """_conway's search, reading _CONWAY and the operation's stage and
+    writing found polynomials into the stage only."""
+    key = (p, n)
+    if key in _CONWAY:
+        return _CONWAY[key]
+    if key in stage:
+        return stage[key]
     w = max(1, -(-p.bit_length() // 30)) ** 2
     if n == 1:
         if p == 2:
@@ -1375,14 +1405,14 @@ def _conway(p, n, budget=None):
                 if all(pow(g, (p - 1) // r, p) != 1 for r in fs):
                     break
         c = [(-g) % p, 1]
-        _CONWAY[key] = c
+        stage[key] = c
         return c
     if p ** n > 10 ** 7:
         raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
     _conway_charge(budget, 3163 * w, p, n)  # (trial factoring of p^n - 1 <= 10^7)
     primes = [r for r, e in _factor_int(p ** n - 1)]
     subs = [m_ for m_ in range(1, n) if n % m_ == 0]
-    sub_polys = [(m_, _conway(p, m_, budget)) for m_ in subs]
+    sub_polys = [(m_, _conway_search(p, m_, budget, stage)) for m_ in subs]
     q1 = p ** n - 1
     mn = 2 * n * n * w                  # one product mod the candidate, M(n)
     expo = 2 * q1.bit_length() * mn     # one power x^e, e < p^n
@@ -1426,7 +1456,7 @@ def _conway(p, n, budget=None):
                 ok = False
                 break
         if ok:
-            _CONWAY[key] = coeffs
+            stage[key] = coeffs
             return coeffs
     raise ArithmeticError("no Conway polynomial found")
 
