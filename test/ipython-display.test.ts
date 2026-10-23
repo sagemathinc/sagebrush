@@ -70,6 +70,30 @@ const CASES: [string, string][] = [
   ["a = [int]\na.append(a)\na", "[int, [...]]"],
   ["d = {'t': int}\nd['k'] = d\nd", "{'t': int, 'k': {...}}"],
   ["[[[[[[[[int]]]]]]]]", "[[[[[[[[int]]]]]]]]"],
+  // (38 levels around int: 79 columns, one line; 39 levels pass the line:
+  // the repr)
+  ["eval('[' * 38 + 'int' + ']' * 38)", "[".repeat(38) + "int" + "]".repeat(38)],
+  ["eval('[' * 39 + 'int' + ']' * 39)", "[".repeat(39) + "<class 'int'>" + "]".repeat(39)],
+  // (the runtime's own types by identity, not by name: CORR-PR57-1)
+  ["class function:\n    pass\nfunction()", "<__main__.function at 0x?>"],
+  ["class builtin_function_or_method:\n    pass\nbuiltin_function_or_method()", "<__main__.builtin_function_or_method at 0x?>"],
+  ["class method:\n    pass\nmethod()", "<__main__.method at 0x?>"],
+  ["class method_descriptor:\n    pass\n[method_descriptor(), method_descriptor]", "[<__main__.method_descriptor at 0x?>, __main__.method_descriptor]"],
+  // (a builtin's class and static methods: CORR-PR57-2)
+  ["dict.fromkeys", "<function dict.fromkeys(iterable, value=None, /)>"],
+  ["{}.fromkeys", "<function dict.fromkeys(iterable, value=None, /)>"],
+  ["class DD(dict):\n    pass\nDD.fromkeys", "<function DD.fromkeys(iterable, value=None, /)>"],
+  ["int.from_bytes", "<function int.from_bytes(bytes, byteorder='big', *, signed=False)>"],
+  ["(1).from_bytes", "<function int.from_bytes(bytes, byteorder='big', *, signed=False)>"],
+  ["float.fromhex", "<function float.fromhex(string, /)>"],
+  ["bytes.fromhex", "<function bytes.fromhex(string, /)>"],
+  ["str.maketrans", "<function str.maketrans>"],
+  // (functools.wraps: the signature of the function wrapped, as
+  // inspect.signature follows __wrapped__: CORR-PR57-3)
+  ["import functools\ndef target(a, b=3, *, c=4):\n    pass\n@functools.wraps(target)\ndef wrapper(*args, **kwargs):\n    return target(*args, **kwargs)\nwrapper", "<function __main__.target(a, b=3, *, c=4)>"],
+  ["def w1(*a, **k):\n    pass\nw1.__wrapped__ = w1\nw1", "<function __main__.w1>"],
+  ["def w2(*a, **k):\n    pass\nw2.__wrapped__ = len\nw2", "<function __main__.w2(obj, /)>"],
+  ["def w5(*a, **k):\n    pass\nw5.__signature__ = None\nw5", "<function __main__.w5(*a, **k)>"],
 ];
 
 test("a notebook shows a cell's value as IPython does: types, functions, objects, and in containers", async () => {
@@ -100,6 +124,100 @@ test("the command line's prompt keeps CPython's repr (a type is <class 'int'>)",
   }
 });
 
+async function session() {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  let id = 0;
+  return async (code: string) => {
+    const n = ++id;
+    await s.handle({ id: n, code });
+    const of = (stream: string) => msgs.filter((m) => m.id === n && m.stream === stream).map((m) => m.text).join("");
+    return { out: of("stdout"), err: of("stderr") };
+  };
+}
+
+test("astra's cases, IPython 9.15's text (past the line: the repr)", async () => {
+  const cases = JSON.parse(require("fs").readFileSync(__dirname + "/../../test/ipython_display_astra_cases.json", "utf8"));
+  const run = await session();
+  for (const [label, code, want] of cases) {
+    const { out, err } = await run(code);
+    assert.equal(err, "", label);
+    assert.equal(out.replace(/0x[0-9a-f]+/g, "0x?"), want + "\n", label);
+  }
+});
+
+// LIMIT-PR57-1 (daybreak2): a value past the line shows as its repr, so the
+// work is one repr plus the trial line, which stops at 79 columns. The trial
+// is counted by wrapping _pyjs_pretty._text, which it calls for each item
+// (and itself for each container).
+test("past the line: one repr, and a trial bounded by the line (counted)", async () => {
+  const run = await session();
+  await run("import _pyjs_pretty as P\nVISITS = [0]\n_t = P._text\ndef _counted(*a):\n    VISITS[0] += 1\n    return _t(*a)\nP._text = _counted\ndef nest(n):\n    L = []\n    for _ in range(n):\n        L = [L]\n    return L");
+  for (const code of ["[int] * 1000000", "[1] * 1000000", "{i: int for i in range(100000)}", "nest(1500)", "[[int] * 1000] * 1000"]) {
+    const { out, err } = await run(`VISITS[0] = 0\nV = ${code}\nV`);
+    assert.equal(err, "", code);
+    assert.ok(out.length > 79, code);
+    const { out: n } = await run("VISITS[0]");
+    assert.ok(Number(n) <= 80, `${code}: the trial visited ${n.trim()} values`);
+  }
+  await run("P._text = _t");
+});
+
+// LIMIT-PR57-3 (daybreak2): no element's __repr__ runs twice. The trial line
+// runs an element's __repr__ (as IPython's does) and, past the line, the
+// repr is built with the strings it already got.
+test("past the line, no element's __repr__ is called twice (counted)", async () => {
+  const run = await session();
+  await run("class R:\n    n = 0\n    def __init__(self, s='R'):\n        self.s = s\n    def __repr__(self):\n        R.n += 1\n        return self.s");
+  const CASES: [string, number, string][] = [
+    ["[int, R(), 'x' * 100]", 1, "[<class 'int'>, R, '" + "x".repeat(100) + "']"],
+    ["[R(), R('y' * 100)]", 2, "[R, " + "y".repeat(100) + "]"],
+    ["r = R()\n[r, r, int, 'x' * 100]", 2, "[R, R, <class 'int'>, '" + "x".repeat(100) + "']"],
+    ["{R(): int, 2: [R(), 'x' * 80]}", 2, "{R: <class 'int'>, 2: [R, '" + "x".repeat(80) + "']}"],
+    ["(R('\\n'), int)", 1, "(\n, <class 'int'>)"],
+    ["[R() for _ in range(100000)]", 100000, "[" + Array(100000).fill("R").join(", ") + "]"],
+    // (a cycle back through the trial's leaves: the repr meets the list again
+    // as [...], so R's runs once)
+    ["L = [R(), 'x' * 100]\nL.append([L])\nL", 1, "[R, '" + "x".repeat(100) + "', [[...]]]"],
+    ["T = ([R(), int, 'x' * 100],)\nT[0].append(T)\nT", 1, "([R, <class 'int'>, '" + "x".repeat(100) + "', (...)],)"],
+  ];
+  for (const [code, calls, want] of CASES) {
+    await run("R.n = 0");
+    const { out, err } = await run(code);
+    assert.equal(err, "", code);
+    assert.equal(out, want + "\n", code);
+    const { out: n } = await run("R.n");
+    assert.equal(Number(n), calls, `${code}: R.__repr__ ran ${n.trim()} times`);
+  }
+  // (as the repr: the same calls, in the same order)
+  await run("seen = []\nclass O:\n    def __init__(self, k):\n        self.k = k\n    def __repr__(self):\n        seen.append(self.k)\n        return 'O%d' % self.k");
+  const { out } = await run("[O(1), [O(2), {O(3): O(4)}], int, O(5), 'x' * 80]");
+  assert.equal(out, "[O1, [O2, {O3: O4}], <class 'int'>, O5, '" + "x".repeat(80) + "']\n");
+  assert.equal((await run("seen")).out, "[1, 2, 3, 4, 5]\n");
+});
+
+// LIMIT-PR57-2 (daybreak2): a container nested past the recursion limit
+// raises RecursionError, as its repr does, not a JavaScript stack overflow.
+test("nesting past the recursion limit raises RecursionError, as repr does", async () => {
+  const run = await session();
+  await run("class R:\n    def __repr__(self):\n        return 'R'");
+  for (const [code, msg] of [
+    ["L = []\nfor _ in range(100000):\n    L = [L]\nL", "maximum recursion depth exceeded"],
+    ["D = {}\nfor _ in range(100000):\n    D = {1: D}\nD", "maximum recursion depth exceeded"],
+    ["L = []\nfor _ in range(100000):\n    L = [L]\n[R(), 'x' * 100, L]", "maximum recursion depth exceeded while getting the repr of an object"],
+  ]) {
+    const { out, err } = await run(code);
+    assert.equal(out, "", code);
+    assert.ok(err.trimEnd().endsWith("RecursionError: " + msg), `${code}: ${err.slice(-300)}`);
+    assert.ok(!/internal error|RangeError|_pyjs_pretty.py", line \d+, in _/.test(err), `${code}: ${err.slice(0, 600)}`);
+  }
+  // (and the session goes on)
+  assert.equal((await run("[int]")).out, "[int]\n");
+});
+
+// (last: a Sage cell installs sage_all's display hook for the whole process)
 test("a Sage cell keeps the repr, as SageMath's shell shows it", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const msgs: any[] = [];
@@ -112,18 +230,4 @@ test("a Sage cell keeps the repr, as SageMath's shell shows it", async () => {
   assert.equal(await out(1, "int", { sage: true }), "<class 'int'>\n");
   assert.equal(await out(2, "max", { sage: true }), "<built-in function max>\n");
   assert.equal(await out(3, "int"), "int\n");
-});
-
-test("a long container's display is bounded by the line, not the container", async () => {
-  const { notebookSession } = require("../src/notebook-session");
-  const msgs: any[] = [];
-  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
-  await s.ready;
-  // (a million types: given up after the first few, then the repr; it is
-  // the repr's own size, not a second rendering of every element)
-  const t0 = Date.now();
-  await s.handle({ id: 1, code: "L = [int] * 1000000\nL" });
-  const out = msgs.filter((m) => m.id === 1 && m.stream === "stdout").map((m) => m.text).join("");
-  assert.ok(out.startsWith("[<class 'int'>, <class 'int'>"));
-  assert.ok(Date.now() - t0 < 20000);
 });
