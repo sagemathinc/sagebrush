@@ -290,8 +290,66 @@ if (fromParent && OWN_ENGINE && !document.getElementById("sb-engine-ref")) {
   r.textContent = JSON.stringify({ site: new URL("/", location.href).href, id: OWN_ENGINE.id });
   document.head.append(r);
 }
+// A board on this computer, shown by `sagebrush board open FILE` (src/board-open.ts): the frame's page, served
+// by that command beside the file, which gives it the file's text (GET board, with the key it puts in #sb-local)
+// and says when the file changes (GET events, a revision each time).  Each version is shown in place (its camera,
+// outputs and interpreter kept); one that isn't a board (half written, or wrong) leaves the last good one shown,
+// said in a bar.  Nothing is written back: Edit isn't offered (v1).
+const fromLocal = embedded()?.dataset.sbFrom === "local";
+const LOCAL_TEXT_MAX = 128 * 2 ** 20;
+const localInfo = (() => {
+  if (!fromLocal) return null;
+  try {
+    const v = JSON.parse(document.getElementById("sb-local")?.textContent ?? "null");
+    const site = typeof v?.engineSite === "string" && /^(https:\/\/|http:\/\/127\.0\.0\.1:\d{1,5}\/$)/.test(v.engineSite) ? v.engineSite : "https://sagebrush.space/";
+    return v && typeof v.key === "string" && /^[0-9a-f]{32,64}$/.test(v.key) && typeof v.name === "string" ? { key: v.key as string, name: v.name.slice(0, 255), engineSite: site as string } : null;
+  } catch {
+    return null;
+  }
+})();
+// (its engine: the one its script was built with, from the site the command names, sagebrush.space unless a
+// checkout built it, as an exported file's)
+if (fromLocal && localInfo && OWN_ENGINE && !document.getElementById("sb-engine-ref")) {
+  const r = document.createElement("script");
+  r.type = "application/json";
+  r.id = "sb-engine-ref";
+  r.textContent = JSON.stringify({ site: localInfo.engineSite, id: OWN_ENGINE.id });
+  document.head.append(r);
+}
 // (an exported file: the engine its code runs with, and the site it comes from)
 const ref = file ? engineRef() : null;
+
+/** The bar a board shown from a file says its trouble in (not a board right now, the command stopped); null: none. */
+function localBar(message: string | null) {
+  let bar = document.getElementById("sbb-local");
+  if (message === null) { bar?.remove(); return; }
+  if (!bar) {
+    bar = Object.assign(document.createElement("div"), { id: "sbb-local" });
+    bar.setAttribute("role", "alert");
+    bar.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);top:44px;z-index:60;max-width:min(720px,94vw);background:#fdecea;color:#5f2120;border:1px solid #e57373;border-radius:6px;padding:6px 12px;font:13px system-ui,sans-serif;box-shadow:0 2px 6px #0002;white-space:pre-wrap;overflow-wrap:anywhere";
+    document.body.append(bar);
+  }
+  bar.textContent = message;
+}
+/** The file's text now, as a board (or what is wrong with it), and its revision. */
+async function localRead(): Promise<{ revision: string; doc?: BoardDoc; notice: string; error?: string }> {
+  const r = await fetch(`board?key=${localInfo!.key}`, { cache: "no-store" });
+  const revision = (r.headers.get("X-Sagebrush-Revision") ?? "").slice(0, 64);
+  const text = await r.text();
+  if (!r.ok) return { revision, notice: "", error: text.slice(0, 500) || `${r.status} ${r.statusText}` };
+  if (text.length > LOCAL_TEXT_MAX) return { revision, notice: "", error: "too large for the board to open" };
+  let notice = "";
+  try {
+    const doc = boardFromText(text, localInfo!.name, (md) => { notice = md; });
+    if (!isBoard(doc)) throw new Error("not a board");
+    return { revision, doc, notice };
+  } catch (e: any) {
+    return { revision, notice: "", error: String(e?.message ?? e).slice(0, 500) };
+  }
+}
+const localTrouble = (error: string) => `${localInfo!.name} isn't a board right now: ${error}\nThe last good version is shown. This page shows the file again as soon as it is a board.`;
+// (the revision shown, and the one first loaded: the events' first says the file's revision now)
+let localShown = "";
 
 // A frame's document: the first its parent posts, as
 // { sagebrush: "board", version: 1, text, name? } (a file's contents and
@@ -741,6 +799,14 @@ const host: BoardHost = {
         const { doc, notice } = await parentDoc;
         return { doc, original: doc, notice };
       }
+      // (a board on this computer: the file as it is now; not a board yet, an empty one until it is)
+      if (fromLocal) {
+        if (!localInfo) return { doc: { title: "Board", nodes: [] }, original: null, notice: "**This page can't reach the file it shows.** Run `sagebrush board open FILE` again." };
+        const r = await localRead().catch((e) => ({ revision: "", notice: "", error: String(e?.message ?? e), doc: undefined }));
+        localShown = r.revision;
+        if (!r.doc) { localBar(localTrouble(r.error ?? "unknown")); return { doc: { title: localInfo.name, nodes: [] }, original: null }; }
+        return { doc: r.doc, original: r.doc, ...(r.notice ? { notice: r.notice } : {}) };
+      }
       // (a new board storage refused: shown, saying it isn't kept)
       if (unsaved) return { doc: blankBoard(unsaved), original: null, notice: `**This board isn't kept:** ${STORAGE_REFUSED}. Download it (File) to keep what you write, or make room and reload.` };
       // (a board of this browser's: as it was last written here, with no
@@ -825,6 +891,8 @@ const host: BoardHost = {
       // (in a frame: to the host, if it granted editing; else kept nowhere.  Taken now, at the action, its pictures'
       // bytes prepared after: astra's CORR-FRAMEEDIT-1)
       if (fromParent) { editCh?.save(d); return; }
+      // (a board on this computer: the file is its only copy, written by whoever writes it; nothing kept here)
+      if (fromLocal) return;
       if (unsaved) throw new Error(STORAGE_REFUSED);
       if (local && ws) return wsSave(source.slice(6), d);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
@@ -839,6 +907,37 @@ const host: BoardHost = {
     ...(fromParent ? {
       subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { editSubs.add(f); return () => { editSubs.delete(f); }; },
       editing(f: (s: EditingState) => void) { editingSubs.add(f); f(editingNow); return () => { editingSubs.delete(f); }; },
+    } : {}),
+    // (a board on this computer: each new version of the file shown in place, one read at a time, the latest
+    // revision said winning; Edit not offered)
+    ...(fromLocal && localInfo ? {
+      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) {
+        let want = "", reading = false, stopped = false;
+        const next = async () => {
+          if (reading || stopped || !want || want === localShown) return;
+          reading = true;
+          try {
+            const target = want, r = await localRead();
+            if (stopped) return;
+            // (the file said to have changed again while it was read: read once more; else this version, good or not)
+            if (want !== target) return;
+            localShown = r.revision || target;
+            if (r.doc) { localBar(null); await f(r.doc, r.notice || undefined); }
+            else localBar(localTrouble(r.error ?? "unknown"));
+          } catch (e: any) {
+            localBar(`Couldn't read ${localInfo.name} from \`sagebrush board open\`: ${String(e?.message ?? e).slice(0, 300)}`);
+          } finally {
+            reading = false;
+            if (!stopped) void next();
+          }
+        };
+        const es = new EventSource(`events?key=${localInfo.key}`);
+        es.addEventListener("board", (e) => { const rev = String((e as MessageEvent).data).slice(0, 64); if (/^[0-9a-f]{64}$/.test(rev)) { want = rev; void next(); } });
+        es.onerror = () => { if (!stopped) localBar("`sagebrush board open` isn't answering (stopped?). This page shows the board as it last was; run the command again to follow the file."); };
+        es.onopen = () => { if (document.getElementById("sbb-local")?.textContent?.startsWith("`sagebrush board open` isn't")) localBar(null); };
+        return () => { stopped = true; es.close(); };
+      },
+      editing(f: (s: EditingState) => void) { f({ allowed: false, hidden: true }); return () => {}; },
     } : {}),
     // (whether it was written here, a new board: kept beside it, never in it)
     writtenHere(set) {
