@@ -642,5 +642,130 @@
     400
    ]
   ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, q=b\"/a b\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?q=%2Fa+b\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "q": "b'/a b'"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, q=b\"\\xff &\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?q=%FF+%26\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "q": "b'\\xff &'"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, a=\"s t\", b=b\"\\x00~\", c=3, d=b\"\", e=\"\\u00e9\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?a=s+t&b=%00~&c=3&d=&e=%C3%A9\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "a": "s t",
+     "b": "b'\\x00~'",
+     "c": 3,
+     "d": "b''",
+     "e": "\u00e9"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"v\", start=b\"30\", list=b\"PL x\")",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/v?start=30&list=PL+x\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "v"
+   ],
+   [
+    "params",
+    {
+     "start": "b'30'",
+     "list": "b'PL x'"
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/v"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
  ]
 ]
