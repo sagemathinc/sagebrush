@@ -139,8 +139,18 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
 
   const server = http.createServer(async (req, res) => {
     try {
-      const host = (req.headers.host ?? "").replace(/:\d+$/, "");
-      if (host !== "127.0.0.1" && host !== "localhost") { res.writeHead(403).end("forbidden host"); return; }
+      // (its own host and port only; and a browser's request only from its own pages: another page, on another
+      // port of this computer too (the cookie is for the host, whatever the port), never reaches it)
+      const host = req.headers.host ?? "";
+      if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) { res.writeHead(403).end("forbidden host"); return; }
+      // (a link to a page of it may be followed from anywhere: the URL with the token is opened from a terminal,
+      // which may be another site's page; it shows the page, which no other page can read)
+      const origin = req.headers.origin, site = req.headers["sec-fetch-site"];
+      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate";
+      if ((origin !== undefined && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) || (!opened && site !== undefined && site !== "same-origin" && site !== "none")) {
+        res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden: not this server's own page\n");
+        return;
+      }
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const cookie = /(?:^|;\s*)sagebrush_token=([0-9a-f]+)/.exec(req.headers.cookie ?? "")?.[1];
       if (url.searchParams.get("token") === token) {
@@ -191,6 +201,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
           });
           return;
         }
+        if (method !== "POST") { res.writeHead(405, { Allow: "POST" }).end(); return; }
         const s = sessions.get(sid);
         if (!s) { res.writeHead(404).end("no such session"); return; }
         if (what === "send") s.worker.postMessage(JSON.parse((await body(req)).toString("utf8")));
