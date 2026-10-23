@@ -201,11 +201,12 @@ test("past the line, no element's __repr__ is called twice (counted)", async () 
 
 // CORR-PR57-4 (astra): a __repr__ that changes the value it is in. One walk
 // builds the line and the repr together, as repr walks a list (by index, to
-// its length at each step) and a dict, and nothing is walked again. Past the
-// line, the expected texts are CPython 3.14.8's repr of a fresh copy (IPython
-// 9.17.1 breaks those lines); on the line, IPython's text. Each __repr__ runs
-// once. (For the dict whose sibling is popped, IPython's printer raises
-// "dictionary changed size during iteration"; repr goes on, and so does this.)
+// its length at each step), and nothing is walked again. Past the line, the
+// expected texts are CPython 3.14.8's repr of a fresh copy (IPython 9.17.1
+// breaks those lines); on the line, IPython's text. Each __repr__ runs once.
+// A dict is walked with its own iterator, as IPython's printer walks it:
+// one whose size a __repr__ changes is IPython's RuntimeError
+// (CORR-PR57-5, below).
 test("a __repr__ that changes its container: one walk, as repr's, each __repr__ once", async () => {
   const run = await session();
   await run("class Clear:\n    n = 0\n    def __init__(self, f, s='Q' * 80):\n        self.f = f\n        self.s = s\n    def __repr__(self):\n        Clear.n += 1\n        self.f()\n        return self.s");
@@ -219,15 +220,10 @@ test("a __repr__ that changes its container: one walk, as repr's, each __repr__ 
     ["nested cleared", "W = [1, 2]\nV = [Clear(W.clear), W]\nV", `[${Q}, []]`],
     ["nested grows", "W = [1]\nV = [Clear(lambda: W.append(2)), W]\nV", `[${Q}, [1, 2]]`],
     ["tuple, list in it cleared", "W = [1, 2]\nT = (Clear(W.clear), W)\nT", `(${Q}, [])`],
-    ["dict cleared", "D = {}\nD[1] = Clear(D.clear)\nD[2] = 3\nD", `{1: ${Q}}`],
-    ["dict grows", "D = {}\nD[1] = Clear(lambda: D.__setitem__(9, 9))\nD[2] = 3\nD", `{1: ${Q}, 2: 3, 9: 9}`],
-    ["dict sibling popped", "D = {}\nD[1] = Clear(lambda: D.pop(2))\nD[2] = 3\nD[4] = 5\nD", `{1: ${Q}, 4: 5}`],
-    ["dict key grows it", "D = {}\nD[Clear(lambda: D.__setitem__(1, 1))] = 3\nD", `{${Q}: 3, 1: 1}`],
     ["dict sibling value replaced", "D = {}\nD[1] = Clear(lambda: D.__setitem__(2, 'new'))\nD[2] = 3\nD", `{1: ${Q}, 2: 'new'}`],
     ["dict in a list cleared", "D = {1: 2, 3: 4}\nV = [Clear(D.clear), D]\nV", `[${Q}, {}]`],
     ["short: parent cleared", "V = []\nV.append(Clear(V.clear, 'q'))\nV.append(int)\nV", "[q]"],
     ["short: nested cleared", "W = [int, 2]\nV = [Clear(W.clear, 'q'), W, int]\nV", "[q, [], int]"],
-    ["short: dict sibling popped", "D = {}\nD[1] = Clear(lambda: D.pop(2), 'q')\nD[2] = int\nD[4] = int\nD", "{1: q, 4: int}"],
   ];
   for (const [label, code, want] of CASES) {
     await run("Clear.n = 0");
@@ -235,6 +231,38 @@ test("a __repr__ that changes its container: one walk, as repr's, each __repr__ 
     assert.equal(err, "", label);
     assert.equal(out, want + "\n", label);
     assert.equal((await run("Clear.n")).out, "1\n", `${label}: __repr__ calls`);
+  }
+  // (astra's probes at e812c295: as CPython's repr; and the dict whose current
+  // key, or an earlier one, is deleted by its value's __repr__: IPython's
+  // RuntimeError, as its printer iterates the dict)
+  await run("seen = []\nclass M:\n    def __init__(self, action): self.action=action\n    def __repr__(self):\n        seen.append('repr')\n        self.action()\n        return 'Q'*80");
+  const PROBES: [string, string][] = [
+    ["V=[]\nV.append(M(V.clear))\nV", `[${Q}]`],
+    ["V=[0,1,2]\nV[0]=M(lambda: V.pop(0))\nV", `[${Q}, 2]`],
+    ["V=[0,1]\nV[0]=M(lambda: V.__setitem__(1,7))\nV", `[${Q}, 7]`],
+    ["D={1:0,2:2,3:3}\ndef action():\n    D.pop(1)\n    D[4]=4\nD[1]=M(action)\nD", `{1: ${Q}, 2: 2, 3: 3, 4: 4}`],
+  ];
+  for (const [code, want] of PROBES) {
+    await run("seen.clear()");
+    const r = await run(code);
+    assert.equal(r.err, "", code);
+    assert.equal(r.out, want + "\n", code);
+    assert.equal((await run("len(seen)")).out, "1\n", `${code}: __repr__ calls`);
+  }
+  const RAISES: [string, string][] = [
+    ["D={1:0,2:2,3:3}\nD[1]=M(lambda: D.pop(1))\nD", "dictionary changed size during iteration"],
+    ["D={1:1,2:0,3:3}\nD[2]=M(lambda: D.pop(1))\nD", "dictionary changed size during iteration"],
+    ["D = {}\nD[1] = Clear(D.clear)\nD[2] = 3\nD", "dictionary changed size during iteration"],
+    ["D = {}\nD[1] = Clear(lambda: D.__setitem__(9, 9))\nD[2] = 3\nD", "dictionary changed size during iteration"],
+    ["D = {}\nD[1] = Clear(lambda: D.pop(2))\nD[2] = 3\nD[4] = 5\nD", "dictionary changed size during iteration"],
+    ["D = {}\nD[Clear(lambda: D.__setitem__(1, 1))] = 3\nD", "dictionary changed size during iteration"],
+    ["D = {}\nD[1] = Clear(lambda: D.pop(2), 'q')\nD[2] = int\nD[4] = int\nD", "dictionary changed size during iteration"],
+  ];
+  for (const [code, msg] of RAISES) {
+    const r = await run(code);
+    assert.equal(r.out, "", code);
+    assert.ok(r.err.trimEnd().endsWith("RuntimeError: " + msg), `${code}: ${r.err.slice(-200)}`);
+    assert.equal((await run("1 + 1")).out, "2\n");
   }
   // (a function's default, whose __repr__ runs for the signature only (repr
   // shows no defaults), clears the list: the walk goes on in the list as it
@@ -244,6 +272,43 @@ test("a __repr__ that changes its container: one walk, as repr's, each __repr__ 
   assert.equal(err, "");
   assert.equal(out.replace(/0x[0-9a-f]+/g, "0x?"), "[<function g at 0x?>]\n");
   assert.equal((await run("Clear.n")).out, "1\n");
+});
+
+// LIMIT-PR57-1 again (daybreak2, at e812c295): a __repr__ that adds to its
+// list, or a new key to its dict, at every step would keep the walk going.
+// One display's work, its nested displays' too, is at most
+// _pyjs_pretty.LIMITS (2**23 steps, 2**26 characters); past it, MemoryError,
+// and the session goes on. Lowered here to keep the test short.
+test("a value that a __repr__ makes grow forever: refused past the display's limit", async () => {
+  const run = await session();
+  await run("import _pyjs_pretty as P\nSAVED = dict(P.LIMITS)\nP.LIMITS['steps'] = 20000\nP.LIMITS['chars'] = 1 << 20");
+  const CASES: [string, string][] = [
+    ["class Grow:\n    def __repr__(self):\n        V.append(Grow())\n        return 'G' * 100\nV = [Grow()]\nV", "a list"],
+    ["class Grow2:\n    def __repr__(self):\n        W.append(Grow2())\n        return 'G'\nW = [Grow2(), 'x' * 100]\nW", "a list, 1 character a step"],
+    // (a dict that keeps its size, its key replaced at every step:
+    // Sagebrush's dict iterator goes on, where CPython's raises "dictionary
+    // keys changed during iteration")
+    ["class Key:\n    n = 0\n    def __repr__(self):\n        Key.n += 1\n        D.pop(Key.n - 1)\n        D[Key.n] = Key()\n        return 'K' * 100\nD = {0: Key()}\nD", "a dict"],
+    ["class Nest:\n    def __repr__(self):\n        N.append([Nest()])\n        return 'n' * 100\nN = [Nest()]\nN", "nested lists"],
+    // (each step a display of its own, which counts with this one's)
+    ["class G3:\n    def __repr__(self):\n        P.text([G3x(), 'y' * 100])\n        N3.append(G3())\n        return 'g' * 100\nclass G3x:\n    def __repr__(self):\n        return 'x'\nN3 = [G3()]\nN3", "nested displays"],
+    ["class Big:\n    def __repr__(self):\n        B.append(Big())\n        return 'b' * 10000\nB = [Big()]\nB", "1 MiB of characters"],
+  ];
+  for (const [code, label] of CASES) {
+    const { out, err } = await run(code);
+    assert.equal(out, "", label);
+    assert.match(err, /MemoryError: displaying this value takes more than Sagebrush's limit of 20000 steps or 1048576 characters/, label);
+    assert.equal((await run("1 + 1")).out, "2\n", `${label}: the session goes on`);
+  }
+  // (which limit stopped it: steps, for 1 character a step (W grew by one
+  // for each 2 steps); characters, for 10,000 a step (B by one for each
+  // 10,002))
+  assert.equal((await run("len(W) <= 10001, len(W) > 9000")).out, "(True, True)\n");
+  assert.equal((await run("len(B) <= 106, len(B) > 90")).out, "(True, True)\n");
+  // (a finite change is not refused, and a new display starts a new count)
+  assert.equal((await run("V2 = [1]\nclass Once:\n    def __repr__(self):\n        V2.clear()\n        return 'o' * 100\nV2.append(Once())\nV2")).out, "[1, " + "o".repeat(100) + "]\n");
+  await run("P.LIMITS.update(SAVED)");
+  assert.equal((await run("P.LIMITS")).out, "{'steps': 8388608, 'chars': 67108864}\n");
 });
 
 // LIMIT-PR57-2 (daybreak2): a container nested past the recursion limit
