@@ -32,14 +32,16 @@ const other = join(base, "a-longer-and-different-checkout-path");
 let r = run("git", ["worktree", "add", "-q", "--detach", other, "HEAD"], root);
 ok(r.status === 0, `a second checkout of HEAD (git worktree add): ${r.stderr}`);
 try {
-  // (its own node_modules, installed offline from pnpm's content-addressed store, which the first build
-  // filled: a symlink to the first checkout's would make the notices pass resolve outside this checkout.
+  // (its own node_modules, from pnpm's content-addressed store, which the first install filled, going to
+  // the network only for what's missing: a symlink to the first checkout's would make the notices pass
+  // resolve outside this checkout.
   // build/, the CLI build's generated files that web/build.ts reads, is copied)
-  r = run("pnpm", ["install", "--frozen-lockfile", "--offline", "--silent"], other);
-  ok(r.status === 0, `the second checkout's dependencies install offline (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
+  r = run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline", "--silent"], other);
+  ok(r.status === 0, `the second checkout's dependencies install (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
   if (existsSync(join(root, "build"))) cpSync(join(root, "build"), join(other, "build"), { recursive: true });
   r = run("bun", [join(other, "web", "build.ts")], other, { SAGEBRUSH_NO_SITE: "1" });
   ok(r.status === 0, `the second build exits 0 (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-5).join(" | ")}`);
+  if (r.status !== 0) throw new Error("the second build failed; nothing to compare");
 
   const latestB = JSON.parse(readFileSync(join(other, "web", "dist", "engine", "latest.json"), "utf8"));
   ok(latestA.id === latestB.id, `the same engine id from both paths (${latestA.id}, ${latestB.id})`);
@@ -55,6 +57,8 @@ try {
     const named = files(dist).filter((f) => readFileSync(join(dist, f)).includes(Buffer.from(mine + "/")));
     ok(named.length === 0, `no file in ${relative(base, dist) || dist} names its checkout's path (${named.slice(0, 5).join(", ")})`);
   }
+} catch (e) {
+  ok(false, String(e?.message ?? e));
 } finally {
   run("git", ["worktree", "remove", "--force", other], root);
   rmSync(base, { recursive: true, force: true });
