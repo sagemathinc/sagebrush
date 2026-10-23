@@ -71,9 +71,9 @@ def _resolve(name):
         return library[name]
     if name in ALIASES:
         new = ALIASES[name]
-        _warnings.warn("%r: use %r (matplotlib renamed it in 3.6 and removed the old name in 3.8; Sagebrush still"
-                       " accepts it for older teaching material)" % (name, new),
-                       _mpl.MatplotlibDeprecationWarning, stacklevel=3)
+        _warn("%r: use %r (matplotlib renamed it in 3.6 and removed the old name in 3.8; Sagebrush still"
+              " accepts it for older teaching material)" % (name, new),
+              _mpl.MatplotlibDeprecationWarning, stacklevel=4)
         return library[new]
     if (_os.sep in name or name.endswith(".mplstyle")) and _os.path.exists(name):
         raise NotImplementedError("style.use(%r): Sagebrush reads no style files yet" % (name,))
