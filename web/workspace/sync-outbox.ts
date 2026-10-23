@@ -308,7 +308,9 @@ export class Outbox {
       await fence(meta, this.lease);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
+      let refused = false, cuts = 100;
       for (const d of results) {
+        OUTBOX.cut?.(cuts++);
         // (what the server says, checked at the boundary: a dseq and a seq are positive safe integers, a code a
         // short string; anything else refused whole, nothing changed)
         if (!Number.isSafeInteger(d.dseq) || d.dseq < 1) throw new Error("sync: an ack for a dseq that isn't a positive safe integer");
@@ -329,8 +331,16 @@ export class Outbox {
           t.bytes -= recordBytes(r);
           t.charged -= chargeOf(r);
           await this.decided(tx, r, "refused", scanned);
+          refused = true;
         }
       }
+      // (a refusal's obligation, the rebuild (design/sync-client.md D6, D7), recorded in the transaction that removes
+      // the record: a crash leaves both or neither.  A stronger reason already recorded (invalid, diverged) stays)
+      if (refused) {
+        const k = `sync:${this.ns}:rebuild`, cur = (await req(meta.get(k))) as { why?: string } | undefined;
+        if (!cur || cur.why === "refused") meta.put({ why: "refused", at: Date.now() }, k);
+      }
+      OUTBOX.cut?.(cuts);
       meta.put(t, key(this.ns, "outbox"));
     });
     afterReleases(this.w);

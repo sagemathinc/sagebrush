@@ -559,7 +559,7 @@ export class SyncClient {
       const list = (await this.metaGet<Refusal[]>(key(c.ns, "refused"))) ?? [];
       for (const d of refused) list.push({ dseq: d.dseq, code: String(d.code).slice(0, 64), path: byDseq.get(d.dseq)?.op.path ?? "", at: now });
       await this.metaPut(key(c.ns, "refused"), list.slice(-CLIENT.refusalsKept));
-      await this.flagRebuild(c.ns, "refused");
+      // (the rebuild's obligation was recorded with the refusal itself, in Outbox.acked's transaction: D7)
     }
     // (accepted ones wait for their echo: the log is read on, to the newest of them, and no further)
     for (const d of results) if ("seq" in d && isNat(d.seq)) c.target = Math.max(c.target, d.seq);
