@@ -1325,22 +1325,62 @@ def conway_polynomial(p, n):
     return R(_conway(p, n))
 
 
-def _conway(p, n):
-    """Coefficients (constant first) of the Conway polynomial C_{p,n}."""
+class ConwayBudgetExceeded(NotImplementedError):
+    """A cold Conway search that would pass its work budget (see _conway)."""
+
+
+def _conway_charge(budget, cops, p, n):
+    if budget is not None:
+        if cops > budget[0]:
+            raise ConwayBudgetExceeded("the Conway polynomial for %d^%d is beyond the bounded search here" % (p, n))
+        budget[0] -= cops
+
+
+def _conway(p, n, budget=None):
+    """Coefficients (constant first) of the Conway polynomial C_{p,n}.
+
+    budget: None (unbounded but for the p^n <= 10^7 cutoff, as before), or a
+    one-element list holding the caller's remaining work in prime-field
+    coefficient operations, charged before each step of a cold search (the
+    factoring of p^n - 1, each primitive-root candidate, each polynomial
+    candidate, with M(n) = 2 n^2 w(p) per product) and shared by the
+    recursive construction of the subfields; ConwayBudgetExceeded when it
+    would pass.  Cache hits are free."""
     key = (p, n)
     if key in _CONWAY:
         return _CONWAY[key]
+    w = max(1, -(-p.bit_length() // 30)) ** 2
     if n == 1:
-        g = int(primitive_root(p)) if p > 2 else 1
+        if p == 2:
+            g = 1
+        elif budget is None:
+            g = int(primitive_root(p))
+        else:
+            # (the least primitive root, each candidate charged first: the
+            # prime factors of p - 1 by trial division, then one power per
+            # factor; p <= 10^7 here, the cardinality cutoff below)
+            if p > 10 ** 7:
+                raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
+            _conway_charge(budget, 3163 * w, p, n)
+            fs = [r for r, e in _factor_int(p - 1)]
+            g = 1
+            while True:
+                g += 1
+                _conway_charge(budget, (len(fs) + 1) * 2 * p.bit_length() * w, p, n)
+                if all(pow(g, (p - 1) // r, p) != 1 for r in fs):
+                    break
         c = [(-g) % p, 1]
         _CONWAY[key] = c
         return c
     if p ** n > 10 ** 7:
         raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
+    _conway_charge(budget, 3163 * w, p, n)  # (trial factoring of p^n - 1 <= 10^7)
     primes = [r for r, e in _factor_int(p ** n - 1)]
     subs = [m_ for m_ in range(1, n) if n % m_ == 0]
-    sub_polys = [(m_, _conway(p, m_)) for m_ in subs]
+    sub_polys = [(m_, _conway(p, m_, budget)) for m_ in subs]
     q1 = p ** n - 1
+    mn = 2 * n * n * w                  # one product mod the candidate, M(n)
+    expo = 2 * q1.bit_length() * mn     # one power x^e, e < p^n
     # enumerate (c_{n-1}, ..., c_0) lexicographically; the coefficient of
     # x^(n-i) is (-1)^i c_{n-i}
     for idx in range(p ** n):
@@ -1355,13 +1395,21 @@ def _conway(p, n):
         for i in range(1, n + 1):
             c = digits[i - 1]
             coeffs[n - i] = c if i % 2 == 0 else (-c) % p
+        _conway_charge(budget, n, p, n)  # (the candidate itself)
         if coeffs[0] == 0:
             continue
-        if not _is_primitive_poly(coeffs, p, n, primes):
+        # x primitive mod the candidate (as _is_primitive_poly), each power
+        # charged before it is taken: most candidates fail the first
+        _conway_charge(budget, expo, p, n)
+        if _ppowmod([0, 1], q1, coeffs, p) != [1]:
+            continue
+        _conway_charge(budget, len(primes) * expo, p, n)
+        if any(_ppowmod([0, 1], q1 // r, coeffs, p) == [1] for r in primes):
             continue
         ok = True
         for m_, cm in sub_polys:
             e = q1 // (p ** m_ - 1)
+            _conway_charge(budget, expo + len(cm) * (mn + m_), p, n)
             # the norm of x to GF(p^m) is x^e: a root of C_{p,m}
             xe = _ppowmod([0, 1], e, coeffs, p)
             val = []
