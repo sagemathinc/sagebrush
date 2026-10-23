@@ -552,7 +552,7 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D10)
+### Step 4 plan delta (D5 to D10, D10 r2)
 
 @sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4. r5 ("D6 r5") answers the reviews of 4772b3a0: daybreak3's LIMIT-PR65-4, and astra's note that echo confirmations must wait for the commit. r6 ("D6 r6") answers daybreak3's narrowed LIMIT-PR65-4 on c8a94c26: the timed fixture and its exact page counts.
 
@@ -777,6 +777,47 @@ C3 keeps the confirmed index in IndexedDB, and L4 says it is never held whole in
   - a derived identity colliding with a gone one (a forced miss, then a retry);
   - a miss on the 9th round (the page cut and the op run alone);
   - the 100k scale fixture's per-op and per-page rows-loaded maxima.
+
+**D10 r2: an exact overlay per op** (astra's CORR-PR65-D10-1). This supersedes r1's miss handling: "answers absent", the reducer's own undo, and the fixed 8 rounds.
+- r1 was unsound, as astra's probe shows. A miss answered "absent" lets `reduce` succeed against a partial index and change memory, and the reducer's private undo runs only on a caught exception. Some of its mutations (`rawPut`) also happen before a later lookup misses.
+- **Each op runs on a fresh overlay over the page's base.** The base is the page's partial index as left by the ops kept so far.
+  - The overlay presents the four maps (`byId`, `byKey`, `children`, `gone`). Every read looks in the overlay, then the base. Every write (`set`, `delete`, and every change to a `children` Set) goes to the overlay only.
+  - A `children` Set is copied from the base into the overlay the first time the op changes it (copy-on-write).
+  - An entry (`SyncEntry`) read from the base is copied into the overlay the first time it's read. The reducer changes entries in place (a move rewrites `path`, `updated` and `seq` on each), so it only ever holds the overlay's copies, and the base's objects are never touched.
+  - So nothing the op does, by any path in the reducer, reaches the base.
+- **A miss throws, and marks the overlay dirty.** A read of a key that the base doesn't know (neither loaded nor confirmed absent) sets the overlay's `missed` flag and throws.
+  - The reducer may catch the throw and return `skipped`. So the decision is the overlay's flag, never `reduce`'s result: a dirty overlay is discarded whole, whatever `reduce` returned.
+  - The missed keys are then loaded into the base (in the page's transaction), and the op runs again on a new, empty overlay.
+- **An op that ends with no miss** has its overlay merged into the base: each overlay key's value or deletion, and each copied Set and entry, replacing the base's. Its `changed` identities join the page's dirty set.
+- Earlier ops' changes in the same page are in the base, and only an op that completes merges into it. So a discarded overlay can't undo, or be undone by, anything else.
+- Iteration and every whole-map member still throw, as in r1. The overlay is the only object the reducer receives.
+- Test: astra's executable `mkdir` probe, a miss on `gone.get` after `rawPut`. The overlay is discarded, the base is unchanged, and the retry succeeds without "already there". Plus every vector, run with a miss forced at each lookup in turn: the result equals the in-memory reducer's.
+
+**D10 r2: work, long tasks and memory, bounded** (daybreak3's review of 124fa1c2).
+
+- **A work meter, per op and per page** (daybreak3's 1). Every `get`, `has`, `set` and `delete` the reducer makes on the partial index's four maps counts one unit, retries included.
+  - An op is run, and its units counted, before it is kept.
+  - A page stops before the op that would take it past 500,000 units, and its rows and cursor are written then. That op starts the next page.
+  - One op alone is bounded by the reducer's own contracts: at most its subtree (100,000) moved twice, plus at most 10,000 name probes per landing folder, plus at most 1,000 derived-identity candidates. So at most about 220,000 units, and a page always holds at least one op.
+  - So 1,000 ops each probing the same 10,000-name folder are cut into pages of at most about 50 ops, each page bounded, instead of one page of 10,000,000 probes.
+- **Retry rounds, isolated and bounded by the reducer's contracts** (daybreak3's 4). A retry reruns only the op that missed, on a fresh overlay, with the page's earlier ops kept in the base as they are. Each round loads only that round's misses.
+  - Rounds go on while each one loads at least one key not loaded before, up to 1,001 rounds: the reducer's 1,000-candidate series for a derived identity, plus one.
+  - So a valid run of more than 8 derived-identity collisions completes rather than halting. The rounds' units count in the op's work.
+  - An op that misses without loading anything new (impossible by the wrapper's construction) halts sync with a person-told error. The fixed "8 rounds" of r1 is withdrawn.
+- **Long tasks: a narrow, measured exception** (daybreak3's 2). A subtree move is one synchronous reducer call over the subtree; the reducer can't yield inside it without forking it.
+  - For an op that moves at most 1,000 entries, the 50 ms long-task bound holds as everywhere else.
+  - An op that moves more is a stated exception, bounded as the migrator's work is (L2: "the longest task must stay under 1 s"): its one long task stays under 1 s at the maximum, a 100,000-entry subtree, measured and asserted on the CI VM's Chrome.
+  - The workspace's own move of that subtree (api.ts `move`) is a task of the same size, so sync adds none larger than the workspace already does.
+- **Transient memory, counted** (daybreak3's 3).
+  - Each op's `Outcome.changed` is merged into the page's one `dirty` set at once and dropped.
+  - Rows are loaded with cursors, at most 1,000 values a request, each batch inserted into the partial index and dropped before the next request. No unbounded array is held.
+  - The 200,000-row budget counts the partial index's rows, the `dirty` set and the batch in hand together.
+  - The scale test asserts the page's peak JS heap growth (Chrome's `performance.memory`, the test's Chrome started with `--enable-precise-memory-info`) under 256 MiB at the maxima: a 100,000-entry subtree move, and a page of ops cut by the meter.
+- **Tests added:**
+  - 1,000 ops into one 10,000-name folder: the pages cut by the meter, none over 500,000 units;
+  - a derived-identity series with 20 collisions completes (20 rounds);
+  - a 100,000-entry subtree move: one long task under 1 s, and the heap growth asserted;
+  - a 1,000-entry move: no long task over 50 ms.
 
 ## 4. Who builds what, in order, and the size of each
 
