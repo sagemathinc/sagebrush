@@ -103,6 +103,41 @@ Untrusted content reaches the page in these ways:
      implementation fields (bytes' `Uint8Array`, a reversed iterator's
      closure) as Python attributes; those names are the runtime's, like the
      `$` slots, hidden from access and `vars()`.
+7. **An optional package set runs only from the bytes its id names (SEC-PKG-1).**
+   Optional packages (optional/<name>/; plan-modular-packages-r4) are
+   published as content-addressed sets, outside the core. They are reviewed
+   first-party code, and the contract lint is not a sandbox for their
+   Python. What is guaranteed is integrity and ownership, in every host
+   (src/pkgset.ts):
+   - a set's id is the SHA-256 of its index's exact bytes. It comes from the
+     notebook's pin, or once from the site's `pkgset/latest.json`, never from
+     the set itself;
+   - the index pins every chunk by its whole SHA-256 and size, and every
+     file by its SHA-256. A chunk's own header must name the package and
+     kind the index gives it;
+   - the index is parsed strictly: no duplicate keys, no `__proto__`,
+     `constructor` or `prototype`, and bounded depth and sizes (`PKGSET_LIMITS`).
+     It is admitted whole before anything changes;
+   - nothing in a set can replace or extend a core, builtin or bundled
+     module, or take a bundled package's directory;
+   - a set's precompiled code is kept apart from the core's
+     (`__SAGEBRUSH_PRECOMPILED__` is never written) and used only for that
+     package's own files in that exact build;
+   - a runtime has at most one set. Another needs a new interpreter.
+
+   The service worker (web/sw.js) treats `/pkg/<sha256>.json` and
+   `/pkgset/<sha256>.json` as content-addressed:
+   - a response is used only if its bytes have the SHA-256 in its own path,
+     from the network (no redirects followed) and from its cache alike;
+   - it is always served as a response made there (200, JSON, no other
+     headers);
+   - it is kept in a cache of its own (`sb-pkg-v1`), never the build's,
+     bounded by a ledger (64 entries, 256 MiB or a tenth of the quota, and
+     never into the documents' reserve), with heartbeat pins only;
+   - a Range request is never kept.
+
+   The worker checks every byte against the index again, so a poisoned cache
+   or a wrong answer can make an import fail, but never run other code.
 
 ## Found and fixed (October 12)
 
