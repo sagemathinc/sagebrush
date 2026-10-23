@@ -1498,7 +1498,84 @@ async function rebuildBehind() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind };
+// ---- step 4: the first sync's adoption (C3)
+
+async function firstSync() {
+  // (a tree made before sync: each identity up once, adopted or made; one in Trash as adopt then remove; one inside a
+  // folder in Trash not adopted; the folder before what is in it)
+  await account();
+  const w = await fresh();
+  await w.mkdir("/p");
+  const f = await w.create("/p/f.txt", { content: "ff" });
+  const g = await w.create("/g.txt", { content: "gg" });
+  const nb = await w.create("/n.ipynb");
+  const t = await w.create("/t.txt", { content: "tt" });
+  await w.remove("/t.txt");
+  await w.mkdir("/q");
+  const inq = await w.create("/q/in.txt", { content: "in" });
+  await w.remove("/q");
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync: settled: " + J(c.status));
+    const { mine } = await serverOps(w);
+    const by = (id) => mine.filter((o) => o.fid === id || o.ref === id);
+    const p = await w.stat("/p");
+    check(by(p.fid).length === 1 && by(p.fid)[0].op === "mkdir", "first sync: the folder made once: " + J(by(p.fid).map((o) => o.op)));
+    check(by(f.fid).length === 1 && by(f.fid)[0].op === "adopt" && by(f.fid)[0].parent === p.fid && by(f.fid)[0].dseq > by(p.fid)[0].dseq, "first sync: its file adopted once, into it by identity, after it");
+    check(by(g.fid).length === 1 && by(nb.ref).length === 1, "first sync: a root file and a notebook adopted once each");
+    check(J(by(t.fid).map((o) => o.op)) === J(["adopt", "remove"]), "first sync: one in Trash: adopted where it was, then removed: " + J(by(t.fid).map((o) => o.op)));
+    check(by(inq.fid).length === 0, "first sync: inside a folder in Trash: not adopted");
+    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length;
+    check(puts >= 3, "first sync: the files' bytes uploaded: " + puts);
+    const ns = nsOf(c);
+    check(!(await metaGet(w.ws, `sync:${ns}:journal`)) && !(await metaGet(w.ws, `sync:${ns}:adopt`)), "first sync: the journal drained and dropped");
+    await w.mkdir("/later");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/later")), "first sync: then the scanner goes on");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function firstSyncRace() {
+  // (C3: a final local write racing the closing transaction: in the journal or sent by the scan, exactly once)
+  await account();
+  const w = await fresh();
+  const f = await w.create("/r.txt", { content: "one" });
+  let wrote = false;
+  W.ADOPT.before = async (step) => { if (step === "close" && !wrote) { wrote = true; await w.write("/r.txt", "two"); } };
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync race: settled");
+    const { mine } = await serverOps(w);
+    const ops = mine.filter((o) => o.fid === f.fid);
+    const last = ops[ops.length - 1];
+    check(wrote && last?.sha256 === (await w.stat("/r.txt")).sha256, "first sync race: the server ends with the written bytes: " + J(ops.map((o) => [o.op, o.sha256?.slice(0, 6)])));
+    check(ops.filter((o) => o.sha256 === (await w.stat("/r.txt")).sha256).length === 1, "first sync race: …sent exactly once");
+  } finally {
+    W.ADOPT.before = null;
+    await stop(c);
+  }
+}
+
+async function firstSyncCollision() {
+  // (C3's last test: the cloud has /x; this device's first sync with its own /x: the cloud's is /x, this one /x (2),
+  // here as on the server)
+  await account();
+  const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/x", kind: "folder", fid: "00000000000000c1" }] });
+  check(r.ack?.ops?.[0]?.seq, "first sync collision: the cloud has /x");
+  const w = await fresh();
+  const mine = await w.mkdir("/x");
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync collision: settled");
+    const here = await w.stat("/x"), ours = (await w.list("/")).find((e) => e.fid === mine.fid);
+    check(here?.fid === "00000000000000c1" && ours?.path === "/x (2)", "first sync collision: the cloud's /x here, this device's at /x (2): " + J({ x: here?.fid, ours: ours?.path }));
+  } finally {
+    await stop(c);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, firstSync, firstSyncRace, firstSyncCollision };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
