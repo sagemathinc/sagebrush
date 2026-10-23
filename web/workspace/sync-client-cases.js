@@ -1694,8 +1694,11 @@ async function scaleRebuild() {
   const longs = [];
   const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) if (window.__phase) longs.push(e.duration); });
   try { obs.observe({ type: "longtask" }); } catch {}
+  globalThis.gc?.();
   let heap0 = performance.memory?.usedJSHeapSize ?? 0, heapMax = heap0, pages = null;
+  const at = {};
   W.REBUILD.before = async (phase) => {
+    at[phase] ??= Date.now();
     if (phase === "view-page" || phase === "retire-page") { window.__phase = phase; heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }
     else if (phase === "announce") { window.__phase = ""; pages = (await W.passOf(w, ns))?.pages; }
     else window.__phase = "";
@@ -1713,7 +1716,8 @@ async function scaleRebuild() {
     const longest = Math.max(0, ...longs);
     check(longest < 50, "scale: every long task under 50 ms: longest " + Math.round(longest) + " ms, " + longs.length + " over 50");
     check(doneToResume <= 300, `scale: done to resume (the first ops message) ${doneToResume.toFixed(1)} s (at most 300 s)`);
-    check(true, "scale: figures " + J({ doneToResumeS: +doneToResume.toFixed(1), viewMaxRequests: vmax, retireMaxRequests: rmax, longestTaskMs: Math.round(longest), heapGrowthMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) }));
+    const secs = (a, b) => (a && b ? +((b - a) / 1000).toFixed(1) : null);
+    check(true, "scale: figures " + J({ doneToResumeS: +doneToResume.toFixed(1), viewS: secs(at["view-page"], at["retire-page"]), retireS: secs(at["retire-page"], at.announce), announceToOpsS: secs(at.announce, firstOps.at), viewMaxRequests: vmax, retireMaxRequests: rmax, longestTaskMs: Math.round(longest), heapGrowthMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) }));
   } finally {
     W.REBUILD.before = null;
     window.__phase = "";

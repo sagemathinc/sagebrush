@@ -30,6 +30,10 @@ import { VIEW_STORES, applyView, type JournalRecord, type ListedWhy } from "./sy
 import { rebuildKey, wireOf, recordBytes, chargeOf, type Obligation, type OutboxRecord } from "./sync-outbox";
 import { RELEASE_STORES, release, pendingOf, stateOf, putPending, capNow, afterReleases, type Pin } from "./sync-pins";
 
+/** A rebuild page's transaction: each writes its own position with its effect, so a page an OS crash loses (relaxed
+ * durability: committed to the browser, not yet flushed) is simply done again; a tab's crash loses nothing committed. */
+const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
+
 export const REBUILD = {
   /** records or identities a capture, view or retire transaction takes at most */
   page: 100,
@@ -114,7 +118,7 @@ export async function cleanStep(w: Workspace, ns: string): Promise<boolean> {
       else meta.delete(cleanKey(ns));
     }
     return list.length > 0;
-  });
+  }, RELAXED);
 }
 
 // ---- stage
@@ -317,7 +321,7 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
     cut("capture");
     meta.put({ ...p, at }, passKey(ns));
     return false;
-  });
+  }, RELAXED);
 }
 
 // ---- done
@@ -386,7 +390,7 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
     const fin = peek.length <= REBUILD.page;
     meta.put(fin ? { ...p, phase: "retire", at: { step: "echoes", key: "" } } : { ...p, at: { key: ids[ids.length - 1] } }, passKey(ns));
     return { done: fin, ops: v.ops, listed: v.listed };
-  }));
+  }, RELAXED));
 }
 
 // ---- retire
@@ -501,7 +505,7 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
     meta.put(t, totalsKey);
     cut("retire");
     return fin;
-  });
+  }, RELAXED);
   afterReleases(w);
   return r;
 }

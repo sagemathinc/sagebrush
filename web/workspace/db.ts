@@ -166,8 +166,8 @@ export function req<T>(r: IDBRequest<T>): Promise<T> {
 /** `f` in one transaction, its result once the transaction has committed;
  * if `f` throws, the transaction is aborted (nothing of it written) and the
  * error passed on.  `f` may await only the transaction's own requests. */
-export async function inTx<T>(db: IDBDatabase, stores: string | string[], mode: IDBTransactionMode, f: (tx: IDBTransaction) => Promise<T>): Promise<T> {
-  const tx = db.transaction(stores, mode);
+export async function inTx<T>(db: IDBDatabase, stores: string | string[], mode: IDBTransactionMode, f: (tx: IDBTransaction) => Promise<T>, opts?: IDBTransactionOptions): Promise<T> {
+  const tx = opts ? db.transaction(stores, mode, opts) : db.transaction(stores, mode);
   const done = new Promise<void>((ok, no) => {
     tx.oncomplete = () => ok();
     tx.onerror = () => no(tx.error);
