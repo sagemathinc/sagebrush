@@ -159,7 +159,7 @@ TABLE = {
     "NewSubspace": (["modular forms"], "The new part of a space of modular symbols."),
     "HeckePolynomial": (["modular forms"], "The characteristic polynomial of the Hecke operator T_p on a space."),
     "HeckeOperator": (["modular forms"], "The Hecke operator T_p on a space of modular symbols."),
-    "CharacteristicPolynomial": (["modular forms", "matrices"], "The characteristic polynomial of an operator."),
+    "CharacteristicPolynomial": (["modular forms", "matrices", "finite fields"], "The characteristic polynomial of an operator, a matrix, or a finite field element (optionally over a subfield)."),
     "NewformDecomposition": (["modular forms"], "A space of modular symbols split into Galois orbits of newforms."),
     "DimensionCuspFormsGamma0": (["modular forms"], "The dimension of the cusp forms of level N and weight k."),
     "DimensionNewCuspFormsGamma0": (["modular forms"], "The dimension of the new cusp forms of level N and weight k."),
@@ -182,6 +182,12 @@ TABLE = {
     "GaloisField": (["finite fields"], "The finite field with q elements: the same as GF(q) or GF(p, n)."),
     "Characteristic": (["finite fields"], "The characteristic of a finite field."),
     "PrimitiveElement": (["finite fields"], "A generator of a finite field's multiplicative group."),
+    "PrimeField": (["finite fields"], "The prime field GF(p) of a finite field."),
+    "Generator": (["finite fields"], "The generator F.1 of a finite field over its prime field (1 for GF(p) itself)."),
+    "DefiningPolynomial": (["finite fields"], "The defining (Conway) polynomial of a finite field, or the minimal polynomial of F.1 over a subfield."),
+    "IsSubfield": (["finite fields"], "Whether one finite field is a subfield of another."),
+    "Embed": (["finite fields"], "Checks that one finite field embeds in another (Sagebrush's finite fields are already embedded)."),
+    "Root": (["finite fields"], "A k-th root of a finite field element, where it is determined."),
     "IsPrimitive": (["finite fields"], "Whether an element generates its finite field's multiplicative group."),
     "Order": (["finite fields"], "The multiplicative order of an element of a finite field."),
     # number fields
@@ -201,9 +207,9 @@ TABLE = {
     "Regulator": (["number fields"], "The regulator of a number field."),
     "UnitRank": (["number fields"], "The rank of the unit group of a number field."),
     "Decomposition": (["number fields"], "How a prime splits in a ring of integers: the primes above it."),
-    "Norm": (["number fields"], "The norm of an element of a number field."),
+    "Norm": (["number fields", "finite fields"], "The norm of an element of a number field, or of a finite field (optionally over a subfield)."),
     "Trace": (["number fields", "matrices"], "The trace of an element or of a square matrix, by the type of its argument."),
-    "MinimalPolynomial": (["number fields"], "The minimal polynomial of an algebraic number."),
+    "MinimalPolynomial": (["number fields", "finite fields"], "The minimal polynomial of an algebraic number, or of a finite field element (optionally over a subfield)."),
     # matrices
     "Matrix": (["matrices"], "A matrix from rows or from a size and entries."),
     "HermiteForm": (["matrices"], "The Hermite normal form of an integer matrix."),
@@ -304,6 +310,34 @@ Finite field of size 2^3""",
     "PrimitiveElement": """\
 > PrimitiveElement(GF(7));
 3""",
+    "PrimeField": """\
+> PrimeField(GF(16));
+Finite field of size 2""",
+    "Generator": """\
+> F<a> := GF(16);
+> Generator(F);
+a
+> Generator(GF(7));
+1""",
+    "DefiningPolynomial": """\
+> DefiningPolynomial(GF(16));
+$.1^4 + $.1 + 1
+> K<b> := GF(16); F<a> := GF(4);
+> DefiningPolynomial(K, F);
+$.1^2 + $.1 + a""",
+    "IsSubfield": """\
+> IsSubfield(GF(4), GF(16));
+true
+> IsSubfield(GF(8), GF(16));
+false""",
+    "Embed": """\
+> Embed(GF(4), GF(16));
+> GF(4).1 in GF(16);
+true""",
+    "Root": """\
+> K<b> := GF(16);
+> Root(b, 7);
+b^13""",
     "IsPrimitive": """\
 > IsPrimitive(GF(7)!3);
 true""",
@@ -1045,6 +1079,8 @@ SIGNATURES = {
         "FldRatElt": ("A rational number is its own trace.", "> Trace(3/4);\n3/4"),
         "FldFinElt": ("The absolute trace of a finite field element: the sum of its conjugates, in the prime field.",
                       "> F<z> := GF(9);\n> Trace(z);\n1"),
+        "FldFinElt, FldFin": ("The trace of a finite field element over a subfield of its field.",
+                              "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"),
         "FldAlgElt": ("The trace of a number field element: the sum of its conjugates.",
                       "> K<w> := QuadraticField(7);\n> Trace(3 + w);\n6"),
         "MtrxS": ("The trace of a square matrix: the sum of its diagonal entries.",

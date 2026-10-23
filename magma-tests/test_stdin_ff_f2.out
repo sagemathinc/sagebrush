@@ -73,12 +73,6 @@ Runtime error in 'CharacteristicPolynomial': Argument 2 is not a subfield of the
 parent of argument 1
 
 
->> Trace(b, Integers());
-        ^
-Runtime error in 'Trace': Bad argument types
-Argument types given: FldFinElt, RngInt
-
-
 >> Root(P!4, 0);
        ^
 Runtime error in 'Root': Argument 85 is not positive

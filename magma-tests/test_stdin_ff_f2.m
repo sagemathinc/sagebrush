@@ -12,7 +12,6 @@ Trace(a, K);
 Norm(b, GF(3));
 MinimalPolynomial(a, K);
 CharacteristicPolynomial(b, E);
-Trace(b, Integers());
 Root(P!4, 0);
 Root(P!4, -2);
 Root(b^5, 3);

@@ -7355,10 +7355,25 @@ def Sqrt(x):
 # here only Magma's signatures, words (checked against Magma 2.18) and
 # objects.
 
+def _call_pos(name):
+    """Where Magma points at an error of the intrinsic `name`: the "(" of its
+    first call at or after the current statement's start (line, col), or
+    None (the statement's start, as before)."""
+    line, col = _pos[0], _pos[1]
+    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
+    m = _re.compile(r"(?<![A-Za-z0-9_'])%s\s*\(" % _re.escape(name)).search(text, max(0, col - 1))
+    return (line, m.end()) if m else None
+
+
+def _fferr(msg, name):
+    """Magma's error `msg` in the intrinsic `name`, at its call."""
+    return MagmaError(msg, "'%s'" % name, True, _call_pos(name))
+
+
 def _ff_work(what, x):
     """The refusal past the one-call budget (WORK), in words."""
-    return lambda: MagmaError("%s of an element of a finite field of degree %d is not supported yet (work)"
-                              % (what, _ffsub.pnq(x.parent())[1]), "'%s'" % what)
+    return lambda: _fferr("%s of an element of a finite field of degree %d is not supported yet (work)"
+                          % (what, _ffsub.pnq(x.parent())[1]), what)
 
 
 def _ff_poly(K, coeffs):
@@ -7383,16 +7398,18 @@ def _ff_absolute(what, x):
     return _ff_poly(P, f)
 
 
-def _ff_relative(what, x, F):
+def _ff_relative(what, x, F, name=None):
     """The same over F, a subfield of x's field (Magma's error otherwise);
-    over a proper subfield bounded as F1's descent."""
+    over a proper subfield bounded as F1's descent.  (name: the intrinsic
+    said in a refusal, when not `what`.)"""
+    name = name or what
     if not isinstance(F, _MFinField):
-        raise _bad_types(what, (x, F))
+        raise _bad_types(name, (x, F), _call_pos(name))
     K = x.parent()
     if not _ffsub.is_subfield(F.K, K):
-        raise MagmaError("Argument 2 is not a subfield of the parent of argument 1", "'%s'" % what)
+        raise _fferr("Argument 2 is not a subfield of the parent of argument 1", name)
     kind = {"Trace": "trace", "Norm": "norm", "MinimalPolynomial": "minpoly"}.get(what, "charpoly")
-    r = _ffsub.relative(kind, x, F.K, [_ffsub.WORK], _ff_refuse(what, _ffwrap(K), F, "'%s'" % what))
+    r = _ffsub.relative(kind, x, F.K, [_ffsub.WORK], _ff_refuse(name, _ffwrap(K), F, "'%s'" % name, _call_pos(name)))
     return _ff_poly(F.K, r) if isinstance(r, list) else r
 
 
@@ -7400,54 +7417,54 @@ def PrimeField(F):
     if isinstance(F, _MFinField):
         return _ffwrap(_sff.GF(F.p))
     if F is _ZZ:
-        raise _bad_types("PrimeField", (F,))
-    raise MagmaError("PrimeField of this argument is not supported yet", "'PrimeField'")
+        raise _bad_types("PrimeField", (F,), _call_pos("PrimeField"))
+    raise _fferr("PrimeField of this argument is not supported yet", "PrimeField")
 
 
-def Generator(F, E=None):
+def Generator(F, sub=None):
     """F.1 (1 in a prime field, as Magma's: not the primitive element);
-    with E, a subfield of F (Magma's error otherwise), the same."""
-    if not isinstance(F, _MFinField) or (E is not None and not isinstance(E, _MFinField)):
-        raise MagmaError("Generator of this argument is not supported yet", "'Generator'")
-    if E is not None and not _ffsub.is_subfield(E.K, F.K):
-        raise MagmaError("Argument 2 is not a subfield of argument 1", "'Generator'")
+    with sub, a subfield of F (Magma's error otherwise), the same."""
+    if not isinstance(F, _MFinField) or (sub is not None and not isinstance(sub, _MFinField)):
+        raise _fferr("Generator of this argument is not supported yet", "Generator")
+    if sub is not None and not _ffsub.is_subfield(sub.K, F.K):
+        raise _fferr("Argument 2 is not a subfield of argument 1", "Generator")
     return F.K(1) if F.n == 1 else F.K.gen()
 
 
-def DefiningPolynomial(F, E=None):
+def DefiningPolynomial(F, sub=None):
     """The defining polynomial of F over GF(p): its Conway polynomial, and
     X - 1 for GF(p) itself ($.1 + (p - 1), as Magma's, whose generator
-    there is 1); with E, a subfield of F (Magma's error otherwise), the
-    minimal polynomial of F.1 over E."""
-    if not isinstance(F, _MFinField) or (E is not None and not isinstance(E, _MFinField)):
-        raise MagmaError("DefiningPolynomial of this argument is not supported yet", "'DefiningPolynomial'")
+    there is 1); with sub, a subfield of F (Magma's error otherwise), the
+    minimal polynomial of F.1 over sub."""
+    if not isinstance(F, _MFinField) or (sub is not None and not isinstance(sub, _MFinField)):
+        raise _fferr("DefiningPolynomial of this argument is not supported yet", "DefiningPolynomial")
     P = _sff.GF(F.p)
-    if E is not None and not _ffsub.is_subfield(E.K, F.K):
-        raise MagmaError("Argument 2 is not a subfield of argument 1", "'DefiningPolynomial'")
+    if sub is not None and not _ffsub.is_subfield(sub.K, F.K):
+        raise _fferr("Argument 2 is not a subfield of argument 1", "DefiningPolynomial")
     if F.n == 1:
-        return _ff_poly(P if E is None else E.K, [F.p - 1, 1])
-    if E is None or E.n == 1:
-        return _ff_poly(P if E is None else E.K, F.K._f)
-    return _ff_relative("MinimalPolynomial", F.K.gen(), E)
+        return _ff_poly(P if sub is None else sub.K, [F.p - 1, 1])
+    if sub is None or sub.n == 1:
+        return _ff_poly(P if sub is None else sub.K, F.K._f)
+    return _ff_relative("MinimalPolynomial", F.K.gen(), sub, "DefiningPolynomial")
 
 
 def IsSubfield(F, K):
     if isinstance(F, _MFinField) and isinstance(K, _MFinField):
         return _ffsub.is_subfield(F.K, K.K)
-    raise MagmaError("IsSubfield of these arguments is not supported yet", "'IsSubfield'")
+    raise _fferr("IsSubfield of these arguments is not supported yet", "IsSubfield")
 
 
 def Embed(F, K, x=None):
     """Embed(F, K[, x]), a procedure: every subfield of a finite field is
     already embedded (Conway-compatibly), so Magma's checks only."""
     if not (isinstance(F, _MFinField) and isinstance(K, _MFinField)):
-        raise MagmaError("Embed of these arguments is not supported yet", "'Embed'")
+        raise _fferr("Embed of these arguments is not supported yet", "Embed")
     if F.p != K.p:
-        raise MagmaError("Arguments 1 and 2 have different characteristics", "'Embed'")
+        raise _fferr("Arguments 1 and 2 have different characteristics", "Embed")
     if K.n % F.n:
-        raise MagmaError("Degree of argument 1 does not divide degree of argument 2", "'Embed'")
+        raise _fferr("Degree of argument 1 does not divide degree of argument 2", "Embed")
     if x is not None:
-        raise MagmaError("Argument 1 is already a subfield of argument 2", "'Embed'")
+        raise _fferr("Argument 1 is already a subfield of argument 2", "Embed")
     return None
 
 
@@ -7489,20 +7506,20 @@ def Root(x, k):
     roots (several, Magma's choice unverified) and exponents of more than
     1024 bits (Magma takes them) are refused."""
     if not _is_ff(x) or not isinstance(k, int) or isinstance(k, bool):
-        raise MagmaError("Root of these arguments is not supported yet", "'Root'")
+        raise _fferr("Root of these arguments is not supported yet", "Root")
     if k <= 0:
         # (Magma's own words, its argument number included)
-        raise MagmaError("Argument 85 is not positive", "'Root'")
+        raise _fferr("Argument 85 is not positive", "Root")
     st, r = _ffsub.root(x, k, [_ffsub.WORK],
-                        lambda: MagmaError("Root of an exponent of more than %d bits is not supported yet" % _ffsub.ROOT_BITS, "'Root'"),
+                        lambda: _fferr("Root of an exponent of more than %d bits is not supported yet" % _ffsub.ROOT_BITS, "Root"),
                         _ff_work("Root", x))
     if st == "unique":
         return r
     if st == "none":
-        raise MagmaError("No solution exists", "'Root'")
+        raise _fferr("No solution exists", "Root")
     r = _root2(x, "'Root'") if k == 2 else None
     if r is None:
-        raise MagmaError("Root of degree %d in this finite field is not supported yet" % k, "'Root'")
+        raise _fferr("Root of degree %d in this finite field is not supported yet" % k, "Root")
     return r
 
 
@@ -8909,10 +8926,10 @@ def HeckeOperator(M, p):
     return _HeckeOp(_msym("HeckeOperator", M), p)
 
 
-def CharacteristicPolynomial(T, F=None):
+def CharacteristicPolynomial(T, sub=None):
     if _is_ff(T):
-        return _ff_absolute("CharacteristicPolynomial", T) if F is None else _ff_relative("CharacteristicPolynomial", T, F)
-    if F is not None:
+        return _ff_absolute("CharacteristicPolynomial", T) if sub is None else _ff_relative("CharacteristicPolynomial", T, sub)
+    if sub is not None:
         raise MagmaError("CharacteristicPolynomial of these arguments is not supported yet", "'CharacteristicPolynomial'")
     if isinstance(T, _MFFMat):
         # (in a new polynomial ring, its variable unnamed: $.1, as Magma's)
@@ -9653,11 +9670,11 @@ def Decomposition(O, p):
     return MSeq(MTuple([_MPrime(P, F._maximal_order()), P.ramification_index()]) for P in F.primes_above(int(p)))
 
 
-def Norm(x, F=None):
-    if F is not None:
+def Norm(x, sub=None):
+    if sub is not None:
         if not _is_ff(x):
             raise MagmaError("Norm of these arguments is not supported yet", "'Norm'")
-        return _ff_relative("Norm", x, F)
+        return _ff_relative("Norm", x, sub)
     if hasattr(x, "_magma_norm"):
         return x._magma_norm()
     if _is_ff(x):
@@ -9701,10 +9718,10 @@ _unimplemented_signature("Trace", "FldAlgElt", "Rng", ret="RngElt")
 _unimplemented_signature("Trace", "RngOrdElt", "Rng", ret="RngElt")
 
 
-def MinimalPolynomial(x, F=None):
+def MinimalPolynomial(x, sub=None):
     if _is_ff(x):
-        return _ff_absolute("MinimalPolynomial", x) if F is None else _ff_relative("MinimalPolynomial", x, F)
-    if F is not None:
+        return _ff_absolute("MinimalPolynomial", x) if sub is None else _ff_relative("MinimalPolynomial", x, sub)
+    if sub is not None:
         raise MagmaError("MinimalPolynomial of these arguments is not supported yet", "'MinimalPolynomial'")
     if isinstance(x, _snf.NumberFieldElement):
         f = x.minpoly()
