@@ -552,9 +552,9 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D9, r4)
+### Step 4 plan delta (D5 to D9, r5)
 
-@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4.
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4. r5 ("D6 r5") answers the reviews of 4772b3a0: daybreak3's LIMIT-PR65-4, and astra's note that echo confirmations must wait for the commit.
 
 **D5 (r2). Two cursors** (daybreak3's CORR-PR65-1).
 - `apply_after` is the durable confirmed cursor (`sync:<ns>:cursor`). Only ops with $\text{seq} > \text{apply\_after}$ are reduced into `syncIndex`, as one contiguous suffix, the suffix and the cursor committed in one transaction (C3).
@@ -685,6 +685,19 @@ Each journal record goes once, retired by its echo or its refusal (C1). A refusa
   - the newer staging log has Y at /c;
   - $W_0 = 10$, $W_1 = 11$.
   The replay passes over seq 11, Y has no journal record, and nothing renames /c back to /b. Y ends at /c on both devices.
+
+**D6 r5: how long sending stays halted, and echoes after the commit** (daybreak3's LIMIT-PR65-4; astra's note on r4).
+- **Echo confirmations wait for the commit** (astra). In `log`, an echo matched to a record by `sameOp` is staged with the pass: under the pass's generation, in its journal store, as `{dseq, seq}`. It is not applied to the live outbox. `retire` applies the staged confirmations (removing the confirmed records and releasing their pins) in its own pages, after a successful `done`. A failed pass discards them with the rest of its generation, so a failed pass confirms nothing. Test: a pass that matches echoes and then fails its compare-and-swap leaves every matched record undecided and every pin where it was.
+- **Elapsed time from `done` to sending again** (daybreak3's LIMIT-PR65-4). At the maxima:
+  - `view` walks the union of 100,000 index identities and 100,000 entries: at most 2,000 transactions of 100;
+  - `retire` removes up to 10,000 replaced records, up to 100,000 undrained records of an earlier committed journal, and the staged confirmations: at most 1,100 transactions of 100.
+  So at most about 3,100 sequential transactions, each of at most 400 IndexedDB requests.
+  - **Yielding:** each page is its own transaction. Between pages the work yields to the event loop (a timer), as the pins cleanup does, so no long task spans pages, and the page stays responsive.
+  - **Target:** every transaction's longest task under 50 ms (C2's measured cleanup slices), and done-to-resume at most 300 s at the maxima ($3{,}100 \times 50\ \text{ms} \approx 155$ s, plus the yields). An ordinary workspace takes seconds.
+  - **Measured:** the scale test (100,000 confirmed entries, 10,000 pending records and 100,000 undrained journal records, on the CI VM's Chrome) asserts done-to-resume at most 300 s, every transaction under 400 requests, and every long task under 50 ms, and reports the figures.
+  - **Progress:** the foot says "Rebuilding sync… N%", computed from the phase and its durable position. A reload resumes `view` and `retire` from those positions, never from the start.
+  - **The person isn't stopped:** local edits keep saving (they're past `W1`, the scanner's), and nothing waiting is lost.
+  - **Why sending doesn't resume before `retire` ends** (@sagebrush's question). The replaced records (dseq below `server_next`) are still in the outbox until `retire` removes them. If sending resumed, the sender would resend them, and the server would answer each with its stored decision for a different op at that dseq: a wrong decision applied to the wrong record. A fence ("never send below `server_next`") would stop that. But the journal's drain also needs `retire`'s pin handover: until a page hands a replaced record's pin to the journal record of its identity, the drain could find that identity's bytes owned by a dead record. So sending would have to be fenced per identity as well, a second invariant for a bounded wait of about 155 s once in a rebuild's life. We keep the halt, and the bound above.
 
 **D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
 
