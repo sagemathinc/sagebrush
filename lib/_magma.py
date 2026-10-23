@@ -7357,12 +7357,42 @@ def Sqrt(x):
 
 def _call_pos(name):
     """Where Magma points at an error of the intrinsic `name`: the "(" of its
-    first call at or after the current statement's start (line, col), or
-    None (the statement's start, as before)."""
+    first call at or after the current statement's start (line, col),
+    outside string literals and comments (astra on dae43019: not a "Root("
+    in a string), or None (the statement's start, as before)."""
     line, col = _pos[0], _pos[1]
     text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
-    m = _re.compile(r"(?<![A-Za-z0-9_'])%s\s*\(" % _re.escape(name)).search(text, max(0, col - 1))
-    return (line, m.end()) if m else None
+    rx = _re.compile(r"%s\s*\(" % _re.escape(name))
+    i, n = max(0, col - 1), len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            # (a string literal, its escapes skipped)
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if text.startswith("//", i):
+            return None
+        if text.startswith("/*", i):
+            k = text.find("*/", i + 2)
+            if k < 0:
+                return None
+            i = k + 2
+            continue
+        if c.isalpha() or c == "_":
+            k = i
+            while k < n and (text[k].isalnum() or text[k] in "_'"):
+                k += 1
+            if text[i:k] == name:
+                m = rx.match(text, i)
+                if m:
+                    return (line, m.end())
+            i = k
+            continue
+        i += 1
+    return None
 
 
 def _fferr(msg, name):
@@ -7475,23 +7505,33 @@ def Embed(F, K, x=None):
 _ROOT2_MAX = 3 ** 12
 
 
-def _root2(x, where):
-    """Magma's square root of the square x (odd p, nonzero), or None where
-    its choice isn't verified; the whole cost charged first."""
+def _root2_cost(x):
+    """The closed-form cops of Magma's square root of x (odd p) where its
+    choice is verified, or None where it isn't (refused).  In GF(p),
+    p = 3 mod 4: x^((p + 1)/4).  In GF(p^n), n > 1, q <= _ROOT2_MAX:
+    x.sqrt() (the generator's primitivity check, omega(q - 1) + 1 powers;
+    is_square, one power; Tonelli-Shanks' three powers and at most
+    S (2 S + 3) products, q - 1 = 2^S Q) and one discrete log (D(q, n),
+    the trial factoring included)."""
     K = x.parent()
     p, n, q = _ffsub.pnq(K)
     if n == 1:
-        if p % 4 != 3:
-            return None
-        _ffsub.charge([_ffsub.WORK], _ffsub.pow_cost((p + 1) // 4, _ffsub.w(p)), _ff_work("Root", x))
-        return x ** ((p + 1) // 4)
+        return _ffsub.prime_pow_cost((p + 1) // 4, p) if p % 4 == 3 else None
     if q > _ROOT2_MAX:
         return None
-    S = (q - 1 & -(q - 1)).bit_length() - 1  # (q - 1 = 2^S Q, Q odd)
+    S = (q - 1 & -(q - 1)).bit_length() - 1
     M = _ffsub.mn(p, n)
-    cost = ((len(_sff._factor_int(q - 1)) + 4) * _ffsub.pow_cost(q, M) + (2 * S * S + 3 * S) * M
-            + 2 ** 11 + _ffsub.dlog_cost(K))
-    _ffsub.charge([_ffsub.WORK], cost, _ff_work("Root", x))
+    return ((len(_sff._factor_int(q - 1)) + 5) * _ffsub.pow_bound(q, M) + S * (2 * S + 3) * M
+            + _ffsub.dlog_cost(K))
+
+
+def _root2(x):
+    """Magma's square root of the square x (odd p, nonzero, _root2_cost not
+    None), its cost already charged with the rest of Root's (one budget)."""
+    K = x.parent()
+    p, n, q = _ffsub.pnq(K)
+    if n == 1:
+        return x ** ((p + 1) // 4)
     r = x.sqrt()
     k = _sff._dlog(r, K.gen(), None, q - 1, lambda u, v: u * v, K.one())
     # (_ff_sqrt's choice: of r and -r, the one with the smaller logarithm;
@@ -7504,23 +7544,25 @@ def Root(x, k):
     gcd(k, q - 1) = 1 (or x = 0), Magma's square root for k = 2 where its
     choice is verified, "No solution exists" when there is none; other
     roots (several, Magma's choice unverified) and exponents of more than
-    1024 bits (Magma takes them) are refused."""
+    1024 bits (Magma takes them) are refused.  ONE budget: the shared
+    root()'s cost and, for k = 2, the square root's, charged together
+    before any power (astra CORR-FF2-3)."""
     if not _is_ff(x) or not isinstance(k, int) or isinstance(k, bool):
         raise _fferr("Root of these arguments is not supported yet", "Root")
     if k <= 0:
         # (Magma's own words, its argument number included)
         raise _fferr("Argument 85 is not positive", "Root")
+    sq = _root2_cost(x) if k == 2 and _ffsub.pnq(x.parent())[0] != 2 else None
     st, r = _ffsub.root(x, k, [_ffsub.WORK],
                         lambda: _fferr("Root of an exponent of more than %d bits is not supported yet" % _ffsub.ROOT_BITS, "Root"),
-                        _ff_work("Root", x))
+                        _ff_work("Root", x), extra=sq or 0)
     if st == "unique":
         return r
     if st == "none":
         raise _fferr("No solution exists", "Root")
-    r = _root2(x, "'Root'") if k == 2 else None
-    if r is None:
+    if sq is None:
         raise _fferr("Root of degree %d in this finite field is not supported yet" % k, "Root")
-    return r
+    return _root2(x)
 
 
 class _MExtMap(MMap):
