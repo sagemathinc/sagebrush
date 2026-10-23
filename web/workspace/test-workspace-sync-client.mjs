@@ -44,11 +44,11 @@ const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "sync",
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: ACCOUNTS.join(",") },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: ACCOUNTS.join(","), SYNC_URL_KEY: "url-key", FILES_ORIGIN: "https://files.test" },
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    routes: ["sagebrush.test/*"],
+    routes: ["sagebrush.test/*", "files.test/*"],
     outboundService: cocalc,
-    ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 1000000, period: 60 } } },
+    ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 1000000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1002", simple: { limit: 1000000, period: 60 } } },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "sync");
@@ -73,6 +73,8 @@ const ctl = {
   rewriteWelcome: null,
   /** PUTs held until released */
   holdPut: false,
+  /** GETs of the user-content domain (/__files) held until released */
+  holdGet: false,
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
   /** the next n pulled index pages (answers to pull_index) dropped */
@@ -158,7 +160,7 @@ async function control(body) {
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -176,6 +178,20 @@ const server = createServer(async (req, res) => {
       const out = await control(JSON.parse((await readBody(req)).toString() || "{}"));
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify(out));
+    }
+    // (the user-content domain, for the page: the signed URLs a blob GET redirects to are rewritten to /__files/…,
+    // served by the real handler (server.ts handleSyncFiles) on files.test in Miniflare.  Test harness only)
+    if (p.startsWith("/__files/")) {
+      const entry = { method: req.method, path: p, files: true };
+      log.http.push(entry);
+      if (ctl.holdGet) await new Promise((ok) => held.push(ok));
+      const r = await mf.dispatchFetch("https://files.test" + p.slice("/__files".length) + u.search, { method: req.method, headers: req.headers.range ? { range: req.headers.range } : {} });
+      entry.status = r.status;
+      const out = Buffer.from(await r.arrayBuffer());
+      const h = {};
+      r.headers.forEach((v, k) => { if (k !== "content-encoding") h[k] = v; });
+      res.writeHead(r.status, h);
+      return res.end(out);
     }
     if (!p.startsWith("/api/") && !p.startsWith("/auth/")) { res.writeHead(404); return res.end(); }
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
@@ -222,6 +238,7 @@ const server = createServer(async (req, res) => {
     const out = Buffer.from(await r.arrayBuffer());
     const h = {};
     r.headers.forEach((v, k) => { if (k !== "set-cookie" && k !== "content-length" && k !== "content-encoding") h[k] = v; });
+    if (h.location?.startsWith("https://files.test/")) h.location = "/__files/" + h.location.slice("https://files.test/".length);
     res.writeHead(r.status, h);
     res.end(out);
   } catch (e) {

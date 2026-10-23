@@ -34,6 +34,7 @@ import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
 import { cursorOf } from "./sync-confirmed";
+import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync/protocol";
 
@@ -64,6 +65,12 @@ export const CLIENT = {
   /** with the confirmed index: one pull from the cursor while connected and idle, this often (D8b: a notice lost
    * on a socket that stays open is found within it) */
   idlePullMs: 5 * 60_000,
+  /** downloads at once (a secondary cap: the reservation decides, L2) */
+  downloadsAtOnce: 4,
+  /** a signed URL is reused while at least this much of its life is left */
+  urlMarginMs: 10_000,
+  /** the queue's pause on the daily read budget when the server gives no retry_after (L1) */
+  budgetPauseMs: 60 * 60_000,
 };
 
 /** The clock the client's timers and pace use (a fake one in tests). */
@@ -176,6 +183,7 @@ export class SyncClient {
   private pullBucket: Bucket;
   private conn: Conn | null = null;
   private running = false;
+  private fetching = false;
   private again = false;
   private bucket: Bucket;
   /** the retry timers of `timerNs` ("-": before a namespace is known, in memory only) */
@@ -189,7 +197,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -345,8 +353,10 @@ export class SyncClient {
     const awaiting = await this.awaitingEcho(ob);
     // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before
     // the oldest record awaiting its echo; ops at or below apply_after only match echoes, never reduced again)
-    const from = this.opts.onIndex ? await cursorOf(this.w, ns) : this.cursor;
-    const start = awaiting ? Math.min(awaiting.lo - 1, from) : from;
+    // (without it (step 3): from just before the oldest awaiting its echo, else this run's cursor, as before)
+    const start = this.opts.onIndex
+      ? Math.min(awaiting ? awaiting.lo - 1 : Infinity, await cursorOf(this.w, ns))
+      : awaiting ? awaiting.lo - 1 : this.cursor;
     // (stopped while this connection was being prepared: no socket is opened)
     if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";
@@ -464,6 +474,7 @@ export class SyncClient {
     if (this.paused?.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
     this.armIdle(c);
+    this.fetchKick(c);
     this.kick();
   }
 
@@ -521,7 +532,11 @@ export class SyncClient {
       }
       if (ok.length) await c.ob.confirmed(ok);
     }
-    if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+    if (this.opts.onIndex && ops.length) {
+      await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+      // (the view may have queued fetches)
+      this.fetchKick(c);
+    }
     this.cursor = last;
     // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
     if (c.discover) {
@@ -987,6 +1002,148 @@ export class SyncClient {
     this.kick();
   }
 
+  // ---- downloads (C5, L1, L2, D9: sync-fetch.ts)
+
+  /** The fetch queue run, if it isn't running: lanes of at most CLIENT.downloadsAtOnce, each item reserved first. */
+  private fetchKick(c: Conn) {
+    if (!this.opts.onIndex || this.fetching || this.conn !== c) return;
+    this.fetching = true;
+    void (async () => {
+      try {
+        await this.fetchQueue(c);
+      } catch (e) {
+        if (!(e instanceof Fenced)) console.warn("sync: downloads:", e);
+      } finally {
+        this.fetching = false;
+      }
+    })();
+  }
+
+  private async fetchQueue(c: Conn) {
+    for (;;) {
+      if (this.conn !== c || this.stopped) return;
+      // (the daily read budget spent: the whole queue paused, durably, until its end (L1))
+      const pause = await this.metaGet<{ until: number }>(pauseKey(c.ns));
+      if (pause && pause.until > this.clock.now()) return this.wake(c, "fetchPause", pause.until, () => this.fetchKick(c));
+      if (pause) await this.metaPut(pauseKey(c.ns), undefined);
+      const left = this.left(c.ns, "fetch");
+      if (left > 0) return this.wake(c, "fetch", this.clock.now() + left, () => this.fetchKick(c));
+      const items = await queued(this.w, c.ns, CLIENT.downloadsAtOnce * 4);
+      if (!items.length) return;
+      let at = 0, stop = false;
+      const lanes = Array.from({ length: Math.min(CLIENT.downloadsAtOnce, items.length) }, async () => {
+        while (!stop && at < items.length && this.conn === c) if ((await this.fetchOne(c, items[at++])) === "wait") stop = true;
+      });
+      await Promise.all(lanes);
+      if (stop) return;
+    }
+  }
+
+  /** One item: "done" (installed, stale, or set apart for good), or "wait" (a timer or pause set; the queue stops). */
+  private async fetchOne(c: Conn, it: FetchItem): Promise<"done" | "wait"> {
+    // (D9: the size checked before any reservation or request: a non-negative safe integer, at most the workspace's
+    // file limit and the largest PUT (nothing larger is ever uploaded); then size × COPIES, at most 190 MiB)
+    const cap = Math.min(this.w.limits.maxFileBytes, CLIENT.maxPut);
+    if (!Number.isSafeInteger(it.size) || it.size < 0 || it.size > cap) {
+      await finalize(this.w, c.ns, it, "too large to sync");
+      return "done";
+    }
+    const token = await reserve(it.size * COPIES);
+    try {
+      if (this.conn !== c) return "wait";
+      if (token.n < it.size * COPIES) throw new Error("sync: a reservation that doesn't cover a download");
+      this.stats.fetches++;
+      this.stats.fetchesAtOnce++;
+      this.stats.maxFetchesAtOnce = Math.max(this.stats.maxFetchesAtOnce, this.stats.fetchesAtOnce);
+      let res: Response;
+      const cached = it.url && it.exp !== undefined && it.exp - this.clock.now() > CLIENT.urlMarginMs;
+      try {
+        if (cached) res = await this.fetch(it.url!, { credentials: "omit" });
+        else {
+          // (asking for a URL debits the read budget: the 303 followed to the signed URL, which is kept (L1))
+          this.stats.urls++;
+          res = await this.fetch(this.origin + `/api/sync/v1/blob/${it.sha256}`, { credentials: "same-origin", headers: this.binding(c), redirect: "follow" });
+          if (res.redirected && res.url) {
+            const exp = Number(new URL(res.url).searchParams.get("exp"));
+            if (Number.isSafeInteger(exp)) await keepUrl(this.w, c.ns, it, res.url, exp);
+          }
+        }
+      } catch {
+        return this.fetchFail(c, it);
+      } finally {
+        this.stats.fetchesAtOnce--;
+      }
+      if (this.conn !== c) return "wait";
+      if (!res.ok) {
+        const fromSite = !cached && !res.redirected;
+        let body: { error?: unknown; retry_after?: unknown } = {};
+        try { body = await res.json(); } catch {}
+        const h = res.headers.get("retry-after");
+        const ra = isNat(body.retry_after) ? body.retry_after : h && /^\d{1,7}$/.test(h) ? Number(h) * 1000 : undefined;
+        // (the URL's request refused for the budget: the whole queue paused, durably (L1))
+        if (fromSite && (res.status === 429 || body.error === "rate")) {
+          await this.metaPut(pauseKey(c.ns), { until: this.clock.now() + (ra ?? CLIENT.budgetPauseMs) });
+          return "wait";
+        }
+        if (fromSite && (res.status === 401 || (res.status === 409 && body.error === "conflict"))) {
+          c.end("closed");
+          return "wait";
+        }
+        // (a signed URL refused (expired, or not valid): dropped, a fresh one asked for next time)
+        if (!fromSite && res.status === 403) await keepUrl(this.w, c.ns, it, undefined, undefined);
+        return this.fetchFail(c, it, ra);
+      }
+      // (D9: the length declared canonically and equal to the size, before the body is read)
+      const cl = res.headers.get("content-length");
+      if (cl === null || !CANONICAL_LENGTH.test(cl) || Number(cl) !== it.size) {
+        try { await res.body?.cancel(); } catch {}
+        return this.fetchFail(c, it);
+      }
+      const bytes = await this.readCapped(res, it.size);
+      if (!bytes) return this.fetchFail(c, it);
+      const sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)));
+      if (sha !== it.sha256) return this.fetchFail(c, it);
+      const out = await install(this.w, c.ns, it, bytes);
+      if (out === "installed") this.stats.installed++;
+      else this.stats.stale++;
+      await this.timerOk(c.ns, "fetch");
+      return "done";
+    } finally {
+      token();
+    }
+  }
+
+  /** A body read into one buffer of `size` bytes through a counting reader: null if it is longer (aborted at the
+   * first byte past it) or shorter. */
+  private async readCapped(res: Response, size: number): Promise<Uint8Array | null> {
+    const out = new Uint8Array(size);
+    if (!res.body) return size === 0 ? out : null;
+    const r = res.body.getReader();
+    let n = 0;
+    try {
+      for (;;) {
+        const { done, value } = await r.read();
+        if (done) break;
+        if (n + value.byteLength > size) {
+          await r.cancel();
+          return null;
+        }
+        out.set(value, n);
+        n += value.byteLength;
+      }
+    } catch {
+      return null;
+    }
+    return n === size ? out : null;
+  }
+
+  private async fetchFail(c: Conn, _it: FetchItem, ra?: number): Promise<"wait"> {
+    this.stats.fetchFailed++;
+    const at = await this.timerFail(c.ns, "fetch", ra);
+    this.wake(c, "fetch", at, () => this.fetchKick(c));
+    return "wait";
+  }
+
   // ---- the rebuild (step 4 does it; step 3 asks for it)
 
   private async flagRebuild(ns: string, why: "refused" | "invalid" | "diverged", detail?: string) {
@@ -1134,3 +1291,5 @@ export class SyncClient {
 class Retry extends Error {
   constructor(readonly retryAfter?: number) { super("retry"); }
 }
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");

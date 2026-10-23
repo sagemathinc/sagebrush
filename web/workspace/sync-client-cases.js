@@ -1134,7 +1134,152 @@ async function idleDiscovery() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery };
+// ---- step 4: downloads (C5, L1, L2, D9)
+
+/** Two devices of one account in this page, each with its own workspace and the confirmed index. */
+async function twoDevices(optsB = {}) {
+  await account();
+  const a = await fresh(), b = await fresh();
+  const ca = viewClient(a), cb = viewClient(b, optsB);
+  if (!(await until(() => settled(a, ca))) || !(await until(() => settled(b, cb)))) throw new Error("two devices: not synced");
+  return { a, b, ca, cb };
+}
+const sameBytes = (x, y) => x && y && x.length === y.length && x.every((v, i) => v === y[i]);
+/** B's entry for A's file `p` listed (remote), via a notice (no waiting for the idle pull). */
+async function seen(b, cb, p) {
+  for (let i = 0; i < 50 && !(await b.stat(p)); i++) {
+    const head = (await serverOps(b)).all.at(-1)?.seq ?? 0;
+    await ctl("notice", { head });
+    await sleep(100);
+  }
+  return b.stat(p);
+}
+
+async function downloadBasic() {
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    const data = bytes(70_000, 7);
+    await a.create("/doc.bin", { content: data });
+    check(await until(() => settled(a, ca)), "download: A's file up");
+    const e = await seen(b, cb, "/doc.bin");
+    check(e?.remote && e.size === 70_000, "download: B lists it remote: " + J(e && { remote: e.remote, size: e.size }));
+    check(await until(async () => { const x = await b.stat("/doc.bin"); return x && !x.remote; }), "download: …then has its bytes (installed)");
+    check(sameBytes(await b.contents(await b.stat("/doc.bin")), data), "download: the same bytes as A's");
+    check(cb.stats.urls === 1 && cb.stats.installed === 1, "download: one URL asked for, one install: " + J({ urls: cb.stats.urls, installed: cb.stats.installed }));
+    const q = await all(b.ws, "meta");
+    check(!q.some((v) => v && typeof v === "object" && "sha256" in v && "rev" in v && v.fid === e.fid), "download: its queue item gone");
+    // (then A writes it again: B's copy follows)
+    const data2 = bytes(5_000, 9);
+    await a.write("/doc.bin", data2);
+    check(await until(() => settled(a, ca)), "download: A's write up");
+    for (let i = 0; i < 50; i++) { const x = await b.stat("/doc.bin"); if (x && x.sha256 !== e.sha256 && !x.remote) break; await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    check(sameBytes(await b.contents(await b.stat("/doc.bin")), data2), "download: a remote write's bytes installed in turn");
+  } finally {
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadChecks() {
+  // (D9: Content-Length missing, malformed, different; a body longer than declared; a size past the cap: each fails
+  // its item under the retry timer and is never installed; then the real answer installs)
+  let mode = null;
+  const real = window.fetch.bind(window);
+  const fakeFetch = async (url, init) => {
+    const r = await real(url, init);
+    const m = mode;
+    if (!m || !r.ok || !String(r.url).includes("/__files/")) return r;
+    mode = null;
+    const body = new Uint8Array(await r.arrayBuffer());
+    const headers = { "content-type": "application/octet-stream" };
+    if (m === "missing") return Object.defineProperty(new Response(body, { headers }), "url", { value: r.url });
+    if (m === "malformed") return Object.defineProperty(new Response(body, { headers: { ...headers, "content-length": "0" + body.length } }), "url", { value: r.url });
+    if (m === "different") return Object.defineProperty(new Response(body, { headers: { ...headers, "content-length": String(body.length + 1) } }), "url", { value: r.url });
+    if (m === "longer") { const more = new Uint8Array(body.length + 1); more.set(body); return Object.defineProperty(new Response(more, { headers: { ...headers, "content-length": String(body.length) } }), "url", { value: r.url }); }
+    return r;
+  };
+  const clock = fakeClock();
+  const { a, b, ca, cb } = await twoDevices({ fetch: fakeFetch, clock });
+  try {
+    for (const m of ["missing", "malformed", "different", "longer"]) {
+      mode = m;
+      const p = `/c-${m}.bin`;
+      await a.create(p, { content: bytes(3000, m.length) });
+      check(await until(() => settled(a, ca)), `download checks (${m}): up`);
+      const failed = cb.stats.fetchFailed;
+      await seen(b, cb, p);
+      check(await until(() => cb.stats.fetchFailed === failed + 1), `download checks (${m}): the item failed: ` + cb.stats.fetchFailed);
+      check((await b.stat(p))?.remote === true && cb.stats.installed === 0 + (["missing", "malformed", "different", "longer"].indexOf(m)), `download checks (${m}): not installed`);
+      await clock.advance(70_000);
+      check(await until(async () => (await b.stat(p))?.remote === undefined), `download checks (${m}): the retry, after its timer, installs the real bytes`);
+    }
+    check(cb.stats.urls === 4, "download checks: each item's signed URL asked for once, reused for its retry: " + cb.stats.urls);
+    // (a size past the cap: never reserved or asked for; set apart, listed)
+    const ns = nsOf(cb);
+    const big = { fid: "00000000000000b1", sha256: "e".repeat(64), size: 95 * 2 ** 20 + 1, rev: 0 };
+    await new Promise((res, no) => { const tx = b.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(big, `sync:${ns}:fetch:${big.fid}`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+    const urls = cb.stats.urls;
+    await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq + 1 });
+    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchFinal:${big.fid}`))?.why === "too large to sync"), "download checks: a size past 95 MiB set apart, too large to sync");
+    check(cb.stats.urls === urls, "download checks: …with no URL asked for");
+  } finally {
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadStale() {
+  // (C5, a GET held open: a local overwrite meanwhile: the fetched bytes are discarded, the local ones kept; a rename
+  // meanwhile: installed at the new path)
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    await ctl("set", { set: { holdGet: true } });
+    await a.create("/s.bin", { content: bytes(2000, 1) });
+    await a.create("/r.bin", { content: bytes(2000, 2) });
+    check(await until(() => settled(a, ca)), "download stale: up");
+    await seen(b, cb, "/r.bin");
+    check(await until(async () => (await ctl("log")).http.filter((h) => h.files).length >= 1), "download stale: a GET held");
+    const mine = bytes(10, 3);
+    await b.write("/s.bin", mine);
+    await b.rename("/r.bin", "/r2.bin");
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    check(await until(async () => cb.stats.installed + cb.stats.stale >= 2, 10_000), "download stale: both fetches answered: " + J({ installed: cb.stats.installed, stale: cb.stats.stale }));
+    check(sameBytes(await b.contents(await b.stat("/s.bin")), mine) && !(await b.stat("/s.bin")).remote, "download stale: the local overwrite kept; the download discarded");
+    check(cb.stats.stale === 1 && sameBytes(await b.contents(await b.stat("/r2.bin")), bytes(2000, 2)), "download stale: the renamed one installed at its new path");
+  } finally {
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadBudget() {
+  // (L1: a 429 on asking for a URL pauses the whole queue, durably, until retry_after; nothing asked meanwhile)
+  const clock = fakeClock();
+  const { a, b, ca, cb } = await twoDevices({ clock });
+  try {
+    await ctl("set", { set: { fakeHttp: [{ method: "GET", path: "/api/sync/v1/blob/", status: 429, body: { error: "rate", retry_after: 600_000 }, times: 1 }] } });
+    await a.create("/q1.bin", { content: bytes(1000, 1) });
+    await a.create("/q2.bin", { content: bytes(1000, 2) });
+    check(await until(() => settled(a, ca)), "download budget: up");
+    await seen(b, cb, "/q2.bin");
+    const ns = nsOf(cb);
+    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchPause`))?.until > clock.now()), "download budget: the queue paused, durably");
+    const asked = cb.stats.urls;
+    await clock.advance(300_000);
+    await sleep(300);
+    check(cb.stats.urls === asked && (await b.stat("/q1.bin")).remote, "download budget: nothing asked during the pause");
+    await clock.advance(300_001);
+    check(await until(async () => !(await b.stat("/q1.bin")).remote && !(await b.stat("/q2.bin")).remote), "download budget: resumed at its end; both installed");
+  } finally {
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
