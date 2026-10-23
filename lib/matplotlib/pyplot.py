@@ -21,6 +21,7 @@ from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine,
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
+from matplotlib import style
 
 PT = 100 / 72  # pixels per point at 100 dpi
 
@@ -290,6 +291,57 @@ def _missing(what):
     return hint
 
 
+def _axes_style():
+    """The rc settings an Axes takes when it is made, as matplotlib's do
+    (so a style in a with-block stays with the plots made in it): its
+    color cycle, and the options of its panel for each key set to other
+    than its default.  A key at its default is left out: the plot then
+    follows the page's light or dark theme, as before."""
+    g = rcParams._given
+    st = {}
+
+    def css(key, opt):
+        v = g(key)
+        if v is not None:
+            st[opt] = to_color(v)
+    css("axes.facecolor", "facecolor")
+    css("axes.edgecolor", "edgecolor")
+    css("axes.labelcolor", "label_color")
+    css("xtick.color", "xtick_color")
+    css("ytick.color", "ytick_color")
+    css("grid.color", "grid_color")
+    tc = g("axes.titlecolor")
+    if tc is None or tc == "auto":
+        css("text.color", "title_color")  # (auto: the text's color)
+    else:
+        st["title_color"] = to_color(tc)
+    for key, opt in (("axes.linewidth", "frame_width"), ("grid.linewidth", "grid_width"), ("grid.alpha", "grid_alpha")):
+        if g(key) is not None:
+            st[opt] = float(g(key))
+    ls = g("grid.linestyle")
+    if ls is not None:
+        st["grid_dash"] = _dash(ls, st.get("grid_width", 0.8))
+    if rcParams["axes.grid"]:
+        st["grid"] = True
+    if rcParams["axes.axisbelow"] is False:
+        st["grid_above"] = True
+    cyc = g("axes.prop_cycle")
+    if cyc is not None:
+        st["_cycle"] = [to_color(c) for c in cyc.by_key()["color"]] or list(TAB10)
+    return st
+
+
+def _dash(ls, width):
+    """an SVG dasharray for a matplotlib linestyle, or None for a solid line"""
+    if isinstance(ls, tuple):
+        return ",".join(_fmt_num(float(v) * width) for v in ls[1]) or None
+    return DASHES.get({"solid": "-", "dashed": "--", "dashdot": "-.", "dotted": ":"}.get(ls, ls))
+
+
+def _fmt_num(v):
+    return ("%.2f" % v).rstrip("0").rstrip(".")
+
+
 class Axes:
     __sagebrush_missing__ = _missing("Axes")
 
@@ -299,6 +351,10 @@ class Axes:
         self._prims = []
         self._opts = {}
         self._ci = self._pi = 0
+        self._style = _axes_style()
+
+    def _cycle(self):
+        return self._style.get("_cycle", TAB10)
 
     def __repr__(self):
         return "<Axes: >"
@@ -309,11 +365,12 @@ class Axes:
         collections (bar, barh, fill_between, scatter, pie)"""
         if c is not None:
             return to_color(c)
+        cyc = self._cycle()
         if patch:
             self._pi += 1
-            return TAB10[(self._pi - 1) % 10]
+            return cyc[(self._pi - 1) % len(cyc)]
         self._ci += 1
-        return TAB10[(self._ci - 1) % 10]
+        return cyc[(self._ci - 1) % len(cyc)]
 
     def _add(self, p):
         self._prims.append(p)
@@ -347,7 +404,7 @@ class Axes:
                 color = _opaque(color)
             ls = kw.get("linestyle", kw.get("ls", fl or "-"))
             marker = kw.get("marker", fm)
-            lw = kw.get("linewidth", kw.get("lw", 1.5))
+            lw = kw.get("linewidth", kw.get("lw", rcParams["lines.linewidth"]))
             ms = kw.get("markersize", kw.get("ms", 6))
             label = kw.get("label")
             o = {"color": color, "color_given": given, "thickness": lw * PT, "linestyle": ls if ls not in ("None", "none", " ", "") else "-",
@@ -381,7 +438,7 @@ class Axes:
         # (a cycle color only when it is the points' color: not with colors
         # given or mapped, as matplotlib's)
         if colors is not None and color is None:
-            col = colors[0] if colors else TAB10[0]
+            col = colors[0] if colors else self._cycle()[0]
         else:
             col = self._color(color if color is not None else (c if isinstance(c, (str, tuple)) else None), True)
         if alpha is not None:
@@ -535,7 +592,7 @@ class Axes:
         # (matplotlib's ErrorbarContainer: the data line or None, the caps (each
         # direction's lower ones, then its upper ones) and each direction's bars)
         caplines, barlines = [], []
-        thick = (float(elinewidth) if elinewidth is not None else 1.5) * PT
+        thick = (float(elinewidth) if elinewidth is not None else rcParams["lines.linewidth"]) * PT
         for err, cap in ((ye, "_"), (xe, "|")):
             if err is None:
                 continue
@@ -586,7 +643,7 @@ class Axes:
         if y is None:
             x, y = list(builtin_range(len(_list(x)))), x
         xs, ys = _list(x), _list(y)
-        col = to_color(kw.get("color")) or TAB10[0]  # (matplotlib's stem: C0, not the next color)
+        col = to_color(kw.get("color")) or self._cycle()[0]  # (matplotlib's stem: C0, not the next color)
         sx, sy = [], []
         for xi, yi in zip(xs, ys):
             sx += [xi, xi, None]
@@ -620,6 +677,8 @@ class Axes:
         if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
             lo, hi = self.get_xlim(), self.get_ylim()
             x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
+        if color is None:
+            color = rcParams._given("text.color")  # (None: the page's text color)
         return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
                        vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
@@ -1027,6 +1086,9 @@ class Axes:
         o.setdefault("margins", 0.05)
         o.setdefault("autoscale", "matplotlib")
         o.setdefault("tick_bins", self._tick_bins(o["tick_size"]))
+        for k, v in self._style.items():
+            if not k.startswith("_"):
+                o.setdefault(k, v)
         if o.get("legend") is None:
             o["legend"] = False  # matplotlib shows a legend only when asked
         prims = [p for p in self._prims if not p.options.get("hidden")]
@@ -1088,14 +1150,15 @@ class Figure:
     __sagebrush_missing__ = _missing("Figure")
 
     def __init__(self, figsize=None, dpi=None, facecolor=None, **kw):
-        fs = figsize or (6.4, 4.8)
+        fs = figsize or rcParams["figure.figsize"]
         self._size = (float(fs[0]), float(fs[1]))
         # (the figure's dpi is what savefig uses by default; on screen the
         # SVG has 100 units per inch)
         self.dpi = float(dpi) if dpi is not None else float(rcParams.get("figure.dpi", 100.0))
         # (the facecolor as it is when the figure is made, as matplotlib's;
         # given, it also colors the figure's SVG)
-        self._facecolor_given = facecolor is not None
+        # (or set in rcParams to other than white: the theme's otherwise)
+        self._facecolor_given = facecolor is not None or rcParams._given("figure.facecolor") is not None
         if facecolor is not None:
             _css_color(facecolor)  # (an invalid one is matplotlib's ValueError here)
         self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
@@ -1161,8 +1224,15 @@ class Figure:
         """This figure as one animation frame: (SVG body, description)."""
         return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
-    def _svg(self):
-        return render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+    def _svg(self, background=True):
+        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+        # (a facecolor the program gave, or set in rcParams, colors the
+        # figure as matplotlib's; otherwise it is the page's background)
+        if background and self._facecolor_given:
+            css = _css_color(self._facecolor)
+            if css != "none":
+                svg = _svg_background(svg, css, self._size[0] * 100, self._size[1] * 100)
+        return svg
 
     def _repr_svg_(self):
         anim = getattr(self, "_animation", None)
@@ -1214,8 +1284,8 @@ class Figure:
         if format == "svg":
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
-            # (Sagebrush's SVG has no background on screen: one asked for is added)
-            svg = self._svg()
+            # (savefig's own background: the one asked for, or none)
+            svg = self._svg(background=False)
             if given and background != "none":
                 svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
             _write(fname, svg, text=True)
@@ -1225,7 +1295,7 @@ class Figure:
         if dpi == "figure":
             dpi = self.dpi
         dpi = float(dpi)
-        svg = self._svg()
+        svg = self._svg(background=False)
         if not transparent:
             svg = _axes_patches(svg, self.axes)
         text = {"Software": "Sagebrush"}

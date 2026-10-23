@@ -18,9 +18,9 @@ def get_backend():
 
 # rc parameters: one object (matplotlib.rcParams is pyplot.rcParams), with
 # every key matplotlib has, at its default until set (matplotlib 3.11.1's,
-# _rckeys); any other key is matplotlib's KeyError.  Values are kept as
-# given; what Sagebrush draws from them is pyplot's (font sizes, figure
-# dpi and facecolor, savefig).
+# _rckeys); any other key is matplotlib's KeyError.  What Sagebrush draws
+# from them is pyplot's (font sizes, figure size, dpi and facecolor,
+# savefig, and the colours, grid and line widths in _VALIDATE).
 class RcParams(dict):
     def __init__(self, *args, **kw):
         super().__init__()
@@ -30,9 +30,13 @@ class RcParams(dict):
         d = _defaults()
         if key not in d:
             raise KeyError("%r is not a valid value for rcParam." % (key,))
-        # (a number for a key whose default is a float is a float, as
-        # matplotlib's validators make it; other values are kept as given)
-        if type(d[key]) is float and type(value) is not bool:
+        # (a key Sagebrush draws is checked as matplotlib checks it; for
+        # another, a number for a float key is a float, as matplotlib's
+        # validators make it, and other values are kept as given)
+        check = _VALIDATE.get(key)
+        if check is not None:
+            value = check(key, value)
+        elif type(d[key]) is float and type(value) is not bool:
             if isinstance(value, int):
                 value = float(value)
             elif isinstance(value, str):
@@ -41,6 +45,14 @@ class RcParams(dict):
                 except ValueError:
                     pass
         dict.__setitem__(self, key, value)
+
+    def _given(self, key):
+        """the value of a key set to other than its default, or None: such
+        a key is drawn as given, one at its default follows the page's light
+        or dark theme (so rcdefaults(), style 'default' and
+        update(rcParamsDefault) all give back the theme's look)"""
+        v = dict.get(self, key)
+        return None if v == _defaults()[key] else v
 
     def __delitem__(self, key):
         raise KeyError()
@@ -107,6 +119,125 @@ def cycler(*args, **kwargs):
     key, values = args if args else next(iter(kwargs.items()))
     return Cycler(key, values)
 
+
+# Values checked as matplotlib's validators check them, for the keys
+# Sagebrush draws (what is kept is what matplotlib keeps); the messages are
+# its ValueErrors'.
+def _bad(key, msg):
+    raise ValueError("Key %s: %s" % (key, msg))
+
+
+def _v_color(key, v):
+    from matplotlib.colors import to_rgba
+    try:
+        to_rgba(v)
+    except (ValueError, TypeError):
+        _bad(key, "%r does not look like a color arg" % (v,))
+    return v
+
+
+def _v_color_or_auto(key, v):
+    return v if v == "auto" else _v_color(key, v)
+
+
+def _v_float(key, v):
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        _bad(key, "Could not convert %r to float" % (v,))
+
+
+_TRUE = ("t", "y", "yes", "on", "true", "1", 1, True)
+_FALSE = ("f", "n", "no", "off", "false", "0", 0, False)
+
+
+def _to_bool(v):
+    s = v.lower() if isinstance(v, str) else v
+    if type(s) in (int, bool, str):
+        if s in _TRUE and not (type(s) is int and s not in (0, 1)):
+            return True
+        if s in _FALSE and not (type(s) is int and s not in (0, 1)):
+            return False
+    return None
+
+
+def _v_bool(key, v):
+    b = _to_bool(v)
+    if b is None:
+        _bad(key, "Cannot convert %r to bool" % (v,))
+    return b
+
+
+def _v_axisbelow(key, v):
+    if isinstance(v, str) and v.lower() == "line":
+        return "line"
+    b = _to_bool(v)
+    if b is None:
+        _bad(key, '%r cannot be interpreted as True, False, or "line"' % (v,))
+    return b
+
+
+_LINESTYLES = ("-", "--", "-.", ":", "solid", "dashed", "dashdot", "dotted", "None", "none", " ", "")
+
+
+def _v_linestyle(key, v):
+    if isinstance(v, str) and v in _LINESTYLES:
+        return v
+    # (an (offset, on-off sequence) pair of numbers)
+    if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], (tuple, list)):
+        try:
+            float(v[0]), [float(x) for x in v[1]]
+            return v
+        except (ValueError, TypeError):
+            pass
+    _bad(key, "linestyle %r is not a valid on-off ink sequence." % (v,))
+
+
+def _v_cycle(key, v):
+    if isinstance(v, Cycler):
+        for c in v.by_key()["color"]:
+            if isinstance(c, str) and _re.fullmatch(r"C[0-9]+", c):
+                _bad(key, "Cannot put cycle reference (%r) in prop_cycler" % (c,))
+        return v
+    if isinstance(v, str):
+        # (matplotlib reads "cycler('color', [...])": the colour list only)
+        m = _re.fullmatch(r"\s*cycler\(\s*(['\"])color\1\s*,\s*\[(.*)\]\s*\)\s*", v, _re.S)
+        if m:
+            vals = [s.strip().strip("'\"") for s in m.group(2).split(",") if s.strip()]
+            return _v_cycle(key, Cycler("color", [_v_color(key, c) for c in vals]))
+        _bad(key, "Sagebrush reads a cycler string of colours only: %r" % (v,))
+    _bad(key, "Object is not a string or Cycler instance: %r" % (v,))
+
+
+def _v_figsize(key, v):
+    if isinstance(v, str):
+        v = v.split(",")
+    try:
+        w, h = v
+        return [float(w), float(h)]
+    except (ValueError, TypeError):
+        _bad(key, "Expected 2 values, not %r" % (v,))
+
+
+class MatplotlibDeprecationWarning(DeprecationWarning):
+    """matplotlib's warning for what it deprecated"""
+
+
+_VALIDATE = {
+    "axes.facecolor": _v_color, "axes.edgecolor": _v_color, "axes.labelcolor": _v_color,
+    "axes.titlecolor": _v_color_or_auto, "text.color": _v_color, "xtick.color": _v_color,
+    "ytick.color": _v_color, "grid.color": _v_color, "figure.facecolor": _v_color,
+    "axes.linewidth": _v_float, "lines.linewidth": _v_float, "grid.linewidth": _v_float, "grid.alpha": _v_float,
+    "axes.grid": _v_bool, "axes.axisbelow": _v_axisbelow, "grid.linestyle": _v_linestyle,
+    "axes.prop_cycle": _v_cycle, "figure.figsize": _v_figsize,
+}
+
+# the keys Sagebrush draws from (the others are kept, and a style that sets
+# them says so)
+_DRAWN = frozenset(_VALIDATE) | {
+    "font.size", "xtick.labelsize", "axes.labelsize", "axes.titlesize", "figure.dpi",
+    "savefig.bbox", "savefig.format", "savefig.transparent", "savefig.facecolor", "savefig.dpi",
+}
 
 _DEFAULTS = []
 
