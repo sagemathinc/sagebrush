@@ -18,20 +18,24 @@ import { sha256Hex } from "./runtime/sha256";
 const builtinNames = new Set(Object.keys(R.builtins));
 
 // compile(..., "single"): expression statements outside functions and
-// classes display their value, as at the interactive prompt.
-function displayExprs(body: any[]): void {
+// classes display their value, as at the interactive prompt. Sage code
+// calls its own hook, which sage_all sets (Sage's display: matrices side by
+// side, dicts sorted), so that it changes no Python cell's display, in this
+// session or another (the runtime's default passes the value on to
+// __pyjs_displayhook__)
+function displayExprs(body: any[], hook: string): void {
   for (const st of body) {
-    if (st.k === "Expr") st.value = { k: "Call", line: st.line, func: { k: "Name", line: st.line, id: "__pyjs_displayhook__" }, args: [st.value], keywords: [] };
-    for (const key of ["body", "orelse", "finalbody"]) if (Array.isArray(st[key]) && st.k !== "FunctionDef" && st.k !== "ClassDef") displayExprs(st[key]);
-    if (st.k === "Try") for (const h of st.handlers) displayExprs(h.body);
+    if (st.k === "Expr") st.value = { k: "Call", line: st.line, func: { k: "Name", line: st.line, id: hook }, args: [st.value], keywords: [] };
+    for (const key of ["body", "orelse", "finalbody"]) if (Array.isArray(st[key]) && st.k !== "FunctionDef" && st.k !== "ClassDef") displayExprs(st[key], hook);
+    if (st.k === "Try") for (const h of st.handlers) displayExprs(h.body, hook);
   }
 }
 
 // A notebook cell (mode "cell"): like Jupyter, only a final expression
 // statement displays its value.
-function displayLast(body: any[]): void {
+function displayLast(body: any[], hook: string): void {
   const st = body[body.length - 1];
-  if (st !== undefined && st.k === "Expr") displayExprs([st]);
+  if (st !== undefined && st.k === "Expr") displayExprs([st], hook);
 }
 
 export interface CompileOptions {
@@ -43,8 +47,9 @@ export interface CompileOptions {
 
 export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false, opts: CompileOptions = {}): Compiled {
   const mod = parse(source, filename, evalMode ? "eval" : "exec", opts);
-  if (single === "cell") displayLast(mod.body);
-  else if (single) displayExprs(mod.body);
+  const hook = opts.sage ? "__pyjs_sage_displayhook__" : "__pyjs_displayhook__";
+  if (single === "cell") displayLast(mod.body, hook);
+  else if (single) displayExprs(mod.body, hook);
   try {
     return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
   } catch (e) {
