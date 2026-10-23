@@ -527,18 +527,24 @@ It holds that reservation until its last large reference is dropped. The same ho
     - `/api/share/me` is read again on every connection.
     - `hello` carries the namespace's `account` hash and `generation`, and the server refuses a socket whose session is another account's or another generation (sync-server §5.2).
     - Blob requests carry them as `x-sync-account` and `x-sync-generation` (§5.4).
-    - Bytes are PUT only while the connection they were read for is still the current one.
+    - Bytes are PUT only while the connection they were read for is still the current one. An answer that comes back after its connection ended changes nothing: no pause, timer, status or wake-up of the next connection's. Wake-ups belong to their connection.
+    - The account object checks the binding again inside the transaction that allocates an upload's reservation, so a generation retired and replaced during the request's awaits is refused there (astra's second round).
     - Switching to another namespace keeps the old one's records; its pins go with the lifecycle epoch, as C2 has it.
   - **One wake-up a kind** (LIMIT-PR58-1). Any kind of work (ops, pace, check, upload, index, pull, unpause) has at most one scheduled callback. The same deadline asked for again keeps it; another one replaces it. Callbacks end with the connection, on success of their kind, and on `stop()`.
   - **Bytes checked against their record** (LIMIT-PR58-2).
     - `bytesFor` reads only when the entry's (or pin's) stored size is the record's, and the reservation covers it ($\text{size} \cdot \text{COPIES}$, checked).
     - Bytes whose length isn't the record's are let go unhashed and unsent.
-    - Such a record is marked (`sync:<ns>:mismatch`, at most 1,000 dseqs) so its bytes are never read twice. It is sent as bytes gone are, and the server decides it.
-    - Stored bytes longer than their metadata are read at most once a record. Metadata and bytes are written in one transaction, so that is the corruption case only.
+    - Such a record gets its own durable mark, `sync:<ns>:mismatch:<dseq>`, so its bytes are never read twice however long it waits. Marks of records already decided are deleted as new ones are made. The record is sent as bytes gone are, and the server decides it.
+    - Stored bytes longer than their metadata (daybreak3's second round):
+      - Every writer of `fileBytes` and `versionBytes` stores a value in the same transaction as metadata made from that value's own length: write, create, adopt's move, the migrator's move, `putVersion`. So the reservation is sized from the metadata ($\text{size} \cdot \text{COPIES}$), as the migrator's hashing read of the same bytes is.
+      - IndexedDB gives no value's length without reading it whole. So a value changed outside the workspace's verbs is found only by reading it, as the migrator's rule has it: one read past the reservation, once.
+      - Upload reads go one at a time, so at most one such value is held at once.
+      - The first one found marks the workspace's stored bytes untrusted, durably (`sync:bytes-untrusted`). Every upload read after that takes the largest reservation, $\text{LEGACY\_MAX} \cdot \text{COPIES}$, which has the page's reservation to itself. The flag is checked again inside the one-at-a-time section.
+      - So in a workspace's whole life at most one value is ever held beyond what its reader reserved.
   - **The log is read only as far as it must be** (LIMIT-PR58-3).
     - `hello.index_after` is just before the oldest record accepted and awaiting its echo (else the in-memory cursor).
     - Each connection reads to a fixed target: the newest such record's seq, raised only by acks' accepted seqs, plus `welcome.index_head` once `onIndex` is given.
-    - Pulls are one at a time and paced (a bucket: 4, then 2 a second), at most `CLIENT.replayPages` (64) pages a connection.
+    - Pulls are one at a time and paced (a bucket: 4, then 2 a second). After at most `CLIENT.replayPages` (64) pages, a slice rests for `CLIENT.replayRestMs` (60 s), then goes on toward the target on the same connection, so it never stalls (daybreak3's question 2). That is at most 64 MiB a slice.
     - A `more` page that moves nothing ends the connection.
   - **Deadlines re-armed** (CORR-PR58-2, 3).
     - A blocked path schedules its own wake-up at its persisted deadline: a check timer, a storage_full pause (cleared durably once past) or the index timer.

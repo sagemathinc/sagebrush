@@ -594,11 +594,11 @@ async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
 /** The bytes an outbox record names, read in `token`'s reservation: the file's present bytes if they are the
  * record's (its entry's SHA-256 and size), else the bytes its pin's storage holds (the pin's hash and size the
  * record's), checked against the record's size and hash; undefined if neither is the record's (sent all the same:
- * the server decides, `missing` if it doesn't hold them); "mismatch" if the stored size or the bytes' length isn't
- * the record's (daybreak3's LIMIT-PR58-2).  The reservation must cover the record's size: nothing is read that it
+ * the server decides, `missing` if it doesn't hold them); "mismatch" if the stored size isn't the record's (nothing
+ * read), "length" if the bytes read aren't as long as their metadata says (daybreak3's LIMIT-PR58-2).  The reservation must cover the record's size: nothing is read that it
  * doesn't, by the metadata, and bytes longer than it are never hashed or sent.  Never other bytes under the
  * record's hash. */
-export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pin?: number; op: { sha256?: string; size?: number } }, token: Release): Promise<Uint8Array | undefined | "mismatch"> {
+export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pin?: number; op: { sha256?: string; size?: number } }, token: Release): Promise<Uint8Array | undefined | "mismatch" | "length"> {
   if (!rec.op.sha256) return undefined;
   if (!token.live()) throw new Error("sync: bytes read in the name of a reservation that isn't held");
   const size = rec.op.size;
@@ -616,7 +616,7 @@ export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pi
     return ("version" in p.storage ? await req(tx.objectStore("versionBytes").get(p.storage.version)) : await req(tx.objectStore("fileBytes").get(p.storage.fileBytes))) as Uint8Array | undefined;
   });
   if (b === undefined || b === "mismatch") return b;
-  // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent)
-  if (b.length !== size) return "mismatch";
+  // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent; "length", as they were read)
+  if (b.length !== size) return "length";
   return (await bytesHash(b)) === rec.op.sha256 ? b : undefined;
 }

@@ -598,6 +598,7 @@ async function byteMismatch() {
   const l = await ctl("log");
   const puts = l.http.filter((h) => h.method === "PUT");
   const refused = (await metaGet(w.ws, `sync:${nsOf(c)}:refused`)) ?? [];
+  check((await metaGet(w.ws, "sync:bytes-untrusted"))?.dseq !== undefined && c.stats.maxReadsAtOnce === 1, "byte mismatch: bytes longer than their metadata mark the workspace's stored bytes untrusted, durably; reads one at a time: " + J({ reads: c.stats.maxReadsAtOnce }));
   check(puts.length === 0 && c.stats.mismatches === 3 && c.stats.connects === 2, "byte mismatch: no PUT; each mismatch found once, though the records went twice: " + J({ puts: puts.length, mismatches: c.stats.mismatches, connects: c.stats.connects }));
   check(refused.length === 3 && refused.every((r) => r.code === "missing"), "byte mismatch: each sent all the same and refused `missing` by the server, listed: " + J(refused.map((r) => [r.path, r.code])));
   // (convergence: each file's next write goes as usual)
@@ -606,6 +607,7 @@ async function byteMismatch() {
   const { mine } = await serverOps(w);
   check(["/m1.bin", "/m2.bin", "/m3.bin"].every((p) => mine.some((o) => o.op === "write" && o.path === p && o.size === 1200)), "byte mismatch: …each file's present bytes now on the server");
   check((await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length === 3, "byte mismatch: …uploaded once each");
+  check(c.stats.wideReads >= 3, "byte mismatch: …each read, once the bytes are untrusted, under the largest reservation (the page's to itself): " + c.stats.wideReads);
   await everyOnce(w, from, 3, "byte mismatch", c);
   await stop(c);
 }
@@ -655,32 +657,31 @@ async function replayPaced() {
 }
 
 async function replayCapped() {
+  // (daybreak3's LIMIT-PR58-3, and their question 2: at most CLIENT.replayPages pages a slice; then a rest, and the
+  // rest of the way on the same connection, never a stall)
   await account();
   const w = await fresh();
   const keep = { ...W.CLIENT };
-  Object.assign(W.CLIENT, { replayPages: 2 });
-  let c = client(w);
+  Object.assign(W.CLIENT, { replayPages: 1, replayRestMs: 1_500 });
+  const c = client(w);
   try {
     check(await until(() => settled(w, c)), "replay capped: synced");
     await otherOps(1800);
     await w.mkdir("/far");
-    check(await until(async () => c.stats.pages === 2 && (await all(w.ws, "outbox")).some((r) => r.accepted !== undefined)), "replay capped: /far accepted; pages read " + c.stats.pages);
-    await sleep(800);
-    const rec = (await all(w.ws, "outbox"))[0];
-    check(c.stats.pages === 2 && c.stats.pulls === 1 && rec?.accepted !== undefined, "replay capped: at most 2 pages a connection (hello's and one pull): the rest waits, the record accepted, awaiting its echo: " + J({ pages: c.stats.pages, pulls: c.stats.pulls }));
-    await stop(c);
-    // (the next connection reads from just before the record's seq: one page, its echo in it)
-    await ctl("log", { reset: true });
-    c = client(w);
-    check(await until(() => settled(w, c)), "replay capped: the next page's client confirms it");
-    const l = await ctl("log");
-    check(l.sent[0]?.index_after === rec.accepted - 1 && c.stats.pages === 1 && c.stats.pulls === 0, "replay capped: …reading from just before it, in one page, no pull: " + J({ after: l.sent[0]?.index_after, seq: rec.accepted, pages: c.stats.pages }));
+    check(await until(async () => (await all(w.ws, "outbox")).some((r) => r.accepted !== undefined)), "replay capped: /far accepted, its echo two pages on");
+    await sleep(600);
+    check(c.stats.pulls === 0 && c.debug().wakes >= 1, "replay capped: 1 page a slice (hello's), then a rest, scheduled: " + J({ pages: c.stats.pages, pulls: c.stats.pulls, wakes: c.debug().wakes }));
+    check(await until(() => c.stats.pulls === 1, 5_000), "replay capped: a slice after the first rest (one pull)");
+    await sleep(600);
+    check(c.stats.pulls === 1, "replay capped: …then a second rest");
+    check(await until(() => settled(w, c), 10_000), "replay capped: after the second rest, the next slice reaches the echo; confirmed, never stalled");
+    check(c.stats.pulls === 2 && c.stats.connects === 1, "replay capped: two boundaries crossed on the same connection, no stop: " + J({ pulls: c.stats.pulls, connects: c.stats.connects }));
     // (a page that says more and moves nothing: refused, not asked again)
     await ctl("set", { set: { emptyMore: 1, dropIndex: 0 } });
     const before = c.stats.connects;
     await w.mkdir("/again");
-    check(await until(() => c.stats.connects === before + 1 && settled(w, c), 15_000), "replay capped: a `more` page that moves nothing ends the connection (no loop of pulls); the next one confirms: " + J({ connects: c.stats.connects, pulls: c.stats.pulls }));
-    check(c.stats.pulls <= 2, "replay capped: …pulls stay few: " + c.stats.pulls);
+    check(await until(async () => c.stats.connects === before + 1 && (await settled(w, c)), 15_000), "replay capped: a `more` page that moves nothing ends the connection (no loop of pulls); the next one confirms: " + J({ connects: c.stats.connects, pulls: c.stats.pulls }));
+    check(c.stats.pulls <= 4, "replay capped: …pulls stay few: " + c.stats.pulls);
   } finally {
     Object.assign(W.CLIENT, keep);
     await stop(c);
@@ -853,7 +854,78 @@ async function indexThrottled() {
   await stop(c);
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled };
+
+async function corruptConcurrent() {
+  // (LIMIT-PR58-2: two values stored longer than their metadata, uploaded side by side: read one at a time; the
+  // first found makes the second be read under the largest reservation; at most one is ever held past its cover)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => settled(w, c0)), "corrupt values: synced");
+  await stop(c0);
+  const big = 4 << 20;
+  const f1 = await w.create("/x1.bin", { content: bytes(1000, 71) });
+  const f2 = await w.create("/x2.bin", { content: bytes(1000, 72) });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").put(bytes(big, 1), f1.fid); tx.objectStore("fileBytes").put(bytes(big, 2), f2.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  const c = client(w);
+  check(await until(() => settled(w, c), 15_000), "corrupt values: decided");
+  const puts = (await ctl("log")).http.filter((h) => h.method === "PUT").length;
+  check(c.stats.mismatches === 2 && puts === 0 && c.stats.maxReadsAtOnce === 1 && c.stats.wideReads === 1, "corrupt values: both found, neither sent; read one at a time; the second under the largest reservation: " + J({ mismatches: c.stats.mismatches, reads: c.stats.maxReadsAtOnce, wide: c.stats.wideReads, puts }));
+  check(W.reserved().held === 0, "corrupt values: every reservation released");
+  await stop(c);
+}
+
+async function manyMismatches() {
+  // (LIMIT-PR58-2: more records with mismatched bytes than any FIFO would keep, all undecided across a resend: each
+  // read once, by its own durable mark)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => settled(w, c0)), "many mismatches: synced");
+  await stop(c0);
+  const n = 1100;
+  const fids = [];
+  // (each its own bytes: uploads are by hash, so equal bytes would be read once for all)
+  const own = (i, len) => new TextEncoder().encode(`mm-${i}-`.padEnd(len, "x"));
+  for (let i = 0; i < n; i++) fids.push((await w.create(`/mm/${i}.bin`, { content: own(i, 64) })).fid);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); const st = tx.objectStore("fileBytes"); fids.forEach((f, i) => st.put(own(i, 80), f)); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  // (the first ack lost and the socket closed: every record is sent again on the next connection)
+  await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true, dropIndex: 1 } });
+  const c = client(w);
+  check(await until(() => settled(w, c), 120_000), "many mismatches: all decided " + J(c.status));
+  const marks = (await keys(w.ws, "meta")).filter((k) => typeof k === "string" && k.startsWith(`sync:${nsOf(c)}:mismatch:`)).length;
+  check(c.stats.mismatches === n && c.stats.connects === 2, "many mismatches: each of 1,100 read once, though they went twice: " + J({ mismatches: c.stats.mismatches, connects: c.stats.connects }));
+  check(marks <= n, "many mismatches: at most one mark a record (decided ones pruned as new ones come): " + marks);
+  await stop(c);
+}
+
+
+async function lateAnswer() {
+  // (astra's narrowed CORR-PR58-1: A's PUT answered late, storage_full with no end, after the client has gone on
+  // as B: it pauses nothing, sets no timer or status of B's; B uploads as usual)
+  const A = await account(), B = await account();
+  await signInOnly(A);
+  await ctl("reset");
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "late answer: synced as A");
+  const nsA = nsOf(c), hB = await hashOf(B);
+  await ctl("set", { set: { delayFakePut: { ms: 4000, status: 507, body: { error: "storage_full", message: "faked, late" } } } });
+  await w.create("/late.bin", { content: bytes(700, 81) });
+  check(await until(async () => (await ctl("log")).http.some((h) => h.method === "PUT")), "late answer: A's PUT on its way");
+  await signInOnly(B);
+  await ctl("closeAll");
+  check(await until(() => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced", 15_000), "late answer: the client went on as B");
+  await sleep(4500);
+  check(c.debug().paused === null && c.status.state === "synced" && (await metaGet(w.ws, `sync:${nsA}:paused`)) === undefined && (await metaGet(w.ws, `sync:${nsOf(c)}:paused`)) === undefined, "late answer: A's late storage_full paused nothing, of B's or of A's namespace: " + J({ paused: c.debug().paused, status: c.status.state }));
+  await w.create("/b-file.bin", { content: bytes(900, 82) });
+  check(await until(async () => (await settledIn(w, c, nsOf(c))) && (await ctl("log")).http.some((h) => h.method === "PUT" && h.status === 201)), "late answer: B uploads and syncs as usual");
+  await stop(c);
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {

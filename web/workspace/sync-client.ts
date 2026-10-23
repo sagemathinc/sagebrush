@@ -29,7 +29,7 @@
 //   reconnect doesn't reset it: retry_after when the server gives one, else 1 s doubling to 60 s, ±20%.
 // - storage_full pauses uploads (`sync:<ns>:paused`) until its retry_after, a `welcome` with another generation
 //   or state, or the person's resume().
-import { COPIES, type Workspace } from "./api";
+import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
@@ -53,10 +53,10 @@ export const CLIENT = {
   maxPut: 95 * 2 ** 20,
   /** refusals kept for the Sync panel */
   refusalsKept: 100,
-  /** records whose bytes weren't what they said, remembered so as never to be read twice */
-  mismatchesKept: 1000,
-  /** index pages read at most per connection (each at most 1,000 ops and 1 MiB: LIMIT-PR58-3) */
+  /** index pages read at most in one slice of a connection (each at most 1,000 ops and 1 MiB: LIMIT-PR58-3);
+   * then a rest of `replayRestMs`, and the next slice, until the target is reached */
   replayPages: 64,
+  replayRestMs: 60_000,
   /** pulls: at most `pullBurst` at once, then `pullsPerSecond` */
   pullBurst: 4,
   pullsPerSecond: 2,
@@ -108,6 +108,9 @@ export type ClientOptions = {
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
+const mismatchKey = (ns: string, dseq: number) => key(ns, "mismatch:" + String(dseq).padStart(16, "0"));
+/** this workspace's stored bytes were once found longer or shorter than their metadata (LIMIT-PR58-2) */
+const UNTRUSTED = "sync:bytes-untrusted";
 const META = "meta";
 const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 // (the fields of an op that make it this op: what an echo must repeat of its record)
@@ -138,7 +141,7 @@ type Conn = {
   /** the seq the log is read up to on this connection: the newest accepted record awaiting its echo, and (with
    * onIndex) welcome's index_head; only ever raised, by those and by acks' accepted seqs */
   target: number;
-  /** index pages read on this connection (hello's and pulls'), at most CLIENT.replayPages */
+  /** index pages read in this slice of the connection (hello's and pulls'), at most CLIENT.replayPages */
   pages: number;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
@@ -178,7 +181,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -445,7 +448,7 @@ export class SyncClient {
       const rb = await this.metaGet<{ why: string }>(key(c.ns, "rebuild"));
       if (rb?.why === "invalid" || rb?.why === "diverged") c.halted = rb.why;
     }
-    if (this.paused?.until) this.wake("unpause", this.paused.until, () => this.unpause(c));
+    if (this.paused?.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
     this.kick();
   }
@@ -494,17 +497,25 @@ export class SyncClient {
     this.kick();
   }
 
-  /** The next page of the log, if the cursor is short of the target: one pull at a time, paced, at most
-   * CLIENT.replayPages pages a connection (then the rest waits for the next one). */
+  /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
+   * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
-    if (this.conn !== c || c.pulling || this.cursor >= c.target || c.pages >= CLIENT.replayPages) return;
+    if (this.conn !== c || c.pulling || this.cursor >= c.target) return;
+    // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
+    // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
+    if (c.pages >= CLIENT.replayPages) {
+      return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => {
+        c.pages = 0;
+        this.pull(c);
+      });
+    }
     if (c.pending.size >= CLIENT.inflight) return;
     // (the index timer, however the pull was asked for (a page, an ack, a reconnect): woken at its end, when the
     // timer is checked again, so a prolonged one waits on, CORR-PR58-3)
     const left = this.left(c.ns, "index");
-    if (left > 0) return this.wake("index", this.clock.now() + left, () => this.pull(c));
+    if (left > 0) return this.wake(c, "index", this.clock.now() + left, () => this.pull(c));
     const wait = this.pullBucket.take(1, this.clock.now());
-    if (wait > 0) return this.wake("pull", this.clock.now() + wait, () => this.pull(c));
+    if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.pull(c));
     c.pulling = true;
     this.stats.pulls++;
     this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
@@ -571,7 +582,7 @@ export class SyncClient {
     if (p?.kind === "index") {
       c.pulling = false;
       const at = await this.timerFail(c.ns, "index", ra);
-      this.wake("index", at, () => this.pull(c));
+      this.wake(c, "index", at, () => this.pull(c));
       return;
     }
     if (p?.kind !== "ops") return;
@@ -648,7 +659,7 @@ export class SyncClient {
     }
     const left = this.left(c.ns, "ops");
     if (left > 0) {
-      this.wake("ops", this.clock.now() + left, () => this.kick());
+      this.wake(c, "ops", this.clock.now() + left, () => this.kick());
       this.showWaiting(c, (await c.ob.status()).count, this.clock.now() + left);
       return;
     }
@@ -677,7 +688,7 @@ export class SyncClient {
       const wait = this.bucket.take(batch.length, this.clock.now());
       if (wait === Infinity) throw new Error("sync: a message larger than the pace allows");
       if (wait > 0) {
-        this.wake("pace", this.clock.now() + wait, () => this.kick());
+        this.wake(c, "pace", this.clock.now() + wait, () => this.kick());
         return;
       }
       this.stats.opsMessages++;
@@ -730,7 +741,7 @@ export class SyncClient {
     for (let i = 0; i < ask.length && this.conn === c; i += CLIENT.checkItems) {
       // (a check timer, persisted, maybe from before a reload: woken at its end, CORR-PR58-2)
       if (this.left(c.ns, "check") > 0) {
-        this.wake("check", this.clock.now() + this.left(c.ns, "check"), () => this.kick());
+        this.wake(c, "check", this.clock.now() + this.left(c.ns, "check"), () => this.kick());
         break;
       }
       const page = ask.slice(i, i + CLIENT.checkItems);
@@ -740,7 +751,7 @@ export class SyncClient {
       if (!r.ok) {
         // (another account's session, or another generation: this connection ends, and the namespace is read again)
         if (r.status === 401 || r.status === 403 || (r.status === 409 && r.code === "conflict")) c.end("closed");
-        else this.wake("check", await this.timerFail(c.ns, "check", r.retryAfter), () => this.kick());
+        else this.wake(c, "check", await this.timerFail(c.ns, "check", r.retryAfter), () => this.kick());
         break;
       }
       await this.timerOk(c.ns, "check");
@@ -792,81 +803,127 @@ export class SyncClient {
       await this.metaPut(key(c.ns, "paused"), undefined);
     }
     if (this.paused) {
-      if (this.paused.until !== undefined) this.wake("unpause", this.paused.until, () => this.unpause(c));
+      if (this.paused.until !== undefined) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
       return "wait";
     }
     if (this.left(c.ns, "upload") > 0) {
-      this.wake("upload", this.clock.now() + this.left(c.ns, "upload"), () => this.kick());
+      this.wake(c, "upload", this.clock.now() + this.left(c.ns, "upload"), () => this.kick());
       return "wait";
     }
     // (bytes found before not to be what their record says: never read again, LIMIT-PR58-2)
     if (await this.mismatched(c.ns, r.dseq)) return "gone";
-    // (the reservation first, before any bytes are read, held until the request is done: L2; bytesFor reads only
-    // bytes whose stored size is the record's, and lets go any whose length isn't)
-    const token = await reserve(size * COPIES);
-    try {
-      if (this.conn !== c) return "wait";
-      if (token.n < size * COPIES) throw new Error("sync: a reservation that doesn't cover an upload");
-      const bytes = await bytesFor(this.w, r, token);
-      if (bytes === "mismatch") {
-        // (not this device's bytes for that record: sent all the same, as bytes gone are, and the server decides
-        // (C1); the file's present state goes as its own write after, by the pending summary's successor path)
-        this.stats.mismatches++;
-        await this.noteMismatch(c.ns, r.dseq);
-        return "gone";
-      }
-      if (!bytes) return "gone";
-      if (bytes.length !== size || bytes.length > CLIENT.maxPut) return "gone";
-      // (the connection still the one these bytes are for: never sent under another lease, CORR-PR58-1)
-      if (this.conn !== c) return "wait";
-      this.stats.puts++;
-      this.stats.putsAtOnce++;
-      this.stats.maxPutsAtOnce = Math.max(this.stats.maxPutsAtOnce, this.stats.putsAtOnce);
-      let res;
+    // (the reservation first, before any bytes are read, held until the request is done: L2.  It is the stored
+    // size × COPIES: every writer of fileBytes and versionBytes stores a value in the same transaction as metadata
+    // made from that value's own length, so they agree (api.ts: write, create, adopt's move, the migrator's move,
+    // putVersion).  IndexedDB gives no value's length without reading it whole, so a value changed outside the
+    // workspace's own verbs is found only by reading it: as the migrator's rule has it (daybreak2), that costs one
+    // read past the reservation, once.  Here reads go one at a time, so at most one such value is held at once,
+    // and the first found marks this workspace's stored bytes untrusted, durably: every upload's read after that
+    // takes the largest reservation, LEGACY_MAX × COPIES, which has the page's reservation to itself.  So in a
+    // workspace's whole life at most one value is ever held beyond what its reader reserved (LIMIT-PR58-2))
+    let wide = await this.untrusted();
+    for (;;) {
+      const need = wide ? Math.max(size, LEGACY_MAX) * COPIES : size * COPIES;
+      const token = await reserve(need);
       try {
-        res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, this.binding(c));
+        if (this.conn !== c) return "wait";
+        if (token.n < need) throw new Error("sync: a reservation that doesn't cover an upload");
+        // (the flag checked again where reads go one at a time: one found meanwhile by another upload's read means
+        // this one is read under the largest reservation, not the one it took before)
+        const bytes = await this.oneRead(async () => {
+          if (!wide && (await this.untrusted())) return "widen" as const;
+          const b = await bytesFor(this.w, r, token);
+          // (found here, the mark made before the next read may begin)
+          if (b === "length") await this.metaPut(UNTRUSTED, { at: this.clock.now(), ns: c.ns, dseq: r.dseq });
+          return b;
+        });
+        if (bytes === "widen") {
+          wide = true;
+          continue;
+        }
+        if (wide) this.stats.wideReads++;
+        if (bytes === "mismatch" || bytes === "length") {
+          // (not this device's bytes for that record: sent all the same, as bytes gone are, and the server decides
+          // (C1); the file's present state goes as its own write after, by the pending summary's successor path)
+          this.stats.mismatches++;
+          await this.noteMismatch(c, r.dseq);
+          return "gone";
+        }
+        if (!bytes) return "gone";
+        if (bytes.length !== size || bytes.length > CLIENT.maxPut) return "gone";
+        // (the connection still the one these bytes are for: never sent under another lease, CORR-PR58-1)
+        if (this.conn !== c) return "wait";
+        this.stats.puts++;
+        this.stats.putsAtOnce++;
+        this.stats.maxPutsAtOnce = Math.max(this.stats.maxPutsAtOnce, this.stats.putsAtOnce);
+        let res;
+        try {
+          res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, this.binding(c));
+        } finally {
+          this.stats.putsAtOnce--;
+        }
+        // (an answer for a connection that is no longer the current one changes nothing: no pause, timer, status or
+        // wake-up of the next one, whatever it says, astra's narrowed CORR-PR58-1)
+        if (this.conn !== c) return "wait";
+        if (res.ok) {
+          await this.timerOk(c.ns, "upload");
+          return "have";
+        }
+        if (res.status === 413 || res.status === 400) return "final";
+        if (res.status === 507) {
+          this.paused = { why: "storage_full", at: this.clock.now(), generation: c.generation, state: "active", ...(res.retryAfter !== undefined ? { until: this.clock.now() + res.retryAfter } : {}) };
+          await this.metaPut(key(c.ns, "paused"), this.paused);
+          if (this.paused.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
+          return "wait";
+        }
+        if (res.status === 409 && (res.code === "readonly" || res.code === "deleting")) {
+          c.writable = false;
+          this.say({ state: "paused", ns: c.ns, reason: res.code === "readonly" ? "read-only" : "deleting" });
+          return "wait";
+        }
+        if (res.status === 401 || res.status === 403 || (res.status === 409 && res.code === "conflict")) {
+          c.end("closed");
+          return "wait";
+        }
+        this.wake(c, "upload", await this.timerFail(c.ns, "upload", res.retryAfter), () => this.kick());
+        return "wait";
       } finally {
-        this.stats.putsAtOnce--;
+        token();
       }
-      if (res.ok) {
-        await this.timerOk(c.ns, "upload");
-        return "have";
-      }
-      if (res.status === 413 || res.status === 400) return "final";
-      if (res.status === 507) {
-        this.paused = { why: "storage_full", at: this.clock.now(), generation: c.generation, state: "active", ...(res.retryAfter !== undefined ? { until: this.clock.now() + res.retryAfter } : {}) };
-        await this.metaPut(key(c.ns, "paused"), this.paused);
-        if (this.paused.until) this.wake("unpause", this.paused.until, () => this.unpause(c));
-        return "wait";
-      }
-      if (res.status === 409 && (res.code === "readonly" || res.code === "deleting")) {
-        c.writable = false;
-        this.say({ state: "paused", ns: c.ns, reason: res.code === "readonly" ? "read-only" : "deleting" });
-        return "wait";
-      }
-      if (res.status === 401 || res.status === 403 || (res.status === 409 && res.code === "conflict")) {
-        c.end("closed");
-        return "wait";
-      }
-      this.wake("upload", await this.timerFail(c.ns, "upload", res.retryAfter), () => this.kick());
-      return "wait";
-    } finally {
-      token();
     }
   }
 
-  // (records whose bytes weren't what they say, by dseq: kept so they are read at most once; at most
-  // CLIENT.mismatchesKept, the oldest let go first: those are decided long since)
+  // (records whose bytes weren't what they say: one durable mark each, `sync:<ns>:mismatch:<dseq>`, so each is read
+  // at most once however long it stays undecided; the marks of records already decided (below the outbox's lowest
+  // dseq) are deleted as new ones are made, so they number at most the outbox's records)
   private async mismatched(ns: string, dseq: number): Promise<boolean> {
-    return ((await this.metaGet<number[]>(key(ns, "mismatch"))) ?? []).includes(dseq);
+    return (await this.metaGet(mismatchKey(ns, dseq))) !== undefined;
   }
-  private async noteMismatch(ns: string, dseq: number) {
-    // (read and written in one transaction: two uploads at once each add theirs)
+  private async noteMismatch(c: Conn, dseq: number) {
+    const low = (await c.ob.records(1, 1))[0]?.dseq ?? dseq;
     await inTx(this.w.ws, META, "readwrite", async (tx) => {
-      const meta = tx.objectStore(META), k = key(ns, "mismatch");
-      const list = ((await req(meta.get(k))) as number[] | undefined) ?? [];
-      if (!list.includes(dseq)) meta.put([...list, dseq].slice(-CLIENT.mismatchesKept), k);
+      const meta = tx.objectStore(META);
+      meta.put(1, mismatchKey(c.ns, dseq));
+      if (low > 1) meta.delete(IDBKeyRange.bound(mismatchKey(c.ns, 0), mismatchKey(c.ns, low), false, true));
     });
+  }
+  private async untrusted(): Promise<boolean> {
+    return (await this.metaGet(UNTRUSTED)) !== undefined;
+  }
+  /** `f`, the only upload read running: bytes read one value at a time (LIMIT-PR58-2). */
+  private reading: Promise<unknown> = Promise.resolve();
+  private oneRead<T>(f: () => Promise<T>): Promise<T> {
+    const run = this.reading.then(async () => {
+      this.stats.readsAtOnce++;
+      this.stats.maxReadsAtOnce = Math.max(this.stats.maxReadsAtOnce, this.stats.readsAtOnce);
+      try {
+        return await f();
+      } finally {
+        this.stats.readsAtOnce--;
+      }
+    });
+    this.reading = run.catch(() => {});
+    return run;
   }
 
   private async unpause(c: Conn) {
@@ -940,7 +997,10 @@ export class SyncClient {
   /** `f` at `at`, as the one wake-up of `kind`: one already set for the same time is kept, one for another time
    * replaced, so however often it is asked for (an edit during a backoff asks each time), at most one is pending
    * per kind (LIMIT-PR58-1).  Ended with the connection, on success of its kind, and by stop(). */
-  private wake(kind: string, at: number, f: () => void) {
+  private wake(c: Conn, kind: string, at: number, f: () => void) {
+    // (only for the current connection: a late answer to an older one sets, replaces or cancels nothing of the
+    // next one's, astra's narrowed CORR-PR58-1)
+    if (this.conn !== c) return;
     const cur = this.wakes.get(kind);
     if (cur && cur.at === at) return;
     cur?.cancel();

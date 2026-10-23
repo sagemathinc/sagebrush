@@ -1530,8 +1530,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       });
       if ("error" in r) return r;
     }
+    // (tests: held here, after every await, so a test can change the generation just before the allocation)
+    await gate(this.env, "reserve-allocate");
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
+      // (the binding again, in the transaction that answers or allocates: the generation may have been retired and
+      // the next one turned on during the awaits above, astra's narrowed CORR-PR58-1)
+      this.bound(a.bind?.account, a.bind?.generation);
       if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) return { have: true as const };
       if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
       if (!l.sync.enabled) throw new SyncError("readonly", "this account's plan doesn't include sync");
