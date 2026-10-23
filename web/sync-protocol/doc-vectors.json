@@ -289,6 +289,37 @@
    "chain": "670cc42b92a999d0b90db63dcafc6faaf9d4d9094c377c9ae33004d16ed6a36a"
   }
  ],
+ "chain_epoch2": {
+  "owner_hash": "abababababababababababababababababababababababababababababababab",
+  "doc": "0123456789ab",
+  "epoch": 2,
+  "first_seq": 5,
+  "seed": "daf401dc44ccb9bae8a9a360f7730c5de71a1973f0eaaf4b27b779c2541cac14",
+  "batches": [
+   {
+    "seq": 5,
+    "recv": 3000,
+    "epoch": 2,
+    "author": "person",
+    "writer": "session:devAAAAA",
+    "envs": "[{\"cseq\":1,\"id\":\"0000000000d_c3\",\"parents\":[],\"size\":4}]",
+    "body_hex": "726f6f74",
+    "hb": "07399fbeb271d4f8beae93c56b096a78c75b4f7d32d461f9c489468a535ea9aa",
+    "chain": "d85866ffabe08e5044cd39312206098a6269b1712cb4935fa6b6f186d164ad01"
+   },
+   {
+    "seq": 6,
+    "recv": 3000,
+    "epoch": 2,
+    "author": "person",
+    "writer": "session:devAAAAA",
+    "envs": "[{\"cseq\":2,\"id\":\"0000000000e_c3\",\"parents\":[\"0000000000d_c3\"],\"size\":1}]",
+    "body_hex": "21",
+    "hb": "8c05676699bb73f110580f6593d67bf85922ba95e6ddf5fd9712dccb1bcddd18",
+    "chain": "0ddbd873d03536f04a054edc3187a9095cce29968ac89a91f3ac20b1b35fc474"
+   }
+  ]
+ },
  "sealed": [
   {
    "kind": "notebook",
