@@ -1482,7 +1482,7 @@ async function rebuildBehind() {
   await ctl("log", { reset: true });
   const c2 = viewClient(w2);
   try {
-    check(await until(async () => (await settled(w2, c2)) && c2.stats.rebuildPasses >= 1, 30_000), "behind: halted, rebuilt, resumed: " + J({ passes: c2.stats.rebuildPasses, phase: c2.stats.rebuildPhase, status: c2.status }));
+    check(await until(async () => (await settled(w2, c2)) && c2.stats.rebuildPasses >= 1, 30_000), "behind: halted, rebuilt, resumed: " + J({ passes: c2.stats.rebuildPasses, phase: c2.stats.rebuildPhase, error: c2.stats.rebuildError, status: c2.status }));
     const { mine } = await serverOps(w2);
     const adopts = mine.filter((o) => o.fid === f.fid), dirs = mine.filter((o) => o.path === "/mine-d" && o.op === "mkdir");
     check(adopts.length === 1 && adopts[0].op === "adopt" && adopts[0].dseq >= 6, "behind: the file reissued once, as an adopt from server_next: " + J(adopts.map((o) => [o.op, o.dseq])));
