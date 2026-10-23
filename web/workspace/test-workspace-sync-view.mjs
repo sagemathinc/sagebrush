@@ -48,6 +48,8 @@ try {
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
   const results = await ev("window.run()");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
+  // (measurements, printed pass or fail)
+  for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
