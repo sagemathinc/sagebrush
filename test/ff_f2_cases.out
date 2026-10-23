@@ -74,4 +74,13 @@ sage over trace exact admitted 1
 sage over printing one short refused NotImplementedError powers 0 coordinates of elements of Finite Field in z6 of size 2^6 over its base are not supported yet (work)
 sage over printing exact admitted z2*z6 + (z2 + 1)*z6^2
 sage over past 2^20 refused NotImplementedError powers 0 Finite Field in z21 of size 2^21 over Finite Field in z3 of size 2^3 is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)
+vector (0, 1, 0) Vector space of dimension 3 over Finite Field in z2 of size 2^2
+vector base L NotImplementedError the vector of an element over the extension itself is not supported yet
+vector base K NotImplementedError the vector of an element over the extension itself is not supported yet
+vector base GF(2) ValueError not (explicitly) defined over Finite Field of size 2
+same object True True
+cache after 100 names 32 cap 32 w0 evicted, made afresh True
+stale entry not returned True
+long name not cached True True
+bad name variable name '1x' does not start with a letter
 core calls [('charpoly', 2), ('coordinates', 1), ('minpoly', 2), ('norm', 2), ('relative', 3), ('root', 3), ('trace', 2)]

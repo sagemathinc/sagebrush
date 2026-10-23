@@ -221,6 +221,37 @@ def main():
     zx5 = zx ** 5
     at(S.coordinates_cost(L, MF.K), "sage over printing", lambda: repr(zx5))
     attempt("sage over past 2^20", lambda: B21.K.over(m.GF(8).K))
+    # vector() over the base (a vector of its VectorSpace); over the
+    # extension itself refused, not computed over the base (astra CORR-FF2-4)
+    print("vector", repr(zx.vector()), zx.vector().parent())
+    for lbl, bb in [("L", Lx), ("K", L), ("GF(2)", s.GF(2))]:
+        try:
+            print("vector base", lbl, zx.vector(base=bb))
+        except (NotImplementedError, ValueError) as ex:
+            print("vector base", lbl, type(ex).__name__, ex)
+    # the over() cache: bounded, LRU, entries checked by identity (daybreak2
+    # LIMIT-FF2-4)
+    s._OVER.clear()
+    Ks, Fs = s.GF(5 ** 4), s.GF(25)
+    first = Ks.over(Fs, names="w0")
+    print("same object", Ks.over(Fs, names="w0") is first, Ks.over(Fs) is Ks.over(Fs))
+    for i in range(100):
+        Ks.over(Fs, names="w%d" % i)
+    print("cache after 100 names", len(s._OVER), "cap", s._OVER_MAX, "w0 evicted, made afresh", Ks.over(Fs, names="w0") is not first)
+    # (an id() reused by other objects: the entry's fields are checked)
+    class Other:
+        pass
+    key = (id(Ks), id(Fs), "w5")
+    stale = object()
+    s._OVER[key] = (Other(), Other(), stale)
+    print("stale entry not returned", Ks.over(Fs, names="w5") is not stale)
+    long = "a" * 300
+    Ks.over(Fs, names=long)
+    print("long name not cached", not any(k[2] == long for k in s._OVER), len(s._OVER) <= s._OVER_MAX)
+    try:
+        Ks.over(Fs, names="1x")
+    except ValueError as ex:
+        print("bad name", ex)
 
     # one core for both front ends
     calls = {}

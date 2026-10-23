@@ -18,6 +18,7 @@ Cantor-Zassenhaus, sagebrush.poly); the others by Cantor-Zassenhaus here.
 import array as _array
 import math as _m
 import random as _random
+import collections as _collections
 from fractions import Fraction as _F
 
 
@@ -2509,7 +2510,15 @@ _FF_EXT_BITS = 1024  # (as Magma mode's GF and ext< >: _magma._FF_BITS)
 # (F1's bound); minpoly and charpoly over the extension itself, and other
 # bases, are refused.
 
-_OVER = {}
+# K.over(F) is K.over(F), as Sage's parents are unique: a small LRU of the
+# extensions made (daybreak2 LIMIT-FF2-4), each entry holding its fields
+# themselves and checked by identity (an id() reused after a field is
+# collected never returns a stale extension); at most _OVER_MAX entries,
+# evicted least recently used first; a generator name of more than
+# _OVER_NAME characters is never cached (its extension is made afresh).
+_OVER = _collections.OrderedDict()
+_OVER_MAX = 32
+_OVER_NAME = 64
 
 
 def _ff_over(self, base=None, names=None, **kwds):
@@ -2531,13 +2540,22 @@ def _ff_over(self, base=None, names=None, **kwds):
     if not (F is self or (_is_finite_field(F) and _ff_embeds(F, self))):
         raise ValueError("No coercion map from %r to %r" % (F, self))
     name = _gf_name(0, names) or _gf_name(0, kwds.get("name"))
+    if name is not None:
+        name = _ff_var_name(name)
     key = (id(self), id(F), name)
-    L = _OVER.get(key)
-    if L is None:
-        m = S.pnq(F)[1]
-        if 1 < m < S.pnq(self)[1] and not S.descendable(self, F):
-            raise NotImplementedError("%r over %r is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)" % (self, F))
-        L = _OVER[key] = RingExtension_ff(self, F, name)
+    ent = _OVER.get(key)
+    if ent is not None and ent[0] is self and ent[1] is F:
+        _OVER.move_to_end(key)
+        return ent[2]
+    m = S.pnq(F)[1]
+    if 1 < m < S.pnq(self)[1] and not S.descendable(self, F):
+        raise NotImplementedError("%r over %r is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)" % (self, F))
+    L = RingExtension_ff(self, F, name)
+    if name is None or len(name) <= _OVER_NAME:
+        _OVER[key] = (self, F, L)
+        _OVER.move_to_end(key)
+        while len(_OVER) > _OVER_MAX:
+            _OVER.popitem(last=False)
     return L
 
 
@@ -2653,10 +2671,16 @@ class RingExtensionElement_ff:
         return self._x
 
     def vector(self, base=None):
+        """The coordinates over base (default: the extension's base), a
+        vector of its VectorSpace, as Sage's; over the extension itself (a
+        vector of dimension 1 over L, in Sage) refused (astra CORR-FF2-4)."""
         L = self._L
-        L._check_base(base)
+        if L._check_base(base) is not L._F:
+            raise NotImplementedError("the vector of an element over the extension itself is not supported yet")
         S = _ffsub()
-        return tuple(S.coordinates(self._x, L._F, [S.WORK], L._refuse))
+        cs = S.coordinates(self._x, L._F, [S.WORK], L._refuse)
+        import _sage_ffmat
+        return _sage_ffmat.VectorSpace(L._F, len(cs))(cs)
 
     def __repr__(self):
         L = self._L
