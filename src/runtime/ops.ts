@@ -1709,27 +1709,38 @@ export class SetIter {
 }
 // reversed() of a dict or its views: from the last entry back, as CPython's;
 // a changed size raises; an entry deleted since is passed over; after
-// clear(), it goes on in the new entries from the same position
+// clear(), it goes on in the new entries from the same position. Its keys
+// are taken at the start; while the dict has deleted none (a plain dict
+// counts its deletions, $dels), they are all there, and none is looked up
+// (LIMIT-PR66-2); after a deletion, or for a dict of attributes, globals or
+// a class (which can lose a key unseen), each is looked up as it is reached.
 export class DictRevIter {
   keys: any[];
   size: number;
   i: number;
   clears: number;
+  dels: number;
+  live: boolean;
   constructor(public d: PyDict, public kind: number) {
-    this.keys = [...d.$m.keys()];
-    this.size = d.$m.size;
+    const m = d.$m;
+    this.keys = [...m.keys()];
+    this.size = m.size;
     this.i = this.keys.length - 1;
     this.clears = d.$clears;
+    this.dels = d.$dels;
+    this.live = m.constructor !== Map;
   }
   $next(): any {
     const d = this.d;
-    if (d.$m.size !== this.size) {
-      this.size = -1;
-      raise(T.RuntimeError, "dictionary changed size during iteration");
-    }
-    if (d.$clears !== this.clears) {
-      this.clears = d.$clears;
-      this.keys = [...d.$m.keys()];
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any) | ((d.$dels !== this.dels) as any)) this.changed();
+    if (!this.live) {
+      const i = this.i;
+      if (i < 0) return this.end();
+      this.i = i - 1;
+      const k = this.keys[i];
+      if (this.kind === 0) return dictKeyOf(d, k);
+      if (this.kind === 1) return d.$m.get(k);
+      return tuple([dictKeyOf(d, k), d.$m.get(k)]);
     }
     while (this.i >= 0) {
       const k = this.keys[this.i--];
@@ -1738,10 +1749,31 @@ export class DictRevIter {
       if (this.kind === 1) return d.$m.get(k);
       return tuple([dictKeyOf(d, k), d.$m.get(k)]);
     }
-    // (exhausted: no more, whatever the dict does after)
+    return this.end();
+  }
+  changed(): void {
+    const d = this.d;
+    if (d.$m.size !== this.size) {
+      this.size = -1;
+      raise(T.RuntimeError, "dictionary changed size during iteration");
+    }
+    if (d.$clears !== this.clears) {
+      // (cleared: the new entries, from the same position)
+      this.clears = d.$clears;
+      this.keys = [...d.$m.keys()];
+    }
+    if (d.$dels !== this.dels) {
+      // (a key deleted: each looked up from now on)
+      this.dels = d.$dels;
+      this.live = true;
+    }
+  }
+  // (exhausted: no more, whatever the dict does after)
+  end(): any {
     this.d = ENDED;
     this.size = 0;
     this.clears = 0;
+    this.dels = 0;
     this.keys = [];
     return DONE;
   }

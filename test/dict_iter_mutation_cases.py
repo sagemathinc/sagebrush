@@ -189,3 +189,31 @@ old = c.__dict__
 c.__dict__ = {"p": 3}
 old["w"] = 9
 print("old __dict__ after replacement", old, c.__dict__, c.p, hasattr(c, "w"), hasattr(c, "x"))
+
+
+# reversed() while keys are deleted, by each way of deleting (it takes its
+# keys at the start and passes over one deleted since), and a key deleted
+# from an instance's __dict__ through del of the attribute
+def rdel(label, act, kind=reversed, make=lambda: {1: 1, 2: 2, 3: 3, 4: 4}):
+    d = make()
+    it = kind(d)
+    first = nxt(it)
+    act(d)
+    print(label, [first] + [nxt(it) for _ in range(5)])
+
+
+def _del(d, k):
+    del d[k]
+
+
+rdel("reversed: del, add", lambda d: (_del(d, 2), d.__setitem__(5, 5)))
+rdel("reversed: popitem, add", lambda d: (d.popitem(), d.__setitem__(5, 5)))
+rdel("reversed: pop with default, add", lambda d: (d.pop(3, None), d.__setitem__(5, 5)))
+rdel("reversed: delete then setdefault", lambda d: (_del(d, 1), d.setdefault(9, 9)))
+rdel("reversed values: del, add", lambda d: (_del(d, 3), d.__setitem__(6, 6)), rvalues)
+rdel("reversed items: del, add", lambda d: (_del(d, 2), d.__setitem__(6, 6)), ritems)
+rdel("reversed: replace a value", lambda d: d.__setitem__(2, "x"), rvalues)
+rdel("reversed: str keys, del, add", lambda d: (_del(d, "b"), d.__setitem__("e", 5)), make=lambda: {"a": 1, "b": 2, "c": 3, "d": 4})
+rdel("reversed: float and int keys", lambda d: (_del(d, 2.0), d.__setitem__(7, 7)), make=lambda: {1: 1, 2: 2, 3.5: 3, 4: 4})
+rdel("reversed: tuple keys, del, add", lambda d: (_del(d, (2, "b")), d.__setitem__((5, "e"), 5)), make=lambda: {(1, "a"): 1, (2, "b"): 2, (3, "c"): 3, (4, "d"): 4})
+rdel("reversed items: frozenset keys, pop, add", lambda d: (d.pop(frozenset({2})), d.__setitem__(frozenset({5}), 5)), ritems, make=lambda: {frozenset({1}): 1, frozenset({2}): 2, frozenset({3}): 3})

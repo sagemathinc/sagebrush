@@ -1373,6 +1373,9 @@ export class PyDict {
   // (clear()s so far: a dict's iterator then goes on in the emptied dict
   // from the same position, as CPython's goes on in its new table)
   $clears = 0;
+  // (keys deleted so far: reversed() takes no deleted key into account
+  // while there are none)
+  $dels = 0;
 }
 
 // The numeric primitive key in `d` equal to the object key `k`, if any.
@@ -1615,6 +1618,7 @@ export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
     d.$orig?.delete(p);
     if (d.$m.delete(p)) {
       d.$nidx = null;
+      d.$dels++;
       return true;
     }
     if (typeof p === "string" || p === null || d.$buckets === null) return false;
@@ -1626,12 +1630,14 @@ export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
     if (a !== undefined) {
       d.$orig?.delete(a);
       d.$nidx = null;
+      d.$dels++;
       return d.$m.delete(a);
     }
     return false;
   }
   const list = d.$buckets!.get(e.h)!;
   list.splice(list.indexOf(e), 1);
+  d.$dels++;
   return d.$m.delete(e);
 }
 
