@@ -485,6 +485,73 @@ It holds that reservation until its last large reference is dropped. The same ho
 - Neither ever holds the whole tree in memory.
 - **Tests:** 100,000 entries, with the pages' counts and bytes bounded, and a crash and reload mid-way.
 
+### As built (step 3: web/workspace/sync-client.ts)
+
+@sagebrush approved deltas D1 to D4 before the code (Oct 23).
+
+- **D1. The namespace.** As built, `welcome` is `{v, state, generation, index_head, next_dseq, server_time}`. It carries no `limits`, `used_bytes` or account hash.
+  - The namespace is `accountHash(account_id) : generation : device`.
+    - `account_id` comes from `GET /api/share/me`, and is hashed the way the server hashes it (protocol.ts `accountHash`).
+    - `generation` comes from `GET /api/sync/v1/status`, because the Web Lock is per namespace and has to be taken before the socket is opened.
+    - The device is the workspace's.
+  - `welcome.generation` is then checked against it. If they differ, the socket is closed with nothing sent on it, and the status is read again, so a new generation gets a new namespace and its own outbox.
+  - A `storage_full` pause (`sync:<ns>:paused`) lifts on whichever comes first:
+    - its `retry_after`, when the server gives one;
+    - a `welcome` with another generation or state than when the pause began;
+    - the person's `resume()`.
+  - It doesn't wait for limits in `welcome`.
+- **D2. Steps 3 and 4.** Step 3 persists no cursor and applies nothing from the server.
+  - The cursor is kept in memory only, so `hello.index_after` is 0 on a page's first connection.
+  - Each `index` page goes, in order, to an `onIndex` hook, which step 3 leaves unset. Step 4 gives it, with the confirmed index and the durable cursor written in one transaction (C3).
+  - This device's echoes confirm their records (`Outbox.confirmed`), but only if each echo is the very op of its record.
+  - Tests assert, after every case, that there is no `sync:*:cursor` key, `syncIndex` is empty, and no op of the server's is applied.
+- **D3. The rebuild is asked for, not done.**
+  - A per-op refusal removes its record (`Outbox.acked`). It is listed in `sync:<ns>:refused` (the last 100: dseq, code, path, time) and sets `sync:<ns>:rebuild` `{why: "refused"}`. Sending goes on, because the server applied the ops after it as if it were absent (sync-server §5.2).
+  - Two cases halt sending until step 4's rebuild, the flag saying which:
+    - the server's top-level `invalid` "rebuild" (`why: "invalid"`);
+    - **a diverged log** (`why: "diverged"`): `welcome.next_dseq` above this namespace's next dseq, an echo that isn't its record's op, or an `order` naming a dseq this device has already decided. This is the case of a workspace restored, or reset with its device kept: step 4's rebuild must also take the server's `next_dseq` as the namespace's next dseq.
+  - No top-level error and no closed socket removes an undecided record. The sender waits for what is in flight, then sends again from the lowest record not accepted, after its timer.
+- **D4. Tests:** web/workspace/test-workspace-sync-client.mjs.
+  - It runs the cases in headless Chrome against web/sync/test-entry.ts in Miniflare.
+  - A front in the test serves the page and proxies the site's API (the socket too) on the page's origin. It keeps the session cookie, and it can drop acks, fake the server's errors, close sockets, rewrite `welcome` and hold uploads.
+  - A fake clock drives pace and backoff.
+  - It runs on the VMs (ci.yml's sync block).
+- **Also as built:**
+  - **Where a namespace's scan starts.** Until step 4's first sync, it starts at the latest op when the namespace first connects (`Outbox.begin`), so ops from before sync was on aren't sent.
+  - **Timers.** They are persisted as `sync:<ns>:retry:<kind>` `{at, n}`, one per kind: ops, index, check, upload, connect (and url, fetch, enable for later steps). Each is `retry_after` when the server gives one, else $1\,\text{s} \cdot 2^{n-1}$ capped at 60 s, $\pm 20\%$. Each is cleared by a success of its kind.
+  - **Uploads before ops.** The sender sends ops only up to the first data file whose bytes the server isn't known to hold, because a `missing` refusal would be final. A file whose bytes this device no longer has, or that the server refuses for good (413, 400: too large, not these bytes), is sent all the same, and the server decides it. A file over 95 MiB isn't uploaded, and its op is refused `missing` and listed (§2).
+  - **Echoes.** The server sends the log only on `hello` and `pull_index`; it pushes nothing when another device's ops are accepted. So after an ack that has accepted ops, the client pulls from its cursor to see its echoes. Live index updates for a second device need a server push (or polling): an open question for step 4.
+
+- **After review** (daybreak3's LIMIT-PR58-1 to 3, astra's CORR-PR58-1 to 3):
+  - **Bound to the account** (CORR-PR58-1).
+    - `/api/share/me` is read again on every connection.
+    - `hello` carries the namespace's `account` hash and `generation`, and the server refuses a socket whose session is another account's or another generation (sync-server §5.2).
+    - Blob requests carry them as `x-sync-account` and `x-sync-generation` (§5.4).
+    - Bytes are PUT only while the connection they were read for is still the current one. An answer that comes back after its connection ended changes nothing: no pause, timer, status or wake-up of the next connection's. Wake-ups belong to their connection.
+    - The account object checks the binding again inside the transaction that allocates an upload's reservation, so a generation retired and replaced during the request's awaits is refused there (astra's second round).
+    - Switching to another namespace keeps the old one's records; its pins go with the lifecycle epoch, as C2 has it.
+  - **One wake-up a kind** (LIMIT-PR58-1). Any kind of work (ops, pace, check, upload, index, pull, unpause) has at most one scheduled callback. The same deadline asked for again keeps it; another one replaces it. Callbacks end with the connection, on success of their kind, and on `stop()`.
+  - **Bytes checked against their record** (LIMIT-PR58-2).
+    - `bytesFor` reads only when the entry's (or pin's) stored size is the record's, and the reservation covers it ($\text{size} \cdot \text{COPIES}$, checked).
+    - Bytes whose length isn't the record's are let go unhashed and unsent.
+    - Such a record gets its own durable mark, `sync:<ns>:mismatch:<dseq>`, so its bytes are never read twice however long it waits. Marks of records already decided are deleted as new ones are made. The record is sent as bytes gone are, and the server decides it.
+    - Stored bytes longer than their metadata (daybreak3's second round):
+      - Every writer of `fileBytes` and `versionBytes` stores a value in the same transaction as metadata made from that value's own length: write, create, adopt's move, the migrator's move, `putVersion`. So the reservation is sized from the metadata ($\text{size} \cdot \text{COPIES}$), as the migrator's hashing read of the same bytes is.
+      - IndexedDB gives no value's length without reading it whole. So a value changed outside the workspace's verbs is found only by reading it, as the migrator's rule has it: one read past the reservation, once.
+      - Upload reads go one at a time, so at most one such value is held at once.
+      - The first one found marks the workspace's stored bytes untrusted, durably (`sync:bytes-untrusted`). The mark is written in the very transaction that reads the value and finds its length, together with that record's own mark (daybreak3's third round). Every upload read after that takes the largest reservation, $\text{LEGACY\_MAX} \cdot \text{COPIES}$, which has the page's reservation to itself. The flag is checked again inside the one-at-a-time section.
+      - A narrow read first records itself durably (`sync:bytes-reading`); the reading transaction clears it. A page killed while it held a value leaves that record, and the next start takes the bytes as untrusted before any read. Tested with a seam (`PINS.cutAfterRead`) that aborts the reading transaction right after the value is materialized.
+      - So in a workspace's whole life at most one value is ever held beyond what its reader reserved.
+  - **The log is read only as far as it must be** (LIMIT-PR58-3).
+    - `hello.index_after` is just before the oldest record accepted and awaiting its echo (else the in-memory cursor).
+    - Each connection reads to a fixed target: the newest such record's seq, raised only by acks' accepted seqs, plus `welcome.index_head` once `onIndex` is given.
+    - Pulls are one at a time and paced (a bucket: 4, then 2 a second). After at most `CLIENT.replayPages` (64) pages, a slice rests for `CLIENT.replayRestMs` (60 s), then goes on toward the target on the same connection, so it never stalls (daybreak3's question 2). That is at most 64 MiB a slice. The first rest's end stands until the slice resumes: the pulls each ack asks for meanwhile never move it later (astra's third round).
+    - A `more` page that moves nothing ends the connection.
+  - **Deadlines re-armed** (CORR-PR58-2, 3).
+    - A blocked path schedules its own wake-up at its persisted deadline: a check timer, a storage_full pause (cleared durably once past) or the index timer.
+    - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
+  - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |

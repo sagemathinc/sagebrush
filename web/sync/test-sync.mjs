@@ -2154,19 +2154,46 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
     { op: "adopt", path: "/W/old", kind: "folder", fid: "4444444444444444", parent: W },
     { op: "create", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes), size: bytes.length, parent: X },
     { op: "write", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length, base: sha(bytes), parent: X },
+    // (a remove and a restore say where: into Trash, and back; the client's log has `to` on both, as the reducer does)
+    { op: "remove", path: "/W/X/d.csv", to: "/Trash/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length },
+    { op: "restore", path: "/Trash/d.csv", to: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length, parent: X },
   ];
   const code = `import { wireOf } from ${JSON.stringify(join(here, "../workspace/sync-outbox.ts"))};
 const local = ${JSON.stringify(local)};
 console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person", device: "d", after: {} }, i + 1))));`;
   const wire = JSON.parse(execFileSync("bun", ["-e", code], { encoding: "utf8" }));
-  ok(wire.length === 8 && wire.every((w, i) => w && w.parent === local[i].parent), "(the client's wireOf keeps each op's parent: " + JSON.stringify(wire.map((w) => w?.parent ?? null)) + ")");
+  ok(wire.length === local.length && wire.every((w, i) => w && w.parent === local[i].parent && w.to === local[i].to), "(the client's wireOf keeps each op's parent: " + JSON.stringify(wire.map((w) => w?.parent ?? null)) + ")");
   const s = await socket(sp);
   await hello(s, "device-wire-0002");
   const a = await s.ask({ t: "ops", ops: wire });
-  ok(a?.t === "ack" && a.ops.length === 8 && a.ops.every((o) => o.seq && !o.code), "the server takes the client's own wire ops with parent: mkdir, create, rename, restore, adopt, and a data file's create and write: " + JSON.stringify(a?.ops));
+  ok(a?.t === "ack" && a.ops.length === local.length && a.ops.every((o) => o.seq && !o.code), "the server takes the client's own wire ops with parent: mkdir, create, rename, restore, adopt, a data file's create and write, and a remove and restore saying `to`: " + JSON.stringify(a?.ops));
   const ix = await s.ask({ t: "pull_index", after: 0 });
   ok(JSON.stringify(ix?.ops?.map((o) => o.parent ?? null)) === JSON.stringify(local.map((o) => o.parent ?? null)), "and gives each one's parent back in the index");
+  ok(JSON.stringify(ix?.ops?.map((o) => o.to ?? null)) === JSON.stringify(local.map((o) => o.to ?? null)), "and each one's `to`");
+  const bad = await s.ask({ t: "ops", ops: [{ dseq: local.length + 1, t: 7, by: "person", op: "mkdir", path: "/Z", to: "/Y", kind: "folder", fid: "5555555555555555" }] });
+  ok(bad?.ops?.[0]?.code === "invalid", "`to` on another op (mkdir) is still refused: " + JSON.stringify(bad?.ops));
   s.ws.close();
+  // (the client's binding, CORR-PR58-1: hello and blob requests name the account hash and generation they are for;
+  // a session of another account, or another generation, is refused before anything is sent or stored)
+  const mine = sha("sagebrush-account\n" + P2), other = sha("sagebrush-account\n" + P1);
+  const sb = await socket(sp);
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: other, generation: 1 });
+  const refusedHello = await sb.next((m) => m.t === "welcome" || m.t === "error");
+  ok(refusedHello?.t === "error" && refusedHello.code === "forbidden" && refusedHello.detail?.reason === "account", "hello bound to another account's hash: refused, no welcome: " + JSON.stringify(refusedHello));
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 2 });
+  const refusedGen = await sb.next((m) => m.t === "welcome" || m.t === "error");
+  ok(refusedGen?.t === "error" && refusedGen.code === "conflict" && refusedGen.detail?.reason === "generation", "hello bound to another generation: refused: " + JSON.stringify(refusedGen));
+  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 1 });
+  ok((await sb.next((m) => m.t === "welcome" || m.t === "error"))?.t === "welcome", "hello bound to its own account and generation: welcome");
+  sb.ws.close();
+  const bytes3 = Buffer.from("bound bytes");
+  const checkAs = (h) => fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", ...h }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes3), size: bytes3.length }] }) });
+  const putAs = (h) => fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes3)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", ...h }, body: bytes3 });
+  ok((await checkAs({ "x-sync-account": other })).status === 403 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 200, "blobs/check bound: another account 403, another generation 409, its own 200");
+  ok((await putAs({ "x-sync-account": other })).status === 403 && (await putAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409, "PUT bound to another account or generation: refused");
+  const still = await (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).json();
+  ok(still.missing?.includes(sha(bytes3)), "…and nothing stored by them");
+  ok((await putAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 201, "PUT bound to its own: stored");
 }
 
 // ---- the page's question: GET /api/sync/v1/status, which never creates or registers anything
@@ -2237,6 +2264,31 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   // and a status from another site is refused like every sync request
   const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
   ok(xr.status === 403, "a status asked from another site is refused (403)");
+}
+
+// ---- astra's narrowed CORR-PR58-1, last: it waits for a whole purge, so it runs after the cases whose clocks a
+// retention of "days" (seconds here) drives, and can't push them past their windows
+{
+  const sp = await signIn(P2);
+  const mine = sha("sagebrush-account\n" + P2);
+  // (astra's narrowed CORR-PR58-1: the generation retired and the next turned on while a PUT bound to the old one is
+  // past its first check, held just before its allocation: refused there, nothing allocated or stored in the new one)
+  const gateP2 = (on) => fetchAt(SITE, `/__test/gate?name=reserve-allocate&on=${on ? 1 : 0}`, { method: "POST" });
+  const bytes4 = Buffer.from("bytes of generation 1, late");
+  await gateP2(true);
+  const latePut = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes4)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sync-account": mine, "x-sync-generation": "1" }, body: bytes4 });
+  await new Promise((r) => setTimeout(r, 300));
+  const acctP2 = acctNs.get(acctNs.idFromName("acct:" + mine));
+  ok((await del(sp, P2)).status === 202, "(P2: Delete my synced data, generation 1, while the PUT waits)");
+  ok(await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(mine).first())?.state === "purged" && (await acctP2.lifecycle())?.record_pending === false), "(the purge finishes)");
+  const en2P2 = await (await post(sp, "/api/sync/v1/enable", {})).json();
+  ok(en2P2.generation === 2, "(P2 turned on again: generation 2)");
+  await gateP2(false);
+  const lr = await latePut;
+  const lrb = await lr.json().catch(() => ({}));
+  ok(lr.status === 409 && lrb.reason === "generation", "a PUT bound to generation 1, held across its purge and generation 2's start, is refused at its allocation: " + JSON.stringify({ status: lr.status, body: lrb }));
+  const chk2 = await (await fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", "x-sync-account": mine, "x-sync-generation": "2" }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes4), size: bytes4.length }] }) })).json();
+  ok(chk2.missing?.includes(sha(bytes4)), "…and generation 2 holds nothing of it");
 }
 
 await mf.dispose();
