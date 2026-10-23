@@ -209,6 +209,11 @@ export function lintPackage(pkg, api) {
     // the names and attributes stored to, and those only read as the start of
     // a longer reference: neither lets a core callable escape
     const notEscaping = new Set();
+    // the exact argument nodes of a reviewed dynamic access, such as the m of a
+    // declared getattr(m, "f"): they reach what the declaration says and no more,
+    // so they are not escapes. Only those nodes: any other reference on the same
+    // line is judged on its own (astra's CORR-PR68-2 on 18a26195).
+    const declaredArgs = new Set();
     const stored = (x) => {
       if (x?.k === "Tuple" || x?.k === "List") for (const y of x.elts ?? []) stored(y);
       else if (x?.k === "Starred") stored(x.value);
@@ -219,6 +224,9 @@ export function lintPackage(pkg, api) {
       if (n.k === "Call") notEscaping.add(n.func);
       for (const t of n.k === "Assign" || n.k === "Delete" ? n.targets ?? [] : n.k === "AugAssign" || n.k === "AnnAssign" || n.k === "For" || n.k === "AsyncFor" || n.k === "comprehension" ? [n.target] : []) stored(t);
       if (n.k === "withitem") stored(n.optional_vars);
+      if (n.k === "Call" && n.func?.k === "Name" && BANNED_NAMES.has(n.func.id) && declaration(file, n.line, "name", n.func.id)) {
+        for (const a of n.args ?? []) declaredArgs.add(a);
+      }
     });
     nodes(tree, (n) => {
       if (n.k === "Name" && BANNED_NAMES.has(n.id)) flag(file, n.line, "name", n.id, `uses ${n.id}, which the contract bans (reflection, dynamic code or the builtins' namespace)`);
@@ -251,7 +259,7 @@ export function lintPackage(pkg, api) {
       }
       // a core callable that escapes (g = f, passed, returned, stored) may be
       // called with any of its parameters: it takes their maximum level (§6.2)
-      if ((n.k === "Name" || n.k === "Attribute") && !notEscaping.has(n)) {
+      if ((n.k === "Name" || n.k === "Attribute") && !notEscaping.has(n) && !declaredArgs.has(n)) {
         const t = resolve(n);
         if (t !== null) uses.push({ file, line: n.line, target: t, bound: "any" });
       } else if (n.k === "Attribute") {
@@ -260,17 +268,9 @@ export function lintPackage(pkg, api) {
       }
     });
   }
-  // (a name handed to a reviewed dynamic access on that same line, such as
-  // the m of a declared getattr(m, "f"), reaches what the declaration says
-  // and no more: its escape is the declared use, not a separate one)
-  const declaredAt = new Set(uses.filter((u) => u.declared).map((u) => `${u.file}\0${u.line}\0${u.target}`));
-  const covered = (u) => !u.declared && u.bound === "any" && [...declaredAt].some((k) => {
-    const [f, l, t] = k.split("\0");
-    return f === u.file && Number(l) === u.line && (t === u.target || t.startsWith(u.target + "."));
-  });
   // core_req: the highest level any use needs (§6.2)
   let level = 1;
-  for (const u of uses.filter((x) => !covered(x))) {
+  for (const u of uses) {
     const l = useLevel(api, u);
     if (l === null) {
       if (!u.target.startsWith("*.") && !u.declared) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
