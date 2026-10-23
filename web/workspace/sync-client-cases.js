@@ -1200,7 +1200,8 @@ async function downloadChecks() {
     if (m === "longer") { const more = new Uint8Array(body.length + 1); more.set(body); return as(new Response(more, { headers: { ...headers, "content-length": String(body.length) } })); }
     return r;
   };
-  const clock = fakeClock();
+  // (the clock from now: a signed URL's expiry is the server's wall clock, 5 minutes on)
+  const clock = fakeClock(Date.now());
   const { a, b, ca, cb } = await twoDevices({ fetch: fakeFetch, clock });
   try {
     for (const m of ["missing", "malformed", "different", "longer"]) {
