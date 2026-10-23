@@ -552,7 +552,7 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D9, r6)
+### Step 4 plan delta (D5 to D10)
 
 @sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4. r5 ("D6 r5") answers the reviews of 4772b3a0: daybreak3's LIMIT-PR65-4, and astra's note that echo confirmations must wait for the commit. r6 ("D6 r6") answers daybreak3's narrowed LIMIT-PR65-4 on c8a94c26: the timed fixture and its exact page counts.
 
@@ -735,6 +735,48 @@ Pages still go through the bucket, one in flight, the index timer and the slices
 - On the final response, of either path, `Content-Length` must be a canonical decimal (`^(0|[1-9]\d{0,11})$`, no leading zeroes) equal to `size` before the body is read. The body goes through a counting reader with a hard cap of `size`: one byte more aborts it. Its SHA-256 is checked before the compare-and-swap install (C5).
 - Any failure fails that item under its retry timer and is never installed.
 - Tests: size at the cap and cap + 1; an unsafe or overflowing size; Content-Length missing, malformed or different; a body longer than declared; a 303 whose final response fails any of these.
+
+**D10. The reducer over the stored index** (found at the start of the code; @sagebrush routed it as a design delta).
+
+The shared reducer (sync-reduce.ts, step 1) is synchronous, and works on a whole in-memory `SyncIndex` with four maps:
+- `byId` (identity to entry);
+- `byKey` (a path's NFC form to identity);
+- `children` (a folder's key to its entries' identities);
+- `gone` (identity to its last path).
+C3 keeps the confirmed index in IndexedDB, and L4 says it is never held whole in memory. D10 runs the reducer, unchanged (no fork; the server and the JSON vectors use it as is), on a partial index loaded for each page.
+
+- **Storage.** `syncIndex` rows are `{ns, id, path, key (NFC), parentKey, ...entry}`, or `{ns, id, gone: true, lastPath}` for an identity forgotten (no `key`, so it holds no path). There are two new indexes, `byKey [ns, key]` and `byParent [ns, parentKey]`. This is a schema-only upgrade to workspace DB v6: index creation over `syncIndex`, which nothing outside dev has written.
+- **One transaction per page, reads and writes together.** A page's reads (the read sets, and any loads after a miss) and its writes (the changed rows and the cursor, C3) are all in the page's one readwrite transaction on `syncIndex` and `meta`. Between IndexedDB requests the work is synchronous (the reducer and its SHA-256 are synchronous), so the transaction stays alive throughout.
+  - Why the same transaction rather than a version check: `syncIndex` is written only by these page transactions, of the one sender holding the lock (C1). IndexedDB serializes readwrite transactions over the same store, so nothing can change a loaded row between its read and the page's write. Local edits write `entries` and `ops`, never `syncIndex`. A version check would add a second failure path for no case that can occur.
+- **The partial index.** For each op, before it runs, the page loads the op's read set into the page's partial `SyncIndex`, if not already there:
+  - its target and `parent` (by identity);
+  - the ancestors of its `path`, of `to`, and of a trashed entry's `from` (by key);
+  - the Trash top;
+  - the target's subtree, for a move (by `byParent`, level by level);
+  - the full listing of each folder an entry may land in: at most 10,000 (the workspace's folder bound), so every "name (k)" probe has its answer.
+  Each loaded key is recorded as *known*: present, or confirmed absent.
+- **The miss recorder, on all four maps.** The partial index's `byId`, `byKey`, `children` and `gone` are `TrackedMap`s.
+  - `get` or `has` of a key not known records a miss and answers "absent". `set` and `delete` mark the key known.
+  - Every other Map member (`size`, iteration, `forEach`, `keys`, `values`, `entries`, `clear`) throws: a partial map can't answer a whole-map question. So a reducer change that starts to use one fails every test at once rather than silently reading a partial index.
+  - `SyncIndex.entries()` and `clone()` are never called on a partial index.
+- **Undo and retry happen in memory only.** If an op misses, it is undone by the reducer's own undo, in memory, before anything of the page is written. Then the missed keys are loaded (in the same transaction) and the op runs again: at most 8 rounds.
+  - Still missing after 8: the page is cut before that op (the ops before it are written with their cursor). The op then runs alone as the next page.
+  - Still failing alone, it halts sync with a person-told error. An op is never applied partially, and a retried op leaves no row written, because rows are written only once the whole page has reduced.
+- **What a page writes.** The rows of every identity in the page's ops' `changed` (as each is now in the partial index: present, moved, or gone), and the cursor, in the page's transaction, at its end.
+- **Bounds:**
+  - a page's partial index holds at most 200,000 rows. Past that, the page is cut at the op that would pass it, and that op runs in a page of its own.
+  - Per op, the rows loaded are at most the target's subtree (at most 100,000) plus at most 10,000 per landing folder. The subtree is the same as the workspace's own folder move, which reads the subtree whole and rewrites it in one transaction (api.ts `move`).
+  - L4 thus reads: never the whole tree in memory, beyond the subtree an op moves.
+  - The 8 rounds and the 200,000 rows are starting numbers, for daybreak3 to judge.
+- **The same for the staging index** (D6), under its generation's prefix.
+- **Tests:**
+  - every vector in sync-vectors.json run through the paged partial-index path, compared to the in-memory reducer: identical entries, identities and hashes;
+  - TrackedMap's throwing members: a test that calls the reducer with a map whose iteration is used must fail;
+  - a folder move with 10,000 descendants;
+  - a collision chain to "name (10000)";
+  - a derived identity colliding with a gone one (a forced miss, then a retry);
+  - a miss on the 9th round (the page cut and the op run alone);
+  - the 100k scale fixture's per-op and per-page rows-loaded maxima.
 
 ## 4. Who builds what, in order, and the size of each
 
