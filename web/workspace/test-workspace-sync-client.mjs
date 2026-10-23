@@ -1,0 +1,288 @@
+// Sync client step 3 (design/sync-client.md §3, C1, L2, L3, L4) in headless Chromium against the sync service in
+// Miniflare: the sender lock, the account socket, hello/welcome/index/pull_index, ops and acks, lost acks,
+// refusals (the rebuild asked for, never done here), pace and backoff, blobs check and PUT.  The page is served by
+// a small front here, which also proxies the site's API to Miniflare (the socket too) on the page's own origin, keeps
+// the session cookie, and can drop, fake or hold what passes, as a network or a server would.  The cases are in
+// sync-client-cases.js.
+//   CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
+import { spawn, execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { devtoolsPort } from "../test-port.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(join(here, "../site/package.json"));
+const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
+const { WebSocketServer } = require("ws");
+
+const SITE = "https://sagebrush.test";
+// (each case signs in its own account, so none sees another's log)
+const ACCOUNTS = Array.from({ length: 24 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+// (the limits each has, from the fake CoCalc: most roomy; FULL's storage is small; SMALL's files are)
+const FULL = ACCOUNTS[20], SMALL = ACCOUNTS[21];
+const limitsOf = (a) => a === FULL ? { storage_bytes: 10_000, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
+  : a === SMALL ? { storage_bytes: 1 << 20, max_file_bytes: 5_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
+  : { storage_bytes: 64 << 20, max_file_bytes: 50 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 64 << 20 } };
+async function cocalc(req) {
+  const u = new URL(req.url);
+  if (u.pathname === "/api/v2/sagebrush/limits") return Response.json(limitsOf(u.searchParams.get("account_id")));
+  return new Response("not found", { status: 404 });
+}
+
+const site = mkdtempSync(join(tmpdir(), "sb-sc-site-"));
+const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
+execFileSync("bun", ["build", join(here, "index.ts"), "--outdir", site, "--entry-naming", "ws.js", "--target", "browser", "--format", "esm"], { stdio: "inherit" });
+copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${JSON.stringify(ACCOUNTS)}; window.FULL = ${JSON.stringify(FULL)}; window.SMALL = ${JSON.stringify(SMALL)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+
+const mf = new Miniflare(convertV4MiniflareOptions({
+  workers: [{
+    modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
+    name: "sync",
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: ACCOUNTS.join(",") },
+    durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
+    routes: ["sagebrush.test/*"],
+    outboundService: cocalc,
+    ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 1000000, period: 60 } } },
+  }],
+}));
+const db = await mf.getD1Database("SHARE_DB", "sync");
+const mig = join(here, "../share/migrations");
+for (const m of readdirSync(mig).filter((f) => f.endsWith(".sql")).sort())
+  for (const s of readFileSync(join(mig, m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
+
+// ---- the front: the page, and the site's API proxied, with what the cases ask of it (ctl)
+
+let jar = "";
+const ctl = {
+  /** answers faked for the next `ops` messages, instead of the server's: [{code, detail}] */
+  fakeOps: [],
+  /** acks with ops dropped (the next n), then the socket closed if closeAfterDrop */
+  dropAcks: 0, closeAfterDrop: false,
+  /** connections closed as soon as they open (the next n) */
+  closeOnOpen: 0,
+  /** the next welcome changed: {generation?, next_dseq?} */
+  rewriteWelcome: null,
+  /** PUTs held until released */
+  holdPut: false,
+};
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [] };
+const held = [];
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [] });
+
+async function upstream(method, path, headers, body) {
+  const h = { origin: SITE, ...headers };
+  if (jar) h.cookie = jar;
+  const r = await mf.dispatchFetch(SITE + path, { method, headers: h, body, redirect: "manual" });
+  const c = r.headers.getSetCookie?.().map((x) => x.split(";")[0]).find((x) => x.startsWith("__Host-sb_session="));
+  if (c) jar = c;
+  return r;
+}
+
+// a second device, from here: its own socket on the same account
+async function probe({ ops = [], device = "0f0f0f0f0f0f0f0f" } = {}) {
+  const r = await upstream("GET", "/api/sync/v1/account", { upgrade: "websocket" });
+  if (r.status !== 101) return { status: r.status };
+  const ws = r.webSocket;
+  ws.accept();
+  const got = [];
+  let wake = null;
+  ws.addEventListener("message", (e) => { got.push(JSON.parse(e.data)); wake?.(); });
+  const next = async (f, ms = 5000) => {
+    const t = Date.now();
+    for (;;) {
+      const i = got.findIndex(f);
+      if (i >= 0) return got.splice(i, 1)[0];
+      if (Date.now() - t > ms) return null;
+      await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
+    }
+  };
+  ws.send(JSON.stringify({ t: "hello", v: 1, device, name: "probe", index_after: 0 }));
+  const welcome = await next((m) => m.t === "welcome");
+  const index = [];
+  let page = await next((m) => m.t === "index");
+  for (let req = 1; page; req++) {
+    index.push(...page.ops);
+    if (!page.more) break;
+    ws.send(JSON.stringify({ t: "pull_index", req, after: index.at(-1).seq }));
+    page = await next((m) => m.t === "index" && m.req === req);
+  }
+  let ack = null;
+  if (ops.length) {
+    ws.send(JSON.stringify({ t: "ops", req: 1000, ops }));
+    ack = await next((m) => m.req === 1000);
+  }
+  ws.close(1000, "done");
+  return { welcome, index, ack };
+}
+
+async function control(body) {
+  switch (body.cmd) {
+    case "set": Object.assign(ctl, body.set); return { ok: true };
+    case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
+    case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
+    case "probe": return probe(body);
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    default: return { error: "unknown" };
+  }
+}
+
+const readBody = (req) => new Promise((ok) => { const parts = []; req.on("data", (d) => parts.push(d)); req.on("end", () => ok(Buffer.concat(parts))); });
+const server = createServer(async (req, res) => {
+  const u = new URL(req.url, "http://x");
+  const p = u.pathname;
+  try {
+    if (p === "/" || p === "/ws.js" || p === "/cases.js") {
+      res.writeHead(200, { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" });
+      return res.end(readFileSync(join(site, p === "/" ? "index.html" : p.slice(1))));
+    }
+    if (p === "/__ctl") {
+      const out = await control(JSON.parse((await readBody(req)).toString() || "{}"));
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(out));
+    }
+    if (!p.startsWith("/api/") && !p.startsWith("/auth/")) { res.writeHead(404); return res.end(); }
+    const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
+    const isPut = req.method === "PUT";
+    const entry = { method: req.method, path: p, bytes: body?.length ?? 0, ...(p.endsWith("/blobs/check") ? { check: JSON.parse(body.toString()).blobs.length } : {}) };
+    log.http.push(entry);
+    if (isPut) {
+      log.putsNow++;
+      log.maxPuts = Math.max(log.maxPuts, log.putsNow);
+      if (ctl.holdPut) await new Promise((ok) => held.push(ok));
+    }
+    const headers = {};
+    for (const k of ["content-type", "content-length"]) if (req.headers[k]) headers[k] = req.headers[k];
+    let r;
+    try {
+      r = await upstream(req.method, p + u.search, headers, body);
+    } finally {
+      if (isPut) log.putsNow--;
+    }
+    entry.status = r.status;
+    const out = Buffer.from(await r.arrayBuffer());
+    const h = {};
+    r.headers.forEach((v, k) => { if (k !== "set-cookie" && k !== "content-length" && k !== "content-encoding") h[k] = v; });
+    res.writeHead(r.status, h);
+    res.end(out);
+  } catch (e) {
+    res.writeHead(500);
+    res.end(String(e));
+  }
+});
+
+// the account socket, proxied message by message, so the cases can drop, fake or close
+const wss = new WebSocketServer({ noServer: true });
+server.on("upgrade", async (req, socket, head) => {
+  const p = new URL(req.url, "http://x").pathname;
+  if (p !== "/api/sync/v1/account") return socket.destroy();
+  log.sockets++;
+  const r = await upstream("GET", p, { upgrade: "websocket" }).catch(() => null);
+  if (!r || r.status !== 101) {
+    socket.write(`HTTP/1.1 ${r?.status ?? 502} refused\r\nconnection: close\r\n\r\n`);
+    return socket.destroy();
+  }
+  const up = r.webSocket;
+  up.accept();
+  wss.handleUpgrade(req, socket, head, (client) => {
+    log.open++;
+    const okCode = (c) => (c === 1000 || (c >= 3000 && c <= 4999) ? c : 1000);
+    let closed = false;
+    const closeBoth = (code = 1000) => {
+      if (closed) return;
+      closed = true;
+      log.open--;
+      try { up.close(1000, "proxy"); } catch {}
+      try { client.close(okCode(code), "proxy"); } catch {}
+    };
+    if (ctl.closeOnOpen > 0) {
+      ctl.closeOnOpen--;
+      return closeBoth(1000);
+    }
+    client.on("message", (data) => {
+      const text = data.toString();
+      let m;
+      try { m = JSON.parse(text); } catch { m = {}; }
+      log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)) } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after });
+      if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+      if (m.t === "ops" && ctl.fakeOps.length) {
+        const f = ctl.fakeOps.shift();
+        client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        return;
+      }
+      try { up.send(text); } catch {}
+    });
+    client.on("close", (code) => closeBoth(code));
+    up.addEventListener("message", (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch { m = {}; }
+      log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
+      if (m.t === "welcome" && ctl.rewriteWelcome) {
+        Object.assign(m, ctl.rewriteWelcome);
+        ctl.rewriteWelcome = null;
+        client.send(JSON.stringify(m));
+        return;
+      }
+      if (m.t === "ack" && m.ops && ctl.dropAcks > 0) {
+        ctl.dropAcks--;
+        log.got.at(-1).dropped = true;
+        if (ctl.closeAfterDrop) closeBoth(1000);
+        return;
+      }
+      try { client.send(e.data); } catch {}
+    });
+    up.addEventListener("close", (e) => closeBoth(e.code));
+  });
+});
+await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+const origin = `http://127.0.0.1:${server.address().port}`;
+
+// ---- Chrome, driven over the DevTools protocol, as the other workspace tests are
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let port = Number(process.env.CDP_PORT) || 0;
+const profile = mkdtempSync(join(tmpdir(), "sb-sc-"));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+let code = 1;
+try {
+  if (!port) port = await devtoolsPort(profile);
+  let targets;
+  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); if (targets.some((t) => t.type === "page")) break; } catch {} await sleep(100); }
+  const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  await new Promise((r) => (ws.onopen = r));
+  let n = 0;
+  const waiting = new Map(), errors = [];
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+    if (m.method === "Runtime.consoleAPICalled" && process.env.SHOW_CONSOLE) console.log("page:", m.params.args.map((a) => a.value ?? a.description).join(" "));
+  };
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 2000)); return r.result?.value; };
+  await send("Runtime.enable");
+  await send("Page.navigate", { url: `${origin}/` });
+  for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  const results = await ev(`window.run(${JSON.stringify(process.env.ONLY ?? "")})`);
+  const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
+  for (const e of errors) fails.push("page error: " + e);
+  if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
+  else {
+    console.log(`ok: sync's client (step 3), ${results.length} checks`);
+    if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
+    code = 0;
+  }
+  ws.close();
+} finally {
+  chrome.kill();
+  server.close();
+  await mf.dispose().catch(() => {});
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true });
+  rmSync(site, { recursive: true, force: true });
+}
+process.exit(code);
