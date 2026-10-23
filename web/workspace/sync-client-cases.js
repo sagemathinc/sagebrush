@@ -995,7 +995,46 @@ async function restUnderAcks() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks };
+
+// ---- step 4
+
+async function refusalAtomic() {
+  // (D7: a refusal removes its record and records the rebuild's obligation in one transaction: cut at each of
+  // acked's points, a reload finds the record still undecided and no flag, or neither record nor missing flag)
+  const w = await fresh();
+  const NS = "c".repeat(64) + ":1:" + w.device;
+  let points = 0, ok = true;
+  for (let at = 100; at < 110; at++) {
+    const lease = await W.switchTo(w, NS), ob = new W.Outbox(w, lease);
+    if ((await ob.status()).scanned === undefined) await ob.begin(await w.lastSeq());
+    await w.mkdir(`/r${at}`);
+    await ob.scan();
+    const rec = (await ob.records()).find((r) => r.accepted === undefined);
+    await new Promise((res, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").delete(`sync:${NS}:rebuild`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+    let cut = false;
+    W.OUTBOX.cut = (n) => { if (n === at) { cut = true; throw new Error("cut (test)"); } };
+    try { await ob.acked([{ dseq: rec.dseq, code: "forbidden" }]); } catch {}
+    W.OUTBOX.cut = null;
+    const still = (await ob.records()).some((r) => r.dseq === rec.dseq);
+    const flag = await metaGet(w.ws, `sync:${NS}:rebuild`);
+    if (cut) points++;
+    // (cut: nothing of it, the record kept, no flag; not cut (past the last point): both)
+    if (cut ? !(still && flag === undefined) : !(!still && flag?.why === "refused")) ok = false;
+    if (!cut) {
+      // (once more without a cut: removed and flagged together; and the flag isn't lowered from a stronger reason)
+      await new Promise((res, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put({ why: "diverged" }, `sync:${NS}:rebuild`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+      await w.mkdir(`/r-strong`);
+      await ob.scan();
+      const r2 = (await ob.records()).find((r) => r.accepted === undefined);
+      await ob.acked([{ dseq: r2.dseq, code: "forbidden" }]);
+      if ((await metaGet(w.ws, `sync:${NS}:rebuild`))?.why !== "diverged") ok = false;
+      break;
+    }
+  }
+  check(ok && points >= 2, "refusal atomic (D7): cut at each of acked's " + points + " points, the record stays undecided with no flag; past them, it is removed and the rebuild flagged in one transaction; a stronger reason is kept");
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
