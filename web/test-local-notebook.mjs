@@ -128,6 +128,40 @@ if (r?.error) console.log("reactive section:", JSON.stringify(r));
 ok(r.reactive && r.first[0] === "c 20" && /NameError: name '_t' is not defined/.test(r.first[3]), "reactive with the native session: graph order, and a cell's _t is its own: " + JSON.stringify(r.first));
 ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[4]), "...editing a cell reruns its dependents, and a removed definition is gone: " + JSON.stringify(r.second));
 
+// another page on this computer (another port: the cookie is the host's, whatever the port) can't use the server
+{
+  const http = await import("node:http");
+  const pwned = join(dir, "pwned.txt");
+  const aport = await freePort();
+  const attacker = http.createServer((q, r) => r.writeHead(200, { "Content-Type": "text/html" }).end(`<script>
+    (async () => {
+      const nb = ${JSON.stringify(base)};
+      // (a session started with the cookie, then code sent to it: text/plain, so no preflight)
+      fetch(nb + "/api/session/atk/events", { mode: "no-cors", credentials: "include" }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1500));
+      await fetch(nb + "/api/session/atk/send", { method: "POST", mode: "no-cors", credentials: "include", body: JSON.stringify({ id: 1, code: "open(" + ${JSON.stringify(JSON.stringify(pwned))} + ", 'w').write('x')" }) }).catch(() => {});
+      document.title = "tried";
+    })();
+  </script>`));
+  await new Promise((r) => attacker.listen(aport, "127.0.0.1", r));
+  await send("Page.navigate", { url: `http://127.0.0.1:${aport}/` });
+  await until("document.title === 'tried'", 15000);
+  await sleep(4000);
+  ok(!existsSync(pwned), "a page on another port of this computer can't run code through the server");
+  attacker.close();
+  const tok = /token=(\w+)/.exec(printed)[1], cookie = `sagebrush_token=${tok}`;
+  const from = (headers) => fetch(base + "/api/session/x2/stop", { method: "POST", headers: { Cookie: cookie, ...headers } }).then((r) => r.status);
+  ok((await from({ Origin: `http://127.0.0.1:${aport}` })) === 403 && (await from({ "Sec-Fetch-Site": "same-site" })) === 403, "...a request from another origin or another site is refused, by its Origin or Sec-Fetch-Site");
+  ok((await fetch(base + "/api/session/x2/stop", { headers: { Cookie: cookie } })).status === 405, "...and the session's actions take POST only");
+  // (by node:http: fetch() sends a Host and Sec-Fetch-Mode of its own, whatever it is given)
+  const { request } = await import("node:http");
+  const raw = (headers) => new Promise((r) => request({ host: "127.0.0.1", port, path: "/?token=" + tok, headers }, (res) => { res.resume(); r(res.statusCode); }).on("error", () => r(0)).end());
+  const hostIs = (h) => raw({ Host: h });
+  ok((await raw({ Host: `127.0.0.1:${port}`, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" })) === 302, "...while the URL with the token opens from anywhere (a link in another site's terminal)");
+  ok((await raw({ Host: `127.0.0.1:${port}`, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" })) === 403, "...but not as another site's subresource");
+  ok((await hostIs(`127.0.0.1:${aport}`)) === 403 && (await hostIs("127.0.0.1")) === 403 && (await hostIs(`localhost:${port}`)) === 302, "...and the Host must be its own host and port (fetch() can't send another)");
+}
+
 cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
