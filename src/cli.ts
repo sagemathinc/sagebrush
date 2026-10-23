@@ -12,7 +12,8 @@ import { dirname, resolve, join } from "path";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { oneLine } from "./terminal-text";
-import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames } from "./compile";
+import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet } from "./pkgcache";
 import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
 import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
@@ -35,6 +36,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
            and run on lib/_matlab.py; implied for other .m files
   -q       no banner on the interactive prompt
+  --pkgset ID|FILE
+           an optional package set for this run (also SAGEBRUSH_PKGSET): its
+           id, fetched and verified into ~/.cache/sagebrush/pkg, or a local
+           pkgset/<id>.json (scripts/optional-packages.mjs build)
   --figures DIR
            keep the figures shown (plt.show(), a plot's display) as SVG files
            in DIR; without it, they are in a directory removed at exit
@@ -458,6 +463,7 @@ async function main(argv = process.argv.slice(2)) {
   // sagebrush --search QUERY [--json]: search the documentation (lib/_pyjs_docsearch.py)
   if (argv[0] === "--search" || argv[0] === "search") argv.splice(0, 1, "-m", "_pyjs_docsearch");
   let emit = false, inspect = false, quiet = false;
+  let pkgset: string | null = process.env.SAGEBRUSH_PKGSET || null;
   let cmd: string | null = null, mod: string | null = null, file: string | null = null;
   while (argv.length) {
     const a = argv[0];
@@ -467,7 +473,16 @@ async function main(argv = process.argv.slice(2)) {
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
     else if (a === "--matlab") matlab = true;
-    else if (a === "--figures") {
+    else if (a === "--pkgset") {
+      // (an optional package set for this run: src/pkgcache.ts)
+      argv.shift();
+      if (!argv.length) {
+        process.stderr.write(`--pkgset takes a set id or a pkgset/<id>.json file\n${USAGE}`);
+        process.exitCode = 2;
+        return;
+      }
+      pkgset = argv[0];
+    } else if (a === "--figures") {
       // (figures to keep, in DIR: made if it isn't there)
       argv.shift();
       if (!argv.length || argv[0].startsWith("-")) {
@@ -552,6 +567,16 @@ async function main(argv = process.argv.slice(2)) {
   if (file !== null && file !== "-") sys.path.push(dirname(resolve(file)));
   else sys.path.push(process.cwd());
   sys.path.push(libDir());
+  if (pkgset !== null) {
+    try {
+      const [S, index, read] = await prepareSet(pkgset, coreBuildId(), reservedNames());
+      installPackageSet(S, index, read);
+    } catch (e: any) {
+      process.stderr.write(`sagebrush: package set: ${oneLine(String(e?.message ?? e))}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
