@@ -4,7 +4,8 @@
 //   bun web/workspace/test-sync-overlay.mjs
 import { readFileSync } from "node:fs";
 import { reduce, reduceAll, SyncIndex } from "./sync-reduce.ts";
-import { Overlay, PartialIndex, runPage, rowsOf, OVERLAY } from "./sync-overlay.ts";
+import { Overlay, PartialIndex, runPage, runOp, rowsOf, OVERLAY, Halt } from "./sync-overlay.ts";
+import { createHash } from "node:crypto";
 import { parentOf } from "./paths.ts";
 
 let checks = 0;
@@ -107,6 +108,78 @@ for (const v of vectors) {
   check(ov.dirty && base.byId.size === 0, "a miss after a change: the overlay dirty, the base unchanged");
   const r = await runPage(memStore(S, stats), [op]);
   check(r.outcomes[0].skipped === undefined && r.changed.has("f000000000000009"), "…run again, it completes: " + JSON.stringify(r.outcomes[0]));
+}
+
+// ---- D10 r2/r3: the meter, the rounds and the ceilings
+
+const DEV = "aaaaaaaaaaaaaaaa";
+const derive = (...parts) => createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 16);
+/** The reducer's derived-identity series for a folder made by op (`device`, `dseq`), its `made`-th: candidate n. */
+const candidate = (dseq, made, n) => (n === 0 ? derive("folder", DEV, dseq, made) : derive("folder", DEV, dseq, made, "again", n));
+const fileOp = (seq, path, fid, more = {}) => ({ seq, device: DEV, dseq: seq, t: seq, by: "person", op: "create", path, kind: "file", fid, sha256: "a".repeat(64), size: 1, ...more });
+const hex16 = (lead, i) => lead + i.toString(16).padStart(15, "0");
+
+// a derived-identity series that collides k times: its folder made at candidate k, in k + 1 rounds or fewer, its
+// probes counted (each round reruns the op: sum over i of i candidates)
+for (const k of [20, 999]) {
+  const S = new SyncIndex(), stats = { reads: 0 };
+  for (let n = 0; n < k; n++) S.gone.set(candidate(1, 1, n), "/was" + n);
+  const op = { seq: 1, device: DEV, dseq: 1, t: 1, by: "person", op: "create", path: "/made/x.txt", kind: "file", fid: "f".repeat(16), sha256: "a".repeat(64), size: 1 };
+  const want = reduceAll([op], (() => { const ix = new SyncIndex(); for (const [id, p] of S.gone) ix.gone.set(id, p); return ix; })());
+  const base = new PartialIndex();
+  let r, halted = null;
+  try { r = await runOp(base, memStore(S, stats), op, { alone: true }); } catch (e) { halted = e; }
+  const made = r && [...base.byId.values()].find((e) => e && e.path === "/made");
+  check(!halted && made?.id === candidate(1, 1, k) && made.id === want.at("/made")?.id, `a series colliding ${k} times completes at candidate ${k}: ` + JSON.stringify({ halted: String(halted ?? ""), made: made?.id }));
+  check(r && r.rounds <= k + 3, `…in about ${k} + 1 rounds (one stored row per candidate): ${r?.rounds}`);
+  const probes = (k * (k + 1)) / 2;
+  if (k === 999) check(r && r.units >= probes && r.units <= OVERLAY.opUnits, `the 1,000-candidate series counts its replayed probes (${probes} at least) within the per-op ceiling: ${r?.units}`);
+}
+
+// the same series on a 100,000-entry move passes the per-op ceiling: it halts, person-told, and nothing is written
+{
+  const S = new SyncIndex(), stats = { reads: 0 };
+  const big = hex16("b", 0);
+  reduce(S, { seq: 1, device: DEV, dseq: 1, t: 1, by: "person", op: "mkdir", path: "/big", kind: "folder", fid: big });
+  let seq = 1;
+  for (let d = 0; d < 10; d++) {
+    const fid = hex16("c", d);
+    reduce(S, { seq: ++seq, device: DEV, dseq: seq, t: seq, by: "person", op: "mkdir", path: `/big/d${d}`, kind: "folder", fid, parent: big });
+    for (let i = 0; i < 9_999; i++) reduce(S, fileOp(++seq, `/big/d${d}/f${i}`, hex16("e", d * 10_000 + i), { parent: fid }));
+  }
+  const mv = { seq: ++seq, device: DEV, dseq: seq, t: seq, by: "person", op: "rename", path: "/big", to: "/new/big", kind: "folder", fid: big };
+  for (let n = 0; n < 999; n++) S.gone.set(candidate(mv.dseq, 1, n), "/was" + n);
+  const before = state(S);
+  let halted = null;
+  try { await runPage(memStore(S, stats), [mv]); } catch (e) { halted = e; }
+  check(halted instanceof Halt && /units/.test(halted.message), "a 100,000-entry move with the 1,000-collision series halts at the per-op ceiling: " + String(halted).slice(0, 120));
+  check(state(S) === before, "…nothing of it written");
+}
+
+// 1,000 ops into one 10,000-name folder: the pages cut by the meter, none over its budget (plus one trial's units),
+// each op probing up to 10,000 names; an over-budget trial starts the next page with its units carried
+{
+  const S = new SyncIndex(), stats = { reads: 0 };
+  let seq = 0;
+  reduce(S, { seq: ++seq, device: DEV, dseq: seq, t: seq, by: "person", op: "mkdir", path: "/full", kind: "folder", fid: hex16("d", 0) });
+  for (let i = 1; i <= 9_998; i++) reduce(S, fileOp(++seq, i === 1 ? "/full/a.txt" : `/full/a (${i}).txt`, hex16("1", i), { parent: hex16("d", 0) }));
+  const ops = [];
+  for (let i = 0; i < 1000; i++) ops.push(fileOp(++seq, "/full/a.txt", hex16("2", i), { parent: hex16("d", 0) }));
+  const want = reduceAll(ops, (() => { const c = S.clone(); return c; })());
+  const store = memStore(S, stats);
+  let i = 0, carry = 0, pages = 0, maxUnits = 0, carried = 0;
+  while (i < ops.length) {
+    const r = await runPage(store, ops.slice(i, i + 1000), carry);
+    flush(S, r.base, r.changed);
+    maxUnits = Math.max(maxUnits, r.units);
+    if (r.carry) carried++;
+    i += r.taken;
+    carry = r.carry;
+    pages++;
+  }
+  check(state(S) === state(want), "1,000 ops into a 10,000-name folder: the result equals the in-memory reducer's");
+  check(pages >= 10 && maxUnits <= OVERLAY.pageUnits * 1.1, `…cut by the meter into ${pages} pages, the largest ${maxUnits} units`);
+  check(carried >= 1, `…an over-budget trial carried to the next page (${carried} times)`);
 }
 
 console.log(`${checks - fails.length}/${checks} passed`);

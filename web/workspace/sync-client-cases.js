@@ -1166,8 +1166,7 @@ async function downloadBasic() {
     check(await until(async () => { const x = await b.stat("/doc.bin"); return x && !x.remote; }), "download: …then has its bytes (installed)");
     check(sameBytes(await b.contents(await b.stat("/doc.bin")), data), "download: the same bytes as A's");
     check(cb.stats.urls === 1 && cb.stats.installed === 1, "download: one URL asked for, one install: " + J({ urls: cb.stats.urls, installed: cb.stats.installed }));
-    const q = await all(b.ws, "meta");
-    check(!q.some((v) => v && typeof v === "object" && "sha256" in v && "rev" in v && v.fid === e.fid), "download: its queue item gone");
+    check((await b.stat("/doc.bin")).fetch === undefined, "download: no longer queued (its fetch cleared)");
     // (then A writes it again: B's copy follows)
     const data2 = bytes(5_000, 9);
     await a.write("/doc.bin", data2);
@@ -1220,10 +1219,10 @@ async function downloadChecks() {
     // (a size past the cap: never reserved or asked for; set apart, listed)
     const ns = nsOf(cb);
     const big = { fid: "00000000000000b1", sha256: "e".repeat(64), size: 95 * 2 ** 20 + 1, rev: 0 };
-    await new Promise((res, no) => { const tx = b.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(big, `sync:${ns}:fetch:${big.fid}`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+    await new Promise((res, no) => { const tx = b.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/big.bin", kind: "file", ref: "/big.bin", created: 1, updated: 1, size: big.size, rev: 0, fid: big.fid, ident: big.fid, migrated: true, sha256: big.sha256, fetch: big.sha256, remote: true, nkey: "/\u0000big.bin" }); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
     const urls = cb.stats.urls;
     await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq + 1 });
-    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchFinal:${big.fid}`))?.why === "too large to sync"), "download checks: a size past 95 MiB set apart, too large to sync");
+    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchFinal:${big.fid}`))?.why === "too large to sync" && (await b.stat("/big.bin")).fetch === undefined && (await b.stat("/big.bin")).remote), "download checks: a size past 95 MiB set apart, too large to sync (listed, still remote)");
     check(cb.stats.urls === urls, "download checks: …with no URL asked for");
   } finally {
     await stop(ca);
@@ -1281,6 +1280,42 @@ async function downloadBudget() {
     check(await until(async () => !(await b.stat("/q1.bin")).remote && !(await b.stat("/q2.bin")).remote), "download budget: resumed at its end; both installed: " + J({ urls: cb.stats.urls, installed: cb.stats.installed, failed: cb.stats.fetchFailed, debug: cb.debug() }));
   } finally {
     Object.assign(W.CLIENT, keep);
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadStale2() {
+  // (C5, the rest, each with the GET held open: a newer remote write (the older fetch discarded, the newer one
+  // installed); Trash (installed into the trashed entry); a remove and a new file at the same path (the new one's
+  // bytes its own, the removed one's installed in Trash))
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    await ctl("set", { set: { holdGet: true } });
+    await a.create("/n.bin", { content: bytes(1500, 1) });
+    await a.create("/t.bin", { content: bytes(1500, 2) });
+    await a.create("/p.bin", { content: bytes(1500, 3) });
+    check(await until(() => settled(a, ca)), "download stale 2: up");
+    await seen(b, cb, "/p.bin");
+    check(await until(async () => (await ctl("log")).http.filter((h) => h.files).length >= 1), "download stale 2: a GET held");
+    const newest = bytes(1600, 4);
+    await a.write("/n.bin", newest);
+    check(await until(() => settled(a, ca)), "download stale 2: A's newer write up");
+    for (let i = 0; i < 30 && (await b.stat("/n.bin")).sha256 !== (await a.stat("/n.bin")).sha256; i++) { await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    const tb = await b.remove("/t.bin");
+    const pOld = await b.stat("/p.bin");
+    const pTrash = await b.remove("/p.bin");
+    const pNew = await b.create("/p.bin", { content: bytes(10, 5) });
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    check(await until(async () => !(await b.stat("/n.bin")).remote && !(await b.stat(tb.path))?.remote && !(await b.stat(pTrash.path))?.remote, 20_000), "download stale 2: every fetch answered: " + J({ installed: cb.stats.installed, stale: cb.stats.stale }));
+    check(sameBytes(await b.contents(await b.stat("/n.bin")), newest), "download stale 2: a newer remote write meanwhile: the newer bytes installed, never the older");
+    check(sameBytes(await b.contents(await b.stat(tb.path)), bytes(1500, 2)) && (await b.stat(tb.path)).trashed, "download stale 2: put in Trash meanwhile: installed there");
+    check(sameBytes(await b.contents(await b.stat("/p.bin")), bytes(10, 5)) && (await b.stat("/p.bin")).fid === pNew.fid, "download stale 2: a new file at the removed one's path keeps its own bytes");
+    check((await b.stat(pTrash.path))?.fid === pOld.fid && sameBytes(await b.contents(await b.stat(pTrash.path)), bytes(1500, 3)), "download stale 2: the removed one's bytes installed in Trash, by its identity");
+  } finally {
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
     await stop(ca);
     await stop(cb);
   }
@@ -1575,7 +1610,7 @@ async function firstSyncCollision() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, firstSync, firstSyncRace, firstSyncCollision };
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

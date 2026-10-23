@@ -80,6 +80,9 @@ export type Entry = {
   /** listed from the server's index (design/sync-client.md C3): a data file whose bytes (its `sha256`) aren't
    * fetched yet, or a document whose content isn't here (slice 2); read-only until they are */
   remote?: boolean;
+  /** a data file listed from the server: the SHA-256 whose bytes are to be fetched (the fetch queue, index byFetch:
+   * design/sync-client.md L1); gone once they are installed, or once the file is written here */
+  fetch?: string;
 };
 /** An op's identity as the op left it (design/sync-client.md §3): its identity, the folder it is in (that
  * folder's fid; null for the root, or for something put in Trash itself), its name, its kind, a data file's
@@ -1146,6 +1149,7 @@ export class Workspace {
         delete next.unmoved;
         // (its own bytes now: a fetch of the server's (C5) finds another revision and is discarded)
         delete next.remote;
+        delete next.fetch;
         st.put(next);
         await this.log(tx, ops, { op: "write", path: e.path, kind: "file" }, next, undefined, base, !same);
         return next;
@@ -2529,7 +2533,7 @@ export class Workspace {
   /** The op recorded in `tx`, with its identity (design/sync-client.md §3): `now`, the entry as the op left it
    * (null: the op removed `gone`; undefined: it changed no entry), and, on a data file's write, `base`, the
    * SHA-256 it replaced.  Its parent folder read in `tx`: one lookup. */
-  private async log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">, now?: Entry | null, gone?: Entry, base?: string, pin = false) {
+  private async log(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by">, now?: Entry | null, gone?: Entry, base?: string, pin = false, parentHint?: string | null) {
     // (Trash's own folder is the workspace's, not something synced: no identity, as the root has none)
     const e = (now ?? gone)?.path === TRASH ? undefined : now ?? gone, id: Partial<Op> = {};
     if (e) {
@@ -2542,7 +2546,7 @@ export class Workspace {
       }
     }
     if (now && e) {
-      const after = await this.afterOf(tx.objectStore("entries"), now);
+      const after = await this.afterOf(tx.objectStore("entries"), now, parentHint);
       if (after) {
         id.after = after;
         // (an op whose result is in a folder is one that put it there: create, adopt, mkdir, write, rename,
@@ -2560,13 +2564,13 @@ export class Workspace {
   /** For sync's view (sync-view.ts, design/sync-client.md C3), in the caller's transaction (its stores include
    * entries, ops and SYNC_STORES), holding the lock: a change applied from the server, logged as `origin: "server"`,
    * so it is never sent back and notes no local intent. */
-  async logServer(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by" | "origin">, now?: Entry | null, gone?: Entry) {
-    await this.log(tx, ops, { ...op, origin: "server" }, now, gone);
+  async logServer(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by" | "origin">, now?: Entry | null, gone?: Entry, parent?: string | null) {
+    await this.log(tx, ops, { ...op, origin: "server" }, now, gone, undefined, false, parent);
   }
 
   /** What an op left of `e` (OpAfter), read in `st`'s transaction; undefined when it, or the folder it is in,
    * has no identity yet (the migrator gives them). */
-  private async afterOf(st: IDBObjectStore, e: Entry): Promise<OpAfter | undefined> {
+  private async afterOf(st: IDBObjectStore, e: Entry, parentHint?: string | null): Promise<OpAfter | undefined> {
     const id = identOf(e);
     if (!id) return undefined;
     // (never a data file's op without its hash (astra's CORR-9C2-2): every path to one has it first: create and
@@ -2575,7 +2579,8 @@ export class Workspace {
     if (e.kind === "file" && !e.sha256) throw new WorkspaceError("invalid", `${e.path}: a data file's op without its SHA-256 (design/sync-client.md §3)`);
     const folder = parentOf(e.path);
     let parent: string | null = null;
-    if (!e.trashed && folder !== "/" && folder !== TRASH) {
+    if (!e.trashed && folder !== "/" && folder !== TRASH && parentHint !== undefined) parent = parentHint;
+    else if (!e.trashed && folder !== "/" && folder !== TRASH) {
       const f: Entry | undefined = await req(st.get(folder));
       if (!f?.fid) return undefined;
       parent = f.fid;

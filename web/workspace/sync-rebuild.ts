@@ -380,7 +380,7 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
     // (one past the page, to know whether this page is the last: so the walk takes exactly ⌈union / page⌉ pages)
     const peek = await nextIds(tx, gp, p.at?.key ?? "", REBUILD.page + 1);
     const ids = peek.slice(0, REBUILD.page);
-    const v = await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true }, ids);
+    const v = ids.length ? await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true, range: { lo: ids[0], hi: ids[ids.length - 1], prefix: gp } }, ids) : { ops: [], gone: [], listed: [] };
     bump(p, "view");
     cut("view");
     const fin = peek.length <= REBUILD.page;
@@ -409,6 +409,10 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
     const t = { count: 0, bytes: 0, charged: 0, ...((await req(meta.get(totalsKey))) as object | undefined) } as { count: number; bytes: number; charged: number };
     const scanned = (await req(meta.get(`sync:${ns}:scanned`))) as number | undefined;
     bump(p, "retire");
+    // (pending states exist only for identities with local changes: their keys read once a page when there are few,
+    // so a record without one costs no request for it)
+    const npend = (await req(tx.objectStore("pending").count())) as number;
+    const pendKeys = npend <= 2_000 ? new Set((await req(tx.objectStore("pending").getAllKeys())) as string[]) : null;
     /** A record removed: its totals, its pin handed to `to` (a journal record wanting its bytes) or released. */
     const remove = async (rec: OutboxRecord, keepFor?: JournalRecord) => {
       out.delete([ns, rec.dseq]);
@@ -422,6 +426,7 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
           else await release(tx, { ...pin, owner: undefined });
         }
       }
+      if (pendKeys && !pendKeys.has(rec.id)) return;
       const pd = await pendingOf(tx, rec.id), st = { ...stateOf(pd, ns) };
       if (st.allocated?.dseq === rec.dseq) delete st.allocated;
       if (st.acceptedTip?.dseq === rec.dseq) delete st.acceptedTip;
@@ -437,8 +442,11 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
     while (at.step !== "end") {
       if (at.step === "echoes") {
         const echoes = (await req(j.getAll(IDBKeyRange.bound([jp, at.key || "e:"], [jp, "e:\uffff"], !!at.key), room + 1))) as { id: string; dseq: number; seq: number }[];
-        for (const e of echoes.slice(0, room)) {
-          const rec = (await req(out.get([ns, e.dseq]))) as OutboxRecord | undefined;
+        // (their records read by one range: staged in dseq order)
+        const page = echoes.slice(0, room);
+        const byDseq = new Map(page.length ? ((await req(out.getAll(IDBKeyRange.bound([ns, page[0].dseq], [ns, page[page.length - 1].dseq])))) as OutboxRecord[]).map((r) => [r.dseq, r]) : []);
+        for (const e of page) {
+          const rec = byDseq.get(e.dseq);
           if (rec) await remove(rec);
           j.delete([jp, e.id]);
           at.key = e.id;
@@ -451,7 +459,8 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
         const lo = (at.dseq ?? 0) + 1;
         const recs = lo <= p.serverNext - 1 ? ((await req(out.getAll(IDBKeyRange.bound([ns, lo], [ns, p.serverNext - 1]), room + 1))) as OutboxRecord[]) : [];
         for (const rec of recs.slice(0, room)) {
-          const jr = (await req(j.get([jp, rec.id]))) as JournalRecord | undefined;
+          // (its journal record read only when it has bytes to hand over)
+          const jr = rec.pin !== undefined ? ((await req(j.get([jp, rec.id]))) as JournalRecord | undefined) : undefined;
           await remove(rec, jr);
           at.dseq = rec.dseq;
         }

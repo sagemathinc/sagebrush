@@ -840,6 +840,30 @@ C3 keeps the confirmed index in IndexedDB, and L4 says it is never held whole in
 - **The discard is authoritative** (astra's note on r2). The call to `reduce` is wrapped: whatever escapes it, including an exception thrown by the reducer's own undo, the overlay is discarded whole if it is dirty, and the op retried. An exception escaping with a clean overlay (a reducer bug, not a miss) discards the overlay too, and halts sync with a person-told error. In no case does anything of that op reach the base.
 - **On batching derived-identity misses** (daybreak3's suggestion). A landing folder's names are already loaded whole in the read set (r1), so name probes never retry. Derived identities can't be batched: they are SHA-256 values the overlay can't predict without forking the reducer. So their replay cost is bounded and counted (above) rather than removed.
 
+### As built (step 4)
+
+Modules (web/workspace): `sync-overlay.ts` (D10), `sync-confirmed.ts` (C3's confirmed index, D5), `sync-view.ts` (C3's view), `sync-fetch.ts` (C5, L1, D9), `sync-rebuild.ts` (D6, D7 r2), `sync-adopt.ts` (C3's first sync), `Outbox.drainJournal` (the journals' drain). The client turns them on with `onIndex: confirmedIndex(w)`; without it, step 3's behaviour is unchanged.
+
+Where the code settles what the plan left open, or differs from it:
+- **The view's layers, per identity** (C3). An identity with no local intent takes its confirmed state. An identity with one gets its placement from the reducer, run over the confirmed index with its intents on top: its outbox records, its journal record, and its unscanned op's `after` if that op placed it. Its folders' intents come first, top-down.
+  - Content stays its own until its record is decided; a conflicting write comes down later as the server's conflict copy.
+  - So a local write never moves a file, and a confirmed entry at its path makes it `name (2)`.
+  - `pending.latest.movedAt` (the seq of the last placing op) says whether an unscanned op placed it. It is carried from op to op, so a save makes no extra request (test-workspace-sync-pins' exact counts hold).
+- **Remote entries** carry `remote: true`:
+  - a data file until its bytes are fetched and installed (C5's compare-and-swap);
+  - a document until slice 2. Writing to it is refused with an error, never dropped silently.
+- **Server-applied changes** are logged with `origin: "server"`, under the workspace's ordinary lock, so they are refused while quarantined. They note no local intent and pin nothing.
+- **The rebuild's view never deletes** (D6 r4): an entry the active index names gone is kept and listed, as is one it doesn't name. The ordinary per-page view deletes on an explicit gone row.
+- **`server_next` follows acks:** the server decides in dseq order, so each ack raises it. A rebuild that starts later in the same connection knows its decided prefix; welcome's value alone was stale.
+- **A mismatched own echo** in a rebuild's log confirms nothing and records no divergence. That's the restored-copy case: those records are the replaced prefix, and their identities are reissued.
+- **The announce** (plan-sync-rebuilt r3 §4) is sent for every obligation, not only `invalid`. A server without `rebuilt` answers `invalid` "unknown message"; the client then runs the same compare-and-swap with no new floor.
+- **The journals' drain** goes in rounds over key order. A record goes once its folder has gone. Gone identities (forget) go after every present one, in key order rather than deepest-first: a forget of a folder already forgotten is a no-op on the server.
+  - A record under a folder in Trash, gone, or not adopted itself is not adopted.
+- **Downloads:** the signed URL is taken from the followed redirect's final URL (`fetch` can't read a 303's Location). A 403 from the files host drops it, and the next attempt asks for a fresh one.
+- **Page counts are exact:** view and retire read one past their page. A retire page takes 100 items across its steps (staged confirmations, replaced records, the old journal's records), so the walks end on their last full page.
+
+Measured on VM 1 (Chrome, the timed fixture of D6 r6; see the PR for the run): the figures are in #65's description.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |
