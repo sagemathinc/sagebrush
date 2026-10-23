@@ -177,6 +177,55 @@ check(P.checkSnapshotBlob(blob).at_seq === 4, "snapshot blob: accepted");
 throwsCode(() => P.checkSnapshotBlob({ ...blob, v: 2 }), "invalid", "snapshot blob: another version");
 throwsCode(() => P.checkSnapshotBlob({ ...blob, extra: 1 }), "invalid", "snapshot blob: an unknown field");
 
+// ---- the bounds, each refused (typed) before the work it bounds (LIMIT-PR62-1..3)
+
+let deep = 0;
+for (let i = 0; i < 20000; i++) deep = [deep];
+throwsCode(() => P.jcs(deep), "invalid_value", "jcs: 20,000-deep nesting is a typed refusal, not a RangeError");
+const nest = (n) => { let v = 0; for (let i = 0; i < n; i++) v = [v]; return v; };
+check(P.jcs(nest(64)).length === 129, "jcs: 64 levels of nesting");
+throwsCode(() => P.jcs(nest(65)), "invalid_value", "jcs: 65 levels of nesting");
+throwsCode(() => P.jcs({ a: "x".repeat(100) }, 50), "limit", "jcs: over its byte budget");
+check(P.jcs({ a: "x".repeat(40) }, 50).length === 48, "jcs: within its byte budget");
+const run = { type: "run", id: "s:1", sid: "s", n: 1 };
+throwsCode(() => P.sealedValueBytes("notebook", new Array(1_000_001).fill(run)), "limit", "sealed: 1,000,001 source records, before projection");
+check(P.utf8(new TextDecoder().decode(P.sealedValueBytes("notebook", new Array(1_000_000).fill(run)))).length === 17, "sealed: 1,000,000 journal records project to the header");
+throwsCode(() => P.sealedValueBytes("notebook", [{ type: "cell", id: "x", pos: 0, input: "x".repeat((16 << 20) + 1), cell_type: "code" }]), "limit", "sealed: one retained string over 16 MiB");
+throwsCode(() => P.sealedValueBytes("notebook", [{ type: "cell", id: "x", pos: 0, input: nest(70), cell_type: "code" }]), "invalid_value", "sealed: a deeply nested record");
+const cellRecs = Array.from({ length: 2001 }, (_, i) => ({ type: "cell", id: "c" + String(i).padStart(5, "0"), pos: i, input: "", cell_type: "code" }));
+throwsCode(() => P.censusOf("notebook", cellRecs), "invalid_value", "census: the 2,001st cell, while gathering");
+check(P.censusOf("notebook", cellRecs.slice(0, 2000)).length === 2000, "census: 2,000 cells");
+throwsCode(() => P.censusOf("notebook", new Array(1_000_001).fill(run)), "limit", "census: 1,000,001 source records");
+throwsCode(() => P.censusBytes([{ id: "x".repeat(129), cell_type: "code" }]), "invalid_value", "census: a 129-character id");
+check(P.censusBytes([{ id: "x".repeat(128), cell_type: "code" }]).length > 0, "census: a 128-character id");
+throwsCode(() => P.censusBytes([{ id: "a", cell_type: "widget" }]), "invalid_value", "census: an unknown cell type");
+const big = Array.from({ length: 2001 }, (_, i) => ({ id: "c" + String(i).padStart(5, "0"), cell_type: "code" }));
+throwsCode(() => P.finalDescriptor(big, new Map()), "invalid_value", "finalDescriptor: a 2,001-cell census");
+throwsCode(() => P.finalDescriptor([], new Map(big.map((c) => [c.id, { cell: c.id, state: "written_after_deadline" }]))), "invalid", "finalDescriptor: a 2,001-cell selection");
+check(P.finalDescriptor(big.slice(0, 2000), new Map()).entries.length === 2000, "finalDescriptor: 2,000 cells");
+throwsCode(() => P.outputsDigest(big.map((c) => ({ cell: c.id, state: "not_run" }))), "invalid", "digest: 2,001 entries");
+check(typeof P.outputsDigest(big.slice(0, 2000).map((c) => ({ cell: c.id, state: "not_run" }))) === "string", "digest: 2,000 entries");
+throwsCode(() => P.outputsDigest([{ cell: "x".repeat(129), state: "not_run" }]), "invalid", "digest: a 129-character cell");
+throwsCode(() => P.outputsDigest([{ cell: "a", state: "captured", full: { sha256: SHA, size: (4 << 20) + 1, rev: 1 } }]), "limit", "digest: a full output over 4 MiB");
+throwsCode(() => P.outputsDigest([{ cell: "a", state: "captured", preview: { sha256: SHA, size: (256 << 10) + 1, rev: 1, kind: "png" } }]), "limit", "digest: a preview over 256 KiB");
+// the chain: page and epoch ceilings before any hashing; pages continue from a state
+const pv = (bs, extra = {}) => P.verifyChainPage({ epoch: 1, ...extra }, P.chainStart(cs.owner_hash, cs.doc, 1), bs);
+const p1 = pv(batches.slice(0, 2));
+check(p1.ok && P.verifyChainPage({ epoch: 1 }, p1.state, batches.slice(2)).ok, "verifyChainPage: two pages continue from the state");
+check(!P.verifyChainPage({ epoch: 1 }, p1.state, batches.slice(0, 1)).ok, "verifyChainPage: a page that doesn't follow its state");
+const MiB = new Uint8Array(1 << 20), fake = (seq, body = new Uint8Array(0)) => ({ seq, recv: 1, epoch: 1, author: "a", writer: "w", envs: "[]", body, chain: "" });
+throwsCode(() => pv([fake(1, new Uint8Array((1 << 20) + 1))]), "limit", "verifyChainPage: a body over 1 MiB");
+throwsCode(() => pv([{ ...fake(1), envs: "x".repeat((1 << 20) + 1) }]), "limit", "verifyChainPage: envelopes over 1 MiB");
+throwsCode(() => pv(Array.from({ length: 501 }, (_, i) => fake(i + 1))), "limit", "verifyChainPage: 501 batches");
+throwsCode(() => pv(Array.from({ length: 5 }, (_, i) => fake(i + 1, MiB))), "limit", "verifyChainPage: over 4 MiB");
+throwsCode(() => P.verifyChain({ ownerHash: cs.owner_hash, doc: cs.doc, epoch: 1, upto: 50_001, expect: last }, []), "limit", "verifyChain: upto past 50,000");
+throwsCode(() => P.verifyChain({ ownerHash: cs.owner_hash, doc: cs.doc, epoch: 1, upto: 33, expect: last }, Array.from({ length: 33 }, (_, i) => fake(i + 1, MiB))), "limit", "verifyChain: over 32 MiB of history");
+// snapshot blobs: 32 MiB before parsing
+throwsCode(() => P.parseSnapshotBlob(new Uint8Array((32 << 20) + 1)), "limit", "parseSnapshotBlob: over 32 MiB, before parsing");
+check(P.parseSnapshotBlob(P.utf8(JSON.stringify(blob))).at_seq === 4, "parseSnapshotBlob: a blob within the limit");
+throwsCode(() => P.parseSnapshotBlob(P.utf8("{not json")), "invalid", "parseSnapshotBlob: not JSON");
+throwsCode(() => P.checkSnapshotBlob({ ...blob, value: "x".repeat((32 << 20) + 1) }), "limit", "checkSnapshotBlob: a value over 32 MiB");
+
 console.log(`${checks - fails.length}/${checks} checks passed`);
 if (fails.length) {
   for (const f of fails.slice(0, 40)) console.log("FAIL", f);
