@@ -72,3 +72,13 @@ test("an unknown path triggers the fast suite even beside known ones", () => {
   assert.deepEqual(suites(classify(["engine/poly/src/lib.rs", "somewhere/new.txt"])), { node: "true", web: "true", modes: "true", engine_smoke: "true", docs_only: "false" });
   assert.deepEqual(suites(classify(["design/notes.md", "somewhere/new.txt"])), { node: "true", web: "true", modes: "true", engine_smoke: "true", docs_only: "false" });
 });
+
+test("optional packages alone select no default suite; with a core change they do", () => {
+  const none = { node: "false", web: "false", modes: "false", engine_smoke: "false", docs_only: "false" };
+  assert.deepEqual(suites(classify(["optional/hello/py/hello/__init__.py", "optional/hello/sagebrush.json"])), none);
+  assert.equal(classify(["optional/pandas/py/pandas/frame.py"]).optional_only, "true");
+  assert.deepEqual(suites(classify([".github/workflows/optional.yml"])), none);
+  // (the shared tooling is a script like any other, and a core change beside a package's runs the suites)
+  assert.equal(suites(classify(["scripts/optional-packages.mjs"])).node, "true");
+  assert.equal(suites(classify(["optional/hello/sagebrush.json", "src/pkgset.ts"])).node, "true");
+});

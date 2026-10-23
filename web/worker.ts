@@ -40,6 +40,7 @@ import { onChunkInstalled, prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
+import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
@@ -117,9 +118,19 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer | Uint8Array> => {
 const libLoading = (what: string | null) => postMessage({ libLoading: what });
 onChunkInstalled((file) => postMessage({ libChunk: file }));
 
+// This interpreter's optional package set (web/pkgset-browser.ts): its index
+// is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
+// can't be used is said once, and imports from it then fail saying why.
+let pkgsetReady: Promise<void> = Promise.resolve();
+onPkgUse((digests) => postMessage({ pkgUsed: digests }));
+
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
   if (m.broker && BROKERED && !ctrl) return setBroker(m.broker);
+  if (m.pkgset !== undefined) {
+    pkgsetReady = useSet(String(m.pkgset), fetchBytes).catch((e) => postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) }));
+    return;
+  }
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
   if (m.mount) return mount(m.mount);
@@ -127,6 +138,10 @@ self.onmessage = async (ev: MessageEvent) => {
   if (mode) {
     const p = prefetchMode(mode, fetchBytes, libLoading);
     if (m.code !== undefined) await p;
+  }
+  if (m.code !== undefined) {
+    await pkgsetReady;
+    await prefetchFor(m.code, fetchBytes);
   }
   await session.handle(m);
 };

@@ -591,6 +591,53 @@ let db = null, replaying = false;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
 let kernel = null, journal = null; // the current notebook's
+// A notebook's optional package set (plan-modular-packages-r4 §4.4): the one
+// it pins (metadata pkgset), or else the site's latest (pkgset/latest.json,
+// asked once a page), which is then pinned in the notebook and saved before
+// any of its code runs, so it keeps running with the same packages whatever
+// is published later.  Without a published set there is nothing to pin, and
+// nothing changes.  A pin that isn't a set id is refused, never guessed.
+// (For the notebook `owner`, which must stay shown: one left meanwhile
+// rejects, and its interpreter holds every run until it is shown again.  A
+// pin saved from elsewhere meanwhile that won the merge is the one used:
+// astra's CORR-PR68-3.  EVERY pin returned is durable first: a pin already in
+// memory may be one whose save hasn't finished, e.g. after a restart while
+// the first start's save is held, so each return waits for nb.saved() and
+// then rechecks the owner and the winning pin; a failed save rejects, and is
+// never taken as success because the metadata holds the pin.)
+let latestPkgset; // undefined: not asked yet; else a promise of the id or null
+async function notebookPkgset(owner) {
+  const shown = () => {
+    if (current.id !== owner) throw new Error("its notebook was left before its package set was pinned");
+  };
+  for (let round = 0; round < 4; round++) {
+    shown();
+    const pin = nb.meta.pkgset;
+    if (pin !== undefined) {
+      if (!(typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin))) {
+        statusEl.textContent = "this notebook's package set pin is invalid: optional packages are off";
+        return null;
+      }
+      await nb.saved(); // (durable, whoever set it; rejects if it isn't)
+      shown();
+      if (nb.meta.pkgset === pin) return pin;
+      continue; // (another pin won meanwhile: that one, once it is durable)
+    }
+    if (LOCAL) return null;
+    latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
+      .then(async (r) => {
+        const j = r.ok ? await r.json() : null;
+        return j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id) ? j.id : null;
+      })
+      .catch(() => null);
+    const S = await latestPkgset;
+    shown();
+    if (!S) return null;
+    if (nb.meta.pkgset === undefined) nb.setMeta({ pkgset: S });
+    // (the next round waits for it to be durable, and returns the winner)
+  }
+  throw new Error("this notebook's package set pin kept changing");
+}
 function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
@@ -603,6 +650,12 @@ function makeKernel(owner) {
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
+      // the notebook's optional package set, pinned, before any code (plan-modular-packages-r4 §4.4;
+      // the kernel holds every run until this is done); a replayed session's is the one it recorded
+      const replayed = j?.replayPkgset();
+      const S = replayed !== undefined ? replayed : owner !== null ? await notebookPkgset(owner) : null;
+      if (S) w.postMessage({ pkgset: S });
+      j?.pkgsetSent(S);
       const old = await j?.replayFiles();
       if (old) return w.postMessage({ files: old });
       if (diskFiles.length) w.postMessage({ files: diskFiles });
