@@ -549,9 +549,13 @@ def text(v):
         # (a value not in a container: its text, however long)
         return _leaf(v, None)
     w = _Walk()
-    # (a __repr__ may display a value itself: the flag then set again after)
+    # (a __repr__ may display a value itself: the flag then set again after,
+    # and the work counted with this display's)
     outer = _ran[0]
     _ran[0] = False
+    if _depth[0] == 0:
+        _spent[0] = _spent[1] = 0
+    _depth[0] += 1
     native = False
     try:
         _walk(v, (), w)
@@ -560,6 +564,7 @@ def text(v):
     except RecursionError:
         raise RecursionError("maximum recursion depth exceeded while getting the repr of an object") from None
     finally:
+        _depth[0] -= 1
         _ran[0] = _ran[0] or outer
     if native:
         return repr(v)
@@ -568,6 +573,23 @@ def text(v):
 
 class _Native(Exception):
     pass
+
+
+# (the work of one display, its nested displays included, once user code
+# can change the value while it is walked (a __repr__ that adds to its list
+# at every step would keep the walk going): walk steps (a piece of the
+# line or the repr) and characters of repr, at most these; past them, MemoryError. Counted
+# from the outermost display; LIMIT-PR57-1)
+LIMITS = {"steps": 1 << 23, "chars": 1 << 26}
+_spent = [0, 0]
+_depth = [0]
+
+
+def _charge(steps, chars):
+    _spent[0] += steps
+    _spent[1] += chars
+    if _spent[0] > LIMITS["steps"] or _spent[1] > LIMITS["chars"]:
+        raise MemoryError("displaying this value takes more than Sagebrush's limit of %d steps or %d characters (a __repr__ may be changing it as it is shown)" % (LIMITS["steps"], LIMITS["chars"]))
 
 
 class _Walk:
@@ -582,6 +604,7 @@ class _Walk:
 def _put(w, text, rep, cost=None):
     # (the next piece of each; the line given up (None) at a piece that
     # passes the room left or holds a newline)
+    _charge(1, len(rep))
     w.rep.append(rep)
     if w.line is None:
         return
@@ -632,31 +655,17 @@ def _walk(v, seen, w):
 
 
 def _walk_dict(d, seen, w):
-    # (as CPython's dict repr: in order, each value as it is when reached;
-    # after a __repr__ adds or removes keys, on from the last key shown)
-    it = iter(d.items())
+    # (through the dict's own iterator, as IPython's printer goes: each value
+    # as it is when reached; a __repr__ that changes the dict's keys meets
+    # the iterator's RuntimeError, as IPython's display does)
     n = 0
-    last = _EMPTY
-    while True:
-        try:
-            k, x = next(it)
-        except StopIteration:
-            break
-        except RuntimeError:
-            # (its size changed: the keys it has now, after the last shown)
-            ks = list(d)
-            at = next((j + 1 for j, q in enumerate(ks) if q is last), min(n, len(ks)))
-            it = iter(d.items())
-            for _ in range(at):
-                next(it)
-            continue
+    for k, x in d.items():
         if n:
             _put(w, ", ", ", ")
         _walk(k, seen, w)
         _put(w, ": ", ": ")
         _walk(x, seen, w)
         n += 1
-        last = k
     return n
 
 
