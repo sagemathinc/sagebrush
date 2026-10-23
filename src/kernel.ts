@@ -466,6 +466,9 @@ export function kernelWorker(mode: Mode) {
     R.stderr.flush();
   };
   R.host = {
+    // (a Python notebook: a value shown as IPython shows it, src/runtime/index.ts
+    // displayText; Sage's, Magma's and MATLAB's keep the repr, as SageMath's shell does)
+    ipython: mode === "python",
     // (MATLAB: a function file, name.m, found on the path, as Python)
     ...matlabHostOps(),
     display(bundle: Record<string, string>) {
@@ -523,7 +526,7 @@ export function kernelWorker(mode: Mode) {
       if (v !== null) {
         R.builtins._ = v;
         const b = mimeBundle(v) ?? {};
-        b["text/plain"] ??= R.repr(v);
+        b["text/plain"] ??= R.displayText(v);
         flush();
         if (current !== null) port.postMessage({ id: current, result: b });
       }
