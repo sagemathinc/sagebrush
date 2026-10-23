@@ -20,8 +20,10 @@ export const OVERLAY = {
   opUnits: 5_000_000,
   /** memory units a page may hold: base rows, dirty, the batch in hand, overlay clones, copied Set members */
   pageMemory: 200_000,
-  /** memory units an op running alone may hold */
-  opMemory: 250_000,
+  /** memory units an op running alone may hold (D10 r3 said 250,000; a maximum move measures about 300,000 (its
+   * 100,000 base rows, their 100,000 overlay clones and the ~100,000 members of the moved folders' copied children
+   * Sets, which r3's estimate left out): set to 350,000, the heap's growth measured under 256 MiB at that maximum) */
+  opMemory: 350_000,
   /** retry rounds: the reducer's 1,000-candidate series, plus one */
   rounds: 1001,
 };
@@ -55,7 +57,7 @@ export class PartialIndex {
   /** a folder's listing, only ever whole */
   readonly children = new Map<string, Set<string> | typeof ABSENT>();
   readonly gone = new Map<string, string | typeof ABSENT>();
-  /** rows held (each entry, each gone row, each Set member): memory units */
+  /** rows held (each entry, each gone row): memory units; a folder's listing Set points at rows already counted */
   memory = 0;
 
   /** An entry loaded: by identity and by its path's key. */
@@ -69,7 +71,6 @@ export class PartialIndex {
     for (const e of entries) this.putEntry(e);
     const s = new Set(entries.map((e) => e.id));
     this.children.set(folderKey, s.size ? s : ABSENT);
-    this.memory += s.size;
   }
 
   /** The missed keys loaded from `store`.  Returns how many keys became known. */
@@ -203,15 +204,7 @@ export class Overlay {
       }
     }
     for (const [k, v] of this.maps.byKey.own) b.byKey.set(k, v === DELETED ? ABSENT : v);
-    for (const [k, v] of this.maps.children.own) {
-      const was = b.children.get(k);
-      if (was && was !== ABSENT) b.memory -= was.size;
-      if (v === DELETED || v.size === 0) b.children.set(k, ABSENT);
-      else {
-        b.children.set(k, v);
-        b.memory += v.size;
-      }
-    }
+    for (const [k, v] of this.maps.children.own) b.children.set(k, v === DELETED || v.size === 0 ? ABSENT : v);
     for (const [k, v] of this.maps.gone.own) b.gone.set(k, v === DELETED ? ABSENT : v);
     return changed;
   }
