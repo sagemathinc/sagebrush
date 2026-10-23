@@ -552,7 +552,7 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D10, D10 r2)
+### Step 4 plan delta (D5 to D10, D10 r3)
 
 @sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4. r5 ("D6 r5") answers the reviews of 4772b3a0: daybreak3's LIMIT-PR65-4, and astra's note that echo confirmations must wait for the commit. r6 ("D6 r6") answers daybreak3's narrowed LIMIT-PR65-4 on c8a94c26: the timed fixture and its exact page counts.
 
@@ -818,6 +818,27 @@ C3 keeps the confirmed index in IndexedDB, and L4 says it is never held whole in
   - a derived-identity series with 20 collisions completes (20 rounds);
   - a 100,000-entry subtree move: one long task under 1 s, and the heap growth asserted;
   - a 1,000-entry move: no long task over 50 ms.
+
+**D10 r3: the bounds, exact** (daybreak3's review of df626e31).
+- **Retry rounds cost what they replay** (daybreak3's 1). A round reruns the whole op, so a derived-identity series that collides $k$ times costs $\sum_{i=1}^{k} i$ candidate probes, plus $k$ times the op's other work:
+  - the series alone, at the reducer's 1,000-candidate contract: $\sum_{i=1}^{1000} i = 500{,}500$ probes;
+  - in general an op's cumulative units are (rounds) × (its other work) + the series' probes, all counted by the meter.
+- **Per-op ceiling.** An op runs alone (in a page of its own) whenever its trial passes the page budget. Its cumulative units, retries included, are capped at 5,000,000. That covers the full 1,000-collision series on an op with up to about 4,500 units of other work, which every op but a large move has. An op that passes the ceiling halts sync with a person-told error, never applied partially. Only a log crafted to collide derived identities (SHA-256 based, so by accident with probability about $2^{-64}$ per candidate) on a large move can reach it.
+- **The over-budget trial.** The meter runs an op as a trial on its overlay. If the trial would take the page past 500,000 units, its overlay is discarded, the page is written up to the op before it, and the op runs again as the first op of the next page. Its trial units count against the page that ran it, so a page's executed work is at most 500,000 plus one trial's units, and a trial is at most the per-op ceiling.
+- **Memory, every object counted** (daybreak3's 2). The memory budget counts, together:
+  - base rows;
+  - the dirty set;
+  - the batch in hand;
+  - the overlay's cloned entries;
+  - the overlay's copied `children` Sets (one unit per member).
+  - A page holds at most 200,000 units, but a single op may exceed it alone: a maximum move counts its 100,000 base rows plus 100,000 overlay clones plus its landing folder's 10,000, about 210,000 units. That op runs in a page of its own, with a single-op memory ceiling of 250,000 units, past which it halts, person-told.
+  - The heap test's fixture uses maximum-length legal rows: paths of 1,024 characters, names of 255, at depth 32, and a 100,000-entry move. It asserts the JS heap growth under 256 MiB, measured with `performance.memory` (`--enable-precise-memory-info`).
+- **Tests added:**
+  - a 1,000-collision derived series (a test seam makes the first 1,000 candidates collide) on a `mkdir`: it completes, and its probes equal 500,500 plus its other work, as counted;
+  - the same series on a 100,000-entry move: it passes the 5,000,000-unit ceiling and halts, person-told, with no row written;
+  - a page whose next op's trial passes the budget: the page is written without it, and the op starts the next page.
+- **The discard is authoritative** (astra's note on r2). The call to `reduce` is wrapped: whatever escapes it, including an exception thrown by the reducer's own undo, the overlay is discarded whole if it is dirty, and the op retried. An exception escaping with a clean overlay (a reducer bug, not a miss) discards the overlay too, and halts sync with a person-told error. In no case does anything of that op reach the base.
+- **On batching derived-identity misses** (daybreak3's suggestion). A landing folder's names are already loaded whole in the read set (r1), so name probes never retry. Derived identities can't be batched: they are SHA-256 values the overlay can't predict without forking the reducer. So their replay cost is bounded and counted (above) rather than removed.
 
 ## 4. Who builds what, in order, and the size of each
 
