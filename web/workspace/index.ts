@@ -4,7 +4,7 @@
 export { Workspace, WorkspaceError, RESET_HOOK, RESET_PAGE, RESET_BYTES_PAGE, RESET_PAGE_BYTES, LOCAL_PAGE, type Identity, LIMITS, PRUNE_STEP, DROP_PAGE, BYTES_STEP, LEGACY_MAX, COPIES, nkeyOf, BOARD_KEYS, askToKeep, type Entry, type Op, type OpAfter, type OldBytes, identOf, needsHash, type Version, type BoardRecord, type Limits, STALE_FAILS_CAP, type StaleWhy, type StaleStuck } from "./api";
 export { migrate, reconcile, adoptOld, signature, RECOVERED, EDITED_FOLDER, type KeyValue, type MigrateReport } from "./migrate";
 export { normPath, kindOf, safeName, freePath, splitExt, parentOf, nameOf, join, within, TRASH, PathError, type Kind } from "./paths";
-export { WS_DB, openWorkspaceDb } from "./db";
+export { WS_DB, WS_VERSION, openWorkspaceDb } from "./db";
 export { startMigrator, onMigration, migrationState, MIGRATE, STALE_NOTICE, STUCK_PATHS, STUCK_CHARS, type MigrationState } from "./migrator";
 export { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, staleText, STALE_DISMISSED } from "./notice";
 export { decide, best, newer, resolveReset, readLocal, readOpfs, writeLocal, writeOpfs, placeOf, isWitness, LOCAL_KEY, type Witness, type State, type Held, type Read } from "./witness";

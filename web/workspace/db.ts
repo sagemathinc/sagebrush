@@ -84,7 +84,7 @@ import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 5;
+export const WS_VERSION = 6;
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -140,6 +140,14 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       db.createObjectStore("prunable", { keyPath: ["fid", "id"] }).createIndex("byId", "id");
       // (every version kept before is made prunable after the open, from this marker: one write here)
       if (old >= 1) tx.objectStore("meta").put({ after: 0 }, "versions:backfill");
+    }
+    if (old < 6) {
+      // (the confirmed index read a page at a time (design/sync-client.md D10): an entry by its path's key, a
+      // folder's listing by its key; gone rows have no key, so neither index holds them.  Schema only: nothing
+      // outside dev has written syncIndex)
+      const ix = tx.objectStore("syncIndex");
+      ix.createIndex("byKey", ["ns", "key"]);
+      ix.createIndex("byParent", ["ns", "parentKey"]);
     }
   }, onClose, ms);
 }

@@ -1468,7 +1468,7 @@ async function upgradeV5() {
   delete after.prunable;
   const metaKeys = JSON.parse(after.meta)[0];
   after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL), JSON.parse(after.meta)[1].filter((v) => !(v && typeof v === "object" && "after" in v))]);
-  check(db5.version === 5 && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && marker?.after === 0, "version 4 to 5: every store the same, byte for byte; the pins' index byStorage and the empty store prunable added; the backfill's marker set: " + J({ idx, prunable, marker }));
+  check(db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && marker?.after === 0, "version 4 to 5: every store the same, byte for byte; the pins' index byStorage and the empty store prunable added; the backfill's marker set: " + J({ idx, prunable, marker }));
   db5.close();
 }
 
