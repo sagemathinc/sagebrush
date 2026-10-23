@@ -295,7 +295,7 @@ server.on("upgrade", async (req, socket, head) => {
       const text = data.toString();
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
-      log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)) } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after });
+      log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
       if (m.t === "hello") helloAccount = m.account ?? null;
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
@@ -365,7 +365,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-sc-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", "--enable-precise-memory-info", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let code = 1;
 try {
   if (!port) port = await devtoolsPort(profile);

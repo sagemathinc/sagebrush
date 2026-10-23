@@ -1577,8 +1577,121 @@ async function firstSyncCollision() {
 
 const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, firstSync, firstSyncRace, firstSyncCollision };
 
+// ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
+
+/** Puts in pages of `n` a transaction (seeding). */
+async function seed(db, store, values, keyOf = null, n = 20_000) {
+  for (let i = 0; i < values.length; i += n) {
+    await new Promise((ok, no) => {
+      const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store);
+      for (const v of values.slice(i, i + n)) keyOf ? st.put(v, keyOf(v)) : st.put(v);
+      tx.oncomplete = ok;
+      tx.onerror = () => no(tx.error);
+    });
+  }
+}
+const metaPutRaw = (db, k, v) => seed(db, "meta", [v], () => k);
+const id16 = (lead, i) => lead + i.toString(16).padStart(15, "0");
+
+/** IndexedDB requests counted per transaction, tagged with the phase running (`window.__phase`), while measuring. */
+function countRequests() {
+  const counts = new WeakMap(), out = [], undo = [];
+  const txOf = (x) => x?.transaction ?? x?.objectStore?.transaction ?? x?.source?.transaction ?? x?.source?.objectStore?.transaction;
+  const note = (self) => {
+    const tx = txOf(self);
+    if (!tx) return;
+    if (!counts.has(tx)) {
+      counts.set(tx, { n: 0, phase: window.__phase ?? "" });
+      tx.addEventListener("complete", () => { const c = counts.get(tx); if (c.phase) out.push(c); });
+    }
+    counts.get(tx).n++;
+  };
+  const wrap = (proto, names) => { for (const name of names) { const f = proto[name]; undo.push(() => (proto[name] = f)); proto[name] = function (...a) { note(this); return f.apply(this, a); }; } };
+  wrap(IDBObjectStore.prototype, ["get", "getAll", "getAllKeys", "getKey", "put", "add", "delete", "count", "openCursor", "openKeyCursor", "clear"]);
+  wrap(IDBIndex.prototype, ["get", "getAll", "getAllKeys", "getKey", "count", "openCursor", "openKeyCursor"]);
+  wrap(IDBCursor.prototype, ["continue", "advance"]);
+  return { out, stop: () => undo.forEach((f) => f()) };
+}
+
+async function scaleRebuild() {
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0), 20_000), "scale: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  const t0 = Date.now();
+  const gen = ((await metaGet(w.ws, `sync:${ns}:genNext`)) ?? (await metaGet(w.ws, `sync:${ns}:indexGen`)) ?? 0) + 1;
+  const gp = W.genPrefix(ns, gen), jp = W.journalPrefix(ns, gen), J0 = `${ns}#reissue#old`;
+  const now = Date.now(), SHA_A = "a".repeat(64), SHA_B = "b".repeat(64);
+  // (the staging index: 100,000 identities, 20 folders of 4,999 files)
+  const rows = [];
+  for (let k = 0; k < 20; k++) rows.push({ ns: gp, id: id16("3", k), path: `/S${k}`, key: `/S${k}`, parentKey: "/", kind: "folder", fid: id16("3", k), created: now, updated: now, by: "person", seq: k + 1 });
+  for (let i = 0; i < 99_980; i++) { const k = i % 20, p = `/S${k}/y${i}`; rows.push({ ns: gp, id: id16("1", i), path: p, key: p, parentKey: `/S${k}`, kind: "file", fid: id16("1", i), sha256: SHA_A, size: 1, created: now, updated: now, by: "person", seq: 100 + i }); }
+  await seed(w.ws, "syncIndex", rows);
+  rows.length = 0;
+  // (100,000 other identities here: 20 folders of 4,999 files, disjoint from the index's)
+  const ents = [];
+  for (let k = 0; k < 20; k++) ents.push({ path: `/L${k}`, kind: "folder", ref: null, created: now, updated: now, fid: id16("4", k), ident: id16("4", k), nkey: `/\u0000L${k}` });
+  for (let i = 0; i < 99_980; i++) { const k = i % 20, p = `/L${k}/x${i}`; ents.push({ path: p, kind: "file", ref: p, created: now, updated: now, size: 1, rev: 0, fid: id16("2", i), migrated: true, sha256: SHA_A, ident: id16("2", i), nkey: `/L${k}\u0000x${i}` }); }
+  await seed(w.ws, "entries", ents);
+  // (10,000 records below server_next, half of them with their echoes staged; an earlier committed journal's 100,000
+  // undrained records)
+  const recs = [];
+  for (let d = 1; d <= 10_000; d++) { const e = ents[20 + d]; recs.push({ ns, dseq: d, lseq: 0, id: e.ident, op: { dseq: d, t: now, by: "person", op: "write", path: e.path, kind: "file", fid: e.fid, sha256: SHA_B, size: 1 } }); }
+  await seed(w.ws, "outbox", recs);
+  const jrows = [];
+  for (let d = 1; d <= 5_000; d++) jrows.push({ ns: jp, id: "e:" + String(d).padStart(16, "0"), dseq: d, seq: d });
+  for (const e of ents) jrows.push({ ns: J0, id: e.ident, parent: "", name: e.path.split("/").pop(), kind: e.kind, ...(e.kind === "file" ? { sha256: SHA_A, size: 1 } : {}), trashed: false });
+  await seed(w.ws, "adoptJournal", jrows);
+  ents.length = 0; jrows.length = 0; recs.length = 0;
+  await metaPutRaw(w.ws, `sync:${ns}:dseq`, 10_001);
+  await metaPutRaw(w.ws, `sync:${ns}:outbox`, { count: 10_000, bytes: 0, charged: 0 });
+  await metaPutRaw(w.ws, `sync:${ns}:journal`, J0);
+  await metaPutRaw(w.ws, `sync:${ns}:genNext`, gen);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const n0 = (await metaGet(w.ws, `sync:${ns}:rebuild`)).n;
+  await metaPutRaw(w.ws, `sync:${ns}:pass`, { phase: "log", gen, n0, serverNext: 10_001, pages: { log: 0, capture: 0, view: 0, retire: 0, clean: 0 } });
+  await metaPutRaw(w.ws, `sync:${ns}:pass:cursor`, 1e12);
+  check(true, `scale: seeded in ${Math.round((Date.now() - t0) / 1000)} s`);
+  // (measured: requests per transaction, long tasks and heap, from done's commit to the announce)
+  const reqs = countRequests();
+  const longs = [];
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) if (window.__phase) longs.push(e.duration); });
+  try { obs.observe({ type: "longtask" }); } catch {}
+  let heap0 = performance.memory?.usedJSHeapSize ?? 0, heapMax = heap0, pages = null;
+  W.REBUILD.before = async (phase) => {
+    if (phase === "view-page" || phase === "retire-page") { window.__phase = phase; heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }
+    else if (phase === "announce") { window.__phase = ""; pages = (await W.passOf(w, ns))?.pages; }
+    else window.__phase = "";
+  };
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(async () => opsMessages(await ctl("log")).length > 0, 900_000), "scale: the pass ran and sending resumed: " + J({ phase: c.stats.rebuildPhase, error: c.stats.rebuildError }));
+    const firstOps = opsMessages(await ctl("log"))[0];
+    const doneToResume = (firstOps.at - c.stats.rebuildDoneAt) / 1000;
+    check(pages?.view === 2000 && pages?.retire === 1100, "scale: exactly 2,000 view pages and 1,100 retire pages: " + J(pages));
+    const byPhase = (ph) => reqs.out.filter((x) => x.phase === ph).map((x) => x.n);
+    const vmax = Math.max(...byPhase("view-page")), rmax = Math.max(...byPhase("retire-page"));
+    check(vmax <= 400 && rmax <= 400, "scale: each transaction within 400 IndexedDB requests: " + J({ view: vmax, retire: rmax }));
+    const longest = Math.max(0, ...longs);
+    check(longest < 50, "scale: every long task under 50 ms: longest " + Math.round(longest) + " ms, " + longs.length + " over 50");
+    check(doneToResume <= 300, `scale: done to resume (the first ops message) ${doneToResume.toFixed(1)} s (at most 300 s)`);
+    check(true, "scale: figures " + J({ doneToResumeS: +doneToResume.toFixed(1), viewMaxRequests: vmax, retireMaxRequests: rmax, longestTaskMs: Math.round(longest), heapGrowthMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) }));
+  } finally {
+    W.REBUILD.before = null;
+    window.__phase = "";
+    reqs.stop();
+    obs.disconnect();
+    await stop(c);
+  }
+}
+const SCALE = { scaleRebuild };
+
 export async function run(only = "") {
-  for (const [name, f] of Object.entries(CASES)) {
+  // (the scale cases run only when named)
+  for (const [name, f] of Object.entries({ ...CASES, ...(only ? SCALE : {}) })) {
     if (only && !only.split(",").includes(name)) continue;
     window.progress = { name, checks: results.length };
     try {
