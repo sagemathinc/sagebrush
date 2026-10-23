@@ -14,7 +14,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
-} from "./protocol.ts";
+} from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";

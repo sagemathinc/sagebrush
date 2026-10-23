@@ -1,0 +1,8 @@
+{
+  "name": "sagebrush-test-workers",
+  "private": true,
+  "description": "Miniflare, for core's tests of its Worker-side modules (web/engines.ts): web/test-engines.mjs, web/test-pwa-update.mjs",
+  "devDependencies": {
+    "miniflare": "5.20260930.0-alpha"
+  }
+}

@@ -1,8 +1,10 @@
 // The sync protocol, version 1 (design/sync-server.md §5): the limits of
 // §8, the forms of ids, and the checks every message passes before
-// anything is written.  Shared by the Worker (web/sync/server.ts) and the
-// objects (account.ts, doc.ts); the client (web/workspace/sync-client.ts,
-// @sagebrush-board's) is tested against the same rules.
+// anything is written.  This is the open contract (MIT OR Apache-2.0) between
+// the sync client (web/workspace/) and the sync server: the server's Worker
+// (web/sync/server.ts) and objects (account.ts, doc.ts) import it, as will
+// sagemathinc/sagebrush-cloud's after the split (plan-cloud-split-r1); the
+// client (web/workspace/sync-client.ts) is tested against the same rules.
 
 import { normPath, PathError, type Kind } from "../workspace/paths.ts";
 

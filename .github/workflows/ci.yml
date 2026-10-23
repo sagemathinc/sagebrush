@@ -39,6 +39,8 @@ jobs:
         with:
           node-version: 24
       - run: git diff --check
+      - name: core imports no server code (plan-cloud-split-r1)
+        run: node scripts/check-no-server-imports.mjs
       - id: paths
         name: classify changed paths and select the tier
         env:
@@ -193,6 +195,7 @@ jobs:
       - name: sharing, sync, engines and PWA
         run: |
           (cd web/site && npm ci --silent)
+          (cd web/test-workers && npm ci --silent)
           node web/share/test-share.mjs
           node web/sync/test-sync.mjs
           CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
