@@ -41,13 +41,15 @@ ALIASES.update({"seaborn-" + s: "seaborn-v0_8-" + s for s in (
 
 def _settings(raw):
     """a style's rc settings from _library's data (a cycler as a Cycler)"""
-    return {k: (_mpl.Cycler("color", v[1]) if isinstance(v, tuple) and len(v) == 2 and v[0] == "__cycler__" else v)
+    return {k: (_mpl.Cycler("color", v[1]) if isinstance(v, list) and len(v) == 2 and v[0] == "__cycler__" else v)
             for k, v in raw.items()}
 
 
 def reload_library():
     """the library as it ships"""
-    from matplotlib.style._library import LIBRARY
+    import json
+    from matplotlib.style import _library
+    LIBRARY = json.loads(_library.LIBRARY_JSON)
     library.clear()
     library.update({name: _settings(raw) for name, raw in LIBRARY.items()})
     available[:] = sorted(k for k in library if not k.startswith("_"))
