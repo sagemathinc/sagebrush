@@ -114,4 +114,15 @@ than 0
       ^
 Runtime error in ext< ... >: Rhs arity (2) should be 1
 
+
+>> print "Root(", Root(P!4, 0);
+                      ^
+Runtime error in 'Root': Argument 85 is not positive
+
+
+>> x := 1; y := "Trace(b, E)"; Trace(b, E);
+                                    ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
 1

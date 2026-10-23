@@ -20,4 +20,6 @@ Root(P!2, 2);
 ext<F | 0>;
 ext<F | -1>;
 ext<F | 2, 3>;
+print "Root(", Root(P!4, 0);
+x := 1; y := "Trace(b, E)"; Trace(b, E);
 1;

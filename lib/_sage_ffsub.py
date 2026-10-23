@@ -442,10 +442,31 @@ def w(p):
     return (-(-p.bit_length() // 30)) ** 2
 
 
+def pow_products(e):
+    """The products (each a _pmul and its _pmod) of x^e in GF(p^n), n > 1,
+    for 1 <= e < q - 1 (_sage_ff's __pow__ reduces e mod q - 1 first, and
+    every exponent charged here is already below q - 1): _ppowmod's
+    bits(e) - 1 squarings and popcount(e) - 1 products, exactly."""
+    return (e.bit_length() - 1) + (bin(e).count("1") - 1)
+
+
 def pow_cost(e, M):
-    """The cops of x^e (e >= 1) with products of M cops: square and
-    multiply, at most 2 (bits(e) - 1) products, 2 at least."""
-    return 2 * max(1, e.bit_length() - 1) * M
+    """The cops of x^e in GF(p^n), n > 1, with products of M cops: exactly
+    pow_products(e) of them (test/ff_f2_cases counts the real _pmul calls)."""
+    return pow_products(e) * M
+
+
+def pow_bound(q, M):
+    """An upper bound on pow_cost(e, M) over every 1 <= e < q - 1, for an
+    exponent known only after the admission (an inverse mod q - 1)."""
+    return 2 * max(0, (q - 2).bit_length() - 1) * M
+
+
+def prime_pow_cost(e, p):
+    """The cops of x^e in GF(p), by Python's built-in pow (which can't be
+    instrumented): 2 bits(e) word products, an upper bound for its binary
+    and windowed methods alike."""
+    return 2 * e.bit_length() * w(p)
 
 
 def _prime_int(x):
@@ -659,15 +680,35 @@ def relative(what, x, F, budget, refuse):
     return f
 
 
-def root(x, k, budget, refuse_bits, refuse):
-    """The k-th roots of x (k >= 1, checked by the caller) as far as they
-    are determined: ("unique", r) when x has exactly one (x = 0, or
-    gcd(k, q - 1) = 1: r = x^(k^-1 mod (q - 1))); ("none", None) when it
-    has none (x^((q - 1)/g) != 1, g = gcd(k, q - 1)); ("many", None) when it
-    has several, whose choice is the front end's (Magma's and Sage's
-    differ).  refuse_bits() for k of more than ROOT_BITS bits, before any
-    arithmetic on k; then the Euclidean step and one power are charged
-    before either.
+def inverse_cost(K):
+    """An upper bound on the cops of 1/x in K: the extended Euclidean
+    algorithm in F_p[x] (_pxgcd_inverse: at most n + 1 steps, each a
+    division and a product of at most M(n) cops); in GF(p), pow(x, -1, p)."""
+    p, n, _ = pnq(K)
+    return 2 * p.bit_length() * w(p) if n == 1 else 2 * (n + 1) * mn(p, n)
+
+
+def root_cost(K, k, invert=False):
+    """The closed-form cops of root(): the Euclidean step on (bits(k) +
+    bits(q)) bits, one power (bounded over every exponent below q - 1,
+    which is known only after it), and the inverse first when invert."""
+    p, n, q = pnq(K)
+    b = k.bit_length() + q.bit_length()
+    c = b * (-(-b // 30)) ** 2 + (pow_bound(q, mn(p, n)) if n > 1 else prime_pow_cost(q, p))
+    return c + (inverse_cost(K) if invert else 0)
+
+
+def root(x, k, budget, refuse_bits, refuse, invert=False, extra=0):
+    """The k-th roots of x (of 1/x when invert; k >= 1, checked by the
+    caller, which handles x = 0 when invert) as far as they are determined:
+    ("unique", r) when there is exactly one (x = 0, or gcd(k, q - 1) = 1:
+    r = x^(k^-1 mod (q - 1))); ("none", None) when there is none
+    (x^((q - 1)/g) != 1, g = gcd(k, q - 1)); ("many", None) when there are
+    several, whose choice is the front end's (Magma's and Sage's differ).
+    refuse_bits() for k of more than ROOT_BITS bits, before any arithmetic
+    on k; then ONE charge, before the inverse or any power: root_cost plus
+    the caller's `extra` (the work it does after, on "many": astra
+    CORR-FF2-3).
 
         sage: import _sage_ffsub as S
         sage: S.root(GF(13)(8), 5, [S.WORK], ValueError, ValueError)
@@ -677,8 +718,9 @@ def root(x, k, budget, refuse_bits, refuse):
         raise refuse_bits()
     K = x.parent()
     p, n, q = pnq(K)
-    b = k.bit_length() + q.bit_length()
-    charge(budget, b * (-(-b // 30)) ** 2 + pow_cost(q, mn(p, n) if n > 1 else w(p)), refuse)
+    charge(budget, root_cost(K, k, invert) + extra, refuse)
+    if invert:
+        x = ~x
     if not x:
         return ("unique", x)
     g = _math.gcd(k % (q - 1), q - 1)
@@ -687,3 +729,71 @@ def root(x, k, budget, refuse_bits, refuse):
     if x ** ((q - 1) // g) != K.one():
         return ("none", None)
     return ("many", None)
+
+
+def coordinates_cost(K, F):
+    """The cops of coordinates() of one element of K over its proper,
+    non-prime subfield F (deg F = m, r = n/m): the image f of F's generator
+    (its power), the n basis vectors f^j g^i (n products), and the solution
+    of the n x n system over GF(p) (Gauss-Jordan: n^2 (n + 1) products and
+    as many sums of words)."""
+    p, n, q = pnq(K)
+    mm, qf = pnq(F)[1], pnq(F)[2]
+    M = mn(p, n)
+    return 2 * ((q - 1) // (qf - 1)).bit_length() * M + n * M + 2 * n * n * (n + 1) * w(p)
+
+
+def _solve_mod_p(cols, x, p):
+    """The c with sum c_k cols[k] = x over GF(p) (the columns independent)."""
+    n = len(x)
+    a = [[cols[k][i] for k in range(n)] + [x[i]] for i in range(n)]
+    for c in range(n):
+        piv = next(r for r in range(c, n) if a[r][c] % p)
+        a[c], a[piv] = a[piv], a[c]
+        inv = pow(a[c][c], -1, p)
+        a[c] = [v * inv % p for v in a[c]]
+        for r in range(n):
+            if r != c and a[r][c] % p:
+                t = a[r][c]
+                a[r] = [(u - t * v) % p for u, v in zip(a[r], a[c])]
+    return [a[i][n] for i in range(n)]
+
+
+def coordinates(x, F, budget, refuse):
+    """The coordinates [c_0, ..., c_{r-1}] (elements of F) of x, an element
+    of K, in the basis 1, g, ..., g^(r-1) of K over its subfield F, g =
+    K.gen(), r = deg K / deg F: x = sum c_i g^i (Sage's RingExtension
+    vector() and printing over F).  Over the prime field, x's own
+    coefficients; over K, [x]; else, for K of at most EMBED_MAX elements
+    (F1's bound), by solving over GF(p) in the basis f^j g^i (f the image
+    of F's generator), its cost (coordinates_cost) charged first.
+
+        sage: import _sage_ffsub as S
+        sage: S.coordinates(GF(5^4).gen() ** 10, GF(25), [S.WORK], ValueError)
+        [z2 + 2, 3*z2 + 1]
+    """
+    K = x.parent()
+    p, n, _ = pnq(K)
+    mm = pnq(F)[1]
+    if mm == n:
+        return [x]
+    if mm == 1:
+        v = [int(c) for c in x.list()] if n > 1 else [int(x)]
+        return [F(c) for c in v + [0] * (n - len(v))]
+    if not descendable(K, F):
+        raise refuse()
+    charge(budget, coordinates_cost(K, F), refuse)
+    r = n // mm
+    f, g = image(F, K), K.gen()
+    pad = lambda y: [int(c) for c in y.list()] + [0] * (n - len(y.list()))
+    cols, gi = [], K.one()
+    for i in range(r):
+        fj = gi
+        for j in range(mm):
+            cols.append(pad(fj))
+            fj = fj * f
+        gi = gi * g
+    c = _solve_mod_p(cols, pad(x), p)
+    # (column i m + j is f^j g^i: c_i = sum_j c[i m + j] f^j, an element of F
+    # in its own power basis, as F1's Conway embedding sends F.gen() to f)
+    return [F._make(c[i * mm:(i + 1) * mm]) for i in range(r)]
