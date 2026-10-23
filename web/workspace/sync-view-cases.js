@@ -285,7 +285,7 @@ async function seedRows(db, store, values, n = 20_000) {
 
 /** A folder with `dirs` subfolders of `per` files, here and in the confirmed index alike; then the server's rename of it
  * applied (one page), its longest task and the heap's growth measured. */
-async function moveMeasured(dirs, per) {
+async function moveMeasured(dirs, per, wide = false) {
   const { w, ns, op, apply } = await setup();
   const gp = W.genPrefix(ns, 0), now = Date.now(), SHA_A = "a".repeat(64);
   const big = hex(16), rows = [], ents = [];
@@ -295,7 +295,23 @@ async function moveMeasured(dirs, per) {
     ents.push({ path, kind, ref: kind === "file" ? path : null, created: now, updated: now, fid: id, ident: id, nkey: parentKey + "\u0000" + path.slice(path.lastIndexOf("/") + 1), ...(kind === "file" ? { size: 1, rev: 0, migrated: true, sha256: SHA_A, remote: true } : {}) });
   };
   add(big, "/big", "folder");
-  for (let d = 0; d < dirs; d++) { const df = hex(16); add(df, `/big/d${d}`, "folder"); for (let i = 0; i < per; i++) add(hex(16), `/big/d${d}/f${i}`, "file"); }
+  // (wide: the maximum legal rows (D10 r3): under /big a 255-character folder, a chain of 28 folders of 20, then
+  // /dK, and files whose names make every path exactly 1,024 characters at depth 32)
+  let base = "/big";
+  if (wide) {
+    const pad = (c, n) => c.repeat(n);
+    base += "/" + pad("A", 255);
+    add(hex(16), base, "folder");
+    for (let k = 0; k < 28; k++) { base += "/" + (String(k).padStart(2, "0") + pad("c", 18)); add(hex(16), base, "folder"); }
+  }
+  for (let d = 0; d < dirs; d++) {
+    const df = hex(16), dp = `${base}/d${d}`;
+    add(df, dp, "folder");
+    for (let i = 0; i < per; i++) {
+      const name = wide ? (`f${i}-` + "x".repeat(1024)).slice(0, 1024 - dp.length - 1) : `f${i}`;
+      add(hex(16), `${dp}/${name}`, "file");
+    }
+  }
   await seedRows(w.ws, "syncIndex", rows);
   await seedRows(w.ws, "entries", ents);
   const n = rows.length;
@@ -312,29 +328,71 @@ async function moveMeasured(dirs, per) {
   let heapMax = heap0;
   const sampler = setInterval(() => { heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }, 5);
   const t0 = performance.now();
-  const r = await apply([op({ op: "rename", path: "/big", to: "/big2", kind: "folder", fid: big })]);
+  const r = await apply([op({ op: "rename", path: "/big", to: wide ? "/bag" : "/big2", kind: "folder", fid: big })]);
   const ms = performance.now() - t0;
   await new Promise((ok) => setTimeout(ok, 50));
   clearInterval(sampler);
   obs.disconnect();
-  const moved = (await w.list("/big2", { recursive: true })).length;
+  const moved = (await w.list(wide ? "/bag" : "/big2", { recursive: true })).length;
   const logged = (await w.ops()).filter((o) => o.origin === "server").length;
-  return { n, ms, longest: Math.max(0, ...longs), heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
+  const out = { n, ms, longest: Math.max(0, ...longs), heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
+  // (the baseline: the workspace's own move of the same tree back (api.ts move, one transaction), measured alike)
+  if (wide) {
+    globalThis.gc?.();
+    await new Promise((ok) => setTimeout(ok, 200));
+    const longs2 = [];
+    const obs2 = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs2.push(e.duration); });
+    obs2.observe({ type: "longtask" });
+    const h0 = performance.memory?.usedJSHeapSize ?? 0;
+    let hMax = h0;
+    const s2 = setInterval(() => { hMax = Math.max(hMax, performance.memory?.usedJSHeapSize ?? 0); }, 5);
+    const t1 = performance.now();
+    await w.rename("/bag", "/bog");
+    out.local = { ms: Math.round(performance.now() - t1), longestTaskMs: Math.round(Math.max(0, ...longs2)), heapGrowthMiB: +((hMax - h0) / 2 ** 20).toFixed(1) };
+    clearInterval(s2);
+    obs2.disconnect();
+  }
+  return out;
 }
 
-async function bigMove() {
+async function bigMove(wide) {
   // (the 1,000-entry move first: measured before the large one's garbage is about)
   const s = await moveMeasured(1, 999);
   check(s.moved === s.n - 1 && s.longest < 50, `a 1,000-entry remote move: no long task over 50 ms (longest ${Math.round(s.longest)} ms)`);
-  const m = await moveMeasured(10, 9_998);
-  check(m.moved === m.n - 1 && m.logged === 1, `a 100,000-entry remote move: all ${m.n - 1} entries moved here, one change logged: ` + J({ moved: m.moved, logged: m.logged }));
-  check(m.longest < 1000, `…its longest task ${Math.round(m.longest)} ms (under 1 s, D10 r2's measured exception)`);
-  check(m.heapMiB < 256, `…the heap's growth ${m.heapMiB.toFixed(1)} MiB (under 256 MiB)`);
-  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1), smallMoveLongestMs: Math.round(s.longest) }));
+  // (short rows: asserted.  The maximum legal rows (1,024-character paths at depth 32, D10 r3) are measured with
+  // WIDE=1 and reported, not asserted, until D11 (plan-pr65-d11-chunked-moves-r1) applies large moves in chunks: no
+  // single-transaction move of that tree fits 256 MiB, the workspace's own move included)
+  const m = await moveMeasured(10, 9_998, !!wide);
+  check(m.moved === m.n - 1 && m.logged === 1, `a 100,000-entry remote move${wide ? " of maximum-width rows (1,024-character paths, depth 32)" : ""}: all ${m.n - 1} entries moved here, one change logged: ` + J({ moved: m.moved, logged: m.logged }));
+  if (!wide) {
+    check(m.longest < 1000, `…its longest task ${Math.round(m.longest)} ms (under 1 s, D10 r2's measured exception)`);
+    check(m.heapMiB < 256, `…the heap's growth ${m.heapMiB.toFixed(1)} MiB (under 256 MiB)`);
+  }
+  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1), smallMoveLongestMs: Math.round(s.longest), workspaceOwnMove: m.local }));
 }
 
-export async function run() {
-  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, bigMove]) {
+async function journalCursorReplaced() {
+  // (astra's CORR-PR65-IMPL-1, their repro: an earlier journal's drain position (in its gone phase, or mid-round)
+  // left when a rebuild installs a new journal; the new journal is walked from its own start, never declared drained
+  // with its present records unsent; also across a reload (a new Outbox))
+  for (const stale of [{ round: 0, key: "", progress: false, gone: true }, { round: 0, key: "zzzz", progress: true, gone: false }, { round: 3, key: "", progress: false, gone: false }]) {
+    const { w, ns, ob } = await setup();
+    await w.mkdir("/kept-folder");
+    await ob.scan();
+    const recs = await ob.records();
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(stale, `sync:${ns}:journal:at`); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await obligateNow(w, ns);
+    const d = await pass(w, ns, recs.at(-1).dseq + 1, []);
+    const ob2 = new W.Outbox(w, await W.currentLease(w));
+    let made = 0;
+    for (let i = 0; i < 20; i++) { const r = await ob2.drainJournal(); made += r.made; if (!r.more) break; }
+    const out = await all(w.ws, "outbox");
+    check(d === "committed" && made >= 1 && out.some((r) => r.op.op === "mkdir" && r.op.path === "/kept-folder"), `a stale drain position (${J(stale)}): the new journal drained from its start: ` + J({ made, ops: out.map((r) => [r.op.op, r.op.path]) }));
+  }
+}
+
+export async function run(wide = "") {
+  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, journalCursorReplaced, () => bigMove(wide)]) {
     try { await t(); } catch (e) { check(false, `${t.name}: threw ${e?.stack ?? e}`); }
   }
   return results;

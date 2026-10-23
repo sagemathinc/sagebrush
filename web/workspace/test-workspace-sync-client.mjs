@@ -78,6 +78,8 @@ const ctl = {
   /** answers for the next `rebuilt` messages, instead of the server's (core's has no `rebuilt`: the server half is
    * the cloud's): [{ack: {floor, count}} | {code, detail} | {hold: true}] (default: an ack with floor = through) */
   rebuilt: [],
+  /** `rebuilt` sent on to the real server (core's: it answers "unknown message"), not answered here */
+  rebuiltReal: false,
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
   /** the next n pulled index pages (answers to pull_index) dropped */
@@ -163,7 +165,7 @@ async function control(body) {
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -299,7 +301,8 @@ server.on("upgrade", async (req, socket, head) => {
       if (m.t === "hello") helloAccount = m.account ?? null;
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
-      if (m.t === "rebuilt") {
+      if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server" });
+      if (m.t === "rebuilt" && !ctl.rebuiltReal) {
         const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
         log.rebuilt.push({ through: m.through, answer: f });
         const answer = () => client.send(JSON.stringify(f.ack ? { t: "ack", req: m.req, rebuilt: f.ack } : { t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
@@ -410,11 +413,14 @@ try {
   }
   ws.close();
 } finally {
+  // (Chrome's exit awaited before its profile is removed: on a loaded runner it may still be writing there)
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((ok) => chrome.once("exit", ok));
   chrome.kill();
+  await Promise.race([exited, new Promise((ok) => setTimeout(ok, 5000))]);
   server.close();
   await mf.dispose().catch(() => {});
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   rmSync(site, { recursive: true, force: true });
 }
 process.exit(code);

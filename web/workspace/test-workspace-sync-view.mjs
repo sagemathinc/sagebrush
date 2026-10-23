@@ -46,7 +46,7 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  const results = await ev("window.run()");
+  const results = await ev(`window.run(${JSON.stringify(process.env.WIDE ?? "")})`);
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (measurements, printed pass or fail)
   for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
@@ -59,10 +59,13 @@ try {
   }
   ws.close();
 } finally {
+  // (Chrome's exit awaited before its profile is removed: on a loaded runner it may still be writing there)
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((ok) => chrome.once("exit", ok));
   chrome.kill();
+  await Promise.race([exited, new Promise((ok) => setTimeout(ok, 5000))]);
   server.stop(true);
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   rmSync(site, { recursive: true, force: true });
 }
 process.exit(code);
