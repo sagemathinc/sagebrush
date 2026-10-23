@@ -600,19 +600,28 @@ let kernel = null, journal = null; // the current notebook's
 // (For the notebook `owner`, which must stay shown: one left meanwhile
 // rejects, and its interpreter holds every run until it is shown again.  A
 // pin saved from elsewhere meanwhile that won the merge is the one used:
-// astra's CORR-PR68-3.)
+// astra's CORR-PR68-3.  EVERY pin returned is durable first: a pin already in
+// memory may be one whose save hasn't finished, e.g. after a restart while
+// the first start's save is held, so each return waits for nb.saved() and
+// then rechecks the owner and the winning pin; a failed save rejects, and is
+// never taken as success because the metadata holds the pin.)
 let latestPkgset; // undefined: not asked yet; else a promise of the id or null
 async function notebookPkgset(owner) {
   const shown = () => {
     if (current.id !== owner) throw new Error("its notebook was left before its package set was pinned");
   };
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 4; round++) {
     shown();
     const pin = nb.meta.pkgset;
     if (pin !== undefined) {
-      if (typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin)) return pin;
-      statusEl.textContent = "this notebook's package set pin is invalid: optional packages are off";
-      return null;
+      if (!(typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin))) {
+        statusEl.textContent = "this notebook's package set pin is invalid: optional packages are off";
+        return null;
+      }
+      await nb.saved(); // (durable, whoever set it; rejects if it isn't)
+      shown();
+      if (nb.meta.pkgset === pin) return pin;
+      continue; // (another pin won meanwhile: that one, once it is durable)
     }
     if (LOCAL) return null;
     latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
@@ -625,7 +634,7 @@ async function notebookPkgset(owner) {
     shown();
     if (!S) return null;
     if (nb.meta.pkgset === undefined) nb.setMeta({ pkgset: S });
-    await nb.saved(); // (durable before the first run; rejects if it isn't)
+    // (the next round waits for it to be durable, and returns the winner)
   }
   throw new Error("this notebook's package set pin kept changing");
 }

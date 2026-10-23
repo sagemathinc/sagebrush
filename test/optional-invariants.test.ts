@@ -129,10 +129,32 @@ test("requirements come from the call forms used (§6.2–6.3): a new keyword ra
   assert.equal(level("from m import f\nxs = list(map(f, [1]))\n"), 2, "passed as an argument");
   assert.equal(level("from m import f\nfs = [f]\n"), 2, "stored in a container");
   assert.equal(level("from m import f\nf(1)\nf = 2\n"), 1, "a name stored to doesn't escape");
+  // an escaping MODULE takes the highest level reachable from it (astra's
+  // CORR-PR68-2 on c6580f48): aliased, passed or stored
+  assert.equal(level("import m\nn = m\nn.f(1, extra=True)\n"), 2, "a module alias");
+  assert.equal(level("import m\ndef g(mod):\n    return mod.f(1)\ng(m)\n"), 2, "a module passed");
+  assert.equal(level("import m\nmods = [m]\n"), 2, "a module stored");
+  assert.equal(level("import m\nm.f(1)\n"), 1, "a module used directly stays exact");
+  // an escaping class takes its members' levels too
+  assert.equal(level("from m import C\nK = C\nK().meth()\n"), 2, "a class alias");
+  // an untyped receiver's method counts module functions of that name too
+  // (the receiver may be a module the lint didn't see), not only class members
+  const both = {
+    api: 1, level: 2, prefixes: [],
+    modules: { m: { since: 1, names: {
+      f: { kind: "function", since: 1, params: [{ name: "x", kind: "pos", default: false, since: 1 }, { name: "extra", kind: "kwonly", default: true, since: 2 }] },
+      C: { kind: "class", since: 1, members: { f: { kind: "function", since: 1, params: [{ name: "self", kind: "pos", default: false, since: 1 }] } } },
+    } } },
+  };
+  const r = lintPackage(pkg("def g(o):\n    return o.f(1)\n"), both);
+  assert.deepEqual(r.findings, []);
+  assert.equal(r.level, 2, "a same-named module function and class method: the untyped call takes the higher");
   const dyn = (extra: any) => [{ file: "py/fixture.py", line: 2, construct: "name", target: "getattr", access: "m.f", reason: "a reviewed fixture", ...extra }];
   const src = "import m\nr = getattr(m, 'f')(1)\n";
   assert.equal(level(src, dyn({ call: [] })), 1, "a declared dynamic target in its call form");
   assert.equal(level(src, dyn({ call: ["extra"] })), 2, "a declared call form passing a newer keyword");
   assert.equal(level(src, dyn({})), 2, "a declared dynamic target without a call form takes the maximum");
+  // (the declaration covers only its own line: the same module escaping on another line still charges it)
+  assert.equal(level("import m\nr = getattr(m, 'f')(1)\nn = m\n", dyn({ call: [] })), 2, "a module escaping elsewhere still takes its maximum");
   assert.ok(lintPackage(pkg(src, dyn({})), api).uses.some((u: any) => u.target === "m.f" && u.declared), "the declared target is in uses");
 });

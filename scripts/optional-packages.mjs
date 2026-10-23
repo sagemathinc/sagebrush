@@ -260,9 +260,17 @@ export function lintPackage(pkg, api) {
       }
     });
   }
+  // (a name handed to a reviewed dynamic access on that same line, such as
+  // the m of a declared getattr(m, "f"), reaches what the declaration says
+  // and no more: its escape is the declared use, not a separate one)
+  const declaredAt = new Set(uses.filter((u) => u.declared).map((u) => `${u.file}\0${u.line}\0${u.target}`));
+  const covered = (u) => !u.declared && u.bound === "any" && [...declaredAt].some((k) => {
+    const [f, l, t] = k.split("\0");
+    return f === u.file && Number(l) === u.line && (t === u.target || t.startsWith(u.target + "."));
+  });
   // core_req: the highest level any use needs (§6.2)
   let level = 1;
-  for (const u of uses) {
+  for (const u of uses.filter((x) => !covered(x))) {
     const l = useLevel(api, u);
     if (l === null) {
       if (!u.target.startsWith("*.") && !u.declared) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
@@ -287,12 +295,44 @@ function entryFor(api, target) {
   }
   return null;
 }
+// the highest level anything reachable from an entry can need: its since, its
+// parameters', and its members' (a class's methods), recursively
+function deepLevel(e) {
+  let l = e.since ?? 1;
+  for (const p of Array.isArray(e.params) ? e.params : []) l = Math.max(l, p.since ?? 1);
+  for (const m of Object.values(e.members ?? {})) l = Math.max(l, deepLevel(m));
+  return l;
+}
 // the level a use needs: the entry's since and its bound parameters' (§6.2);
 // bound null is a bare reference (an import, or the start of a longer one),
-// bound "any" one that may be called with every parameter
+// bound "any" one that may be called with every parameter. An escaping core
+// name (an alias, passed or stored) can be used later in ways the lint can't
+// follow, so it takes the highest level of everything reachable from it: a
+// class's members too, and a module's every name and submodule (astra's
+// CORR-PR68-2 on c6580f48: `n = m; n.f(1, extra=True)`).
 export function useLevel(api, use) {
+  if (use.bound === "any" && !use.target.startsWith("*.")) {
+    const mods = Object.keys(api.modules).filter((k) => k === use.target || k.startsWith(use.target + "."));
+    if (Object.hasOwn(api.modules, use.target)) {
+      let level = 1;
+      for (const k of mods) {
+        level = Math.max(level, api.modules[k].since ?? 1);
+        for (const e of Object.values(api.modules[k].names ?? {})) level = Math.max(level, deepLevel(e));
+      }
+      return level;
+    }
+    const e = entryFor(api, use.target);
+    return e ? Math.max(1, deepLevel(e)) : null;
+  }
+  // (a method call on a receiver the lint can't type: every core member of
+  // that name, and every module function of that name, since the receiver
+  // may be a module reached some way the lint didn't see)
+  const attr = use.target.slice(2);
   const entries = use.target.startsWith("*.")
-    ? Object.values(api.modules).flatMap((m) => Object.values(m.names ?? {}).flatMap((e) => (e.members && Object.hasOwn(e.members, use.target.slice(2)) ? [e.members[use.target.slice(2)]] : [])))
+    ? Object.values(api.modules).flatMap((m) => [
+        ...(m.names && Object.hasOwn(m.names, attr) ? [m.names[attr]] : []),
+        ...Object.values(m.names ?? {}).flatMap((e) => (e.members && Object.hasOwn(e.members, attr) ? [e.members[attr]] : [])),
+      ])
     : [entryFor(api, use.target)].filter(Boolean);
   if (!entries.length) return null;
   let level = 1;
