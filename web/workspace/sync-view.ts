@@ -131,7 +131,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
         const layer: SyncOp[] = m.out.map((r) => ({ ...r.op, seq: synthSeq++, device: w.device }) as SyncOp);
         for (const op of layer) await runOp(base, store, op, { alone: true });
         if (m.journal) for (const op of await synth(base, x, m.journal.gone ? null : m.journal, e)) await runOp(base, store, op, { alone: true });
-        if (m.unscanned && m.unscanned.after !== undefined) for (const op of await synth(base, x, m.unscanned.after, e)) await runOp(base, store, op, { alone: true });
+        if (m.unscanned && m.unscanned.after !== undefined && m.unscanned.moved) for (const op of await synth(base, x, m.unscanned.after, e)) await runOp(base, store, op, { alone: true });
       }
     } catch (err) {
       if (!(err instanceof Halt)) throw err;

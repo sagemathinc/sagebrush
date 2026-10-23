@@ -129,19 +129,29 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[]): P
   const cap = await capNow();
   return w.locked(async () => {
     const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
-    const r = await applyOps(w, ns, ops, {
-      stores: VIEW_STORES,
-      onPage: async (tx, changed, prefix) => {
-        const v = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap }, changed);
-        // (kept only once the page's transaction commits: a page that aborts is run again whole)
-        tx.addEventListener("complete", () => {
-          told.push(...v.ops);
-          gone.push(...v.gone);
-          listed.push(...v.listed);
-        });
-      },
-    });
-    w.tell({ ops: told });
+    // (a page's results kept once it has committed: when the next page begins, or applyOps returns; a page that
+    // aborts throws out of applyOps, and its results go with it)
+    let last: Awaited<ReturnType<typeof applyView>> | null = null;
+    const keep = () => {
+      if (!last) return;
+      told.push(...last.ops);
+      gone.push(...last.gone);
+      listed.push(...last.listed);
+      last = null;
+    };
+    let r: Applied;
+    try {
+      r = await applyOps(w, ns, ops, {
+        stores: VIEW_STORES,
+        onPage: async (tx, changed, prefix) => {
+          keep();
+          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap }, changed);
+        },
+      });
+      keep();
+    } finally {
+      w.tell({ ops: told });
+    }
     if (gone.length) await w.dropContents(gone).catch((err) => console.warn("sync: dropping forgotten contents:", err));
     return { ...r, listed };
     // (an ordinary change's hold: refused while quarantined or after a reset elsewhere, and the durability witness
