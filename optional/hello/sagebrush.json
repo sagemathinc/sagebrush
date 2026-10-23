@@ -1,0 +1,20 @@
+{
+  "name": "@sagebrush/hello",
+  "version": "0.1.0",
+  "kind": "optional",
+  "sagebrush": ">=0.5.0",
+  "modes": [
+    "python"
+  ],
+  "python": {
+    "root": "py",
+    "modules": [
+      "hello"
+    ]
+  },
+  "requires": [],
+  "private_prefix": "_hello_",
+  "files": {
+    "py/hello/__init__.py": "d10013b763d56b74aef072f976f5ec7ca7d4a043b722aa448ee686300b1a961b"
+  }
+}

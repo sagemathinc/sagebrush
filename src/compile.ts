@@ -11,8 +11,9 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
-import { cwdPath } from "./runtime/modules";
+import { cwdPath, isBuiltinModule } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
+import { admitIndex, checkChunk, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
@@ -134,9 +135,20 @@ function libPath(filename: string): string | null {
 // a mounted package file's "pkg:<dir>/<path>" (its checked bytes); else null)
 function precompiledPath(filename: string): string | null {
   const key = pkgKeys.get(filename);
-  return key !== undefined ? "pkg:" + key : libPath(filename);
+  if (key !== undefined) return "pkg:" + key;
+  // (an optional package's file: "opt:<package id>:<path in the package>",
+  // for scripts/optional-packages.mjs pre, which records them apart)
+  const o = optKeys.get(filename);
+  return o !== undefined ? "opt:" + o.id + ":" + o.path : libPath(filename);
 }
 function precompiled(source: string, filename: string, name: string, sage: boolean): Compiled | null {
+  // (an optional package's file: only its own set's precompiled code, from
+  // its own store, never the core's table, src/pkgset.ts; plan §4.1)
+  if (optKeys.has(filename)) {
+    if (mounted.get(filename) !== source) return null;
+    const e = optPre.get(filename + (sage ? "\0sage" : "\0py"));
+    return e === undefined || e.module !== name ? null : { code: e.code, lineMap: e.lineMap as any };
+  }
   const g = globalThis as any;
   const p: Precompiled | undefined = g.__SAGEBRUSH_PRECOMPILED__;
   if (p === undefined || p === null || typeof p !== "object" || p.build !== g.__SAGEBRUSH_BUILD_ID__ || typeof p.modules !== "object" || p.modules === null) return null;
@@ -392,8 +404,9 @@ R.loader.load = (name: string) => {
     const file = join(d, leaf + ".py");
     if (fileExists(file)) return execModule(fileRead(file), file, name);
   }
-  // (not on sys.path: a package's, if the registry names one for it)
-  const found = packageModule(name, false);
+  // (not on sys.path: a package's, if the registry names one for it; then
+  // this session's optional package set's)
+  const found = packageModule(name, false) ?? optionalModule(name, false);
   return found === null ? null : execModule(found[0], found[1], name, found[1].endsWith("/__init__.py"));
 };
 
@@ -549,7 +562,145 @@ export function findModuleSource(name: string): [string, string] | null {
     const file = join(d, leaf + ".py");
     if (fileExists(file)) return [fileRead(file), file];
   }
-  return packageModule(name, true);
+  return packageModule(name, true) ?? optionalModule(name, true);
+}
+
+// Optional packages (optional/<name>/; src/pkgset.ts; plan-modular-packages-r4):
+// a runtime has at most one package set, the one its document pins.  The host
+// admits the set's index (installPackageSet) and supplies a function that
+// returns a chunk's bytes; a module is looked up only after sys.path, the
+// library and the bundled registry.  A package's dependencies are mounted
+// first; each chunk and file is checked (src/pkgset.ts checkChunk) before any
+// of the package is mounted, at /$pyjs/optional/<set>/<dir>/, apart from
+// every other mount.  Its precompiled code, if the set has it for this build,
+// is kept in its own store and used only for its own files.
+export const OPT_VIRTUAL = "/$pyjs/optional";
+export type ChunkFetch = (ref: ChunkRef, what: string) => Uint8Array;
+let optional: { plan: SetPlan; fetch: ChunkFetch } | null = null;
+const optKeys = new Map<string, { id: string; path: string }>(); // mounted file -> its package and path in it
+const optPre = new Map<string, { module: string; code: string; lineMap: unknown[] }>(); // file + "\0py"/"\0sage"
+const optMounted = new Map<string, string>(); // package id -> its Python root
+/** This core's build id, as optional sets' precompiled code and costs are keyed (an unbundled build has none: 0s, which no set uses). */
+export function coreBuildId(): string {
+  const b = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
+  return typeof b === "string" && /^[0-9a-f]{16}$/.test(b) ? b : "0".repeat(16);
+}
+// (the names a set may not take: the library's modules, builtin modules and
+// the bundled packages', and their directories; plan §4.1 rule 4)
+export function reservedNames() {
+  const reg = packageRegistry();
+  const lib = libDir();
+  return {
+    isCoreModule(name: string) {
+      if (isBuiltinModule(name)) return true;
+      if (reg !== null && Object.hasOwn(reg.modules, name)) return true;
+      const rel = name.split(".").join("/");
+      return fileExists(join(lib, rel + ".py")) || fileExists(join(lib, rel, "__init__.py"));
+    },
+    bundledDirs: new Set(reg === null ? [] : Object.values(reg.packages).map((p) => p.dir)),
+  };
+}
+/**
+ * Admit package set `S` from its index's bytes and use it for this runtime;
+ * `fetch` returns a chunk's bytes (the host's: a cache, a fetch, the grader
+ * child's modules).  Once per runtime: the same set again is a no-op, another
+ * one is refused (plan §4.1, §4.4).  Throws a PkgsetError, having changed nothing.
+ */
+export function installPackageSet(S: string, index: Uint8Array, fetch: ChunkFetch): SetPlan {
+  if (optional !== null) {
+    if (optional.plan.S === S) return optional.plan;
+    throw new PkgsetError(`this session uses package set ${optional.plan.S.slice(0, 12)}; reopen it to use ${S.slice(0, 12)}`);
+  }
+  const plan = admitIndex(S, index, coreBuildId(), reservedNames());
+  optional = { plan, fetch };
+  return plan;
+}
+/** This runtime's package set id, or null. */
+export function packageSetId(): string | null {
+  return optional === null ? null : optional.plan.S;
+}
+// Mount package `id` and its dependencies (each once): all of a package's
+// chunks are fetched and checked before any of it is mounted.
+function mountOptional(id: string, name: string): string {
+  const done = optMounted.get(id);
+  if (done !== undefined) return done;
+  const { plan, fetch } = optional!;
+  for (const dep of plan.closure.get(id)!) {
+    if (optMounted.has(dep)) continue;
+    const p = plan.packages.get(dep)!;
+    const build = coreBuildId();
+    let src: SrcChunk, pre: PreChunk | null = null;
+    try {
+      src = checkChunk(plan, dep, "src", build, fetch(p.src, `${dep} (source)`)) as SrcChunk;
+      if (p.pre[build]) pre = checkChunk(plan, dep, "pre", build, fetch(p.pre[build], `${dep} (precompiled)`)) as PreChunk;
+    } catch (e: any) {
+      const err = (R.T as any).ImportError(`No module named '${name}' could be loaded: ${String(e?.message ?? e)}`);
+      err.name = name;
+      throw err;
+    }
+    const base = join(OPT_VIRTUAL, plan.S, p.dir);
+    for (const [path, text] of src.files) {
+      const f = join(base, path);
+      mounted.set(f, text);
+      optKeys.set(f, { id: dep, path });
+    }
+    if (pre !== null) for (const e of pre.entries) optPre.set(join(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
+    mountedBases.push(base);
+    optMounted.set(dep, join(base, p.root));
+  }
+  return optMounted.get(id)!;
+}
+// The [source, filename] of module `name` from this runtime's optional set, or null
+function optionalModule(name: string, main: boolean): [string, string] | null {
+  if (optional === null || !optional.plan.modules.has(name)) return null;
+  const dot = name.lastIndexOf(".");
+  if (dot > 0) {
+    const parent = R.sysModules.$m.get(name.slice(0, dot));
+    if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
+  }
+  const id = optional.plan.modules.get(name)!;
+  const at = join(mountOptional(id, name), ...name.split("."));
+  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+    const text = mounted.get(p);
+    if (text !== undefined) return [text, p];
+  }
+  throw (R.T as any).ImportError(`${id} has no file for module '${name}'`);
+}
+/**
+ * Mount the packages that provide `modules` (and their dependencies) now,
+ * without importing them: the grader's Dynamic Worker child calls this at its
+ * top level, so every chunk is checked and mounted in its startup, where
+ * code may be generated (plan §4.5), whichever cell first imports them.
+ * The ids mounted, dependencies first.
+ */
+export function premountPackages(modules: string[]): string[] {
+  if (optional === null) return [];
+  const ids: string[] = [];
+  for (const name of modules) {
+    const id = optional.plan.modules.get(name);
+    if (id === undefined) continue;
+    mountOptional(id, name);
+    for (const d of optional.plan.closure.get(id)!) if (!ids.includes(d)) ids.push(d);
+  }
+  return ids;
+}
+/** A chunk reader over bytes the host already has (the grader's child: its {json}/{data} modules), by SHA-256. */
+export function chunksFrom(entries: Iterable<[string, Uint8Array]>): ChunkFetch {
+  const m = new Map(entries);
+  return (ref) => {
+    const b = m.get(ref.sha256);
+    if (b === undefined) throw new PkgsetError(`chunk ${ref.sha256.slice(0, 12)} was not given to this runtime`);
+    return b;
+  };
+}
+/** Tests only: forget this runtime's package set (a real runtime never does: a new set means a new runtime). */
+export function resetPackageSetForTests(): void {
+  for (const [f] of optKeys) mounted.delete(f);
+  for (let i = mountedBases.length - 1; i >= 0; i--) if (mountedBases[i].startsWith(OPT_VIRTUAL + "/")) mountedBases.splice(i, 1);
+  optKeys.clear();
+  optPre.clear();
+  optMounted.clear();
+  optional = null;
 }
 
 export { initParser, R };

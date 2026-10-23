@@ -17,7 +17,7 @@
 
 import { bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
-import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "./protocol.ts";
+import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
 import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
 import type { SyncAccount } from "./account.ts";
 
