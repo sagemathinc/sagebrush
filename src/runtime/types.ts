@@ -2346,21 +2346,21 @@ export class DictView {
 }
 const viewTypes = ["dict_keys", "dict_values", "dict_items"].map((name, kind) => {
   const vt = builtinType(name, [object], () => raise(T.TypeError, `cannot create '${name}' instances`));
-  method(vt, "__iter__", (v: DictView) => new O.DictIter(v.d, v.kind));
+  method(vt, "__iter__", (v: DictView) => O.dictIter(v.d, v.kind));
   method(vt, "__len__", (v: DictView) => v.d.$m.size);
   if (kind !== 1) vt.$dict.set("__hash__", null);
-  method(vt, "__reversed__", (v: DictView) => new O.ListIter(O.toArray(new O.DictIter(v.d, v.kind)).reverse()));
-  method(vt, "__repr__", (v: DictView) => `${name}(${repr(O.toArray(new O.DictIter(v.d, v.kind)))})`);
+  method(vt, "__reversed__", (v: DictView) => new O.DictRevIter(v.d, v.kind));
+  method(vt, "__repr__", (v: DictView) => `${name}(${repr(O.toArray(O.dictIter(v.d, v.kind)))})`);
   method(vt, "__contains__", (v: DictView, x: any) => {
     if (kind === 0) return dictGet(v.d, x) !== undefined;
-    if (kind === 1) return O.contains(O.toArray(new O.DictIter(v.d, 1)), x);
+    if (kind === 1) return O.contains(O.toArray(new O.DictValueIter(v.d)), x);
     const kv = O.unpack(x, 2);
     const w = dictGet(v.d, kv[0]);
     return w !== undefined && O.eqBool(w, kv[1]);
   });
   if (kind !== 1) {
     for (const [op, f] of [["__and__", "and"], ["__or__", "or"], ["__sub__", "sub"], ["__xor__", "xor"]] as const) {
-      method(vt, op, (v: DictView, other: any) => O.setOp(O.newSet(new O.DictIter(v.d, v.kind)), O.newSet(other), f));
+      method(vt, op, (v: DictView, other: any) => O.setOp(O.newSet(O.dictIter(v.d, v.kind)), O.newSet(other), f));
     }
   }
   return vt;
@@ -2372,7 +2372,7 @@ Object.defineProperty(DictView.prototype, "$cls", {
 });
 
 method(dict, "keys", (d: PyDict) => new DictView(d, 0));
-method(dict, "__reversed__", (d: PyDict) => new O.ListIter(O.toArray(new O.DictIter(d, 0)).reverse()));
+method(dict, "__reversed__", (d: PyDict) => new O.DictRevIter(d, 0));
 method(dict, "values", (d: PyDict) => new DictView(d, 1));
 method(dict, "items", (d: PyDict) => new DictView(d, 2));
 method(dict, "get", (d: PyDict, k: any, dflt: any = null) => {
@@ -2439,7 +2439,7 @@ method(dict, "__delitem__", (d: PyDict, k: any) => {
   return null;
 });
 method(dict, "__contains__", (d: PyDict, k: any) => dictGet(d, k) !== undefined);
-method(dict, "__iter__", (d: PyDict) => new O.DictIter(d, 0));
+method(dict, "__iter__", (d: PyDict) => new O.DictIter(d));
 method(dict, "__eq__", (d: PyDict, o: any) => (o instanceof PyDict ? O.dictEquals(d, o) : NotImplemented));
 method(dict, "__ne__", (d: PyDict, o: any) => (o instanceof PyDict ? !O.dictEquals(d, o) : NotImplemented));
 method(dict, "__or__", (d: PyDict, o: any) => {
@@ -2510,7 +2510,7 @@ const setMethods = (cls: PyType, mutable: boolean) => {
   method(cls, "isdisjoint", (s: O.PySet, o: any) => O.toArray(o).every((v) => dictGet(s.$d, v) === undefined));
   method(cls, "__len__", (s: O.PySet) => s.$d.$m.size);
   method(cls, "__contains__", (s: O.PySet, x: any) => dictGet(s.$d, x) !== undefined);
-  method(cls, "__iter__", (s: O.PySet) => new O.DictIter(s.$d, 0));
+  method(cls, "__iter__", (s: O.PySet) => new O.SetIter(s.$d));
   method(cls, "__repr__", (s: O.PySet) => setRepr(s));
   method(cls, "__eq__", (s: O.PySet, o: any) => (o instanceof O.PySet ? O.eq(s, o) : NotImplemented));
   // (the binary operators, reflected too, and for a set the in-place ones,
@@ -2906,6 +2906,10 @@ iteratorType("range_iterator", O.RangeIter);
 iteratorType("longrange_iterator", BigRangeIter);
 iteratorType("str_ascii_iterator", O.StrIter);
 iteratorType("dict_keyiterator", O.DictIter);
+iteratorType("dict_valueiterator", O.DictValueIter);
+iteratorType("dict_itemiterator", O.DictItemIter);
+iteratorType("dict_reversekeyiterator", O.DictRevIter);
+iteratorType("set_iterator", O.SetIter);
 iteratorType("bytes_iterator", O.BytesIter);
 iteratorType("generator_wrapper", O.GenIter);
 // Python's "iterator" is its __getitem__ adapter. ProtoIter wraps Python
@@ -3231,6 +3235,7 @@ getset(object, "__dict__", (o) => {
   if (!(v instanceof PyDict)) raise(T.TypeError, `__dict__ must be set to a dictionary, not a '${typeName(v)}'`);
   const items = [...v.$m].map(([k, x]) => [dictKeyOf(v, k), x]);
   instanceDict(o).$m.clear();
+  instanceDict(o).$clears++;
   for (const [k, x] of items) instanceDict(o).$m.set(k, x);
 });
 

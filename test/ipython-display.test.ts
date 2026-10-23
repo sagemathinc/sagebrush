@@ -240,7 +240,6 @@ test("a __repr__ that changes its container: one walk, as repr's, each __repr__ 
     ["V=[]\nV.append(M(V.clear))\nV", `[${Q}]`],
     ["V=[0,1,2]\nV[0]=M(lambda: V.pop(0))\nV", `[${Q}, 2]`],
     ["V=[0,1]\nV[0]=M(lambda: V.__setitem__(1,7))\nV", `[${Q}, 7]`],
-    ["D={1:0,2:2,3:3}\ndef action():\n    D.pop(1)\n    D[4]=4\nD[1]=M(action)\nD", `{1: ${Q}, 2: 2, 3: 3, 4: 4}`],
   ];
   for (const [code, want] of PROBES) {
     await run("seen.clear()");
@@ -250,6 +249,9 @@ test("a __repr__ that changes its container: one walk, as repr's, each __repr__ 
     assert.equal((await run("len(seen)")).out, "1\n", `${code}: __repr__ calls`);
   }
   const RAISES: [string, string][] = [
+    // (the current key deleted and another added, at the same size: IPython's
+    // and CPython's dict iterator raise this)
+    ["D={1:0,2:2,3:3}\ndef action():\n    D.pop(1)\n    D[4]=4\nD[1]=M(action)\nD", "dictionary keys changed during iteration"],
     ["D={1:0,2:2,3:3}\nD[1]=M(lambda: D.pop(1))\nD", "dictionary changed size during iteration"],
     ["D={1:1,2:0,3:3}\nD[2]=M(lambda: D.pop(1))\nD", "dictionary changed size during iteration"],
     ["D = {}\nD[1] = Clear(D.clear)\nD[2] = 3\nD", "dictionary changed size during iteration"],
@@ -285,10 +287,6 @@ test("a value that a __repr__ makes grow forever: refused past the display's lim
   const CASES: [string, string][] = [
     ["class Grow:\n    def __repr__(self):\n        V.append(Grow())\n        return 'G' * 100\nV = [Grow()]\nV", "a list"],
     ["class Grow2:\n    def __repr__(self):\n        W.append(Grow2())\n        return 'G'\nW = [Grow2(), 'x' * 100]\nW", "a list, 1 character a step"],
-    // (a dict that keeps its size, its key replaced at every step:
-    // Sagebrush's dict iterator goes on, where CPython's raises "dictionary
-    // keys changed during iteration")
-    ["class Key:\n    n = 0\n    def __repr__(self):\n        Key.n += 1\n        D.pop(Key.n - 1)\n        D[Key.n] = Key()\n        return 'K' * 100\nD = {0: Key()}\nD", "a dict"],
     ["class Nest:\n    def __repr__(self):\n        N.append([Nest()])\n        return 'n' * 100\nN = [Nest()]\nN", "nested lists"],
     // (each step a display of its own, which counts with this one's)
     ["class G3:\n    def __repr__(self):\n        P.text([G3x(), 'y' * 100])\n        N3.append(G3())\n        return 'g' * 100\nclass G3x:\n    def __repr__(self):\n        return 'x'\nN3 = [G3()]\nN3", "nested displays"],
@@ -299,6 +297,15 @@ test("a value that a __repr__ makes grow forever: refused past the display's lim
     assert.equal(out, "", label);
     assert.match(err, /MemoryError: displaying this value takes more than Sagebrush's limit of 20000 steps or 1048576 characters/, label);
     assert.equal((await run("1 + 1")).out, "2\n", `${label}: the session goes on`);
+  }
+  // (a dict can't grow forever: its iterator raises at a changed size, and
+  // at the same size, its key replaced at every step, once it would give
+  // more items than it had, as CPython's)
+  {
+    const { out, err } = await run("class Key:\n    n = 0\n    def __repr__(self):\n        Key.n += 1\n        D.pop(Key.n - 1)\n        D[Key.n] = Key()\n        return 'K' * 100\nD = {0: Key()}\nD");
+    assert.equal(out, "");
+    assert.ok(err.trimEnd().endsWith("RuntimeError: dictionary keys changed during iteration"), err.slice(-200));
+    assert.equal((await run("Key.n")).out, "1\n");
   }
   // (which limit stopped it: steps, for 1 character a step (W grew by one
   // for each 2 steps); characters, for 10,000 a step (B by one for each
