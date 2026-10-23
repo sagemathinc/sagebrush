@@ -251,6 +251,21 @@ const pv = (bs, extra = {}) => P.verifyChainPage({ epoch: 1, ...extra }, P.chain
 const p1 = pv(batches.slice(0, 2));
 check(p1.ok && P.verifyChainPage({ epoch: 1 }, p1.state, batches.slice(2)).ok, "verifyChainPage: two pages continue from the state");
 check(!P.verifyChainPage({ epoch: 1 }, p1.state, batches.slice(0, 1)).ok, "verifyChainPage: a page that doesn't follow its state");
+// a cleared document's epoch starts mid-sequence: chainStartAt(…, root.seq), never seq 0 or a renumbered root
+{
+  const e = V.chain_epoch2;
+  const bs = e.batches.map((b) => ({ ...b, body: P.fromHex(b.body_hex) }));
+  const start = P.chainStartAt(e.owner_hash, e.doc, e.epoch, e.first_seq);
+  check(start.seq === e.first_seq - 1 && P.hex(start.chain) === e.seed, "chainStartAt: the epoch's seed, at root.seq - 1");
+  check(JSON.stringify(P.chainStartAt(e.owner_hash, e.doc, 1, 1)) === JSON.stringify(P.chainStart(e.owner_hash, e.doc, 1)), "chainStartAt(…, 1) is chainStart");
+  const r = P.verifyChainPage({ epoch: 2 }, start, bs);
+  check(r.ok && P.hex(r.state.chain) === bs[bs.length - 1].chain && r.state.seq === 6, "verifyChainPage: a mid-sequence epoch verifies from chainStartAt");
+  const from0 = P.verifyChainPage({ epoch: 2 }, P.chainStart(e.owner_hash, e.doc, 2), bs);
+  check(!from0.ok && from0.why === "a gap or a reordering", "verifyChainPage: the default start (seq 0) refuses a mid-sequence epoch");
+  const renum = P.verifyChainPage({ epoch: 2 }, P.chainStart(e.owner_hash, e.doc, 2), bs.map((b, i) => ({ ...b, seq: i + 1 })));
+  check(!renum.ok && renum.why === "the chain differs", "verifyChainPage: a renumbered root doesn't verify (the chain hashes the stored seq)");
+  for (const bad of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) throwsCode(() => P.chainStartAt(e.owner_hash, e.doc, 2, bad), "invalid", `chainStartAt refuses first seq ${bad}`);
+}
 const MiB = new Uint8Array(1 << 20), fake = (seq, body = new Uint8Array(0)) => ({ seq, recv: 1, epoch: 1, author: "a", writer: "w", envs: "[]", body, chain: "" });
 throwsCode(() => pv([fake(1, new Uint8Array((1 << 20) + 1))]), "limit", "verifyChainPage: a body over 1 MiB");
 throwsCode(() => pv([{ ...fake(1), envs: "x".repeat((1 << 20) + 1) }]), "limit", "verifyChainPage: envelopes over 1 MiB");
