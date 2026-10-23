@@ -27,6 +27,8 @@
 //    are fresh names, used nowhere in the cell.  The other magics stay calls
 //    (lib/_pyjs_magic.py).
 import { parse as pyparse } from "../pyparse/src/index";
+import { TokState } from "../pyparse/src/lexer";
+import * as TK from "../pyparse/src/tokens.gen";
 import { preparse } from "./sagepre";
 
 const LINE_MAGIC = /^(\s*)%([A-Za-z_][\w.]*)(.*)$/;
@@ -277,8 +279,24 @@ function builders(line: number, col: number, fresh: (base: string) => string) {
   };
 }
 
+/** Whether code ends with ;, IPython's sign to show no value: its last
+ *  token, past comments and blank lines, is ; (the tokenizer's view, so a ;
+ *  in a string or a comment is not one). A cell's (src/compile.ts) and
+ *  %time's code's. */
+export function endsWithSemicolon(src: string, sage = false): boolean {
+  const tok = new TokState(src.endsWith("\n") ? src : src + "\n", { sage });
+  let semi = false;
+  for (let n = 0; n <= src.length + 16; n++) {
+    const raw: any = { type: 0, start: -1, end: -1, level: 0, lineno: 0, col_offset: -1, end_lineno: 0, end_col_offset: -1, metadata: null };
+    const t = tok.get(raw);
+    if (t === TK.ENDMARKER || t < 0) break;
+    if (t !== TK.NEWLINE && t !== TK.NL && t !== TK.INDENT && t !== TK.DEDENT && t !== TK.COMMENT) semi = t === TK.SEMI;
+  }
+  return semi;
+}
+
 /** Expand %time, %timeit, %%time and %%timeit into the tree (see above). */
-export function expandMagics(tree: Node, parseCode: ParseCode) {
+export function expandMagics(tree: Node, parseCode: ParseCode, sage = false) {
   const body: Node[] = tree.body ?? [];
   // (the code of every magic in the cell, parsed, for the names it uses)
   const taken = identifiers(tree);
@@ -298,8 +316,9 @@ export function expandMagics(tree: Node, parseCode: ParseCode) {
         let repl: Node[];
         if (mname === "time") {
           // an expression's value: kept inside the timed block, then shown
-          // (no function around it: its scope is the cell's, as in IPython)
-          repl = parsed.length === 1 && parsed[0]._type === "Expr"
+          // (no function around it: its scope is the cell's, as in IPython);
+          // not when the code ends with ;, as IPython's %time 7; shows none
+          repl = parsed.length === 1 && parsed[0]._type === "Expr" && !endsWithSemicolon(code, sage)
             ? [b.withTimer([b.expr(b.call(b.api("keep"), [parsed[0].value]))]), b.expr(b.call(b.api("kept"), []))]
             : [b.withTimer(parsed)];
         } else repl = [b.timeitDef([], parsed), b.timeitRun(opts, top)];
@@ -342,7 +361,7 @@ export function expandMagics(tree: Node, parseCode: ParseCode) {
 /** The tree transform for cells whose text went through magicSyntax. */
 export function magicTransform(sage: boolean): (tree: any) => void {
   const parseCode = codeParser(sage);
-  return (tree) => expandMagics(tree, parseCode);
+  return (tree) => expandMagics(tree, parseCode, sage);
 }
 
 // ------------------------------------------------------------------ autoreload's classes

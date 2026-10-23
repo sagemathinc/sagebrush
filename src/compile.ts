@@ -12,7 +12,7 @@ import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
 import { cwdPath } from "./runtime/modules";
-import { classCellReport } from "./magic-syntax";
+import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
 const builtinNames = new Set(Object.keys(R.builtins));
@@ -28,11 +28,13 @@ function displayExprs(body: any[]): void {
 }
 
 // A notebook cell (mode "cell"): like Jupyter, only a final expression
-// statement displays its value.
-function displayLast(body: any[]): void {
+// statement displays its value, and not when the cell ends with ; (IPython's
+// rule: its last token, past comments and blank lines, is ;)
+function displayLast(body: any[], src: string, opts: CompileOptions): void {
   const st = body[body.length - 1];
-  if (st !== undefined && st.k === "Expr") displayExprs([st]);
+  if (st !== undefined && st.k === "Expr" && !endsWithSemicolon(src, !!opts.sage)) displayExprs([st]);
 }
+
 
 export interface CompileOptions {
   /** Sage syntax: `^` is `**`, `^^` is xor, int/int is an exact Rational. */
@@ -43,7 +45,7 @@ export interface CompileOptions {
 
 export function compile(source: string, filename: string, moduleName: string, evalMode = false, single: boolean | "cell" = false, opts: CompileOptions = {}): Compiled {
   const mod = parse(source, filename, evalMode ? "eval" : "exec", opts);
-  if (single === "cell") displayLast(mod.body);
+  if (single === "cell") displayLast(mod.body, source, opts);
   else if (single) displayExprs(mod.body);
   try {
     return new Emitter(analyze(mod), builtinNames, moduleName).module(mod.body, evalMode);
