@@ -1243,13 +1243,14 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..30000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..20000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 30000
-  // rows of 30000, fewer rows than the bound, by their entries)
+  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 20000
+  // rows of 30000, fewer rows than the bound, by their entries: 20000, not
+  // 30000, as the bound is the heap left over in 96 MiB, 29696 in Oct 2026)
   assert.equal((out.match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
