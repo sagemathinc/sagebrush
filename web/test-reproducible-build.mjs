@@ -8,7 +8,7 @@
 // job), which this compares against.
 //   bun web/test-reproducible-build.mjs
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,11 +32,11 @@ const other = join(base, "a-longer-and-different-checkout-path");
 let r = run("git", ["worktree", "add", "-q", "--detach", other, "HEAD"], root);
 ok(r.status === 0, `a second checkout of HEAD (git worktree add): ${r.stderr}`);
 try {
-  // node_modules, wherever the first checkout has them, are linked; build/ (the CLI build's generated
-  // files, which web/build.ts reads) is copied
-  for (const d of ["node_modules", "web/node_modules", "web/site/node_modules"]) {
-    if (existsSync(join(root, d)) && !existsSync(join(other, d))) symlinkSync(join(root, d), join(other, d));
-  }
+  // (its own node_modules, installed offline from pnpm's content-addressed store, which the first build
+  // filled: a symlink to the first checkout's would make the notices pass resolve outside this checkout.
+  // build/, the CLI build's generated files that web/build.ts reads, is copied)
+  r = run("pnpm", ["install", "--frozen-lockfile", "--offline", "--silent"], other);
+  ok(r.status === 0, `the second checkout's dependencies install offline (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
   if (existsSync(join(root, "build"))) cpSync(join(root, "build"), join(other, "build"), { recursive: true });
   r = run("bun", [join(other, "web", "build.ts")], other, { SAGEBRUSH_NO_SITE: "1" });
   ok(r.status === 0, `the second build exits 0 (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-5).join(" | ")}`);
