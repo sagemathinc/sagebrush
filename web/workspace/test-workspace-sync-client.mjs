@@ -86,7 +86,11 @@ const ctl = {
   /** the session switched to this account just before the next socket upgrade, or the next PUT, is forwarded (as
    * another tab signing in would) */
   switchOnUpgrade: null, switchOnPut: null,
+  /** the next PUT answered with this, after `ms`: {ms, status, body} (a late answer) */
+  delayFakePut: null,
 };
+/** every open proxied socket's closer */
+const closers = new Set();
 const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] };
 const held = [];
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] });
@@ -146,9 +150,10 @@ async function control(body) {
   switch (body.cmd) {
     case "set": Object.assign(ctl, body.set); return { ok: true };
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
+    case "closeAll": { const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -179,6 +184,15 @@ const server = createServer(async (req, res) => {
       entry.faked = true;
       res.writeHead(fake.status, { "content-type": "application/json" });
       return res.end(JSON.stringify(fake.body ?? {}));
+    }
+    if (isPut && ctl.delayFakePut) {
+      const f = ctl.delayFakePut;
+      ctl.delayFakePut = null;
+      entry.faked = true;
+      await new Promise((r) => setTimeout(r, f.ms));
+      entry.status = f.status;
+      res.writeHead(f.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(f.body ?? {}));
     }
     if (isPut && ctl.switchOnPut) {
       await signInAs(ctl.switchOnPut);
@@ -239,10 +253,12 @@ server.on("upgrade", async (req, socket, head) => {
     const closeBoth = (code = 1000) => {
       if (closed) return;
       closed = true;
+      closers.delete(closeBoth);
       log.open--;
       try { up.close(1000, "proxy"); } catch {}
       try { client.close(okCode(code), "proxy"); } catch {}
     };
+    closers.add(closeBoth);
     if (ctl.closeOnOpen > 0) {
       ctl.closeOnOpen--;
       return closeBoth(1000);

@@ -357,7 +357,7 @@ Server to client:
 {t: "revoked"}                                        followed by close 4401
 ```
 
-- **The client's binding** (CORR-PR58-1): `hello`'s `account` (the account's hash) and `generation` name the namespace whose outbox the client sends. If either isn't this account object's, hello is refused (`forbidden`, reason `account`; `conflict`, reason `generation`) and nothing is sent on the socket. A socket whose session switched to another account between the page's discovery and the upgrade is refused this way. Blob requests carry the same binding as headers (§5.4).
+- **The client's binding** (CORR-PR58-1): `hello`'s `account` (the account's hash) and `generation` name the namespace whose outbox the client sends. If either isn't this account object's, hello is refused (`forbidden`, reason `account`; `conflict`, reason `generation`) and nothing is sent on the socket. A socket whose session switched to another account between the page's discovery and the upgrade is refused this way. Blob requests carry the same binding as headers (§5.4). **Both are optional in v1: absent means unbound** (accepted, as before the binding). The step-3 client always sends both. A later version can make them mandatory once no unbound client remains.
 - **`Env`** is `{cseq, id, parents, size, blobs?}` (§4.1).
   - The author isn't in it. The server sets the author from the session, or from the grant's admission, and never takes it from the client (§7.10, §8.7).
   - A receiving client builds each patch from the returned `Env` and its payload slice, and refuses a payload that holds its own `time` or `parents`.
@@ -406,7 +406,7 @@ PUT  /api/sync/v1/blob/<sha256> the bytes (Content-Length required)
 GET  /api/sync/v1/blob/<sha256> -> 303 to a signed URL on the user-content domain
 ```
 
-A client's `blobs/check` and `PUT` carry `x-sync-account` (the account's hash) and `x-sync-generation`. If either isn't the account object's, the request is refused (403 `forbidden`, 409 `conflict`) before anything is reserved, stored or answered, so bytes queued for one account never land in another's under a switched session (CORR-PR58-1).
+A client's `blobs/check` and `PUT` carry `x-sync-account` (the account's hash) and `x-sync-generation`. If either isn't the account object's, the request is refused (403 `forbidden`, 409 `conflict`) before anything is reserved, stored or answered, so bytes queued for one account never land in another's under a switched session (CORR-PR58-1). As in hello, an absent header means unbound; the step-3 client always sends both.
 
 **Uploading follows sharing's steps:**
 1. The account object reserves the bytes with one conditional write against the limit (`max_file_bytes`, and `sync.storage_bytes` minus usage), with a random R2 key, for at most an hour.
