@@ -669,6 +669,24 @@ export function mimeBundle(v: any): Record<string, string> | null {
   return Object.keys(out).length ? out : null;
 }
 // Show v richly if the host can, else print its repr; true if shown richly.
+// A Python function's parameters as the compiler bound them, (args,
+// posonly count, vararg, kwonly, kwarg), for the notebook's IPython display
+// of a function (lib/_pyjs_pretty.py); None for anything else
+B.builtins.__pyjs_signature__ = Obj.builtin((f: any) => {
+  const s = f?.$sig;
+  if (Obj.typeOf(f) !== T.function || s === undefined || s === null) return null;
+  return tuple([tuple([...s.args]), s.posonly, s.vararg, tuple([...s.kwonly]), s.kwarg]);
+}, "__pyjs_signature__");
+
+// A value's text as shown: IPython's (lib/_pyjs_pretty.py: int, not <class
+// 'int'>; <function __main__.f(c=3)>) where the host is a notebook
+// (host.ipython), else its repr, as CPython's prompt shows it
+export function displayText(v: any): string {
+  if (R.host?.ipython !== true) return F.repr(v);
+  const t = Obj.callObj(Obj.getattr(M.importModule("_pyjs_pretty"), "text"), [v]);
+  return typeof t === "string" ? t : F.str(t);
+}
+
 function displayValue(v: any): boolean {
   const host = R.host;
   // IPython's _ipython_display_ (ipywidgets' widgets draw themselves as
@@ -683,12 +701,12 @@ function displayValue(v: any): boolean {
   if (host?.display) {
     const b = mimeBundle(v);
     if (b !== null) {
-      b["text/plain"] ??= F.repr(v);
+      b["text/plain"] ??= displayText(v);
       B.stdout.flush();
       if (host.display(b)) return true;
     }
   }
-  B.stdout.write(F.repr(v) + "\n");
+  B.stdout.write(displayText(v) + "\n");
   return false;
 }
 B.builtins.__pyjs_display__ = Obj.builtin((v: any) => displayValue(v), "display");
@@ -1107,6 +1125,7 @@ export const R: any = {
   INTR,
   interrupted,
   mimeBundle,
+  displayText,
   ...O,
   ...F,
   sagediv,
