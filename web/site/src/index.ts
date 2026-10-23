@@ -24,7 +24,7 @@ export default {
     // from R2 (web/engines.ts)
     const chunk = await handleLibChunk(request, env as EnginesEnv, ctx);
     if (chunk) return chunk;
-    // a shared collection's page (web/share/view.html, at /s/)
+    // a shared collection's page (web/share-client/view.html, at /s/)
     if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/s/", url), request));
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;

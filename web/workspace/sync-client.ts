@@ -34,7 +34,7 @@ import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
 import { reserve } from "./reserve";
-import { accountHash, Bucket } from "../sync/protocol";
+import { accountHash, Bucket } from "../sync-protocol/protocol";
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
