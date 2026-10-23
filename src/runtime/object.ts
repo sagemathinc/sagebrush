@@ -1376,6 +1376,12 @@ export class PyDict {
   // (keys deleted so far: reversed() takes no deleted key into account
   // while there are none)
   $dels = 0;
+  // (values stored so far, new keys and old: reversed() of the values or
+  // items takes the values at the start while there are none)
+  $stores = 0;
+  // (a Map also changed without the dict, a function's attributes: then
+  // reversed() counts on neither)
+  $shared = false;
 }
 
 // The numeric primitive key in `d` equal to the object key `k`, if any.
@@ -1578,6 +1584,7 @@ export function dictGet(d: PyDict, k: any, kh?: number): any {
 }
 
 export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
+  d.$stores++;
   if (typeof k === "string") {
     d.$m.set(k, v);
     return;

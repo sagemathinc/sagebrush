@@ -611,6 +611,9 @@ getset(fnType, "__dict__", (f) => {
   if (f.$dictView === undefined) {
     const d = new PyDict();
     d.$m = f.$attrs ??= new Map();
+    // (its Map is the function's attributes too: set and deleted without
+    // the dict, so its reversed() looks each key and value up)
+    d.$shared = true;
     Object.defineProperty(f, "$dictView", { value: d, enumerable: false });
   }
   return f.$dictView;
