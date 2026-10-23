@@ -274,6 +274,20 @@ def main():
         b["chain"] = prev.hex()
         batches.append(b)
     v["chain"] = batches
+    # (a cleared document's epoch 2, whose root is stored at seq 5: the seq keeps counting across the clear)
+    prev = seed(owner, doc, 2)
+    e2 = []
+    for seq, recv, writer, envs, body in [
+        (5, 3000, "session:devAAAAA", '[{"cseq":1,"id":"0000000000d_c3","parents":[],"size":4}]', b"root"),
+        (6, 3000, "session:devAAAAA", '[{"cseq":2,"id":"0000000000e_c3","parents":["0000000000d_c3"],"size":1}]', b"!"),
+    ]:
+        b = {"seq": seq, "recv": recv, "epoch": 2, "author": "person", "writer": writer, "envs": envs, "body_hex": body.hex()}
+        hb = batch_hash(envs, body)
+        prev = nxt(prev, b, hb)
+        b["hb"] = hb.hex()
+        b["chain"] = prev.hex()
+        e2.append(b)
+    v["chain_epoch2"] = {"owner_hash": owner, "doc": doc, "epoch": 2, "first_seq": 5, "seed": seed(owner, doc, 2).hex(), "batches": e2}
     nb = [
         {"type": "run", "id": "s1:1", "sid": "s1", "n": 1, "src": "x"},
         {"type": "cell", "id": "c2", "pos": 1, "input": "print('é')", "cell_type": "code", "extra": "dropped"},
