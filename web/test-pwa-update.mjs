@@ -28,7 +28,7 @@ let failures = 0;
 const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
 
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
-const require = createRequire(join(here, "site/package.json"));
+const require = createRequire(join(here, "test-workers/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 const entryFile = join(mkdtempSync(join(tmpdir(), "sb-update-")), "entry.ts");
 writeFileSync(entryFile, `import { handleLibChunk } from ${JSON.stringify(join(here, "engines.ts"))};
