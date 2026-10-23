@@ -39,9 +39,17 @@ export const PKGSET_LIMITS = Object.freeze({
   preBytes: 24 * MiB,
   // (decoded, resident: every source and selected pre kept as JS strings, 2
   // bytes a character at most, plus the transient copies of the largest one
-  // being admitted, raw + decoded + parsed, 3x: daybreak3's r2 note)
+  // being admitted: raw (1x), decoded (2x at most) and its parse (at most
+  // jsonHeapPerByte x + slack, enforced by strictJson): 6x + slack)
   residentBytes: 48 * MiB,
   jsonDepth: 32,
+  // (a parse's own work: values, and an estimate of the heap its tree takes,
+  // charged before each allocation: daybreak3's LIMIT-PR68-1.  A real
+  // chunk's tree is about 2.1x its bytes, mostly its code's strings; a wide
+  // array of small numbers is about 12x)
+  jsonValues: 1_000_000,
+  jsonHeapPerByte: 3,
+  jsonHeapSlack: 1 * MiB,
   errorChars: 1024,
 });
 
@@ -61,9 +69,24 @@ const fail = (m: string): never => {
 // duplicates, and the first or last of two would silently win.
 
 const BAD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDepth): any {
+export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDepth, heapBytes: number = PKGSET_LIMITS.jsonHeapPerByte * text.length + PKGSET_LIMITS.jsonHeapSlack): any {
   let i = 0;
   const n = text.length;
+  // the work budget: a value costs 16 (its slot), an array or object 176 more
+  // (V8 keeps about 186 bytes for a one-element array or a prototype-less
+  // object, measured), an array element 8 more, an object member 112 more
+  // (a dictionary's slots, up to 4 per member just after it grows, and its
+  // key), a string 2 a code unit and 8 more; charged before the allocation it
+  // pays for, so a refused parse never built the excess
+  let heap = 0, values = 0;
+  const charge = (b: number) => {
+    heap += b;
+    if (heap > heapBytes) fail(`not admitted: parsing would take more than ${heapBytes} bytes`);
+  };
+  const value1 = () => {
+    if (++values > PKGSET_LIMITS.jsonValues) fail(`not admitted: more than ${PKGSET_LIMITS.jsonValues} JSON values`);
+    charge(16);
+  };
   const ws = () => {
     while (i < n) {
       const c = text.charCodeAt(i);
@@ -81,12 +104,14 @@ export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDe
       if (i >= n) err("unterminated string");
       const c = text.charCodeAt(i);
       if (c === 0x22) {
+        charge(2 * (i - start) + 8);
         out += text.slice(start, i);
         i++;
         return out;
       }
       if (c < 0x20) err("control character in a string");
       if (c === 0x5c) {
+        charge(2 * (i - start) + 2);
         out += text.slice(start, i);
         const e = text[i + 1];
         if (e === undefined) err("unterminated escape");
@@ -115,10 +140,12 @@ export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDe
   };
   const value = (depth: number): any => {
     if (depth > maxDepth) err(`nested deeper than ${maxDepth}`);
+    value1();
     ws();
     const c = text[i];
     if (c === "{") {
       i++;
+      charge(176);
       const o: any = Object.create(null);
       ws();
       if (text[i] === "}") {
@@ -131,6 +158,7 @@ export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDe
         const k = str();
         if (BAD_KEYS.has(k)) err(`forbidden key ${JSON.stringify(k)}`);
         if (Object.hasOwn(o, k)) err(`duplicate key ${JSON.stringify(k.slice(0, 64))}`);
+        charge(112);
         ws();
         if (text[i] !== ":") err("expected :");
         i++;
@@ -149,6 +177,7 @@ export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDe
     }
     if (c === "[") {
       i++;
+      charge(176);
       const a: any[] = [];
       ws();
       if (text[i] === "]") {
@@ -156,6 +185,7 @@ export function strictJson(text: string, maxDepth: number = PKGSET_LIMITS.jsonDe
         return a;
       }
       for (;;) {
+        charge(8);
         a.push(value(depth + 1));
         ws();
         if (text[i] === ",") {
@@ -385,18 +415,33 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
   }
   if (edges > L.requiresEdges) fail(`a package set has at most ${L.requiresEdges} requires edges`);
   // the dependency closure: exact ids in this set, acyclic, bounded depth (rule 6)
+  // (the depth is each package's height, its longest requires path, kept with
+  // its closure: a closure reused from the cache still counts its whole
+  // height, so the order packages are visited in can't matter: astra's
+  // CORR-PR68-1)
   const closure = new Map<string, string[]>();
+  const height = new Map<string, number>();
+  const deep = () => fail(`requires is deeper than ${L.requiresDepth}`);
   const visit = (id: string, stack: string[]): string[] => {
     const done = closure.get(id);
-    if (done) return done;
+    if (done) {
+      if (stack.length + height.get(id)! > L.requiresDepth) deep();
+      return done;
+    }
     if (stack.includes(id)) fail(`requires has a cycle: ${[...stack, id].map((s) => s.slice(11)).join(" -> ")}`);
-    if (stack.length >= L.requiresDepth + 1) fail(`requires is deeper than ${L.requiresDepth}`);
+    if (stack.length > L.requiresDepth) deep();
     const p = packages.get(id);
     if (!p) fail(`${stack[stack.length - 1]} requires ${id}, which is not in this set`);
     const order: string[] = [];
-    for (const r of p!.requires) for (const x of visit(r, [...stack, id])) if (!order.includes(x)) order.push(x);
+    let h = 0;
+    for (const r of p!.requires) {
+      for (const x of visit(r, [...stack, id])) if (!order.includes(x)) order.push(x);
+      h = Math.max(h, height.get(r)! + 1);
+    }
+    if (stack.length + h > L.requiresDepth) deep();
     order.push(id);
     closure.set(id, order);
+    height.set(id, h);
     return order;
   };
   for (const id of packages.keys()) visit(id, []);
@@ -414,7 +459,7 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
   }
   if (srcBytes > L.srcBytes) fail(`a package set's sources total at most ${L.srcBytes} bytes`);
   if (preBytes > L.preBytes) fail(`a package set's precompiled code for one build totals at most ${L.preBytes} bytes`);
-  const resident = 2 * (srcBytes + preBytes) + 3 * largest;
+  const resident = 2 * (srcBytes + preBytes) + (1 + 2 + L.jsonHeapPerByte) * largest + L.jsonHeapSlack;
   if (resident > L.residentBytes) fail(`package set ${S.slice(0, 12)} would hold about ${resident} bytes in memory; at most ${L.residentBytes}`);
   return { S, packages, modules, closure };
 }

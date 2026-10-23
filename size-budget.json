@@ -1,9 +1,9 @@
 {
  "note": "exact bytes of the core's artifacts: scripts/size-budget.mjs; any increase must be made here, in review",
  "sizes": {
-  "cli/lib.gen.js": 6889480,
+  "cli/lib.gen.js": 6893545,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 22697756,
+  "cli/pyjs.cjs": 22704126,
   "engine/lib/core.pre": 1738852,
   "engine/lib/core.src": 402678,
   "engine/lib/magma-more.src": 143386,
@@ -29,7 +29,7 @@
   "engine/lib/mod-html.src": 85615,
   "engine/lib/mod-importlib.src": 3604,
   "engine/lib/mod-io.src": 13519,
-  "engine/lib/mod-ipython.src": 2736,
+  "engine/lib/mod-ipython.src": 6801,
   "engine/lib/mod-json.src": 4930,
   "engine/lib/mod-marimo.src": 6464,
   "engine/lib/mod-matplotlib.src": 24036,
@@ -68,13 +68,13 @@
   "engine/lib/sci.src": 308907,
   "engine/lib/tzdata": 257239,
   "engine/runner/index.html": 4275,
-  "engine/sagebrush-analyze.js": 355321,
+  "engine/sagebrush-analyze.js": 355339,
   "engine/sagebrush-engine.wasm": 7141596,
   "engine/sagebrush-graphview.js": 14106,
-  "engine/sagebrush-notebook.js": 204994,
+  "engine/sagebrush-notebook.js": 206440,
   "engine/sagebrush-raster.wasm": 808830,
   "engine/sagebrush-viewer3d.js": 88151,
-  "engine/sagebrush-worker.js": 1498100,
+  "engine/sagebrush-worker.js": 1498784,
   "registry/packages": 3
  }
 }
