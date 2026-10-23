@@ -59,7 +59,7 @@ async function prefetch(tx: IDBTransaction, ns: string, prefix: string, journalN
 const inRange = (pre: Prefetched | undefined, id: string) => !!pre && id >= pre.lo && id <= pre.hi;
 
 /** One identity's local intents (C3's layers, by key): its outbox records, its journal record, its pending state. */
-async function intents(tx: IDBTransaction, ns: string, scanned: number | undefined, id: string, journalNs: string, pre?: Prefetched, replacedBelow?: number) {
+async function intentsOf(tx: IDBTransaction, ns: string, scanned: number | undefined, id: string, journalNs: string, pre?: Prefetched, replacedBelow?: number) {
   const here = inRange(pre, id);
   const out0 = here ? (pre!.out.get(id) ?? []) : ((await req(tx.objectStore("outbox").index("byIdent").getAll([ns, id]))) as OutboxRecord[]);
   const out = replacedBelow === undefined ? out0 : out0.filter((r) => r.dseq >= replacedBelow);
@@ -108,6 +108,12 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
   const ops: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
   let synthSeq = 2 ** 52;
   const pre = c.range ? await prefetch(tx, ns, c.range.prefix, journalNs, c.range.lo, c.range.hi) : undefined;
+  // (an identity's intents read once a page: a folder's are asked for by each of its entries' reductions)
+  const seen = new Map<string, Awaited<ReturnType<typeof intentsOf>>>();
+  const intents = async (tx: IDBTransaction, ns: string, scanned: number | undefined, id: string, journalNs: string, pre?: Prefetched, below?: number) => {
+    if (!seen.has(id)) seen.set(id, await intentsOf(tx, ns, scanned, id, journalNs, pre, below));
+    return seen.get(id)!;
+  };
   // (the confirmed index doesn't change while a view is applied (the view writes entries): what it answers is kept
   // for the page, an identity in the prefetched range answered from it, so each identity's reduction reads only what
   // no earlier one did)
@@ -184,7 +190,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     const chain: [string, Entry | undefined][] = [];
     if (local) {
       for (let p = parentOf(local.path); p !== "/" && p !== TRASH; p = parentOf(p)) {
-        const f = (await req(st.get(p))) as Entry | undefined;
+        const f = await folderAt(p);
         if (f?.ident) chain.unshift([f.ident, f]);
       }
     }
@@ -230,12 +236,14 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     if (!lifted.has(e.path)) {
       lifted.set(e.path, e);
       st.delete(e.path);
+      if (e.kind === "folder") folders.set(e.path, null);
     }
     if (e.kind === "folder" && !underLifted(e.path)) {
       subtrees.add(e.path);
       for (const d of (await req(st.getAll(subtree(e.path)))) as Entry[]) {
         lifted.set(d.path, d);
         if (d.ident) moved.add(d.ident);
+        if (d.kind === "folder") folders.set(d.path, null);
         st.delete(d.path);
         await breathe();
       }
@@ -343,6 +351,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     else delete n.trashed;
     if (!item.intent) contentOf(n, v);
     st.put(n);
+    if (n.kind === "folder") folders.set(to, n);
     lifted.delete(old);
     for (const [p, d] of [...lifted]) {
       if (!p.startsWith(old + "/")) continue;
@@ -351,7 +360,9 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
       while (owner !== old && !tops.has(owner) && owner !== "/") owner = parentOf(owner);
       if (owner !== old || tops.has(p)) continue;
       const q = to + p.slice(old.length);
-      st.put({ ...d, path: q, nkey: nkeyOf(q), ...(d.kind === "file" && d.ref !== null ? { ref: q } : {}) });
+      const placed = { ...d, path: q, nkey: nkeyOf(q), ...(d.kind === "file" && d.ref !== null ? { ref: q } : {}) };
+      st.put(placed);
+      if (d.kind === "folder") folders.set(q, placed);
       lifted.delete(p);
       await breathe();
     }
