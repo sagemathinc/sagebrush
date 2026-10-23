@@ -24,6 +24,7 @@ import { TRASH, within, type Kind } from "./paths";
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { jsonTextSize } from "../notebook/stores.js";
+import { genKey, genPrefix } from "./sync-confirmed";
 import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 
 export const OUTBOX = {
@@ -201,8 +202,9 @@ export class Outbox {
               continue;
             }
             // (its base: the newest record it follows, undecided or accepted; else the newest accepted, not yet
-            // confirmed; else the confirmed index's; else, until C3 keeps it, the op's own)
-            const confirmed = (await req(tx.objectStore("syncIndex").get([this.ns, id]))) as { sha256?: string } | undefined;
+            // confirmed; else the confirmed index's (its active generation's); else the op's own)
+            const gen = ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0;
+            const confirmed = (await req(tx.objectStore("syncIndex").get([genPrefix(this.ns, gen), id]))) as { sha256?: string; gone?: true } | undefined;
             const base = (st.allocated && st.allocated.state !== "confirmed" ? st.allocated.sha256 : undefined) ?? st.acceptedTip?.sha256 ?? confirmed?.sha256 ?? o.base;
             // (the same bytes as its base: nothing for the server to do)
             if (o.op === "write" && base === o.sha256) {
