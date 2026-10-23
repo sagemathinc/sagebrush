@@ -40,11 +40,11 @@ export type ListedWhy = "kept" | "conflict" | "no-room" | "no-folder" | "not-emp
 
 /** A page's identities read by range, five requests (the rebuild's view walks identities in key order): their
  * confirmed rows, entries, outbox records, journal records and pending states. */
-type Prefetched = { lo: string; hi: string; rows: Map<string, SyncEntry | "gone">; ents: Map<string, Entry>; out: Map<string, OutboxRecord[]>; j: Map<string, JournalRecord>; pend: Map<string, Pending> };
+type Prefetched = { lo: string; hi: string; rows: Map<string, SyncEntry | { gone: string }>; ents: Map<string, Entry>; out: Map<string, OutboxRecord[]>; j: Map<string, JournalRecord>; pend: Map<string, Pending> };
 async function prefetch(tx: IDBTransaction, ns: string, prefix: string, journalNs: string, lo: string, hi: string): Promise<Prefetched> {
-  const rows = new Map<string, SyncEntry | "gone">(), ents = new Map<string, Entry>(), out = new Map<string, OutboxRecord[]>(), j = new Map<string, JournalRecord>(), pend = new Map<string, Pending>();
-  for (const r of (await req(tx.objectStore("syncIndex").getAll(IDBKeyRange.bound([prefix, lo], [prefix, hi])))) as (SyncEntry & { ns: string; key?: string; parentKey?: string; gone?: true })[]) {
-    if (r.gone) rows.set(r.id, "gone");
+  const rows = new Map<string, SyncEntry | { gone: string }>(), ents = new Map<string, Entry>(), out = new Map<string, OutboxRecord[]>(), j = new Map<string, JournalRecord>(), pend = new Map<string, Pending>();
+  for (const r of (await req(tx.objectStore("syncIndex").getAll(IDBKeyRange.bound([prefix, lo], [prefix, hi])))) as (SyncEntry & { ns: string; key?: string; parentKey?: string; gone?: true; lastPath?: string })[]) {
+    if (r.gone) rows.set(r.id, { gone: r.lastPath ?? "" });
     else {
       const { ns: _n, key: _k, parentKey: _p, ...e } = r;
       rows.set(r.id, e as SyncEntry);
@@ -59,9 +59,10 @@ async function prefetch(tx: IDBTransaction, ns: string, prefix: string, journalN
 const inRange = (pre: Prefetched | undefined, id: string) => !!pre && id >= pre.lo && id <= pre.hi;
 
 /** One identity's local intents (C3's layers, by key): its outbox records, its journal record, its pending state. */
-async function intents(tx: IDBTransaction, ns: string, scanned: number | undefined, id: string, journalNs: string, pre?: Prefetched) {
+async function intents(tx: IDBTransaction, ns: string, scanned: number | undefined, id: string, journalNs: string, pre?: Prefetched, replacedBelow?: number) {
   const here = inRange(pre, id);
-  const out = here ? (pre!.out.get(id) ?? []) : ((await req(tx.objectStore("outbox").index("byIdent").getAll([ns, id]))) as OutboxRecord[]);
+  const out0 = here ? (pre!.out.get(id) ?? []) : ((await req(tx.objectStore("outbox").index("byIdent").getAll([ns, id]))) as OutboxRecord[]);
+  const out = replacedBelow === undefined ? out0 : out0.filter((r) => r.dseq >= replacedBelow);
   const j = here ? pre!.j.get(id) : ((await req(tx.objectStore("adoptJournal").get([journalNs, id]))) as JournalRecord | undefined);
   const p = here ? pre!.pend.get(id) : ((await req(tx.objectStore("pending").get(id))) as Pending | undefined);
   const st = p?.byNs?.[ns];
@@ -86,6 +87,9 @@ export type ViewContext = {
   /** the identities given are every one in [lo, hi] of the union (the rebuild's walk): read by range, `prefix` the
    * confirmed index's generation */
   range?: { lo: string; hi: string; prefix: string };
+  /** a rebuild's view: records below this dseq are the replaced prefix, not intents (their identities' state is in
+   * the committed journal, a layer of its own; retire removes them next) */
+  replacedBelow?: number;
   now?: number;
 };
 
@@ -95,7 +99,7 @@ export type ViewContext = {
  * paths listed.
  */
 export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<{ ops: Op[]; gone: Entry[]; listed: [string, ListedWhy][] }> {
-  const { w, tx, ns, store } = c;
+  const { w, tx, ns } = c;
   const st = tx.objectStore("entries"), meta = tx.objectStore("meta");
   const breathe = breather(tx);
   const scanned = (await req(meta.get(`sync:${ns}:scanned`))) as number | undefined;
@@ -104,13 +108,35 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
   const ops: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
   let synthSeq = 2 ** 52;
   const pre = c.range ? await prefetch(tx, ns, c.range.prefix, journalNs, c.range.lo, c.range.hi) : undefined;
+  // (the confirmed index doesn't change while a view is applied (the view writes entries): what it answers is kept
+  // for the page, an identity in the prefetched range answered from it, so each identity's reduction reads only what
+  // no earlier one did)
+  const memo = { byId: new Map<string, SyncEntry | undefined>(), gone: new Map<string, string | undefined>(), folder: new Map<string, SyncEntry[]>() };
+  const cp = (e: SyncEntry): SyncEntry => ({ ...e, ...(e.trashed ? { trashed: { ...e.trashed } } : {}) });
+  const store: Store = {
+    async byId(id) {
+      if (inRange(pre, id)) { const r = pre!.rows.get(id); return r && !("gone" in r) ? cp(r) : undefined; }
+      if (!memo.byId.has(id)) memo.byId.set(id, await c.store.byId(id));
+      const e = memo.byId.get(id);
+      return e ? cp(e) : undefined;
+    },
+    async gone(id) {
+      if (inRange(pre, id)) { const r = pre!.rows.get(id); return r && "gone" in r ? r.gone : undefined; }
+      if (!memo.gone.has(id)) memo.gone.set(id, await c.store.gone(id));
+      return memo.gone.get(id);
+    },
+    async folder(k) {
+      if (!memo.folder.has(k)) memo.folder.set(k, await c.store.folder(k));
+      return memo.folder.get(k)!.map(cp);
+    },
+  };
 
   const entryOf = async (id: string) => (inRange(pre, id) ? pre!.ents.get(id) : ((await req(st.index("byIdent").get(id))) as Entry | undefined));
   /** The confirmed state of an identity with no intent: its entry, gone, or none. */
   const confirmedOf = async (id: string): Promise<View> => {
     if (inRange(pre, id)) {
       const r = pre!.rows.get(id);
-      return r === undefined ? { kind: "none" } : r === "gone" ? { kind: "gone" } : { kind: "entry", e: r };
+      return r === undefined ? { kind: "none" } : "gone" in r ? { kind: "gone" } : { kind: "entry", e: r };
     }
     const e = await store.byId(id);
     if (e) return { kind: "entry", e };
@@ -150,7 +176,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
 
   /** The view of `id`: its confirmed state, or (with local intents) its placement with them reduced on top. */
   const viewOf = async (id: string, local: Entry | undefined): Promise<{ v: View; intent: boolean }> => {
-    const mine = await intents(tx, ns, scanned, id, journalNs, pre);
+    const mine = await intents(tx, ns, scanned, id, journalNs, pre, c.replacedBelow);
     if (!mine.any) return { v: await confirmedOf(id), intent: false };
     // (its folders' intents first, top-down, then its own: a folder made or moved here and not yet confirmed is
     // where its entries go; each by key, at most the workspace's depth)
@@ -165,7 +191,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     chain.push([id, local]);
     try {
       for (const [x, e] of chain) {
-        const m = x === id ? mine : await intents(tx, ns, scanned, x, journalNs, pre);
+        const m = x === id ? mine : await intents(tx, ns, scanned, x, journalNs, pre, c.replacedBelow);
         if (!m.any) continue;
         const layer: SyncOp[] = m.out.map((r) => ({ ...r.op, seq: synthSeq++, device: w.device }) as SyncOp);
         for (const op of layer) await runOp(base, store, op, { alone: true });

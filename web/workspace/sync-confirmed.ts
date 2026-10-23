@@ -47,22 +47,16 @@ export function idbStore(tx: IDBTransaction, prefix: string, stats?: { reads: nu
       return r && "gone" in r ? r.lastPath : undefined;
     },
     async folder(folderKey) {
-      // (a listing is at most the workspace's 10,000 per folder, read by one cursor a row at a time: no batch
-      // array beyond the rows taken (D10 r3))
+      // (a listing is at most the workspace's 10,000 per folder: one request; the batch is the listing the partial
+      // index holds next anyway (D10 r3's batch in hand))
       if (stats) stats.reads++;
+      const rows = (await req(st.index("byParent").getAll(IDBKeyRange.only([prefix, folderKey])))) as Row[];
       const out: SyncEntry[] = [];
-      await new Promise<void>((ok, no) => {
-        const c = st.index("byParent").openCursor(IDBKeyRange.only([prefix, folderKey]));
-        c.onsuccess = () => {
-          const cur = c.result;
-          if (!cur) return ok();
-          const e = entryOf(cur.value as Row);
-          if (e) out.push(e);
-          if (stats) stats.rows++;
-          cur.continue();
-        };
-        c.onerror = () => no(c.error);
-      });
+      for (const r of rows) {
+        const e = entryOf(r);
+        if (e) out.push(e);
+      }
+      if (stats) stats.rows += rows.length;
       return out;
     },
   };

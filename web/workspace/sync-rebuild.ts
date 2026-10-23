@@ -380,7 +380,7 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
     // (one past the page, to know whether this page is the last: so the walk takes exactly ⌈union / page⌉ pages)
     const peek = await nextIds(tx, gp, p.at?.key ?? "", REBUILD.page + 1);
     const ids = peek.slice(0, REBUILD.page);
-    const v = ids.length ? await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true, range: { lo: ids[0], hi: ids[ids.length - 1], prefix: gp } }, ids) : { ops: [], gone: [], listed: [] };
+    const v = ids.length ? await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true, range: { lo: ids[0], hi: ids[ids.length - 1], prefix: gp }, replacedBelow: p.serverNext }, ids) : { ops: [], gone: [], listed: [] };
     bump(p, "view");
     cut("view");
     const fin = peek.length <= REBUILD.page;
