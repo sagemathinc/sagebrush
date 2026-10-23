@@ -134,6 +134,14 @@ def _hex_rgba(h, c):
     return v if len(v) == 4 else v + (1.0,)
 
 
+def _cycle_colors():
+    """the colors of rcParams' axes.prop_cycle when it is set to other than
+    matplotlib's, or None (then "C0".."C9" are tab10's)"""
+    import matplotlib
+    cyc = matplotlib.rcParams._given("axes.prop_cycle")
+    return cyc.by_key()["color"] if cyc is not None and len(cyc) else None
+
+
 def to_rgba(c, alpha=None):
     """c as (r, g, b, a) in 0..1, as matplotlib's: a name, hex string, 'C<n>',
     a gray level, a sequence or array of 3 or 4 values (kept as they are), or
@@ -153,7 +161,11 @@ def to_rgba(c, alpha=None):
         if c in BASE_COLORS:
             rgba = tuple(float(v) for v in BASE_COLORS[c]) + (1,)
         elif _re.fullmatch(r"C[0-9]+", c):  # (the color cycle's, round and round)
-            rgba = _hex_rgba(_TAB10[int(c[1:]) % 10], c)[:3] + (1,)
+            cyc = _cycle_colors()
+            if cyc is None:
+                rgba = _hex_rgba(_TAB10[int(c[1:]) % 10], c)[:3] + (1,)
+            else:
+                rgba = to_rgba(cyc[int(c[1:]) % len(cyc)])[:3] + (1,)
         elif lc.startswith("xkcd:"):
             raise NotImplementedError("the xkcd colors (%r) are not supported by sagebrush's matplotlib" % (c,))
         elif lc in TABLEAU_COLORS or lc in CSS4_COLORS:  # (names in any case)
