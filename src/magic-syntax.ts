@@ -18,7 +18,7 @@
 //    compiled with the cell (Sage's syntax, the reactive notebook's renamed
 //    names, a function's locals) and analyzed with it:
 //      %time S          with __pyjs_magic_api__("timer")(): S
-//      %time E          with <timer>: <keep>(E)     then <kept>()  (shown: E's value)
+//      %time S; E       with <timer>: S; <keep>(E)  then <kept>()  (shown: E's value)
 //      %timeit [opts] S def F(IT, CLOCK): T0 = CLOCK(); for I in IT: S ...; return CLOCK() - T0
 //                       __pyjs_magic_api__("timeit_run")(opts, F, top)
 //    so %time's code is in its own scope (walrus, locals(), a class body),
@@ -315,11 +315,13 @@ export function expandMagics(tree: Node, parseCode: ParseCode, sage = false) {
         const b = builders(st.lineno, st.col_offset, fresh);
         let repl: Node[];
         if (mname === "time") {
-          // an expression's value: kept inside the timed block, then shown
-          // (no function around it: its scope is the cell's, as in IPython);
-          // not when the code ends with ;, as IPython's %time 7; shows none
-          repl = parsed.length === 1 && parsed[0]._type === "Expr" && !endsWithSemicolon(code, sage)
-            ? [b.withTimer([b.expr(b.call(b.api("keep"), [parsed[0].value]))]), b.expr(b.call(b.api("kept"), []))]
+          // the last statement's value, when it is an expression (%time 23;
+          // 24 shows 24): kept inside the timed block, then shown (no
+          // function around it: its scope is the cell's, as in IPython); not
+          // when the code ends with ;, as IPython's %time 7; shows none
+          const last = parsed[parsed.length - 1];
+          repl = last._type === "Expr" && !endsWithSemicolon(code, sage)
+            ? [b.withTimer([...parsed.slice(0, -1), b.expr(b.call(b.api("keep"), [last.value]))]), b.expr(b.call(b.api("kept"), []))]
             : [b.withTimer(parsed)];
         } else repl = [b.timeitDef([], parsed), b.timeitRun(opts, top)];
         stmts.splice(i, 1, ...repl);
