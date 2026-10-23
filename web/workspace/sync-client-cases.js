@@ -873,6 +873,7 @@ async function corruptConcurrent() {
   const puts = (await ctl("log")).http.filter((h) => h.method === "PUT").length;
   check(c.stats.mismatches === 2 && puts === 0 && c.stats.maxReadsAtOnce === 1 && c.stats.wideReads === 1, "corrupt values: both found, neither sent; read one at a time; the second under the largest reservation: " + J({ mismatches: c.stats.mismatches, reads: c.stats.maxReadsAtOnce, wide: c.stats.wideReads, puts }));
   check(W.reserved().held === 0, "corrupt values: every reservation released");
+  check((await metaGet(w.ws, "sync:bytes-reading")) === undefined, "corrupt values: no read-in-progress mark left");
   await stop(c);
 }
 
@@ -925,7 +926,76 @@ async function lateAnswer() {
   await stop(c);
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer };
+
+async function cutRead() {
+  // (daybreak3's third round on LIMIT-PR58-2: a narrow read cut short (the page killed while it held the value)
+  // leaves its mark; the next start takes the bytes as untrusted and reads wide; a read that ends clears its mark
+  // in the transaction that read)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => settled(w, c0)), "cut read: synced");
+  await w.create("/ok.bin", { content: bytes(300, 91) });
+  check(await until(() => settled(w, c0)), "cut read: an upload as usual");
+  check((await metaGet(w.ws, "sync:bytes-reading")) === undefined && (await metaGet(w.ws, "sync:bytes-untrusted")) === undefined && c0.stats.wideReads === 0, "cut read: its read-in-progress mark cleared by the read's own transaction; bytes trusted");
+  await stop(c0);
+  // (the crash gate: bytes stored longer than their metadata, and the read's transaction cut right after the value
+  // is read, before it marks or commits anything, as a page killed there would be)
+  const f = await w.create("/after-cut.bin", { content: bytes(300, 92) });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").put(bytes(3000, 93), f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  let cuts = 0;
+  W.PINS.cutAfterRead = () => { cuts++; W.PINS.cutAfterRead = null; throw new Error("cut (test)"); };
+  const c = client(w);
+  check(await until(() => cuts === 1), "cut read: the read cut after its value was materialized");
+  await sleep(300);
+  const reading = await metaGet(w.ws, "sync:bytes-reading");
+  check(reading?.dseq !== undefined && (await metaGet(w.ws, `sync:${nsOf(c)}:mismatch:${String(reading?.dseq).padStart(16, "0")}`)) === undefined, "cut read: …its transaction aborted whole: nothing marked but the read-in-progress mark made before it: " + J(reading));
+  await stop(c);
+  // (the next page: the cut read's mark taken as untrusted bytes, durably, before any read)
+  const c2 = client(w);
+  check(await until(() => settled(w, c2), 15_000), "cut read: the next start decides it");
+  check((await metaGet(w.ws, "sync:bytes-untrusted")) !== undefined && (await metaGet(w.ws, "sync:bytes-reading")) === undefined && c2.stats.wideReads >= 1 && c2.stats.mismatches === 1, "cut read: …the bytes untrusted, durably, and the value read again only under the largest reservation: " + J({ wide: c2.stats.wideReads, mismatches: c2.stats.mismatches }));
+  await stop(c2);
+}
+
+
+async function restUnderAcks() {
+  // (astra's narrowed CORR-PR58-4: acks keep coming during a replay's rest; the rest still ends when it first said)
+  await account();
+  const w = await fresh();
+  const keep = { ...W.CLIENT };
+  Object.assign(W.CLIENT, { replayPages: 1, replayRestMs: 60_000 });
+  const clock = fakeClock();
+  const c = client(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "rest under acks: synced");
+    await otherOps(1800);
+    await w.mkdir("/far");
+    check(await until(async () => (await all(w.ws, "outbox")).some((r) => r.accepted !== undefined) && c.debug().wakes >= 1), "rest under acks: /far accepted, its echo past the slice: a rest");
+    const t0 = clock.now();
+    // (an edit, so an ack, every 10 s through the rest)
+    for (let k = 1; k <= 5; k++) {
+      await clock.advance(10_000);
+      await w.mkdir(`/during${k}`);
+      await until(async () => (await all(w.ws, "outbox")).filter((r) => r.accepted !== undefined).length === k + 1);
+    }
+    await sleep(300);
+    check(c.stats.pulls === 0, "rest under acks: five acks during the rest pull nothing: " + c.stats.pulls);
+    await clock.advance(t0 + 60_000 - clock.now());
+    check(await until(() => c.stats.pulls === 1), "rest under acks: the slice resumes at the first rest's end (60 s), not pushed back: " + J({ pulls: c.stats.pulls, at: clock.now() - t0 }));
+    // (then another rest (1 page a slice), and on to the echoes)
+    await clock.advance(60_000);
+    check(await until(() => c.stats.pulls === 2), "rest under acks: the next slice a rest later");
+    for (let i = 0; i < 3 && !(await settled(w, c)); i++) await clock.advance(60_000);
+    check(await until(() => settled(w, c)), "rest under acks: every echo seen, every record confirmed, on one connection: " + J({ pulls: c.stats.pulls, connects: c.stats.connects }));
+    check(c.stats.connects === 1, "rest under acks: no restart");
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {

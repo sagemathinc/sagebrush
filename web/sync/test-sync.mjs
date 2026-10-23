@@ -2194,24 +2194,6 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const still = await (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).json();
   ok(still.missing?.includes(sha(bytes3)), "…and nothing stored by them");
   ok((await putAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 201, "PUT bound to its own: stored");
-  // (astra's narrowed CORR-PR58-1: the generation retired and the next turned on while a PUT bound to the old one is
-  // past its first check, held just before its allocation: refused there, nothing allocated or stored in the new one)
-  const gateP2 = (on) => fetchAt(SITE, `/__test/gate?name=reserve-allocate&on=${on ? 1 : 0}`, { method: "POST" });
-  const bytes4 = Buffer.from("bytes of generation 1, late");
-  await gateP2(true);
-  const latePut = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes4)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sync-account": mine, "x-sync-generation": "1" }, body: bytes4 });
-  await new Promise((r) => setTimeout(r, 300));
-  const acctP2 = acctNs.get(acctNs.idFromName("acct:" + mine));
-  ok((await del(sp, P2)).status === 202, "(P2: Delete my synced data, generation 1, while the PUT waits)");
-  ok(await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(mine).first())?.state === "purged" && (await acctP2.lifecycle())?.record_pending === false), "(the purge finishes)");
-  const en2P2 = await (await post(sp, "/api/sync/v1/enable", {})).json();
-  ok(en2P2.generation === 2, "(P2 turned on again: generation 2)");
-  await gateP2(false);
-  const lr = await latePut;
-  const lrb = await lr.json().catch(() => ({}));
-  ok(lr.status === 409 && lrb.reason === "generation", "a PUT bound to generation 1, held across its purge and generation 2's start, is refused at its allocation: " + JSON.stringify({ status: lr.status, body: lrb }));
-  const chk2 = await (await fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", "x-sync-account": mine, "x-sync-generation": "2" }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes4), size: bytes4.length }] }) })).json();
-  ok(chk2.missing?.includes(sha(bytes4)), "…and generation 2 holds nothing of it");
 }
 
 // ---- the page's question: GET /api/sync/v1/status, which never creates or registers anything
@@ -2282,6 +2264,31 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   // and a status from another site is refused like every sync request
   const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
   ok(xr.status === 403, "a status asked from another site is refused (403)");
+}
+
+// ---- astra's narrowed CORR-PR58-1, last: it waits for a whole purge, so it runs after the cases whose clocks a
+// retention of "days" (seconds here) drives, and can't push them past their windows
+{
+  const sp = await signIn(P2);
+  const mine = sha("sagebrush-account\n" + P2);
+  // (astra's narrowed CORR-PR58-1: the generation retired and the next turned on while a PUT bound to the old one is
+  // past its first check, held just before its allocation: refused there, nothing allocated or stored in the new one)
+  const gateP2 = (on) => fetchAt(SITE, `/__test/gate?name=reserve-allocate&on=${on ? 1 : 0}`, { method: "POST" });
+  const bytes4 = Buffer.from("bytes of generation 1, late");
+  await gateP2(true);
+  const latePut = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes4)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sync-account": mine, "x-sync-generation": "1" }, body: bytes4 });
+  await new Promise((r) => setTimeout(r, 300));
+  const acctP2 = acctNs.get(acctNs.idFromName("acct:" + mine));
+  ok((await del(sp, P2)).status === 202, "(P2: Delete my synced data, generation 1, while the PUT waits)");
+  ok(await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(mine).first())?.state === "purged" && (await acctP2.lifecycle())?.record_pending === false), "(the purge finishes)");
+  const en2P2 = await (await post(sp, "/api/sync/v1/enable", {})).json();
+  ok(en2P2.generation === 2, "(P2 turned on again: generation 2)");
+  await gateP2(false);
+  const lr = await latePut;
+  const lrb = await lr.json().catch(() => ({}));
+  ok(lr.status === 409 && lrb.reason === "generation", "a PUT bound to generation 1, held across its purge and generation 2's start, is refused at its allocation: " + JSON.stringify({ status: lr.status, body: lrb }));
+  const chk2 = await (await fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", "x-sync-account": mine, "x-sync-generation": "2" }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes4), size: bytes4.length }] }) })).json();
+  ok(chk2.missing?.includes(sha(bytes4)), "…and generation 2 holds nothing of it");
 }
 
 await mf.dispose();
