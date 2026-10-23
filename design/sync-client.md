@@ -552,9 +552,9 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D9, r3)
+### Step 4 plan delta (D5 to D9, r4)
 
-@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3.
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4.
 
 **D5 (r2). Two cursors** (daybreak3's CORR-PR65-1).
 - `apply_after` is the durable confirmed cursor (`sync:<ns>:cursor`). Only ops with $\text{seq} > \text{apply\_after}$ are reduced into `syncIndex`, as one contiguous suffix, the suffix and the cursor committed in one transaction (C3).
@@ -665,6 +665,26 @@ Each journal record goes once, retired by its echo or its refusal (C1). A refusa
 - **Tests asked by astra:** (a) after an $n$-CAS restart, the new pass's journal again holds the replaced identities' pins and their gone rows (nothing lost when the failed pass is discarded); (b) C3's order: the committed journal drains before any record the scanner makes for ops after `W1`.
 
 **D9 (wording, nonblocking):** canonical `Content-Length` is `^(0|[1-9]\d{0,11})$`, with no leading zeroes.
+
+**D6 r4: the view is applied only after a successful `done`** (daybreak3's CORR-PR65-5).
+- The phases run in this order: `stage`, `log`, `capture`, `done` (the compare-and-swap), then `view`, then `retire`, then sending resumes. `clean` runs before the next pass's `stage`.
+- Before `done` succeeds, a pass writes only its own generation-scoped staging index and journal. It touches no live entry, no outbox record, no pin, no watermark and no cursor. So a failed pass (a mismatched $n$) leaves the live workspace exactly as it was, and discarding it is pure deletion (D6 r3).
+- After `done` succeeds, `view` recomputes, against the now-active index, every identity in the union of the active index's identities and the entries' identities. It walks in key order, at most 100 identities and 400 requests a transaction, its position durable, and applies the difference to the live entries (never deleting: kept, or a conflict copy, and listed). Then `retire` runs, as in r3.
+- Sending stays halted through `view` and `retire`, so nothing is sent from a view that is partly applied.
+- A refusal or divergence recorded during `view` or `retire` sets the flag again (D7 r2), and the next pass starts once this one has finished. A committed pass is never undone.
+- Tests:
+  - a mismatched $n$ during `log` and during `capture`: no live entry, record, pin, watermark or cursor changed, compared byte for byte before and after;
+  - a crash inside `view`, then a reload: the view resumes from its position, and every entry ends as one uninterrupted `view` would leave it.
+
+**D6 r4: the closing replay takes only this device's own intents** (astra's CORR-PR65-A4).
+- The replay of $(\text{scanned}, W_1]$ uses C1's rule for what goes up (`wireOf`): an op applied from the server (`origin: "server"`), `dropVersions`, or an op with no `after` (no identity yet) is passed over. The watermark still moves past it, as a scan page does.
+- Every eligible local intent is kept: a create, write, rename, move, remove or restore, from its `after`; a forget, discard or emptied Trash, as `gone` (its `after: null` tombstone).
+- So an identity changed only by the server since `scanned` gets no journal record, and its confirmed state stands. An identity with a local intent gets its local state as of that intent, ordered after the server's ops by the seq its reissued record receives (the reducer's "later wins"), as any queued op is.
+- Named test (astra's trace, from the executable evidence in sagebrush-pr65-69ad3af2-delta-astra.md):
+  - scanned is 10; a remote rename /a to /b of Y is applied locally as seq 11, origin server;
+  - the newer staging log has Y at /c;
+  - $W_0 = 10$, $W_1 = 11$.
+  The replay passes over seq 11, Y has no journal record, and nothing renames /c back to /b. Y ends at /c on both devices.
 
 **D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
 
