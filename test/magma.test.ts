@@ -112,7 +112,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
-    "H<h> := GF(9); J<j> := GF(81); h + j;",
+    "H<h> := GF(2^11); J<j> := GF(2^10); h + j;",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -132,7 +132,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
-    "Runtime error in '+': arithmetic of two finite fields of characteristic 3, neither the prime field, is not supported yet",
+    "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 2^20 elements",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -2194,4 +2194,259 @@ test("IsIsomorphic as Magma's for quadratic fields and the symmetric and dihedra
     const o = run(e).replace(/\s+/g, " ");
     assert.ok(o.includes(m) && o.endsWith("end ") && !/Traceback|TypeError|AttributeError/.test(o), e + " => " + o);
   }
+});
+
+test("subfields of finite fields: one budget per operation, every deterministic cost reserved before any work, each refusal before it (F1; LIMIT-PR45-1/2)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-ffsub-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m, _sage_ff as sff, _sage_ffsub as sub",
+    "calls = {'up': 0, 'image': 0, 'GF': 0, 'dlog': 0}",
+    // (the shared core's functions: Magma's wrappers call them)
+    "dlog, gf, up, image = sff._dlog, sff.GF, sub.up, sub.image",
+    "def spy(name, fn):",
+    "    def g(*a, **k):",
+    "        calls[name] += 1",
+    "        return fn(*a, **k)",
+    "    return g",
+    "sff._dlog, sff.GF, sub.up, sub.image = spy('dlog', dlog), spy('GF', gf), spy('up', up), spy('image', image)",
+    "class Refused(Exception): pass",
+    "def refuse(): return Refused()",
+    "def attempt(label, f):",
+    "    for k in calls: calls[k] = 0",
+    "    n0, snap = len(sub.IMAGES), list(sub.IMAGES.items())",
+    "    try:",
+    "        f()",
+    "        r = 'admitted'",
+    "    except (Refused, m.MagmaError):",
+    "        r = 'refused'",
+    // (the whole ordered cache, keys and values: a refusal leaves it exactly as it was)
+    "    same = list(sub.IMAGES.items()) == snap",
+    "    print(label, r, 'up=%(up)d image=%(image)d GF=%(GF)d dlog=%(dlog)d' % calls, 'cached=%d' % (len(sub.IMAGES) - n0), 'order=' + ('same' if same else 'changed'))",
+    // the plan's formulas, independently: M(n) = 2 n^2 w(p); an embedding m M(n) + m n; an image 2 bits(e) M(n)
+    "def M(p, n): return 2 * n * n * (-(-p.bit_length() // 30)) ** 2",
+    "def UP(p, k, n): return k * (M(p, n) + n)",
+    "def IMG(p, k, n): return 2 * ((p ** n - 1) // (p ** k - 1)).bit_length() * M(p, n)",
+    // D(q, n) from the plan: M(n) [2 b + sum (6 b + e (8 b + 2 (ceil(sqrt r) + 1)))] + 2^11, b = bits(q - 1)
+    "def D(p, n):",
+    "    N = p ** n - 1; b = N.bit_length(); s = 2 * b",
+    "    for r, e in sff._factor_int(N):",
+    "        c = 1",
+    "        while c * c < r: c += 1",
+    "        s += 6 * b + e * (8 * b + 2 * (c + 1))",
+    "    return M(p, n) * s + 2 ** 11",
+    "W = {}",
+    "def F(q):",
+    "    if q not in W: W[q] = m.GF(q)",
+    "    return W[q]",
+    "for q in (2 ** 20, 2 ** 19, 2 ** 11, 2 ** 10, 3 ** 7, 4, 8, 9, 16, 25, 64, 81, 125, 256): F(q)",
+    "print('D', sub.dlog_cost(F(2 ** 20).K), D(2, 20), sub.dlog_cost(F(2 ** 19).K), D(2, 19))",
+    "print('Dmax', max((D(p, n), p, n) for p in range(2, 33) if sff._is_prime_power(p) == (p, 1) for n in range(4, 21) if p ** n <= 2 ** 20))",
+    // a descent from GF(2^20) to GF(2^10): refused one cop short, before the discrete log
+    "H, M10 = F(2 ** 20), F(2 ** 10)",
+    "x = H.K.gen() ** (1025 * 7)",
+    "need = sub.dlog_cost(H.K) + 2 * M10.q.bit_length() * M(2, 10)",
+    "attempt('descent-short', lambda: m._ff_down(x, M10, [need - 1], refuse))",
+    "attempt('descent', lambda: m._ff_down(x, M10, [need], refuse))",
+    // a common field past 2^20 elements: refused structurally (nothing made)
+    "attempt('cover-2^110', lambda: m._ff_cover([F(2 ** 11), F(2 ** 10)], refuse))",
+    "attempt('cover-3^14', lambda: m._ff_cover([F(3 ** 7), F(9)], refuse))",
+    // one embedding: one cop short leaves the cache, the output and the Horner work untouched
+    "sub.IMAGES.clear()",
+    "a4 = F(4).K.gen()",
+    "need = UP(2, 2, 4) + IMG(2, 2, 4)",
+    "attempt('embed-short', lambda: up(a4, F(16).K, [need - 1], refuse))",
+    "attempt('embed', lambda: up(a4, F(16).K, [need], refuse))",
+    // a cold common field: Conway search C plus embeddings R, each within _FF_WORK, together in ONE budget
+    "x5, y5 = F(25).K.gen(), F(125).K.gen()",
+    "R = UP(5, 2, 6) + IMG(5, 2, 6) + UP(5, 3, 6) + IMG(5, 3, 6)",
+    "sff._CONWAY.pop((5, 6), None)",
+    "b = [10 ** 15]",
+    "sff._conway(5, 6, b); C = 10 ** 15 - b[0]; sff._CONWAY.pop((5, 6))",
+    "print('straddle', 0 < R < C)",
+    "sub.IMAGES.clear(); image(F(4).K, F(16).K); image(F(8).K, F(64).K)",
+    "sub.WORK = R + C - 1",
+    "attempt('cold-short', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
+    "print('conway kept', (5, 6) in sff._CONWAY)",
+    "sub.WORK = R + C",
+    "attempt('cold', lambda: m._ff_promote([x5, y5], 'arithmetic', None))",
+    // a collection, admitted whole before its first element goes in
+    "a, c = F(4).K.gen(), F(8).K.gen()",
+    // (GF(4)'s image in GF(64) cached and the OLDEST entry: counted free, and a
+    // refusal must not make it the most recent)
+    "sub.IMAGES.clear(); image(F(4).K, F(64).K); image(F(4).K, F(16).K)",
+    // (plus the checked walk of the literal: 6 nodes, one cop each)
+    "R = 6 + 5 * UP(2, 2, 6) + UP(2, 3, 6) + IMG(2, 3, 6)",
+    "sub.WORK = R - 1",
+    "attempt('literal-short', lambda: m._seq([a] * 5 + [c]))",
+    "sub.WORK = R",
+    "attempt('literal', lambda: m._seq([a] * 5 + [c]))",
+    "sub.IMAGES.clear(); image(F(4).K, F(64).K); image(F(4).K, F(16).K)",
+    "R = 5 * UP(2, 2, 6)",
+    "sub.WORK = R - 1",
+    "attempt('declared-short', lambda: m._into_universe([a] * 5, F(64), 'seq'))",
+    "sub.WORK = R",
+    "attempt('declared', lambda: m._into_universe([a] * 5, F(64), 'seq'))",
+    "sub.WORK = 10 ** 7",
+    "attempt('literal-2^110', lambda: m._seq([F(2 ** 11).K.gen(), F(2 ** 10).K.gen()]))",
+    // the image cache keeps at most _FF_IMAGES_MAX, the least recently used dropped first
+    "sub.IMAGES_MAX = 3",
+    "sub.IMAGES.clear()",
+    "pairs = [(F(4), F(16)), (F(4), F(64)), (F(8), F(64)), (F(9), F(81)), (F(4), F(256))]",
+    "for S, U in pairs[:3]: image(S.K, U.K)",
+    "image(pairs[0][0].K, pairs[0][1].K)",
+    "for S, U in pairs[3:]: image(S.K, U.K)",
+    "print('cache', len(sub.IMAGES), [(S.p, S.n, U.n) in sub.IMAGES for S, U in pairs])",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  const none = "up=0 image=0 GF=0 dlog=0 cached=0 order=same";
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    // (the plan's numbers: 1,331,648 at 2^20; at 2^19, q - 1 = 524,287 prime,
+    // ceil(sqrt) = 725, a table of at most 726)
+    "D 1331648 1331648 1269880 1269880",
+    "Dmax (1331648, 2, 20)",
+    "descent-short refused " + none,
+    "descent admitted up=0 image=0 GF=0 dlog=1 cached=0 order=same",
+    "cover-2^110 refused " + none,
+    "cover-3^14 refused " + none,
+    "embed-short refused " + none,
+    "embed admitted up=0 image=1 GF=0 dlog=0 cached=1 order=changed",
+    "straddle True",
+    "cold-short refused " + none,
+    "conway kept False",
+    // (GF(5^6) and, inside it, its prime field GF(5); two images, two embeddings)
+    "cold admitted up=2 image=2 GF=2 dlog=0 cached=2 order=changed",
+    "literal-short refused " + none,
+    // (GF(64) found, not made: it exists, its Conway polynomial cached; the
+    // free image made the most recent, GF(8)'s added)
+    "literal admitted up=6 image=6 GF=1 dlog=0 cached=1 order=changed",
+    "declared-short refused " + none,
+    "declared admitted up=5 image=5 GF=0 dlog=0 cached=0 order=changed",
+    "literal-2^110 refused " + none,
+    "cache 3 [True, False, False, True, True]",
+  ], r.stdout + r.stderr);
+});
+
+test("finite fields: Include, Exclude and Index of an element that doesn't go into the collection's field keep Magma's words (astra CORR-PR45-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  // (Magma 2.18-5 for the same lines; their carets point into the call,
+  // which Sagebrush doesn't place yet, so only the words are compared)
+  const run = (src: string) => (spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: "F<a> := GF(4); E<c> := GF(8);\n" + src + "\n\"end\";\n", encoding: "utf8" }).stdout as string).replace(/\s+/g, " ");
+  for (const [src, said] of [
+    ["Index([E!1], a);", "Runtime error in 'Index': Cannot coerce element into the universe"],
+    ["Include({E!1}, a);", "Runtime error in 'Include': No embedding known into LHS field"],
+    ["Exclude({E!1}, a);", "Runtime error in 'Exclude': No embedding known into LHS field"],
+    ["Include({E | }, a);", "Runtime error in 'Include': No embedding known into LHS field"],
+    ["Include([E!1], F!1);", "Runtime error in 'Include': Cannot lift element into sequence"],
+    ["Include([E | ], a);", "Runtime error in 'Include': Cannot lift element into sequence"],
+  ]) {
+    const o = run(src);
+    assert.ok(o.includes(said) && !/Traceback|Error: /.test(o.replace(/Runtime error/g, "")), src + " => " + o);
+  }
+});
+
+test("finite fields in nested collections: the walk is checked (nodes and depth) before anything is made, deep nesting refused in words (LIMIT-PR45-3)", () => {
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const f = join(mkdtempSync(join(tmpdir(), "magma-ffnest-")), "check.py");
+  writeFileSync(f, [
+    "import _magma as m, _sage_ffsub as sub",
+    "calls = {'leaves': 0, 'up': 0}",
+    "leaves, up = m._ff_leaves, sub.up",
+    "def spy(name, fn):",
+    "    def g(*a, **k):",
+    "        calls[name] += 1",
+    "        return fn(*a, **k)",
+    "    return g",
+    "m._ff_leaves, sub.up = spy('leaves', leaves), spy('up', up)",
+    "F, K = m.GF(4), m.GF(16)",
+    "x, y = F.K.gen(), K.K.gen() ** 5",
+    "msg = 'Arguments 1 and 2 have incompatible universal sets'",
+    "def attempt(label, f):",
+    "    for k in calls: calls[k] = 0",
+    "    snap = list(sub.IMAGES.items())",
+    "    try:",
+    "        r = 'admitted ' + str(f())",
+    "    except m.MagmaError as e:",
+    "        r = 'refused ' + str(e).split(' (')[0]",
+    "    except RecursionError:",
+    "        r = 'RecursionError'",
+    "    print(label, r, 'leaves=%(leaves)d up=%(up)d' % calls, 'cache=' + ('same' if list(sub.IMAGES.items()) == snap else 'changed'))",
+    "eq = lambda a, b: m._eq(a, b)",
+    // {x} eq {y}: the walk meets 4 nodes (the two sets and their elements)
+    // (the image of GF(4) in GF(16) cached, free, and the OLDEST entry)
+    "sub.IMAGES.clear(); sub.image(F.K, K.K); sub.image(m.GF(8).K, m.GF(64).K)",
+    "lim = m._COLLECT_MAX",
+    "m._COLLECT_MAX = 4",
+    "attempt('nodes-at', lambda: eq(m.MSet([x]), m.MSet([y])))",
+    "m._COLLECT_MAX = 3",
+    "attempt('nodes-over', lambda: eq(m.MSet([x]), m.MSet([y])))",
+    "m._COLLECT_MAX = lim",
+    // {{x}} eq {{y}}: nested 2 deep
+    "nest = m._NEST_MAX",
+    "sub.IMAGES.clear(); sub.image(F.K, K.K); sub.image(m.GF(8).K, m.GF(64).K)",
+    "m._NEST_MAX = 2",
+    "attempt('depth-at', lambda: eq(m.MSet([m.MSet([x])]), m.MSet([m.MSet([y])])))",
+    "m._NEST_MAX = 1",
+    "attempt('depth-over', lambda: eq(m.MSet([m.MSet([x])]), m.MSet([m.MSet([y])])))",
+    "m._NEST_MAX = nest",
+    // 3000 deep: refused in words, never a RecursionError (membership and a literal)
+    "deep = m.MSeq([x])",
+    "for _ in range(3000): deep = m.MSeq([deep])",
+    "attempt('deep-in', lambda: m._in(deep, m.MSeq([m.MSeq([y])])))",
+    "attempt('deep-literal', lambda: len(m._seq([deep, y])))",
+    // (LIMIT-PR45-4: nothing deeper than _NEST_MAX is ever pushed, and the
+    // slots are interned integers, O(1) per node, never copied paths)
+    "slots = [0]",
+    "slot = m._ff_slot",
+    "def spy_slot(*a):",
+    "    slots[0] += 1",
+    "    return slot(*a)",
+    "m._ff_slot = spy_slot",
+    "m._NEST_MAX = 3",
+    "chain = m.MTuple([x])",
+    "for _ in range(9): chain = m.MTuple([chain])",
+    "try:",
+    "    m._ff_nest_scan([chain], {}); print('chain admitted')",
+    "except m.MagmaError as e:",
+    "    print('chain refused', str(e), 'slots', slots[0])",
+    "chain = m.MTuple([m.MTuple([m.MTuple([x])])])",
+    "n, f, c, tall = m._ff_nest_scan([chain], {})",
+    "print('chain-at nodes', n, 'tallest', tall)",
+    "m._NEST_MAX = 5",
+    "wide = m.MTuple([m.MTuple([m.MTuple([m.MTuple([m.MTuple([x]) for _ in range(200)])])])])",
+    "intern = {}",
+    "n, f, c, tall = m._ff_nest_scan([wide], intern)",
+    "print('wide nodes', n, 'slots', len(intern), 'tallest', tall, 'elements', sum(c.values()))",
+    "m._NEST_MAX = nest",
+    "",
+  ].join("\n"));
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  const deep = "refused a value nested more than 100 deep is not supported yet leaves=0 up=0 cache=same";
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    // (leaves counts _ff_leaves's calls, one per collection walked, made
+    // only on admission; the free cached image made the most recent)
+    "nodes-at admitted True leaves=3 up=2 cache=changed",
+    "nodes-over refused a set operation of collections this large is not supported yet leaves=0 up=0 cache=same",
+    "depth-at admitted True leaves=5 up=2 cache=changed",
+    "depth-over refused a value nested more than 1 deep is not supported yet leaves=0 up=0 cache=same",
+    "deep-in " + deep,
+    "deep-literal " + deep,
+    // (10 deep with _NEST_MAX = 3: refused at the 4th level, 3 slots made:
+    // at most _NEST_MAX + 1 levels visited)
+    "chain refused a value nested more than 3 deep is not supported yet slots 3",
+    // (exactly 3 deep: admitted, the stack at most _NEST_MAX + 1)
+    "chain-at nodes 4 tallest 4",
+    // (200 sibling tuples at the depth limit: 404 nodes, 403 interned slots,
+    // at most one per node, never a copied path; the stack at most
+    // _NEST_MAX + 1)
+    "wide nodes 404 slots 403 tallest 6 elements 200",
+  ], r.stdout + r.stderr);
 });
