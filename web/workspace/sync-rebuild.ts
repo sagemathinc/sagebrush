@@ -280,7 +280,8 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
         return true;
       }
     } else if (at.step === "replay") {
-      const ops = (await req(tx.objectStore("ops").getAll(IDBKeyRange.bound(at.seq ?? 0, p.W1!, true, false), REBUILD.replayPage))) as Op[];
+      // (an empty (W0, W1]: nothing logged since the watermark)
+      const ops = (at.seq ?? 0) < p.W1! ? ((await req(tx.objectStore("ops").getAll(IDBKeyRange.bound(at.seq ?? 0, p.W1!, true, false), REBUILD.replayPage))) as Op[]) : [];
       const j = tx.objectStore("adoptJournal"), st = tx.objectStore("entries");
       for (const o of ops) {
         at.seq = o.seq;
