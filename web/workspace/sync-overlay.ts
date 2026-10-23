@@ -240,6 +240,11 @@ async function preload(base: PartialIndex, store: Store, op: SyncOp) {
     while (queue.length) {
       const k = queue.shift()!;
       if (!base.children.has(k)) base.putFolder(k, await store.folder(k));
+      // (and where it lands: each subtree folder's destination listing, for a move with `to`)
+      if (typeof op.to === "string" && op.to.startsWith("/")) {
+        const dest = keyOf(op.to) + k.slice(keyOf(e.path).length);
+        if (!base.children.has(dest)) base.putFolder(dest, await store.folder(dest));
+      }
       const kids = base.children.get(k);
       if (!kids || kids === ABSENT) continue;
       for (const cid of kids) {
