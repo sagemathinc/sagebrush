@@ -149,12 +149,13 @@ test("astra's cases, IPython 9.15's text (past the line: the repr)", async () =>
 });
 
 // LIMIT-PR57-1 (daybreak2): a value past the line shows as its repr, so the
-// work is one repr plus the trial line, which stops at 79 columns. The trial
-// is counted by wrapping _pyjs_pretty._text, which it calls for each item
-// (and itself for each container).
+// work is one repr plus the trial line, which stops at 79 columns. The walk
+// is counted by wrapping _pyjs_pretty._walk, which it calls for each item
+// and container; with no user code run, it stops with the line and the
+// runtime's repr is the rest.
 test("past the line: one repr, and a trial bounded by the line (counted)", async () => {
   const run = await session();
-  await run("import _pyjs_pretty as P\nVISITS = [0]\n_t = P._text\ndef _counted(*a):\n    VISITS[0] += 1\n    return _t(*a)\nP._text = _counted\ndef nest(n):\n    L = []\n    for _ in range(n):\n        L = [L]\n    return L");
+  await run("import _pyjs_pretty as P\nVISITS = [0]\n_t = P._walk\ndef _counted(*a):\n    VISITS[0] += 1\n    return _t(*a)\nP._walk = _counted\ndef nest(n):\n    L = []\n    for _ in range(n):\n        L = [L]\n    return L");
   for (const code of ["[int] * 1000000", "[1] * 1000000", "{i: int for i in range(100000)}", "nest(1500)", "[[int] * 1000] * 1000"]) {
     const { out, err } = await run(`VISITS[0] = 0\nV = ${code}\nV`);
     assert.equal(err, "", code);
@@ -162,7 +163,7 @@ test("past the line: one repr, and a trial bounded by the line (counted)", async
     const { out: n } = await run("VISITS[0]");
     assert.ok(Number(n) <= 80, `${code}: the trial visited ${n.trim()} values`);
   }
-  await run("P._text = _t");
+  await run("P._walk = _t");
 });
 
 // LIMIT-PR57-3 (daybreak2): no element's __repr__ runs twice. The trial line
@@ -196,6 +197,53 @@ test("past the line, no element's __repr__ is called twice (counted)", async () 
   const { out } = await run("[O(1), [O(2), {O(3): O(4)}], int, O(5), 'x' * 80]");
   assert.equal(out, "[O1, [O2, {O3: O4}], <class 'int'>, O5, '" + "x".repeat(80) + "']\n");
   assert.equal((await run("seen")).out, "[1, 2, 3, 4, 5]\n");
+});
+
+// CORR-PR57-4 (astra): a __repr__ that changes the value it is in. One walk
+// builds the line and the repr together, as repr walks a list (by index, to
+// its length at each step) and a dict, and nothing is walked again. Past the
+// line, the expected texts are CPython 3.14.8's repr of a fresh copy (IPython
+// 9.17.1 breaks those lines); on the line, IPython's text. Each __repr__ runs
+// once. (For the dict whose sibling is popped, IPython's printer raises
+// "dictionary changed size during iteration"; repr goes on, and so does this.)
+test("a __repr__ that changes its container: one walk, as repr's, each __repr__ once", async () => {
+  const run = await session();
+  await run("class Clear:\n    n = 0\n    def __init__(self, f, s='Q' * 80):\n        self.f = f\n        self.s = s\n    def __repr__(self):\n        Clear.n += 1\n        self.f()\n        return self.s");
+  const Q = "Q".repeat(80);
+  const CASES: [string, string, string][] = [
+    ["parent cleared", "V = []\nV.append(Clear(V.clear))\nV", `[${Q}]`],
+    ["parent cleared, more after", "V = []\nV.append(Clear(V.clear))\nV.append(1)\nV", `[${Q}]`],
+    ["parent grows", "V = []\nV.append(Clear(lambda: V.append(7)))\nV.append(1)\nV", `[${Q}, 1, 7]`],
+    ["sibling popped", "V = [0, 0, 0]\nV[0] = Clear(lambda: V.pop())\nV", `[${Q}, 0]`],
+    ["sibling replaced", "V = [0, 1]\nV[0] = Clear(lambda: V.__setitem__(1, int))\nV", `[${Q}, <class 'int'>]`],
+    ["nested cleared", "W = [1, 2]\nV = [Clear(W.clear), W]\nV", `[${Q}, []]`],
+    ["nested grows", "W = [1]\nV = [Clear(lambda: W.append(2)), W]\nV", `[${Q}, [1, 2]]`],
+    ["tuple, list in it cleared", "W = [1, 2]\nT = (Clear(W.clear), W)\nT", `(${Q}, [])`],
+    ["dict cleared", "D = {}\nD[1] = Clear(D.clear)\nD[2] = 3\nD", `{1: ${Q}}`],
+    ["dict grows", "D = {}\nD[1] = Clear(lambda: D.__setitem__(9, 9))\nD[2] = 3\nD", `{1: ${Q}, 2: 3, 9: 9}`],
+    ["dict sibling popped", "D = {}\nD[1] = Clear(lambda: D.pop(2))\nD[2] = 3\nD[4] = 5\nD", `{1: ${Q}, 4: 5}`],
+    ["dict key grows it", "D = {}\nD[Clear(lambda: D.__setitem__(1, 1))] = 3\nD", `{${Q}: 3, 1: 1}`],
+    ["dict sibling value replaced", "D = {}\nD[1] = Clear(lambda: D.__setitem__(2, 'new'))\nD[2] = 3\nD", `{1: ${Q}, 2: 'new'}`],
+    ["dict in a list cleared", "D = {1: 2, 3: 4}\nV = [Clear(D.clear), D]\nV", `[${Q}, {}]`],
+    ["short: parent cleared", "V = []\nV.append(Clear(V.clear, 'q'))\nV.append(int)\nV", "[q]"],
+    ["short: nested cleared", "W = [int, 2]\nV = [Clear(W.clear, 'q'), W, int]\nV", "[q, [], int]"],
+    ["short: dict sibling popped", "D = {}\nD[1] = Clear(lambda: D.pop(2), 'q')\nD[2] = int\nD[4] = int\nD", "{1: q, 4: int}"],
+  ];
+  for (const [label, code, want] of CASES) {
+    await run("Clear.n = 0");
+    const { out, err } = await run(code);
+    assert.equal(err, "", label);
+    assert.equal(out, want + "\n", label);
+    assert.equal((await run("Clear.n")).out, "1\n", `${label}: __repr__ calls`);
+  }
+  // (a function's default, whose __repr__ runs for the signature only (repr
+  // shows no defaults), clears the list: the walk goes on in the list as it
+  // is now, as IPython's printer does, and does not start the list again)
+  await run("Clear.n = 0");
+  const { out, err } = await run("V = []\ndef g(a=Clear(V.clear, 'm' * 80)):\n    pass\nV += [g, 'x' * 100]\nV");
+  assert.equal(err, "");
+  assert.equal(out.replace(/0x[0-9a-f]+/g, "0x?"), "[<function g at 0x?>]\n");
+  assert.equal((await run("Clear.n")).out, "1\n");
 });
 
 // LIMIT-PR57-2 (daybreak2): a container nested past the recursion limit
