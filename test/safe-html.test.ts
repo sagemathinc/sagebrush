@@ -92,6 +92,14 @@ const PAYLOADS = [
   "<font color=\"red;background:url(x)\" face=\"x\" size=\"3\">t</font>",
   "<span style=\"color:green\">green</span>",
   "<img src=\"attachment:a.png\" width=\"600px\">",
+  // (iframes: one with an https address becomes a link, the rest nothing)
+  "<iframe src=\"https://www.youtube.com/embed/x\" onload=\"alert(1)\"></iframe>",
+  "<iframe src=\"JaVaScRiPt:alert(1)\"></iframe>",
+  "<iframe src=\"&#106;avascript:alert(1)\"></iframe>",
+  "<iframe src=\"https://x.example/&quot; onmouseover=&quot;alert(1)\"></iframe>",
+  "<iframe src=\"data:text/html,<script>alert(1)</script>\"></iframe>",
+  "<iframe src=\"//evil.example/x\"></iframe>",
+  "<svg><foreignObject><iframe src=\"https://evil.example/\"></iframe></foreignObject></svg>",
 ];
 
 test("safe HTML: XSS payloads come out harmless, as a browser parses them", () => {
@@ -129,4 +137,42 @@ test("safe HTML: what Jupyter notebooks use survives", () => {
   assert.equal(render("![a](https://x.example/i.png)", { remote: false }), "<p>a</p>\n");
   // (the Lab notebooks' Markdown: colored text renders, not as source)
   assert.equal(render('<span style="color:green">**Answer**</span>'), '<p><span style="color: green"><strong>Answer</strong></span></p>\n');
+});
+
+// An <iframe> (IPython's IFrame, YouTubeVideo and VimeoVideo; one in a
+// notebook's Markdown) is not embedded: one whose src is an https address,
+// safe as a link (safeLink, as <a href>), becomes a link to it opening in a
+// new tab, naming its site; nothing is fetched until it is clicked. Any
+// other src, or none, is nothing, and an iframe's contents are dropped.
+test("safe HTML: an https iframe becomes a link that opens it in a new tab", () => {
+  const link = (href: string, host: string) => `<a href="${href}" target="_blank" rel="noopener noreferrer">Open ${host} in a new tab</a>`;
+  // (IPython's YouTubeVideo("dQw4w9WgXcQ"), as its text/html)
+  const yt = '\n        <iframe\n            width="400"\n            height="300"\n            src="https://www.youtube.com/embed/dQw4w9WgXcQ"\n            frameborder="0"\n            allowfullscreen\n            \n        ></iframe>\n        ';
+  assert.equal(safeHtml(yt).trim(), link("https://www.youtube.com/embed/dQw4w9WgXcQ", "www.youtube.com"));
+  assert.equal(safeHtml(yt, { remote: false }).trim(), link("https://www.youtube.com/embed/dQw4w9WgXcQ", "www.youtube.com"));
+  assert.equal(safeHtml('<iframe src="https://example.org/a?b=1&amp;c=2" width="500"></iframe>'), link("https://example.org/a?b=1&amp;c=2", "example.org"));
+  assert.equal(safeHtml("<IFRAME SRC=HTTPS://X.Example/p></IFRAME>"), link("HTTPS://X.Example/p", "x.example"));
+  assert.equal(safeHtml('<iframe src="&#104;ttps://x.example/p"></iframe>'), link("https://x.example/p", "x.example"));
+  assert.equal(safeHtml('<iframe src="https://x.example/p"/>after'), link("https://x.example/p", "x.example") + "after");
+  for (const html of [
+    '<iframe src="javascript:alert(1)"></iframe>',
+    '<iframe src="JaVaScRiPt:alert(1)"></iframe>',
+    '<iframe src="&#106;avascript:alert(1)"></iframe>',
+    '<iframe src="java&#x09;script:alert(1)"></iframe>',
+    '<iframe src="data:text/html,<b>x</b>"></iframe>',
+    '<iframe src="//evil.example/x"></iframe>',
+    '<iframe src="http://x.example/p"></iframe>',
+    '<iframe src="page.html"></iframe>',
+    '<iframe srcdoc="<script>alert(1)</script>"></iframe>',
+    "<iframe></iframe>",
+    '<svg><foreignObject><iframe src="https://evil.example/"></iframe></foreignObject></svg>',
+    '<math><mtext><iframe src="https://evil.example/"></iframe></mtext></math>',
+  ]) assert.equal(safeHtml(html), "", html);
+  // (its contents dropped: an iframe inside one is nothing. A browser reads
+  // an iframe's contents as text up to the first </iframe>, so that one
+  // ends the outer iframe, and what follows is ordinary HTML, as here)
+  assert.equal(safeHtml('<iframe src="https://a.example/"><iframe src="https://b.example/"></iframe><b>x</b></iframe>after'), link("https://a.example/", "a.example") + "<b>x</b>after");
+  assert.equal(safeHtml('<iframe src="https://a.example/"><iframe src="https://b.example/"><b>x</b></iframe>after'), link("https://a.example/", "a.example") + "after");
+  // (and in Markdown)
+  assert.equal(render('<iframe src="https://x.example/v"></iframe>'), link("https://x.example/v", "x.example"));
 });

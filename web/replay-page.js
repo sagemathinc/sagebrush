@@ -57,6 +57,16 @@ export function createJournal(o) {
     for (const [path, data] of pairs) files.push([path, await putBlob(db, data)]);
     if (s && !s.replay) s.files = files;
   }
+  /** The package set sent to a starting worker (null: none), before any of its code: the session's, so a replay uses it, never what is latest then. */
+  function pkgsetSent(S) {
+    const s = current();
+    if (s && !s.replay) s.pkgset = S ?? null;
+  }
+  /** A replayed session's package set (null: none), or undefined when this one isn't a replay. */
+  function replayPkgset() {
+    const s = current();
+    return s?.replay ? (s.pkgset ?? null) : undefined;
+  }
   o.kernel.on("ready", () => {
     const s = current(), info = o.kernel.readyInfo;
     if (!s || !info || s.replay) return;
@@ -67,7 +77,7 @@ export function createJournal(o) {
   });
   const sessionRecord = (s, incomplete) => ({
     type: "session", id: s.id, t: s.t, ...(s.seed && s.seeded !== false ? { seed: s.seed } : {}), startup: s.startup, files: s.files,
-    ms: s.ms, kernel: o.local ? "local" : "browser", version: s.version, ...(incomplete ? { incomplete: true } : {}),
+    ms: s.ms, kernel: o.local ? "local" : "browser", version: s.version, ...(s.pkgset ? { pkgset: s.pkgset } : {}), ...(incomplete ? { incomplete: true } : {}),
   });
 
   // ---------------------------------------------------------- writing
@@ -169,6 +179,7 @@ export function createJournal(o) {
       n: plan.events.reduce((m, e) => Math.max(m, (e.run ?? e.file).n), 0),
       journaled: new Map([[nbId, events.length]]),
       t: ps.t, ms: ps.ms, version: ps.version, seeded: !!ps.seed,
+      pkgset: typeof ps.pkgset === "string" && /^[0-9a-f]{64}$/.test(ps.pkgset) ? ps.pkgset : null,
     };
   }
   /** The bytes of the files a replayed session started with ([path, bytes]). */
@@ -244,7 +255,7 @@ export function createJournal(o) {
     return report;
   }
 
-  return { workerName, filesSent, fileEvent, flushPending, historyCleared, continueSession, replayFiles, replay, get session() { return current(); } };
+  return { workerName, filesSent, pkgsetSent, replayPkgset, fileEvent, flushPending, historyCleared, continueSession, replayFiles, replay, get session() { return current(); } };
 }
 
 /** "about 8 s" */

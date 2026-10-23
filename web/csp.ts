@@ -8,6 +8,7 @@
 // under engine/) get the runner's policy.  Fails if a page is left without a
 // policy that allows its own scripts.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { framePolicy, pagePolicy, runnerPolicy } from "./csp-policy.mts";
@@ -96,7 +97,8 @@ export function headersFor(dir: string): string {
 }
 
 export function writeHeaders() {
-  for (const dir of [join(here, "site", "public"), join(here, "dist")]) if (existsSync(dir)) writeFileSync(join(dir, "_headers"), headersFor(dir));
+  // (web/site's only when it is here: web/site-dir.mts)
+  for (const dir of [...(hasSite ? [join(siteDir, "public")] : []), join(here, "dist")]) if (existsSync(dir)) writeFileSync(join(dir, "_headers"), headersFor(dir));
 }
 
 if (import.meta.main) writeHeaders();

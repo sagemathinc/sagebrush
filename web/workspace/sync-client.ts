@@ -39,7 +39,7 @@ import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, ca
 import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
-import { accountHash, Bucket } from "../sync/protocol";
+import { accountHash, Bucket } from "../sync-protocol/protocol";
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */

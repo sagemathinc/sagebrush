@@ -129,3 +129,62 @@ export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitU
   if (req.method === "GET" && cache) ctx.waitUntil(cache.put(key, res.clone()));
   return res;
 }
+
+// Optional package sets (plan-modular-packages-r4 §3.2): GET
+// /pkgset/<sha256>.json (a set's index) and /pkg/<sha256>.json (a chunk),
+// from R2's pkgset/ and pkg/ keys, where the optional tier publishes them and
+// leaves them forever.  Content-addressed by the whole SHA-256: served only if
+// the object is within the set format's size limits (checked before it is
+// read) and its bytes have that hash; immutable, readable from anywhere.  A
+// Range of bytes 0-N (the browser worker's synchronous fallback asks for
+// exactly the pinned size) is answered with those bytes, or the whole object
+// if it is no longer.  Ids not there are remembered briefly, as engines' are.
+const PKG = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/;
+const PKG_MAX = { pkgset: 256 * 1024, pkg: 8 * 1024 * 1024 };
+const pkgMissing = new Map<string, number>();
+
+/** The response for a package set's file, or null if the request is not for one. */
+export async function handlePkg(req: Request, env: EnginesEnv, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response | null> {
+  const url = new URL(req.url);
+  const m = url.pathname.match(PKG);
+  if (!m || !env.ENGINES) return null;
+  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+  const [, kind, hash] = m as unknown as [string, "pkgset" | "pkg", string];
+  const none = () => new Response("no such package file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  const name = `${kind}/${hash}.json`;
+  const t = pkgMissing.get(name);
+  if (t !== undefined && Date.now() - t < MISSING_MS) return none();
+  const cache = (globalThis as any).caches?.default as Cache | undefined;
+  const key = new Request(`${url.origin}/${name}`);
+  let res: Response | undefined = cache ? await cache.match(key) : undefined;
+  if (!res) {
+    const o = await env.ENGINES.get(name);
+    if (!o) {
+      if (pkgMissing.size >= MISSING_MAX) pkgMissing.delete(pkgMissing.keys().next().value!);
+      pkgMissing.set(name, Date.now());
+      return none();
+    }
+    if (o.size > PKG_MAX[kind]) {
+      await o.body.cancel();
+      return none();
+    }
+    const bytes = await new Response(o.body).arrayBuffer();
+    if ((await sha256Hex(bytes)) !== hash) return none();
+    res = new Response(bytes, { headers: { "Content-Type": "application/json", ...COMMON, "Content-Length": String(bytes.byteLength) } });
+    if (cache) ctx.waitUntil(cache.put(key, res.clone()));
+  }
+  if (req.method === "HEAD") return new Response(null, { status: 200, headers: res.headers });
+  const range = /^bytes=0-(\d{1,9})$/.exec(req.headers.get("Range") ?? "");
+  if (range) {
+    const bytes = await res.arrayBuffer();
+    const end = Number(range[1]);
+    if (end + 1 < bytes.byteLength) {
+      const h = new Headers(res.headers);
+      h.set("Content-Length", String(end + 1));
+      h.set("Content-Range", `bytes 0-${end}/${bytes.byteLength}`);
+      return new Response(bytes.slice(0, end + 1), { status: 206, headers: h });
+    }
+    return new Response(bytes, { status: 200, headers: res.headers });
+  }
+  return res;
+}

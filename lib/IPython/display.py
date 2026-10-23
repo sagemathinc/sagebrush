@@ -6,6 +6,8 @@ text form of the rest), otherwise prints its repr.
 """
 import builtins
 
+from IPython.lib.display import IFrame, VimeoVideo, YouTubeVideo
+
 
 def display(*objs, **kw):
     for obj in objs:

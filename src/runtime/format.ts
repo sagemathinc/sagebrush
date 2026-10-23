@@ -271,6 +271,23 @@ export const hex = (n: number) => "0x" + n.toString(16);
 
 const reprActive = new Set<any>();
 
+// A __repr__ may change the list or dict it is in while that is shown (one
+// that appends to its list at every step would never end): the items
+// reached past the length each had when its repr began, and their
+// characters, counted from the outermost repr (nested ones too), at most
+// these; past them, MemoryError. A list or dict that nothing changes is
+// never refused. The same limits and error as a notebook's display
+// (lib/_pyjs_pretty.py LIMITS).
+export const REPR_GROWTH = { steps: 2 ** 23, chars: 2 ** 26 };
+let grownSteps = 0, grownChars = 0;
+function grown(chars: number): void {
+  grownSteps++;
+  grownChars += chars;
+  if (grownSteps > REPR_GROWTH.steps || grownChars > REPR_GROWTH.chars) {
+    raise(T.MemoryError, `displaying this value takes more than Sagebrush's limit of ${REPR_GROWTH.steps} steps or ${REPR_GROWTH.chars} characters (a __repr__ may be changing it as it is shown)`);
+  }
+}
+
 export function repr(x: any): string {
   switch (typeof x) {
     case "string":
@@ -323,10 +340,27 @@ export function repr(x: any): string {
 export function seqRepr(x: any[]): string {
   {
     if (reprActive.has(x)) return (x as any).$t ? "(...)" : "[...]";
+    if (reprActive.size === 0) grownSteps = grownChars = 0;
     reprActive.add(x);
     try {
-      const body = x.map(repr).join(", ");
-      return (x as any).$t ? (x.length === 1 ? `(${body},)` : `(${body})`) : `[${body}]`;
+      if ((x as any).$t) {
+        const body = x.map(repr).join(", ");
+        return x.length === 1 ? `(${body},)` : `(${body})`;
+      }
+      // (as CPython's list repr: by index, to the list's length at each
+      // step, so that a __repr__ that changes the list is seen)
+      const n0 = x.length;
+      const parts: string[] = new Array(n0);
+      let i = 0;
+      for (; i < n0 && i < x.length; i++) parts[i] = repr(x[i]);
+      if (i < n0) parts.length = i;
+      // (past the length it had: grown while shown, bounded)
+      for (; i < x.length; i++) {
+        const r = repr(x[i]);
+        grown(r.length + 2);
+        parts.push(r);
+      }
+      return `[${parts.join(", ")}]`;
     } finally {
       reprActive.delete(x);
     }
@@ -340,10 +374,18 @@ export function defaultRepr(x: any): string {
 
 export function dictRepr(d: PyDict): string {
   if (reprActive.has(d)) return "{...}";
+  if (reprActive.size === 0) grownSteps = grownChars = 0;
   reprActive.add(d);
   try {
     const parts: string[] = [];
-    for (const [k, v] of d.$m) parts.push(repr(dictKeyOf(d, k)) + ": " + repr(v));
+    // (the dict's entries as they are when reached: one a __repr__ adds is
+    // reached too, past the size the dict had, bounded)
+    const n0 = d.$m.size;
+    for (const [k, v] of d.$m) {
+      const r = repr(dictKeyOf(d, k)) + ": " + repr(v);
+      if (parts.length >= n0) grown(r.length + 2);
+      parts.push(r);
+    }
     return "{" + parts.join(", ") + "}";
   } finally {
     reprActive.delete(d);
