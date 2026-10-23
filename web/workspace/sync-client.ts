@@ -31,7 +31,7 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, sender, obligate, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
 import { cursorOf } from "./sync-confirmed";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
@@ -1145,10 +1145,8 @@ export class SyncClient {
   // ---- the rebuild (step 4 does it; step 3 asks for it)
 
   private async flagRebuild(ns: string, why: "refused" | "invalid" | "diverged", detail?: string) {
-    const cur = await this.metaGet<{ why: string }>(key(ns, "rebuild"));
-    // (a halt is never lowered to a plain refusal's flag)
-    if (cur && cur.why !== "refused" && why === "refused") return;
-    await this.metaPut(key(ns, "rebuild"), { why, at: this.clock.now(), ...(detail ? { detail: detail.slice(0, 300) } : {}) });
+    // (the obligation, its counter incremented in the same transaction (D7 r2); a halt is never lowered to a refusal)
+    await inTx(this.w.ws, META, "readwrite", async (tx) => { await obligate(tx.objectStore(META), ns, why, detail); });
   }
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {
     c.halted = why;

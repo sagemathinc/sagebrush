@@ -80,6 +80,22 @@ function checkNs(ns: string) {
   if (typeof ns !== "string" || !NS.test(ns)) throw new Error(`sync: not a namespace: ${String(ns).slice(0, 80)}`);
 }
 
+/** The rebuild's obligation (design/sync-client.md D6, D7 r2): `sync:<ns>:rebuild` = {why, n, at}.  Every write of it
+ * increments `n` from a counter that never goes back (`sync:<ns>:rebuildN`, kept when the flag is cleared), in the
+ * transaction that records the decision; a rebuild records the `n0` it started from, and only its `done`'s
+ * compare-and-swap (n still n0) may clear the flag.  A stronger reason already recorded (invalid, diverged) stays. */
+export type Obligation = { why: "refused" | "invalid" | "diverged"; n: number; at: number; detail?: string };
+export const rebuildKey = (ns: string) => `sync:${ns}:rebuild`;
+export async function obligate(meta: IDBObjectStore, ns: string, why: Obligation["why"], detail?: string): Promise<Obligation> {
+  const cur = (await req(meta.get(rebuildKey(ns)))) as Obligation | undefined;
+  const n = (((await req(meta.get(`sync:${ns}:rebuildN`))) as number | undefined) ?? cur?.n ?? 0) + 1;
+  const keep = cur && cur.why !== "refused" && why === "refused";
+  const o: Obligation = { why: keep ? cur!.why : why, n, at: Date.now(), ...(detail ? { detail: detail.slice(0, 300) } : keep && cur!.detail ? { detail: cur!.detail } : {}) };
+  meta.put(n, `sync:${ns}:rebuildN`);
+  meta.put(o, rebuildKey(ns));
+  return o;
+}
+
 /** What the server receives for a local op, or null for one not sent. */
 export function wireOf(o: Op, dseq: number): WireOp | null {
   if (o.origin === "server" || !("after" in o) || o.after === undefined) return null;
@@ -338,10 +354,7 @@ export class Outbox {
       }
       // (a refusal's obligation, the rebuild (design/sync-client.md D6, D7), recorded in the transaction that removes
       // the record: a crash leaves both or neither.  A stronger reason already recorded (invalid, diverged) stays)
-      if (refused) {
-        const k = `sync:${this.ns}:rebuild`, cur = (await req(meta.get(k))) as { why?: string } | undefined;
-        if (!cur || cur.why === "refused") meta.put({ why: "refused", at: Date.now() }, k);
-      }
+      if (refused) await obligate(meta, this.ns, "refused");
       OUTBOX.cut?.(cuts);
       meta.put(t, key(this.ns, "outbox"));
     });
@@ -393,7 +406,8 @@ export class Outbox {
     // (a held identity's record decided: its successor scheduled, based on the answer: this record's hash if it was
     // accepted (an echo first counts so), else the newest accepted, else the confirmed index's)
     if (st.held && mine) {
-      const confirmedSha = ((await req(tx.objectStore("syncIndex").get([this.ns, r.id]))) as { sha256?: string } | undefined)?.sha256;
+      const gen = ((await req(tx.objectStore("meta").get(genKey(this.ns)))) as number | undefined) ?? 0;
+      const confirmedSha = ((await req(tx.objectStore("syncIndex").get([genPrefix(this.ns, gen), r.id]))) as { sha256?: string } | undefined)?.sha256;
       const base = how === "refused" ? (st.acceptedTip?.sha256 ?? confirmedSha) : sha;
       st.held = false;
       st.successor = base !== undefined ? { base } : {};

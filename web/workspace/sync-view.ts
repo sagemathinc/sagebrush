@@ -61,6 +61,8 @@ export type ViewContext = {
   journalNs?: string;
   /** the pins' cap, read before the transaction (capNow) */
   cap: number;
+  /** a rebuild's view (D6 r4): nothing is deleted, an entry the view names gone is kept and listed too */
+  keepGone?: boolean;
   now?: number;
 };
 
@@ -283,7 +285,8 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
         st.put(n);
         await w.logServer(tx, ops, { op: "write", path: n.path, kind: n.kind }, n);
       }
-    } else if (it.v.kind === "gone") {
+    } else if (it.v.kind === "gone" && c.keepGone) list(cur.path, "kept");
+    else if (it.v.kind === "gone") {
       if (cur.kind === "folder" && ((await req(st.count(subtree(cur.path)))) as number) > 0) {
         list(cur.path, "not-empty");
         continue;
