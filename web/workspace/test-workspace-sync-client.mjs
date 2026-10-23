@@ -91,6 +91,8 @@ const ctl = {
 };
 /** every open proxied socket's closer */
 const closers = new Set();
+/** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
+const toPage = new Set();
 const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] };
 const held = [];
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] });
@@ -153,6 +155,9 @@ async function control(body) {
     case "closeAll": { const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
+    // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
+    // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
+    case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
     case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
@@ -259,6 +264,9 @@ server.on("upgrade", async (req, socket, head) => {
       try { client.close(okCode(code), "proxy"); } catch {}
     };
     closers.add(closeBoth);
+    const send = (text) => { try { client.send(text); } catch {} };
+    toPage.add(send);
+    client.on("close", () => toPage.delete(send));
     if (ctl.closeOnOpen > 0) {
       ctl.closeOnOpen--;
       return closeBoth(1000);

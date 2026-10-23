@@ -61,6 +61,9 @@ export const CLIENT = {
   /** pulls: at most `pullBurst` at once, then `pullsPerSecond` */
   pullBurst: 4,
   pullsPerSecond: 2,
+  /** with the confirmed index: one pull from the cursor while connected and idle, this often (D8b: a notice lost
+   * on a socket that stays open is found within it) */
+  idlePullMs: 5 * 60_000,
 };
 
 /** The clock the client's timers and pace use (a fake one in tests). */
@@ -146,6 +149,8 @@ type Conn = {
   target: number;
   /** index pages read in this slice of the connection (hello's and pulls'), at most CLIENT.replayPages */
   pages: number;
+  /** an idle pull's discovery (D8b r2): pulls may go past the target, each page raising it, until one ends the log */
+  discover?: boolean;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -423,6 +428,8 @@ export class SyncClient {
         return this.ack(c, m);
       case "error":
         return this.error(c, m);
+      case "index_changed":
+        return this.indexChanged(c, m);
       case "revoked":
         this.say({ state: "off", ns: c.ns, reason: "signed out" });
         return c.end("revoked");
@@ -456,7 +463,26 @@ export class SyncClient {
     }
     if (this.paused?.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
+    this.armIdle(c);
     this.kick();
+  }
+
+  /** The server's notice that the log grew (D8, plan-sync-index-changed r1 §4): the target raised to its head, and a
+   * pull through the usual pacing.  Advisory: a head that isn't a non-negative safe integer is ignored, and it moves
+   * nothing but the target, a bound on pulling.  Without the confirmed index (step 3) it is ignored. */
+  private indexChanged(c: Conn, m: Record<string, unknown>) {
+    if (!this.opts.onIndex || !isNat(m.head) || m.head <= this.cursor) return;
+    c.target = Math.max(c.target, m.head);
+    this.pull(c);
+  }
+
+  /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
+  private armIdle(c: Conn) {
+    if (!this.opts.onIndex) return;
+    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => {
+      c.discover = true;
+      this.pull(c);
+    });
   }
 
   private async index(c: Conn, m: Record<string, unknown>) {
@@ -497,8 +523,14 @@ export class SyncClient {
     }
     if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
     this.cursor = last;
+    // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
+    if (c.discover) {
+      c.target = Math.max(c.target, last);
+      if (!m.more) c.discover = false;
+    }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    this.armIdle(c);
     this.pull(c);
     this.kick();
   }
@@ -506,7 +538,7 @@ export class SyncClient {
   /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
    * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
-    if (this.conn !== c || c.pulling || this.cursor >= c.target) return;
+    if (this.conn !== c || c.pulling || (this.cursor >= c.target && !c.discover)) return;
     // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
     // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
     if (c.pages >= CLIENT.replayPages) {
@@ -527,6 +559,7 @@ export class SyncClient {
     if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.pull(c));
     c.pulling = true;
     this.stats.pulls++;
+    this.armIdle(c);
     this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
   }
 

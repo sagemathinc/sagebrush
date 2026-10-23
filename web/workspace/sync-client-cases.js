@@ -1034,7 +1034,107 @@ async function refusalAtomic() {
   check(ok && points >= 2, "refusal atomic (D7): cut at each of acked's " + points + " points, the record stays undecided with no flag; past them, it is removed and the rebuild flagged in one transaction; a stronger reason is kept");
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic };
+// ---- step 4: the confirmed index and its view, live notices (D8), idle discovery (D8b)
+
+/** A client with the confirmed index (step 4's onIndex). */
+const viewClient = (w, opts = {}) => client(w, { onIndex: W.confirmedIndex(w), ...opts });
+
+async function echoNoCopy() {
+  // (C3's first test: a local create, then its echo: confirmed, applied to the index, and no `x (2)`)
+  await account();
+  const w = await fresh();
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c)), "echo, no copy: synced");
+    const f = await w.create("/x.txt", { content: "x" });
+    check(await until(async () => (await settled(w, c)) && (await W.cursorOf(w, nsOf(c))) > 0), "echo, no copy: decided, and the durable cursor past its echo");
+    const list = await w.list("/");
+    check(list.filter((e) => e.path.startsWith("/x")).length === 1 && (await w.stat("/x.txt"))?.fid === f.fid, "echo, no copy: one /x.txt, the same file: " + J(list.map((e) => e.path)));
+    const conf = await W.confirmedEntry(w, nsOf(c), f.fid);
+    check(conf?.path === "/x.txt" && conf.sha256 === f.sha256, "echo, no copy: in the confirmed index: " + J(conf));
+    check((await w.ops()).filter((o) => o.origin === "server").length === 0, "echo, no copy: nothing logged from the server (the view had it already)");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function liveNotice() {
+  // (D8, plan-sync-index-changed r1 test 7, the notice injected by the front: another device's create appears within
+  // 1 s, with no reconnect and no edit here; without a notice, nothing is pulled)
+  await account();
+  const w = await fresh();
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c)), "live notice: synced");
+    const pulls = c.stats.pulls;
+    const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/theirs", kind: "folder", fid: "00000000000000a1" }] });
+    const head = r.ack.ops[0].seq;
+    await sleep(500);
+    check(!(await w.stat("/theirs")) && c.stats.pulls === pulls, "live notice: no notice, nothing pulled yet");
+    const t0 = Date.now();
+    await ctl("notice", { head });
+    check(await until(async () => (await w.stat("/theirs"))?.fid === "00000000000000a1", 1_000), "live notice: the other device's folder here within 1 s: " + (Date.now() - t0) + " ms");
+    check(c.stats.connects === 1 && c.stats.pulls === pulls + 1, "live notice: by one pull, on the same connection: " + J({ pulls: c.stats.pulls, connects: c.stats.connects }));
+    // (a notice that isn't a safe integer, or isn't past the cursor: nothing)
+    await ctl("notice", { head: "9" });
+    await ctl("notice", { head });
+    await sleep(300);
+    check(c.stats.pulls === pulls + 1, "live notice: a malformed or old head moves nothing");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function noticeFlood() {
+  // (plan-sync-index-changed r1 test 8: 1,000 notices in a second pull only at the bucket's pace, never two at once)
+  await account();
+  const w = await fresh();
+  const keep = { ...W.CLIENT };
+  Object.assign(W.CLIENT, { pullBurst: 1, pullsPerSecond: 0.1 });
+  const clock = fakeClock();
+  const c = viewClient(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "notice flood: synced");
+    await otherOps(5, 0, "f");
+    const head = (await serverOps(w)).all.at(-1).seq;
+    const pulls = c.stats.pulls;
+    await ctl("notice", { head, times: 1000 });
+    await sleep(800);
+    check(c.stats.pulls - pulls <= 1 && c.debug().inflight <= 1, "notice flood: at most one pull for 1,000 notices (a token each 10 s): " + J({ pulls: c.stats.pulls - pulls, inflight: c.debug().inflight }));
+    check(await until(async () => !!(await w.stat("/f4"))), "notice flood: …and that pull brings the ops");
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
+async function idleDiscovery() {
+  // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
+  // page, with no edit and no reconnect, and no pull before it)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const c = viewClient(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "idle discovery: synced");
+    await otherOps(1500, 0, "i");
+    const pulls = c.stats.pulls;
+    await clock.advance(W.CLIENT.idlePullMs - 1000);
+    await sleep(300);
+    check(c.stats.pulls === pulls && !(await w.stat("/i0")), "idle discovery: nothing pulled before the 5 minutes: " + (c.stats.pulls - pulls));
+    await clock.advance(1000);
+    check(await until(async () => !!(await w.stat("/i1499")), 20_000), "idle discovery: at 5 minutes, every op of a two-page log here");
+    check(c.stats.pulls - pulls === 2 && c.stats.connects === 1, "idle discovery: two pulls (two pages), the same connection: " + J({ pulls: c.stats.pulls - pulls, connects: c.stats.connects }));
+    const listed = (await w.list("/")).filter((e) => /^\/i\d+$/.test(e.path)).length;
+    check(listed === 1500, "idle discovery: all 1,500 folders listed: " + listed);
+    await sleep(300);
+    check(c.stats.pulls - pulls === 2, "idle discovery: …then idle again (no further pull until the next 5 minutes)");
+  } finally {
+    await stop(c);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
