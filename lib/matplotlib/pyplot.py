@@ -979,7 +979,10 @@ class Axes:
 
     def set(self, **kw):
         for k, v in kw.items():
-            getattr(self, "set_" + k)(v)
+            f = getattr(self, "set_" + k, None)
+            if f is None:
+                raise AttributeError("Axes.set() got an unexpected keyword argument %r" % k)
+            f(v)
 
     def cla(self):
         self._prims, self._opts, self._ci, self._pi = [], {}, 0, 0
@@ -1370,6 +1373,37 @@ def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze
 
 def subplot(nrows=1, ncols=1, index=1, **kw):
     return gcf().add_subplot(nrows, ncols, index)
+
+
+def axes(arg=None, **kw):
+    """plt.axes(): new Axes filling the current figure, every call (as
+    matplotlib's); plt.axes([left, bottom, width, height]) at that place
+    (Figure.add_axes); an Axes made current. Keywords are Axes properties
+    (xlim=, ylim=, xlabel=, title=, ...), set through Axes.set."""
+    for k in ("projection", "polar"):
+        if kw.get(k) not in (None, False, "rectilinear"):
+            raise NotImplementedError("plt.axes(%s=%r): Sagebrush draws rectilinear Axes only" % (k, kw[k]))
+        kw.pop(k, None)
+    if isinstance(arg, Axes):
+        fig = arg.figure
+        if fig not in _figs:
+            _figs.append(fig)
+        _cur[0] = fig
+        if arg in fig.axes:
+            fig.axes.remove(arg)
+        fig.axes.append(arg)
+        ax = arg
+    elif arg is None:
+        fig = gcf()
+        ax = Axes(fig, (0.0, 0.0, 1.0, 1.0))
+        ax._grid = (1, 1)
+        fig.axes.append(ax)
+    else:
+        if isinstance(arg, str) or len(arg) != 4:
+            raise TypeError("plt.axes(rect): rect is [left, bottom, width, height], not %r" % (arg,))
+        ax = gcf().add_axes(arg)
+    ax.set(**kw)
+    return ax
 
 
 def close(fig=None):
