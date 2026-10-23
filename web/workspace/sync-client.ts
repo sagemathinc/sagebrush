@@ -34,6 +34,7 @@ import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix } from "./sync-confirmed";
+import { capture as captureAdoption } from "./sync-adopt";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
@@ -357,8 +358,10 @@ export class SyncClient {
       throw e;
     }
     const ob = new Outbox(this.w, lease);
-    // (a namespace's scan starts here, at the latest op, until step 4's first sync sends the tree as it was)
-    if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
+    // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
+    // without it (step 3): the scan starts at the latest op)
+    if (this.opts.onIndex) await captureAdoption(this.w, ns);
+    else if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);
     // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before

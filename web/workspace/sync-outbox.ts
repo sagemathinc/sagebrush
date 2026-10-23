@@ -349,8 +349,14 @@ export class Outbox {
         } else {
           // (its folder first: a parent still unsent in this journal waits for the next round)
           if (jr.parent) {
-            const pj = (await req(j.get([jp, jr.parent]))) as JRec | undefined;
-            if (pj && !pj.sent && !pj.gone) continue;
+            const pj = (await req(j.get([jp, jr.parent]))) as (JRec & { skipped?: true }) | undefined;
+            // (under a folder in Trash, gone, or itself not adopted: not adopted (C3), so nothing brings it back)
+            if (pj && (pj.trashed || pj.gone || pj.skipped)) {
+              j.put({ ...jr, sent: true, skipped: true });
+              pos.progress = true;
+              continue;
+            }
+            if (pj && !pj.sent) continue;
           }
           const folder = jr.parent ? ((await pathOf(jr.parent)) ?? "/") : "/";
           const placed = (folder === "/" ? "" : folder) + "/" + jr.name;

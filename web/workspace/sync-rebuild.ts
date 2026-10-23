@@ -253,9 +253,20 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
       }
       if (recs.length === 0 || (recs.length < REBUILD.page && at.dseq === recs[recs.length - 1].dseq)) Object.assign(at, { step: "journals", key: "", dseq: undefined });
     } else if (at.step === "journals") {
-      // (the journals still draining: the active reissue journal, then the first sync's (prefix `ns`))
+      // (the journal still draining, if any: an earlier pass's reissue journal, or the first sync's adoption journal)
       const active = (await req(meta.get(journalKey(ns)))) as string | undefined;
-      const prefixes = [...(active ? [active] : []), ns];
+      const prefixes = active ? [active] : [];
+      if (!prefixes.length) {
+        Object.assign(at, { step: p.captured ? "close" : "skip", key: undefined });
+        if (!p.captured) {
+          meta.put({ ...p, phase: "done", at: undefined }, passKey(ns));
+          cut("capture");
+          return true;
+        }
+        meta.put({ ...p, at }, passKey(ns));
+        cut("capture");
+        return false;
+      }
       const [which, from] = (at.key ?? "").includes("\u0001") ? (at.key as string).split("\u0001") : [prefixes[0], ""];
       const j = tx.objectStore("adoptJournal");
       const recs = (await req(j.getAll(IDBKeyRange.bound([which, from], [which, "\uffff"], true), REBUILD.page))) as JournalRecord[];

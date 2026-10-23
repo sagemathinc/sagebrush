@@ -18,3 +18,4 @@ export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, gen
 export { applyView, fetchKey, VIEW_STORES, type ListedWhy, type JournalRecord } from "./sync-view";
 export { REBUILD, passOf, obligationOf, cleanKey, journalKey, floorKey, journalPrefix, type Pass } from "./sync-rebuild";
 export { obligate, rebuildKey, type Obligation } from "./sync-outbox";
+export { ADOPT, adoptPrefix, capture as captureAdoption } from "./sync-adopt";
