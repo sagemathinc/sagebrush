@@ -10,7 +10,7 @@
 // No IndexedDB here: the base loads through a `Store` (sync-confirmed.ts gives the IndexedDB one; the tests an
 // in-memory one), so the vectors can check it against the in-memory reducer.
 import { SyncIndex, reduce, type Outcome, type SyncEntry, type SyncOp } from "./sync-reduce";
-import { parentOf } from "./paths";
+import { TRASH, parentOf } from "./paths";
 
 /** D10 r3's bounds. */
 export const OVERLAY = {
@@ -217,6 +217,39 @@ export class Overlay {
   }
 }
 
+/**
+ * The op's read set loaded before it runs (D10 r1): its target and `parent` by identity; the ancestors of its path
+ * and of `to` by key (each a folder's listing, as a key's miss loads it); for a folder it moves, puts in Trash or
+ * forgets, its subtree, level by level; and Trash's top.  So the rounds that follow miss only on what can't be
+ * known before the reducer runs: derived identities' candidates (D10 r2's 1,001 rounds).
+ */
+async function preload(base: PartialIndex, store: Store, op: SyncOp) {
+  const misses: Miss[] = [];
+  const id = op.kind === "file" || op.kind === "folder" ? op.fid : op.ref;
+  if (typeof id === "string") misses.push(new Miss("byId", id));
+  if (typeof op.parent === "string") misses.push(new Miss("byId", op.parent));
+  for (const p of [op.path, op.to]) {
+    if (typeof p !== "string" || !p.startsWith("/")) continue;
+    for (let a = p; a !== "/" && a.length > 0; a = parentOf(a)) misses.push(new Miss("byKey", keyOf(a)));
+  }
+  misses.push(new Miss("children", keyOf(TRASH)));
+  await base.load(store, misses);
+  const e = typeof id === "string" ? base.byId.get(id) : undefined;
+  if (e && e !== ABSENT && e.kind === "folder" && op.op !== "write" && op.op !== "create" && op.op !== "mkdir" && op.op !== "adopt") {
+    const queue = [keyOf(e.path)];
+    while (queue.length) {
+      const k = queue.shift()!;
+      if (!base.children.has(k)) base.putFolder(k, await store.folder(k));
+      const kids = base.children.get(k);
+      if (!kids || kids === ABSENT) continue;
+      for (const cid of kids) {
+        const c = base.byId.get(cid);
+        if (c && c !== ABSENT && c.kind === "folder") queue.push(keyOf(c.path));
+      }
+    }
+  }
+}
+
 /** What one op did, with what it cost. */
 export type OpResult = { outcome: Outcome; units: number; rounds: number; memory: number };
 
@@ -229,6 +262,7 @@ export type OpResult = { outcome: Outcome; units: number; rounds: number; memory
  */
 export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: { carried?: number; budget?: number; alone?: boolean } = {}): Promise<OpResult | { trial: number }> {
   let units = opts.carried ?? 0;
+  await preload(base, store, op);
   for (let round = 1; ; round++) {
     const ov = new Overlay(base);
     let outcome: Outcome | undefined, escaped: unknown;
