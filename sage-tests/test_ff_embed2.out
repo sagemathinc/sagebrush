@@ -1,0 +1,101 @@
+bad characteristic map ValueError No embedding of Finite Field in a of size 2^2 into Finite Field in h of size 3^2
+bad characteristic nocheck ValueError No embedding of Finite Field in a of size 2^2 into Finite Field in h of size 3^2
+degree not dividing ValueError No embedding of Finite Field in c of size 2^3 into Finite Field in b of size 2^4
+degree not dividing nocheck ValueError No embedding of Finite Field in c of size 2^3 into Finite Field in b of size 2^4
+bigger into smaller ValueError No embedding of Finite Field in b of size 2^4 into Finite Field in a of size 2^2
+same char wrong root ValueError relations do not all (canonically) map to 0 under map determined by images of generators
+same char wrong root nocheck Ring morphism:
+  From: Finite Field in a of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: a |--> 1
+Hom other char (Set of field embeddings from Finite Field in a of size 2^2 to Finite Field in h of size 3^2, [], [])
+equal hash (True, 2)
+subfield name [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1), (Finite Field in v2 of size 2^2, Ring morphism:
+  From: Finite Field in v2 of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: v2 |--> b^2 + b), (Finite Field in b of size 2^4, Identity endomorphism of Finite Field in b of size 2^4)]
+subfield single name [(Finite Field in v of size 2^2, Ring morphism:
+  From: Finite Field in v of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: v |--> b^2 + b)]
+subfield dict [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1), (Finite Field in u of size 2^2, Ring morphism:
+  From: Finite Field in u of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: u |--> b^2 + b), (Finite Field in b of size 2^4, Identity endomorphism of Finite Field in b of size 2^4)]
+subfield dict missing KeyError 1
+subfield dict with degree ValueError variable name "{2: 'u'}" is not alphanumeric
+subfield bad name ValueError variable name '5' does not start with a letter
+subfield dict E [Finite Field of size 2, Finite Field in u of size 2^2, Finite Field in w of size 2^3, Finite Field in e of size 2^6]
+subfield name E [Finite Field of size 2, Finite Field in v2 of size 2^2, Finite Field in v3 of size 2^3, Finite Field in e of size 2^6]
+subfield degrees [[Finite Field of size 2], [Finite Field in b2 of size 2^2], [Finite Field in b of size 2^4], [], [], [Finite Field of size 2, Finite Field in b2 of size 2^2, Finite Field in b of size 2^4]]
+subfield negative KeyError -1
+subfield negative 2 KeyError -2
+prefix name single [(Finite Field in v of size 2^2, Ring morphism:
+  From: Finite Field in v of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: v |--> z4^2 + z4)]
+prefix name all [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in z4 of size 2^4
+  Defn: 1 |--> 1), (Finite Field in v2 of size 2^2, Ring morphism:
+  From: Finite Field in v2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: v2 |--> z4^2 + z4), (Finite Field in z4 of size 2^4, Identity endomorphism of Finite Field in z4 of size 2^4)]
+prefix dict [Finite Field of size 2, Finite Field in u of size 2^2, Finite Field in z4 of size 2^4]
+prefix dict missing KeyError 1
+prefix default [Finite Field of size 2, Finite Field in z2 of size 2^2, Finite Field in z4 of size 2^4]
+Hom order (3, 2, 1) [2*b + 1, b]
+Hom order (3, 3, 1) [b, b + 2, b + 1]
+Hom order (3, 4, 1) [b, b^3, b^3 + 2*b^2 + 1, b^3 + b^2 + 2*b]
+Hom order (5, 2, 1) [4*b + 1, b]
+Hom order (5, 3, 1) [b, 3*b^2 + 1, 2*b^2 + 4*b + 4]
+Hom order (7, 2, 1) [6*b + 1, b]
+Hom order (7, 3, 1) [b, 4*b^2 + b + 1, 3*b^2 + 5*b]
+Hom order (11, 2, 1) [10*b + 4, b]
+Hom order (3, 2, 2) [2*b^3 + 2*b^2 + 1, b^3 + b^2]
+Hom order (3, 2, 3) [2*b^5 + 2*b^3 + b^2 + 2*b + 2, b^5 + b^3 + 2*b^2 + b + 2]
+Hom order (3, 3, 2) [2*b^5 + 2*b^4, 2*b^5 + 2*b^4 + 2, 2*b^5 + 2*b^4 + 1]
+Hom order (5, 2, 2) [4*b^3 + 4*b^2 + 4*b + 3, b^3 + b^2 + b + 3]
+Hom order (7, 2, 2) [4*b^3 + 5*b^2 + 4*b + 4, 3*b^3 + 2*b^2 + 3*b + 4]
+Hom order (2, 4, 1) [b, b + 1, b^2, b^2 + 1]
+Hom order (2, 3, 2) [b^4 + b^2 + b + 1, b^5 + b, b^5 + b^4 + b^2 + 1]
+Hom order (2, 2, 3) [b^3 + b^2 + b, b^3 + b^2 + b + 1]
+Hom order prefix 9 81 [2*z4^3 + 2*z4^2 + 1, z4^3 + z4^2]
+Hom order prefix 25 625 [4*z4^3 + 4*z4^2 + 4*z4 + 3, z4^3 + z4^2 + z4 + 3]
+Hom order prefix 27 729 [2*z6^5 + 2*z6^4, 2*z6^5 + 2*z6^4 + 2, 2*z6^5 + 2*z6^4 + 1]
+Hom first Ring endomorphism of Finite Field in a of size 3^2
+  Defn: a |--> 2*a + 1
+prime hom Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1
+prime hom zero ValueError relations do not all (canonically) map to 0 under map determined by images of generators
+prime hom gen ValueError relations do not all (canonically) map to 0 under map determined by images of generators
+prime hom self Ring endomorphism of Finite Field of size 2
+  Defn: 1 |--> 1
+prime hom field Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1
+prime hom other char ValueError No embedding of Finite Field of size 3 into Finite Field in b of size 2^4
+prime hom nocheck other char ValueError No embedding of Finite Field of size 3 into Finite Field in b of size 2^4
+prime hom two ValueError number of images must equal number of generators
+prime hom int Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1
+prime hom apply 1
+prime subfields ([(Finite Field of size 2, Identity endomorphism of Finite Field of size 2)], [(Finite Field of size 2, Identity endomorphism of Finite Field of size 2)], [], [(Finite Field of size 2, Identity endomorphism of Finite Field of size 2)])
+prime subfields negative KeyError -1
+prime subfields big [(Finite Field of size 1099511627791, Identity endomorphism of Finite Field of size 1099511627791)]
+prime Hom (Set of field embeddings from Finite Field of size 2 to Finite Field in b of size 2^4, [Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1], [Ring endomorphism of Finite Field of size 2
+  Defn: 1 |--> 1], [])
