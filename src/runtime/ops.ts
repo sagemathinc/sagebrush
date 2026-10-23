@@ -1708,18 +1708,24 @@ export class SetIter {
   }
 }
 // reversed() of a dict or its views: from the last entry back, as CPython's;
-// a changed size raises; an entry deleted since is passed over; after
-// clear(), it goes on in the new entries from the same position. Its keys
-// are taken at the start; while the dict has deleted none (a plain dict
-// counts its deletions, $dels), they are all there, and none is looked up
-// (LIMIT-PR66-2); after a deletion, or for a dict of attributes, globals or
-// a class (which can lose a key unseen), each is looked up as it is reached.
+// a changed size raises; an entry deleted since is passed over; a value is
+// read as it is when reached; after clear(), it goes on in the new entries
+// from the same position. Its keys, and for the values and items its
+// values, are taken at the start (LIMIT-PR66-2): a plain dict counts its
+// deletions ($dels) and its stores ($stores), and while there are none the
+// keys are all there and the values are the ones taken, so nothing is
+// looked up. After a deletion each key is looked up as it is reached, after
+// a store each value, for good (one-way); a dict of attributes, globals or
+// a class, or one sharing its Map (a function's __dict__), can change
+// without the dict, so for it each is always looked up.
 export class DictRevIter {
   keys: any[];
+  vals: any[] | null;
   size: number;
   i: number;
   clears: number;
   dels: number;
+  stores: number;
   live: boolean;
   constructor(public d: PyDict, public kind: number) {
     const m = d.$m;
@@ -1728,19 +1734,21 @@ export class DictRevIter {
     this.i = this.keys.length - 1;
     this.clears = d.$clears;
     this.dels = d.$dels;
-    this.live = m.constructor !== Map;
+    this.stores = d.$stores;
+    this.live = m.constructor !== Map || d.$shared;
+    this.vals = kind !== 0 && !this.live ? [...m.values()] : null;
   }
   $next(): any {
     const d = this.d;
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any) | ((d.$dels !== this.dels) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any) | ((d.$dels !== this.dels) as any) | ((d.$stores !== this.stores) as any)) this.changed();
     if (!this.live) {
       const i = this.i;
       if (i < 0) return this.end();
       this.i = i - 1;
       const k = this.keys[i];
       if (this.kind === 0) return dictKeyOf(d, k);
-      if (this.kind === 1) return d.$m.get(k);
-      return tuple([dictKeyOf(d, k), d.$m.get(k)]);
+      const v = this.vals !== null ? this.vals[i] : d.$m.get(k);
+      return this.kind === 1 ? v : tuple([dictKeyOf(d, k), v]);
     }
     while (this.i >= 0) {
       const k = this.keys[this.i--];
@@ -1761,11 +1769,18 @@ export class DictRevIter {
       // (cleared: the new entries, from the same position)
       this.clears = d.$clears;
       this.keys = [...d.$m.keys()];
+      this.vals = null;
     }
     if (d.$dels !== this.dels) {
       // (a key deleted: each looked up from now on)
       this.dels = d.$dels;
       this.live = true;
+      this.vals = null;
+    }
+    if (d.$stores !== this.stores) {
+      // (a value stored: each value read from the dict from now on)
+      this.stores = d.$stores;
+      this.vals = null;
     }
   }
   // (exhausted: no more, whatever the dict does after)
@@ -1774,7 +1789,9 @@ export class DictRevIter {
     this.size = 0;
     this.clears = 0;
     this.dels = 0;
+    this.stores = 0;
     this.keys = [];
+    this.vals = null;
     return DONE;
   }
 }

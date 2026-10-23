@@ -217,3 +217,32 @@ rdel("reversed: str keys, del, add", lambda d: (_del(d, "b"), d.__setitem__("e",
 rdel("reversed: float and int keys", lambda d: (_del(d, 2.0), d.__setitem__(7, 7)), make=lambda: {1: 1, 2: 2, 3.5: 3, 4: 4})
 rdel("reversed: tuple keys, del, add", lambda d: (_del(d, (2, "b")), d.__setitem__((5, "e"), 5)), make=lambda: {(1, "a"): 1, (2, "b"): 2, (3, "c"): 3, (4, "d"): 4})
 rdel("reversed items: frozenset keys, pop, add", lambda d: (d.pop(frozenset({2})), d.__setitem__(frozenset({5}), 5)), ritems, make=lambda: {frozenset({1}): 1, frozenset({2}): 2, frozenset({3}): 3})
+
+
+# reversed() of the values or items while a value is stored (each read as
+# it is when reached), and a function's __dict__ changed through its
+# attributes
+rdel("reversed values: update", lambda d: d.update({2: "u", 1: "v"}), rvalues)
+rdel("reversed items: replace two", lambda d: (d.__setitem__(1, "a"), d.__setitem__(3, "c")), ritems)
+rdel("reversed values: same value again", lambda d: d.__setitem__(2, 2), rvalues)
+rdel("reversed values: setdefault of an existing key", lambda d: d.setdefault(2, "no"), rvalues)
+rdel("reversed items: replace, then del and add", lambda d: (d.__setitem__(2, "x"), _del(d, 1), d.__setitem__(9, 9)), ritems)
+rdel("reversed values: str keys, replace", lambda d: d.__setitem__("b", "B"), rvalues, make=lambda: {"a": 1, "b": 2, "c": 3, "d": 4})
+
+
+def fn():
+    pass
+
+
+fn.a, fn.b, fn.c = 1, 2, 3
+it = reversed(fn.__dict__.values())
+out = [nxt(it)]
+fn.b = "x"
+out += [nxt(it) for _ in range(3)]
+print("reversed function __dict__ values: attribute set", out)
+it = reversed(fn.__dict__)
+out = [nxt(it)]
+fn.__dict__.pop("b")
+fn.d = 4
+out += [nxt(it) for _ in range(3)]
+print("reversed function __dict__: key popped, attribute added", out)
