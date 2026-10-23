@@ -40,6 +40,14 @@ const wire = (o) => (o.op === "emptyTrash" || o.op === "discard" ? "forget" : o.
 const nsOf = (c) => c.debug().ns ?? c.status.ns;
 const bytes = (n, seed) => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + seed) & 255; return b; };
 
+/** Everything logged here decided: scanned to the latest op, no record left, the sender idle and saying so. */
+async function settled(w, c) {
+  const ns = nsOf(c);
+  if (!ns || c.status.state !== "synced" || (await outbox(w)) !== 0) return false;
+  const scanned = await metaGet(w.ws, `sync:${ns}:scanned`);
+  return scanned >= (await w.lastSeq()) && c.debug().inflight === 0;
+}
+
 /** The op that made `path` is still to go: an undecided record, or past the scan's watermark. */
 async function unlost(w, ns, path, what) {
   const op = (await all(w.ws, "ops")).find((o) => o.path === path);
@@ -132,7 +140,7 @@ async function basics() {
   await w.write("/b.txt", "hello again");
   const t = await w.remove("/d/c.txt");
   await w.restore(t.path);
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "basics: every record sent, accepted, its echo seen, and removed " + J(c.status));
+  check(await until(() => settled(w, c)), "basics: every record sent, accepted, its echo seen, and removed " + J(c.status));
   await everyOnce(w, from, 0, "basics");
   const log = await ctl("log");
   const puts = log.http.filter((h) => h.method === "PUT");
@@ -174,7 +182,7 @@ async function lostAckReconnect() {
   const from = await w.lastSeq();
   await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true } });
   await w.create("/l.txt", { content: "lost" });
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced", 15_000), "lost ack, then the socket closed: the record decided after the reconnect " + J(c.status));
+  check(await until(() => settled(w, c), 15_000), "lost ack, then the socket closed: the record decided after the reconnect " + J(c.status));
   const log = await ctl("log");
   const sends = opsMessages(log);
   const dropped = log.got.filter((g) => g.dropped);
@@ -198,7 +206,7 @@ async function lostAckReload() {
   const kept = await all(w.ws, "outbox");
   check(kept.length === 1 && kept[0].accepted === undefined, "lost ack, reload: the record kept, undecided, across the stop: " + J(kept.map((r) => [r.dseq, r.accepted])));
   const c2 = client(w);
-  check(await until(async () => (await outbox(w)) === 0 && c2.status.state === "synced"), "lost ack, reload: decided by the next page's client " + J(c2.status));
+  check(await until(() => settled(w, c2)), "lost ack, reload: decided by the next page's client " + J(c2.status));
   const sends = opsMessages(await ctl("log"));
   check(sends.length === 2 && J(sends[0].json) === J(sends[1].json) && sends[0].dseqs[0] === kept[0].dseq, "lost ack, reload: the same dseq, the same payload: " + J(sends.map((s) => s.dseqs)));
   await everyOnce(w, from, 0, "lost ack, reload");
@@ -218,7 +226,7 @@ async function refusal() {
   await w.forget("/f.txt");
   w.actor = "person";
   await w.mkdir("/after");
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "refusal: every record decided " + J(c.status));
+  check(await until(() => settled(w, c)), "refusal: every record decided " + J(c.status));
   const ns = nsOf(c);
   const refused = (await metaGet(w.ws, `sync:${ns}:refused`)) ?? [];
   const rb = await metaGet(w.ws, `sync:${ns}:rebuild`);
@@ -256,7 +264,7 @@ async function rateProlonged() {
   await clock.advance(30_000);
   check(await until(async () => opsMessages(await ctl("log")).length === 3), "rate: resent at its next timer (refused again)");
   await clock.advance(30_000);
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "rate: then accepted: every record decided " + J(c.status));
+  check(await until(() => settled(w, c)), "rate: then accepted: every record decided " + J(c.status));
   const sends = opsMessages(await ctl("log"));
   check(sends.length === 4 && sends.every((s) => J(s.json) === J(sends[0].json)), "rate: 4 messages in 90 s, each the same 3 records unchanged: " + J(sends.map((s) => s.dseqs)));
   check((await metaGet(w.ws, `sync:${ns}:retry:ops`)) === undefined, "rate: the timer cleared once a message went through");
@@ -332,7 +340,7 @@ async function busyOrder() {
   await ctl("log", { reset: true });
   await ctl("set", { set: { fakeOps: [{ code: "busy", detail: { retry_after: 300 } }, { code: "order", detail: { next_dseq: 1 } }] } });
   const c = client(w);
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "busy and order: decided after both " + J(c.status));
+  check(await until(() => settled(w, c)), "busy and order: decided after both " + J(c.status));
   const sends = opsMessages(await ctl("log"));
   check(sends.length === 3 && sends.every((s) => J(s.json) === J(sends[0].json)), "busy and order: resent unchanged, from the lowest undecided, each time: " + J(sends.map((s) => s.dseqs)));
   await everyOnce(w, from, 0, "busy and order");
@@ -374,11 +382,11 @@ async function twoTabs() {
   const l = await ctl("log");
   check(c2.status.state === "waiting" && l.open === 1 && l.sockets === 1, "two tabs: the second waits for the lock; one socket: " + J({ s: c2.status.state, open: l.open, sockets: l.sockets }));
   await w2.mkdir("/from-tab-2");
-  check(await until(async () => (await outbox(w1)) === 0 && c1.status.state === "synced"), "two tabs: a change in the waiting tab sent by the one holding the lock");
+  check(await until(() => settled(w1, c1)), "two tabs: a change in the waiting tab sent by the one holding the lock");
   await stop(c1);
   check(await until(() => c2.status.state === "synced"), "two tabs: the lock passed on; the second connects " + J(c2.status));
   await w2.mkdir("/after-handover");
-  check(await until(async () => (await outbox(w2)) === 0 && c2.status.state === "synced"), "two tabs: …and sends, from the durable state");
+  check(await until(() => settled(w2, c2)), "two tabs: …and sends, from the durable state");
   await everyOnce(w2, from, 0, "two tabs");
   await nothingApplied(w2, "two tabs");
   await stop(c2);
@@ -396,7 +404,7 @@ async function generation() {
   await ctl("log", { reset: true });
   await ctl("set", { set: { rewriteWelcome: { generation: g + 1 } } });
   const c = client(w);
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "generation: decided " + J(c.status));
+  check(await until(() => settled(w, c)), "generation: decided " + J(c.status));
   const l = await ctl("log");
   const order = l.sent.map((m) => m.t);
   check(c.stats.connects === 2 && order[0] === "hello" && order[1] === "hello" && opsMessages(l).length === 1, "generation: a welcome for another generation than the status's: closed, nothing sent on it, the namespace read again: " + J(order));
@@ -450,7 +458,7 @@ async function tooLarge() {
   const from = await w.lastSeq();
   await w.create("/large.bin", { content: bytes(6_000, 2) });
   await w.mkdir("/after-large");
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "too large: decided " + J(c.status));
+  check(await until(() => settled(w, c)), "too large: decided " + J(c.status));
   const refused = (await metaGet(w.ws, `sync:${nsOf(c)}:refused`)) ?? [];
   const puts = (await ctl("log")).http.filter((h) => h.method === "PUT");
   check(puts.length === 1 && puts[0].status === 413 && refused.length === 1 && refused[0].code === "missing" && refused[0].path === "/large.bin", "too large: the upload refused for good (413), the op sent all the same and refused `missing`, listed: " + J({ puts: puts.map((p) => p.status), refused }));
@@ -477,7 +485,7 @@ async function reservation() {
   check(l.putsNow === 2 && l.maxPuts === 2 && r.held >= 2 * size * W.COPIES, "reservation: no third while two run; each holds size × COPIES of the page's reservation while its bytes are out: " + J({ now: l.putsNow, held: r.held }));
   await ctl("set", { set: { holdPut: false } });
   await ctl("release");
-  check(await until(async () => (await outbox(w)) === 0 && c.status.state === "synced"), "reservation: then all decided");
+  check(await until(() => settled(w, c)), "reservation: then all decided");
   check(W.reserved().held === 0 && (await ctl("log")).maxPuts <= 2 && c.stats.maxPutsAtOnce <= 2, "reservation: every reservation released; never more than 2 PUTs at once");
   await everyOnce(w, from, 0, "reservation");
   await stop(c);
