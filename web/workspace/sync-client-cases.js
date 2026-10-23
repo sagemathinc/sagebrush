@@ -1454,7 +1454,51 @@ async function rebuildFailedPass() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass };
+async function rebuildBehind() {
+  // (D6: local behind the server, as a restored older copy: a second workspace with the first one's device, its own
+  // edits at dseqs the server decided for other ops.  welcome's next_dseq is past them: halted, rebuilt; the
+  // replaced records' identities reissued at fresh dseqs from server_next, each once; the server's tree listed here)
+  await account();
+  const w1 = await fresh();
+  const c1 = viewClient(w1);
+  check(await until(() => settled(w1, c1)), "behind: the first copy synced");
+  for (let i = 1; i <= 5; i++) await w1.mkdir(`/a${i}`);
+  check(await until(() => settled(w1, c1)), "behind: its five folders up");
+  const ns = nsOf(c1);
+  await stop(c1);
+  const nm = names();
+  let w2 = await W.Workspace.open(nm);
+  w2.close();
+  await new Promise((ok, no) => { const r = indexedDB.open(nm.name); r.onsuccess = () => { const db = r.result; const tx = db.transaction("meta", "readwrite"); tx.objectStore("meta").put(w1.device, "device"); tx.oncomplete = () => { db.close(); ok(); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); });
+  w2 = await W.Workspace.open(nm);
+  used.push(w2);
+  check(w2.device === w1.device, "behind: the older copy has the same device");
+  const ob = new W.Outbox(w2, await W.switchTo(w2, ns));
+  await ob.begin(await w2.lastSeq());
+  const f = await w2.create("/mine.txt", { content: "mine" });
+  await w2.mkdir("/mine-d");
+  await ob.scan();
+  check((await ob.records()).map((r) => r.dseq).join() === "1,2", "behind: its own records at dseqs 1 and 2 (the server's are other ops)");
+  await ctl("log", { reset: true });
+  const c2 = viewClient(w2);
+  try {
+    check(await until(async () => (await settled(w2, c2)) && c2.stats.rebuildPasses >= 1, 30_000), "behind: halted, rebuilt, resumed: " + J({ passes: c2.stats.rebuildPasses, phase: c2.stats.rebuildPhase, status: c2.status }));
+    const { mine } = await serverOps(w2);
+    const adopts = mine.filter((o) => o.fid === f.fid), dirs = mine.filter((o) => o.path === "/mine-d" && o.op === "mkdir");
+    check(adopts.length === 1 && adopts[0].op === "adopt" && adopts[0].dseq >= 6, "behind: the file reissued once, as an adopt from server_next: " + J(adopts.map((o) => [o.op, o.dseq])));
+    check(dirs.length === 1 && dirs[0].dseq >= 6, "behind: the folder reissued once: " + J(dirs.map((o) => o.dseq)));
+    const sent = (await ctl("log")).sent.filter((m) => m.t === "ops").flatMap((m) => m.dseqs);
+    check(sent.every((d) => d >= 6) && new Set(sent).size === sent.length, "behind: nothing sent below server_next, no dseq twice: " + J(sent));
+    const here = (await w2.list("/")).map((e) => e.path).sort();
+    check(["/a1", "/a2", "/a3", "/a4", "/a5", "/mine-d", "/mine.txt"].every((p) => here.includes(p)) && !here.some((p) => / \(2\)/.test(p)), "behind: the server's folders listed here, its own kept, no copies: " + J(here));
+    await w2.mkdir("/after");
+    check(await until(async () => (await settled(w2, c2)) && (await serverOps(w2)).mine.some((o) => o.path === "/after")), "behind: a later edit accepted");
+  } finally {
+    await stop(c2);
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
