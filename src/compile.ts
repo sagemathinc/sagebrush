@@ -242,7 +242,7 @@ export function execModule(source: string, filename: string, name: string, isPac
     if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
     fn(m, R);
   } catch (e) {
-    R.sysModules.$m.delete(name);
+    if (R.sysModules.$m.delete(name)) R.sysModules.$dels++;
     throw e;
   }
   return m;

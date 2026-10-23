@@ -32,3 +32,13 @@ test("a loop that replaces every key it is given ends", () => {
   const got = execFileSync(process.execPath, [cli, "-c", src], { encoding: "utf8" });
   assert.equal(got, "1000 dictionary keys changed during iteration\n");
 });
+
+// reversed() of an instance's __dict__: its attributes can be deleted without
+// the dict (del c.y), so each key is looked up as it is reached, and a
+// deleted one is passed over. (CPython's own result here shows its instance
+// dicts' layout, 'w' twice, so this is checked on its own.)
+test("reversed() of an instance's __dict__ passes over an attribute deleted since", () => {
+  const src = "class C:\n    pass\nc = C()\nc.x, c.y, c.z, c.w = 1, 2, 3, 4\nit = reversed(c.__dict__)\nout = [next(it)]\ndel c.y\nc.v = 5\nout += list(it)\nprint(out)\nit = reversed(c.__dict__.values())\nout = [next(it)]\ndel c.z\nc.u = 6\nout += list(it)\nprint(out)\n";
+  const got = execFileSync(process.execPath, [cli, "-c", src], { encoding: "utf8" });
+  assert.equal(got, "['w', 'z', 'x']\n[5, 4, 1]\n");
+});
