@@ -1,0 +1,771 @@
+[
+ [
+  "YouTubeVideo(\"dQw4w9WgXcQ\")",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/dQw4w9WgXcQ\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "dQw4w9WgXcQ"
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/dQw4w9WgXcQ"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"abc\", width=640, height=360, start=30)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"640\"\n            height=\"360\"\n            src=\"https://www.youtube.com/embed/abc?start=30\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    360
+   ],
+   [
+    "id",
+    "abc"
+   ],
+   [
+    "params",
+    {
+     "start": 30
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/abc"
+   ],
+   [
+    "width",
+    640
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"x\", allow_autoplay=True, autoplay=1)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/x?autoplay=1\"\n            frameborder=\"0\"\n            allowfullscreen\n            allow=\"autoplay\"\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "allow=\"autoplay\""
+    ]
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "x"
+   ],
+   [
+    "params",
+    {
+     "autoplay": 1
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/x"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"x\", allow_autoplay=True)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/x?autoplay=1\"\n            frameborder=\"0\"\n            allowfullscreen\n            allow=\"autoplay\"\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "allow=\"autoplay\""
+    ]
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "x"
+   ],
+   [
+    "params",
+    {
+     "autoplay": 1
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/x"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"x\", extras=[\"e1\"], allow_autoplay=True, autoplay=1)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/x?autoplay=1\"\n            frameborder=\"0\"\n            allowfullscreen\n            e1 allow=\"autoplay\"\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "e1",
+     "allow=\"autoplay\""
+    ]
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "x"
+   ],
+   [
+    "params",
+    {
+     "autoplay": 1
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/x"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"id\", start=5, end=9)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/id?start=5&end=9\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "id"
+   ],
+   [
+    "params",
+    {
+     "start": 5,
+     "end": 9
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/id"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"id\", width=\"100%\")",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"100%\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/id\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "id"
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/id"
+   ],
+   [
+    "width",
+    "100%"
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"a b&c\")",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/a b&amp;c\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "a b&c"
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/a b&c"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(123)",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/123\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    123
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/123"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"https://example.org/a?b=1&c=2\", width=500, height=300)",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"500\"\n            height=\"300\"\n            src=\"https://example.org/a?b=1&amp;c=2\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://example.org/a?b=1&c=2"
+   ],
+   [
+    "width",
+    500
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"page.html\", \"100%\", 400, extras=[\"allowfullscreen\"])",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"100%\"\n            height=\"400\"\n            src=\"page.html\"\n            frameborder=\"0\"\n            allowfullscreen\n            allowfullscreen\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "allowfullscreen"
+    ]
+   ],
+   [
+    "height",
+    400
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "page.html"
+   ],
+   [
+    "width",
+    "100%"
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"https://a.b/c\", 300, 200, extras=['allow=\"x\"', \"sandbox\"])",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"300\"\n            height=\"200\"\n            src=\"https://a.b/c\"\n            frameborder=\"0\"\n            allowfullscreen\n            allow=\"x\" sandbox\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "allow=\"x\"",
+     "sandbox"
+    ]
+   ],
+   [
+    "height",
+    200
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://a.b/c"
+   ],
+   [
+    "width",
+    300
+   ]
+  ]
+ ],
+ [
+  "IFrame('a\"b<c>\\'d', 1, 2)",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"a&quot;b&lt;c&gt;&#x27;d\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "a\"b<c>'d"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"s\", 1, 2, extras=(\"t1\", \"t2\"))",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"s\"\n            frameborder=\"0\"\n            allowfullscreen\n            t1 t2\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "t1",
+     "t2"
+    ]
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "s"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"s\", 1.5, None)",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1.5\"\n            height=\"None\"\n            src=\"s\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    null
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "s"
+   ],
+   [
+    "width",
+    1.5
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"s?q=1\", 1, 2, r=2)",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"s?q=1?r=2\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "r": 2
+    }
+   ],
+   [
+    "src",
+    "s?q=1"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, a=1, b=\"c d\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?a=1&b=c+d\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "a": 1,
+     "b": "c d"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, q=\"\u00e9/?&=~_.-\", n=[1, 2])",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?q=%C3%A9%2F%3F%26%3D~_.-&n=%5B1%2C+2%5D\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "q": "\u00e9/?&=~_.-",
+     "n": [
+      1,
+      2
+     ]
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "VimeoVideo(\"12345\")",
+  "<IPython.lib.display.VimeoVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://player.vimeo.com/video/12345\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://player.vimeo.com/video/12345"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "VimeoVideo(\"1\", width=640, height=360)",
+  "<IPython.lib.display.VimeoVideo at 0x?>",
+  "\n        <iframe\n            width=\"640\"\n            height=\"360\"\n            src=\"https://player.vimeo.com/video/1\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    360
+   ],
+   [
+    "params",
+    {}
+   ],
+   [
+    "src",
+    "https://player.vimeo.com/video/1"
+   ],
+   [
+    "width",
+    640
+   ]
+  ]
+ ],
+ [
+  "VimeoVideo(\"v\", extras=[\"z\"], k=\"1\")",
+  "<IPython.lib.display.VimeoVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://player.vimeo.com/video/v?k=1\"\n            frameborder=\"0\"\n            allowfullscreen\n            z\n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    [
+     "z"
+    ]
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "params",
+    {
+     "k": "1"
+    }
+   ],
+   [
+    "src",
+    "https://player.vimeo.com/video/v"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, q=b\"/a b\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?q=%2Fa+b\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "q": "b'/a b'"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, q=b\"\\xff &\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?q=%FF+%26\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "q": "b'\\xff &'"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "IFrame(\"x\", 1, 2, a=\"s t\", b=b\"\\x00~\", c=3, d=b\"\", e=\"\\u00e9\")",
+  "<IPython.lib.display.IFrame at 0x?>",
+  "\n        <iframe\n            width=\"1\"\n            height=\"2\"\n            src=\"x?a=s+t&b=%00~&c=3&d=&e=%C3%A9\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    2
+   ],
+   [
+    "params",
+    {
+     "a": "s t",
+     "b": "b'\\x00~'",
+     "c": 3,
+     "d": "b''",
+     "e": "\u00e9"
+    }
+   ],
+   [
+    "src",
+    "x"
+   ],
+   [
+    "width",
+    1
+   ]
+  ]
+ ],
+ [
+  "YouTubeVideo(\"v\", start=b\"30\", list=b\"PL x\")",
+  "<IPython.lib.display.YouTubeVideo at 0x?>",
+  "\n        <iframe\n            width=\"400\"\n            height=\"300\"\n            src=\"https://www.youtube.com/embed/v?start=30&list=PL+x\"\n            frameborder=\"0\"\n            allowfullscreen\n            \n        ></iframe>\n        ",
+  [
+   [
+    "extras",
+    []
+   ],
+   [
+    "height",
+    300
+   ],
+   [
+    "id",
+    "v"
+   ],
+   [
+    "params",
+    {
+     "start": "b'30'",
+     "list": "b'PL x'"
+    }
+   ],
+   [
+    "src",
+    "https://www.youtube.com/embed/v"
+   ],
+   [
+    "width",
+    400
+   ]
+  ]
+ ]
+]

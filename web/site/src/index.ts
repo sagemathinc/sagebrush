@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { handleAtlas } from "../../atlas/server.ts";
 import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
-import { handleEngines, handleLibChunk, type EnginesEnv } from "../../engines.ts";
+import { handleEngines, handleLibChunk, handlePkg, type EnginesEnv } from "../../engines.ts";
 import { syncScheduled, type Env as SyncSiteEnv } from "../../sync/server.ts";
 import { BUILD } from "./build-id.ts";
 
@@ -24,7 +24,10 @@ export default {
     // from R2 (web/engines.ts)
     const chunk = await handleLibChunk(request, env as EnginesEnv, ctx);
     if (chunk) return chunk;
-    // a shared collection's page (web/share/view.html, at /s/)
+    // an optional package set's index or chunk, by its content, from R2 (web/engines.ts)
+    const pkg = await handlePkg(request, env as EnginesEnv, ctx);
+    if (pkg) return pkg;
+    // a shared collection's page (web/share-client/view.html, at /s/)
     if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/s/", url), request));
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;

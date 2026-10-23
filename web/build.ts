@@ -15,6 +15,8 @@ function withAlphaBanner(html: string): string {
   return html.replace("</head>", ALPHA_BANNER_TAG + "</head>");
 }
 const here = import.meta.dir;
+// (web/site/ when it is here; see web/site-dir.mts)
+const { siteDir, hasSite } = await import("./site-dir.mts");
 const shims: Record<string, string> = {
   fs: "fs.ts", vm: "vm.ts", path: "path.ts", os: "os.ts", crypto: "crypto.ts",
 };
@@ -78,7 +80,11 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
 const result = await Bun.build(<any>{
   metafile: true,
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest) },
+  // (__dirname: Bun inlines a browser bundle's __dirname as the source's absolute directory, which made the
+  // engine worker, and so its hash, the engine id and sw.js, depend on where the checkout is.  The worker's
+  // only use is a Node-only fallback that looks for wasm/ beside the source (src/runtime/engine.ts, raster.ts),
+  // unreachable in a browser; undefined sends it to process.cwd(), as when __dirname doesn't exist)
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -129,8 +135,8 @@ const analyzeResult = await Bun.build(<any>{
   minify: true,
   plugins: [{ name: "unames", setup(build) { build.onResolve({ filter: /unames\.gen$/ }, () => ({ path: join(here, "shims", "unames.ts") })); } }],
 });
-// A shared collection's page, /s/<id> (web/share/view.ts; design/sharing.md)
-const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
+// A shared collection's page, /s/<id> (web/share-client/view.ts; design/sharing.md)
+const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
 const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult]];
 for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult]) {
   if (!r.success) {
@@ -247,8 +253,8 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   }
   writeFileSync(join(here, "dist", "engine", id, "manifest.json"), JSON.stringify({ format: "sagebrush-engine", id, api: ENGINE_API, files }, null, 1) + "\n");
   writeFileSync(join(here, "dist", "engine", "latest.json"), JSON.stringify({ id, api: ENGINE_API }) + "\n");
-  mkdirSync(join(here, "site", "public", "engine"), { recursive: true });
-  copyFileSync(join(here, "dist", "engine", "latest.json"), join(here, "site", "public", "engine", "latest.json"));
+  if (hasSite) mkdirSync(join(siteDir, "public", "engine"), { recursive: true });
+  if (hasSite) copyFileSync(join(here, "dist", "engine", "latest.json"), join(siteDir, "public", "engine", "latest.json"));
   ENGINE = { id, api: ENGINE_API, files: Object.fromEntries(Object.entries(files).map(([f, d]) => [f, d.sha256])) };
   console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
 }
@@ -347,17 +353,18 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   }
   writeFileSync(join(here, "dist", "THIRD-PARTY-NOTICES.txt"), notices);
 }
-// The Cloudflare site (web/site) serves the same files.
-rmSync(join(here, "site", "public", "atlas"), { recursive: true, force: true });
-cpSync(join(here, "dist", "atlas"), join(here, "site", "public", "atlas"), { recursive: true });
+// The Cloudflare site (web/site, when it is here: web/site-dir.mts) serves the same files.
+// (every write into web/site below is guarded by hasSite)
+if (hasSite) rmSync(join(siteDir, "public", "atlas"), { recursive: true, force: true });
+if (hasSite) cpSync(join(here, "dist", "atlas"), join(siteDir, "public", "atlas"), { recursive: true });
 // the site Worker's build id: its edge cache of atlas pages is keyed on it
-writeFileSync(join(here, "site", "src", "build-id.ts"), `// written by web/build.ts\nexport const BUILD = ${JSON.stringify(Date.now().toString(36))};\n`);
+if (hasSite) writeFileSync(join(siteDir, "src", "build-id.ts"), `// written by web/build.ts\nexport const BUILD = ${JSON.stringify(Date.now().toString(36))};\n`);
 // boards (/board/)
-rmSync(join(here, "site", "public", "board"), { recursive: true, force: true });
-cpSync(join(here, "dist", "board"), join(here, "site", "public", "board"), { recursive: true });
-rmSync(join(here, "site", "public", "frame"), { recursive: true, force: true });
-cpSync(join(here, "dist", "frame"), join(here, "site", "public", "frame"), { recursive: true });
-mkdirSync(join(here, "site", "public", "katex", "fonts"), { recursive: true });
+if (hasSite) rmSync(join(siteDir, "public", "board"), { recursive: true, force: true });
+if (hasSite) cpSync(join(here, "dist", "board"), join(siteDir, "public", "board"), { recursive: true });
+if (hasSite) rmSync(join(siteDir, "public", "frame"), { recursive: true, force: true });
+if (hasSite) cpSync(join(here, "dist", "frame"), join(siteDir, "public", "frame"), { recursive: true });
+if (hasSite) mkdirSync(join(siteDir, "public", "katex", "fonts"), { recursive: true });
 // the 3D viewer, loaded by the page when a Graphics3d is shown
 // The app (PWA): manifest, icons, and the service worker with the files it
 // keeps for offline use, versioned by their content
@@ -394,23 +401,23 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
-mkdirSync(join(here, "site", "public", "icons"), { recursive: true });
+if (hasSite) mkdirSync(join(siteDir, "public", "icons"), { recursive: true });
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
-mkdirSync(join(here, "site", "public", "embed"), { recursive: true });
-mkdirSync(join(here, "site", "public", "runner"), { recursive: true });
+if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
+if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
 mkdirSync(join(here, "dist", "s"), { recursive: true });
-copyFileSync(join(here, "share", "view.html"), join(here, "dist", "s", "index.html"));
-mkdirSync(join(here, "site", "public", "s"), { recursive: true });
+copyFileSync(join(here, "share-client", "view.html"), join(here, "dist", "s", "index.html"));
+if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
-  copyFileSync(join(here, "dist", f), join(here, "site", "public", f));
+  if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
-rmSync(join(here, "site", "public", "lib"), { recursive: true, force: true });
-cpSync(join(here, "dist", "lib"), join(here, "site", "public", "lib"), { recursive: true });
+if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
+if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
 // the articles (articles/ in the repository) as static pages, sitemap.xml
-await import("./build-articles.ts");
+if (hasSite) await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
 (await import("./csp.ts")).writeHeaders();
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;

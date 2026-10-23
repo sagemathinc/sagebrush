@@ -119,3 +119,43 @@ test("a Sage cell's %time ending with ; shows no value too", async () => {
   assert.equal(await shown("%time 3^2;"), "");
   assert.equal(await shown("_"), "8\n");
 });
+
+// %time's code of several statements shows its last one's value, when that
+// is an expression and the code doesn't end with ;, as IPython's %time 23; 24
+// shows 24. Expected: IPython 9.17.1 on CPython 3.14.8, its timing lines aside.
+const SEVERAL: [string, string][] = [
+  ["5", "5"],
+  ["%time 23; 24", "24"],
+  ["_", "24"],
+  ["%time x = 1; x", "1"],
+  ["_", "1"],
+  ["%time 1; 2;", ""],
+  ["_", "1"],
+  ["%time y = 3; y + 1  # c", "4"],
+  ["%time z = [1]; z.append(2); z", "[1, 2]"],
+  ["_", "[1, 2]"],
+  ["%time a = 1; b = 2", ""],
+  ["_", "[1, 2]"],
+  ["%time 6; print('p')", "p"],
+  ["_", "[1, 2]"],
+  ["%time 7; 8 ;", ""],
+  ["%time w = 9; w; ", ""],
+  ["_", "[1, 2]"],
+  ["%time import math; math.pi", "3.141592653589793"],
+  ["%time 'a;'; 'b'", "'b'"],
+  ["_", "'b'"],
+  ["def f():\n    %time 1; 2\nf()", ""],
+  ["if True:\n    %time 3; 4", ""],
+  ["_", "'b'"],
+];
+
+test("%time's code of several statements shows the last one's value, as IPython's %time 23; 24", async () => {
+  const run = await session();
+  for (const [code, want] of SEVERAL) {
+    const { out, err } = await run(code);
+    assert.equal(err, "", code);
+    assert.equal(out.replace(TIMING, ""), want === "" ? "" : want + "\n", code);
+  }
+  // (and in a Sage cell)
+  assert.equal((await run("%time a = 2; a^3", { sage: true })).out.replace(TIMING, ""), "8\n");
+});

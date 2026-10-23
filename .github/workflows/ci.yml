@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: 24
       - run: git diff --check
+      - uses: oven-sh/setup-bun@v2
+      - name: core imports no server code (plan-cloud-split-r1)
+        run: bun scripts/test-check-no-server-imports.mjs && bun scripts/check-no-server-imports.mjs
       - id: paths
         name: classify changed paths and select the tier
         env:
@@ -134,7 +137,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (pinned: size-budget.json records exact bytes, and bun's output differs
+      # between releases; move this pin and re-record the budget in one PR)
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
@@ -153,6 +160,8 @@ jobs:
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
+          node scripts/core-api-surface.mjs --check
+          node scripts/size-budget.mjs --check
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -173,7 +182,7 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -193,14 +202,20 @@ jobs:
       - name: sharing, sync, engines and PWA
         run: |
           (cd web/site && npm ci --silent)
+          (cd web/test-workers && npm ci --silent)
           node web/share/test-share.mjs
           node web/sync/test-sync.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
+          bun web/sync-protocol/test-doc-protocol.mjs
+          python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          bun web/test-no-site-build.mjs
+          bun web/test-reproducible-build.mjs
 
   web-runner:
     needs: changes
@@ -250,7 +265,6 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
-          CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
@@ -336,6 +350,10 @@ jobs:
               node web/test-doclang.mjs
               node web/test-big-pictures.mjs
               node web/test-png.mjs
+              node web/test-pkgset.mjs
+              node web/test-kernel-start.mjs
+              node web/test-pkgset-pin.mjs
+              node web/test-pkgset-page.mjs
               ;;
             board-a)
               node web/board/bench.mjs

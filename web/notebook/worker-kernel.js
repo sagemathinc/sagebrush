@@ -65,12 +65,29 @@ function keepChunk(file) {
 }
 sw?.addEventListener?.("controllerchange", flushChunks);
 
+// The optional package set's files the live interpreters use (web/
+// pkgset-browser.ts), pinned in the service worker's package cache while
+// they run: told every 2 minutes, kept 10 minutes after (web/sw.js).  Never
+// permanent: a set no interpreter uses can be evicted, and is fetched again.
+const pkgPins = new Map(); // kernel uid -> [sha256]
+let pinTimer = null;
+function pinPackages() {
+  const all = [...new Set([...pkgPins.values()].flat())].slice(0, 64);
+  try {
+    if (all.length) sw?.controller?.postMessage({ pkgPin: all });
+  } catch {}
+  if (!pkgPins.size && pinTimer) {
+    clearInterval(pinTimer);
+    pinTimer = null;
+  } else if (pkgPins.size && !pinTimer) pinTimer = setInterval(pinPackages, 2 * 60 * 1000);
+}
+
 export class WorkerKernel {
   static count = 0;
   /**
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
-   * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files)
+   * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing is sent to the worker until it is done
    * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
    */
   constructor({ createWorker, onStart, onMessage }) {
@@ -84,6 +101,7 @@ export class WorkerKernel {
     this.version = "";
     this.ready = false;
     this.started = Promise.resolve();
+    this.startError = null;
     this.interruptFlag = null;
     // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
@@ -110,7 +128,34 @@ export class WorkerKernel {
     this.generation++;
     const t0 = performance.now();
     const w = (this.worker = this.createWorker());
-    this.started = Promise.resolve(this.onStart?.(w));
+    // (a barrier: every run, interact, question and check waits for onStart,
+    // e.g. the notebook's package set resolved and durably pinned (index.html);
+    // if it fails, what waits is stopped, and the next one starts a new
+    // worker: nothing ever runs in one whose start failed, astra's CORR-PR68-3)
+    this.startError = null;
+    // (with nothing to wait for, what is asked goes to the worker at once, as
+    // before; else it is queued until the start is done)
+    this.startDone = !this.onStart;
+    this.queued = 0;
+    let begun;
+    try {
+      begun = Promise.resolve(this.onStart?.(w));
+    } catch (e) {
+      begun = Promise.reject(e);
+    }
+    this.started = begun.then(() => {
+      if (w === this.worker) this.startDone = true;
+    }, (e) => {
+      if (w !== this.worker) return;
+      this.startError = e ?? new Error("it did not start");
+      const message = `\nThe interpreter did not start: ${String(this.startError?.message ?? this.startError).slice(0, 300)}\n`;
+      this.emit("status", "error: " + message.trim());
+      const pending = [...this.pending.values()];
+      this.pending.clear();
+      this.runs.clear();
+      this.interrupted.clear();
+      for (const p of pending) p.stopped(message);
+    });
     w.onmessage = (ev) => {
       const m = ev.data;
       if (this.onMessage?.(m)) return;
@@ -128,6 +173,11 @@ export class WorkerKernel {
       // said once it has taken 300 ms, until it is here, in the status and
       // ("loading" event) on the cells waiting for it
       if (m.libChunk !== undefined) return keepChunk(m.libChunk);
+      if (m.pkgUsed !== undefined) {
+        if (w === this.worker && Array.isArray(m.pkgUsed)) pkgPins.set(this.uid, m.pkgUsed.filter((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d)));
+        return pinPackages();
+      }
+      if (m.pkgsetError !== undefined) return this.emit("status", `optional packages are off: ${String(m.pkgsetError).slice(0, 300)}`);
       if (m.libLoading !== undefined) {
         clearTimeout(this.libTimer);
         if (m.libLoading) this.libTimer = setTimeout(() => { this.libShown = true; this.emit("status", `loading ${m.libLoading}…`); this.emit("loading", m.libLoading); }, 300);
@@ -186,12 +236,34 @@ export class WorkerKernel {
    */
   execute(code, opts, sink) {
     if (!this.worker) return sink.stopped?.("\nThe interpreter was stopped.\n");
+    this.retryStart();
     const id = this.nextId++;
     this.pending.set(id, sink);
     const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
+    // (what the run is, and the document version its code is from, are taken
+    // now ("execute"); it goes to the worker once the start is done, and into
+    // the journal when it is done ("run"))
     this.track(id, run);
-    this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget });
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
+  }
+
+  // after the start, in the order asked, if this is still pending in the same worker
+  whenStarted(id, entry, f) {
+    const w = this.worker;
+    if (this.startDone && !this.startError && this.queued === 0) return f();
+    this.queued++;
+    this.started.then(() => {
+      if (w !== this.worker) return;
+      this.queued--;
+      if (!this.startError && this.pending.get(id) === entry) f();
+    });
+  }
+  // a worker whose start failed is replaced before anything more is asked of it
+  retryStart() {
+    if (!this.startError) return;
+    this.worker?.terminate();
+    this.start();
   }
 
   // The journal (TimeTravel): "execute" as a run is asked for (the page
@@ -218,21 +290,24 @@ export class WorkerKernel {
   ask(msg, mode, fallback) {
     return new Promise((resolve) => {
       if (!this.worker) return resolve(fallback);
+      this.retryStart();
       const id = this.nextId++;
-      this.pending.set(id, { reply: resolve, stopped: () => resolve(fallback) });
-      this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg });
+      const entry = { reply: resolve, stopped: () => resolve(fallback) };
+      this.pending.set(id, entry);
+      this.whenStarted(id, entry, () => this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg }));
     });
   }
 
   /** Rerun an @interact's function with new values (opts.clock: TimeTravel replay). */
   interact(iid, values, sink, opts = {}) {
     if (!this.worker) return sink.stopped?.("\nThe interpreter was stopped.\n");
+    this.retryStart();
     const id = this.nextId++;
     this.pending.set(id, sink);
     // (a copy: the journal's document freezes what it is given, and the
     // notebook keeps changing its own values object)
     this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
-    this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) });
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) }));
   }
 
   /**
@@ -246,11 +321,12 @@ export class WorkerKernel {
   evaluate(code, answer, mode, ms, by) {
     return new Promise((resolve) => {
       if (!this.worker) return resolve({ ok: false, error: "the interpreter is not running" });
+      this.retryStart();
       const id = this.nextId++;
       let timer = null, over = false, waiting = null;
       const finish = (r) => { clearTimeout(timer); clearTimeout(waiting); resolve(r); };
       const nothing = () => {};
-      this.pending.set(id, {
+      const entry = {
         // (its deadline from when it starts: not while the board's own code still runs before it)
         start: () => {
           clearTimeout(waiting);
@@ -264,8 +340,9 @@ export class WorkerKernel {
           try { finish(x?.evaluated ? JSON.parse(x.evaluated) : { ok: false, error: "it could not run" }); } catch { finish({ ok: false, error: "it could not run" }); }
         },
         stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
-      });
-      this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" });
+      };
+      this.pending.set(id, entry);
+      this.whenStarted(id, entry, () => this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" }));
       // (an interpreter that never takes it up: given up after evaluateStartMs,
       // or at `by`, an absolute deadline (Date.now) for the whole of it, the
       // caller's remaining allowance, HARD-729-1)
@@ -312,6 +389,7 @@ export class WorkerKernel {
   close(message = "\nThe interpreter was stopped.\n") {
     this.worker?.terminate();
     this.worker = null;
+    pkgPins.delete(this.uid);
     const pending = [...this.pending.values()];
     this.pending.clear();
     this.runs.clear();

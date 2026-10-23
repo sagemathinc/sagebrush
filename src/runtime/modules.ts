@@ -26,6 +26,11 @@ export function builtinModuleNames(): string[] {
   return Object.keys(factories).filter((n) => !n.startsWith("_"));
 }
 
+/** Is `name` a builtin (JavaScript) module, public or the runtime's own? (src/pkgset.ts reserves these names.) */
+export function isBuiltinModule(name: string): boolean {
+  return Object.hasOwn(factories, name);
+}
+
 export function newBuiltinModule(name: string, fill: (m: any) => void) {
   factories[name] = fill;
 }
