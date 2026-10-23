@@ -5,7 +5,7 @@
 import * as SP from "./strpos";
 import {
   T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, typeGetattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
+  dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -1589,26 +1589,231 @@ export class StrIter {
     return ch;
   }
 }
-// kind: 0 keys, 1 values, 2 items
+// kind: 0 keys, 1 values, 2 items. A dict's iterator, as CPython's: a
+// changed size raises at every step after; it gives at most as many items
+// as the dict had (so a loop that replaces each key it is given with a new
+// one ends: "dictionary keys changed during iteration", and then no more);
+// after clear(), it goes on in the new entries from the position it had
+// reached.
+// (an exhausted dict iterator's dict: empty, never changed, so the checks
+// at each step pass and it gives no more, whatever its dict does after)
+const ENDED = new PyDict();
+const ENDED_META = dictMeta(ENDED);
+const NOTHING: Iterator<any> = [][Symbol.iterator]();
 export class DictIter {
   it: Iterator<any>;
   size: number;
-  constructor(public d: PyDict, public kind: number) {
-    this.it = kind === 1 ? d.$m.values() : kind === 0 ? d.$m.keys() : d.$m.entries();
+  left: number;
+  x: DictMeta;
+  clears: number;
+  constructor(public d: PyDict, public kind: number = 0) {
+    const m = d.$m;
+    this.it = kind === 1 ? m.values() : kind === 0 ? m.keys() : m.entries();
+    this.size = this.left = m.size;
+    this.x = dictMeta(d);
+    this.clears = this.x.clears;
+  }
+  // (each kind's $next has the checks written out: the hot path)
+  $next(): any {
+    const d = this.d;
+    // (one branch for both: the size changed, or the dict was cleared)
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return dictKeyOf(d, r.value);
+  }
+  // (the rest at once, for list(d), tuple(d), sorted(d) and the like: no
+  // user code runs as it goes, so the same items, checks and errors as one
+  // $next at a time)
+  rest(): any[] {
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
+    const it = this.it;
+    const out: any[] = [];
+    if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
+    else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
+    else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    // (more than it may give: the same error one $next at a time meets)
+    if (out.length > this.left) this.keysChanged();
+    this.end();
+    return out;
+  }
+  // (exhausted: no more, as CPython's, whatever the dict does after)
+  end(): any {
+    this.d = ENDED;
+    this.x = ENDED_META;
+    this.size = this.left = 0;
+    this.clears = 0;
+    this.it = NOTHING;
+    return DONE;
+  }
+  keysChanged(): never {
+    this.end();
+    return raise(T.RuntimeError, "dictionary keys changed during iteration");
+  }
+  changed(): void {
+    const d = this.d, m = d.$m;
+    if (m.size !== this.size) {
+      this.size = -1;
+      raise(T.RuntimeError, "dictionary changed size during iteration");
+    }
+    // (cleared: on in the new entries, from the position it had reached)
+    this.clears = this.x.clears;
+    this.it = this.kind === 1 ? m.values() : this.kind === 0 ? m.keys() : m.entries();
+    for (let i = this.size - this.left; i > 0; i--) this.it.next();
+  }
+}
+export class DictValueIter extends DictIter {
+  constructor(d: PyDict) {
+    super(d, 1);
+  }
+  $next(): any {
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return r.value;
+  }
+}
+export class DictItemIter extends DictIter {
+  constructor(d: PyDict) {
+    super(d, 2);
+  }
+  $next(): any {
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (r.done) return this.end();
+    if (--this.left < 0) this.keysChanged();
+    return tuple([dictKeyOf(d, r.value[0]), r.value[1]]);
+  }
+}
+// kind: 0 keys, 1 values, 2 items
+export function dictIter(d: PyDict, kind: number): DictIter {
+  return kind === 0 ? new DictIter(d) : kind === 1 ? new DictValueIter(d) : new DictItemIter(d);
+}
+// A set's: a changed size raises at every step after, in a set's words
+export class SetIter {
+  it: Iterator<any>;
+  size: number;
+  constructor(public d: PyDict) {
+    this.it = d.$m.keys();
     this.size = d.$m.size;
   }
   $next(): any {
     if (this.d.$m.size !== this.size) {
       this.size = -1;
-      raise(T.RuntimeError, "dictionary changed size during iteration");
+      raise(T.RuntimeError, "Set changed size during iteration");
     }
     const r = this.it.next();
-    if (r.done) return DONE;
-    if (this.kind === 0) return dictKeyOf(this.d, r.value);
-    if (this.kind === 1) return r.value;
-    return tuple([dictKeyOf(this.d, r.value[0]), r.value[1]]);
+    return r.done ? DONE : dictKeyOf(this.d, r.value);
   }
 }
+// reversed() of a dict or its views: from the last entry back, as CPython's;
+// a changed size raises; an entry deleted since is passed over; a value is
+// read as it is when reached; after clear(), it goes on in the new entries
+// from the same position. What it needs is taken at the start, the keys
+// and, for the values and items, the values (LIMIT-PR66-2); a plain dict
+// counts, once it has had an iterator, the changes that leave its size as
+// it was (ver: a deletion, a clear(), a value stored over one there), and
+// while its size and that are as they were, what was taken is the dict's,
+// and nothing is looked up. After a change, each key is looked up as it is
+// reached, and each value read from the dict, for good (one-way).
+// reversed() of the values takes no keys: told just before a key is
+// deleted (rev), it takes them then, as they were; after only values were
+// stored, the dict's keys are in the order they had. A dict of attributes,
+// globals or a class, or one sharing its Map (a function's __dict__), can
+// change without the dict: for it, each is always looked up.
+export class DictRevIter {
+  keys: any[] | null;
+  vals: any[] | null;
+  x: DictMeta;
+  size: number;
+  i: number;
+  clears: number;
+  ver: number;
+  live: boolean;
+  constructor(public d: PyDict, public kind: number) {
+    const m = d.$m;
+    const x = (this.x = dictMeta(d));
+    this.size = m.size;
+    this.i = m.size - 1;
+    this.clears = x.clears;
+    this.ver = x.ver;
+    this.live = m.constructor !== Map || x.shared;
+    if (kind === 1 && !this.live) {
+      this.keys = null;
+      this.vals = [...m.values()];
+      // (the reversed() of its values before this one takes its keys now)
+      x.rev?.deref()?.keep();
+      x.rev = new WeakRef(this);
+    } else {
+      this.keys = [...m.keys()];
+      this.vals = kind === 2 && !this.live ? [...m.values()] : null;
+    }
+  }
+  // (the keys as they are now: before a deletion, or after only stores)
+  keep(): void {
+    if (this.keys === null) this.keys = [...this.d.$m.keys()];
+  }
+  $next(): any {
+    const d = this.d;
+    if (((d.$m.size !== this.size) as any) | ((this.x.ver !== this.ver) as any)) this.changed();
+    if (!this.live) {
+      const i = this.i;
+      if (i < 0) return this.end();
+      this.i = i - 1;
+      if (this.kind === 1) return this.vals![i];
+      const k = this.keys![i];
+      if (this.kind === 0) return dictKeyOf(d, k);
+      return tuple([dictKeyOf(d, k), this.vals![i]]);
+    }
+    const keys = this.keys!;
+    while (this.i >= 0) {
+      const k = keys[this.i--];
+      if (!d.$m.has(k)) continue;
+      if (this.kind === 0) return dictKeyOf(d, k);
+      if (this.kind === 1) return d.$m.get(k);
+      return tuple([dictKeyOf(d, k), d.$m.get(k)]);
+    }
+    return this.end();
+  }
+  changed(): void {
+    const d = this.d, x = this.x;
+    if (d.$m.size !== this.size) {
+      this.size = -1;
+      raise(T.RuntimeError, "dictionary changed size during iteration");
+    }
+    this.ver = x.ver;
+    if (x.rev?.deref() === this) x.rev = null;
+    if (x.clears !== this.clears) {
+      // (cleared: the new entries, from the same position)
+      this.clears = x.clears;
+      this.keys = [...d.$m.keys()];
+    } else {
+      // (a key deleted (its keys were taken just before), or values stored
+      // (its keys are in the order they had))
+      this.keep();
+    }
+    this.vals = null;
+    this.live = true;
+  }
+  // (exhausted: no more, whatever the dict does after)
+  end(): any {
+    if (this.x.rev?.deref() === this) this.x.rev = null;
+    this.d = ENDED;
+    this.x = ENDED_META;
+    this.size = 0;
+    this.clears = 0;
+    this.ver = 0;
+    this.keys = [];
+    this.vals = null;
+    return DONE;
+  }
+}
+
 export class BytesIter {
   i = 0;
   constructor(public b: PyBytes) {}
@@ -1759,8 +1964,8 @@ export function iter(x: any): any {
   if (typeof x === "string") return new StrIter(x);
   if (x !== null && typeof x === "object") {
     if (typeof x.$next === "function") return x;
-    if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x, 0);
-    if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new DictIter(x.$d, 0);
+    if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x);
+    if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new SetIter(x.$d);
     if (x instanceof PyBytes) return new BytesIter(x);
     if (isGen(x)) return new GenIter(x);
     const f = special(x, "__iter__");
@@ -1835,8 +2040,9 @@ export function pollInterrupt() {
 
 export function toArray(x: any): any[] {
   if (Array.isArray(x)) return x.slice();
-  const out: any[] = [];
   const it = iter(x);
+  if (it instanceof DictIter) return it.rest();
+  const out: any[] = [];
   for (let v = it.$next(); v !== DONE; v = it.$next()) out.push(v);
   return out;
 }
