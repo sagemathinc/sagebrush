@@ -89,17 +89,24 @@ const enginePaths = [
   /^scripts\/build-engine\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
+// Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
+// own tier, .github/workflows/optional.yml; a change to them alone runs no
+// default suite (they are outside every core input: the build id, the
+// worker's manifest and the CLI bundle).  The shared tooling
+// (scripts/optional-packages.mjs) is a runtime path like any script.
+const optionalPaths = [/^optional\//, /^\.github\/workflows\/optional\.yml$/];
 const workflowOrBuild = matches(workflowOrBuildPaths);
 const runtime = matches(runtimePaths);
 const webChange = matches(webPaths);
 const modeChange = matches(modePaths);
 const engineChange = matches(enginePaths);
 const appOnly = !full && every(appPaths);
+const optionalOnly = !full && every(optionalPaths);
 
 // Unknown paths deliberately fall back to the fast suite, file by file: an
 // unknown path beside known ones still triggers it.  Skips are allowed only
 // for the two narrow, audited classes above.
-const knownPaths = [...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths];
+const knownPaths = [...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
 const fallback = files.some((file) => !knownPaths.some((pattern) => pattern.test(file)));
 const node = full || workflowOrBuild || runtime || webChange || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
@@ -110,6 +117,7 @@ const outputs = {
   full,
   docs_only: docsOnly,
   app_only: appOnly,
+  optional_only: optionalOnly,
   node,
   web,
   modes,

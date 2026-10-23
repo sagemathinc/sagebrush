@@ -137,7 +137,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (pinned: size-budget.json records exact bytes, and bun's output differs
+      # between releases; move this pin and re-record the budget in one PR)
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
@@ -156,6 +160,8 @@ jobs:
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
+          node scripts/core-api-surface.mjs --check
+          node scripts/size-budget.mjs --check
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -344,6 +350,10 @@ jobs:
               node web/test-doclang.mjs
               node web/test-big-pictures.mjs
               node web/test-png.mjs
+              node web/test-pkgset.mjs
+              node web/test-kernel-start.mjs
+              node web/test-pkgset-pin.mjs
+              node web/test-pkgset-page.mjs
               ;;
             board-a)
               node web/board/bench.mjs
