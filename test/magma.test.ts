@@ -1012,8 +1012,10 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   const { join } = require("node:path");
   const t0 = Date.now();
   const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
-    // (many small subsets: their sets are charged with their elements)
-    "U := {1..30000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
+    // (many small subsets: their sets are charged with their elements;
+    // 20000 singletons, so that U itself stays under the set bound, the heap
+    // left over in 96 MiB, 29696 on CI in Oct 2026)
+    "U := {1..20000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
     "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
