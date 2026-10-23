@@ -50,8 +50,7 @@ async function remoteCreate() {
   check(a?.kind === "file" && a.fid === fid && a.sha256 === SHA("a") && a.size === 3 && a.remote === true && a.ref === "/d/a.txt", `remote create: /d/a.txt listed remote with its fid, hash and size (${J(a)})`);
   check(nb?.kind === "notebook" && nb.ref === ref && nb.remote === true, `remote notebook listed, content not here (remote) (${J(nb)})`);
   check((await w.contents(a)) === undefined, "a remote file's bytes aren't read from stale storage");
-  const q = await metaGet(w.ws, W.fetchKey(ns, fid));
-  check(q?.sha256 === SHA("a") && q.size === 3, `its fetch queued (${J(q)})`);
+  check(a?.fetch === SHA("a"), `its fetch queued (the entry's fetch, index byFetch: ${a?.fetch})`);
   check((await W.cursorOf(w, ns)) === 3 && r.cursor === 3, `the cursor at the page's last seq (${await W.cursorOf(w, ns)})`);
   const logged = (await w.ops()).filter((o) => o.origin === "server");
   check(logged.length === 3 && logged.every((o) => o.origin === "server"), `three ops logged, each origin server (${logged.map((o) => o.op).join(",")})`);
@@ -278,8 +277,61 @@ async function drainOrder() {
   check(js.length === 2 && after && js.every((r) => r.dseq < after.dseq), "drain order: the journal's records first, then the scanner's: " + J(out.map((r) => [r.dseq, r.op.op, r.op.path])));
 }
 
+// ---- D10 r2/r3: a remote move of a folder's whole subtree, measured
+
+async function seedRows(db, store, values, n = 20_000) {
+  for (let i = 0; i < values.length; i += n) await new Promise((ok, no) => { const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store); for (const v of values.slice(i, i + n)) st.put(v); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+}
+
+/** A folder with `dirs` subfolders of `per` files, here and in the confirmed index alike; then the server's rename of it
+ * applied (one page), its longest task and the heap's growth measured. */
+async function moveMeasured(dirs, per) {
+  const { w, ns, op, apply } = await setup();
+  const gp = W.genPrefix(ns, 0), now = Date.now(), SHA_A = "a".repeat(64);
+  const big = hex(16), rows = [], ents = [];
+  const add = (id, path, kind) => {
+    const key = path, parentKey = path.slice(0, path.lastIndexOf("/")) || "/";
+    rows.push({ ns: gp, id, path, key, parentKey, kind, fid: id, ...(kind === "file" ? { sha256: SHA_A, size: 1 } : {}), created: now, updated: now, by: "person", seq: 1 });
+    ents.push({ path, kind, ref: kind === "file" ? path : null, created: now, updated: now, fid: id, ident: id, nkey: parentKey + "\u0000" + path.slice(path.lastIndexOf("/") + 1), ...(kind === "file" ? { size: 1, rev: 0, migrated: true, sha256: SHA_A, remote: true } : {}) });
+  };
+  add(big, "/big", "folder");
+  for (let d = 0; d < dirs; d++) { const df = hex(16); add(df, `/big/d${d}`, "folder"); for (let i = 0; i < per; i++) add(hex(16), `/big/d${d}/f${i}`, "file"); }
+  await seedRows(w.ws, "syncIndex", rows);
+  await seedRows(w.ws, "entries", ents);
+  const n = rows.length;
+  rows.length = 0; ents.length = 0;
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(10, `sync:${ns}:cursor`); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  for (let i = 0; i < 10; i++) op({ op: "noop-seq", path: "/", kind: "folder", fid: big });
+  const longs = [];
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); });
+  obs.observe({ type: "longtask" });
+  globalThis.gc?.();
+  const heap0 = performance.memory?.usedJSHeapSize ?? 0;
+  let heapMax = heap0;
+  const sampler = setInterval(() => { heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }, 5);
+  const t0 = performance.now();
+  const r = await apply([op({ op: "rename", path: "/big", to: "/big2", kind: "folder", fid: big })]);
+  const ms = performance.now() - t0;
+  await new Promise((ok) => setTimeout(ok, 50));
+  clearInterval(sampler);
+  obs.disconnect();
+  const moved = (await w.list("/big2", { recursive: true })).length;
+  const logged = (await w.ops()).filter((o) => o.origin === "server").length;
+  return { n, ms, longest: Math.max(0, ...longs), heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
+}
+
+async function bigMove() {
+  const m = await moveMeasured(10, 9_998);
+  check(m.moved === m.n - 1 && m.logged === 1, `a 100,000-entry remote move: all ${m.n - 1} entries moved here, one change logged: ` + J({ moved: m.moved, logged: m.logged }));
+  check(m.longest < 1000, `…its longest task ${Math.round(m.longest)} ms (under 1 s, D10 r2's measured exception)`);
+  check(m.heapMiB < 256, `…the heap's growth ${m.heapMiB.toFixed(1)} MiB (under 256 MiB)`);
+  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1) }));
+  const s = await moveMeasured(1, 999);
+  check(s.moved === s.n - 1 && s.longest < 50, `a 1,000-entry remote move: no long task over 50 ms (longest ${Math.round(s.longest)} ms)`);
+}
+
 export async function run() {
-  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder]) {
+  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, bigMove]) {
     try { await t(); } catch (e) { check(false, `${t.name}: threw ${e?.stack ?? e}`); }
   }
   return results;

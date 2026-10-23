@@ -148,6 +148,9 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       const ix = tx.objectStore("syncIndex");
       ix.createIndex("byKey", ["ns", "key"]);
       ix.createIndex("byParent", ["ns", "parentKey"]);
+      // (the fetch queue (design/sync-client.md L1, C5): a data file listed from the server whose bytes aren't here
+      // carries `fetch`, the SHA-256 to fetch; a sparse index, so queuing one costs no write of its own)
+      tx.objectStore("entries").createIndex("byFetch", "fetch");
     }
   }, onClose, ms);
 }

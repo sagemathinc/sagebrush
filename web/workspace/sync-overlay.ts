@@ -76,18 +76,23 @@ export class PartialIndex {
   async load(store: Store, misses: Miss[]): Promise<number> {
     let learned = 0;
     for (const m of misses) {
-      if (m.map === "byId") {
-        if (this.byId.has(m.key)) continue;
-        const e = await store.byId(m.key);
-        if (e) this.putEntry(e);
-        else this.byId.set(m.key, ABSENT);
-        learned++;
-      } else if (m.map === "gone") {
-        if (this.gone.has(m.key)) continue;
-        const p = await store.gone(m.key);
-        this.gone.set(m.key, p === undefined ? ABSENT : p);
-        if (p !== undefined) this.memory++;
-        learned++;
+      if (m.map === "byId" || m.map === "gone") {
+        // (an identity's entry and its gone row are one stored row: both learned from one miss, so a derived
+        // identity's probe (byId, then gone) costs one round per candidate, as D10 r2's 1,001 rounds count)
+        if (this.byId.has(m.key) && this.gone.has(m.key)) continue;
+        if (!this.byId.has(m.key)) {
+          const e = await store.byId(m.key);
+          if (e) this.putEntry(e);
+          else this.byId.set(m.key, ABSENT);
+          learned++;
+        }
+        if (!this.gone.has(m.key)) {
+          const cur = this.byId.get(m.key);
+          const p = cur !== undefined && cur !== ABSENT ? undefined : await store.gone(m.key);
+          this.gone.set(m.key, p === undefined ? ABSENT : p);
+          if (p !== undefined) this.memory++;
+          learned++;
+        }
       } else {
         // (a path's key, or a folder's listing: the folder loaded whole (D10 r3: a landing folder's names
         // are its read set, so name probes never retry), the key absent if it isn't among them)
