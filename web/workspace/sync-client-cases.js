@@ -1286,7 +1286,173 @@ async function downloadBudget() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget };
+// ---- step 4: the rebuild (D6, D7 r2; plan-sync-rebuilt r3 tests 14-19)
+
+/** The live state a failed pass must leave exactly as it was (D6 r4): entries, outbox, pins, pending, and the
+ * namespace's cursor, watermark, active generation, next dseq and outbox totals. */
+async function liveState(w, ns) {
+  const meta = {};
+  for (const k of ["cursor", "scanned", "indexGen", "dseq", "outbox", "journal"]) meta[k] = await metaGet(w.ws, `sync:${ns}:${k}`);
+  return J({ entries: await all(w.ws, "entries"), outbox: await all(w.ws, "outbox"), pins: await all(w.ws, "pins"), pending: await all(w.ws, "pending"), meta });
+}
+/** The prefixes of syncIndex's generations present (at most two, D6 r3). */
+async function generations(w) {
+  return [...new Set((await keys(w.ws, "syncIndex")).map((k) => k[0]))];
+}
+
+async function rebuildAfterRefusal() {
+  // (test 14's shape, on a per-op refusal: the rebuild runs before anything else is sent, announces through =
+  // server_next - 1, and resumes; later ops are accepted)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild: synced");
+  await stop(c0);
+  const f = await w.create("/gone.txt", { content: "bytes gone" });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").delete(f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(() => c.stats.rebuildPasses >= 1 && !c.debug().halted && c.status.state === "synced", 20_000), "rebuild: refused, rebuilt and resumed: " + J({ passes: c.stats.rebuildPasses, phase: c.stats.rebuildPhase, status: c.status }));
+    const ns = nsOf(c);
+    const lg = await ctl("log");
+    const welcome = lg.got.find((m) => m.t === "welcome");
+    check(lg.rebuilt.length === 1 && lg.rebuilt[0].through >= 1, "rebuild: one announce, through = server_next - 1: " + J(lg.rebuilt));
+    check(!(await metaGet(w.ws, `sync:${ns}:rebuild`)) && !(await metaGet(w.ws, `sync:${ns}:pass`)), "rebuild: the flag and the pass cleared");
+    check((await metaGet(w.ws, `sync:${ns}:floor`)) === lg.rebuilt[0].through, "rebuild: the acknowledged floor recorded");
+    check((await generations(w)).length <= 2 && (await metaGet(w.ws, `sync:${ns}:indexGen`)) >= 1, "rebuild: the new generation active, at most two present: " + J(await generations(w)));
+    check(!!(await w.stat("/gone.txt")), "rebuild: the refused file kept here");
+    await w.mkdir("/later");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/later")), "rebuild: sending resumed, a later op accepted");
+    void welcome;
+  } finally {
+    await stop(c);
+  }
+}
+
+async function rebuildRate() {
+  // (test 15: `rate` on rebuilt: halted and said; retried at retry_after; no op sent meanwhile)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild rate: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  await w.mkdir("/r1");
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("set", { set: { rebuilt: [{ code: "rate", detail: { message: "slow down", retry_after: 1500 } }] } });
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(() => (c.status.reason ?? "").includes("wait")), "rebuild rate: halted, the foot says why: " + J(c.status));
+    check(opsMessages(await ctl("log")).length === 0, "rebuild rate: no op sent while halted");
+    check(await until(async () => (await ctl("log")).rebuilt.length === 2 && (await settled(w, c)), 15_000), "rebuild rate: retried after retry_after, acked, resumed: " + J((await ctl("log")).rebuilt));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function rebuildCrashAfterAnnounce() {
+  // (test 16: a crash after announce is recorded, before the ack: the next start sends rebuilt again and converges)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild crash: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("set", { set: { rebuilt: [{ hold: true }] } });
+  await ctl("log", { reset: true });
+  const c1 = viewClient(w);
+  check(await until(async () => (await ctl("log")).rebuilt.length === 1), "rebuild crash: announced, the ack held");
+  const pass = await metaGet(w.ws, `sync:${ns}:pass`);
+  check(pass?.phase === "announce" && pass.through === (await ctl("log")).rebuilt[0].through, "rebuild crash: announce recorded with its through before it was sent: " + J(pass && { phase: pass.phase, through: pass.through }));
+  await stop(c1);
+  const c2 = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length === 2 && (await settled(w, c2)), 15_000), "rebuild crash: the next start sends rebuilt again, with the same through, and converges: " + J((await ctl("log")).rebuilt.map((r) => r.through)));
+    const r = (await ctl("log")).rebuilt;
+    check(r[0].through === r[1].through, "rebuild crash: …the same through");
+  } finally {
+    await ctl("release");
+    await stop(c2);
+  }
+}
+
+async function rebuildCounter() {
+  // (test 19, CORR-REBUILT-1: done services n0; a refusal (n0 + 1) recorded during view, during retire, before the
+  // announce, and during the held ack: the ack records the floor, the flag stays set, another pass runs, and its
+  // announce is acked; n0 + 1 is never cleared unserviced)
+  for (const at of ["view-page", "retire-page", "announce", "ack"]) {
+    await account();
+    const w = await fresh();
+    const c0 = viewClient(w);
+    check(await until(() => settled(w, c0)), `rebuild counter (${at}): synced`);
+    const ns = nsOf(c0);
+    await stop(c0);
+    await w.mkdir("/x");
+    const bump = () => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await bump();
+    const n0 = (await metaGet(w.ws, `sync:${ns}:rebuild`)).n;
+    let fired = false;
+    W.REBUILD.before = async (phase) => { if (!fired && phase === at) { fired = true; await bump(); } };
+    await ctl("set", { set: { rebuilt: at === "ack" ? [{ hold: true }] : [] } });
+    await ctl("log", { reset: true });
+    const c = viewClient(w);
+    try {
+      if (at === "ack") {
+        check(await until(async () => (await ctl("log")).rebuilt.length === 1), `rebuild counter (${at}): announced, ack held`);
+        await bump();
+        fired = true;
+        await ctl("release");
+      }
+      check(await until(async () => (await settled(w, c)) && !(await metaGet(w.ws, `sync:${ns}:rebuild`)), 20_000), `rebuild counter (${at}): converged, the flag cleared only by the pass that serviced it: ` + J({ passes: c.stats.rebuildPasses, phase: c.stats.rebuildPhase, rebuilt: (await ctl("log")).rebuilt.length }));
+      check(fired && c.stats.rebuildPasses >= 2 && (await ctl("log")).rebuilt.length >= 2, `rebuild counter (${at}): n0 = ${n0} serviced, then n0 + 1 by another pass and its own announce: ` + J({ passes: c.stats.rebuildPasses, rebuilt: (await ctl("log")).rebuilt.length }));
+    } finally {
+      W.REBUILD.before = null;
+      await ctl("release");
+      await stop(c);
+    }
+  }
+}
+
+async function rebuildFailedPass() {
+  // (D6 r4: a mismatched n during log and during capture: no live entry, record, pin, watermark or cursor changed,
+  // compared before and after; the pass's generations go to the cleanup list, and the next pass completes)
+  for (const at of ["log", "capture"]) {
+    await account();
+    const w = await fresh();
+    const c0 = viewClient(w);
+    check(await until(() => settled(w, c0)), `failed pass (${at}): synced`);
+    const ns = nsOf(c0);
+    await stop(c0);
+    await w.create("/keep.txt", { content: "k" });
+    await w.mkdir("/kd");
+    // (records made, undecided: the replaced prefix a capture would read)
+    await new W.Outbox(w, await W.currentLease(w)).scan();
+    const bump = () => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await bump();
+    let before = null, after = null, fired = false;
+    W.REBUILD.before = async (phase) => {
+      if (phase === "log" && !before) before = await liveState(w, ns);
+      if (!fired && phase === at) { fired = true; await bump(); }
+      // (the failed pass's done has run: the next pass is at its log)
+      if (fired && phase === "log" && before && !after && (await metaGet(w.ws, `sync:${ns}:clean`))?.length !== undefined) after = await liveState(w, ns);
+    };
+    const c = viewClient(w);
+    try {
+      check(await until(() => !!after, 20_000), `failed pass (${at}): the pass failed its compare-and-swap, another began`);
+      check(before === after, `failed pass (${at}): the live state exactly as it was`);
+      check(await until(async () => (await settled(w, c)) && !(await metaGet(w.ws, `sync:${ns}:rebuild`)), 20_000), `failed pass (${at}): the next pass completes`);
+      check((await generations(w)).length <= 2, `failed pass (${at}): at most two generations: ` + J(await generations(w)));
+    } finally {
+      W.REBUILD.before = null;
+      await stop(c);
+    }
+  }
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {

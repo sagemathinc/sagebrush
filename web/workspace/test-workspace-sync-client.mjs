@@ -75,6 +75,9 @@ const ctl = {
   holdPut: false,
   /** GETs of the user-content domain (/__files) held until released */
   holdGet: false,
+  /** answers for the next `rebuilt` messages, instead of the server's (core's has no `rebuilt`: the server half is
+   * the cloud's): [{ack: {floor, count}} | {code, detail} | {hold: true}] (default: an ack with floor = through) */
+  rebuilt: [],
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
   /** the next n pulled index pages (answers to pull_index) dropped */
@@ -95,9 +98,9 @@ const ctl = {
 const closers = new Set();
 /** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
 const toPage = new Set();
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] };
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] };
 const held = [];
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] });
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
@@ -160,7 +163,7 @@ async function control(body) {
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -296,6 +299,14 @@ server.on("upgrade", async (req, socket, head) => {
       if (m.t === "hello") helloAccount = m.account ?? null;
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+      if (m.t === "rebuilt") {
+        const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
+        log.rebuilt.push({ through: m.through, answer: f });
+        const answer = () => client.send(JSON.stringify(f.ack ? { t: "ack", req: m.req, rebuilt: f.ack } : { t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        if (f.hold) held.push(() => { f.ack = f.ack ?? { floor: m.through, count: 0 }; answer(); });
+        else answer();
+        return;
+      }
       if (m.t === "pull_index" && ctl.fakePull.length) {
         const f = ctl.fakePull.shift();
         client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
