@@ -363,18 +363,9 @@ export async function done(w: Workspace, ns: string): Promise<"committed" | "fai
 
 /** The next identities after `at` in the union of the index generation `gp`'s and the entries', in key order. */
 async function nextIds(tx: IDBTransaction, gp: string, at: string, n: number): Promise<string[]> {
+  // (two requests: each source's next n, merged; their first n in key order are the union's next n)
   const ix = ((await req(tx.objectStore("syncIndex").getAllKeys(IDBKeyRange.bound([gp, at], [gp, "\uffff"], true), n))) as [string, string][]).map((k) => k[1]);
-  const ents = await new Promise<string[]>((ok, no) => {
-    const out: string[] = [];
-    const c = tx.objectStore("entries").index("byIdent").openKeyCursor(IDBKeyRange.lowerBound(at, true), "nextunique");
-    c.onsuccess = () => {
-      const cur = c.result;
-      if (!cur || out.length >= n) return ok(out);
-      out.push(cur.key as string);
-      cur.continue();
-    };
-    c.onerror = () => no(c.error);
-  });
+  const ents = ((await req(tx.objectStore("entries").index("byIdent").getAll(IDBKeyRange.lowerBound(at, true), n))) as Entry[]).map((e) => e.ident!);
   const all = [...new Set([...ix, ...ents])].sort();
   return all.slice(0, n);
 }
@@ -386,11 +377,13 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
   return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, "syncIndex", META])], "readwrite", async (tx) => {
     const meta = tx.objectStore(META), p = (await req(meta.get(passKey(ns)))) as Pass;
     const gp = genPrefix(ns, p.gen);
-    const ids = await nextIds(tx, gp, p.at?.key ?? "", REBUILD.page);
+    // (one past the page, to know whether this page is the last: so the walk takes exactly ⌈union / page⌉ pages)
+    const peek = await nextIds(tx, gp, p.at?.key ?? "", REBUILD.page + 1);
+    const ids = peek.slice(0, REBUILD.page);
     const v = await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true }, ids);
     bump(p, "view");
     cut("view");
-    const fin = ids.length < REBUILD.page;
+    const fin = peek.length <= REBUILD.page;
     meta.put(fin ? { ...p, phase: "retire", at: { step: "echoes", key: "" } } : { ...p, at: { key: ids[ids.length - 1] } }, passKey(ns));
     return { done: fin, ops: v.ops, listed: v.listed };
   }));
@@ -437,40 +430,56 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
       if (p.W1 !== undefined) st.cutoff = Math.max(st.cutoff ?? 0, p.W1);
       putPending(tx, pd, ns, st, scanned);
     };
-    let fin = false;
-    if (at.step === "echoes") {
-      const echoes = (await req(j.getAll(IDBKeyRange.bound([jp, at.key || "e:"], [jp, "e:\uffff"], !!at.key), REBUILD.page))) as { id: string; dseq: number; seq: number }[];
-      for (const e of echoes) {
-        const rec = (await req(out.get([ns, e.dseq]))) as OutboxRecord | undefined;
-        if (rec) await remove(rec);
-        j.delete([jp, e.id]);
-        at.key = e.id;
-      }
-      if (echoes.length < REBUILD.page) Object.assign(at, { step: "replaced", dseq: 0, key: undefined });
-    } else if (at.step === "replaced") {
-      const lo = (at.dseq ?? 0) + 1;
-      const recs = lo <= p.serverNext - 1 ? ((await req(out.getAll(IDBKeyRange.bound([ns, lo], [ns, p.serverNext - 1]), REBUILD.page))) as OutboxRecord[]) : [];
-      for (const rec of recs) {
-        const jr = (await req(j.get([jp, rec.id]))) as JournalRecord | undefined;
-        await remove(rec, jr);
-        at.dseq = rec.dseq;
-      }
-      if (recs.length < REBUILD.page) Object.assign(at, { step: p.oldJournal ? "old" : "end", key: "", dseq: undefined });
-    } else if (at.step === "old") {
-      const old = p.oldJournal!;
-      const recs = (await req(j.getAll(IDBKeyRange.bound([old, at.key ?? ""], [old, "\uffff"], !!at.key), REBUILD.page))) as JournalRecord[];
-      for (const r of recs) {
-        // (an undrained record's pin (C3: the journal owns its records' pins until they drain), handed on or released)
-        const owned = r.sha256 ? ((await req(pins.getAll(IDBKeyRange.bound([r.id, -Infinity], [r.id, Infinity])))) as Pin[]).filter((x) => x.owner?.ns === old) : [];
-        const mine = (await req(j.get([jp, r.id]))) as JournalRecord | undefined;
-        for (const pin of owned) {
-          if (mine && !mine.gone && mine.sha256 === pin.sha256) pins.put({ ...pin, owner: { ns: jp, dseq: 0 } } satisfies Pin);
-          else await release(tx, { ...pin, owner: undefined });
+    // (a page takes REBUILD.page items across its steps, in order; each step's read asks for one more than the room
+    // left, so a step that ends is passed at once, and a page with no room left only peeks: the walk ends on its
+    // last full page, never an empty one)
+    let fin = false, room = REBUILD.page;
+    while (at.step !== "end") {
+      if (at.step === "echoes") {
+        const echoes = (await req(j.getAll(IDBKeyRange.bound([jp, at.key || "e:"], [jp, "e:\uffff"], !!at.key), room + 1))) as { id: string; dseq: number; seq: number }[];
+        for (const e of echoes.slice(0, room)) {
+          const rec = (await req(out.get([ns, e.dseq]))) as OutboxRecord | undefined;
+          if (rec) await remove(rec);
+          j.delete([jp, e.id]);
+          at.key = e.id;
         }
-        j.delete([old, r.id]);
-        at.key = r.id;
+        const took = Math.min(room, echoes.length);
+        room -= took;
+        if (echoes.length > took) break;
+        Object.assign(at, { step: "replaced", dseq: 0, key: undefined });
+      } else if (at.step === "replaced") {
+        const lo = (at.dseq ?? 0) + 1;
+        const recs = lo <= p.serverNext - 1 ? ((await req(out.getAll(IDBKeyRange.bound([ns, lo], [ns, p.serverNext - 1]), room + 1))) as OutboxRecord[]) : [];
+        for (const rec of recs.slice(0, room)) {
+          const jr = (await req(j.get([jp, rec.id]))) as JournalRecord | undefined;
+          await remove(rec, jr);
+          at.dseq = rec.dseq;
+        }
+        const took = Math.min(room, recs.length);
+        room -= took;
+        if (recs.length > took) break;
+        Object.assign(at, { step: p.oldJournal ? "old" : "end", key: "", dseq: undefined });
+      } else if (at.step === "old") {
+        const old = p.oldJournal!;
+        const recs = (await req(j.getAll(IDBKeyRange.bound([old, at.key ?? ""], [old, "\uffff"], !!at.key), room + 1))) as JournalRecord[];
+        for (const r of recs.slice(0, room)) {
+          // (an undrained record's pin (C3: the journal owns its records' pins until they drain), handed on or released)
+          const owned = r.sha256 ? ((await req(pins.getAll(IDBKeyRange.bound([r.id, -Infinity], [r.id, Infinity])))) as Pin[]).filter((x) => x.owner?.ns === old) : [];
+          if (owned.length) {
+            const mine = (await req(j.get([jp, r.id]))) as JournalRecord | undefined;
+            for (const pin of owned) {
+              if (mine && !mine.gone && mine.sha256 === pin.sha256) pins.put({ ...pin, owner: { ns: jp, dseq: 0 } } satisfies Pin);
+              else await release(tx, { ...pin, owner: undefined });
+            }
+          }
+          j.delete([old, r.id]);
+          at.key = r.id;
+        }
+        const took = Math.min(room, recs.length);
+        room -= took;
+        if (recs.length > took) break;
+        Object.assign(at, { step: "end", key: undefined });
       }
-      if (recs.length < REBUILD.page) Object.assign(at, { step: "end", key: undefined });
     }
     if (at.step === "end") {
       fin = true;

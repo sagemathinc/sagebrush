@@ -152,8 +152,134 @@ async function keptNotDeleted() {
   check(r.listed.some(([, why]) => why === "conflict") && listed?.count >= 1, `listed in the Sync panel (${J(listed)})`);
 }
 
+// ---- the rebuild's named traces, driven phase by phase (D6 r3-r5; astra's A3 and A4; astra's (a) and (b))
+
+/** A rebuild pass run by hand: stage at `serverNext`, the server's `log` reduced into the staging index (own echoes
+ * staged when they match their records), then capture, done, view and retire.  Returns what done said. */
+async function pass(w, ns, serverNext, log, opts = {}) {
+  let p = await W.stage(w, ns, serverNext);
+  while (p === "clean") { while (await W.cleanStep(w, ns)); p = await W.stage(w, ns, serverNext); }
+  if (typeof p !== "object") throw new Error("stage: " + p);
+  const recs = await all(w.ws, "outbox");
+  const echoes = log.filter((o) => o.device === w.device && recs.some((r) => r.dseq === o.dseq && r.op.op === o.op && r.op.path === o.path)).map((o) => ({ dseq: o.dseq, seq: o.seq }));
+  await W.stageEchoes(w, ns, p, echoes);
+  await W.applyOps(w, ns, log, { prefix: W.genPrefix(ns, p.gen), cursorAt: `sync:${ns}:pass:cursor` });
+  await W.logDone(w, ns);
+  while (!(await W.captureStep(w, ns)));
+  if (opts.beforeDone) await opts.beforeDone(await W.passOf(w, ns));
+  const d = await W.rebuildDone(w, ns);
+  if (d !== "committed") return d;
+  while (!(await W.viewStep(w, ns)).done);
+  while (!(await W.retireStep(w, ns)));
+  return d;
+}
+const obligateNow = (w, ns) => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+
+async function traceA4() {
+  // (astra's trace: scanned is 10; a remote rename /a to /b of Y applied here as seq 11, origin server; the newer
+  // staging log has Y at /c; W0 = 10, W1 = 11.  The replay passes over seq 11, Y gets no journal record, nothing
+  // renames /c back to /b: Y ends at /c)
+  const { w, ns, ob, op, echo, apply } = await setup();
+  const Y = hex(16);
+  const mkY = op({ op: "mkdir", path: "/a", kind: "folder", fid: Y });
+  await apply([mkY]);
+  // (a replaced record: this device's /x, made and sent, its ack lost; the server decided it)
+  await w.mkdir("/x");
+  await ob.scan();
+  const [x] = await ob.records();
+  const scanned = await metaGet(w.ws, `sync:${ns}:scanned`);
+  const toB = op({ op: "rename", path: "/a", to: "/b", kind: "folder", fid: Y });
+  await apply([toB]);
+  const s11 = (await w.ops()).filter((o) => o.origin === "server").at(-1).seq;
+  check(s11 === scanned + 1 && (await w.stat("/b"))?.fid === Y, `A4: the remote rename applied here as seq ${s11}, right past the watermark ${scanned}`);
+  await obligateNow(w, ns);
+  const xEcho = echo(x);
+  const toC = op({ op: "rename", path: "/b", to: "/c", kind: "folder", fid: Y });
+  const d = await pass(w, ns, x.dseq + 1, [mkY, xEcho, toB, toC]);
+  const p = await W.passOf(w, ns);
+  const jY = await new Promise((ok) => { const r = w.ws.transaction("adoptJournal").objectStore("adoptJournal").get([W.journalPrefix(ns, p.gen), Y]); r.onsuccess = () => ok(r.result); });
+  check(d === "committed" && p.W0 === scanned && p.W1 === s11, "A4: W0 = 10, W1 = 11 (here " + J({ W0: p.W0, W1: p.W1 }) + ")");
+  check(jY === undefined, "A4: Y has no journal record (the replay passed over the server's op)");
+  check((await w.stat("/c"))?.fid === Y && !(await w.stat("/b")), "A4: Y at /c here, nothing renamed it back to /b");
+  await ob.drainJournal();
+  check(!(await all(w.ws, "outbox")).some((r) => r.id === Y), "A4: nothing for Y goes up");
+}
+
+async function traceA3() {
+  // (astra's A3: scanned = 10, an unrelated rename Y logged at 11, not yet scanned; W0 = W1 = 11.  Y is in the
+  // journal and reaches the server once)
+  const { w, ns, ob, op, echo, apply } = await setup();
+  const Yfid = hex(16);
+  const mkY = op({ op: "mkdir", path: "/y", kind: "folder", fid: Yfid });
+  await apply([mkY]);
+  await w.mkdir("/x");
+  await ob.scan();
+  const [x] = await ob.records();
+  const scanned = await metaGet(w.ws, `sync:${ns}:scanned`);
+  await w.rename("/y", "/y2");
+  const s11 = await w.lastSeq();
+  await obligateNow(w, ns);
+  const d = await pass(w, ns, x.dseq + 1, [mkY, echo(x)]);
+  const p = await W.passOf(w, ns);
+  const jY = await new Promise((ok) => { const r = w.ws.transaction("adoptJournal").objectStore("adoptJournal").get([W.journalPrefix(ns, p.gen), Yfid]); r.onsuccess = () => ok(r.result); });
+  check(d === "committed" && p.W0 === scanned && p.W1 === s11 && s11 === scanned + 1, "A3: W0 = 10, W1 = 11: " + J({ W0: p.W0, W1: p.W1, scanned }));
+  check(jY?.name === "y2", "A3: Y in the journal, renamed: " + J(jY));
+  check((await metaGet(w.ws, `sync:${ns}:scanned`)) === s11, "A3: the watermark at W1");
+  check(!(await all(w.ws, "outbox")).some((r) => r.dseq === x.dseq), "A3: the replaced record (its echo staged) retired");
+  for (let i = 0; i < 10 && (await ob.drainJournal()).more; i++);
+  const forY = (await all(w.ws, "outbox")).filter((r) => r.id === Yfid);
+  check(forY.length === 1 && forY[0].op.op === "rename" && forY[0].op.to === "/y2", "A3: Y's rename goes up once: " + J(forY.map((r) => r.op)));
+  await ob.scan();
+  check((await all(w.ws, "outbox")).filter((r) => r.id === Yfid).length === 1, "A3: …and the scanner doesn't send it again");
+}
+
+async function nCasRestartPins() {
+  // (astra's (a): after an n compare-and-swap restart, the new pass's journal again holds the replaced identities'
+  // pins and their gone rows: nothing lost when the failed pass is discarded)
+  const { w, ns, ob } = await setup();
+  const f = await w.create("/pinned.txt", { content: "pinned bytes" });
+  await w.mkdir("/doomed");
+  await w.forget("/doomed");
+  await ob.scan();
+  const recs = await ob.records();
+  const doomed = recs.find((r) => r.op.op === "forget");
+  check(recs.some((r) => r.id === f.fid && r.pin !== undefined) && doomed, "n-CAS: a pinned file's record and a forget, undecided");
+  await obligateNow(w, ns);
+  // (the first pass fails its compare-and-swap: a refusal recorded after its capture)
+  const d1 = await pass(w, ns, recs.at(-1).dseq + 1, [], { beforeDone: () => obligateNow(w, ns) });
+  check(d1 === "failed", "n-CAS: the first pass fails (n moved)");
+  const pinsAfterFail = await all(w.ws, "pins");
+  check(pinsAfterFail.some((x) => x.id === f.fid && x.owner?.ns === ns), "n-CAS: the failed pass moved no pin (still its record's)");
+  const d2 = await pass(w, ns, recs.at(-1).dseq + 1, []);
+  const p = await W.passOf(w, ns);
+  const jp = W.journalPrefix(ns, p.gen);
+  const pins = await all(w.ws, "pins"), j = await all(w.ws, "adoptJournal");
+  check(d2 === "committed" && pins.some((x) => x.id === f.fid && x.owner?.ns === jp), "n-CAS: the new pass's journal holds the file's pin: " + J(pins.filter((x) => x.id === f.fid).map((x) => x.owner)));
+  check(j.some((r) => r.ns === jp && r.id === doomed.id && r.gone), "n-CAS: …and the forgotten identity's gone row");
+  check((await all(w.ws, "outbox")).length === 0, "n-CAS: the replaced records retired");
+}
+
+async function drainOrder() {
+  // (astra's (b), C3's order: the committed journal drains before any record the scanner makes for ops after W1)
+  const { w, ns, ob } = await setup();
+  await w.mkdir("/j1");
+  await w.mkdir("/j2");
+  await ob.scan();
+  const recs = await ob.records();
+  await obligateNow(w, ns);
+  await pass(w, ns, recs.at(-1).dseq + 1, []);
+  await w.mkdir("/after");
+  const s1 = await ob.scanPage();
+  check(s1.made === 0, "drain order: the scanner idle while the journal drains");
+  for (let i = 0; i < 10 && (await ob.drainJournal()).more; i++);
+  await ob.scan();
+  const out = (await all(w.ws, "outbox")).sort((a, b) => a.dseq - b.dseq);
+  const after = out.find((r) => r.op.path === "/after"), js = out.filter((r) => r.op.path === "/j1" || r.op.path === "/j2");
+  check(js.length === 2 && after && js.every((r) => r.dseq < after.dseq), "drain order: the journal's records first, then the scanner's: " + J(out.map((r) => [r.dseq, r.op.op, r.op.path])));
+}
+
 export async function run() {
-  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted]) {
+  for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder]) {
     try { await t(); } catch (e) { check(false, `${t.name}: threw ${e?.stack ?? e}`); }
   }
   return results;
