@@ -316,6 +316,8 @@ export class Outbox {
    * the watermark (C3: the journal drains before anything the scanner makes for ops after W1).
    */
   async drainJournal(): Promise<{ made: number; full: boolean; more: boolean }> {
+    // (no journal (the usual case, and always without the confirmed index): one read, nothing else)
+    if ((await inTx(this.w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(JOURNAL(this.ns))))) === undefined) return { made: 0, full: false, more: false };
     const r = await inTx(this.w.ws, ["outbox", "adoptJournal", "entries", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), out = tx.objectStore("outbox"), j = tx.objectStore("adoptJournal"), ents = tx.objectStore("entries"), ix = tx.objectStore("syncIndex");
       await fence(meta, this.lease);
@@ -435,7 +437,6 @@ export class Outbox {
       meta.put(t, key(this.ns, "outbox"));
       return { made, full, more };
     });
-    afterReleases(this.w);
     return r;
   }
 
