@@ -156,5 +156,10 @@ test("requirements come from the call forms used (§6.2–6.3): a new keyword ra
   assert.equal(level(src, dyn({})), 2, "a declared dynamic target without a call form takes the maximum");
   // (the declaration covers only its own line: the same module escaping on another line still charges it)
   assert.equal(level("import m\nr = getattr(m, 'f')(1)\nn = m\n", dyn({ call: [] })), 2, "a module escaping elsewhere still takes its maximum");
+  // the declaration covers only its own call's arguments, not every reference on its line
+  // (astra's CORR-PR68-2 on 18a26195: an independent escape on the same line)
+  assert.equal(level("import m\ng = m.f; r = getattr(m, 'f')(1)\ng(1, extra=True)\n", dyn({ call: [] })), 2, "an escape before the declared call, on its line");
+  assert.equal(level("import m\nr = getattr(m, 'f')(1); g = m.f\ng(1, extra=True)\n", dyn({ call: [] })), 2, "an escape after the declared call, on its line");
+  assert.equal(level("import m\nr = getattr(m, 'f')(1); n = m\n", dyn({ call: [] })), 2, "the same module escaping on the declared line");
   assert.ok(lintPackage(pkg(src, dyn({})), api).uses.some((u: any) => u.target === "m.f" && u.declared), "the declared target is in uses");
 });
