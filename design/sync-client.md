@@ -552,9 +552,9 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D9, r2)
+### Step 4 plan delta (D5 to D9, r3)
 
-@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b.
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3.
 
 **D5 (r2). Two cursors** (daybreak3's CORR-PR65-1).
 - `apply_after` is the durable confirmed cursor (`sync:<ns>:cursor`). Only ops with $\text{seq} > \text{apply\_after}$ are reduced into `syncIndex`, as one contiguous suffix, the suffix and the cursor committed in one transaction (C3).
@@ -624,6 +624,48 @@ Each journal record goes once, retired by its echo or its refusal (C1). A refusa
   - the scale: 100,000 confirmed entries and 10,000 pending records, asserting each transaction's request and record maxima. This runs against the reference server, seeded directly, since a real server's ops rate would take 50 minutes to make that log.
   Each asserts no dseq sent twice or skipped, every local edit on the server once (or listed), and the local tree intact.
 
+**D6 r3: one lifecycle for a pass's resources** (daybreak3's LIMIT-PR65-3, CORR-PR65-4).
+
+- **A pass's resources are scoped to its generation `gen`:**
+  - its staging confirmed index, under `[ns + "#" + gen]` in `syncIndex`;
+  - its reissue journal, under `[ns + "#reissue#" + gen]` in `adoptJournal`.
+  Nothing a pass writes is visible to the client's view, the scanner or the sender until its `done` succeeds.
+- **`capture` no longer removes anything** (daybreak3's simpler option).
+  - It reads the replaced records: undecided records with $\text{dseq} < \text{server\_next}$, plus every record of a previous committed pass's journal not yet drained (C3: the journal is local intent, so a new rebuild replaces it too).
+  - It writes the pass's journal from the identities' present local state, closing at `W1` as the first-sync capture does.
+  - The replaced records stay where they are, with their pins, until the pass commits. Sending is halted throughout, so they are never sent meanwhile.
+- **`done`** is one transaction with the compare-and-swap (D7 r2):
+  - **Success:**
+    - the active index generation becomes `gen`, and the previous active generation is appended to the cleanup list `sync:<ns>:clean`;
+    - the pass is marked committed, and the scan watermark is set to `W1`;
+    - the live cursor is set to the rebuild's;
+    - the flag is cleared;
+    - the phase becomes `retire`.
+  - **Failure** ($n \ne n_0$): the pass's staging index generation and journal generation are appended to `sync:<ns>:clean`, nothing else changes, and the next pass begins. A failed pass has removed nothing and moved no pin, so discarding it is pure deletion: no undo, no pin to reassign.
+- **`retire`** (after a successful `done`; sending still halted): the replaced records, the undecided outbox records below `server_next` and the previous journal generations' undrained records, are removed in pages of at most 100 records and 400 requests. Each page is one transaction that hands each removed record's pin to the committed journal record of the same identity, or releases it if that record has no bytes to keep (a folder, a document, a gone identity, other bytes). Its position is in the rebuild state. When it ends, sending resumes: first the records at or above `server_next`, then the journal's drain.
+- **Exactly once, at every crash point:**
+  - before `done`, every local edit is represented by the old records (ops up to the old watermark `W0`) or is past `W0` (the scanner's). The pass's journal is invisible.
+  - At `done`, both switch together. Edits up to `W1` are represented by the committed journal (as of `W1`), edits after `W1` by the scanner. The old records below `server_next` are dead (never sent again: sending is halted until `retire` ends) and leave in `retire`.
+  - Each `retire` page is atomic, and a pin moves from the removed record to the journal record in the page's own transaction. So every pin has exactly one owner at every point.
+- **Cleanup, bounded** (LIMIT-PR65-3):
+  - `sync:<ns>:clean` is a list of prefixes: an index generation or a journal generation. Each is deleted a page of at most 500 keys a transaction, from a durable position.
+  - A new pass's `stage` doesn't begin until the list is empty, so a pass waits for the previous one's leftovers to be deleted first.
+  - So at most two index generations exist at once (the active one, and either one staging or one being cleaned), and at most two journal generations (the committed one draining, and either one staging or one being cleaned): at most 2 × 100,000 index rows and 2 × 100,000 journal rows, whatever the number of failed passes.
+  - The list itself holds at most 2 entries.
+- **Tests:**
+  - many consecutive $n$ mismatches at the 100,000-row scale, asserting each transaction's limits and never more than two generations of each store;
+  - capture done, then a late refusal increments $n$, then the retry's replaced prefix names different identities, with edits on both sides of the first `W1`. Every edit is represented exactly once, and every pin has exactly one owner, after crashes at the failed CAS, in each cleanup page and in each `retire` page.
+
+- **What the capture covers** (astra's CORR-PR65-A3). `done` moves the global scan watermark, so the capture must represent every intent the watermark moves past, not only the replaced identities:
+  - the capture's `W0` is the current scan watermark `scanned`, not the latest op;
+  - the closing replay reads every op in $(\text{scanned}, W_1]$, in pages of 500 ops a transaction. Each op's identity, whichever it is (replaced or not, present or gone, its `after` or `after: null`), gets its journal record assigned from that op's `after`. A gone identity is recorded as `gone`.
+  - So every op at or below `W1` is either already scanned (below the old watermark, so its record exists, or was decided, or was collapsed by C2's rules) or represented in the committed journal. Moving the watermark to `W1` at `done` skips nothing. Ops after `W1` are the scanner's, which stays idle until the journal has drained (C3, step 5).
+  - Unscanned writes now represented by the journal are covered as C2's `cutoff` covers them: in each `retire` page, the identity's pending `cutoff` is set to its last op at or below `W1`, and their unowned pins (intermediate bytes) are released, as a collapse releases them. The journal record owns the pin of the identity's present bytes.
+  - Test (A3): the trace scanned = 10, an unrelated rename Y logged at 11 and not yet scanned, $W_0 = W_1 = 11$. Y is in the journal and reaches the server once.
+- **Tests asked by astra:** (a) after an $n$-CAS restart, the new pass's journal again holds the replaced identities' pins and their gone rows (nothing lost when the failed pass is discarded); (b) C3's order: the committed journal drains before any record the scanner makes for ops after `W1`.
+
+**D9 (wording, nonblocking):** canonical `Content-Length` is `^(0|[1-9]\d{0,11})$`, with no leading zeroes.
+
 **D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
 
 **D7 (r2). The obligation's counter** (astra's A2). Every write of `sync:<ns>:rebuild` (D7's refusal branch, a halt) increments its `n`, in the transaction that records the decision. A rebuild records `n0` when it starts. Acks for messages sent before the halt can still arrive during a rebuild, and only `done`'s compare-and-swap decides whether the flag may be cleared. So a refusal that lands at any point of a rebuild, before or after its identity's view page, is never cleared unrebuilt. Test: a refusal delivered (a held ack, released) during each phase: the rebuild runs again, and the refused identity's view is right after it.
@@ -648,7 +690,7 @@ Pages still go through the bucket, one in flight, the index timer and the slices
 
 **D9 (r2). Downloads** (daybreak3's LIMIT-PR65-2).
 - Before any reservation or request, the record's `size` must be a non-negative safe integer with $\text{size} \le \min(\text{maxFileBytes}, \text{MAX\_PUT})$ (95 MiB: nothing larger is ever uploaded). Then $\text{size} \cdot \text{COPIES}$ is computed (at most 190 MiB, safe) and reserved, and the reservation is held across a 303 redirect until the body is installed or dropped.
-- On the final response, of either path, `Content-Length` must be a canonical decimal (`^\d{1,12}$`) equal to `size` before the body is read. The body goes through a counting reader with a hard cap of `size`: one byte more aborts it. Its SHA-256 is checked before the compare-and-swap install (C5).
+- On the final response, of either path, `Content-Length` must be a canonical decimal (`^(0|[1-9]\d{0,11})$`, no leading zeroes) equal to `size` before the body is read. The body goes through a counting reader with a hard cap of `size`: one byte more aborts it. Its SHA-256 is checked before the compare-and-swap install (C5).
 - Any failure fails that item under its retry timer and is never installed.
 - Tests: size at the cap and cap + 1; an unsafe or overflowing size; Content-Length missing, malformed or different; a body longer than declared; a 303 whose final response fails any of these.
 
