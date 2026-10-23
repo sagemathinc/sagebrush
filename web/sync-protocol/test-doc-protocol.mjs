@@ -1,0 +1,184 @@
+// The documents' sync protocol (doc-protocol.ts; plan-sync-slice2-r9.md §0a):
+// its encodings against doc-vectors.json (made by an independent Python
+// implementation, gen-doc-vectors.py), and its checks, each accepting what
+// the plan allows and refusing what it doesn't.
+//   bun web/sync-protocol/test-doc-protocol.mjs
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import * as P from "./doc-protocol.ts";
+
+let checks = 0;
+const fails = [];
+const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
+const throwsCode = (f, code, what) => {
+  try {
+    f();
+    check(false, `${what}: didn't throw`);
+  } catch (e) {
+    check(e instanceof P.DocError && e.code === code, `${what}: ${e?.code ?? e} (wanted ${code})`);
+  }
+};
+const here = new URL(".", import.meta.url).pathname;
+const V = JSON.parse(readFileSync(here + "doc-vectors.json", "utf8"));
+const td = new TextDecoder();
+
+// ---- the encodings, against the vectors
+
+for (const t of V.sha256) check(P.hex(P.sha256(P.fromHex(t.hex_in))) === t.out, `sha256 of ${t.hex_in.length / 2} bytes`);
+// (and against node's, on sizes around every block boundary)
+for (let n = 0; n < 300; n++) {
+  const b = new Uint8Array(n).map((_, i) => (i * 31 + n) & 255);
+  check(P.hex(P.sha256(b)) === createHash("sha256").update(b).digest("hex"), `sha256 of ${n} bytes, against node's`);
+}
+for (const t of V.enc) check(P.hex(P.enc(t.in)) === t.out, `enc ${JSON.stringify(t.in)}`);
+for (const t of V.u64) check(P.hex(P.u64(t.in)) === t.out, `u64 ${t.in}`);
+throwsCode(() => P.u64(-1), "invalid", "u64 of -1");
+throwsCode(() => P.u64(2 ** 53), "invalid", "u64 past safe integers");
+for (const t of V.jcs) check(P.jcs(t.in) === t.out, `jcs ${t.out}`);
+for (const s of V.jcs_invalid) throwsCode(() => P.jcs(JSON.parse(s)), "invalid_value", `jcs refuses ${s}`);
+throwsCode(() => P.jcs({ a: NaN }), "invalid_value", "jcs refuses NaN");
+throwsCode(() => P.jcs({ a: Infinity }), "invalid_value", "jcs refuses Infinity");
+throwsCode(() => P.jcs(new Date(0)), "invalid_value", "jcs refuses a non-plain object");
+
+// the chain
+const cs = V.chain_seed;
+check(P.hex(P.chainSeed(cs.owner_hash, cs.doc, cs.epoch)) === cs.out, "chain seed");
+let prev = P.chainSeed(cs.owner_hash, cs.doc, cs.epoch);
+const batches = V.chain.map((b) => ({ ...b, body: P.fromHex(b.body_hex) }));
+for (const b of batches) {
+  const hb = P.batchHash(b.envs, b.body);
+  check(P.hex(hb) === b.hb, `h_b of batch ${b.seq}`);
+  prev = P.chainNext(prev, { ...b, hb });
+  check(P.hex(prev) === b.chain, `chain at ${b.seq}`);
+}
+const last = batches[batches.length - 1].chain;
+const vc = (bs, extra = {}) => P.verifyChain({ ownerHash: cs.owner_hash, doc: cs.doc, epoch: 1, upto: bs.length, expect: bs.length ? bs[bs.length - 1].chain : P.hex(P.chainSeed(cs.owner_hash, cs.doc, 1)), ...extra }, bs);
+check(vc(batches).ok, "verifyChain: the vectors' prefix");
+check(vc(batches.slice(0, 2)).ok, "verifyChain: a shorter prefix");
+check(vc([]).ok, "verifyChain: the empty prefix is the seed");
+check(!vc([batches[0], batches[2]]).ok, "verifyChain: a gap");
+check(!vc([batches[1], batches[0], batches[2]]).ok, "verifyChain: a reordering");
+check(!vc(batches.map((b, i) => (i === 1 ? { ...b, body: new Uint8Array([1]) } : b))).ok, "verifyChain: a changed body");
+check(!vc(batches.map((b, i) => (i === 1 ? { ...b, author: "other" } : b))).ok, "verifyChain: a changed author");
+check(!vc(batches.map((b, i) => (i === 2 ? { ...b, recv: 999 } : b))).ok, "verifyChain: recv going back");
+check(!vc(batches.map((b, i) => (i === 0 ? { ...b, epoch: 2 } : b))).ok, "verifyChain: another epoch");
+check(!vc(batches, { deadline: 2500 }).ok, "verifyChain: a batch at the deadline is late");
+check(vc(batches, { deadline: 2501 }).ok, "verifyChain: all before the deadline");
+check(!vc(batches, { expect: "00".repeat(32) }).ok, "verifyChain: a different collection chain");
+check(!P.verifyChain({ ownerHash: cs.owner_hash, doc: cs.doc, epoch: 1, upto: 3, expect: last }, batches.slice(0, 2)).ok, "verifyChain: fewer batches than upto");
+
+// the sealed value and the census
+for (const s of V.sealed) {
+  const b = P.sealedValueBytes(s.kind, s.records);
+  check(td.decode(b) === s.text, `sealed ${s.kind}: bytes`);
+  check(P.sha256Hex(b) === s.sha256, `sealed ${s.kind}: sha256`);
+  const cells = P.censusOf(s.kind, s.records);
+  check(JSON.stringify(cells) === JSON.stringify(s.census), `census ${s.kind}`);
+  const cb = P.censusBytes(cells);
+  check(td.decode(cb) === s.census_text && P.sha256Hex(cb) === s.census_sha256, `census ${s.kind}: bytes`);
+  check(JSON.stringify(P.parseCensus(cb)) === JSON.stringify(cells), `census ${s.kind}: parsed back`);
+  // (insertion order never matters)
+  check(P.sha256Hex(P.sealedValueBytes(s.kind, [...s.records].reverse())) === s.sha256, `sealed ${s.kind}: any record order`);
+  const shuffled = s.records.map((r) => Object.fromEntries(Object.entries(r).reverse()));
+  check(P.sha256Hex(P.sealedValueBytes(s.kind, shuffled)) === s.sha256, `sealed ${s.kind}: any property order`);
+}
+const nb = V.sealed[0].records;
+throwsCode(() => P.sealedValueBytes("notebook", [...nb, { type: "cell", id: "c2", pos: 9, input: "", cell_type: "code" }]), "invalid_value", "sealed: two cells with one id");
+throwsCode(() => P.sealedValueBytes("notebook", [{ type: "cell", id: "x", pos: NaN, input: "", cell_type: "code" }]), "invalid_value", "sealed: a non-finite number");
+throwsCode(() => P.sealedValueBytes("notebook", [{ type: "cell", id: "x", pos: 0, input: "\ud800", cell_type: "code" }]), "invalid_value", "sealed: a lone surrogate");
+throwsCode(() => P.sealedValueBytes("notebook", [{ type: "cell", id: "x", pos: 0, input: "x".repeat(16 << 20), cell_type: "code" }]), "limit", "sealed: over 16 MiB");
+const many = Array.from({ length: 2001 }, (_, i) => ({ id: "c" + String(i).padStart(5, "0"), cell_type: "code" }));
+throwsCode(() => P.censusBytes(many), "invalid_value", "census: over 2,000 cells");
+check(P.censusBytes(many.slice(0, 2000)).length <= 256 << 10, "census: 2,000 cells fit 256 KiB");
+throwsCode(() => P.censusBytes([{ id: "b", cell_type: "code" }, { id: "a", cell_type: "code" }]), "invalid", "census: out of order");
+throwsCode(() => P.parseCensus(P.utf8("sb-sync-census-v1\n{\"id\":\"a\",\"cell_type\":\"code\"}\n")), "invalid", "census: not canonical (key order)");
+throwsCode(() => P.parseCensus(P.utf8("sb-sync-census-v1")), "invalid", "census: no final newline");
+check(P.parseCensus(P.utf8("sb-sync-census-v1\n")).length === 0, "census: the empty census");
+
+// the outputs digest and the final descriptor
+for (const t of V.outputs_digest) check(P.outputsDigest(t.entries) === t.out, `outputs digest of ${t.entries.length} cells`);
+const E = V.outputs_digest[0].entries;
+const digestOf = (mut) => P.outputsDigest(mut(structuredClone(E)));
+check(digestOf((e) => ((e[5].state = "not_run"), e)) !== V.outputs_digest[0].out, "digest: a state changes it");
+check(digestOf((e) => ((e[2].full.rev = 4), e)) !== V.outputs_digest[0].out, "digest: a blob's rev changes it");
+check(digestOf((e) => ((e[3].preview.kind = "text"), e)) !== V.outputs_digest[0].out, "digest: a preview's kind changes it");
+check(digestOf((e) => ((e[4].preview.sha256 = "e".repeat(64)), e)) !== V.outputs_digest[0].out, "digest: a preview's blob changes it");
+throwsCode(() => P.outputsDigest([E[1], E[0]]), "invalid", "digest: cells out of order");
+throwsCode(() => P.outputsDigest([{ cell: "x", state: "not_run", full: E[2].full }]), "invalid", "digest: a blob on a cell that isn't captured");
+throwsCode(() => P.outputsDigest([{ cell: "x", state: "captured" }]), "invalid", "digest: a captured cell with no blob");
+const census = [{ id: "a", cell_type: "code" }, { id: "b", cell_type: "markdown" }, { id: "c", cell_type: "code" }, { id: "d", cell_type: "code" }];
+const sel = new Map([
+  ["a", { cell: "a", state: "captured", full: { sha256: "1".repeat(64), size: 1, rev: 1 } }],
+  ["d", { cell: "d", state: "written_after_deadline" }],
+  ["z", { cell: "z", state: "captured", full: { sha256: "2".repeat(64), size: 1, rev: 2 } }],
+]);
+const fd = P.finalDescriptor(census, sel);
+check(JSON.stringify(fd.entries.map((e) => [e.cell, e.state])) === JSON.stringify([["a", "captured"], ["b", "not_code"], ["c", "not_run"], ["d", "written_after_deadline"]]), "finalDescriptor: one entry per census cell, with its state");
+check(JSON.stringify(fd.dropped) === '["z"]', "finalDescriptor: a selected cell outside the census is dropped");
+check(typeof P.outputsDigest(fd.entries) === "string", "finalDescriptor: its entries digest");
+
+// claims
+for (const t of V.claims) {
+  const b = P.encodeClaims(t.in);
+  check(btoa(String.fromCharCode(...b)) === t.out, "claims: encoded");
+  check(JSON.stringify(P.decodeClaims(b)) === JSON.stringify(Object.fromEntries(Object.keys(P.decodeClaims(b)).map((k) => [k, t.in[k]]))), "claims: decoded back");
+  check(P.checkProgress({ t: "progress", claims: t.out }).claims.length === 32, "progress: accepted");
+}
+const goodClaims = V.claims[0].in;
+throwsCode(() => P.encodeClaims({ ...goodClaims, cells_run: 70000 }), "invalid", "claims: a count over u16");
+throwsCode(() => P.encodeClaims({ ...goodClaims, outbox_waiting: -1 }), "invalid", "claims: a negative count");
+const raw = P.encodeClaims(goodClaims);
+throwsCode(() => P.decodeClaims(raw.slice(0, 31)), "invalid", "claims: 31 bytes");
+throwsCode(() => P.decodeClaims(Uint8Array.from(raw, (x, i) => (i === 0 ? 2 : x))), "invalid", "claims: another version");
+throwsCode(() => P.decodeClaims(Uint8Array.from(raw, (x, i) => (i === 30 ? 1 : x))), "invalid", "claims: reserved bytes");
+throwsCode(() => P.decodeClaims(Uint8Array.from(raw, (x, i) => (i === 1 ? 2 : x))), "invalid", "claims: unknown flags");
+throwsCode(() => P.checkProgress({ t: "progress", claims: V.claims[0].out, extra: 1 }), "invalid", "progress: an unknown field");
+throwsCode(() => P.checkProgress({ t: "progress", claims: "AAAA" }), "invalid", "progress: short claims");
+
+// ---- the messages
+
+const DOC = "0123456789ab", SHA = "f".repeat(64);
+check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1" }).client === "c1", "doc_claim: accepted");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", owner: SHA }).owner === SHA, "doc_claim: with an owner");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c 1" }), "invalid", "doc_claim: a bad client");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: "nope", client: "c1" }), "invalid", "doc_claim: a bad doc");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", fgen: 0 }), "invalid", "doc_claim: an unknown field");
+throwsCode(() => P.checkDocClaim({ t: "doc_claim", req: 1, doc: DOC, client: "c1", owner: "x" }), "invalid", "doc_claim: a bad owner");
+const fence = { t: "doc_fence", req: 2, doc: DOC, clients: [{ client: "c1", target: 3 }] };
+check(P.checkDocFence(fence).clients[0].target === 3, "doc_fence: accepted");
+throwsCode(() => P.checkDocFence({ ...fence, clients: [] }), "invalid", "doc_fence: no clients");
+throwsCode(() => P.checkDocFence({ ...fence, clients: Array.from({ length: 9 }, (_, i) => ({ client: "c" + i, target: 1 })) }), "limit", "doc_fence: nine clients");
+throwsCode(() => P.checkDocFence({ ...fence, clients: [{ client: "c1", target: 1 }, { client: "c1", target: 2 }] }), "invalid", "doc_fence: a client twice");
+throwsCode(() => P.checkDocFence({ ...fence, clients: [{ client: "c1", target: 0 }] }), "invalid", "doc_fence: target 0");
+throwsCode(() => P.checkDocFence({ ...fence, clients: [{ client: "c1", target: 2 ** 32 }] }), "invalid", "doc_fence: target past u32");
+throwsCode(() => P.checkDocFence({ ...fence, clients: [{ client: "c1", target: 1, x: 1 }] }), "invalid", "doc_fence: an unknown client field");
+const inBatch = new Set(["c1", "c2"]);
+check(P.checkFgen({ c1: 0, c2: 4 }, inBatch).get("c2") === 4, "fgen: one per client");
+throwsCode(() => P.checkFgen({ c1: 0 }, inBatch), "invalid", "fgen: a client missing");
+throwsCode(() => P.checkFgen({ c1: 0, c2: 1, c3: 2 }, inBatch), "invalid", "fgen: a client not in the batch");
+throwsCode(() => P.checkFgen({ c1: -1, c2: 1 }, inBatch), "invalid", "fgen: a negative generation");
+check(P.checkUpto({}, 5) === undefined && P.checkUpto({ upto: 7 }, 5) === 7, "pull upto: absent or at least after");
+throwsCode(() => P.checkUpto({ upto: 4 }, 5), "invalid", "pull upto: below after");
+const snap = { t: "snapshot", req: 3, doc: DOC, at_seq: 10, sha256: SHA, bytes: 100 };
+check(P.checkSnapshot(snap).at_seq === 10, "snapshot: accepted");
+throwsCode(() => P.checkSnapshot({ ...snap, at_seq: 0 }), "invalid", "snapshot: at_seq 0");
+throwsCode(() => P.checkSnapshot({ ...snap, bytes: (32 << 20) + 1 }), "limit", "snapshot: over 32 MiB");
+const outs = { t: "outputs", req: 4, doc: DOC, oreq: { client: "c1", n: 1 }, set: [{ cell: "a", full: { sha256: SHA, size: 10 } }, { cell: "b", preview: { sha256: SHA, size: 10, kind: "png" } }] };
+check(P.checkOutputs(outs).set.length === 2, "outputs: accepted");
+throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a" }] }), "invalid", "outputs: a cell with neither");
+throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", full: { sha256: SHA, size: (4 << 20) + 1 } }] }), "limit", "outputs: over 4 MiB");
+throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", preview: { sha256: SHA, size: (256 << 10) + 1, kind: "png" } }] }), "limit", "outputs: a preview over 256 KiB");
+throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", preview: { sha256: SHA, size: 1, kind: "html" } }] }), "invalid", "outputs: a preview kind");
+throwsCode(() => P.checkOutputs({ ...outs, set: [outs.set[0], outs.set[0]] }), "invalid", "outputs: a cell twice");
+throwsCode(() => P.checkOutputs({ ...outs, oreq: { client: "c1", n: 0 } }), "invalid", "outputs: oreq n 0");
+throwsCode(() => P.checkOutputs({ ...outs, set: Array.from({ length: 501 }, (_, i) => ({ cell: "c" + i, full: { sha256: SHA, size: 1 } })) }), "limit", "outputs: 501 cells");
+const blob = { format: "sb-sync-snapshot", v: 1, kind: "notebook", epoch: 1, at_seq: 4, time: "0000000000a_c1", value: "" };
+check(P.checkSnapshotBlob(blob).at_seq === 4, "snapshot blob: accepted");
+throwsCode(() => P.checkSnapshotBlob({ ...blob, v: 2 }), "invalid", "snapshot blob: another version");
+throwsCode(() => P.checkSnapshotBlob({ ...blob, extra: 1 }), "invalid", "snapshot blob: an unknown field");
+
+console.log(`${checks - fails.length}/${checks} checks passed`);
+if (fails.length) {
+  for (const f of fails.slice(0, 40)) console.log("FAIL", f);
+  process.exit(1);
+}
