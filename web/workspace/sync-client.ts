@@ -600,7 +600,9 @@ export class SyncClient {
       const recs = await this.undecided(c, c.next ?? 1, CLIENT.opsPerMessage);
       if (!recs.length) {
         const st = await c.ob.status();
-        if (opsInFlight === 0 && st.count === 0) this.say({ state: "synced", ns: c.ns, waiting: 0, lastSynced: this.clock.now() });
+        // (synced only once every op logged here is scanned: one logged since this run's scan is the next run's)
+        const caughtUp = (st.scanned ?? 0) >= (await this.w.lastSeq());
+        if (opsInFlight === 0 && st.count === 0 && caughtUp) this.say({ state: "synced", ns: c.ns, waiting: 0, lastSynced: this.clock.now() });
         else this.showWaiting(c, st.count);
         return;
       }
