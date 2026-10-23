@@ -552,55 +552,81 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
-### Step 4 plan delta (D5 to D9)
+### Step 4 plan delta (D5 to D9, r2)
 
-@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say.
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b.
 
-**D5. Where the log is read from.**
-- Once `onIndex` is given (the confirmed index), `hello.index_after` is the durable cursor `sync:<ns>:cursor`, which is written in the same transaction as each page applied to `syncIndex` (C3). It goes lower, to just before the oldest record accepted and awaiting its echo, only if that is lower.
-- The connection's target becomes `welcome.index_head`, raised by acks' accepted seqs and by `index_changed` (D8).
-- Pulls keep step 3's pacing and slices.
+**D5 (r2). Two cursors** (daybreak3's CORR-PR65-1).
+- `apply_after` is the durable confirmed cursor (`sync:<ns>:cursor`). Only ops with $\text{seq} > \text{apply\_after}$ are reduced into `syncIndex`, as one contiguous suffix, the suffix and the cursor committed in one transaction (C3).
+- `request_after` is what `hello.index_after` and `pull_index.after` ask from. It may be lower than `apply_after`, to just before the oldest record accepted and awaiting its echo.
+- Ops with $\text{seq} \le \text{apply\_after}$ in an answer are checked for order (strictly increasing) and used only to match this device's echoes (`sameOp`). They are never reduced, and they never move `apply_after`.
+- Test: an old echo below the cursor, with a later rename and write of the same identity above it. The replayed prefix confirms the record and leaves the confirmed state unchanged.
 
-**D6. The rebuild.** It runs when `sync:<ns>:rebuild` is set, before anything is sent. It is a sequence of phases, each a series of transactions, each recording its progress in `sync:<ns>:rebuild` (`{why, phase, at}`). Sending stays halted until the last phase ends.
+**D6 (r2). The rebuild.** It runs when `sync:<ns>:rebuild` is set, before anything is sent. It is a sequence of phases recorded in `sync:<ns>:rebuild` (`{why, phase, gen, at, ...}`). Every phase is a series of transactions, each writing its own progress with its effect. Sending is halted until `done`.
 
-1. **`floor`** (only for `why: "diverged"` or `"invalid"`). In one transaction:
-   - the namespace's next dseq is set to $\max(\text{local next dseq}, \text{welcome.next\_dseq})$;
-   - that value is recorded as the rebuild's `floor`.
-   The next dseq only ever rises.
-2. **`log`**: `syncIndex` is rebuilt from the server's log, from seq 0, in pages (at most 1,000 ops and 1 MiB, L4).
-   - Each page is reduced into `syncIndex`, and the rebuild's own cursor written, in one transaction. The live cursor is replaced only at the phase's end.
-   - This device's echoes met on the way are matched to their records by `sameOp`, as in step 3. A match confirms its record (its pin released) in that page's transaction.
-3. **`reissue`** (only with a `floor`). The outbox is walked in dseq order, a page of 500 records a transaction. Each record still undecided with $\text{dseq} < \text{floor}$ is one the server has decided as something else, so its dseq can never be sent. In one transaction:
-   - the record is removed;
-   - its pin is handed to its identity's successor (C2's successor path: `successor: {base}` from the confirmed index);
-   - the identity is listed in `sync:<ns>:successors`.
-   The scan later allocates the successor fresh dseqs, at or above `floor`, with the identity's current state. Records with $\text{dseq} \ge \text{floor}$ are kept and sent as they are: the server hasn't decided those dseqs.
-4. **`view`**: every identity whose confirmed state or local layers changed is recomputed (C3's four layers, by key) and the difference applied to the workspace's entries, a page a transaction.
-   - An entry the rebuilt view no longer has is never deleted. It is kept, as a conflict copy if its path is taken, and listed in the Sync panel.
-5. **`done`**: in one transaction the flag is cleared and the live cursor set to the rebuilt one. Sending resumes.
+*Two dseq values, never confused* (daybreak3's CORR-PR65-2), recorded once, in one transaction, at the rebuild's start:
+- `server_next` = `welcome.next_dseq` of the connection that found the divergence: the server's decided prefix. Only records with $\text{dseq} < \text{server\_next}$ can have been decided by the server.
+- `alloc_floor` = $\max(\text{local next dseq}, \text{server\_next})$. The namespace's next dseq is set to it, and only rises.
+- Records with $\text{dseq} \ge \text{server\_next}$ keep their dseq and are sent in order, from `server_next`.
+- If a dseq in $[\text{server\_next}, \text{local next})$ has no local record, the server is waiting for a dseq this device can't produce, because its record was removed on a decision the server no longer has. A client can never skip a dseq, so this is a halt the person is told about ("this device's queue can't continue here; Delete my synced data to start again"). It is never a skip. It can't happen while the server keeps its decisions. It is tested by a rewritten `welcome`.
+- `why: "invalid"` (the server's 10,000-refusal limit) can't be rebuilt away: the server keeps refusing that device. It is the same person-told halt. An open question for the server (@sagebrush-auth): a way to reset a device's refusal count after a rebuild.
 
-A plain refusal (`why: "refused"`) runs `log`, `view` and `done`. Its refused record is already gone.
+*Phases:*
+1. **`stage`**: one transaction draws a fresh index generation `gen`. The staging confirmed index lives in `syncIndex` under the key prefix `[ns + "#" + gen]`, empty by construction because no row has ever had that prefix (daybreak3's LIMIT-PR65-1). Nothing is cleared to begin.
+2. **`log`**: the server's log, from seq 0, in pages (at most 1,000 ops and 1 MiB, L4).
+   - Each page is reduced into the staging index, and the rebuild's own cursor written, in one transaction.
+   - Echoes met on the way are matched to their records by `sameOp`, and a match confirms its record in that page's transaction.
+   - The live index and its cursor are untouched until `done`.
+3. **`capture`** (only when there are records with $\text{dseq} < \text{server\_next}$ still undecided: the replaced prefix) (daybreak3's CORR-PR65-3).
+   - Those records' identities, and each one's ancestors, are written to a **reissue journal**. It reuses `adoptJournal`'s store and `byParent` index under the prefix `[ns + "#reissue"]`, and records each identity's present local state: `{id, parent, name, kind, sha256, size, trashed}` or `gone`.
+   - It is captured as C3's first-sync adoption captures a tree: walk by identity, close at a finite boundary `W1`, replay $(W_0, W_1]$ in pages, so an edit made during the capture is in the journal or after `W1`, exactly once. Ops after `W1` are the scanner's.
+   - The capture also removes, a page at a time, each replaced record, with its pin handed to the journal record (C3: the journal owns its records' pins until they drain).
+   - Pages of at most 100 records, at most 400 IndexedDB requests a transaction (as `PINS.slice`).
+4. **`view`**: the union of the staging index's identities and the workspace entries' identities (`byIdent`), walked in key order, at most 100 identities and 400 requests a transaction, its position in the rebuild state. For each, the four-layer view is recomputed against the staging index and the difference applied to the entries.
+   - An entry the view no longer has is never deleted. It is kept, as a conflict copy if its path is taken, and listed.
+5. **`done`**, one transaction, which is a compare-and-swap on the obligation (astra's A2):
+   - the rebuild flag's `n` must still be the `n0` the rebuild started from. If it isn't, a refusal (or a divergence) was recorded meanwhile: `done` does nothing but start another pass, keeping its phases' results where they still hold. A new pass always starts from `stage`, with a fresh `gen`.
+   - Otherwise: the active index generation (`sync:<ns>:indexGen`) switches to `gen`; the live cursor is set to the rebuild's; the scan watermark is set to `W1` if a capture ran; and the flag is cleared.
+   Sending resumes, sending the records at or above `server_next`, then draining the reissue journal.
+6. **`clean`** (after `done`, not blocking sending): the old generation's rows are deleted from `syncIndex` a page at a time (at most 500 keys a transaction, by `getAllKeys` on its prefix), from a durable position.
 
-**D6's invariants:**
+*The reissue journal drains* through the outbox as it has room, at fresh dseqs from `alloc_floor` up, diffed against the (now active) confirmed index. For each identity, in this order:
+- (a) top-down through `byParent` (parents before children):
+  - present locally and absent from the index: `mkdir` for a folder; `adopt` for a data file or document, which syncs as a create. Data files go with their bytes, uploaded first.
+  - present in both, but another parent or name: `rename`, its `parent` the folder's identity.
+  - another hash: `write`, its `base` the index's hash.
+  - trashed locally, not in the index's Trash: `remove`;
+- (b) then, deepest first, identities gone locally but present in the index: `forget`, person-only, as emptying Trash already sends.
+Each journal record goes once, retired by its echo or its refusal (C1). A refusal sets the flag again (D7), and the next rebuild starts from the same rules.
+
+*D6's invariants (r2):*
 - **No dseq is ever reused.**
-  - The next dseq is raised to `floor` before any record is touched, and only rises.
-  - A record below `floor` is removed in the same transaction that schedules its replacement. The replacement takes a new dseq from the counter.
-  - Nothing below `floor` is ever sent again: sending is halted until `done`, and no record below `floor` survives `reissue`.
+  - `alloc_floor` is written once, before any record is touched, and the next dseq only rises from it.
+  - Replaced records ($\text{dseq} < \text{server\_next}$) are removed in the transaction that moves their identities' state into the journal.
+  - Records at or above `server_next` keep their dseqs and are sent in order. Nothing is sent before `done`.
 - **No local edit is lost.**
-  - Every removed record's identity gets a successor carrying its current local state. If that state is gone (a forget, emptying Trash), the deletion goes as its own record, as C2 has it.
-  - Local entries are only ever added to or moved by the rebuild, never deleted.
-  - Unscanned ops stay past the scan's watermark and are sent after `done`.
+  - Every replaced record's identity, and its ancestors, are captured in the journal with their present state, at `W1`; ops after `W1` stay past the watermark for the scanner.
+  - Local entries are never deleted by the rebuild.
+  - A capture that can't fit the journal (more than the workspace's 100,000 entries can't occur) still pages, never truncates.
 - **Idempotent across a crash at every step.**
-  - Each transaction writes its progress with its effect: a `log` page with its cursor; a `reissue` record's removal with its successor; a `view` page with its position.
-  - A crash leaves the whole transaction or none of it.
-  - The next start resumes the recorded phase from its recorded position. Re-running a step that already committed finds nothing left to do: the record is gone, or the page is past the cursor.
-  - `floor` is written once and read thereafter.
-- Tests:
-  - a crash at every phase boundary and inside each phase's transaction (`OUTBOX.cut`-style seams);
-  - divergence by a restored older copy (local next dseq < server's) and by a workspace reset that kept its device.
-  Each asserts no dseq sent twice, every local edit on the server once (or listed), and the local tree intact.
+  - Each transaction writes its effect with its position: a log page with its cursor, a capture page with its walk position or replay position, a view page with its key, a clean page with its key.
+  - The staging generation is never live until `done` switches to it in one transaction. A crash before then leaves the old index whole and the rebuild resumable from its recorded phase and position. A crash after then leaves only `clean` to finish.
+  - `server_next`, `alloc_floor`, `gen` and `W1` are written once and read thereafter.
+- **Bounds:**
+  - each transaction at most 1,000 ops and 1 MiB (log), or 100 records and 400 requests (capture, view), or 500 keys (clean);
+  - no array grows with the tree. The successors list isn't used by the rebuild.
+- **Tests:**
+  - a crash at every phase boundary and inside each phase's transaction (cut seams);
+  - local ahead of the server (server_next < local next);
+  - local behind (a restored older copy);
+  - a reset that kept its device;
+  - a stale prefix containing a folder create and move, a document create, a file write, and an emptied-Trash deletion;
+  - the scale: 100,000 confirmed entries and 10,000 pending records, asserting each transaction's request and record maxima. This runs against the reference server, seeded directly, since a real server's ops rate would take 50 minutes to make that log.
+  Each asserts no dseq sent twice or skipped, every local edit on the server once (or listed), and the local tree intact.
 
 **D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
+
+**D7 (r2). The obligation's counter** (astra's A2). Every write of `sync:<ns>:rebuild` (D7's refusal branch, a halt) increments its `n`, in the transaction that records the decision. A rebuild records `n0` when it starts. Acks for messages sent before the halt can still arrive during a rebuild, and only `done`'s compare-and-swap decides whether the flag may be cleared. So a refusal that lands at any point of a rebuild, before or after its identity's view page, is never cleared unrebuilt. Test: a refusal delivered (a held ack, released) during each phase: the rebuild runs again, and the refused identity's view is right after it.
 
 **D8. Live updates** (plan-sync-index-changed-r1).
 - With the confirmed index, the server's `index_changed` raises the target and pulls through the existing pacing.
@@ -614,10 +640,17 @@ A plain refusal (`why: "refused"`) runs `log`, `view` and `done`. Its refused re
 - Cost: at most one small request every 5 minutes per idle device. A pull that finds nothing new is one empty page.
 - Test: with a fake clock, the only notice for another device's op is dropped. The op arrives at the 5-minute pull, with no edit and no reconnect, and no other pull happens meanwhile.
 
-**D9. Downloads** (L1, L2, C5).
-- A download reserves $\text{size} \cdot \text{COPIES}$ (L2) before asking. It accepts either the files Worker's 303 to a signed URL, or a 200 with the bytes (the reference server's).
-- On both paths, **`Content-Length` must be present and equal the record's size before the body is read**. The body is read through a counting reader with a **hard cap of exactly that size**: one byte more aborts the download. Its SHA-256 is checked before the compare-and-swap install (C5).
-- A mismatch is a failed download of that item under its retry timer, never installed.
+**D8b (r2). Idle discovery** (astra's note). The idle pull doesn't know a target (there is no notice to say how far the log goes). So it sets the connection's `discover` flag:
+- while it is set, `pull()` may ask past the target (bypassing the `cursor >= target` return);
+- each page's last seq raises the target;
+- a page with `more: false` clears it.
+Pages still go through the bucket, one in flight, the index timer and the slices. Test: the dropped-notice case reads every page of a log longer than one page at the 5-minute pull.
+
+**D9 (r2). Downloads** (daybreak3's LIMIT-PR65-2).
+- Before any reservation or request, the record's `size` must be a non-negative safe integer with $\text{size} \le \min(\text{maxFileBytes}, \text{MAX\_PUT})$ (95 MiB: nothing larger is ever uploaded). Then $\text{size} \cdot \text{COPIES}$ is computed (at most 190 MiB, safe) and reserved, and the reservation is held across a 303 redirect until the body is installed or dropped.
+- On the final response, of either path, `Content-Length` must be a canonical decimal (`^\d{1,12}$`) equal to `size` before the body is read. The body goes through a counting reader with a hard cap of `size`: one byte more aborts it. Its SHA-256 is checked before the compare-and-swap install (C5).
+- Any failure fails that item under its retry timer and is never installed.
+- Tests: size at the cap and cap + 1; an unsafe or overflowing size; Content-Length missing, malformed or different; a body longer than declared; a 303 whose final response fails any of these.
 
 ## 4. Who builds what, in order, and the size of each
 
