@@ -15,6 +15,7 @@ import type { Entry, Op, OpAfter, Workspace } from "./api";
 import { req } from "./db";
 import { TRASH, freePath, join, nameOf, parentOf, splitExt, within } from "./paths";
 import { PartialIndex, entryIn, runOp, Halt, type Store } from "./sync-overlay";
+import { breather } from "./sync-confirmed";
 import type { SyncEntry, SyncOp } from "./sync-reduce";
 import type { OutboxRecord } from "./sync-outbox";
 import type { Pending } from "./sync-pins";
@@ -96,6 +97,7 @@ export type ViewContext = {
 export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<{ ops: Op[]; gone: Entry[]; listed: [string, ListedWhy][] }> {
   const { w, tx, ns, store } = c;
   const st = tx.objectStore("entries"), meta = tx.objectStore("meta");
+  const breathe = breather(tx);
   const scanned = (await req(meta.get(`sync:${ns}:scanned`))) as number | undefined;
   const journalNs = c.journalNs ?? ns;
   const now = c.now ?? Date.now();
@@ -209,6 +211,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
         lifted.set(d.path, d);
         if (d.ident) moved.add(d.ident);
         st.delete(d.path);
+        await breathe();
       }
     }
   };
@@ -324,12 +327,13 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
       const q = to + p.slice(old.length);
       st.put({ ...d, path: q, nkey: nkeyOf(q), ...(d.kind === "file" && d.ref !== null ? { ref: q } : {}) });
       lifted.delete(p);
+      await breathe();
     }
     const op = v.trashed && !e.trashed ? "remove" : !v.trashed && e.trashed ? "restore" : "rename";
     await w.logServer(tx, ops, { op, path: old, to, kind: e.kind }, n);
   }
   // (anything still lifted (a move inside a move that couldn't be made): back where it was)
-  for (const [, e] of lifted) st.put(e);
+  for (const [, e] of lifted) { st.put(e); await breathe(); }
 
   // ---- content only (no move), and what goes (deepest first), and what is kept
   const lease = await liveLease(meta);

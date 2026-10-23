@@ -68,12 +68,23 @@ export function idbStore(tx: IDBTransaction, prefix: string, stats?: { reads: nu
   };
 }
 
+/** Every BREATHE writes in a transaction, one cheap read awaited: the task ends there (the transaction stays alive),
+ * so a page of many writes (a 100,000-entry move) is many short tasks, not one long one (D10 r2's long tasks). */
+export const BREATHE = 200;
+export const breather = (tx: IDBTransaction) => {
+  let n = 0;
+  const meta = tx.objectStore(META);
+  return async () => {
+    if (++n % BREATHE === 0) await req(meta.get("sync:breathe"));
+  };
+};
+
 /** A page's rows written to one generation (in the page's transaction). */
-function writeRows(tx: IDBTransaction, prefix: string, put: SyncEntry[], gone: [string, string][], drop: string[]) {
-  const st = tx.objectStore("syncIndex");
-  for (const e of put) st.put({ ...e, ns: prefix, key: keyOf(e.path), parentKey: keyOf(parentOf(e.path)) });
-  for (const [id, lastPath] of gone) st.put({ ns: prefix, id, gone: true, lastPath });
-  for (const id of drop) st.delete([prefix, id]);
+async function writeRows(tx: IDBTransaction, prefix: string, put: SyncEntry[], gone: [string, string][], drop: string[]) {
+  const st = tx.objectStore("syncIndex"), breathe = breather(tx);
+  for (const e of put) { st.put({ ...e, ns: prefix, key: keyOf(e.path), parentKey: keyOf(parentOf(e.path)) }); await breathe(); }
+  for (const [id, lastPath] of gone) { st.put({ ns: prefix, id, gone: true, lastPath }); await breathe(); }
+  for (const id of drop) { st.delete([prefix, id]); await breathe(); }
 }
 
 export type Applied = { applied: number; cursor: number; pages: number; changed: string[]; halted?: string };
@@ -104,7 +115,7 @@ export async function applyOps(
       if (at >= ops.length) return true;
       const page = await runPage(idbStore(tx, prefix), ops.slice(at, at + 1000), carry);
       const { put, gone, drop } = rowsOf(page.base, page.changed);
-      writeRows(tx, prefix, put, gone, drop);
+      await writeRows(tx, prefix, put, gone, drop);
       const taken = page.taken;
       cursor = ops[at + taken - 1].seq;
       meta.put(cursor, ck);
