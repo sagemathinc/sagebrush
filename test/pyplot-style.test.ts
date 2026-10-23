@@ -98,9 +98,9 @@ def t(label, f):
             print(label, repr(r), [str(x.message) for x in w])
         except Exception as e:
             print(label, type(e).__name__, str(e))
-t("available", lambda: plt.style.available)
+t("available", lambda: len(plt.style.available))
 t("unknown", lambda: plt.style.use("nosuch"))
-t("old seaborn name", lambda: plt.style.use("seaborn-whitegrid"))
+t("unknown seaborn name", lambda: plt.style.use("seaborn-nosuch"))
 t("blacklisted", lambda: (plt.style.use({"backend": "Agg", "font.size": 13}), mpl.rcParams["font.size"])[1])
 t("undrawn", lambda: plt.style.use({"axes.spines.top": False, "legend.frameon": False, "axes.grid": True}))
 t("bad key", lambda: plt.style.use({"nosuch.key": 1}))
@@ -125,9 +125,9 @@ for k, v in [("axes.grid", "yes"), ("grid.linewidth", "1.5"), ("figure.figsize",
 `);
   const lines = out.trim().split("\n");
   assert.deepEqual(lines, [
-    "available [] []",
+    "available 20 []",
     "unknown OSError 'nosuch' is not a valid package style, path of style file, URL of style file, or library style name (library styles are listed in `style.available`)",
-    "old seaborn name OSError 'seaborn-whitegrid' is not a valid package style, path of style file, URL of style file, or library style name (library styles are listed in `style.available`)",
+    "unknown seaborn name OSError 'seaborn-nosuch' is not a valid package style, path of style file, URL of style file, or library style name (library styles are listed in `style.available`)",
     "blacklisted 13.0 [\"Style includes a parameter, 'backend', that is not related to style.  Ignoring this parameter.\"]",
     "undrawn None [\"Sagebrush does not draw 2 of this style's settings yet (they are kept in rcParams): axes.spines.top, legend.frameon\"]",
     "bad key KeyError \"'nosuch.key' is not a valid value for rcParam.\"",
