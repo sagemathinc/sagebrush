@@ -1436,10 +1436,12 @@ async function rebuildFailedPass() {
     W.REBUILD.before = async (phase) => {
       if (phase === "log" && !before) before = await liveState(w, ns);
       if (!fired && phase === at) { fired = true; await bump(); }
-      // (the failed pass's done has run: the next pass is at its log)
-      if (fired && phase === "log" && before && !after && (await metaGet(w.ws, `sync:${ns}:clean`))?.length !== undefined) after = await liveState(w, ns);
+      // (the failed pass's done has run, its generations cleaned: the next pass is at its log)
+      if (fired && phase === "log" && before && !after && c.stats.rebuildPasses >= 2) after = await liveState(w, ns);
     };
-    const c = viewClient(w);
+    // (assigned before the hook can run: the client's first phase comes after its connection)
+    let c = null;
+    c = viewClient(w);
     try {
       check(await until(() => !!after, 20_000), `failed pass (${at}): the pass failed its compare-and-swap, another began`);
       check(before === after, `failed pass (${at}): the live state exactly as it was`);
