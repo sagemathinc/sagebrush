@@ -65,6 +65,23 @@ function keepChunk(file) {
 }
 sw?.addEventListener?.("controllerchange", flushChunks);
 
+// The optional package set's files the live interpreters use (web/
+// pkgset-browser.ts), pinned in the service worker's package cache while
+// they run: told every 2 minutes, kept 10 minutes after (web/sw.js).  Never
+// permanent: a set no interpreter uses can be evicted, and is fetched again.
+const pkgPins = new Map(); // kernel uid -> [sha256]
+let pinTimer = null;
+function pinPackages() {
+  const all = [...new Set([...pkgPins.values()].flat())].slice(0, 64);
+  try {
+    if (all.length) sw?.controller?.postMessage({ pkgPin: all });
+  } catch {}
+  if (!pkgPins.size && pinTimer) {
+    clearInterval(pinTimer);
+    pinTimer = null;
+  } else if (pkgPins.size && !pinTimer) pinTimer = setInterval(pinPackages, 2 * 60 * 1000);
+}
+
 export class WorkerKernel {
   static count = 0;
   /**
@@ -128,6 +145,11 @@ export class WorkerKernel {
       // said once it has taken 300 ms, until it is here, in the status and
       // ("loading" event) on the cells waiting for it
       if (m.libChunk !== undefined) return keepChunk(m.libChunk);
+      if (m.pkgUsed !== undefined) {
+        if (w === this.worker && Array.isArray(m.pkgUsed)) pkgPins.set(this.uid, m.pkgUsed.filter((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d)));
+        return pinPackages();
+      }
+      if (m.pkgsetError !== undefined) return this.emit("status", `optional packages are off: ${String(m.pkgsetError).slice(0, 300)}`);
       if (m.libLoading !== undefined) {
         clearTimeout(this.libTimer);
         if (m.libLoading) this.libTimer = setTimeout(() => { this.libShown = true; this.emit("status", `loading ${m.libLoading}…`); this.emit("loading", m.libLoading); }, 300);
@@ -312,6 +334,7 @@ export class WorkerKernel {
   close(message = "\nThe interpreter was stopped.\n") {
     this.worker?.terminate();
     this.worker = null;
+    pkgPins.delete(this.uid);
     const pending = [...this.pending.values()];
     this.pending.clear();
     this.runs.clear();

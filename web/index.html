@@ -591,6 +591,32 @@ let db = null, replaying = false;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
 let kernel = null, journal = null; // the current notebook's
+// A notebook's optional package set (plan-modular-packages-r4 §4.4): the one
+// it pins (metadata pkgset), or else the site's latest (pkgset/latest.json,
+// asked once a page), which is then pinned in the notebook, so it keeps
+// running with the same packages whatever is published later.  Without a
+// published set there is nothing to pin, and nothing changes.  A pin that
+// isn't a set id is refused, never guessed.
+let latestPkgset; // undefined: not asked yet; null: none
+async function notebookPkgset() {
+  const pin = nb.meta.pkgset;
+  if (pin !== undefined) {
+    if (typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin)) return pin;
+    statusEl.textContent = "this notebook's package set pin is invalid: optional packages are off";
+    return null;
+  }
+  if (LOCAL) return null;
+  if (latestPkgset === undefined) {
+    latestPkgset = null;
+    try {
+      const r = await fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" });
+      const j = r.ok ? await r.json() : null;
+      if (j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id)) latestPkgset = j.id;
+    } catch {}
+  }
+  if (latestPkgset) nb.setMeta({ pkgset: latestPkgset });
+  return latestPkgset;
+}
 function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
@@ -603,6 +629,9 @@ function makeKernel(owner) {
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
+      // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4)
+      const S = owner !== null && current.id === owner ? await notebookPkgset() : null;
+      if (S) w.postMessage({ pkgset: S });
       const old = await j?.replayFiles();
       if (old) return w.postMessage({ files: old });
       if (diskFiles.length) w.postMessage({ files: diskFiles });
