@@ -149,11 +149,20 @@ for (const k of [20, 999]) {
   }
   const mv = { seq: ++seq, device: DEV, dseq: seq, t: seq, by: "person", op: "rename", path: "/big", to: "/new/big", kind: "folder", fid: big };
   for (let n = 0; n < 999; n++) S.gone.set(candidate(mv.dseq, 1, n), "/was" + n);
+  // (D10 r3 expected each round to replay the move and so pass the ceiling; this reducer makes the missing folder
+  // before it moves anything, so a round that misses a candidate costs little: the op either completes within the
+  // ceiling, equal to the in-memory reducer, or halts with nothing written.  Both are bounded; which one is reported)
+  const want = reduceAll([mv], S.clone());
   const before = state(S);
-  let halted = null;
-  try { await runPage(memStore(S, stats), [mv]); } catch (e) { halted = e; }
-  check(halted instanceof Halt && /units/.test(halted.message), "a 100,000-entry move with the 1,000-collision series halts at the per-op ceiling: " + String(halted).slice(0, 120));
-  check(state(S) === before, "…nothing of it written");
+  let halted = null, r = null;
+  const base = new PartialIndex();
+  try { r = await runOp(base, memStore(S, stats), mv, { alone: true }); } catch (e) { halted = e; }
+  if (halted) check(halted instanceof Halt && state(S) === before, "a 100,000-entry move with the 1,000-collision series: halted, person-told, nothing written: " + String(halted).slice(0, 120));
+  else {
+    const page = await runPage(memStore(S, stats), [mv]);
+    flush(S, page.base, page.changed);
+    check(state(S) === state(want) && r.units <= OVERLAY.opUnits, `a 100,000-entry move with the 1,000-collision series: completed within the per-op ceiling (${r.units} units, ${r.rounds} rounds), equal to the in-memory reducer`);
+  }
 }
 
 // 1,000 ops into one 10,000-name folder: the pages cut by the meter, none over its budget (plus one trial's units),
