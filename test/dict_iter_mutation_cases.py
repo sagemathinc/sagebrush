@@ -230,6 +230,54 @@ rdel("reversed items: replace, then del and add", lambda d: (d.__setitem__(2, "x
 rdel("reversed values: str keys, replace", lambda d: d.__setitem__("b", "B"), rvalues, make=lambda: {"a": 1, "b": 2, "c": 3, "d": 4})
 
 
+# reversed() of the values, which takes its keys only when a key is deleted
+# or a value stored: a new key alone, a new key and then a deletion, a value
+# stored and then a deletion, two deletions, clear(), and three of them over
+# one dict (in a dict small enough that CPython's does not compact its
+# entries in between, which moves where its reversed() is)
+rdel("reversed values: add", lambda d: d.__setitem__(5, 5), rvalues)
+rdel("reversed values: add, then del", lambda d: (d.__setitem__(5, 5), _del(d, 2)), rvalues)
+rdel("reversed values: replace, then del and add", lambda d: (d.__setitem__(1, "x"), _del(d, 2), d.__setitem__(6, 6)), rvalues)
+rdel("reversed values: popitem, add", lambda d: (d.popitem(), d.__setitem__(5, 5)), rvalues)
+rdel("reversed values: two dels, two adds", lambda d: (_del(d, 2), d.__setitem__(5, 5), _del(d, 3), d.__setitem__(6, 6)), rvalues, make=lambda: {1: 1, 2: 2, 3: 3})
+rdel("reversed values: clear, add 4", lambda d: (d.clear(), d.update({5: 5, 6: 6, 7: 7, 8: 8})), rvalues)
+rdel("reversed values: str keys, del, add", lambda d: (_del(d, "b"), d.__setitem__("e", 5)), rvalues, make=lambda: {"a": 1, "b": 2, "c": 3, "d": 4})
+d = {1: 1, 2: 2, 3: 3}
+a = reversed(d.values())
+b = reversed(d.values())
+out = [nxt(a), nxt(b), nxt(b)]
+del d[2]
+d[4] = 4
+c = reversed(d.values())
+out += [nxt(c)]
+del d[1]
+d[5] = 5
+out += [nxt(a) for _ in range(3)] + [nxt(b) for _ in range(2)] + [nxt(c) for _ in range(3)]
+print("reversed values: three over one dict, dels and adds", out)
+
+
+# a dict's first iterator made by a key's __eq__ while a value is stored
+# over that key (the store is then counted, and the value read as it is)
+class EqMakesIter:
+    def __init__(self, n):
+        self.n = n
+
+    def __hash__(self):
+        return hash(self.n)
+
+    def __eq__(self, other):
+        global made
+        if made is None:
+            made = reversed(d.values())
+        return isinstance(other, EqMakesIter) and other.n == self.n
+
+
+made = None
+d = {EqMakesIter(1): "a"}
+d[EqMakesIter(1)] = "b"
+print("reversed values made by __eq__ during a store", [nxt(made) for _ in range(2)])
+
+
 def fn():
     pass
 

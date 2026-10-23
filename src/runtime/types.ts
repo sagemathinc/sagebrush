@@ -3,7 +3,7 @@
 import * as SP from "./strpos";
 import { CASEFOLD } from "./casefold-data";
 import {
-  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
+  checkArity, ListLayout, TupleLayout, T, PyType, FloatBox, PyDict, dictMeta, PyBytes, PyByteArray, checkResizable, DONE, NotImplemented, Ellipsis,
   builtinType, markRaised, objectType, typeOf, typeName, lookupType, isType, raise, pyfn, builtin, sig, tuple,
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
@@ -613,7 +613,7 @@ getset(fnType, "__dict__", (f) => {
     d.$m = f.$attrs ??= new Map();
     // (its Map is the function's attributes too: set and deleted without
     // the dict, so its reversed() looks each key and value up)
-    d.$shared = true;
+    dictMeta(d).shared = true;
     Object.defineProperty(f, "$dictView", { value: d, enumerable: false });
   }
   return f.$dictView;
