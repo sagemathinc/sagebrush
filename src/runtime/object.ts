@@ -1370,6 +1370,45 @@ export class PyDict {
   // equal to a number (e.g. mpmath's mpf(1) == 1) finds its entry.
   $nidx: Map<number, any[]> | null = null;
   $hasNum = false;
+  // (what its iterators need, made by the first one, or by a Map shared
+  // with something else: until then, no change to the dict counts anything)
+  $it: DictMeta | null = null;
+}
+
+// A dict's changes, as its iterators need them (one per dict, its size
+// fixed; an iterator keeps what they were when it began, and compares).
+export interface DictMeta {
+  // (clear()s: a dict's iterator then goes on in the emptied dict from the
+  // same position, as CPython's goes on in its new table)
+  clears: number;
+  // (changes to its keys or values other than a new key, which changes its
+  // size: a deletion, a clear(), a value stored over one there; reversed()
+  // takes its keys and values at the start, and while this and the size are
+  // as they were, they are the dict's)
+  ver: number;
+  // (a Map also changed without the dict, a function's attributes: then
+  // reversed() counts on neither)
+  shared: boolean;
+  // (the reversed() of its values that took no keys yet, if any: told just
+  // before a key is deleted, so that it takes them as they were)
+  rev: WeakRef<{ keep(): void }> | null;
+}
+
+export function dictMeta(d: PyDict): DictMeta {
+  return (d.$it ??= { clears: 0, ver: 0, shared: false, rev: null });
+}
+
+// A store into a dict that has had an iterator: one over a key already
+// there (the size is the same) is a change to its values, counted in ver; a
+// new key changes the size. (Only a plain Map: the other kinds are always
+// looked up.)
+function put(d: PyDict, x: DictMeta, mk: any, v: any): void {
+  const m = d.$m;
+  if (m.constructor === Map) {
+    const n = m.size;
+    m.set(mk, v);
+    if (m.size === n) x.ver++;
+  } else m.set(mk, v);
 }
 
 // The numeric primitive key in `d` equal to the object key `k`, if any.
@@ -1470,6 +1509,15 @@ export function instanceDict(o: any): PyDict {
   return d;
 }
 
+// (the instance's attribute dict, if it has one, made a dict of its own with
+// what it holds now: the next instanceDict(o) is a new one)
+export function detachInstanceDict(o: any): void {
+  const d = instanceDicts.get(o);
+  if (d === undefined) return;
+  (d as any).$m = new Map(d.$m.entries());
+  instanceDicts.delete(o);
+}
+
 export function newDict(): PyDict {
   return new PyDict();
 }
@@ -1564,7 +1612,9 @@ export function dictGet(d: PyDict, k: any, kh?: number): any {
 
 export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
   if (typeof k === "string") {
-    d.$m.set(k, v);
+    const x = d.$it;
+    if (x === null) d.$m.set(k, v);
+    else put(d, x, k, v);
     return;
   }
   strOnly(d, k);
@@ -1573,7 +1623,9 @@ export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
     if (typeof p !== "string" && p !== null && d.$buckets !== null && !d.$m.has(p)) {
       const e = bucketEntry(d, k, false);
       if (e !== undefined) {
-        d.$m.set(e, v);
+        const x = d.$it;
+        if (x === null) d.$m.set(e, v);
+        else put(d, x, e, v);
         return;
       }
     }
@@ -1582,22 +1634,46 @@ export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
       d.$hasNum = true;
       d.$nidx = null;
     }
-    d.$m.set(p, v);
+    const x = d.$it;
+    if (x === null) d.$m.set(p, v);
+    else put(d, x, p, v);
     return;
   }
   const h = kh ?? keyHash(d, k);
   if (d.$hasNum && (d.$buckets === null || bucketEntry(d, k, false, h) === undefined)) {
     const a = numAlias(d, k, h);
     if (a !== undefined) {
-      d.$m.set(a, v);
+      const x = d.$it;
+      if (x === null) d.$m.set(a, v);
+      else put(d, x, a, v);
       return;
     }
   }
-  d.$m.set(bucketEntry(d, k, true, h), v);
+  const e = bucketEntry(d, k, true, h);
+  // (read after the key's __eq__ and __hash__ have run, which may make the
+  // dict's first iterator)
+  const x = d.$it;
+  if (x === null) d.$m.set(e, v);
+  else put(d, x, e, v);
+}
+
+// (a deletion, about to be made, in a dict that has had an iterator: a
+// reversed() of its values that took no keys takes them now, as they are;
+// counted even if there is no such key, which only makes a reversed() look
+// each up)
+function beforeDelete(x: DictMeta): void {
+  x.ver++;
+  if (x.rev !== null) {
+    const r = x.rev.deref();
+    x.rev = null;
+    r?.keep();
+  }
 }
 
 export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
   if (typeof k !== "string") strOnly(d, k);
+  const x = d.$it;
+  if (x !== null) beforeDelete(x);
   const p = primitiveKey(k);
   if (p !== undefined) {
     d.$orig?.delete(p);
@@ -1636,6 +1712,11 @@ export function dictKeyOf(d: PyDict, mk: any): any {
 export function dictClear(d: PyDict) {
   d.$nidx = null;
   d.$m.clear();
+  const x = d.$it;
+  if (x !== null) {
+    x.clears++;
+    x.ver++;
+  }
   d.$orig = null;
   d.$buckets = null;
 }
