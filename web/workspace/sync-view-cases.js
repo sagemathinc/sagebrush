@@ -114,7 +114,7 @@ async function collisions() {
 }
 
 async function intentsKept() {
-  const { w, ob, op, apply } = await setup();
+  const { w, ob, op, apply, echo } = await setup();
   const fid = hex(16);
   await apply([op({ op: "create", path: "/f.txt", kind: "file", fid, sha256: SHA("a"), size: 1 })]);
   // (the person renames it here: an op past the watermark, unscanned; the server renames it elsewhere first)
@@ -125,6 +125,8 @@ async function intentsKept() {
   const g = await w.create("/g.txt", { content: "one" });
   await ob.scan();
   const recs = await ob.records();
+  // (its create echoed into the confirmed index, then its record confirmed: no intent left until the write)
+  await apply(recs.map((r) => echo(r)));
   for (const r of recs) await ob.confirmed([r.dseq]);
   await w.write("/g.txt", "two");
   const before = await byIdent(w, g.fid);
