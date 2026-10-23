@@ -160,7 +160,14 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     R.stdout.flush();
     R.stderr.flush();
   };
+  let ipythonDisplay = true;
   R.host = {
+    // (a Python cell's value shown as IPython shows it, src/runtime/index.ts
+    // displayText; a Sage, Magma or MATLAB cell's keeps the repr, as
+    // SageMath's shell shows <class 'int'>; set by each run)
+    get ipython() {
+      return ipythonDisplay;
+    },
     // (MATLAB: a function file, name.m, found on the path, as Python)
     ...matlabHostOps(),
     display(bundle: Record<string, string>) {
@@ -368,6 +375,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // (comprehensions: no name is left bound, even when there is nothing to delete)
       run(`import __main__ as _m\n[_m.__dict__.pop(_k, None) for _k in ${JSON.stringify(names)}]\ndel _m\n`, host, "exec", "<forget>");
     }
+    if (m.interact === undefined && (m.code !== undefined || m.evaluate !== undefined)) ipythonDisplay = !(m.sage || m.magma || m.matlab);
     if (m.interact !== undefined) {
       ok = run(`import _interact\n_interact._update(${Number(m.interact)}, ${JSON.stringify(JSON.stringify(m.values))})\n`, host, "exec", "<interact>");
     } else {
