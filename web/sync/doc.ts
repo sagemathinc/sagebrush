@@ -18,8 +18,8 @@
 //   transaction (§4.6).
 
 import { DurableObject } from "cloudflare:workers";
-import { SyncError, LIMITS, RECHECK_MS, attempt, attemptAsync, clientOf, enc, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "./protocol.ts";
-export { unwrap, type Result } from "./protocol.ts";
+import { SyncError, LIMITS, RECHECK_MS, attempt, attemptAsync, clientOf, enc, fields, isNat, parseMessage, toB64, type Batch, type Env, type Head, type Result } from "../sync-protocol/protocol.ts";
+export { unwrap, type Result } from "../sync-protocol/protocol.ts";
 import { testMode, type SyncEnv } from "./env.ts";
 
 /** Who sent a batch, as the account object authenticated it. */
