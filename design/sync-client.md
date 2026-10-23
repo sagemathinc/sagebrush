@@ -552,6 +552,66 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
 
+### Step 4 plan delta (D5 to D9)
+
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say.
+
+**D5. Where the log is read from.**
+- Once `onIndex` is given (the confirmed index), `hello.index_after` is the durable cursor `sync:<ns>:cursor`, which is written in the same transaction as each page applied to `syncIndex` (C3). It goes lower, to just before the oldest record accepted and awaiting its echo, only if that is lower.
+- The connection's target becomes `welcome.index_head`, raised by acks' accepted seqs and by `index_changed` (D8).
+- Pulls keep step 3's pacing and slices.
+
+**D6. The rebuild.** It runs when `sync:<ns>:rebuild` is set, before anything is sent. It is a sequence of phases, each a series of transactions, each recording its progress in `sync:<ns>:rebuild` (`{why, phase, at}`). Sending stays halted until the last phase ends.
+
+1. **`floor`** (only for `why: "diverged"` or `"invalid"`). In one transaction:
+   - the namespace's next dseq is set to $\max(\text{local next dseq}, \text{welcome.next\_dseq})$;
+   - that value is recorded as the rebuild's `floor`.
+   The next dseq only ever rises.
+2. **`log`**: `syncIndex` is rebuilt from the server's log, from seq 0, in pages (at most 1,000 ops and 1 MiB, L4).
+   - Each page is reduced into `syncIndex`, and the rebuild's own cursor written, in one transaction. The live cursor is replaced only at the phase's end.
+   - This device's echoes met on the way are matched to their records by `sameOp`, as in step 3. A match confirms its record (its pin released) in that page's transaction.
+3. **`reissue`** (only with a `floor`). The outbox is walked in dseq order, a page of 500 records a transaction. Each record still undecided with $\text{dseq} < \text{floor}$ is one the server has decided as something else, so its dseq can never be sent. In one transaction:
+   - the record is removed;
+   - its pin is handed to its identity's successor (C2's successor path: `successor: {base}` from the confirmed index);
+   - the identity is listed in `sync:<ns>:successors`.
+   The scan later allocates the successor fresh dseqs, at or above `floor`, with the identity's current state. Records with $\text{dseq} \ge \text{floor}$ are kept and sent as they are: the server hasn't decided those dseqs.
+4. **`view`**: every identity whose confirmed state or local layers changed is recomputed (C3's four layers, by key) and the difference applied to the workspace's entries, a page a transaction.
+   - An entry the rebuilt view no longer has is never deleted. It is kept, as a conflict copy if its path is taken, and listed in the Sync panel.
+5. **`done`**: in one transaction the flag is cleared and the live cursor set to the rebuilt one. Sending resumes.
+
+A plain refusal (`why: "refused"`) runs `log`, `view` and `done`. Its refused record is already gone.
+
+**D6's invariants:**
+- **No dseq is ever reused.**
+  - The next dseq is raised to `floor` before any record is touched, and only rises.
+  - A record below `floor` is removed in the same transaction that schedules its replacement. The replacement takes a new dseq from the counter.
+  - Nothing below `floor` is ever sent again: sending is halted until `done`, and no record below `floor` survives `reissue`.
+- **No local edit is lost.**
+  - Every removed record's identity gets a successor carrying its current local state. If that state is gone (a forget, emptying Trash), the deletion goes as its own record, as C2 has it.
+  - Local entries are only ever added to or moved by the rebuild, never deleted.
+  - Unscanned ops stay past the scan's watermark and are sent after `done`.
+- **Idempotent across a crash at every step.**
+  - Each transaction writes its progress with its effect: a `log` page with its cursor; a `reissue` record's removal with its successor; a `view` page with its position.
+  - A crash leaves the whole transaction or none of it.
+  - The next start resumes the recorded phase from its recorded position. Re-running a step that already committed finds nothing left to do: the record is gone, or the page is past the cursor.
+  - `floor` is written once and read thereafter.
+- Tests:
+  - a crash at every phase boundary and inside each phase's transaction (`OUTBOX.cut`-style seams);
+  - divergence by a restored older copy (local next dseq < server's) and by a workspace reset that kept its device.
+  Each asserts no dseq sent twice, every local edit on the server once (or listed), and the local tree intact.
+
+**D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
+
+**D8. Live updates** (plan-sync-index-changed-r1).
+- With the confirmed index, the server's `index_changed` raises the target and pulls through the existing pacing.
+- Until the server sends it, a second device sees changes on its own ack-pulls and reconnects.
+- The paced idle poll (at most one `pull_index` a minute) is added only if the notice can't ship by step 6. @sagebrush is told early if so.
+
+**D9. Downloads** (L1, L2, C5).
+- A download reserves $\text{size} \cdot \text{COPIES}$ (L2) before asking. It accepts either the files Worker's 303 to a signed URL, or a 200 with the bytes (the reference server's).
+- On both paths, **`Content-Length` must be present and equal the record's size before the body is read**. The body is read through a counting reader with a **hard cap of exactly that size**: one byte more aborts the download. Its SHA-256 is checked before the compare-and-swap install (C5).
+- A mismatch is a failed download of that item under its retry timer, never installed.
+
 ## 4. Who builds what, in order, and the size of each
 
 | # | Step | Who | Size |
