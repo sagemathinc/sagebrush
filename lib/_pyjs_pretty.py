@@ -355,6 +355,15 @@ _BUILTIN_SIGNATURES = {
 
 _EMPTY = object()
 _WIDTH = 79
+# (set when a repr not the runtime's own has run during a value's display:
+# user code, which may have changed the value)
+_ran = [False]
+
+
+def _r(x):
+    if type(x) not in _TRUSTED:
+        _ran[0] = True
+    return repr(x)
 
 
 class _C:
@@ -368,8 +377,7 @@ _METHOD = type(_C().m)
 _BUILTIN = type(len)
 _METHOD_DESCRIPTOR = type(list.append)
 _BUILTIN_TYPES = (bytearray, bytes, complex, dict, float, frozenset, int, list, set, str, tuple)
-# (the leaves whose repr is the runtime's own: a container of only these may
-# be repr'd again)
+# (the values whose repr is the runtime's own: no user code runs in it)
 _TRUSTED = (int, float, complex, str, bytes, bool, type(None))
 
 
@@ -378,12 +386,12 @@ def _annotation(a):
     mod = getattr(a, "__module__", None)
     if mod == "typing":
         import re
-        return re.sub(r"[\w\.]+", lambda m: m.group().removeprefix("typing."), repr(a))
+        return re.sub(r"[\w\.]+", lambda m: m.group().removeprefix("typing."), _r(a))
     if type(a).__name__ == "GenericAlias":
         return str(a)
     if isinstance(a, type):
         return a.__qualname__ if a.__module__ == "builtins" else a.__module__ + "." + a.__qualname__
-    return repr(a)
+    return _r(a)
 
 
 def _parameter(name, annotations, default, prefix=""):
@@ -391,9 +399,9 @@ def _parameter(name, annotations, default, prefix=""):
     if name in annotations:
         s += ": " + _annotation(annotations[name])
         if default is not _EMPTY:
-            s += " = " + repr(default)
+            s += " = " + _r(default)
     elif default is not _EMPTY:
-        s += "=" + repr(default)
+        s += "=" + _r(default)
     return prefix + s
 
 
@@ -458,6 +466,9 @@ def _unwrap(f):
     # function it wraps, stopping at one with a __signature__; a loop: None)
     seen = {id(f)}
     limit = sys.getrecursionlimit()
+    if hasattr(f, "__wrapped__"):
+        # (attributes of objects it may wrap: user code)
+        _ran[0] = True
     while hasattr(f, "__wrapped__") and not hasattr(f, "__signature__"):
         f = f.__wrapped__
         if id(f) in seen or len(seen) >= limit:
@@ -528,119 +539,145 @@ def _function(v):
 
 def text(v):
     """The value as IPython displays it (one line where IPython's is one line)."""
-    tape = []
-    r = _text(v, (), _WIDTH, tape)
-    if r is not None:
-        return r
-    # (it doesn't fit on the line: the repr. When the trial line called no
-    # repr but the runtime's own, the repr itself; else the repr built here,
-    # with the strings the trial line already got, so that no __repr__ runs
-    # twice)
-    if all(x is _EMPTY or x[0] for x in tape):
-        return repr(v)
+    # (one walk of the value builds IPython's line, while it fits, and the
+    # repr together, so that no __repr__ runs twice and nothing is walked
+    # again after a __repr__ has changed it (CORR-PR57-4); past the line,
+    # the walk goes on for the repr alone, unless no user code has run yet:
+    # then the value is as it was, and its repr is the runtime's own)
+    t = type(v)
+    if t is not list and t is not tuple and t is not dict:
+        # (a value not in a container: its text, however long)
+        return _leaf(v, None)
+    w = _Walk()
+    # (a __repr__ may display a value itself: the flag then set again after)
+    outer = _ran[0]
+    _ran[0] = False
+    native = False
     try:
-        return _repr(v, (), [0], tape)
+        _walk(v, (), w)
+    except _Native:
+        native = True
     except RecursionError:
         raise RecursionError("maximum recursion depth exceeded while getting the repr of an object") from None
+    finally:
+        _ran[0] = _ran[0] or outer
+    if native:
+        return repr(v)
+    return "".join(w.line if w.line is not None else w.rep)
 
 
-def _leaf(v, tape):
-    # (a value's repr, noted in the tape with whether the runtime's own)
-    r = repr(v)
-    tape.append((type(v) in _TRUSTED, r))
-    return r
+class _Native(Exception):
+    pass
 
 
-def _text(v, seen, room, tape):
-    # (None: show the repr instead; a container that would pass the line in
-    # the room it has, or holds itself. Each value not in a container is a
-    # leaf, and gets one entry in the tape, in order: its repr, or _EMPTY
-    # where none was asked for)
+class _Walk:
+    __slots__ = ("line", "room", "rep")
+
+    def __init__(self):
+        self.line = []  # IPython's text so far; None once past the line
+        self.room = _WIDTH
+        self.rep = []  # the repr so far
+
+
+def _put(w, text, rep, cost=None):
+    # (the next piece of each; the line given up (None) at a piece that
+    # passes the room left or holds a newline)
+    w.rep.append(rep)
+    if w.line is None:
+        return
+    n = len(text) if cost is None else cost
+    if "\n" in text or n > w.room:
+        w.line = None
+        if not _ran[0]:
+            raise _Native
+        return
+    w.line.append(text)
+    w.room -= n
+
+
+def _walk(v, seen, w):
     t = type(v)
-    if t in (list, tuple, dict):
-        return _container(v, seen, room, tape)
+    if t is list or t is tuple or t is dict:
+        if id(v) in seen:
+            # (a container inside itself, as IPython's and repr's: [...], {...}, (...))
+            m = "[...]" if t is list else "{...}" if t is dict else "(...)"
+            _put(w, m, m)
+            return
+        seen = seen + (id(v),)
+        o, c = ("[", "]") if t is list else ("{", "}") if t is dict else ("(", ")")
+        # (both brackets' room taken at the start: so the walk of the line
+        # stops within 39 levels)
+        _put(w, o, o, 2)
+        if t is dict:
+            n = _walk_dict(v, seen, w)
+        else:
+            # (as CPython's list repr: by index, to the length the list has at
+            # each step, so a __repr__ that changes it is seen)
+            n = 0
+            while n < len(v):
+                if n:
+                    _put(w, ", ", ", ")
+                _walk(v[n], seen, w)
+                n += 1
+        if t is tuple and n == 1:
+            _put(w, ",)", ",)", 0)
+        else:
+            _put(w, c, c, 0)
+        return
+    # (a leaf: its repr, called once, here; and IPython's text of it)
+    if not (t in _TRUSTED or t is type or t is _FUNCTION or t is _BUILTIN or t is _METHOD_DESCRIPTOR or (t.__repr__ is object.__repr__ and type(t) is type)):
+        _ran[0] = True
+    r = repr(v)
+    _put(w, _leaf(v, r) if w.line is not None else r, r)
+
+
+def _walk_dict(d, seen, w):
+    # (as CPython's dict repr: in order, each value as it is when reached;
+    # after a __repr__ adds or removes keys, on from the last key shown)
+    it = iter(d.items())
+    n = 0
+    last = _EMPTY
+    while True:
+        try:
+            k, x = next(it)
+        except StopIteration:
+            break
+        except RuntimeError:
+            # (its size changed: the keys it has now, after the last shown)
+            ks = list(d)
+            at = next((j + 1 for j, q in enumerate(ks) if q is last), min(n, len(ks)))
+            it = iter(d.items())
+            for _ in range(at):
+                next(it)
+            continue
+        if n:
+            _put(w, ", ", ", ")
+        _walk(k, seen, w)
+        _put(w, ": ", ": ")
+        _walk(x, seen, w)
+        n += 1
+        last = k
+    return n
+
+
+def _leaf(v, r):
+    # (IPython's text of a value, given its repr r, or None to call it here
+    # if needed)
+    t = type(v)
     if isinstance(v, type) and t.__repr__ is type.__repr__:
-        tape.append(_EMPTY)
         mod = getattr(v, "__module__", None)
         if not mod or mod in ("builtins", "__builtin__", "exceptions"):
             return v.__qualname__
         return mod + "." + v.__qualname__
     f = _function(v)
     if f is not None:
-        tape.append(_EMPTY)
         return f
+    if r is None:
+        r = repr(v)
     if t.__repr__ is object.__repr__:
         # (object's own repr, <__main__.C object at 0x...>: IPython's drops "object")
-        r = repr(v)
-        tape.append((True, r))
         mod = getattr(t, "__module__", None)
         name = t.__qualname__ if not mod or mod == "builtins" else mod + "." + t.__qualname__
         if r.startswith("<" + name + " object at 0x"):
             return "<" + name + r[len(name) + 8:]
-        return r
-    return _leaf(v, tape)
-
-
-def _container(v, seen, room, tape):
-    # (one line, as IPython's pretty printer writes a list, tuple or dict that
-    # fits in 79 columns; built item by item, in the room left on the line,
-    # and given up (None, the repr) as soon as it passes it, or meets a
-    # container it is already inside: so this trial is bounded by the line,
-    # whatever the container's size or depth (each level takes 2 columns))
-    t = type(v)
-    if id(v) in seen:
-        # (a container inside itself, as IPython's: [...], {...}, (...))
-        return "[...]" if t is list else "{...}" if t is dict else "(...)"
-    room -= 2
-    if room < 0:
-        return None
-    seen = seen + (id(v),)
-    parts = []
-    for x in (v.items() if t is dict else v):
-        if parts:
-            room -= 2
-        if t is dict:
-            k = _text(x[0], seen, room, tape)
-            if k is None:
-                return None
-            val = _text(x[1], seen, room - len(k) - 2, tape)
-            s = None if val is None else k + ": " + val
-        else:
-            s = _text(x, seen, room, tape)
-        if s is None or "\n" in s:
-            return None
-        room -= len(s)
-        if room < 0:
-            return None
-        parts.append(s)
-    if t is dict:
-        return "{" + ", ".join(parts) + "}"
-    if t is list:
-        return "[" + ", ".join(parts) + "]"
-    if len(parts) == 1:
-        return "(" + parts[0] + ",)"
-    return "(" + ", ".join(parts) + ")"
-
-
-def _repr(v, seen, at, tape):
-    # (repr(v), as the runtime's repr writes a list, tuple and dict, with the
-    # leaves the tape has: the same leaves in the same order as _text's)
-    t = type(v)
-    if t in (list, tuple, dict):
-        if id(v) in seen:
-            return "[...]" if t is list else "{...}" if t is dict else "(...)"
-        seen = seen + (id(v),)
-        if t is dict:
-            parts = [_repr(k, seen, at, tape) + ": " + _repr(x, seen, at, tape) for k, x in v.items()]
-            return "{" + ", ".join(parts) + "}"
-        parts = [_repr(x, seen, at, tape) for x in v]
-        if t is list:
-            return "[" + ", ".join(parts) + "]"
-        if len(parts) == 1:
-            return "(" + parts[0] + ",)"
-        return "(" + ", ".join(parts) + ")"
-    i = at[0]
-    at[0] = i + 1
-    if i < len(tape) and tape[i] is not _EMPTY:
-        return tape[i][1]
-    return repr(v)
+    return r
