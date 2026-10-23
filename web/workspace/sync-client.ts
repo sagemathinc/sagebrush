@@ -532,11 +532,9 @@ export class SyncClient {
       }
       if (ok.length) await c.ob.confirmed(ok);
     }
-    if (this.opts.onIndex && ops.length) {
-      await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
-      // (the view may have queued fetches)
-      this.fetchKick(c);
-    }
+    if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+    // (the view may have queued fetches; and a page is a moment to look at the queue anyway)
+    this.fetchKick(c);
     this.cursor = last;
     // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
     if (c.discover) {

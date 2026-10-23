@@ -1162,7 +1162,7 @@ async function downloadBasic() {
     await a.create("/doc.bin", { content: data });
     check(await until(() => settled(a, ca)), "download: A's file up");
     const e = await seen(b, cb, "/doc.bin");
-    check(e?.remote && e.size === 70_000, "download: B lists it remote: " + J(e && { remote: e.remote, size: e.size }));
+    check(e?.size === 70_000 && e.sha256 === (await a.stat("/doc.bin")).sha256, "download: B lists it (remote until fetched): " + J(e && { remote: e.remote, size: e.size }));
     check(await until(async () => { const x = await b.stat("/doc.bin"); return x && !x.remote; }), "download: …then has its bytes (installed)");
     check(sameBytes(await b.contents(await b.stat("/doc.bin")), data), "download: the same bytes as A's");
     check(cb.stats.urls === 1 && cb.stats.installed === 1, "download: one URL asked for, one install: " + J({ urls: cb.stats.urls, installed: cb.stats.installed }));
@@ -1192,10 +1192,12 @@ async function downloadChecks() {
     mode = null;
     const body = new Uint8Array(await r.arrayBuffer());
     const headers = { "content-type": "application/octet-stream" };
-    if (m === "missing") return Object.defineProperty(new Response(body, { headers }), "url", { value: r.url });
-    if (m === "malformed") return Object.defineProperty(new Response(body, { headers: { ...headers, "content-length": "0" + body.length } }), "url", { value: r.url });
-    if (m === "different") return Object.defineProperty(new Response(body, { headers: { ...headers, "content-length": String(body.length + 1) } }), "url", { value: r.url });
-    if (m === "longer") { const more = new Uint8Array(body.length + 1); more.set(body); return Object.defineProperty(new Response(more, { headers: { ...headers, "content-length": String(body.length) } }), "url", { value: r.url }); }
+    // (a made Response keeps the real one's url and redirected, as the browser's own would)
+    const as = (x) => Object.defineProperties(x, { url: { value: r.url }, redirected: { value: r.redirected } });
+    if (m === "missing") return as(new Response(body, { headers }));
+    if (m === "malformed") return as(new Response(body, { headers: { ...headers, "content-length": "0" + body.length } }));
+    if (m === "different") return as(new Response(body, { headers: { ...headers, "content-length": String(body.length + 1) } }));
+    if (m === "longer") { const more = new Uint8Array(body.length + 1); more.set(body); return as(new Response(more, { headers: { ...headers, "content-length": String(body.length) } })); }
     return r;
   };
   const clock = fakeClock();
@@ -1258,6 +1260,9 @@ async function downloadStale() {
 async function downloadBudget() {
   // (L1: a 429 on asking for a URL pauses the whole queue, durably, until retry_after; nothing asked meanwhile)
   const clock = fakeClock();
+  const keep = { ...W.CLIENT };
+  // (one lane: the 429 is the first URL asked for, nothing else in flight beside it)
+  W.CLIENT.downloadsAtOnce = 1;
   const { a, b, ca, cb } = await twoDevices({ clock });
   try {
     await ctl("set", { set: { fakeHttp: [{ method: "GET", path: "/api/sync/v1/blob/", status: 429, body: { error: "rate", retry_after: 600_000 }, times: 1 }] } });
@@ -1270,10 +1275,11 @@ async function downloadBudget() {
     const asked = cb.stats.urls;
     await clock.advance(300_000);
     await sleep(300);
-    check(cb.stats.urls === asked && (await b.stat("/q1.bin")).remote, "download budget: nothing asked during the pause");
+    check(cb.stats.urls === asked && (await b.stat("/q1.bin")).remote && (await b.stat("/q2.bin")).remote, "download budget: nothing asked during the pause: " + J({ asked, urls: cb.stats.urls, installed: cb.stats.installed }));
     await clock.advance(300_001);
-    check(await until(async () => !(await b.stat("/q1.bin")).remote && !(await b.stat("/q2.bin")).remote), "download budget: resumed at its end; both installed");
+    check(await until(async () => !(await b.stat("/q1.bin")).remote && !(await b.stat("/q2.bin")).remote), "download budget: resumed at its end; both installed: " + J({ urls: cb.stats.urls, installed: cb.stats.installed, failed: cb.stats.fetchFailed, debug: cb.debug() }));
   } finally {
+    Object.assign(W.CLIENT, keep);
     await stop(ca);
     await stop(cb);
   }
