@@ -112,6 +112,21 @@ test("hash-valid hostile sets are refused before anything changes (§4.2)", () =
   // (and 5 levels is fine: a -> ... -> e)
   const ok = makeSet(chain.slice(1));
   assert.equal(P.admitIndex(ok.S, ok.index, BUILD, reserved).closure.get("@sagebrush/b@0.1.0").length, 5);
+  // the same chain the other way round, the leaf visited first, so every
+  // deeper visit reuses a cached closure (astra's CORR-PR68-1)
+  const up: Pkg[] = ["a", "b", "c", "d", "e", "f"].map((n, i, all) => ({ name: n, modules: ["m" + n], files: { [`py/m${n}.py`]: "" }, requires: i ? [`@sagebrush/${all[i - 1]}@0.1.0`] : [] }));
+  const upDeep = makeSet(up);
+  refused(() => P.admitIndex(upDeep.S, upDeep.index, BUILD, reserved), /deeper than 4/);
+  const upOk = makeSet(up.slice(0, 5));
+  assert.equal(P.admitIndex(upOk.S, upOk.index, BUILD, reserved).closure.get("@sagebrush/e@0.1.0").length, 5);
+  // a shared dependency reached first shallow (a -> z -> y), then deep
+  // (b -> c -> d -> e -> z -> y): refused, and fine one level shorter
+  const dep = (n: string, r: string[]): Pkg => ({ name: n, modules: ["m" + n], files: { [`py/m${n}.py`]: "" }, requires: r.map((x) => `@sagebrush/${x}@0.1.0`) });
+  const shared = (leaf: boolean) => makeSet([dep("a", ["z"]), dep("b", ["c"]), dep("c", ["d"]), dep("d", ["e"]), dep("e", ["z"]), dep("z", leaf ? [] : ["y"]), ...(leaf ? [] : [dep("y", [])])]);
+  const sd = shared(false);
+  refused(() => P.admitIndex(sd.S, sd.index, BUILD, reserved), /deeper than 4/);
+  const so = shared(true);
+  assert.equal(P.admitIndex(so.S, so.index, BUILD, reserved).closure.get("@sagebrush/b@0.1.0").length, 5);
 });
 
 test("the limits: index bytes, packages and aggregate sources are checked from declared sizes", () => {
@@ -336,4 +351,62 @@ test("protocol calls: an added argument only for methods that implement it (§6.
   });
   assert.equal(out, "Old:false/false New:true/true Kw:false/false Kw+provides:true/true Pos:false/false opaque:false");
   void s;
+});
+
+// LIMIT-PR68-1: the parse's own work is bounded, charged before allocation
+test("strict JSON's work budget: values and estimated heap, at the cap and one over", () => {
+  // (a real chunk: mostly a code string; about 2x its bytes)
+  const code = "x".repeat(200_000);
+  assert.equal(P.strictJson(JSON.stringify({ code, lineMap: [1, 2, 3] })).code.length, 200_000);
+  // a wide array of small numbers: about 12x its bytes, refused once over budget
+  const wide = "[" + "0,".repeat(400_000) + "0]";
+  assert.throws(() => P.strictJson(wide), (e: any) => e.name === "PkgsetError" && /more than \d+ bytes/.test(e.message));
+  // exactly at an explicit budget, and one byte under it
+  const small = '{"a":[1,2]}';
+  let need = 0;
+  for (let b = 0; b < 4096; b++) {
+    try {
+      P.strictJson(small, 32, b);
+      need = b;
+      break;
+    } catch {}
+  }
+  assert.ok(need > 0);
+  assert.doesNotThrow(() => P.strictJson(small, 32, need));
+  assert.throws(() => P.strictJson(small, 32, need - 1), /parsing would take more than/);
+  // the value count cap
+  const many = "[" + "1,".repeat(1_000_000) + "1]";
+  assert.throws(() => P.strictJson(many, 32, Infinity), /more than 1000000 JSON values/);
+});
+
+test("a set whose largest chunk is too big for the resident estimate is refused before any fetch", () => {
+  const s = makeSet([hello], { index: (ix) => (ix.packages["@sagebrush/hello@0.1.0"].src.size = 8 * 1024 * 1024) });
+  refused(() => P.admitIndex(s.S, s.index, BUILD, reserved), /in memory; at most/);
+});
+
+test("a hostile hash-valid chunk can't take the heap: refused within a 64 MiB heap, where an unbudgeted parse runs out", () => {
+  const { spawnSync } = require("node:child_process");
+  const { mkdtempSync, writeFileSync } = require("node:fs");
+  const { tmpdir } = require("node:os");
+  const { join } = require("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "sb-pkgset-heap-"));
+  // (about 5.5 MiB of [0], inner arrays: each costs an object, an element and a value)
+  const script = join(dir, "heap.js");
+  writeFileSync(script, `
+    const P = require(${JSON.stringify(DIST + "/src/pkgset.js")});
+    const text = '{"format":"sagebrush-pkg-chunk","files":{},"kind":"src","package":"@sagebrush/hello@0.1.0","v":1,"x":[' + "[0],".repeat(1_440_000) + '[0]]}';
+    try {
+      P.strictJson(text, 32, process.argv[2] === "unbudgeted" ? Infinity : undefined);
+      console.log("parsed");
+    } catch (e) {
+      console.log(e.name + ": " + e.message);
+    }
+  `);
+  const run = (mode: string) => spawnSync(process.execPath, ["--max-old-space-size=64", script, mode], { encoding: "utf8", timeout: 120_000 });
+  const budgeted = run("budgeted");
+  assert.equal(budgeted.status, 0, budgeted.stderr.slice(-500));
+  assert.match(budgeted.stdout, /^PkgsetError: not admitted: parsing would take more than \d+ bytes/);
+  // (the check bites: the same parse without the budget doesn't fit)
+  const unbudgeted = run("unbudgeted");
+  assert.notEqual(unbudgeted.status, 0, "an unbudgeted parse of this input should not fit in 64 MiB");
 });

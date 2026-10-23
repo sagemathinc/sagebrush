@@ -112,4 +112,27 @@ test("requirements come from the call forms used (§6.2–6.3): a new keyword ra
   assert.equal(useLevel(api, { target: "*.meth", bound: { npos: 0, kw: [], unpack: false } }), 2, "an untyped method call takes the maximum");
   assert.equal(useLevel(api, { target: "m.C.meth", bound: { npos: 1, kw: [], unpack: false } }), 1);
   assert.equal(useLevel(api, { target: "m.nothere", bound: null }), null);
+  assert.equal(useLevel(api, { target: "m.f", bound: "any" }), 2, "an escaping reference takes the maximum");
+
+  // through lintPackage: an alias, a reference passed or stored, and a
+  // declared dynamic target with and without its call form (astra's CORR-PR68-2)
+  const { lintPackage } = await esm("scripts/optional-packages.mjs");
+  const pkg = (src: string, declarations: any[] = []) => ({ dir: "fixture", id: "@sagebrush/fixture@0.1.0", manifest: { python: { root: "py", modules: ["fixture"] }, private_prefix: "_fx_" }, files: { "py/fixture.py": src }, declarations });
+  const level = (src: string, declarations: any[] = []) => {
+    const r = lintPackage(pkg(src, declarations), api);
+    assert.deepEqual(r.findings, [], src);
+    return r.level;
+  };
+  assert.equal(level("from m import f\nf(1)\n"), 1);
+  assert.equal(level("from m import f\ng = f\ng(1, extra=True)\n"), 2, "an alias");
+  assert.equal(level("import m\ng = m.f\n"), 2, "an attribute alias");
+  assert.equal(level("from m import f\nxs = list(map(f, [1]))\n"), 2, "passed as an argument");
+  assert.equal(level("from m import f\nfs = [f]\n"), 2, "stored in a container");
+  assert.equal(level("from m import f\nf(1)\nf = 2\n"), 1, "a name stored to doesn't escape");
+  const dyn = (extra: any) => [{ file: "py/fixture.py", line: 2, construct: "name", target: "getattr", access: "m.f", reason: "a reviewed fixture", ...extra }];
+  const src = "import m\nr = getattr(m, 'f')(1)\n";
+  assert.equal(level(src, dyn({ call: [] })), 1, "a declared dynamic target in its call form");
+  assert.equal(level(src, dyn({ call: ["extra"] })), 2, "a declared call form passing a newer keyword");
+  assert.equal(level(src, dyn({})), 2, "a declared dynamic target without a call form takes the maximum");
+  assert.ok(lintPackage(pkg(src, dyn({})), api).uses.some((u: any) => u.target === "m.f" && u.declared), "the declared target is in uses");
 });

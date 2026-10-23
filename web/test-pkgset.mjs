@@ -9,7 +9,8 @@
 //   bun web/build.ts && node web/test-pkgset.mjs
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,9 +135,52 @@ try {
   const g = await run(S, "try:\n    import hello\n    print('RAN')\nexcept ImportError as e:\n    print('refused')");
   ok(g.out === "refused\n", `a rewritten kept copy is dropped, and the lying network refused (${JSON.stringify(g)})`);
   poison = false;
+
+  // LIMIT-PR68-3: many first opens at once, and a service worker stopped in
+  // the middle: the physical cache stays within its caps, and every entry in
+  // it has its ledger row (web/sw.js's queue and reconciliation)
+  const blob = (i) => {
+    const b = Buffer.from(JSON.stringify({ filler: i, pad: "x".repeat(64) }));
+    const h = createHash("sha256").update(b).digest("hex");
+    writeFileSync(join(setDir, "pkg", h + ".json"), b);
+    return h;
+  };
+  const state = () => ev(`(async () => {
+    const keys = (await (await caches.open("sb-pkg-v1")).keys()).map((k) => /([0-9a-f]{64})\\.json$/.exec(k.url)[1]);
+    const rows = await new Promise((resolve) => { const r = indexedDB.open("sb-pkg-ledger"); r.onsuccess = () => { const t = r.result.transaction("e").objectStore("e").getAll(); t.onsuccess = () => { resolve(t.result); r.result.close(); }; }; });
+    const kept = new Set(rows.filter((x) => x.state === "kept").map((x) => x.digest));
+    return { physical: keys.length, rows: rows.length, orphans: keys.filter((k) => !kept.has(k)).length, pending: rows.filter((x) => x.state !== "kept").length };
+  })()`);
+  const fetchAll = (hs) => ev(`Promise.all(${JSON.stringify(hs)}.map((h) => fetch("pkg/" + h + ".json").then((r) => r.status))).then((s) => s.filter((x) => x === 200).length)`);
+  // (the queue drains one keep at a time: settled once nothing is pending and
+  // a second look agrees; a queue that stalls fails after 30 s)
+  const settle = async () => {
+    let last = "";
+    for (let i = 0; i < 150; i++) {
+      await sleep(200);
+      const s = await state();
+      if (s.pending === 0 && JSON.stringify(s) === last) return s;
+      last = s.pending === 0 ? JSON.stringify(s) : "";
+    }
+    return state();
+  };
+  const first = Array.from({ length: 140 }, (_, i) => blob(i));
+  const served = await fetchAll(first);
+  const s1 = await settle();
+  ok(served === 140 && s1.physical <= 64 && s1.orphans === 0 && s1.pending === 0 && s1.rows === s1.physical, `140 concurrent first opens: all served; the cache holds ${s1.physical} <= 64, every entry ledgered (${JSON.stringify(s1)})`);
+  await send("ServiceWorker.enable");
+  const second = Array.from({ length: 60 }, (_, i) => blob(1000 + i));
+  const flight = fetchAll(second).catch(() => 0);
+  await sleep(40);
+  await send("ServiceWorker.stopAllWorkers");
+  await flight;
+  await fetchAll([blob(5000)]); // (the next admission reconciles first)
+  const s2 = await settle();
+  ok(s2.physical <= 64 && s2.orphans === 0 && s2.pending === 0 && s2.rows === s2.physical, `a service worker stopped mid-keep: after the next admission, ${s2.physical} <= 64 entries, every one ledgered (${JSON.stringify(s2)})`);
 } finally {
   chrome.kill();
   server.close();
-  rmSync(profile, { recursive: true, force: true });
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   rmSync(setDir, { recursive: true, force: true });
 }

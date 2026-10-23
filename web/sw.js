@@ -80,7 +80,7 @@ self.addEventListener("fetch", (ev) => {
     // (only the exact grammar; a Range request, the worker's synchronous
     // fallback, goes to the network and is never kept)
     if (url.search || url.hash || req.headers.has("range")) return;
-    ev.respondWith(pkgResponse(url, pm[1]));
+    ev.respondWith(pkgResponse(url, pm[1], ev));
     return;
   }
   // the page itself (with any ?open=... or #share link): the cached "./" when offline
@@ -155,39 +155,83 @@ async function fetchAndKeep(req, key) {
 // least recently used evicted first, except entries a live notebook's
 // interpreter pinned in the last 10 minutes.  The worker checks every byte
 // against its set's pins again (src/pkgset.ts), so the cache is only a cache.
+//
+// The ledger and the cache are kept consistent (daybreak3's LIMIT-PR68-3):
+// every change to either runs in one queue, in this order, so a physical
+// entry always has a ledger row and the caps hold for the physical cache at
+// every moment, even if this worker is stopped in between:
+//   reconcile (rows without an entry, entries without a row: both removed;
+//   a "pending" row whose entry is there becomes "kept"; "deleting" rows'
+//   entries deleted, then the rows) -> choose evictions -> mark them
+//   "deleting" and record the new row "pending" -> delete their entries ->
+//   drop their rows -> put the entry -> mark it "kept".
+// And the keep is part of the fetch's lifetime (event.waitUntil).
 const PKG_PATH = new RegExp("^" + scope.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:pkg|pkgset)/([0-9a-f]{64})\\.json$");
 const PKG_CACHE = "sb-pkg-v1"; // (not "sagebrush-…": a new version's activate doesn't drop it)
 const PKG_MAX_ENTRIES = 64, PKG_MAX_BYTES = 256 * 1024 * 1024, PKG_MAX_BODY = 8 * 1024 * 1024;
 const PKG_PIN_MS = 10 * 60 * 1000;
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const pkgMade = (bytes) => new Response(bytes, { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+const digestOf = (u) => /\/([0-9a-f]{64})\.json$/.exec(new URL(u).pathname)?.[1] ?? null;
 
-// the ledger: IndexedDB sb-pkg-ledger, {digest, bytes, used, pin}
+// the ledger: IndexedDB sb-pkg-ledger, {digest, bytes, used, pin, state: pending|kept|deleting}
 function ledgerDb() {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open("sb-pkg-ledger", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("e", { keyPath: "digest" });
+    const r = indexedDB.open("sb-pkg-ledger", 2);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains("e")) r.result.createObjectStore("e", { keyPath: "digest" }); };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
 }
-async function ledger(mode, f) {
+// one transaction: f gets the store and the rows, and returns what to do
+async function ledgerTx(f) {
   const db = await ledgerDb();
   try {
     return await new Promise((resolve, reject) => {
-      const t = db.transaction("e", mode), s = t.objectStore("e");
+      const t = db.transaction("e", "readwrite"), s = t.objectStore("e");
       let out;
-      Promise.resolve(f(s)).then((v) => (out = v));
+      s.getAll().onsuccess = (e) => { out = f(s, e.target.result); };
       t.oncomplete = () => resolve(out);
       t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
     });
   } finally {
     db.close();
   }
 }
-const all = (s) => new Promise((resolve) => (s.getAll().onsuccess = (e) => resolve(e.target.result)));
 
-// (bytes from the network, at most PKG_MAX_BODY, not redirected)
+// the queue: one package-cache operation at a time
+let pkgChain = Promise.resolve();
+function pkgSerial(f) {
+  const p = pkgChain.then(f, f);
+  pkgChain = p.catch(() => {});
+  return p;
+}
+
+// (bounded: at most 4 x PKG_MAX_ENTRIES entries looked at a time; a cache
+// can't hold more than that except by a crash, which each pass reduces)
+async function pkgReconcile(cache) {
+  const keys = (await cache.keys()).slice(0, 4 * PKG_MAX_ENTRIES);
+  const present = new Map(keys.map((k) => [digestOf(k.url), k]));
+  const del = await ledgerTx((s, rows) => {
+    const known = new Set();
+    const out = [];
+    for (const r of rows) {
+      known.add(r.digest);
+      if (r.state === "deleting") out.push(r.digest);
+      else if (!present.has(r.digest)) s.delete(r.digest);
+      else if (r.state === "pending") s.put({ ...r, state: "kept" });
+    }
+    for (const d of present.keys()) if (d === null || !known.has(d)) out.push(d);
+    return out;
+  });
+  for (const d of del) {
+    const k = present.get(d);
+    if (k) await cache.delete(k);
+  }
+  if (del.length) await ledgerTx((s, rows) => { for (const r of rows) if (r.state === "deleting") s.delete(r.digest); });
+}
+
 async function pkgFetch(url) {
   const res = await fetch(url.href, { redirect: "error", credentials: "same-origin", cache: "no-store" });
   if (res.status !== 200 || res.type !== "basic") throw new Error("HTTP " + res.status);
@@ -212,18 +256,20 @@ async function pkgFetch(url) {
   return out.buffer;
 }
 
-async function pkgResponse(url, digest) {
+async function pkgResponse(url, digest, ev) {
   const cache = await caches.open(PKG_CACHE);
   const key = new Request(url.href);
   const hit = await cache.match(key);
   if (hit) {
     const b = await hit.arrayBuffer();
     if (hex(await crypto.subtle.digest("SHA-256", b)) === digest) {
-      ledger("readwrite", (s) => s.get(digest).onsuccess = (e) => e.target.result && s.put({ ...e.target.result, used: Date.now() })).catch(() => {});
+      ev.waitUntil(pkgSerial(() => ledgerTx((s, rows) => {
+        const r = rows.find((x) => x.digest === digest);
+        if (r && r.state === "kept") s.put({ ...r, used: Date.now() });
+      })).catch(() => {}));
       return pkgMade(b);
     }
-    await cache.delete(key);
-    await ledger("readwrite", (s) => s.delete(digest)).catch(() => {});
+    ev.waitUntil(pkgSerial(() => pkgReconcile(cache)).catch(() => {}));
   }
   let b;
   try {
@@ -233,61 +279,50 @@ async function pkgResponse(url, digest) {
     return new Response(null, { status: 504 });
   }
   if (hex(await crypto.subtle.digest("SHA-256", b)) !== digest) return new Response(null, { status: 502 });
-  keepPkg(cache, key, digest, b).catch(() => {});
+  ev.waitUntil(pkgSerial(() => keepPkg(cache, key, digest, b)).catch(() => {}));
   return pkgMade(b);
 }
 
-// keep it, if the caps and the documents' reserve allow (reserved in the
-// ledger first), evicting the least recently used unpinned entries
+// keep it, if the caps and the documents' reserve allow (in the queue)
 async function keepPkg(cache, key, digest, bytes) {
+  await pkgReconcile(cache);
+  if (await cache.match(key)) return;
   const est = (await navigator.storage?.estimate?.()) ?? {};
   const quota = est.quota ?? 0, usage = est.usage ?? 0;
   const capBytes = quota ? Math.min(PKG_MAX_BYTES, Math.floor(quota / 10)) : PKG_MAX_BYTES;
   const reserve = Math.max(512 * 1024 * 1024, Math.floor(quota / 5));
   if (bytes.byteLength > capBytes) return;
+  // (and never into the documents' reserve: then it is used once, not kept)
+  if (quota && quota - usage - bytes.byteLength < reserve) return;
   const now = Date.now();
-  const evict = await ledger("readwrite", async (s) => {
-    const rows = (await all(s)).sort((a, b) => a.used - b.used);
+  const evict = await ledgerTx((s, rows) => {
+    rows = rows.filter((r) => r.state !== "deleting").sort((a, b) => a.used - b.used);
     let total = rows.reduce((t, r) => t + r.bytes, 0), count = rows.length;
     const out = [];
     for (const r of rows) {
       if (total + bytes.byteLength <= capBytes && count + 1 <= PKG_MAX_ENTRIES) break;
       if (r.pin > now) continue;
-      s.delete(r.digest);
       out.push(r.digest);
       total -= r.bytes;
       count--;
     }
     if (total + bytes.byteLength > capBytes || count + 1 > PKG_MAX_ENTRIES) return null;
-    // (and never into the documents' reserve: then it is used once, not kept)
-    if (quota && quota - usage - bytes.byteLength < reserve) return null;
-    s.put({ digest, bytes: bytes.byteLength, used: now, pin: 0 });
+    for (const d of out) s.put({ ...rows.find((r) => r.digest === d), state: "deleting" });
+    s.put({ digest, bytes: bytes.byteLength, used: now, pin: 0, state: "pending" });
     return out;
   });
   if (evict === null) return;
-  for (const d of evict) {
-    for (const k of await cache.keys()) if (k.url.endsWith("/" + d + ".json")) await cache.delete(k);
-  }
+  const keys = await cache.keys();
+  for (const d of evict) for (const k of keys) if (digestOf(k.url) === d) await cache.delete(k);
+  await ledgerTx((s, rows) => { for (const r of rows) if (r.state === "deleting") s.delete(r.digest); });
   await cache.put(key, pkgMade(bytes));
+  await ledgerTx((s, rows) => {
+    const r = rows.find((x) => x.digest === digest);
+    if (r) s.put({ ...r, state: "kept" });
+  });
 }
 
-// Startup: the ledger and the cache agree (at most PKG_MAX_ENTRIES of each)
-async function pkgRecount() {
-  const cache = await caches.open(PKG_CACHE);
-  const keys = (await cache.keys()).slice(0, 4 * PKG_MAX_ENTRIES);
-  const inCache = new Set(keys.map((k) => /([0-9a-f]{64})\.json$/.exec(new URL(k.url).pathname)?.[1]).filter(Boolean));
-  const rows = await ledger("readwrite", async (s) => {
-    const r = await all(s);
-    for (const x of r) if (!inCache.has(x.digest)) s.delete(x.digest);
-    return r;
-  });
-  const known = new Set(rows.map((r) => r.digest));
-  for (const k of keys) {
-    const d = /([0-9a-f]{64})\.json$/.exec(new URL(k.url).pathname)?.[1];
-    if (!d || !known.has(d)) await cache.delete(k);
-  }
-}
-self.addEventListener("activate", (ev) => ev.waitUntil(pkgRecount().catch(() => {})));
+self.addEventListener("activate", (ev) => ev.waitUntil(caches.open(PKG_CACHE).then((c) => pkgSerial(() => pkgReconcile(c))).catch(() => {})));
 
 // Heartbeat pins: a page sends {pkgPin: [digest...]} for the chunks its live
 // interpreters use (web/notebook/worker-kernel.js), every 2 minutes; they are
@@ -298,7 +333,7 @@ self.addEventListener("message", (ev) => {
   if (ev.origin !== scope.origin || !Array.isArray(pins) || pins.length > PKG_MAX_ENTRIES) return;
   if (!pins.every((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d))) return;
   const until = Date.now() + PKG_PIN_MS;
-  ev.waitUntil(ledger("readwrite", (s) => {
-    for (const d of pins) s.get(d).onsuccess = (e) => e.target.result && s.put({ ...e.target.result, pin: until });
-  }).catch(() => {}));
+  ev.waitUntil(pkgSerial(() => ledgerTx((s, rows) => {
+    for (const r of rows) if (pins.includes(r.digest) && r.state === "kept") s.put({ ...r, pin: until });
+  })).catch(() => {}));
 });

@@ -18,7 +18,14 @@ import { basename, dirname, join, resolve } from "node:path";
 import { admitIndex, PKGSET_LIMITS, PkgsetError, type ChunkRef } from "./pkgset";
 import { sha256Hex } from "./runtime/sha256";
 
-export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, cleanPerRun: 100 });
+export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 });
+// (the caps, configurable down by SAGEBRUSH_PKG_CACHE_BYTES and
+// SAGEBRUSH_PKG_CACHE_ENTRIES, never above these defaults' hard ceilings)
+const envCap = (name: string, ceiling: number) => {
+  const v = Number(process.env[name]);
+  return Number.isInteger(v) && v > 0 && v <= ceiling ? v : ceiling;
+};
+const caps = () => ({ bytes: envCap("SAGEBRUSH_PKG_CACHE_BYTES", CACHE_LIMITS.bytes), entries: envCap("SAGEBRUSH_PKG_CACHE_ENTRIES", CACHE_LIMITS.entries) });
 const HEX64 = /^[0-9a-f]{64}$/;
 
 export function cacheDir(): string {
@@ -99,8 +106,9 @@ export function trimCache(dir: string, now = Date.now()): void {
   }
   let total = entries.reduce((s, e) => s + e.bytes, 0), count = entries.length;
   entries.sort((a, b) => a.used - b.used);
+  const cap = caps();
   for (const e of entries) {
-    if (total <= CACHE_LIMITS.bytes && count <= CACHE_LIMITS.entries) break;
+    if (total <= cap.bytes && count <= cap.entries) break;
     if (inUse.has(e.h)) continue;
     try {
       rmSync(join(dir, e.h + ".json"), { force: true });
@@ -138,8 +146,70 @@ async function boundedGet(url: string, max: number): Promise<Uint8Array> {
   return out;
 }
 
-// One verified entry in the cache, fetched if it isn't there (temporary file,
-// verify, rename; one fetch per entry at a time, by an O_EXCL lock)
+// The cache-wide lock (.cache.lock, O_EXCL; stale after a few seconds: it
+// is held only while one entry is admitted), around admission's measure,
+// evict and rename, so concurrent processes can't together pass the caps
+async function withCacheLock<T>(dir: string, f: () => T): Promise<T> {
+  const lock = join(dir, ".cache.lock");
+  for (let tries = 0; ; tries++) {
+    let fd: number;
+    try {
+      fd = openSync(lock, "wx");
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") throw e;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > CACHE_LIMITS.adminLockMs) rmSync(lock, { force: true });
+      } catch {}
+      if (tries > 400) throw new PkgsetError("the package cache's lock is held");
+      await new Promise((r) => setTimeout(r, 25));
+      continue;
+    }
+    try {
+      return f();
+    } finally {
+      closeSync(fd);
+      rmSync(lock, { force: true });
+    }
+  }
+}
+
+// Admit a verified entry (at `tmp`): measure the cache's physical entries,
+// evict the least recently used that no live process uses until this one
+// fits within both caps, then rename it into place.  If it can't fit (every
+// candidate is in use), it is not kept, and this run uses it from memory
+// (daybreak3's LIMIT-PR68-2).  True if kept.
+function admit(dir: string, h: string, tmp: string, size: number): boolean {
+  const cap = caps();
+  const live = new Set<string>();
+  const entries: { h: string; bytes: number; used: number }[] = [];
+  for (const n of readdirSync(dir)) {
+    const m = /^([0-9a-f]{64})\.inuse\.(\d+)$/.exec(n);
+    if (m && alive(Number(m[2]))) live.add(m[1]);
+    const e = /^([0-9a-f]{64})\.json$/.exec(n);
+    if (e) {
+      try {
+        const st = statSync(join(dir, n));
+        entries.push({ h: e[1], bytes: st.size, used: Math.max(st.atimeMs, st.mtimeMs) });
+      } catch {}
+    }
+  }
+  if (entries.some((e) => e.h === h)) return true; // (another process kept it meanwhile)
+  let total = entries.reduce((t, e) => t + e.bytes, 0), count = entries.length;
+  entries.sort((a, b) => a.used - b.used);
+  for (const e of entries) {
+    if (total + size <= cap.bytes && count + 1 <= cap.entries) break;
+    if (live.has(e.h) || e.h === h) continue;
+    rmSync(join(dir, e.h + ".json"), { force: true });
+    total -= e.bytes;
+    count--;
+  }
+  if (total + size > cap.bytes || count + 1 > cap.entries) return false;
+  renameSync(tmp, join(dir, h + ".json"));
+  return true;
+}
+
+// One verified entry: from the cache, or fetched (one fetch per entry at a
+// time, by an O_EXCL lock), verified, then admitted (or used from memory)
 async function ensure(dir: string, base: string, path: string, h: string, max: number, size: number | null): Promise<Uint8Array> {
   const f = join(dir, h + ".json");
   if (existsSync(f)) {
@@ -168,15 +238,16 @@ async function ensure(dir: string, base: string, path: string, h: string, max: n
     }
   }
   if (fd < 0) throw new PkgsetError(`the package cache's lock for ${h.slice(0, 12)} is held`);
+  const tmp = join(dir, `.tmp-${process.pid}-${h.slice(0, 16)}`);
   try {
     const bytes = await boundedGet(base.replace(/\/+$/, "") + "/" + path, size ?? max);
     if (sha256Hex(bytes) !== h || (size !== null && bytes.length !== size)) throw new PkgsetError(`${path}: not the bytes its address names`);
-    const tmp = join(dir, `.tmp-${process.pid}-${h.slice(0, 16)}`);
     writeFileSync(tmp, bytes);
-    renameSync(tmp, f);
     markInUse(dir, h);
+    await withCacheLock(dir, () => admit(dir, h, tmp, bytes.length));
     return bytes;
   } finally {
+    rmSync(tmp, { force: true });
     closeSync(fd);
     rmSync(lock, { force: true });
   }

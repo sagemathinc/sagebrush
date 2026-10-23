@@ -115,3 +115,77 @@ test("eviction: least recently used first, never one in use; stale temporaries a
   assert.ok(!left.has(".tmp-1-abc") && !left.has("dead.lock"), "stale temporaries and locks are cleaned");
   assert.ok(!left.has(`${names[1]}.inuse.999999999`), "a dead process's mark is cleaned");
 });
+
+// LIMIT-PR68-2: the caps hold for the physical cache at every admission
+function tinySets(n: number) {
+  const out: { dir: string; S: string; name: string }[] = [];
+  for (let i = 0; i < n; i++) {
+    const dir = mkdtempSync(join(tmpdir(), "sb-pkgcache-tiny-"));
+    mkdirSync(join(dir, "pkg"));
+    mkdirSync(join(dir, "pkgset"));
+    const name = "tiny" + i;
+    const files = { [`py/${name}.py`]: `V = ${i}\n` };
+    const chunk = Buffer.from(canon({ format: "sagebrush-pkg-chunk", v: 1, kind: "src", package: `@sagebrush/${name}@0.1.0`, files }));
+    const h = sha(chunk);
+    writeFileSync(join(dir, "pkg", h + ".json"), chunk);
+    const ix = { format: "sagebrush-pkgset", v: 1, core_api: 1, packages: { [`@sagebrush/${name}@0.1.0`]: { dir: name, root: "py", files: { [`py/${name}.py`]: sha(files[`py/${name}.py`]) }, modules: [name], requires: [], core_req: { api: 1, level: 1 }, src: { sha256: h, size: chunk.length }, pre: {}, cost: {} } } };
+    const index = Buffer.from(canon(ix));
+    const S = sha(index);
+    writeFileSync(join(dir, "pkgset", S + ".json"), index);
+    out.push({ dir, S, name });
+  }
+  return out;
+}
+async function serve(sets: { dir: string }[]) {
+  const server = createServer((req, res) => {
+    const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(req.url ?? "");
+    for (const s of sets) {
+      const f = m ? join(s.dir, m[1], m[2] + ".json") : "";
+      if (m && existsSync(f)) return res.writeHead(200).end(require("node:fs").readFileSync(f));
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  return { server, base: `http://127.0.0.1:${(server.address() as any).port}` };
+}
+const runCli = (env: Record<string, string>, S: string, code: string) => new Promise<any>((resolve) => {
+  const p = require("node:child_process").spawn(process.execPath, [join(DIST, "src", "cli.js"), "--pkgset", S, "-c", code], { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env } });
+  let out = "", err = "";
+  p.stdout.on("data", (d: Buffer) => (out += d));
+  p.stderr.on("data", (d: Buffer) => (err += d));
+  p.on("close", (status: number) => resolve({ out, err, status }));
+});
+const physical = (cache: string) => readdirSync(join(cache, "sagebrush", "pkg")).filter((f) => /^[0-9a-f]{64}\.json$/.test(f));
+
+test("a cache at its caps whose entries are all in use: the run uses the set from memory and keeps nothing more", async () => {
+  const sets = tinySets(3);
+  const { server, base } = await serve(sets);
+  const cache = mkdtempSync(join(tmpdir(), "sb-pkgcache-full-"));
+  try {
+    const env = { SAGEBRUSH_PKG_BASE: base, XDG_CACHE_HOME: cache, SAGEBRUSH_PKG_CACHE_ENTRIES: "2" };
+    const a = await runCli(env, sets[0].S, "import tiny0; print(tiny0.V)");
+    assert.equal(a.out, "0\n", a.err);
+    assert.equal(physical(cache).length, 2, "exactly at the entry cap");
+    // (both entries in use by a live process: this one)
+    for (const f of physical(cache)) writeFileSync(join(cache, "sagebrush", "pkg", f.replace(".json", `.inuse.${process.pid}`)), "");
+    const b = await runCli(env, sets[1].S, "import tiny1; print(tiny1.V)");
+    assert.equal(b.out, "1\n", b.err);
+    assert.equal(physical(cache).length, 2, "nothing more is kept while every candidate is in use");
+  } finally {
+    server.close();
+  }
+});
+
+test("concurrent processes can't together pass the caps", async () => {
+  const sets = tinySets(6);
+  const { server, base } = await serve(sets);
+  const cache = mkdtempSync(join(tmpdir(), "sb-pkgcache-conc-"));
+  try {
+    const env = { SAGEBRUSH_PKG_BASE: base, XDG_CACHE_HOME: cache, SAGEBRUSH_PKG_CACHE_ENTRIES: "4" };
+    const rs = await Promise.all(sets.map((s, i) => runCli(env, s.S, `import tiny${i}; print(tiny${i}.V)`)));
+    rs.forEach((r, i) => assert.equal(r.out, `${i}\n`, r.err));
+    assert.ok(physical(cache).length <= 4, `at most 4 entries (${physical(cache).length})`);
+  } finally {
+    server.close();
+  }
+});

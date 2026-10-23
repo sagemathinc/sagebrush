@@ -145,9 +145,15 @@ export function lintPackage(pkg, api) {
   const ownTop = new Set([...own].map((m) => m.split(".")[0]));
   const prefix = pkg.manifest.private_prefix;
   const coreModule = (name) => Object.hasOwn(api.modules, name);
-  const declared = (file, line, construct, target) => pkg.declarations.some((d) => d.file === file && d.line === line && d.construct === construct && (d.target === undefined || d.target === target));
+  const declaration = (file, line, construct, target) => pkg.declarations.find((d) => d.file === file && d.line === line && d.construct === construct && (d.target === undefined || d.target === target));
+  // (a declared dynamic access waives its finding and is a use of the core
+  // name it reaches, "access" (else its target), in its stated call form,
+  // "call": [parameter names], or else at that name's maximum parameter
+  // level: §5.3, §6.2, astra's CORR-PR68-2)
   const flag = (file, line, construct, target, message) => {
-    if (!declared(file, line, construct, target)) findings.push({ file, line, construct, target, message });
+    const d = declaration(file, line, construct, target);
+    if (!d) findings.push({ file, line, construct, target, message });
+    else uses.push({ file, line, target: d.access ?? d.target ?? target, bound: Array.isArray(d.call) ? { npos: 0, kw: d.call.map(String), unpack: false } : "any", declared: true });
   };
   // (the prefix must not begin any core module's or type's attribute, private
   // ones included: core-api-surface.json lists every "_name_" prefix the
@@ -200,6 +206,20 @@ export function lintPackage(pkg, api) {
       return null;
     };
     const rootName = (e) => (e?.k === "Attribute" ? rootName(e.value) : e?.k === "Name" ? e.id : null);
+    // the names and attributes stored to, and those only read as the start of
+    // a longer reference: neither lets a core callable escape
+    const notEscaping = new Set();
+    const stored = (x) => {
+      if (x?.k === "Tuple" || x?.k === "List") for (const y of x.elts ?? []) stored(y);
+      else if (x?.k === "Starred") stored(x.value);
+      else if (x) notEscaping.add(x);
+    };
+    nodes(tree, (n) => {
+      if (n.k === "Attribute") notEscaping.add(n.value);
+      if (n.k === "Call") notEscaping.add(n.func);
+      for (const t of n.k === "Assign" || n.k === "Delete" ? n.targets ?? [] : n.k === "AugAssign" || n.k === "AnnAssign" || n.k === "For" || n.k === "AsyncFor" || n.k === "comprehension" ? [n.target] : []) stored(t);
+      if (n.k === "withitem") stored(n.optional_vars);
+    });
     nodes(tree, (n) => {
       if (n.k === "Name" && BANNED_NAMES.has(n.id)) flag(file, n.line, "name", n.id, `uses ${n.id}, which the contract bans (reflection, dynamic code or the builtins' namespace)`);
       if (n.k === "Attribute") {
@@ -228,6 +248,12 @@ export function lintPackage(pkg, api) {
         if (t !== null) uses.push({ file, line: n.line, target: t, bound });
         // (a method call on a receiver the lint can't type: every core member of that name counts, §6.2)
         else if (n.func?.k === "Attribute" && !n.func.attr.startsWith("_")) uses.push({ file, line: n.line, target: "*." + n.func.attr, bound });
+      }
+      // a core callable that escapes (g = f, passed, returned, stored) may be
+      // called with any of its parameters: it takes their maximum level (§6.2)
+      if ((n.k === "Name" || n.k === "Attribute") && !notEscaping.has(n)) {
+        const t = resolve(n);
+        if (t !== null) uses.push({ file, line: n.line, target: t, bound: "any" });
       } else if (n.k === "Attribute") {
         const t = resolve(n);
         if (t !== null) uses.push({ file, line: n.line, target: t, bound: null });
@@ -239,7 +265,7 @@ export function lintPackage(pkg, api) {
   for (const u of uses) {
     const l = useLevel(api, u);
     if (l === null) {
-      if (!u.target.startsWith("*.")) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
+      if (!u.target.startsWith("*.") && !u.declared) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
     } else level = Math.max(level, l);
   }
   return { findings, uses, level };
@@ -261,7 +287,9 @@ function entryFor(api, target) {
   }
   return null;
 }
-// the level a use needs: the entry's since and its bound parameters' (§6.2)
+// the level a use needs: the entry's since and its bound parameters' (§6.2);
+// bound null is a bare reference (an import, or the start of a longer one),
+// bound "any" one that may be called with every parameter
 export function useLevel(api, use) {
   const entries = use.target.startsWith("*.")
     ? Object.values(api.modules).flatMap((m) => Object.values(m.names ?? {}).flatMap((e) => (e.members && Object.hasOwn(e.members, use.target.slice(2)) ? [e.members[use.target.slice(2)]] : [])))
@@ -272,7 +300,7 @@ export function useLevel(api, use) {
     let l = e.since ?? 1;
     const params = e.params;
     if (use.bound && Array.isArray(params)) {
-      if (use.bound.unpack || use.target.startsWith("*.")) for (const p of params) l = Math.max(l, p.since ?? 1);
+      if (use.bound === "any" || use.bound.unpack || use.target.startsWith("*.")) for (const p of params) l = Math.max(l, p.since ?? 1);
       else {
         const positional = params.filter((p) => p.kind === "posonly" || p.kind === "pos");
         for (let i = 0; i < use.bound.npos; i++) {
