@@ -652,7 +652,8 @@ def _ff_into(U, x, budget=None):
         if U.n % Kx.n == 0:
             return _ff_up(x, U, budget, refuse)
         if U.n == 1:
-            return U.K(int(x.list()[0])) if x ** U.p == x else None
+            v = _ffsub.prime_value(x)
+            return None if v is None else U.K(v)
         if Kx.n % U.n == 0:
             return _ff_down(x, U, budget, refuse)
         return None
@@ -740,8 +741,8 @@ def _into_universe(items, universe, kind):
             y = _qelt(x) if universe is _QQ and _num(x) else x
         elif universe is _ZZ and _ffwrap(x.parent()).n == 1:
             y = int(x)
-        elif universe is _ZZ and x ** _ffwrap(x.parent()).p == x:
-            y = int(x.list()[0])
+        elif universe is _ZZ and _ffsub.prime_value(x) is not None:
+            y = _ffsub.prime_value(x)
         else:
             y = None
         if y is None:
@@ -1413,8 +1414,8 @@ def _coerce_struct(x, u):
         W = _ffwrap(x.parent())
         if u is _ZZ and W.n == 1:
             return int(x)
-        if u is _ZZ and x ** W.p == x:
-            return int(x.list()[0])
+        if u is _ZZ and _ffsub.prime_value(x) is not None:
+            return _ffsub.prime_value(x)
         return _NOCOERCE
     d = _udesc(u)
     return None if d is None else _into(x, d, u)
@@ -7880,7 +7881,7 @@ class _MFinField:
             if Kx.n == 1 or self.n % Kx.n == 0:
                 return True  # (x's field lies in F)
             if self.n == 1:
-                return x ** self.p == x
+                return _ffsub.prime_value(x) is not None
             if Kx.n % self.n == 0:
                 # (F lies in x's field: by value; fields neither in the
                 # other: false, even for 0 or 1, as Magma)
@@ -7906,7 +7907,8 @@ class _MFinField:
                 elif self.n % Kx.n == 0:
                     y = _ff_up(x, self, budget, refuse)
                 elif self.n == 1:
-                    y = self.K(int(x.list()[0])) if x ** self.p == x else None
+                    v = _ffsub.prime_value(x)
+                    y = None if v is None else self.K(v)
                 elif Kx.n % self.n == 0:
                     y = _ff_down(x, self, budget, refuse)
             if y is None:

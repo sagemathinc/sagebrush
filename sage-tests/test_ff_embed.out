@@ -1,0 +1,100 @@
+named map False
+named call TypeError unable to coerce from a finite field other than the prime subfield
+named scalar TypeError unable to coerce from a finite field other than the prime subfield
+named sum TypeError unsupported operand parent(s) for +: 'Finite Field in a of size 2^2' and 'Finite Field in b of size 2^4'
+named membership (False, False)
+Hom repr Set of field embeddings from Finite Field in a of size 2^2 to Finite Field in b of size 2^4
+Hom list [Ring morphism:
+  From: Finite Field in a of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: a |--> b^2 + b, Ring morphism:
+  From: Finite Field in a of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: a |--> b^2 + b + 1]
+Hom len 2
+Hom EL [Ring morphism:
+  From: Finite Field in c of size 2^3
+  To:   Finite Field in d of size 2^6
+  Defn: c |--> d^4 + d^2 + d + 1, Ring morphism:
+  From: Finite Field in c of size 2^3
+  To:   Finite Field in d of size 2^6
+  Defn: c |--> d^5 + d, Ring morphism:
+  From: Finite Field in c of size 2^3
+  To:   Finite Field in d of size 2^6
+  Defn: c |--> d^5 + d^4 + d^2 + 1]
+Hom FF (Automorphism group of Finite Field in a of size 2^2, [Ring endomorphism of Finite Field in a of size 2^2
+  Defn: a |--> a, Ring endomorphism of Finite Field in a of size 2^2
+  Defn: a |--> a + 1])
+Hom empty (0, [], 0)
+hom good Ring morphism:
+  From: Finite Field in a of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: a |--> b^2 + b
+hom bad ValueError relations do not all (canonically) map to 0 under map determined by images of generators
+hom natural TypeError natural coercion morphism from Finite Field in a of size 2^2 to Finite Field in b of size 2^4 not defined
+hom call (d^3 + d^2 + d + 1, [d^3 + d^2 + d], a + 1)
+subfields [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+  Defn: 1 |--> 1), (Finite Field in b2 of size 2^2, Ring morphism:
+  From: Finite Field in b2 of size 2^2
+  To:   Finite Field in b of size 2^4
+  Defn: b2 |--> b^2 + b), (Finite Field in b of size 2^4, Identity endomorphism of Finite Field in b of size 2^4)]
+subfields 64 [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in d of size 2^6
+  Defn: 1 |--> 1), (Finite Field in d2 of size 2^2, Ring morphism:
+  From: Finite Field in d2 of size 2^2
+  To:   Finite Field in d of size 2^6
+  Defn: d2 |--> d^3 + d^2 + d), (Finite Field in d3 of size 2^3, Ring morphism:
+  From: Finite Field in d3 of size 2^3
+  To:   Finite Field in d of size 2^6
+  Defn: d3 |--> d^5 + d^4 + d^2 + 1), (Finite Field in d of size 2^6, Identity endomorphism of Finite Field in d of size 2^6)]
+same prefix (True, z4^2 + z4, True, w4^2 + w4)
+descent z2
+bad descent ValueError z4 is not in the image of (map internal to coercion system -- copy before use)
+Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+nonnested (z6^5 + z6^4 + z6^3 + z6 + 1, Finite Field in z6 of size 2^6, Finite Field in z6 of size 2^6)
+nonnested call TypeError unable to coerce from a finite field other than the prime subfield
+nonnested call one TypeError unable to coerce from a finite field other than the prime subfield
+in by value (True, False, True, False)
+eq (True, False, True)
+cross prefix (True, w4^2 + w4, w4^2, True, True)
+cross nonnested TypeError unsupported operand parent(s) for +: 'Finite Field in z2 of size 2^2' and 'Finite Field in w3 of size 2^3'
+named-prefix map (False, False)
+named z-looking (False, False, False, False, False)
+named self (True, a, True)
+prefix hom (Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: z2 |--> z4^2 + z4, [Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: z2 |--> z4^2 + z4, Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: z2 |--> z4^2 + z4 + 1])
+prefix subfields [(Finite Field of size 2, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in z4 of size 2^4
+  Defn: 1 |--> 1), (Finite Field in z2 of size 2^2, Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: z2 |--> z4^2 + z4), (Finite Field in z4 of size 2^4, Identity endomorphism of Finite Field in z4 of size 2^4)]
+coerce maps (Ring morphism:
+  From: Finite Field in z2 of size 2^2
+  To:   Finite Field in z4 of size 2^4
+  Defn: z2 |--> z4^2 + z4, Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in z4 of size 2^4
+  Defn: 1 |--> 1, None)
+product z6^4 + z6^3 + z6^2
+prime value (1, 1, 1)
+prime not in ValueError b is not in the image of (map internal to coercion system -- copy before use)
+Ring morphism:
+  From: Finite Field of size 2
+  To:   Finite Field in b of size 2^4
+prime in (True, False, True)
+prime coerce (False, True)
