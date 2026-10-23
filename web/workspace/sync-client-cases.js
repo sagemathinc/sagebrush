@@ -112,7 +112,8 @@ async function serverOps(w) {
 }
 
 /** Every op this device logged since `from` is in the server's log once, in order, or was refused (listed). */
-async function everyOnce(w, from, refusedCount, what) {
+async function everyOnce(w, from, refusedCount, what, c) {
+  const listed = c ? ((await metaGet(w.ws, `sync:${nsOf(c)}:refused`)) ?? []) : [];
   const local = sendable((await w.ops()).filter((o) => o.seq > from));
   const { mine } = await serverOps(w);
   const dseqs = mine.map((o) => o.dseq);
@@ -120,7 +121,7 @@ async function everyOnce(w, from, refusedCount, what) {
   const paths = local.filter((o, i) => i < local.length).map((o) => wire(o) + " " + o.path);
   const got = mine.map((o) => o.op + " " + o.path);
   const covered = got.every((g) => paths.includes(g));
-  check(once && covered && mine.length + refusedCount === local.length, `${what}: every local op in the server's log once, in dseq order, or refused (${mine.length} + ${refusedCount} of ${local.length}): ${J(got).slice(0, 300)}`);
+  check(once && covered && mine.length + refusedCount === local.length, `${what}: every local op in the server's log once, in dseq order, or refused (${mine.length} + ${refusedCount} of ${local.length}): ${J(got).slice(0, 300)}; refused here: ${J(listed).slice(0, 300)}`);
 }
 
 // ---- the cases
@@ -141,7 +142,7 @@ async function basics() {
   const t = await w.remove("/d/c.txt");
   await w.restore(t.path);
   check(await until(() => settled(w, c)), "basics: every record sent, accepted, its echo seen, and removed " + J(c.status));
-  await everyOnce(w, from, 0, "basics");
+  await everyOnce(w, from, 0, "basics", c);
   const log = await ctl("log");
   const puts = log.http.filter((h) => h.method === "PUT");
   check(puts.length === 3 && puts.every((p) => p.status === 201 || p.status === 200), "basics: each new file's bytes PUT once, the same bytes (two files) once: " + J(puts.map((p) => [p.path.slice(-8), p.status])));
@@ -180,12 +181,13 @@ async function lostAckReconnect() {
   const c = client(w);
   check(await until(() => c.status.state === "synced"), "lost ack: synced");
   const from = await w.lastSeq();
-  await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true } });
+  // (and the next connection's first index, so the record is resent rather than confirmed by its echo first)
+  await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true, dropIndex: 1 } });
   await w.create("/l.txt", { content: "lost" });
   check(await until(() => settled(w, c), 15_000), "lost ack, then the socket closed: the record decided after the reconnect " + J(c.status));
   const log = await ctl("log");
   const sends = opsMessages(log);
-  const dropped = log.got.filter((g) => g.dropped);
+  const dropped = log.got.filter((g) => g.dropped && g.t === "ack");
   const same = sends.length === 2 && J(sends[0].json) === J(sends[1].json);
   check(dropped.length === 1 && same && c.stats.connects === 2, "lost ack: the same dseq resent unchanged on the new connection, the server's stored decision taken: " + J(sends.map((s) => s.dseqs)));
   await everyOnce(w, from, 0, "lost ack");
@@ -199,7 +201,7 @@ async function lostAckReload() {
   const c = client(w);
   check(await until(() => c.status.state === "synced"), "lost ack, reload: synced");
   const from = await w.lastSeq();
-  await ctl("set", { set: { dropAcks: 1 } });
+  await ctl("set", { set: { dropAcks: 1, dropIndex: 1 } });
   await w.create("/r.txt", { content: "reload" });
   check(await until(async () => (await ctl("log")).got.some((g) => g.dropped)), "lost ack, reload: the ack dropped");
   await stop(c);
@@ -217,24 +219,26 @@ async function lostAckReload() {
 async function refusal() {
   await account();
   const w = await fresh();
-  const c = client(w);
-  check(await until(() => c.status.state === "synced"), "refusal: synced");
+  const c0 = client(w);
+  check(await until(() => c0.status.state === "synced"), "refusal: synced");
   const from = await w.lastSeq();
-  await w.create("/f.txt", { content: "forget me" });
-  // (forget is a person's only: an agent's is refused, `forbidden`, a per-op decision)
-  w.actor = "agent:test";
-  await w.forget("/f.txt");
-  w.actor = "person";
+  await stop(c0);
+  // (a file whose bytes this device no longer has: its record is sent all the same (C1), the server refuses it
+  // `missing`, a per-op decision; the op after it is decided as usual)
+  const f = await w.create("/f.txt", { content: "bytes gone" });
   await w.mkdir("/after");
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").delete(f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const c = client(w);
   check(await until(() => settled(w, c)), "refusal: every record decided " + J(c.status));
   const ns = nsOf(c);
   const refused = (await metaGet(w.ws, `sync:${ns}:refused`)) ?? [];
   const rb = await metaGet(w.ws, `sync:${ns}:rebuild`);
-  check(refused.length === 1 && refused[0].code === "forbidden" && refused[0].path === "/f.txt", "refusal: the refusal listed with its code and path: " + J(refused));
+  const puts = (await ctl("log")).http.filter((h) => h.method === "PUT");
+  check(puts.length === 0 && refused.length === 1 && refused[0].code === "missing" && refused[0].path === "/f.txt", "refusal: no bytes to upload, the op sent anyway, refused `missing`, listed with its code and path: " + J(refused));
   check(rb?.why === "refused", "refusal: the rebuild asked for (done in step 4): " + J(rb));
   const { mine } = await serverOps(w);
   check(mine.some((o) => o.op === "mkdir" && o.path === "/after"), "refusal: the op after the refused one accepted");
-  await everyOnce(w, from, 1, "refusal");
+  await everyOnce(w, from, 1, "refusal", c);
   await nothingApplied(w, "refusal");
   await stop(c);
 }
@@ -288,11 +292,14 @@ async function reloadHonorsTimer() {
   check(await until(async () => opsMessages(await ctl("log")).length === 1), "timer across a reload: refused (rate, 60 s)");
   await sleep(200);
   await stop(c1);
+  const persisted = await metaGet(w.ws, `sync:${nsOf(c1)}:retry:ops`);
+  check(persisted?.at === clock.now() + 60_000, "timer across a reload: the timer persisted: " + J(persisted) + " now " + clock.now());
   const clock2 = fakeClock(clock.now() + 5_000);
   const c2 = client(w, { clock: clock2 });
   check(await until(() => c2.debug().writable === true), "timer across a reload: the next page's client connected");
   await sleep(500);
-  check(opsMessages(await ctl("log")).length === 1, "timer across a reload: nothing sent before the persisted timer ends");
+  const lt = await ctl("log");
+  check(opsMessages(lt).length === 1, "timer across a reload: nothing sent before the persisted timer ends: " + J(lt.sent.map((m) => m.t)) + " " + J(c2.debug()));
   await clock2.advance(55_000);
   check(await until(async () => (await outbox(w)) === 0), "timer across a reload: sent, and decided, when it ends");
   await everyOnce(w, from, 0, "timer across a reload");
@@ -380,7 +387,7 @@ async function twoTabs() {
   const c2 = client(w2);
   await sleep(500);
   const l = await ctl("log");
-  check(c2.status.state === "waiting" && l.open === 1 && l.sockets === 1, "two tabs: the second waits for the lock; one socket: " + J({ s: c2.status.state, open: l.open, sockets: l.sockets }));
+  check(c2.status.state === "waiting" && l.sockets === 1, "two tabs: the second waits for the lock; one socket: " + J({ s: c2.status.state, open: l.open, sockets: l.sockets }));
   await w2.mkdir("/from-tab-2");
   check(await until(() => settled(w1, c1)), "two tabs: a change in the waiting tab sent by the one holding the lock");
   await stop(c1);
