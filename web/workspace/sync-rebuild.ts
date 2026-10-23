@@ -242,7 +242,8 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
     const at = { ...(p.at ?? { step: "records", dseq: 0 }) };
     bump(p, "capture");
     if (at.step === "records") {
-      const recs = (await req(tx.objectStore("outbox").getAll(IDBKeyRange.bound([ns, (at.dseq ?? 0) + 1], [ns, p.serverNext - 1]), REBUILD.page))) as OutboxRecord[];
+      const lo = (at.dseq ?? 0) + 1;
+      const recs = lo <= p.serverNext - 1 ? ((await req(tx.objectStore("outbox").getAll(IDBKeyRange.bound([ns, lo], [ns, p.serverNext - 1]), REBUILD.page))) as OutboxRecord[]) : [];
       n.requests++;
       for (const r of recs) {
         if (n.requests > REBUILD.requests - 40) break;
@@ -435,7 +436,8 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
       }
       if (echoes.length < REBUILD.page) Object.assign(at, { step: "replaced", dseq: 0, key: undefined });
     } else if (at.step === "replaced") {
-      const recs = (await req(out.getAll(IDBKeyRange.bound([ns, (at.dseq ?? 0) + 1], [ns, p.serverNext - 1]), REBUILD.page))) as OutboxRecord[];
+      const lo = (at.dseq ?? 0) + 1;
+      const recs = lo <= p.serverNext - 1 ? ((await req(out.getAll(IDBKeyRange.bound([ns, lo], [ns, p.serverNext - 1]), REBUILD.page))) as OutboxRecord[]) : [];
       for (const rec of recs) {
         const jr = (await req(j.get([jp, rec.id]))) as JournalRecord | undefined;
         await remove(rec, jr);

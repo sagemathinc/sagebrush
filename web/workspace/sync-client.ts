@@ -620,6 +620,9 @@ export class SyncClient {
     if (!Array.isArray(m.ops)) return c.end("closed");
     const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
     await c.ob.acked(results);
+    // (the server decides in dseq order with no gaps: its decided prefix, D6's server_next, follows each ack, so a
+    // rebuild starting now knows which records it has decided)
+    for (const d of results) if (isNat(d.dseq)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
     await this.timerOk(c.ns, "ops");
     const byDseq = new Map(p.recs.map((r) => [r.dseq, r]));
     const refused = results.filter((d): d is { dseq: number; code: string } => "code" in d);
@@ -747,6 +750,12 @@ export class SyncClient {
     if (!c.writable || c.halted) {
       this.showWaiting(c, st0.count);
       return;
+    }
+    // (a committed journal first (a rebuild's reissue, C3/D6): drained into records as the outbox has room; the scan
+    // stays idle until it has drained, so what it makes for ops after W1 comes after the journal's)
+    for (;;) {
+      const d = await c.ob.drainJournal();
+      if (!d.more || d.full || this.conn !== c) break;
     }
     // (the scan: local changes made into records, as the outbox has room)
     await c.ob.scan();

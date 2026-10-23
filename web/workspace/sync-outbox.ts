@@ -62,6 +62,10 @@ type Totals = { count: number; bytes: number; charged: number; full?: { at: numb
 const NONE: Totals = { count: 0, bytes: 0, charged: 0 };
 
 const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors") => `sync:${ns}:${what}`;
+/** The committed reissue journal draining now (sync-rebuild.ts journalKey). */
+const JOURNAL = (ns: string) => `sync:${ns}:journal`;
+const JOURNAL_PAGE = 100;
+type JRec = { ns: string; id: string; parent: string; name: string; kind: Kind; sha256?: string; size?: number; trashed: boolean; gone?: true; sent?: true; from?: string };
 /** A record's size, as the bound counts it: its JSON text, keys and all, as the workspace's inert JSON writer
  * writes it (notebook/stores.js, as TimeTravel's backlog counts an entry: 2a), two bytes a character, as the page
  * holds it. */
@@ -182,6 +186,9 @@ export class Outbox {
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       cut(1);
       if (scanned === undefined) throw new Error(`sync: ${this.ns} has no scan watermark yet (begin)`);
+      // (a committed journal still draining: the scanner waits, so the journal's records come before any made for ops
+      // after W1 (C3, astra's (b)))
+      if ((await req(meta.get(JOURNAL(this.ns)))) !== undefined) return { made: 0, full: false, more: false };
       let dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
       cut(2);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
@@ -290,6 +297,138 @@ export class Outbox {
       return { made, full, more: full || ops.length === OUTBOX.page };
     });
     // (a pin released by the scan: its version prunable again, its file due; the cleanup begun)
+    afterReleases(this.w);
+    return r;
+  }
+
+  /**
+   * One page of the committed journal's drain (C3, D6's reissue rules), in ONE transaction under the lease, as the
+   * outbox has room.  Journal records are taken in rounds over their key order: a record goes once its folder has
+   * gone (or is no journal record, or is the root), so parents go before their children.  Each is diffed against the
+   * active confirmed index:
+   * - present here, absent there: `mkdir`, or `adopt` (which syncs as a create; a data file with its bytes' pin);
+   * - present in both, another folder or name: `rename`, its `parent` the folder's identity;
+   * - another hash: `write`, its `base` the index's hash;
+   * - in Trash here, not there: `remove`; out of Trash here, in it there: `restore`;
+   * - gone here, present there (`forget`), after every present record has gone.
+   * Each record is marked sent with its outbox records made, its pin handed to them.  When nothing is left the
+   * journal is done: its key cleared and its prefix to the cleanup list; the scanner, idle until then, goes on from
+   * the watermark (C3: the journal drains before anything the scanner makes for ops after W1).
+   */
+  async drainJournal(): Promise<{ made: number; full: boolean; more: boolean }> {
+    const r = await inTx(this.w.ws, ["outbox", "adoptJournal", "entries", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
+      const meta = tx.objectStore("meta"), out = tx.objectStore("outbox"), j = tx.objectStore("adoptJournal"), ents = tx.objectStore("entries"), ix = tx.objectStore("syncIndex");
+      await fence(meta, this.lease);
+      const jp = (await req(meta.get(JOURNAL(this.ns)))) as string | undefined;
+      if (!jp) return { made: 0, full: false, more: false };
+      const posKey = JOURNAL(this.ns) + ":at";
+      const pos = ((await req(meta.get(posKey))) as { round: number; key: string; progress: boolean; gone: boolean } | undefined) ?? { round: 0, key: "", progress: false, gone: false };
+      const gp = genPrefix(this.ns, ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0);
+      let dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
+      const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
+      const recs = (await req(j.getAll(IDBKeyRange.bound([jp, pos.key], [jp, "\uffff"], true), JOURNAL_PAGE))) as JRec[];
+      let made = 0, full = false;
+      const now = Date.now();
+      const fits = (r: OutboxRecord) => t.count + 1 <= OUTBOX.maxRecords && t.charged + chargeOf(r) <= OUTBOX.maxBytes;
+      // (a folder's path, here or in the index: where a record's own path is derived from; its `parent` decides)
+      const pathOf = async (fid: string): Promise<string | undefined> => (((await req(ents.index("byIdent").get(fid))) as Entry | undefined)?.path) ?? (((await req(ix.get([gp, fid]))) as { path?: string } | undefined)?.path);
+      for (const jr of recs) {
+        const before = pos.key;
+        pos.key = jr.id;
+        if (jr.id.startsWith("e:") || jr.sent) continue;
+        // (gone ones after every present one: a second phase of rounds)
+        if (!!jr.gone !== pos.gone) continue;
+        const conf = (await req(ix.get([gp, jr.id]))) as (Record<string, unknown> & { path?: string; sha256?: string; trashed?: unknown; gone?: true }) | undefined;
+        const live = conf && !conf.gone ? conf : undefined;
+        const ops: WireOp[] = [];
+        const ident: Partial<WireOp> = jr.kind === "file" || jr.kind === "folder" ? { fid: jr.id } : { ref: jr.id };
+        const mk = (op: string, path: string, more: Partial<WireOp> = {}): WireOp => ({ dseq: 0, t: now, by: "person", op, path, kind: jr.kind, ...ident, ...more });
+        if (jr.gone) {
+          if (live) ops.push(mk("forget", live.path!));
+        } else {
+          // (its folder first: a parent still unsent in this journal waits for the next round)
+          if (jr.parent) {
+            const pj = (await req(j.get([jp, jr.parent]))) as JRec | undefined;
+            if (pj && !pj.sent && !pj.gone) continue;
+          }
+          const folder = jr.parent ? ((await pathOf(jr.parent)) ?? "/") : "/";
+          const placed = (folder === "/" ? "" : folder) + "/" + jr.name;
+          const parent = jr.parent ? { parent: jr.parent } : {};
+          const content = jr.kind === "file" ? { ...(jr.sha256 ? { sha256: jr.sha256 } : {}), ...(jr.size !== undefined ? { size: jr.size } : {}) } : {};
+          const trashTo = TRASH + "/" + jr.name;
+          if (!live) {
+            const at = jr.trashed ? (jr.from ?? "/" + jr.name) : placed;
+            ops.push(mk(jr.kind === "folder" ? "mkdir" : "adopt", at, { ...(jr.trashed ? {} : parent), ...content }));
+            if (jr.trashed) ops.push(mk("remove", at, { to: trashTo }));
+          } else {
+            const inTrash = !!live.trashed;
+            if (jr.trashed && !inTrash) ops.push(mk("remove", live.path!, { to: trashTo }));
+            else if (!jr.trashed && inTrash) ops.push(mk("restore", live.path!, { to: placed, ...parent }));
+            else if (!jr.trashed && live.path!.normalize("NFC") !== placed.normalize("NFC")) ops.push(mk("rename", live.path!, { to: placed, ...parent }));
+            if (jr.kind === "file" && jr.sha256 && jr.sha256 !== live.sha256) ops.push(mk("write", jr.trashed ? live.path! : placed, { ...parent, ...content, ...(live.sha256 ? { base: live.sha256 as string } : {}) }));
+          }
+        }
+        // (all of its records fit, or none of them now: the page stops, the record waits for room)
+        const made1: OutboxRecord[] = ops.map((op, i) => ({ ns: this.ns, dseq: dseq + i, lseq: 0, id: jr.id, op: { ...op, dseq: dseq + i } }));
+        let room = true;
+        const tt = { ...t };
+        for (const r of made1) {
+          if (tt.count + 1 > OUTBOX.maxRecords || tt.charged + chargeOf(r) > OUTBOX.maxBytes) { room = false; break; }
+          tt.count++;
+          tt.charged += chargeOf(r);
+        }
+        // (no room: read again from just before it once records are decided)
+        if (!room) { full = true; pos.key = before; break; }
+        for (const r of made1) {
+          // (a data file's bytes: its pin (the journal's, from retire), else its present bytes' if they are the record's)
+          if ((r.op.op === "adopt" || r.op.op === "write") && r.op.sha256) {
+            const owned = ((await req(tx.objectStore("pins").getAll(IDBKeyRange.bound([jr.id, -Infinity], [jr.id, Infinity])))) as Pin[]).find((x) => x.owner?.ns === jp && x.sha256 === r.op.sha256);
+            const pin = owned ?? (await pinOfCurrent(tx, jr.id, r.op.sha256));
+            if (pin) {
+              r.pin = pin.seq;
+              tx.objectStore("pins").put({ ...pin, owner: { ns: this.ns, dseq: r.dseq } } satisfies Pin);
+            } else {
+              const e = (await req(ents.index("byIdent").get(jr.id))) as Entry | undefined;
+              if (e?.kind === "file" && e.migrated && e.sha256 === r.op.sha256 && !e.remote) {
+                const np = await pinPresent(tx, jr.id, scanned ?? 0, e.path, e.sha256, e.size ?? 0, jr.id, { ns: this.ns, dseq: r.dseq });
+                r.pin = np.seq;
+              }
+            }
+            const pd = await pendingOf(tx, jr.id), st = stateOf(pd, this.ns);
+            putPending(tx, pd, this.ns, { ...st, allocated: { dseq: r.dseq, sha256: r.op.sha256, pinned: r.pin !== undefined, state: "undecided" } }, scanned);
+          }
+          out.add(r);
+          t.count++;
+          t.bytes += recordBytes(r);
+          t.charged += chargeOf(r);
+          made++;
+        }
+        dseq += made1.length;
+        j.put({ ...jr, sent: true });
+        pos.progress = true;
+      }
+      let more = true;
+      if (!full && recs.length < JOURNAL_PAGE) {
+        // (the end of a round: another, while the last one made progress; then the gone phase; then done)
+        if (pos.progress) Object.assign(pos, { round: pos.round + 1, key: "", progress: false });
+        else if (!pos.gone) Object.assign(pos, { gone: true, round: 0, key: "", progress: false });
+        else {
+          // (drained: what is left unsent (under a folder that never went: the server refuses it, or a cycle) is
+          // dropped with the journal; the journal's prefix to the cleanup list; the scanner goes on)
+          meta.delete(JOURNAL(this.ns));
+          meta.delete(posKey);
+          const clean = ((await req(meta.get(`sync:${this.ns}:clean`))) as string[] | undefined) ?? [];
+          meta.put([...clean, "j:" + jp], `sync:${this.ns}:clean`);
+          more = false;
+        }
+      }
+      if (more) meta.put(pos, posKey);
+      if (full) t.full = { at: Date.now(), count: t.count, bytes: t.bytes };
+      meta.put(dseq, key(this.ns, "dseq"));
+      meta.put(t, key(this.ns, "outbox"));
+      return { made, full, more };
+    });
     afterReleases(this.w);
     return r;
   }
