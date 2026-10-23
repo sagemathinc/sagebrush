@@ -22,6 +22,21 @@ const here = new URL(".", import.meta.url).pathname;
 const V = JSON.parse(readFileSync(here + "doc-vectors.json", "utf8"));
 const td = new TextDecoder();
 
+// ---- first, while this process is small: a 16 MiB string of U+0001 is refused without its escaped copy (LIMIT-PR62-1)
+const child = Bun.spawnSync([process.execPath, "-e", `
+  const P = await import(${JSON.stringify(here + "doc-protocol.ts")});
+  const s = "\\u0001".repeat(16 << 20);
+  let code = "none";
+  try { P.jcs(s); } catch (e) { code = e.code; }
+  console.log(JSON.stringify({ code, maxRSS: process.resourceUsage().maxRSS }));
+`]);
+const res = JSON.parse(new TextDecoder().decode(child.stdout).trim() || "{}");
+check(res.code === "limit", `jcs: 16 MiB of U+0001 refused (${res.code})`);
+// (run first, before this process grows: Linux carries a parent's max RSS into its child across fork and exec.
+//  The string itself is 16 MiB; its escaped copy would be 96 MiB more, and the old path peaked near 177 MiB.)
+check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused below the escaped copy's peak (max RSS ${res.maxRSS} KiB)`);
+
+
 // ---- the encodings, against the vectors
 
 for (const t of V.sha256) check(P.hex(P.sha256(P.fromHex(t.hex_in))) === t.out, `sha256 of ${t.hex_in.length / 2} bytes`);
@@ -35,6 +50,15 @@ for (const t of V.u64) check(P.hex(P.u64(t.in)) === t.out, `u64 ${t.in}`);
 throwsCode(() => P.u64(-1), "invalid", "u64 of -1");
 throwsCode(() => P.u64(2 ** 53), "invalid", "u64 past safe integers");
 for (const t of V.jcs) check(P.jcs(t.in) === t.out, `jcs ${t.out}`);
+// (RFC 8785's IEEE-754 cases, as bits: the oracle and the TypeScript agree, and so does JSON.stringify: CORR-PR62-1)
+check(V.jcs_numbers.length >= 35, "the number vectors");
+for (const t of V.jcs_numbers) {
+  const dv = new DataView(new ArrayBuffer(8));
+  for (let i = 0; i < 8; i++) dv.setUint8(i, parseInt(t.bits.slice(2 * i, 2 * i + 2), 16));
+  const x = dv.getFloat64(0);
+  check(P.jcs(x) === t.out, `jcs of the double ${t.bits}: ${P.jcs(x)}, wanted ${t.out}`);
+  check(JSON.stringify(x) === t.out, `JSON.stringify parity on ${t.bits}`);
+}
 for (const s of V.jcs_invalid) throwsCode(() => P.jcs(JSON.parse(s)), "invalid_value", `jcs refuses ${s}`);
 throwsCode(() => P.jcs({ a: NaN }), "invalid_value", "jcs refuses NaN");
 throwsCode(() => P.jcs({ a: Infinity }), "invalid_value", "jcs refuses Infinity");
@@ -172,6 +196,20 @@ throwsCode(() => P.checkOutputs({ ...outs, set: [{ cell: "a", preview: { sha256:
 throwsCode(() => P.checkOutputs({ ...outs, set: [outs.set[0], outs.set[0]] }), "invalid", "outputs: a cell twice");
 throwsCode(() => P.checkOutputs({ ...outs, oreq: { client: "c1", n: 0 } }), "invalid", "outputs: oreq n 0");
 throwsCode(() => P.checkOutputs({ ...outs, set: Array.from({ length: 501 }, (_, i) => ({ cell: "c" + i, full: { sha256: SHA, size: 1 } })) }), "limit", "outputs: 501 cells");
+// both socket forms (CORR-PR62-2): the document socket's message names no doc, and is normalized with the attachment's
+const OWNER = "a".repeat(64), VIA = { socket: "document", doc: DOC, owner: OWNER };
+const rawSnap = { t: "snapshot", req: 3, at_seq: 10, sha256: SHA, bytes: 100 };
+const ds = P.checkSnapshot(rawSnap, VIA);
+check(ds.doc === DOC && ds.owner === OWNER && ds.at_seq === 10, "snapshot: the document-socket form, normalized with the attachment's doc and owner");
+check(P.checkSnapshot(snap).doc === DOC && P.checkSnapshot(snap).owner === undefined, "snapshot: the account-socket form");
+throwsCode(() => P.checkSnapshot(rawSnap), "invalid", "snapshot: the account socket needs doc");
+throwsCode(() => P.checkSnapshot({ ...rawSnap, doc: "aaaaaaaaaaaa" }, VIA), "invalid", "snapshot: a document socket's message can't name another doc");
+throwsCode(() => P.checkSnapshot({ ...rawSnap, owner: "b".repeat(64) }, VIA), "invalid", "snapshot: a document socket's message can't name another owner");
+throwsCode(() => P.checkSnapshot(rawSnap, { socket: "document", doc: "bad", owner: OWNER }), "invalid", "snapshot: a malformed attachment");
+check(P.checkDocClaim({ t: "doc_claim", req: 1, client: "c1" }, VIA).doc === DOC, "doc_claim: the document-socket form");
+check(P.checkDocFence({ t: "doc_fence", req: 1, clients: [{ client: "c1", target: 1 }] }, VIA).owner === OWNER, "doc_fence: the document-socket form");
+check(P.checkOutputs({ t: "outputs", req: 1, oreq: { client: "c1", n: 1 }, set: [{ cell: "a", full: { sha256: SHA, size: 1 } }] }, VIA).doc === DOC, "outputs: the document-socket form");
+throwsCode(() => P.checkOutputs({ ...outs }, VIA), "invalid", "outputs: a document socket's message with doc is refused");
 const blob = { format: "sb-sync-snapshot", v: 1, kind: "notebook", epoch: 1, at_seq: 4, time: "0000000000a_c1", value: "" };
 check(P.checkSnapshotBlob(blob).at_seq === 4, "snapshot blob: accepted");
 throwsCode(() => P.checkSnapshotBlob({ ...blob, v: 2 }), "invalid", "snapshot blob: another version");
@@ -226,6 +264,12 @@ check(P.parseSnapshotBlob(P.utf8(JSON.stringify(blob))).at_seq === 4, "parseSnap
 throwsCode(() => P.parseSnapshotBlob(P.utf8("{not json")), "invalid", "parseSnapshotBlob: not JSON");
 throwsCode(() => P.checkSnapshotBlob({ ...blob, value: "x".repeat((32 << 20) + 1) }), "limit", "checkSnapshotBlob: a value over 32 MiB");
 
+// a string's escaped length is charged before its escaped copy exists (LIMIT-PR62-1): 16 MiB of U+0001
+// escapes to 96 MiB; it is refused without making it.  In a child process, so its peak RSS is its own.
+throwsCode(() => P.jcs("\u0001".repeat(1 << 20), 6 << 20), "limit", "jcs: 1 MiB of U+0001 (6 MiB escaped) over a 6 MiB budget");
+check(P.jcs("\u0001".repeat(1000), 6002).length === 6002, "jcs: escaped length exactly at the budget");
+throwsCode(() => P.jcs("\u0001".repeat(1000), 6001), "limit", "jcs: escaped length one over the budget");
+throwsCode(() => P.jcs("é".repeat(10), 21), "limit", "jcs: two-byte characters counted as two");
 console.log(`${checks - fails.length}/${checks} checks passed`);
 if (fails.length) {
   for (const f of fails.slice(0, 40)) console.log("FAIL", f);

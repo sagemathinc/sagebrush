@@ -6,6 +6,7 @@
 # and the cloud server all run these.
 #   python3 -I web/sync-protocol/gen-doc-vectors.py > web/sync-protocol/doc-vectors.json
 import base64
+import decimal
 import hashlib
 import json
 import struct
@@ -61,20 +62,72 @@ def jcs_string(s):
 
 
 def jcs_number(x):
+    """ECMAScript's Number::toString (ES2023 §6.1.6.1.20), which RFC 8785 §3.2.2.3 requires.
+
+    The digits are the shortest that round-trip (Python's repr gives the same
+    digits: both are the shortest correctly rounded decimal), then ES's
+    layout rules for where the point and exponent go."""
     if isinstance(x, bool):
         raise TypeError
-    if isinstance(x, int):
-        return str(x)
+    x = float(x)
     if x != x or x in (float("inf"), float("-inf")):
         raise ValueError("non-finite")
-    if x == int(x) and abs(x) < 1e21:
-        return str(int(x))
-    r = repr(x)  # shortest round-trip, as ES6's Number.prototype.toString
-    if "e" in r:
-        m, e = r.split("e")
-        e = int(e)
-        return "%se%s%d" % (m, "+" if e > 0 else "-", abs(e))
-    return r
+    if x == 0:
+        return "0"
+    if x < 0:
+        return "-" + jcs_number(-x)
+    t = decimal.Decimal(repr(x)).normalize().as_tuple()
+    s = "".join(map(str, t.digits))
+    k = len(s)
+    n = k + t.exponent  # the value is 0.s x 10^n
+    if k <= n <= 21:
+        return s + "0" * (n - k)
+    if 0 < n <= 21:
+        return s[:n] + "." + s[n:]
+    if -6 < n <= 0:
+        return "0." + "0" * (-n) + s
+    e = n - 1
+    return (s if k == 1 else s[0] + "." + s[1:]) + "e" + ("+" if e > 0 else "-") + str(abs(e))
+
+
+# RFC 8785 Appendix B's IEEE-754 cases (and astra's from the PR #62 review): the oracle checks itself against them.
+RFC8785_NUMBERS = [
+    ("0000000000000000", "0"),
+    ("8000000000000000", "0"),
+    ("0000000000000001", "5e-324"),
+    ("8000000000000001", "-5e-324"),
+    ("7fefffffffffffff", "1.7976931348623157e+308"),
+    ("ffefffffffffffff", "-1.7976931348623157e+308"),
+    ("4340000000000000", "9007199254740992"),
+    ("c340000000000000", "-9007199254740992"),
+    ("4430000000000000", "295147905179352830000"),
+    ("44b52d02c7e14af5", "9.999999999999997e+22"),
+    ("44b52d02c7e14af6", "1e+23"),
+    ("44b52d02c7e14af7", "1.0000000000000001e+23"),
+    ("444b1ae4d6e2ef4e", "999999999999999700000"),
+    ("444b1ae4d6e2ef4f", "999999999999999900000"),
+    ("444b1ae4d6e2ef50", "1e+21"),
+    ("3eb0c6f7a0b5ed8c", "9.999999999999997e-7"),
+    ("3eb0c6f7a0b5ed8d", "0.000001"),
+    ("3ee4f8b588e368f1", "0.00001"),
+    ("41b3de4355555553", "333333333.3333332"),
+    ("41b3de4355555554", "333333333.33333325"),
+    ("41b3de4355555555", "333333333.3333333"),
+    ("41b3de4355555556", "333333333.3333334"),
+    ("41b3de4355555557", "333333333.33333343"),
+    ("becbf647612f3696", "-0.0000033333333333333333"),
+    ("43143ff3c1cb0959", "1424953923781206.2"),
+]
+
+
+def bits(h):
+    return struct.unpack(">d", bytes.fromhex(h))[0]
+
+
+for h, want in RFC8785_NUMBERS:
+    got = jcs_number(bits(h))
+    if got != want:
+        raise SystemExit("the JCS oracle is wrong on %s: %s, not %s" % (h, got, want))
 
 
 def utf16_key(k):
@@ -197,6 +250,10 @@ def main():
             {"s": "q\"\\/\b\f\n\r\t\u0001\u001f\u007f é😀"},
             [0, -1, 1.5, -0.25, 1e21, 123456789012, 0.1],
         ]
+    ]
+    # (each as its IEEE-754 bits, so no decimal parsing stands between the double and its form)
+    v["jcs_numbers"] = [{"bits": h, "out": jcs_number(bits(h))} for h, _ in RFC8785_NUMBERS] + [
+        {"bits": struct.pack(">d", x).hex(), "out": jcs_number(x)} for x in [1e-6, 1e-7, 1e21, 1e20, 123456789012345680000.0, 2.0**70, 0.1 + 0.2, 5e-7, 1.5e-6, 2.0**-1074 * 3]
     ]
     v["jcs_invalid"] = ['{"a":"\\ud800"}', '["\\udc00x"]']
     owner, doc = "ab" * 32, "0123456789ab"
