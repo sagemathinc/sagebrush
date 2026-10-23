@@ -302,10 +302,12 @@ async function moveMeasured(dirs, per) {
   rows.length = 0; ents.length = 0;
   await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(10, `sync:${ns}:cursor`); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
   for (let i = 0; i < 10; i++) op({ op: "noop-seq", path: "/", kind: "folder", fid: big });
+  // (a full collection first, and a moment for its own long task to pass, before anything is observed)
+  globalThis.gc?.();
+  await new Promise((ok) => setTimeout(ok, 200));
   const longs = [];
   const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) longs.push(e.duration); });
   obs.observe({ type: "longtask" });
-  globalThis.gc?.();
   const heap0 = performance.memory?.usedJSHeapSize ?? 0;
   let heapMax = heap0;
   const sampler = setInterval(() => { heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }, 5);
@@ -321,13 +323,14 @@ async function moveMeasured(dirs, per) {
 }
 
 async function bigMove() {
+  // (the 1,000-entry move first: measured before the large one's garbage is about)
+  const s = await moveMeasured(1, 999);
+  check(s.moved === s.n - 1 && s.longest < 50, `a 1,000-entry remote move: no long task over 50 ms (longest ${Math.round(s.longest)} ms)`);
   const m = await moveMeasured(10, 9_998);
   check(m.moved === m.n - 1 && m.logged === 1, `a 100,000-entry remote move: all ${m.n - 1} entries moved here, one change logged: ` + J({ moved: m.moved, logged: m.logged }));
   check(m.longest < 1000, `…its longest task ${Math.round(m.longest)} ms (under 1 s, D10 r2's measured exception)`);
   check(m.heapMiB < 256, `…the heap's growth ${m.heapMiB.toFixed(1)} MiB (under 256 MiB)`);
-  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1) }));
-  const s = await moveMeasured(1, 999);
-  check(s.moved === s.n - 1 && s.longest < 50, `a 1,000-entry remote move: no long task over 50 ms (longest ${Math.round(s.longest)} ms)`);
+  check(true, "big move figures: " + J({ entries: m.n, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1), smallMoveLongestMs: Math.round(s.longest) }));
 }
 
 export async function run() {
