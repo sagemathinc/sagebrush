@@ -1313,9 +1313,9 @@ export class SyncClient {
       for (const o of mine) {
         const r = recs.get(o.dseq);
         if (!r) continue;
-        // (not this record's op: a divergence, recorded (its counter moves, so this pass's done fails and another runs))
-        if (!sameOp(r.op, o as unknown as Record<string, unknown>)) await this.flagRebuild(c.ns, "diverged", `the server's op ${o.seq} for dseq ${o.dseq} isn't this device's record`);
-        else staged.push({ dseq: o.dseq, seq: o.seq });
+        // (a match confirms its record, at retire; another op at that dseq (a restored older copy, whose records there
+        // aren't the server's) confirms nothing: the record is in the replaced prefix, its identity reissued (D6))
+        if (sameOp(r.op, o as unknown as Record<string, unknown>)) staged.push({ dseq: o.dseq, seq: o.seq });
       }
       await stageEchoes(this.w, c.ns, p, staged);
     }
