@@ -146,7 +146,9 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       // (a link to a page of it may be followed from anywhere: the URL with the token is opened from a terminal,
       // which may be another site's page; it shows the page, which no other page can read)
       const origin = req.headers.origin, site = req.headers["sec-fetch-site"];
-      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate";
+      // (only a top-level navigation to one of its pages, never to its API, nor in another page's frame)
+      const pathOnly = (req.url ?? "/").split("?")[0];
+      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && !/\/api\//.test(pathOnly);
       if ((origin !== undefined && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) || (!opened && site !== undefined && site !== "same-origin" && site !== "none")) {
         res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden: not this server's own page\n");
         return;
@@ -186,6 +188,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       if (m) {
         const [, sid, what] = m;
         if (what === "events") {
+          if (method !== "GET") { res.writeHead(405, { Allow: "GET" }).end(); return; }
           // the notebook's directory: from the page's address (…/nb/<path>/api/…)
           const nb = /^\/nb\/(.*)\/api\//.exec(path)?.[1] ?? "";
           const s = sessions.get(sid) ?? startSession(sid, dirname(inside(nb) ?? join(dir, "x")));
