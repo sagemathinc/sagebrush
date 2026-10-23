@@ -1473,6 +1473,15 @@ export function instanceDict(o: any): PyDict {
   return d;
 }
 
+// (the instance's attribute dict, if it has one, made a dict of its own with
+// what it holds now: the next instanceDict(o) is a new one)
+export function detachInstanceDict(o: any): void {
+  const d = instanceDicts.get(o);
+  if (d === undefined) return;
+  (d as any).$m = new Map(d.$m.entries());
+  instanceDicts.delete(o);
+}
+
 export function newDict(): PyDict {
   return new PyDict();
 }

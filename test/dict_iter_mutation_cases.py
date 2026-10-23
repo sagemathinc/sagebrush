@@ -80,3 +80,112 @@ out = [nxt(it), nxt(it), nxt(it)]
 del d[0], d[1]
 d[10] = d[11] = 0
 print("two past the size", out + [nxt(it) for _ in range(9)])
+
+
+# list(), tuple() and sorted() of a dict or its views take the rest at once;
+# the same items and errors as one at a time, and a dict subclass's own
+# __iter__ is still used
+def whole(label, f):
+    try:
+        print(label, f())
+    except RuntimeError as e:
+        print(label, "RuntimeError:", e)
+
+
+class Rev(dict):
+    def __iter__(self):
+        return reversed(list(super().__iter__()))
+
+
+class Plain(dict):
+    pass
+
+
+whole("list(d)", lambda: list({3: 0, 1: 0, 2: 0}))
+whole("tuple(d.values())", lambda: tuple({1: "a", 2: "b"}.values()))
+whole("sorted(d.items())", lambda: sorted({2: "b", 1: "a"}.items()))
+whole("list(subclass with __iter__)", lambda: list(Rev({1: 1, 2: 2, 3: 3})))
+whole("list(subclass)", lambda: list(Plain({1: 1, 2: 2})))
+
+
+def rest_after(act):
+    d = {1: 1, 2: 2, 3: 3}
+    it = iter(d)
+    next(it)
+    act(d)
+    return list(it)
+
+
+whole("rest: untouched", lambda: rest_after(lambda d: None))
+whole("rest: pop yielded, add", lambda: rest_after(lambda d: (d.pop(1), d.__setitem__(4, 4))))
+whole("rest: pop later, add", lambda: rest_after(lambda d: (d.pop(3), d.__setitem__(4, 4))))
+whole("rest: add", lambda: rest_after(lambda d: d.__setitem__(4, 4)))
+whole("rest: clear, add 3", lambda: rest_after(lambda d: (d.clear(), d.update({4: 4, 5: 5, 6: 6}))))
+
+
+# an exhausted iterator stays exhausted, whatever its dict does after (and
+# so after "keys changed"); one that raised at a changed size raises again
+def ended(label, kind, act):
+    d = {1: 1, 2: 2}
+    it = kind(d)
+    first = [nxt(it) for _ in range(3)]
+    act(d)
+    print(label, first, [nxt(it), nxt(it)])
+
+
+ended("ended, then add", iter, lambda d: d.__setitem__(9, 9))
+ended("ended, then pop", iter, lambda d: d.pop(1))
+ended("ended values, then add", values, lambda d: d.__setitem__(9, 9))
+ended("ended items, then clear", items, lambda d: d.clear())
+ended("ended reversed, then add", reversed, lambda d: d.__setitem__(9, 9))
+ended("ended reversed values, then add", rvalues, lambda d: d.__setitem__(9, 9))
+ended("ended reversed items, then pop", ritems, lambda d: d.pop(2))
+ended("ended list(), then add", lambda d: (lambda it: (list(it), it)[1])(iter(d)), lambda d: d.__setitem__(9, 9))
+d = {1: 1, 2: 2}
+it = iter(d)
+whole_ = list(it)
+d[9] = 9
+print("list(it), then add, then next", whole_, [nxt(it), nxt(it)])
+
+d = {1: 1, 2: 2, 3: 3}
+it = iter(d)
+out = [nxt(it)]
+d.pop(1)
+d[4] = 4
+out += [nxt(it) for _ in range(3)]
+d[10] = 10
+print("keys changed, then add", out, [nxt(it), nxt(it)])
+
+
+# an instance's __dict__ replaced: an iterator on the old one goes on in the
+# old one; its __dict__ cleared and refilled: as a dict's
+class C:
+    pass
+
+
+def instance():
+    c = C()
+    c.x = 1
+    c.y = 2
+    return c
+
+
+for label, kind in (("keys", iter), ("values", values), ("items", items), ("reversed", reversed)):
+    c = instance()
+    it = kind(c.__dict__)
+    first = nxt(it)
+    c.__dict__ = {"p": 3, "q": 4}
+    print("__dict__ replaced:", label, [first, nxt(it), nxt(it)])
+c = instance()
+c.z = 3
+it = iter(c.__dict__)
+first = nxt(it)
+c.__dict__.clear()
+c.__dict__.update({"a": 1, "b": 2, "c": 3})
+print("__dict__ cleared and refilled", [first, nxt(it), nxt(it), nxt(it)])
+# (and the old __dict__ itself keeps what it had; the instance has the new one)
+c = instance()
+old = c.__dict__
+c.__dict__ = {"p": 3}
+old["w"] = 9
+print("old __dict__ after replacement", old, c.__dict__, c.p, hasattr(c, "w"), hasattr(c, "x"))
