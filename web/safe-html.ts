@@ -10,7 +10,9 @@
 // <style> with their contents), or shown as text (a stray `<`).  No id or
 // name attribute (DOM clobbering), no class, no event handlers, no
 // url() or expression() in a style, no SVG, MathML, forms, frames or
-// objects: nothing a browser could be talked into running.
+// objects: nothing a browser could be talked into running.  An <iframe>
+// with an https address becomes a link to it, opened in a new tab: nothing
+// is embedded or fetched until a person clicks it.
 
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "./image-size";
 
@@ -153,6 +155,23 @@ function attribute(tag: string, name: string, value: string, o: SafeOptions): st
   }
 }
 
+// An <iframe>'s src, when it is an https address safe as a link: a link
+// that opens it in a new tab, naming its site; else nothing
+function frameLink(attrs: string): string {
+  let src: string | null = null;
+  for (const a of attrs.matchAll(ATTR)) {
+    if (a[1].toLowerCase() !== "src") continue;
+    const raw = a[2] === undefined ? "" : a[2][0] === '"' || a[2][0] === "'" ? a[2].slice(1, -1) : a[2];
+    src = safeLink(decodeEntities(raw));
+    break;
+  }
+  if (src === null || !/^https:\/\//i.test(src)) return "";
+  let host = "";
+  try { host = new URL(src).host; } catch { return ""; }
+  if (!host) return "";
+  return `<a href="${esc(src)}" target="_blank" rel="noopener noreferrer">Open ${esc(host)} in a new tab</a>`;
+}
+
 const TAG = /<!--[\s\S]*?(?:-->|$)|<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^\s"'>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/g;
 const ATTR = /([^\s"'>\/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
 
@@ -170,6 +189,10 @@ export function safeHtml(html: string, o: SafeOptions = {}): string {
       continue;
     }
     if (DROP.has(name)) {
+      // (an embedded page, IPython's IFrame or YouTubeVideo: not embedded,
+      // a link to it instead, checked as <a href> is, https only; its
+      // contents dropped all the same)
+      if (name === "iframe" && !close) out += frameLink(m[3] ?? "");
       if (!close && !m[4]) dropping = name;
       continue;
     }
