@@ -3467,13 +3467,23 @@ def _side_by_side(v):
     return o + "\n" + "\n".join(r.ljust(width) for r in rows) + "\n" + c
 
 
-def _sorted_dict_repr(d):
-    """A dict shown with its keys sorted, as Sage's (IPython's) display does."""
+def _sorted_dict_repr(d, seen=()):
+    """A dict shown with its keys sorted, as Sage's (IPython's) display does
+    (one inside itself as {...}, as repr's)."""
     try:
         keys = sorted(d)
     except TypeError:
         return None
-    return "{" + ", ".join("%r: %s" % (k, _sorted_dict_repr(d[k]) if type(d[k]) is dict else repr(d[k])) for k in keys) + "}"
+    seen = seen + (id(d),)
+
+    def value(x):
+        if type(x) is not dict:
+            return repr(x)
+        if id(x) in seen:
+            return "{...}"
+        s = _sorted_dict_repr(x, seen)
+        return repr(x) if s is None else s
+    return "{" + ", ".join("%r: %s" % (k, value(d[k])) for k in keys) + "}"
 
 
 class _UnavailableInterface:
@@ -3596,11 +3606,21 @@ __all__ += ["load", "attach", "save"]
 def _install_displayhook():
     import builtins
     import sys
-    # pyjs calls builtins.__pyjs_displayhook__; CPython's REPL sys.displayhook
-    pyjs = hasattr(builtins, "__pyjs_displayhook__")
-    plain = builtins.__pyjs_displayhook__ if pyjs else sys.displayhook
-    if getattr(plain, "_sagebrush", False):
-        return
+    # pyjs: Sage code calls builtins.__pyjs_sage_displayhook__, Python code
+    # __pyjs_displayhook__ (src/compile.ts), so this is Sage's display only,
+    # whatever the session; CPython's REPL: sys.displayhook
+    pyjs = hasattr(builtins, "__pyjs_sage_displayhook__")
+    if pyjs:
+        if getattr(builtins.__pyjs_sage_displayhook__, "_sagebrush", False):
+            return
+
+        def plain(v):
+            # (the hook the host has now, for all code)
+            return builtins.__pyjs_displayhook__(v)
+    else:
+        plain = sys.displayhook
+        if getattr(plain, "_sagebrush", False):
+            return
 
     def hook(v):
         s = _side_by_side(v)
@@ -3612,7 +3632,7 @@ def _install_displayhook():
         print(s)
     hook._sagebrush = True
     if pyjs:
-        builtins.__pyjs_displayhook__ = hook
+        builtins.__pyjs_sage_displayhook__ = hook
     else:
         sys.displayhook = hook
 
