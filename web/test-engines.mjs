@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { engineIdText, isManifest } from "./engine-id.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(join(here, "site/package.json"));
+const require = createRequire(join(here, "test-workers/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
 let failures = 0, count = 0;

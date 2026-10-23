@@ -15,7 +15,8 @@ const here = dirname(new URL(import.meta.url).pathname);
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
-const out = join(here, "site", "public");
+const { siteDir } = await import("./site-dir.mts");
+const out = join(siteDir, "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const tex = (s: string, displayMode: boolean) => katex.renderToString(s, { displayMode, throwOnError: false, output: "html" });

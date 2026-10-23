@@ -4,7 +4,7 @@
 (globalThis as { __SAGEBRUSH_SYNC_TEST__?: boolean }).__SAGEBRUSH_SYNC_TEST__ = true;
 import { handleShare } from "../share/server.ts";
 import { handleSync, handleSyncFiles, register, syncScheduled, type Env } from "./server.ts";
-import { accountHash } from "./protocol.ts";
+import { accountHash } from "../sync-protocol/protocol.ts";
 import { setGate } from "./env.ts";
 export { SyncAccount } from "./account.ts";
 export { SyncDoc } from "./doc.ts";
