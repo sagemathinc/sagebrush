@@ -374,6 +374,26 @@ single-file CLI and executables (`src/notebook.ts`; the page and the
 browser's worker share `src/notebook-session.ts`).
 `web/test-local-notebook.mjs` tests it end to end in Chromium.
 
+### Boards on your computer
+
+```sh
+npx sagebrush board check talk.board.json   # every problem in one report
+npx sagebrush board open talk.board.json    # shows it in your browser, and follows the file
+```
+
+`board open` shows the board as sagebrush.space/board does, and again, in
+place (the same camera, the code's outputs kept), each time the file
+changes: an AI agent writing boards on your laptop can rewrite the file and
+you see each version as it lands. A version that isn't a board (half
+written, or wrong) leaves the last good one shown, with a bar saying what is
+wrong. The board's code runs in the page, as on the site; nothing of the
+board is uploaded. As with the notebook, the server listens on 127.0.0.1
+only, needs the random token in the URL it opens, answers only for its own
+host and port, and serves that one file and the page, nothing else. The
+page is sandboxed as the site's board frame is. Edits made in the page
+aren't saved to the file (yet): the file is the board. `src/board-open.ts`;
+`web/test-board-open.mjs` tests it end to end in Chromium.
+
 sagebrush.space itself is also an app: open it once, and it works offline
 (a service worker, `web/sw.js`). Chrome and Edge offer "Install as an app"
 (also in the File menu), and Safari has Add to Dock or Home Screen. The
