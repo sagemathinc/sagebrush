@@ -28,6 +28,20 @@ export const DOC_LIMITS = {
   snapshotBytes: 32 << 20,
   /** the fixed width of progress claims (§7.1) */
   claimsBytes: 32,
+  /** nesting in a JCS value (LIMIT-PR62-1): deeper is refused before any recursion */
+  jcsDepth: 64,
+  /** records a value is built from, the execution journal's included (LIMIT-PR62-1) */
+  sourceRecords: 1_000_000,
+  /** a cell's id, in UTF-16 units (as outputs' `cell`, §5.3) */
+  cellId: 128,
+  /** a batch: its body, its stored envelopes (sync-server §8: 1 MiB, 2,000 envelopes ≈ 0.4 MiB) */
+  batchBody: 1 << 20,
+  batchEnvs: 1 << 20,
+  /** a page a reader verifies at once (§5.5's pull page), and an epoch's whole history (§5.7) */
+  pageBatches: 500,
+  pageBytes: 4 << 20,
+  epochBatches: 50_000,
+  historyBytes: 32 << 20,
 } as const;
 
 export type DocCode = "invalid" | "limit" | "invalid_value";
@@ -140,33 +154,81 @@ export const chainNext = (prev: Uint8Array, l: ChainLink) =>
 
 /** A batch as a reader gets it, with what the chain covers. */
 export interface ChainedBatch { seq: number; recv: number; epoch: number; author: string; writer: string; envs: string; body: Uint8Array; chain: string }
+/** Where a reader is in a prefix: the last batch checked (seq 0 and the seed at the start). */
+export interface ChainState { seq: number; recv: number; chain: Uint8Array }
+export const chainStart = (ownerHash: string, doc: string, epoch: number): ChainState => ({ seq: 0, recv: 0, chain: chainSeed(ownerHash, doc, epoch) });
+type Verdict = { ok: true; state: ChainState } | { ok: false; at: number; why: string };
 /**
- * A reader's check of a prefix (§6.5): batches 1..upto with no gap, all in
- * `epoch`, recv non-decreasing (and below `deadline`, when one is given),
- * each chain recomputed from its inputs, the last equal to `expect`.  An
- * empty prefix is the seed.
+ * One page of a prefix (§6.5), from the state after the batches before it:
+ * at most DOC_LIMITS.pageBatches batches and pageBytes of envelopes and
+ * bodies, each batch within its own limits, all checked before any hashing
+ * (LIMIT-PR62-3).  Then: consecutive seqs, the epoch, recv non-decreasing
+ * (and below `deadline`), and each chain recomputed from its inputs.
+ */
+export function verifyChainPage(a: { epoch: number; deadline?: number }, from: ChainState, page: ChainedBatch[]): Verdict {
+  if (page.length > DOC_LIMITS.pageBatches) throw tooBig("page_batches", DOC_LIMITS.pageBatches, "verify at most 500 batches a page");
+  let bytes = 0;
+  for (const b of page) {
+    if (b.body.length > DOC_LIMITS.batchBody) throw tooBig("batch_bytes", DOC_LIMITS.batchBody, "a batch's body is at most 1 MiB");
+    if (b.envs.length > DOC_LIMITS.batchEnvs) throw tooBig("batch_envs", DOC_LIMITS.batchEnvs, "a batch's envelopes are at most 1 MiB");
+    bytes += b.body.length + b.envs.length;
+  }
+  if (bytes > DOC_LIMITS.pageBytes) throw tooBig("page_bytes", DOC_LIMITS.pageBytes, "verify at most 4 MiB a page");
+  let { seq, recv, chain } = from;
+  for (const b of page) {
+    if (b.seq !== seq + 1) return { ok: false, at: seq + 1, why: "a gap or a reordering" };
+    if (b.epoch !== a.epoch) return { ok: false, at: b.seq, why: "another epoch" };
+    if (!Number.isSafeInteger(b.recv) || b.recv < recv) return { ok: false, at: b.seq, why: "recv went back" };
+    if (a.deadline !== undefined && b.recv >= a.deadline) return { ok: false, at: b.seq, why: "received at or after the deadline" };
+    chain = chainNext(chain, { ...b, hb: batchHash(b.envs, b.body) });
+    if (hex(chain) !== b.chain) return { ok: false, at: b.seq, why: "the chain differs" };
+    seq = b.seq;
+    recv = b.recv;
+  }
+  return { ok: true, state: { seq, recv, chain } };
+}
+/**
+ * A whole prefix, 1..upto (§6.5), within an epoch's ceilings (at most
+ * 50,000 batches and 32 MiB, checked before any hashing), page by page; the
+ * last chain must equal `expect`.  An empty prefix is the seed.
  */
 export function verifyChain(
   a: { ownerHash: string; doc: string; epoch: number; upto: number; expect: string; deadline?: number },
   batches: ChainedBatch[],
 ): { ok: true } | { ok: false; at: number; why: string } {
-  let prev = chainSeed(a.ownerHash, a.doc, a.epoch), recv = 0;
+  if (a.upto > DOC_LIMITS.epochBatches || batches.length > DOC_LIMITS.epochBatches) throw tooBig("epoch_batches", DOC_LIMITS.epochBatches, "at most 50,000 batches in an epoch");
+  let total = 0;
+  for (const b of batches) total += b.body.length + b.envs.length;
+  if (total > DOC_LIMITS.historyBytes) throw tooBig("history_bytes", DOC_LIMITS.historyBytes, "at most 32 MiB of history");
   if (batches.length !== a.upto) return { ok: false, at: batches.length, why: "not exactly batches 1..upto" };
-  for (let i = 0; i < batches.length; i++) {
-    const b = batches[i];
-    if (b.seq !== i + 1) return { ok: false, at: i + 1, why: "a gap or a reordering" };
-    if (b.epoch !== a.epoch) return { ok: false, at: b.seq, why: "another epoch" };
-    if (!Number.isSafeInteger(b.recv) || b.recv < recv) return { ok: false, at: b.seq, why: "recv went back" };
-    if (a.deadline !== undefined && b.recv >= a.deadline) return { ok: false, at: b.seq, why: "received at or after the deadline" };
-    recv = b.recv;
-    prev = chainNext(prev, { ...b, hb: batchHash(b.envs, b.body) });
-    if (hex(prev) !== b.chain) return { ok: false, at: b.seq, why: "the chain differs" };
+  let state = chainStart(a.ownerHash, a.doc, a.epoch);
+  for (let i = 0; i < batches.length; ) {
+    // (pages within both page limits)
+    let j = i, bytes = 0;
+    while (j < batches.length && j - i < DOC_LIMITS.pageBatches && bytes + batches[j].body.length + batches[j].envs.length <= DOC_LIMITS.pageBytes) bytes += batches[j].body.length + batches[j++].envs.length;
+    if (j === i) j = i + 1;
+    const v = verifyChainPage(a, state, batches.slice(i, j));
+    if (!v.ok) return v;
+    state = v.state;
+    i = j;
   }
-  return hex(prev) === a.expect ? { ok: true } : { ok: false, at: a.upto, why: "the final chain differs from the collection's" };
+  return hex(state.chain) === a.expect ? { ok: true } : { ok: false, at: a.upto, why: "the final chain differs from the collection's" };
 }
 
 // ---- RFC 8785 (JCS): one serialization, everywhere (§6.7.1)
 
+/** UTF-8 bytes of a string, without encoding it. */
+function utf8Length(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) (n += 4), i++;
+    else n += 3;
+  }
+  return n;
+}
 function jcsString(s: string): string {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
@@ -179,21 +241,63 @@ function jcsString(s: string): string {
   // (ECMAScript's JSON string form is JCS's, RFC 8785 §3.2.2.2)
   return JSON.stringify(s);
 }
-/** JCS: plain JSON data only; properties sorted by UTF-16 code units; numbers in ES6 form; nothing non-finite. */
-export function jcs(v: unknown): string {
-  if (v === null || typeof v === "boolean") return JSON.stringify(v);
+type Budget = { bytes: number; max: number };
+/** One piece of output, counted against the budget before it is kept. */
+function emit(out: string[], piece: string, b: Budget) {
+  b.bytes += utf8Length(piece);
+  if (b.bytes > b.max) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+  out.push(piece);
+}
+function jcsInto(v: unknown, out: string[], b: Budget, depth: number) {
+  if (v === null || typeof v === "boolean") return emit(out, JSON.stringify(v), b);
   if (typeof v === "number") {
     if (!Number.isFinite(v)) throw badValue("a non-finite number");
-    return JSON.stringify(v);
+    return emit(out, JSON.stringify(v), b);
   }
-  if (typeof v === "string") return jcsString(v);
-  if (Array.isArray(v)) return "[" + v.map(jcs).join(",") + "]";
+  if (typeof v === "string") {
+    // (a string longer than what's left can't fit: refused before it is escaped)
+    if (v.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+    return emit(out, jcsString(v), b);
+  }
+  if (depth >= DOC_LIMITS.jcsDepth) throw badValue(`nested deeper than ${DOC_LIMITS.jcsDepth}`);
+  if (Array.isArray(v)) {
+    if (v.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+    emit(out, "[", b);
+    for (let i = 0; i < v.length; i++) {
+      if (i) emit(out, ",", b);
+      jcsInto(v[i], out, b, depth + 1);
+    }
+    return emit(out, "]", b);
+  }
   if (typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) {
     const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+    emit(out, "{", b);
     // (the default sort compares UTF-16 code units, as RFC 8785 §3.2.3 asks; an undefined property is absent)
-    return "{" + Object.keys(o).sort().filter((k) => o[k] !== undefined).map((k) => jcsString(k) + ":" + jcs(o[k])).join(",") + "}";
+    let first = true;
+    for (const k of keys.sort()) {
+      if (o[k] === undefined) continue;
+      if (!first) emit(out, ",", b);
+      first = false;
+      if (k.length > b.max - b.bytes) throw tooBig("value_bytes", b.max, `over ${b.max} bytes encoded`);
+      emit(out, jcsString(k) + ":", b);
+      jcsInto(o[k], out, b, depth + 1);
+    }
+    return emit(out, "}", b);
   }
   throw badValue("not plain JSON data");
+}
+/**
+ * JCS: plain JSON data only; properties sorted by UTF-16 code units; numbers
+ * in ES6 form; nothing non-finite.  Bounded: at most `maxBytes` of UTF-8
+ * output and DOC_LIMITS.jcsDepth of nesting, each refused (typed) as soon as
+ * it is passed, before the rest is walked (LIMIT-PR62-1).
+ */
+export function jcs(v: unknown, maxBytes: number = DOC_LIMITS.valueBytes): string {
+  const out: string[] = [];
+  jcsInto(v, out, { bytes: 0, max: maxBytes }, 0);
+  return out.join("");
 }
 
 // ---- the sealed value (§6.7.1)
@@ -225,11 +329,17 @@ const keyOf = (kind: ValueKind, r: Rec) =>
   kind === "notebook" ? [keyPart(r, "type"), keyPart(r, "id")] : [keyPart(r, "type"), keyPart(r, "page"), keyPart(r, "id")];
 /** The canonical bytes of a document's value: the header line, then one JCS record a line, in key order. */
 export function sealedValueBytes(kind: ValueKind, records: Rec[]): Uint8Array {
+  if (records.length > DOC_LIMITS.sourceRecords) throw tooBig("source_records", DOC_LIMITS.sourceRecords, "too many records to build a value from");
   const rs = projectRecords(kind, records).sort((a, b) => cmpTuple(keyOf(kind, a), keyOf(kind, b)));
   for (let i = 1; i < rs.length; i++) if (cmpTuple(keyOf(kind, rs[i - 1]), keyOf(kind, rs[i])) === 0) throw badValue("two records with one key");
-  const out = utf8("sb-sync-value-v1\n" + rs.map((r) => jcs(r) + "\n").join(""));
-  if (out.length > DOC_LIMITS.valueBytes) throw tooBig("value_bytes", DOC_LIMITS.valueBytes, "the value is over 16 MiB");
-  return out;
+  // (one budget for the whole value: the first record past 16 MiB stops it)
+  const out: string[] = [], b: Budget = { bytes: 0, max: DOC_LIMITS.valueBytes };
+  emit(out, "sb-sync-value-v1\n", b);
+  for (const r of rs) {
+    jcsInto(r, out, b, 0);
+    emit(out, "\n", b);
+  }
+  return utf8(out.join(""));
 }
 
 // ---- the census (§6.7.2)
@@ -238,13 +348,23 @@ export interface CensusCell { id: string; cell_type: string }
 /** The cells of a value: a notebook's, in ascending id order; a board has none (no outputs map in slice 2). */
 export function censusOf(kind: ValueKind, records: Rec[]): CensusCell[] {
   if (kind === "board") return [];
-  return projectRecords(kind, records)
-    .filter((r) => r.type === "cell")
-    .map((r) => ({ id: String(r.id), cell_type: String(r.cell_type) }))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (records.length > DOC_LIMITS.sourceRecords) throw tooBig("source_records", DOC_LIMITS.sourceRecords, "too many records to build a census from");
+  const cells: CensusCell[] = [];
+  for (const r of records) {
+    if (r.type !== "cell") continue;
+    // (refused at the 2,001st cell, before any more is gathered)
+    if (cells.length >= DOC_LIMITS.censusCells) throw badValue(`a census over ${DOC_LIMITS.censusCells} cells`);
+    cells.push({ id: String(r.id), cell_type: String(r.cell_type) });
+  }
+  return cells.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
+const CELL_TYPES = new Set(["code", "markdown", "raw"]);
+/** A cell id's form, as outputs' `cell` (§5.3): 1 to 128 characters, no control characters. */
+export const isCellId = (s: unknown): s is string => typeof s === "string" && s.length >= 1 && s.length <= DOC_LIMITS.cellId && /^[^\u0000-\u001f\u007f]+$/.test(s);
 export function censusBytes(cells: CensusCell[]): Uint8Array {
   if (cells.length > DOC_LIMITS.censusCells) throw badValue(`a census over ${DOC_LIMITS.censusCells} cells`);
+  // (every field bounded before anything is encoded: 2,000 cells of at most 128 characters fit 256 KiB)
+  for (const c of cells) if (!isCellId(c.id) || !CELL_TYPES.has(c.cell_type)) throw badValue("census: a cell id of 1 to 128 characters, and a cell type of code, markdown or raw");
   for (let i = 1; i < cells.length; i++) if (!(cells[i - 1].id < cells[i].id)) throw invalid("census: ids in strictly ascending order");
   const out = utf8("sb-sync-census-v1\n" + cells.map((c) => jcs({ cell_type: c.cell_type, id: c.id }) + "\n").join(""));
   if (out.length > DOC_LIMITS.censusBytes) throw badValue("a census over 256 KiB");
@@ -288,9 +408,14 @@ function blobBytes(b: BlobRef | undefined, kind?: string): Uint8Array {
 }
 /** outputs_digest, v2: every census cell in ascending id order, with its state, full blob and preview, each behind a presence byte. */
 export function outputsDigest(entries: OutputEntry[]): string {
+  if (entries.length > DOC_LIMITS.censusCells) throw invalid(`descriptor: over ${DOC_LIMITS.censusCells} cells`);
   const parts: Uint8Array[] = [utf8("sb-sync-outputs-v2")];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
+    // (the bounded fields first: the cell id's form, the blobs' sizes, LIMIT-PR62-2)
+    if (!isCellId(e.cell)) throw invalid("descriptor: a cell id of 1 to 128 characters");
+    if (e.full && !(isNat(e.full.size) && e.full.size <= DOC_LIMITS.outputBytes)) throw tooBig("output_bytes", DOC_LIMITS.outputBytes, "descriptor: an output over 4 MiB");
+    if (e.preview && !(isNat(e.preview.size) && e.preview.size <= DOC_LIMITS.previewBytes)) throw tooBig("preview_bytes", DOC_LIMITS.previewBytes, "descriptor: a preview over 256 KiB");
     if (i > 0 && !(entries[i - 1].cell < e.cell)) throw invalid("descriptor: cells in strictly ascending order");
     if (!(OUTPUT_STATES as readonly string[]).includes(e.state)) throw invalid("descriptor: state");
     if (e.state !== "captured" && (e.full || e.preview)) throw invalid("descriptor: only a captured output has blobs");
@@ -307,6 +432,8 @@ export function outputsDigest(entries: OutputEntry[]): string {
  * the caller's to release.
  */
 export function finalDescriptor(census: CensusCell[], selection: Map<string, OutputEntry>): { entries: OutputEntry[]; dropped: string[] } {
+  if (census.length > DOC_LIMITS.censusCells) throw badValue(`a census over ${DOC_LIMITS.censusCells} cells`);
+  if (selection.size > DOC_LIMITS.censusCells) throw invalid(`a selection over ${DOC_LIMITS.censusCells} cells`);
   const inCensus = new Set(census.map((c) => c.id));
   const entries = census.map((c): OutputEntry => {
     if (c.cell_type !== "code") return { cell: c.id, state: "not_code" };
@@ -474,8 +601,20 @@ export function checkProgress(v: unknown): Progress {
 // ---- the snapshot blob (§5.2)
 
 export interface SnapshotBlob { format: "sb-sync-snapshot"; v: 1; kind: ValueKind; epoch: number; at_seq: number; time: string; value: string }
+/** A snapshot blob's bytes: at most 32 MiB, refused before they are decoded or parsed (LIMIT-PR62-3). */
+export function parseSnapshotBlob(bytes: Uint8Array): SnapshotBlob {
+  if (bytes.length > DOC_LIMITS.snapshotBytes) throw tooBig("snapshot_bytes", DOC_LIMITS.snapshotBytes, "a snapshot is at most 32 MiB");
+  let v: unknown;
+  try {
+    v = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw invalid("snapshot blob: UTF-8 JSON");
+  }
+  return checkSnapshotBlob(v);
+}
 export function checkSnapshotBlob(v: unknown): SnapshotBlob {
   const o = fields(v, ["format", "v", "kind", "epoch", "at_seq", "time", "value"], "snapshot blob");
+  if (typeof o.value === "string" && utf8Length(o.value) > DOC_LIMITS.snapshotBytes) throw tooBig("snapshot_bytes", DOC_LIMITS.snapshotBytes, "a snapshot is at most 32 MiB");
   if (o.format !== "sb-sync-snapshot" || o.v !== 1) throw invalid("snapshot blob: format and version");
   if (o.kind !== "notebook" && o.kind !== "board") throw invalid("snapshot blob: kind");
   if (!isNat(o.epoch) || !isNat(o.at_seq) || o.at_seq < 1) throw invalid("snapshot blob: epoch and at_seq");
