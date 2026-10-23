@@ -2154,18 +2154,24 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
     { op: "adopt", path: "/W/old", kind: "folder", fid: "4444444444444444", parent: W },
     { op: "create", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes), size: bytes.length, parent: X },
     { op: "write", path: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length, base: sha(bytes), parent: X },
+    // (a remove and a restore say where: into Trash, and back; the client's log has `to` on both, as the reducer does)
+    { op: "remove", path: "/W/X/d.csv", to: "/Trash/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length },
+    { op: "restore", path: "/Trash/d.csv", to: "/W/X/d.csv", kind: "file", fid: Fd, sha256: sha(bytes2), size: bytes2.length, parent: X },
   ];
   const code = `import { wireOf } from ${JSON.stringify(join(here, "../workspace/sync-outbox.ts"))};
 const local = ${JSON.stringify(local)};
 console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person", device: "d", after: {} }, i + 1))));`;
   const wire = JSON.parse(execFileSync("bun", ["-e", code], { encoding: "utf8" }));
-  ok(wire.length === 8 && wire.every((w, i) => w && w.parent === local[i].parent), "(the client's wireOf keeps each op's parent: " + JSON.stringify(wire.map((w) => w?.parent ?? null)) + ")");
+  ok(wire.length === local.length && wire.every((w, i) => w && w.parent === local[i].parent && w.to === local[i].to), "(the client's wireOf keeps each op's parent: " + JSON.stringify(wire.map((w) => w?.parent ?? null)) + ")");
   const s = await socket(sp);
   await hello(s, "device-wire-0002");
   const a = await s.ask({ t: "ops", ops: wire });
-  ok(a?.t === "ack" && a.ops.length === 8 && a.ops.every((o) => o.seq && !o.code), "the server takes the client's own wire ops with parent: mkdir, create, rename, restore, adopt, and a data file's create and write: " + JSON.stringify(a?.ops));
+  ok(a?.t === "ack" && a.ops.length === local.length && a.ops.every((o) => o.seq && !o.code), "the server takes the client's own wire ops with parent: mkdir, create, rename, restore, adopt, a data file's create and write, and a remove and restore saying `to`: " + JSON.stringify(a?.ops));
   const ix = await s.ask({ t: "pull_index", after: 0 });
   ok(JSON.stringify(ix?.ops?.map((o) => o.parent ?? null)) === JSON.stringify(local.map((o) => o.parent ?? null)), "and gives each one's parent back in the index");
+  ok(JSON.stringify(ix?.ops?.map((o) => o.to ?? null)) === JSON.stringify(local.map((o) => o.to ?? null)), "and each one's `to`");
+  const bad = await s.ask({ t: "ops", ops: [{ dseq: local.length + 1, t: 7, by: "person", op: "mkdir", path: "/Z", to: "/Y", kind: "folder", fid: "5555555555555555" }] });
+  ok(bad?.ops?.[0]?.code === "invalid", "`to` on another op (mkdir) is still refused: " + JSON.stringify(bad?.ops));
   s.ws.close();
 }
 
