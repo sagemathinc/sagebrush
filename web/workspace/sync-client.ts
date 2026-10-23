@@ -33,6 +33,7 @@ import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
+import { cursorOf } from "./sync-confirmed";
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync/protocol";
 
@@ -337,7 +338,10 @@ export class SyncClient {
     if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);
-    const start = awaiting ? awaiting.lo - 1 : this.cursor;
+    // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before
+    // the oldest record awaiting its echo; ops at or below apply_after only match echoes, never reduced again)
+    const from = this.opts.onIndex ? await cursorOf(this.w, ns) : this.cursor;
+    const start = awaiting ? Math.min(awaiting.lo - 1, from) : from;
     // (stopped while this connection was being prepared: no socket is opened)
     if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";

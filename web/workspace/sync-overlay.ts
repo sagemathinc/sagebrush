@@ -268,6 +268,13 @@ export async function runPage(store: Store, ops: SyncOp[], carried = 0): Promise
   return { base, taken: ops.length, changed, units, carry: 0, outcomes };
 }
 
+/** An identity's entry in `base`, loaded from `store` first if the base doesn't know it (the view, C3). */
+export async function entryIn(base: PartialIndex, store: Store, id: string): Promise<SyncEntry | undefined> {
+  if (!base.byId.has(id)) await base.load(store, [new Miss("byId", id)]);
+  const v = base.byId.get(id);
+  return v === undefined || v === ABSENT ? undefined : v;
+}
+
 /** What a page writes for an identity it changed: its entry as it is now, or that it is gone (with its last path),
  * or nothing (an identity a conflict made and a later op removed again isn't possible: the reducer's changes are
  * entries, moves and forgets). */
