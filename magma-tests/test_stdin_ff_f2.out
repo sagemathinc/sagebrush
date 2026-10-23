@@ -1,0 +1,123 @@
+
+>> Generator(K, E);
+            ^
+Runtime error in 'Generator': Argument 2 is not a subfield of argument 1
+
+
+>> Generator(K, GF(3));
+            ^
+Runtime error in 'Generator': Argument 2 is not a subfield of argument 1
+
+
+>> DefiningPolynomial(K, E);
+                     ^
+Runtime error in 'DefiningPolynomial': Argument 2 is not a subfield of argument 
+1
+
+
+>> PrimeField(Integers());
+             ^
+Runtime error in 'PrimeField': Bad argument types
+Argument types given: RngInt
+
+
+>> Embed(E, K);
+        ^
+Runtime error in 'Embed': Degree of argument 1 does not divide degree of 
+argument 2
+
+
+>> Embed(F, K, b^5);
+        ^
+Runtime error in 'Embed': Argument 1 is already a subfield of argument 2
+
+
+>> Embed(GF(9), K);
+        ^
+Runtime error in 'Embed': Arguments 1 and 2 have different characteristics
+
+
+>> Trace(b, E);
+        ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+
+>> Trace(b, GF(3));
+        ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+
+>> Trace(a, K);
+        ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+
+>> Norm(b, GF(3));
+       ^
+Runtime error in 'Norm': Argument 2 is not a subfield of the parent of argument 
+1
+
+
+>> MinimalPolynomial(a, K);
+                    ^
+Runtime error in 'MinimalPolynomial': Argument 2 is not a subfield of the parent
+of argument 1
+
+
+>> CharacteristicPolynomial(b, E);
+                           ^
+Runtime error in 'CharacteristicPolynomial': Argument 2 is not a subfield of the
+parent of argument 1
+
+
+>> Trace(b, Integers());
+        ^
+Runtime error in 'Trace': Bad argument types
+Argument types given: FldFinElt, RngInt
+
+
+>> Root(P!4, 0);
+       ^
+Runtime error in 'Root': Argument 85 is not positive
+
+
+>> Root(P!4, -2);
+       ^
+Runtime error in 'Root': Argument 85 is not positive
+
+
+>> Root(b^5, 3);
+       ^
+Runtime error in 'Root': No solution exists
+
+
+>> Root(e, 2);
+       ^
+Runtime error in 'Root': No solution exists
+
+
+>> Root(P!2, 2);
+       ^
+Runtime error in 'Root': No solution exists
+
+
+>> ext<F | 0>;
+      ^
+Runtime error in ext< ... >: Extension degree should be a small integer greater 
+than 0
+
+
+>> ext<F | -1>;
+      ^
+Runtime error in ext< ... >: Extension degree should be a small integer greater 
+than 0
+
+
+>> ext<F | 2, 3>;
+      ^
+Runtime error in ext< ... >: Rhs arity (2) should be 1
+
+1

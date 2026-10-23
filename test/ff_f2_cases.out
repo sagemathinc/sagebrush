@@ -1,0 +1,47 @@
+trace boundary at p = 2: 135
+Trace one short refused powers 0 Trace of an element of a finite field of degree 4 is not supported yet
+Trace exact admitted 0
+Norm one short refused powers 0 Norm of an element of a finite field of degree 4 is not supported yet
+Norm exact admitted 2
+MinimalPolynomial one short refused powers 0 MinimalPolynomial of an element of a finite field of degree 4 is not supported yet
+MinimalPolynomial exact admitted $.1^2 + 2*$.1 + 2
+CharacteristicPolynomial one short refused powers 0 CharacteristicPolynomial of an element of a finite field of degree 4 is not supported yet
+CharacteristicPolynomial exact admitted $.1^4 + $.1^2 + 1
+relative Trace one short refused powers 0 Trace of elements of GF(2^6) and GF(2^3) is not supported yet
+relative Trace exact admitted $.1
+relative Norm one short refused powers 0 Norm of elements of GF(2^6) and GF(2^2) is not supported yet
+relative Norm exact admitted $.1
+relative MinimalPolynomial one short refused powers 0 MinimalPolynomial of elements of GF(2^6) and GF(2^2) is not supported yet
+relative MinimalPolynomial exact admitted $.1^3 + $.1^2 + $.1 + $.1
+relative CharacteristicPolynomial one short refused powers 0 CharacteristicPolynomial of elements of GF(2^6) and GF(2^3) is not supported yet
+relative CharacteristicPolynomial exact admitted $.1^2 + $.1^2
+sage trace one short refused NotImplementedError powers 0 trace of an element of a finite field of degree 4 is not supported yet (work)
+sage trace exact admitted 0
+sage norm one short refused NotImplementedError powers 0 norm of an element of a finite field of degree 4 is not supported yet (work)
+sage norm exact admitted 2
+sage minpoly one short refused NotImplementedError powers 0 minpoly of an element of a finite field of degree 4 is not supported yet (work)
+sage minpoly exact admitted x^2 + 2*x + 2
+sage charpoly one short refused NotImplementedError powers 0 charpoly of an element of a finite field of degree 4 is not supported yet (work)
+sage charpoly exact admitted x^4 + x^3 + 2*x^2 + 2*x + 1
+Root one short refused powers 0 Root of an element of a finite field of degree 4 is not supported yet
+Root exact admitted $.1^13
+sage nth_root one short refused NotImplementedError powers 0 nth_root of an element of a finite field of degree 4 is not supported yet (work)
+sage nth_root exact admitted $.1^27
+Root k of 1024 bits admitted $.1^14
+Root k of 1025 bits refused powers 0 Root of an exponent of more than 1024 bits is not supported yet
+sage nth_root k of 1025 bits refused NotImplementedError powers 0 nth_root of an exponent of more than 1024 bits is not supported yet
+Root 2 in GF(13) refused powers 0 Root of degree 2 in this finite field is not supported yet
+Root 2 in GF(3^13) refused powers 1 Root of degree 2 in this finite field is not supported yet
+Root 2 in GF(3^12) admitted True
+relative Trace past 2^20 refused powers 0 Trace of elements of GF(2^21) and GF(2^3) is not supported yet
+relative MinimalPolynomial past 2^20 refused powers 0 MinimalPolynomial of elements of GF(2^21) and GF(2^7) is not supported yet
+Trace over GF(2) past 2^20 admitted 0
+absolute Trace past 2^20 admitted 0
+ext of more than 1024 bits refused fields made 0 GF of a field of more than 1024 bits is not supported yet
+ext by 0 refused fields made 0 Extension degree should be a small integer greater than 0
+sage extension of more than 1024 bits refused fields made 0 the Conway polynomial for 2^1025 is beyond the exhaustive search here
+ext past the Conway budget refused powers 0 GF(1771561): the search for its Conway polynomial is beyond the work allowed here, and is not supported yet
+sage extension past the Conway budget refused ConwayBudgetExceeded powers 0 the Conway polynomial for 11^6 is beyond the bounded search here
+fields made 0
+cache unchanged True
+core calls [('charpoly', 2), ('minpoly', 2), ('norm', 2), ('relative', 1), ('root', 3), ('trace', 2)]

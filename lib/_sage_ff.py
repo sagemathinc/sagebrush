@@ -766,9 +766,13 @@ class IntegerMod:
 
         EXAMPLES::
 
-            sage: Mod(8, 11).nth_root(3), sorted(Mod(1, 7).nth_root(3, all=True))
-            (2, [1, 2, 4])
+            sage: Mod(8, 11).nth_root(3), Mod(2, 7).nth_root(3, all=True)
+            (2, [])
+            sage: sorted(Mod(1, 9).nth_root(3, all=True))
+            [1, 4, 7]
         """
+        if getattr(self._parent, "_prime", False):
+            return _ff_nth_root(self, k, all)
         n = self._parent._n
         k = int(k)
         rs = [_elt(self._parent, v) for v in range(n) if pow(v, k, n) == self._v] if n < 10 ** 6 else None
@@ -2124,12 +2128,8 @@ class FiniteFieldElement:
             sage: F.<z> = GF(3^4); (z^5).minimal_polynomial()
             x^4 + 2*x^2 + 2
         """
-        K = self._parent
-        R = PolynomialRing_ff(K, var)
-        f = R([1])
-        for c in self._conjugates():
-            f = f * R([-c, 1])
-        return PolynomialRing_ff(K._prime_field, var)([int(c._c[0]) for c in f.list()])
+        S = _ffsub()
+        return PolynomialRing_ff(self._parent._prime_field, var)(S.minpoly(self, [S.WORK], _ff_work("minpoly", self)))
 
     minpoly = minimal_polynomial
 
@@ -2141,8 +2141,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); k(2).charpoly()
             x^2 + 2*x + 1
         """
-        m = self.minimal_polynomial(var)
-        return m ** (self._parent._n // m.degree())
+        S = _ffsub()
+        return PolynomialRing_ff(self._parent._prime_field, var)(S.charpoly(self, [S.WORK], _ff_work("charpoly", self)))
 
     def trace(self):
         """The trace to GF(p).
@@ -2152,13 +2152,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); a.trace(), a.norm()
             (1, 2)
         """
-        K = self._parent
-        s = K.zero()
-        x = self
-        for _ in range(K._n):
-            s = s + x
-            x = x ** K._p
-        return K._prime_field(s._c[0])
+        S = _ffsub()
+        return self._parent._prime_field(S.trace(self, [S.WORK], _ff_work("trace", self)))
 
     def norm(self):
         """The norm to GF(p).
@@ -2168,8 +2163,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); (a + 1).norm()
             1
         """
-        K = self._parent
-        return K._prime_field((self ** ((K._q - 1) // (K._p - 1)))._c[0])
+        S = _ffsub()
+        return self._parent._prime_field(S.norm(self, [S.WORK], _ff_work("norm", self)))
 
     def multiplicative_order(self):
         """The order in the multiplicative group.
@@ -2316,21 +2311,15 @@ class FiniteFieldElement:
         return _Integer(k)
 
     def nth_root(self, k, all=False):
-        """A k-th root (all=True: all of them), by search.
+        """A k-th root (all=True: all of them), by the shared core (see
+        _ff_nth_root).
 
         EXAMPLES::
 
-            sage: k.<a> = GF(9); (a^3).nth_root(3)
-            a
+            sage: k.<a> = GF(9); (a^3).nth_root(3), a.nth_root(2, all=True)
+            (a, [])
         """
-        K = self._parent
-        k = int(k)
-        rs = [x for x in K if x ** k == self]
-        if all:
-            return rs
-        if not rs:
-            raise ValueError("no %d-th root" % k)
-        return rs[0]
+        return _ff_nth_root(self, k, all)
 
 
 def _gf_name(q, names):
@@ -2430,6 +2419,66 @@ FiniteField = GF
 def _ffsub():
     import _sage_ffsub
     return _sage_ffsub
+
+
+def _ff_work(what, x):
+    """The refusal past the shared core's one-call budget, in words."""
+    return lambda: NotImplementedError("%s of an element of a finite field of degree %d is not supported yet (work)"
+                                       % (what, _ffsub().pnq(x.parent())[1]))
+
+
+def _ff_nth_root(x, k, all):
+    """x.nth_root(k) of a finite field element, as Sage's where its answer
+    is determined: the one root when there is exactly one (x = 0, or
+    gcd(k, q - 1) = 1), ValueError "no nth root" (all=True: []) when there
+    is none; k < 0 as the root of 1/x (of 0: none), k = 0 Sage's
+    ValueError.  When there
+    are several, Sage's choice (and all=True's order) follows no rule found
+    (black-box: GF(13)(4).nth_root(2) is 2 but GF(13)(3).nth_root(2) is 9),
+    so that is refused, as are exponents of more than 1024 bits (Sage takes
+    them)."""
+    S = _ffsub()
+    k = int(k)
+    if k == 0:
+        raise ValueError("")
+    if k < 0:
+        if not x:
+            # (Sage's: no root, its ValueError without words)
+            if all:
+                return []
+            raise ValueError("")
+        x, k = ~x, -k
+    st, r = S.root(x, k, [S.WORK],
+                   lambda: NotImplementedError("nth_root of an exponent of more than %d bits is not supported yet" % S.ROOT_BITS),
+                   _ff_work("nth_root", x))
+    if st == "unique":
+        return [r] if all else r
+    if st == "none":
+        if all:
+            return []
+        raise ValueError("no nth root")
+    raise NotImplementedError("nth_root of degree %d of an element with several such roots in this finite field is not supported yet" % k)
+
+
+def _ff_extension(self, modulus, name=None, names=None, **kwds):
+    """The extension of this finite field of degree modulus: GF(p^(n k)),
+    named name (else the prefix field z(nk), as Sage's), its construction
+    bounded as GF's (the shared Conway budget).  An extension by a
+    polynomial is refused.
+
+    EXAMPLES::
+
+        sage: GF(3).extension(4, 'h'), GF(4, 'a').extension(2)
+        (Finite Field in h of size 3^4, Finite Field in z4 of size 2^4)
+    """
+    if isinstance(modulus, bool) or not isinstance(modulus, int):
+        raise NotImplementedError("extension of a finite field by a polynomial is not supported yet")
+    p, n, _ = _ffsub().pnq(self)
+    k = int(modulus)
+    if k < 1:
+        raise ValueError("the order of a finite field must be a prime power")
+    given = _gf_name(p ** (n * k), name if name is not None else names)
+    return GF(p ** (n * k), given) if given else GF(p ** (n * k))
 
 
 def _is_finite_field(K):
@@ -2806,6 +2855,8 @@ FiniteField_ext.has_coerce_map_from = _ff_has_coerce_map_from
 FiniteField_ext.coerce_map_from = _ff_coerce_map_from
 FiniteField_ext.hom = _ff_hom
 FiniteField_ext.subfields = _ff_subfields
+FiniteField_ext.extension = _ff_extension
+IntegerModRing_.extension = _ff_extension
 
 
 # ------------------------------------------------------------------ polynomials over finite fields

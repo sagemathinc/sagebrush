@@ -47,7 +47,6 @@ jInvariant
 LLL
 MaximalOrder
 Maximum
-MinimalPolynomial
 Minimum
 ModularForms
 ModularSymbols
@@ -57,7 +56,6 @@ Ncols
 NewformDecomposition
 Newforms
 NewSubspace
-Norm
 Nrows
 NthPrime
 NumberField
@@ -86,7 +84,6 @@ SmithForm
 Sprintf
 SumOfDivisors
 TorsionSubgroup
-Trace
 TraceOfFrobenius
 Type
 UnitGroup

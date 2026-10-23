@@ -422,3 +422,268 @@ def apply(x, U, img, budget, refuse):
     for v in reversed([int(v) for v in x.list()]):
         r = r * img + v
     return r
+
+
+# Traces, norms, minimal and characteristic polynomials and roots
+# (plan-finite-fields F2), for both front ends: each computes its whole
+# cost first, in closed form from p, n (and m, k), and charges it to the
+# caller's budget before the first power; past it the caller's refuse().
+# Over the prime field these work in every field GF makes (no 2^20 bound);
+# relative to a proper subfield they descend by F1's down(), so they are
+# bounded as it is (overfield of at most EMBED_MAX elements).  Results are
+# neutral: prime-field values as ints, polynomials as coefficient lists
+# (constant first), which each front end turns into its own objects.
+
+ROOT_BITS = 1024  # Root/nth_root exponents of more bits are refused (Magma takes them)
+
+
+def w(p):
+    """The word factor of the plan's cost model: ceil(bits(p) / 30)^2."""
+    return (-(-p.bit_length() // 30)) ** 2
+
+
+def pow_cost(e, M):
+    """The cops of x^e (e >= 1) with products of M cops: square and
+    multiply, at most 2 (bits(e) - 1) products, 2 at least."""
+    return 2 * max(1, e.bit_length() - 1) * M
+
+
+def _prime_int(x):
+    """The int value of x, an element of a prime field or of an extension
+    lying in its prime field (a trace, a norm, a coefficient)."""
+    v = prime_value(x)
+    if v is None:
+        raise ArithmeticError("not in the prime field")  # (never, for these results)
+    return v
+
+
+def trace_cost(K):
+    """Of the absolute trace in K = GF(p^n): n - 1 Frobenius powers x^p and
+    as many sums of n coefficients."""
+    p, n, _ = pnq(K)
+    return 0 if n == 1 else (n - 1) * (pow_cost(p, mn(p, n)) + n * w(p))
+
+
+def trace(x, budget, refuse):
+    """Tr(x) = x + x^p + ... + x^(p^(n-1)), the trace of x to the prime
+    field, as an int.
+
+        sage: import _sage_ffsub as S
+        sage: k.<a> = GF(9); S.trace(a, [S.WORK], ValueError)
+        1
+    """
+    K = x.parent()
+    p, n, _ = pnq(K)
+    if n == 1:
+        return int(x)
+    charge(budget, trace_cost(K), refuse)
+    s = y = x
+    for _ in range(n - 1):
+        y = y ** p
+        s = s + y
+    return _prime_int(s)
+
+
+def norm_cost(K):
+    """Of the absolute norm: one power x^((q - 1)/(p - 1))."""
+    p, n, q = pnq(K)
+    return 0 if n == 1 else pow_cost((q - 1) // (p - 1), mn(p, n))
+
+
+def norm(x, budget, refuse):
+    """N(x) = x^((q - 1)/(p - 1)), the norm of x to the prime field, as an
+    int."""
+    K = x.parent()
+    p, n, q = pnq(K)
+    if n == 1:
+        return int(x)
+    charge(budget, norm_cost(K), refuse)
+    return _prime_int(x ** ((q - 1) // (p - 1)))
+
+
+def _orbit(x, step, limit):
+    """x, x^step, x^(step^2), ... up to (not including) the first repeat,
+    at most limit of them."""
+    out, y = [x], x
+    for _ in range(limit - 1):
+        y = y ** step
+        if y == x:
+            break
+        out.append(y)
+    return out
+
+
+def _from_roots(roots, one):
+    """The coefficients (constant first) of the product of X - r over roots,
+    each step a product by a linear factor."""
+    c = [one]
+    for r in roots:
+        c = [-r * c[0]] + [c[i - 1] - r * c[i] for i in range(1, len(c))] + [c[-1]]
+    return c
+
+
+def minpoly_cost(K):
+    """Of the absolute minimal polynomial in GF(p^n): the orbit of x under
+    Frobenius (n - 1 powers x^p), the product of up to n linear factors
+    (n^2 products and sums), and the n + 1 coefficients' prime-field values."""
+    p, n, _ = pnq(K)
+    return 0 if n == 1 else (n - 1) * pow_cost(p, mn(p, n)) + n * n * (mn(p, n) + n * w(p)) + (n + 1) * n * w(p)
+
+
+def minpoly(x, budget, refuse):
+    """The minimal polynomial of x over the prime field, its coefficients
+    as ints mod p (constant first): the product of X - c over the distinct
+    conjugates c of x.
+
+        sage: import _sage_ffsub as S
+        sage: F.<z> = GF(3^4); S.minpoly(z^5, [S.WORK], ValueError)
+        [2, 0, 2, 0, 1]
+    """
+    K = x.parent()
+    p, n, _ = pnq(K)
+    if n == 1:
+        return [(-int(x)) % p, 1]
+    charge(budget, minpoly_cost(K), refuse)
+    return [_prime_int(c) for c in _from_roots(_orbit(x, p, n), K.one())]
+
+
+def _poly_pow(c, e, mul, add, zero):
+    """The coefficients of the polynomial c^e (e >= 1), by repeated products."""
+    r = c
+    for _ in range(e - 1):
+        out = [zero] * (len(r) + len(c) - 1)
+        for i, u in enumerate(r):
+            for j, v in enumerate(c):
+                out[i + j] = add(out[i + j], mul(u, v))
+        r = out
+    return r
+
+
+def charpoly_cost(K):
+    """Of the absolute characteristic polynomial: the minimal polynomial's,
+    then its power of degree n over GF(p) (at most n products of
+    polynomials of degree at most n: n^3 prime-field products and sums)."""
+    p, n, _ = pnq(K)
+    return minpoly_cost(K) + 2 * n ** 3 * w(p)
+
+
+def charpoly(x, budget, refuse):
+    """The characteristic polynomial of x over the prime field (degree n,
+    the minimal polynomial's power), coefficients as ints mod p."""
+    K = x.parent()
+    p, n, _ = pnq(K)
+    if n == 1:
+        return [(-int(x)) % p, 1]
+    charge(budget, charpoly_cost(K), refuse)
+    f = [_prime_int(c) for c in _from_roots(_orbit(x, p, n), K.one())]
+    return _poly_pow(f, n // (len(f) - 1), lambda u, v: u * v % p, lambda u, v: (u + v) % p, 0)
+
+
+def is_subfield(F, K):
+    """Whether the finite field F is a subfield of K, as both front ends
+    see their fields: one characteristic, deg F | deg K."""
+    pf, mf, _ = pnq(F)
+    pk, nk, _ = pnq(K)
+    return pf == pk and nk % mf == 0
+
+
+def _down_cost(K, F):
+    """An upper bound on one down() from K to its proper subfield F."""
+    return dlog_cost(K) + 2 * pnq(F)[2].bit_length() * m(F)
+
+
+def relative_cost(what, K, F):
+    """The closed-form cops of a relative Trace, Norm, MinimalPolynomial or
+    CharacteristicPolynomial ('trace', 'norm', 'minpoly', 'charpoly') of an
+    element of K over its proper subfield F (1 < deg F < deg K, K of at
+    most EMBED_MAX elements): its powers in K, its products, and one
+    descent per coefficient, r + 1 of them for a polynomial of degree at most
+    r = deg K / deg F (F1's down())."""
+    p, n, q = pnq(K)
+    mm, qf = pnq(F)[1], pnq(F)[2]
+    r, M = n // mm, mn(p, n)
+    if what == "trace":
+        return (r - 1) * (pow_cost(qf, M) + n * w(p)) + _down_cost(K, F)
+    if what == "norm":
+        return pow_cost((q - 1) // (qf - 1), M) + _down_cost(K, F)
+    c = (r - 1) * pow_cost(qf, M) + r * r * (M + n * w(p)) + (r + 1) * _down_cost(K, F)
+    if what == "charpoly":
+        c += 2 * r ** 3 * (mn(p, mm) + mm * w(p))
+    return c
+
+
+def relative(what, x, F, budget, refuse):
+    """The relative Trace, Norm (elements of F), MinimalPolynomial or
+    CharacteristicPolynomial (coefficient lists over F, constant first) of
+    x over F, a subfield of x's field K (is_subfield(F, K), checked by the
+    caller): over the prime field the absolute ones (as elements of F);
+    over K itself x, x and X - x; else, for K of at most EMBED_MAX elements
+    (Conway, as F1), the sum, power or product over the orbit of x under
+    x -> x^(q_F), its coefficients descended to F, the whole cost
+    (relative_cost) charged first.  refuse() past the bounds.
+
+        sage: import _sage_ffsub as S
+        sage: F, K = GF(4), GF(16)
+        sage: S.relative('minpoly', K.gen(), F, [S.WORK], ValueError)
+        [z2, 1, 1]
+    """
+    K = x.parent()
+    p, n, _ = pnq(K)
+    mm = pnq(F)[1]
+    if mm == 1:
+        if what == "trace":
+            return F(trace(x, budget, refuse))
+        if what == "norm":
+            return F(norm(x, budget, refuse))
+        f = (minpoly if what == "minpoly" else charpoly)(x, budget, refuse)
+        return [F(c) for c in f]
+    if mm == n:
+        return x if what in ("trace", "norm") else [-x, K.one()]
+    if not descendable(K, F):
+        raise refuse()
+    charge(budget, relative_cost(what, K, F), refuse)
+    qf = pnq(F)[2]
+    # (the descents' share of what was charged, prepaid to down())
+    sub = [(1 if what in ("trace", "norm") else n // mm + 1) * _down_cost(K, F)]
+    if what == "trace":
+        s = y = x
+        for _ in range(n // mm - 1):
+            y = y ** qf
+            s = s + y
+        return down(s, F, sub, refuse)
+    if what == "norm":
+        return down(x ** ((pnq(K)[2] - 1) // (qf - 1)), F, sub, refuse)
+    f = [down(c, F, sub, refuse) for c in _from_roots(_orbit(x, qf, n // mm), K.one())]
+    if what == "charpoly":
+        f = _poly_pow(f, (n // mm) // (len(f) - 1), lambda u, v: u * v, lambda u, v: u + v, F(0))
+    return f
+
+
+def root(x, k, budget, refuse_bits, refuse):
+    """The k-th roots of x (k >= 1, checked by the caller) as far as they
+    are determined: ("unique", r) when x has exactly one (x = 0, or
+    gcd(k, q - 1) = 1: r = x^(k^-1 mod (q - 1))); ("none", None) when it
+    has none (x^((q - 1)/g) != 1, g = gcd(k, q - 1)); ("many", None) when it
+    has several, whose choice is the front end's (Magma's and Sage's
+    differ).  refuse_bits() for k of more than ROOT_BITS bits, before any
+    arithmetic on k; then the Euclidean step and one power are charged
+    before either.
+
+        sage: import _sage_ffsub as S
+        sage: S.root(GF(13)(8), 5, [S.WORK], ValueError, ValueError)
+        ('unique', 8)
+    """
+    if k.bit_length() > ROOT_BITS:
+        raise refuse_bits()
+    K = x.parent()
+    p, n, q = pnq(K)
+    b = k.bit_length() + q.bit_length()
+    charge(budget, b * (-(-b // 30)) ** 2 + pow_cost(q, mn(p, n) if n > 1 else w(p)), refuse)
+    if not x:
+        return ("unique", x)
+    g = _math.gcd(k % (q - 1), q - 1)
+    if g == 1:
+        return ("unique", x ** pow(k % (q - 1), -1, q - 1) if q > 2 else x)
+    if x ** ((q - 1) // g) != K.one():
+        return ("none", None)
+    return ("many", None)
