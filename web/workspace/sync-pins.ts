@@ -162,7 +162,8 @@ export function putPending(tx: IDBTransaction, p: Pending, ns: string, s: NsStat
  * for a data file's new bytes (`pin`), those bytes pinned, tagged with the epoch.  Nothing if sync is off. */
 export async function noteChange(tx: IDBTransaction, rec: Op, pin: boolean) {
   const meta = tx.objectStore("meta");
-  if (!(await syncOn(meta))) return;
+  // (a change applied from the server is no local intent: nothing pending, nothing pinned (C3))
+  if (rec.origin === "server" || !(await syncOn(meta))) return;
   const id = rec.after?.id ?? rec.fid ?? rec.ref;
   if (!id) return;
   const ps = tx.objectStore("pending");

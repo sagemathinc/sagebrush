@@ -77,6 +77,9 @@ export type Entry = {
   recovered?: { from: string; sha: string };
   /** contents reconcile could not find (shown, never dropped) */
   missing?: boolean;
+  /** listed from the server's index (design/sync-client.md C3): a data file whose bytes (its `sha256`) aren't
+   * fetched yet, or a document whose content isn't here (slice 2); read-only until they are */
+  remote?: boolean;
 };
 /** An op's identity as the op left it (design/sync-client.md §3): its identity, the folder it is in (that
  * folder's fid; null for the root, or for something put in Trash itself), its name, its kind, a data file's
@@ -1041,6 +1044,8 @@ export class Workspace {
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
+      // (a document listed from the server: its content comes in slice 2, read-only until then)
+      if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
       const t = this.now();
       let rev: number;
       if (e.kind === "notebook") {
@@ -1139,6 +1144,8 @@ export class Workspace {
         const next: Entry = { ...cur, fid, ident: fid, migrated: true, rev, size: b.length, sha256, updated: t };
         delete next.missing;
         delete next.unmoved;
+        // (its own bytes now: a fetch of the server's (C5) finds another revision and is discarded)
+        delete next.remote;
         st.put(next);
         await this.log(tx, ops, { op: "write", path: e.path, kind: "file" }, next, undefined, base, !same);
         return next;
@@ -1601,80 +1608,86 @@ export class Workspace {
         return out;
       });
       // (then their contents, and their histories)
-      const hdb = gone.some((e) => e.kind === "notebook") ? await openHistoryDb() : null;
-      const bdb = gone.some((e) => e.kind === "board") ? await openBoardHistoryDb() : null;
-      const fids = new Set(gone.filter((e) => e.kind === "file" && e.fid).map((e) => e.fid!));
-      for (const e of gone) {
-        if (e.ref === null) continue;
-        try {
-          if (e.kind === "notebook") {
-            await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
-            if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, Infinity])); });
-          } else if (e.kind === "board") {
-            await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
-            // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
-            const pre = "board:local:" + e.ref;
-            if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
-            // (and what the board page keeps of it in localStorage: the copy
-            // from before the workspace, its mark as written here, a closed
-            // page's changes; none of them bring it back, or vouch for a
-            // board under its id)
-            try {
-              const ls = (globalThis as any).localStorage as Storage | undefined;
-              for (const k of Object.values(BOARD_KEYS)) ls?.removeItem(k(e.ref));
-            } catch {}
-          }
-        } catch (err) { console.warn("workspace: emptying Trash:", err); }
-      }
-      if (fids.size) {
-        // (their versions not kept for sync: from the versions store itself, by the index byFile, a transaction at
-        // most DROP_REQUESTS requests, each going on from the last one looked at (a key cursor); those kept for sync
-        // stay until their pins go (design/sync-client.md C2).  Never waiting for the backfill: a version it hasn't
-        // reached goes all the same.  A file's last page also deletes its whole prunable range, one request, and its
-        // gone mark: done only when every one of its versions not kept for sync is gone (@sagebrush's (b) and (c))
-        const list = [...fids];
-        const all = (await inTx(this.ws, "versions", "readonly", async (tx) => {
-          let n = 0;
-          for (const fid of list) n += (await req(tx.objectStore("versions").index("byFile").count(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as number;
-          return n;
-        })) as number;
-        let i = 0, at: [IDBValidKey, number] | null = null, seen = 0;
-        while (i < list.length) {
-          await inTx(this.ws, ["versions", "versionBytes", "prunable", "meta"], "readwrite", async (tx) => {
-            const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable"), meta = tx.objectStore("meta");
-            let freed = 0, left = DROP_REQUESTS - 4;
-            while (i < list.length && left >= 8) {
-              const fid = list[i], want = Math.min(DROP_PAGE, Math.floor((left - 4) / 3));
-              const page = await filePage(vs.index("byFile"), fid, at, want);
-              left -= page.list.length + 2;
-              for (const v of page.list) {
-                seen++;
-                if (v.pinned) continue;
-                vs.delete(v.id!); vb.delete(v.id!); freed += v.size;
-                left -= 2;
-              }
-              at = page.last;
-              if (page.end) {
-                pr.delete(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]));
-                meta.delete(GONE + fid);
-                left -= 2;
-                i++;
-                at = null;
-              }
-            }
-            const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
-            meta.put(Math.max(0, total - freed), "versionBytes");
-          });
-          this.noteDeleting(all ? seen / all : 1);
-        }
-        this.noteDeleting(1);
-      }
-      hdb?.close();
-      bdb?.close();
+      await this.dropContents(gone);
       afterReleases(this);
       this.tell({ ops });
       return gone.length;
     });
+  }
+
+  /** The contents and histories of entries removed for good (emptying Trash; a forget from the server, C3), after
+   * their entries' transaction: a failure part way leaves contents without entries, never the reverse. */
+  async dropContents(gone: Entry[]) {
+    const hdb = gone.some((e) => e.kind === "notebook") ? await openHistoryDb() : null;
+    const bdb = gone.some((e) => e.kind === "board") ? await openBoardHistoryDb() : null;
+    const fids = new Set(gone.filter((e) => e.kind === "file" && e.fid).map((e) => e.fid!));
+    for (const e of gone) {
+      if (e.ref === null) continue;
+      try {
+        if (e.kind === "notebook") {
+          await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
+          if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, Infinity])); });
+        } else if (e.kind === "board") {
+          await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
+          // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
+          const pre = "board:local:" + e.ref;
+          if (bdb) await inTx(bdb, "history", "readwrite", async (tx) => { tx.objectStore("history").delete(IDBKeyRange.bound([pre, -Infinity], [pre + ":\uffff", Infinity])); });
+          // (and what the board page keeps of it in localStorage: the copy
+          // from before the workspace, its mark as written here, a closed
+          // page's changes; none of them bring it back, or vouch for a
+          // board under its id)
+          try {
+            const ls = (globalThis as any).localStorage as Storage | undefined;
+            for (const k of Object.values(BOARD_KEYS)) ls?.removeItem(k(e.ref));
+          } catch {}
+        }
+      } catch (err) { console.warn("workspace: emptying Trash:", err); }
+    }
+    if (fids.size) {
+      // (their versions not kept for sync: from the versions store itself, by the index byFile, a transaction at
+      // most DROP_REQUESTS requests, each going on from the last one looked at (a key cursor); those kept for sync
+      // stay until their pins go (design/sync-client.md C2).  Never waiting for the backfill: a version it hasn't
+      // reached goes all the same.  A file's last page also deletes its whole prunable range, one request, and its
+      // gone mark: done only when every one of its versions not kept for sync is gone (@sagebrush's (b) and (c))
+      const list = [...fids];
+      const all = (await inTx(this.ws, "versions", "readonly", async (tx) => {
+        let n = 0;
+        for (const fid of list) n += (await req(tx.objectStore("versions").index("byFile").count(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity])))) as number;
+        return n;
+      })) as number;
+      let i = 0, at: [IDBValidKey, number] | null = null, seen = 0;
+      while (i < list.length) {
+        await inTx(this.ws, ["versions", "versionBytes", "prunable", "meta"], "readwrite", async (tx) => {
+          const vs = tx.objectStore("versions"), vb = tx.objectStore("versionBytes"), pr = tx.objectStore("prunable"), meta = tx.objectStore("meta");
+          let freed = 0, left = DROP_REQUESTS - 4;
+          while (i < list.length && left >= 8) {
+            const fid = list[i], want = Math.min(DROP_PAGE, Math.floor((left - 4) / 3));
+            const page = await filePage(vs.index("byFile"), fid, at, want);
+            left -= page.list.length + 2;
+            for (const v of page.list) {
+              seen++;
+              if (v.pinned) continue;
+              vs.delete(v.id!); vb.delete(v.id!); freed += v.size;
+              left -= 2;
+            }
+            at = page.last;
+            if (page.end) {
+              pr.delete(IDBKeyRange.bound([fid, -Infinity], [fid, Infinity]));
+              meta.delete(GONE + fid);
+              left -= 2;
+              i++;
+              at = null;
+            }
+          }
+          const total = ((await req(meta.get("versionBytes"))) as number | undefined) ?? 0;
+          meta.put(Math.max(0, total - freed), "versionBytes");
+        });
+        this.noteDeleting(all ? seen / all : 1);
+      }
+      this.noteDeleting(1);
+    }
+    hdb?.close();
+    bdb?.close();
   }
 
   // ------------------------------------------------------------ for the pages
@@ -2032,6 +2045,8 @@ export class Workspace {
     if (e.kind === "notebook") return this.mainTx("notebooks", "readonly", (st) => st.get(e.ref!));
     if (e.kind === "board") return inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").get(e.ref!)));
     if (e.kind === "file") {
+      // (listed from the server, its bytes not fetched yet: not here)
+      if (e.remote) return undefined;
       if (e.migrated) return inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(e.fid!)));
       const old = await this.legacyBytes(e);
       if (old !== undefined) return old;
@@ -2540,6 +2555,13 @@ export class Workspace {
     ops.push(rec);
     // (sync's pending note, and a pin on new bytes, in this transaction: design/sync-client.md C2)
     await noteChange(tx, rec, pin);
+  }
+
+  /** For sync's view (sync-view.ts, design/sync-client.md C3), in the caller's transaction (its stores include
+   * entries, ops and SYNC_STORES), holding the lock: a change applied from the server, logged as `origin: "server"`,
+   * so it is never sent back and notes no local intent. */
+  async logServer(tx: IDBTransaction, ops: Op[], op: Omit<Op, "t" | "device" | "by" | "origin">, now?: Entry | null, gone?: Entry) {
+    await this.log(tx, ops, { ...op, origin: "server" }, now, gone);
   }
 
   /** What an op left of `e` (OpAfter), read in `st`'s transaction; undefined when it, or the folder it is in,
