@@ -1589,24 +1589,122 @@ export class StrIter {
     return ch;
   }
 }
-// kind: 0 keys, 1 values, 2 items
+// kind: 0 keys, 1 values, 2 items. A dict's iterator, as CPython's: a
+// changed size raises at every step after; it gives at most as many items
+// as the dict had (so a loop that replaces each key it is given with a new
+// one ends: "dictionary keys changed during iteration", and then no more);
+// after clear(), it goes on in the new entries from the position it had
+// reached.
 export class DictIter {
   it: Iterator<any>;
   size: number;
-  constructor(public d: PyDict, public kind: number) {
-    this.it = kind === 1 ? d.$m.values() : kind === 0 ? d.$m.keys() : d.$m.entries();
+  left: number;
+  clears: number;
+  constructor(public d: PyDict, public kind: number = 0) {
+    const m = d.$m;
+    this.it = kind === 1 ? m.values() : kind === 0 ? m.keys() : m.entries();
+    this.size = this.left = m.size;
+    this.clears = d.$clears;
+  }
+  // (the next entry from the Map, after the checks; undefined at the end)
+  step(): IteratorResult<any> {
+    const d = this.d;
+    // (one branch for both: the size changed, or the dict was cleared)
+    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    const r = this.it.next();
+    if (!r.done && --this.left < 0) {
+      this.it = [][Symbol.iterator]();
+      raise(T.RuntimeError, "dictionary keys changed during iteration");
+    }
+    return r;
+  }
+  $next(): any {
+    const r = this.step();
+    return r.done ? DONE : dictKeyOf(this.d, r.value);
+  }
+  changed(): void {
+    const d = this.d, m = d.$m;
+    if (m.size !== this.size) {
+      this.size = -1;
+      raise(T.RuntimeError, "dictionary changed size during iteration");
+    }
+    // (cleared: on in the new entries, from the position it had reached)
+    this.clears = d.$clears;
+    this.it = this.kind === 1 ? m.values() : this.kind === 0 ? m.keys() : m.entries();
+    for (let i = this.size - this.left; i > 0; i--) this.it.next();
+  }
+}
+export class DictValueIter extends DictIter {
+  constructor(d: PyDict) {
+    super(d, 1);
+  }
+  $next(): any {
+    const r = this.step();
+    return r.done ? DONE : r.value;
+  }
+}
+export class DictItemIter extends DictIter {
+  constructor(d: PyDict) {
+    super(d, 2);
+  }
+  $next(): any {
+    const r = this.step();
+    return r.done ? DONE : tuple([dictKeyOf(this.d, r.value[0]), r.value[1]]);
+  }
+}
+// kind: 0 keys, 1 values, 2 items
+export function dictIter(d: PyDict, kind: number): DictIter {
+  return kind === 0 ? new DictIter(d) : kind === 1 ? new DictValueIter(d) : new DictItemIter(d);
+}
+// A set's: a changed size raises at every step after, in a set's words
+export class SetIter {
+  it: Iterator<any>;
+  size: number;
+  constructor(public d: PyDict) {
+    this.it = d.$m.keys();
     this.size = d.$m.size;
   }
   $next(): any {
     if (this.d.$m.size !== this.size) {
       this.size = -1;
-      raise(T.RuntimeError, "dictionary changed size during iteration");
+      raise(T.RuntimeError, "Set changed size during iteration");
     }
     const r = this.it.next();
-    if (r.done) return DONE;
-    if (this.kind === 0) return dictKeyOf(this.d, r.value);
-    if (this.kind === 1) return r.value;
-    return tuple([dictKeyOf(this.d, r.value[0]), r.value[1]]);
+    return r.done ? DONE : dictKeyOf(this.d, r.value);
+  }
+}
+// reversed() of a dict or its views: from the last entry back, as CPython's;
+// a changed size raises; an entry deleted since is passed over; after
+// clear(), it goes on in the new entries from the same position
+export class DictRevIter {
+  keys: any[];
+  size: number;
+  i: number;
+  clears: number;
+  constructor(public d: PyDict, public kind: number) {
+    this.keys = [...d.$m.keys()];
+    this.size = d.$m.size;
+    this.i = this.keys.length - 1;
+    this.clears = d.$clears;
+  }
+  $next(): any {
+    const d = this.d;
+    if (d.$m.size !== this.size) {
+      this.size = -1;
+      raise(T.RuntimeError, "dictionary changed size during iteration");
+    }
+    if (d.$clears !== this.clears) {
+      this.clears = d.$clears;
+      this.keys = [...d.$m.keys()];
+    }
+    while (this.i >= 0) {
+      const k = this.keys[this.i--];
+      if (!d.$m.has(k)) continue;
+      if (this.kind === 0) return dictKeyOf(d, k);
+      if (this.kind === 1) return d.$m.get(k);
+      return tuple([dictKeyOf(d, k), d.$m.get(k)]);
+    }
+    return DONE;
   }
 }
 export class BytesIter {
@@ -1759,8 +1857,8 @@ export function iter(x: any): any {
   if (typeof x === "string") return new StrIter(x);
   if (x !== null && typeof x === "object") {
     if (typeof x.$next === "function") return x;
-    if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x, 0);
-    if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new DictIter(x.$d, 0);
+    if (x instanceof PyDict && x.$cls === T.dict) return new DictIter(x);
+    if (x instanceof PySet && (x.$cls === T.set || x.$cls === T.frozenset)) return new SetIter(x.$d);
     if (x instanceof PyBytes) return new BytesIter(x);
     if (isGen(x)) return new GenIter(x);
     const f = special(x, "__iter__");

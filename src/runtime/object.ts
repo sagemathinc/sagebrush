@@ -1370,6 +1370,9 @@ export class PyDict {
   // equal to a number (e.g. mpmath's mpf(1) == 1) finds its entry.
   $nidx: Map<number, any[]> | null = null;
   $hasNum = false;
+  // (clear()s so far: a dict's iterator then goes on in the emptied dict
+  // from the same position, as CPython's goes on in its new table)
+  $clears = 0;
 }
 
 // The numeric primitive key in `d` equal to the object key `k`, if any.
@@ -1636,6 +1639,7 @@ export function dictKeyOf(d: PyDict, mk: any): any {
 export function dictClear(d: PyDict) {
   d.$nidx = null;
   d.$m.clear();
+  d.$clears++;
   d.$orig = null;
   d.$buckets = null;
 }
