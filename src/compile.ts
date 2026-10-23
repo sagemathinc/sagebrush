@@ -12,7 +12,7 @@ import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
 import { cwdPath } from "./runtime/modules";
-import { classCellReport } from "./magic-syntax";
+import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
 const builtinNames = new Set(Object.keys(R.builtins));
@@ -32,21 +32,9 @@ function displayExprs(body: any[]): void {
 // rule: its last token, past comments and blank lines, is ;)
 function displayLast(body: any[], src: string, opts: CompileOptions): void {
   const st = body[body.length - 1];
-  if (st !== undefined && st.k === "Expr" && !endsWithSemicolon(src, opts)) displayExprs([st]);
+  if (st !== undefined && st.k === "Expr" && !endsWithSemicolon(src, !!opts.sage)) displayExprs([st]);
 }
 
-function endsWithSemicolon(src: string, opts: CompileOptions): boolean {
-  // (the tokenizer's view, so a ; in a string or a comment is not one)
-  const tok = new TokState(src.endsWith("\n") ? src : src + "\n", { sage: opts.sage });
-  let semi = false;
-  for (let n = 0; n <= src.length + 16; n++) {
-    const raw: any = { type: 0, start: -1, end: -1, level: 0, lineno: 0, col_offset: -1, end_lineno: 0, end_col_offset: -1, metadata: null };
-    const t = tok.get(raw);
-    if (t === TK.ENDMARKER || t < 0) break;
-    if (t !== TK.NEWLINE && t !== TK.NL && t !== TK.INDENT && t !== TK.DEDENT && t !== TK.COMMENT) semi = t === TK.SEMI;
-  }
-  return semi;
-}
 
 export interface CompileOptions {
   /** Sage syntax: `^` is `**`, `^^` is xor, int/int is an exact Rational. */

@@ -69,3 +69,53 @@ test("a Sage cell ending with ; shows no value too", async () => {
   assert.equal((await run("2^3;", { sage: true })).out, "");
   assert.equal((await run("2^3", { sage: true })).out, "8\n");
 });
+
+// %time's code ending with ; shows no value either, as IPython's %time 7;
+// (CORR-PR60-1, astra3): the ; is in the magic's code, which the cell's own
+// check doesn't see. %timeit -o's result is shown, ; or not, as IPython's
+// (there the ; is the timed statement's). Expected: IPython 9.17.1 on CPython
+// 3.14.8, its timing lines aside.
+const TIMING = /^(CPU times|Wall time|[0-9.]+ [nmuµ]?s ± ).*\n/gm;
+const MAGICS: [string, string][] = [
+  ["5", "5"],
+  ["%time 7;", ""],
+  ["_", "5"],
+  ["%time 7", "7"],
+  ["_", "7"],
+  ["%time 8 ;", ""],
+  ["%time 9;  # c", ""],
+  ["%time 10  # c;", "10"],
+  ["%time '11;'", "'11;'"],
+  ["_", "'11;'"],
+  ["%time x = 12;", ""],
+  ["18\n%time 19;", ""],
+  ["%time 20;\n", ""],
+  ["%time 21;\n# trailing", ""],
+  ["if True:\n    %time 22;", ""],
+  ["%time 25; 26;", ""],
+  ["_", "'11;'"],
+  ["%timeit -n1 -r1 15;", ""],
+  ["_", "'11;'"],
+  ["%timeit -o -n1 -r1 16;", "<TimeitResult : >"],
+  ["type(_).__name__", "'TimeitResult'"],
+];
+
+test("a line magic's code ending with ; shows no value, as IPython's %time 7;", async () => {
+  const run = await session();
+  for (const [code, want] of MAGICS) {
+    const { out, err } = await run(code);
+    assert.equal(err, "", code);
+    const shown = out.replace(/<TimeitResult : .*>/, "<TimeitResult : >").replace(TIMING, "");
+    assert.equal(shown, want === "" ? "" : want + "\n", code);
+  }
+});
+
+test("a Sage cell's %time ending with ; shows no value too", async () => {
+  const run = await session();
+  const shown = async (code: string) => (await run(code, { sage: true })).out.replace(TIMING, "");
+  assert.equal(await shown("%time 2^3;"), "");
+  assert.equal(await shown("%time 2^3"), "8\n");
+  assert.equal(await shown("_"), "8\n");
+  assert.equal(await shown("%time 3^2;"), "");
+  assert.equal(await shown("_"), "8\n");
+});
