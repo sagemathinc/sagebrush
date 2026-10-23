@@ -607,6 +607,13 @@ A plain refusal (`why: "refused"`) runs `log`, `view` and `done`. Its refused re
 - Until the server sends it, a second device sees changes on its own ack-pulls and reconnects.
 - The paced idle poll (at most one `pull_index` a minute) is added only if the notice can't ship by step 6. @sagebrush is told early if so.
 
+**D8b. Bounded idle recovery** (astra, on plan-sync-index-changed-r1; @sagebrush's decision).
+- A notice is advisory, and the last one can be lost on a socket that stays open. Then nothing would pull until the next local edit or reconnect.
+- So while connected and idle, with the confirmed index (`onIndex` given), the client makes one `pull_index` from its cursor every 5 minutes (`CLIENT.idlePullMs`). It goes through the same pacing: the bucket, one in flight, the index retry timer, and the slice cap.
+- The timer is one wake-up of its own kind ("idle"), re-armed after each pull or page, and ended with the connection and on `stop()`.
+- Cost: at most one small request every 5 minutes per idle device. A pull that finds nothing new is one empty page.
+- Test: with a fake clock, the only notice for another device's op is dropped. The op arrives at the 5-minute pull, with no edit and no reconnect, and no other pull happens meanwhile.
+
 **D9. Downloads** (L1, L2, C5).
 - A download reserves $\text{size} \cdot \text{COPIES}$ (L2) before asking. It accepts either the files Worker's 303 to a signed URL, or a 200 with the bytes (the reference server's).
 - On both paths, **`Content-Length` must be present and equal the record's size before the body is read**. The body is read through a counting reader with a **hard cap of exactly that size**: one byte more aborts the download. Its SHA-256 is checked before the compare-and-swap install (C5).
