@@ -14,7 +14,9 @@ const used = [];
 const ctl = async (cmd, extra = {}) => (await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }) })).json();
 const post = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: J(body ?? {}) });
 /** A new account, signed in, sync on: its own log. */
-async function account(id = window.ACCOUNTS[acct++]) {
+async function account(given) {
+  const id = given ?? window.ACCOUNTS[acct++];
+  if (!given && (id === window.FULL || id === window.SMALL)) throw new Error("out of test accounts");
   const s = await post("/auth/dev", { token: "dev-token", account_id: id });
   if (!s.ok) throw new Error("sign-in: " + s.status);
   const e = await post("/api/sync/v1/enable", {});
@@ -522,11 +524,341 @@ async function pace() {
   await stop(c);
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace };
+
+// ---- daybreak3's LIMIT-PR58-1 to 3
+
+async function wakesBounded() {
+  // (LIMIT-PR58-1: tens of thousands of changes while ops and uploads are both backed off: at most one wake-up a
+  // kind pending, and as few fired when they end)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => c0.status.state === "synced"), "wakes: synced");
+  await stop(c0);
+  await w.mkdir("/k0");
+  await w.create("/k.bin", { content: bytes(1000, 7) });
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "rate", detail: { retry_after: 60_000 } }], fakeHttp: [{ method: "PUT", status: 503, body: { error: "busy", retry_after: 60_000 }, times: 1000 }] } });
+  const clock = fakeClock();
+  const c = client(w, { clock });
+  check(await until(async () => { const l = await ctl("log"); return opsMessages(l).length === 1 && l.http.some((h) => h.method === "PUT"); }), "wakes: the ops refused (rate, 60 s) and the upload refused (busy, 60 s)");
+  await sleep(200);
+  for (let i = 0; i < 50_000; i++) {
+    c.kick();
+    if (i % 500 === 0) await sleep(1);
+  }
+  for (let i = 1; i <= 200; i++) await w.mkdir(`/k${i}`);
+  await sleep(300);
+  const d = c.debug();
+  check(d.wakes <= 8 && c.stats.maxWakes <= 8, "wakes: 50,000 kicks and 200 edits during both backoffs leave at most one wake-up a kind: " + J({ now: d.wakes, max: c.stats.maxWakes }));
+  const fired = c.stats.wakesFired;
+  await clock.advance(60_000);
+  await sleep(500);
+  check(c.stats.wakesFired - fired <= 8, "wakes: …and at most one a kind fires when they end: " + (c.stats.wakesFired - fired));
+  await stop(c);
+  check(c.debug().wakes === 0, "wakes: none left after stop()");
+}
+
+/** `f(value)` -> new value, on the first record of `store` that `match`es (a cursor, in one transaction). */
+const patch = (db, store, match, f) => new Promise((ok, no) => {
+  const tx = db.transaction(store, "readwrite");
+  const r = tx.objectStore(store).openCursor();
+  let done = false;
+  r.onsuccess = () => {
+    const cur = r.result;
+    if (!cur || done) return;
+    if (match(cur.value)) { cur.update(f(cur.value)); done = true; return; }
+    cur.continue();
+  };
+  tx.oncomplete = () => ok(done);
+  tx.onerror = () => no(tx.error);
+});
+
+async function byteMismatch() {
+  // (LIMIT-PR58-2: an entry whose stored size isn't its record's; stored bytes longer than their metadata; a record
+  // whose size is less than its bytes: none read beyond its reservation's cover by its metadata, hashed or PUT; each
+  // read at most once, across a resend; then the files converge by their next writes)
+  await account();
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => c0.status.state === "synced"), "byte mismatch: synced");
+  const from = await w.lastSeq();
+  await stop(c0);
+  const m1 = await w.create("/m1.bin", { content: bytes(1000, 21) });
+  const m2 = await w.create("/m2.bin", { content: bytes(1000, 22) });
+  await w.create("/m3.bin", { content: bytes(1000, 23) });
+  check(await patch(w.ws, "entries", (e) => e.fid === m1.fid, (e) => ({ ...e, size: 10 })), "(m1's entry says 10 bytes)");
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").put(bytes(5000, 22), m2.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  check(await patch(w.ws, "ops", (o) => o.path === "/m3.bin" && o.op === "create", (o) => ({ ...o, size: 10 })), "(m3's op says 10 bytes)");
+  await ctl("log", { reset: true });
+  // (the first ack lost and the socket closed: the records are sent again on the next connection)
+  await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true, dropIndex: 1 } });
+  const c = client(w);
+  check(await until(() => settled(w, c), 15_000), "byte mismatch: decided " + J(c.status));
+  const l = await ctl("log");
+  const puts = l.http.filter((h) => h.method === "PUT");
+  const refused = (await metaGet(w.ws, `sync:${nsOf(c)}:refused`)) ?? [];
+  check(puts.length === 0 && c.stats.mismatches === 3 && c.stats.connects === 2, "byte mismatch: no PUT; each mismatch found once, though the records went twice: " + J({ puts: puts.length, mismatches: c.stats.mismatches, connects: c.stats.connects }));
+  check(refused.length === 3 && refused.every((r) => r.code === "missing"), "byte mismatch: each sent all the same and refused `missing` by the server, listed: " + J(refused.map((r) => [r.path, r.code])));
+  // (convergence: each file's next write goes as usual)
+  for (const [p, seed] of [["/m1.bin", 31], ["/m2.bin", 32], ["/m3.bin", 33]]) await w.write(p, bytes(1200, seed));
+  check(await until(() => settled(w, c)), "byte mismatch: the next writes decided");
+  const { mine } = await serverOps(w);
+  check(["/m1.bin", "/m2.bin", "/m3.bin"].every((p) => mine.some((o) => o.op === "write" && o.path === p && o.size === 1200)), "byte mismatch: …each file's present bytes now on the server");
+  check((await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length === 3, "byte mismatch: …uploaded once each");
+  await everyOnce(w, from, 3, "byte mismatch", c);
+  await stop(c);
+}
+
+/** Another device's `n` mkdirs, from dseq `d0` + 1, in messages of at most 450. */
+async function otherOps(n, d0 = 0, tag = "o") {
+  for (let i = 0; i < n; i += 450) {
+    const ops = [];
+    for (let j = i; j < Math.min(n, i + 450); j++) ops.push({ dseq: d0 + j + 1, t: Date.now(), by: "person", op: "mkdir", path: `/${tag}${d0 + j}`, kind: "folder", fid: (d0 + j + 1).toString(16).padStart(16, "0") });
+    const r = await ctl("probe", { ops });
+    if (!r.ack?.ops?.every((o) => o.seq)) throw new Error("another device's ops refused: " + J(r.ack).slice(0, 200));
+  }
+}
+
+async function replayPaced() {
+  // (LIMIT-PR58-3: the log read only to its target, the newest accepted record awaiting its echo; pulls paced)
+  await account();
+  const w = await fresh();
+  const keep = { ...W.CLIENT };
+  Object.assign(W.CLIENT, { pullBurst: 1, pullsPerSecond: 0.1 });
+  const clock = fakeClock();
+  const c = client(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "replay paced: synced");
+    check(c.stats.pages === 1 && c.stats.pulls === 0, "replay paced: nothing awaiting an echo: hello's one page, no pull: " + J({ pages: c.stats.pages, pulls: c.stats.pulls }));
+    await w.mkdir("/a");
+    check(await until(async () => (await settled(w, c)) && c.stats.pulls === 1), "replay paced: an accepted record: one pull, to its echo");
+    await otherOps(1800);
+    await w.mkdir("/b");
+    check(await until(async () => (await all(w.ws, "outbox")).some((r) => r.accepted !== undefined)), "replay paced: /b accepted, its echo 1,800 ops on");
+    await sleep(500);
+    check(c.stats.pulls === 1, "replay paced: the next pull waits for the pace (a token each 10 s): " + c.stats.pulls);
+    await clock.advance(10_000);
+    check(await until(() => c.stats.pulls === 2), "replay paced: a pull at 10 s: " + c.stats.pulls);
+    await sleep(300);
+    check(c.stats.pulls === 2, "replay paced: …then waits again (more to read): " + c.stats.pulls);
+    await clock.advance(10_000);
+    check(await until(() => c.stats.pulls === 3 && settled(w, c)), "replay paced: the next at 20 s reaches the echo; confirmed: " + J({ pulls: c.stats.pulls, cursor: c.debug().cursor }));
+    // (others' ops after the target: not read, however many)
+    await otherOps(100, 1800);
+    await sleep(500);
+    check(c.stats.pulls === 3, "replay paced: ops past the target aren't pulled: " + c.stats.pulls);
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
+async function replayCapped() {
+  await account();
+  const w = await fresh();
+  const keep = { ...W.CLIENT };
+  Object.assign(W.CLIENT, { replayPages: 2 });
+  let c = client(w);
+  try {
+    check(await until(() => settled(w, c)), "replay capped: synced");
+    await otherOps(1800);
+    await w.mkdir("/far");
+    check(await until(async () => c.stats.pages === 2 && (await all(w.ws, "outbox")).some((r) => r.accepted !== undefined)), "replay capped: /far accepted; pages read " + c.stats.pages);
+    await sleep(800);
+    const rec = (await all(w.ws, "outbox"))[0];
+    check(c.stats.pages === 2 && c.stats.pulls === 1 && rec?.accepted !== undefined, "replay capped: at most 2 pages a connection (hello's and one pull): the rest waits, the record accepted, awaiting its echo: " + J({ pages: c.stats.pages, pulls: c.stats.pulls }));
+    await stop(c);
+    // (the next connection reads from just before the record's seq: one page, its echo in it)
+    await ctl("log", { reset: true });
+    c = client(w);
+    check(await until(() => settled(w, c)), "replay capped: the next page's client confirms it");
+    const l = await ctl("log");
+    check(l.sent[0]?.index_after === rec.accepted - 1 && c.stats.pages === 1 && c.stats.pulls === 0, "replay capped: …reading from just before it, in one page, no pull: " + J({ after: l.sent[0]?.index_after, seq: rec.accepted, pages: c.stats.pages }));
+    // (a page that says more and moves nothing: refused, not asked again)
+    await ctl("set", { set: { emptyMore: 1, dropIndex: 0 } });
+    const before = c.stats.connects;
+    await w.mkdir("/again");
+    check(await until(() => c.stats.connects === before + 1 && settled(w, c), 15_000), "replay capped: a `more` page that moves nothing ends the connection (no loop of pulls); the next one confirms: " + J({ connects: c.stats.connects, pulls: c.stats.pulls }));
+    check(c.stats.pulls <= 2, "replay capped: …pulls stay few: " + c.stats.pulls);
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
+async function echoAcrossReload() {
+  // (an accepted record whose echo was lost: the next page's client reads from just before its seq, not from 0)
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => settled(w, c)), "echo across a reload: synced");
+  await otherOps(1200);
+  await ctl("set", { set: { dropPulled: 1 } });
+  await w.mkdir("/e");
+  check(await until(async () => (await ctl("log")).got.some((g) => g.dropped)), "echo across a reload: the pull's answer lost");
+  await stop(c);
+  const rec = (await all(w.ws, "outbox"))[0];
+  await ctl("log", { reset: true });
+  const c2 = client(w);
+  check(await until(() => settled(w, c2)), "echo across a reload: confirmed by the next page's client");
+  const l = await ctl("log");
+  check(rec?.accepted && l.sent[0]?.index_after === rec.accepted - 1 && c2.stats.pages === 1 && c2.stats.pulls === 0, "echo across a reload: hello from just before the record's seq (not 0, not the 1,200 others): " + J({ after: l.sent[0]?.index_after, seq: rec?.accepted }));
+  await stop(c2);
+}
+
+
+// ---- astra's CORR-PR58-1 to 3
+
+const signInOnly = (id) => post("/auth/dev", { token: "dev-token", account_id: id });
+const hashOf = async (id) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sagebrush-account\n" + id)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+async function accountSwitch() {
+  // (CORR-PR58-1: two accounts, both at generation 1; the session switched to B between discovery and the socket,
+  // and during a PUT.  The invariant, checked on every message and request the proxy saw: nothing is sent on a
+  // socket, or PUT, under one account's session for another account's namespace; A's records stay A's, and go to A
+  // once A is signed in again.  (B's own namespace syncing this same local workspace is C1's rule, not a leak.))
+  const A = await account(), B = await account();
+  await signInOnly(A);
+  await ctl("reset");
+  const w = await fresh();
+  const c0 = client(w);
+  check(await until(() => settled(w, c0)), "account switch: synced as A");
+  const nsA = nsOf(c0);
+  const from = await w.lastSeq();
+  await stop(c0);
+  await w.mkdir("/a-only");
+  // (B signs in just before the socket opens: discovery said A, the socket is B's)
+  await ctl("set", { set: { switchOnUpgrade: B } });
+  const c = client(w);
+  const hB = await hashOf(B), hA = await hashOf(A);
+  check(await until(() => (nsOf(c) ?? "").startsWith(hB) && c.status.state === "synced", 15_000), "account switch: the socket opened under B's session is refused (its hello names A), and the client goes on as B: " + J({ ns: (nsOf(c) ?? "").slice(0, 8), state: c.status.state }));
+  const l1 = await ctl("log");
+  const refusedHello = l1.got.some((g) => g.t === "error" && g.code === "forbidden");
+  check(l1.switchedUpgrade === 1 && refusedHello && !l1.bindings.some((b) => b.hello === hA), "account switch: nothing of A's namespace sent on B's socket: " + J(l1.bindings));
+  await unlost(w, nsA, "/a-only", "account switch");
+  await stop(c);
+  // (back to A; then B signs in during one of A's PUTs: refused by its binding)
+  await signInOnly(A);
+  const c2 = client(w);
+  check(await until(async () => nsOf(c2) === nsA && (await settledIn(w, c2, nsA))), "account switch: A signed in again: A's namespace resumes and its records are decided");
+  await ctl("set", { set: { switchOnPut: B } });
+  const f = await w.create("/a-file.bin", { content: bytes(2000, 41) });
+  check(await until(async () => (await ctl("log")).http.some((h) => h.switched)), "account switch: B signed in during A's PUT");
+  check(await until(() => (nsOf(c2) ?? "").startsWith(hB), 15_000), "account switch: the PUT refused (A's binding, B's session), and the client goes on as B");
+  const put = (await ctl("log")).http.find((h) => h.switched);
+  check(put.status === 403 && put.bind === hA && put.session === hB, "account switch: …refused 403, before anything was stored: " + J({ status: put.status }));
+  await stop(c2);
+  // (explicitly back to A: A's file goes to A)
+  await signInOnly(A);
+  const c3 = client(w);
+  check(await until(async () => nsOf(c3) === nsA && (await settledIn(w, c3, nsA)), 15_000), "account switch: back as A, every record of A's decided");
+  const { mine: inA } = await serverOps(w);
+  check(inA.some((o) => o.path === "/a-only") && inA.some((o) => o.path === "/a-file.bin" && o.sha256 === f.sha256), "account switch: A's log has A's ops: " + J(inA.map((o) => o.path)));
+  const l = await ctl("log");
+  const opsOk = l.bindings.every((b) => b.session === b.hello);
+  const putsOk = l.http.filter((h) => (h.method === "PUT" || h.check !== undefined) && h.status >= 200 && h.status < 300).every((h) => h.bind === h.session);
+  check(opsOk && putsOk && l.bindings.length > 0, "account switch: every ops message went on a socket of the account its hello named, every blob request that succeeded under its own account's session: " + J({ ops: l.bindings.map((b) => [b.session?.slice(0, 6), b.hello?.slice(0, 6)]) }));
+  await stop(c3);
+}
+
+/** As settled(), for one namespace's records only (another namespace's may wait for its own account). */
+async function settledIn(w, c, ns) {
+  if (c.status.state !== "synced" || nsOf(c) !== ns) return false;
+  if ((await all(w.ws, "outbox")).some((r) => r.ns === ns)) return false;
+  return (await metaGet(w.ws, `sync:${ns}:scanned`)) >= (await w.lastSeq()) && c.debug().inflight === 0;
+}
+
+async function restoredCheckTimer() {
+  // (CORR-PR58-2: a blobs/check retry_after, persisted; reloads during the wait; the page idle: nothing early,
+  // and the file goes when it is due)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const c1 = client(w, { clock });
+  check(await until(() => settled(w, c1)), "check timer: synced");
+  await ctl("set", { set: { fakeHttp: [{ method: "POST", path: "/blobs/check", status: 429, body: { error: "rate", retry_after: 30_000 }, times: 1 }] } });
+  await w.create("/ct.bin", { content: bytes(500, 51) });
+  check(await until(async () => (await ctl("log")).http.some((h) => h.faked)), "check timer: the check refused (30 s)");
+  await sleep(200);
+  await stop(c1);
+  const checks = async () => (await ctl("log")).http.filter((h) => h.check !== undefined).length;
+  const clock2 = fakeClock(clock.now() + 5_000);
+  const c2 = client(w, { clock: clock2 });
+  check(await until(() => c2.debug().writable === true), "check timer: reloaded (5 s in)");
+  await sleep(400);
+  check((await checks()) === 1, "check timer: idle after the reload, nothing asked early");
+  await clock2.advance(10_000);
+  await sleep(300);
+  await stop(c2);
+  const clock3 = fakeClock(clock2.now());
+  const c3 = client(w, { clock: clock3 });
+  check(await until(() => c3.debug().writable === true), "check timer: reloaded again (15 s in)");
+  await sleep(400);
+  check((await checks()) === 1, "check timer: …still nothing early");
+  await clock3.advance(15_000);
+  check(await until(() => settled(w, c3)), "check timer: at its end, with the page idle, the file goes: " + J(c3.status));
+  check((await checks()) === 2, "check timer: one check after the wait");
+  await stop(c3);
+}
+
+async function restoredPause() {
+  // (CORR-PR58-2: storage_full with retry_after, persisted; a reload just before it ends: woken at its end, idle)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const c1 = client(w, { clock });
+  check(await until(() => settled(w, c1)), "pause: synced");
+  await ctl("set", { set: { fakeHttp: [{ method: "PUT", status: 507, body: { error: "storage_full", retry_after: 30_000 }, times: 1 }] } });
+  await w.create("/sp.bin", { content: bytes(500, 61) });
+  check(await until(() => c1.status.reason === "storage full"), "pause: storage full (30 s)");
+  const paused = await metaGet(w.ws, `sync:${nsOf(c1)}:paused`);
+  await stop(c1);
+  const puts = async () => (await ctl("log")).http.filter((h) => h.method === "PUT").length;
+  const clock2 = fakeClock(paused.until - 1_000);
+  const c2 = client(w, { clock: clock2 });
+  check(await until(() => c2.debug().writable === true), "pause: reloaded 1 s before it ends");
+  await sleep(400);
+  check((await puts()) === 1 && (await outbox(w)) === 1, "pause: nothing sent early; the record kept");
+  await clock2.advance(1_000);
+  check(await until(() => settled(w, c2)), "pause: at its end, with the page idle, the upload and its op go: " + J(c2.status));
+  check((await puts()) === 2 && (await metaGet(w.ws, `sync:${nsOf(c2)}:paused`)) === undefined, "pause: one PUT after; the pause cleared durably");
+  await stop(c2);
+}
+
+async function indexThrottled() {
+  // (CORR-PR58-3: a pull refused with retry_after; ops accepted meanwhile pull nothing before it ends; a prolonged
+  // timer waits on; then pages in order, every record confirmed)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const c = client(w, { clock });
+  check(await until(() => settled(w, c)), "index throttled: synced");
+  await ctl("set", { set: { fakePull: [{ code: "rate", detail: { retry_after: 60_000 } }, { code: "rate", detail: { retry_after: 60_000 } }] } });
+  const pulls = async () => (await ctl("log")).sent.filter((m) => m.t === "pull_index").length;
+  await w.mkdir("/i0");
+  check(await until(async () => (await pulls()) === 1), "index throttled: the first pull refused (60 s)");
+  for (let i = 1; i <= 3; i++) await w.mkdir(`/i${i}`);
+  check(await until(async () => (await all(w.ws, "outbox")).filter((r) => r.accepted !== undefined).length === 4), "index throttled: four records accepted, awaiting echoes");
+  await sleep(400);
+  check((await pulls()) === 1, "index throttled: accepted acks pull nothing before the timer ends: " + (await pulls()));
+  await clock.advance(60_000);
+  check(await until(async () => (await pulls()) === 2), "index throttled: a pull at 60 s (refused again: prolonged)");
+  await clock.advance(30_000);
+  await sleep(300);
+  check((await pulls()) === 2, "index throttled: nothing during the prolonged wait");
+  await clock.advance(30_000);
+  check(await until(() => settled(w, c)), "index throttled: then pulled, every echo seen, every record confirmed");
+  check((await pulls()) === 3 && (await all(w.ws, "outbox")).length === 0, "index throttled: three pulls in all");
+  await stop(c);
+}
+
+const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled };
 
 export async function run(only = "") {
   for (const [name, f] of Object.entries(CASES)) {
     if (only && !only.split(",").includes(name)) continue;
+    window.progress = { name, checks: results.length };
     try {
       await f();
     } catch (e) {

@@ -9,6 +9,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,9 +22,9 @@ const { WebSocketServer } = require("ws");
 
 const SITE = "https://sagebrush.test";
 // (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 24 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+const ACCOUNTS = Array.from({ length: 64 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
 // (the limits each has, from the fake CoCalc: most roomy; FULL's storage is small; SMALL's files are)
-const FULL = ACCOUNTS[20], SMALL = ACCOUNTS[21];
+const FULL = ACCOUNTS[62], SMALL = ACCOUNTS[63];
 const limitsOf = (a) => a === FULL ? { storage_bytes: 10_000, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : a === SMALL ? { storage_bytes: 1 << 20, max_file_bytes: 5_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : { storage_bytes: 64 << 20, max_file_bytes: 50 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 64 << 20 } };
@@ -58,6 +59,9 @@ for (const m of readdirSync(mig).filter((f) => f.endsWith(".sql")).sort())
 // ---- the front: the page, and the site's API proxied, with what the cases ask of it (ctl)
 
 let jar = "";
+// (the account the session is now: its hash, for the binding checks)
+let session = null;
+const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
 const ctl = {
   /** answers faked for the next `ops` messages, instead of the server's: [{code, detail}] */
   fakeOps: [],
@@ -71,19 +75,35 @@ const ctl = {
   holdPut: false,
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
+  /** the next n pulled index pages (answers to pull_index) dropped */
+  dropPulled: 0,
+  /** the next n pulled index pages answered {ops: [], more: true} instead (a page that moves nothing) */
+  emptyMore: 0,
+  /** HTTP answers faked: [{method, path (a part of it), status, body, times}] */
+  fakeHttp: [],
+  /** answers faked for the next pull_index requests: [{code, detail}] */
+  fakePull: [],
+  /** the session switched to this account just before the next socket upgrade, or the next PUT, is forwarded (as
+   * another tab signing in would) */
+  switchOnUpgrade: null, switchOnPut: null,
 };
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [] };
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] };
 const held = [];
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [] });
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
   if (jar) h.cookie = jar;
   const r = await mf.dispatchFetch(SITE + path, { method, headers: h, body, redirect: "manual" });
   const c = r.headers.getSetCookie?.().map((x) => x.split(";")[0]).find((x) => x.startsWith("__Host-sb_session="));
-  if (c) jar = c;
+  if (c) {
+    jar = c;
+    if (path === "/auth/dev") try { session = hashOf(JSON.parse(String(body)).account_id); } catch {}
+  }
   return r;
 }
+
+const signInAs = (account_id) => upstream("POST", "/auth/dev", { "content-type": "application/json" }, JSON.stringify({ token: "dev-token", account_id }));
 
 // a second device, from here: its own socket on the same account
 async function probe({ ops = [], device = "0f0f0f0f0f0f0f0f" } = {}) {
@@ -128,7 +148,7 @@ async function control(body) {
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0 }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -152,13 +172,27 @@ const server = createServer(async (req, res) => {
     const isPut = req.method === "PUT";
     const entry = { method: req.method, path: p, bytes: body?.length ?? 0, ...(p.endsWith("/blobs/check") ? { check: JSON.parse(body.toString()).blobs.length } : {}) };
     log.http.push(entry);
+    const fake = ctl.fakeHttp.find((f) => f.method === req.method && (!f.path || p.includes(f.path)) && f.times > 0);
+    if (fake) {
+      fake.times--;
+      entry.status = fake.status;
+      entry.faked = true;
+      res.writeHead(fake.status, { "content-type": "application/json" });
+      return res.end(JSON.stringify(fake.body ?? {}));
+    }
+    if (isPut && ctl.switchOnPut) {
+      await signInAs(ctl.switchOnPut);
+      ctl.switchOnPut = null;
+      entry.switched = true;
+    }
+    if (isPut || entry.check !== undefined) Object.assign(entry, { session, bind: req.headers["x-sync-account"] ?? null });
     if (isPut) {
       log.putsNow++;
       log.maxPuts = Math.max(log.maxPuts, log.putsNow);
       if (ctl.holdPut) await new Promise((ok) => held.push(ok));
     }
     const headers = {};
-    for (const k of ["content-type", "content-length"]) if (req.headers[k]) headers[k] = req.headers[k];
+    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) if (req.headers[k]) headers[k] = req.headers[k];
     let r;
     try {
       r = await upstream(req.method, p + u.search, headers, body);
@@ -183,6 +217,11 @@ server.on("upgrade", async (req, socket, head) => {
   const p = new URL(req.url, "http://x").pathname;
   if (p !== "/api/sync/v1/account") return socket.destroy();
   log.sockets++;
+  if (ctl.switchOnUpgrade) {
+    await signInAs(ctl.switchOnUpgrade);
+    ctl.switchOnUpgrade = null;
+    log.switchedUpgrade = (log.switchedUpgrade ?? 0) + 1;
+  }
   const r = await upstream("GET", p, { upgrade: "websocket" }).catch(() => null);
   if (!r || r.status !== 101) {
     socket.write(`HTTP/1.1 ${r?.status ?? 502} refused\r\nconnection: close\r\n\r\n`);
@@ -190,6 +229,9 @@ server.on("upgrade", async (req, socket, head) => {
   }
   const up = r.webSocket;
   up.accept();
+  // (the session's account when this socket was opened: the one it is authenticated as)
+  const socketSession = session;
+  let helloAccount = null;
   wss.handleUpgrade(req, socket, head, (client) => {
     log.open++;
     const okCode = (c) => (c === 1000 || (c >= 3000 && c <= 4999) ? c : 1000);
@@ -210,7 +252,14 @@ server.on("upgrade", async (req, socket, head) => {
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
       log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)) } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after });
+      if (m.t === "hello") helloAccount = m.account ?? null;
+      if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+      if (m.t === "pull_index" && ctl.fakePull.length) {
+        const f = ctl.fakePull.shift();
+        client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        return;
+      }
       if (m.t === "ops" && ctl.fakeOps.length) {
         const f = ctl.fakeOps.shift();
         client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
@@ -227,6 +276,17 @@ server.on("upgrade", async (req, socket, head) => {
         Object.assign(m, ctl.rewriteWelcome);
         ctl.rewriteWelcome = null;
         client.send(JSON.stringify(m));
+        return;
+      }
+      if (m.t === "index" && m.req !== undefined && ctl.emptyMore > 0) {
+        ctl.emptyMore--;
+        log.got.at(-1).faked = true;
+        client.send(JSON.stringify({ t: "index", req: m.req, ops: [], more: true }));
+        return;
+      }
+      if (m.t === "index" && m.req !== undefined && ctl.dropPulled > 0) {
+        ctl.dropPulled--;
+        log.got.at(-1).dropped = true;
         return;
       }
       if (m.t === "index" && m.req === undefined && ctl.dropIndex > 0) {
@@ -274,7 +334,18 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: `${origin}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  const results = await ev(`window.run(${JSON.stringify(process.env.ONLY ?? "")})`);
+  // (a watchdog: a run that doesn't end says which case it was in, and the last checks, rather than being killed silently)
+  const limit = Number(process.env.RUN_LIMIT_S ?? 720) * 1000;
+  let timer;
+  const results = await Promise.race([
+    ev(`window.run(${JSON.stringify(process.env.ONLY ?? "")})`),
+    new Promise((_, no) => { timer = setTimeout(() => no(new Error("timeout")), limit); }),
+  ]).catch(async (e) => {
+    const where = await Promise.race([ev("JSON.stringify({ progress: window.progress })"), sleep(5000).then(() => "(the page doesn't answer)")]);
+    console.error(`FAIL: the run didn't end within ${limit / 1000} s (${e.message}): ${where}`);
+    throw e;
+  });
+  clearTimeout(timer);
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));

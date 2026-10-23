@@ -14,8 +14,11 @@
 //   waits for what is in flight, then sends again from the lowest undecided record, after its timer.
 // - This device's echo in an `index` (its device, a dseq in the outbox, the same op) confirms its record
 //   (Outbox.confirmed).  Step 3 applies nothing else from the server and keeps no cursor: the cursor is in memory
-//   only (hello's `index_after` is 0 on the first connection of a page), and other devices' ops go to `onIndex`,
-//   which step 4 gives (with the confirmed index and its cursor, written in one transaction, C3).
+//   only, and other devices' ops go to `onIndex`, which step 4 gives (with the confirmed index and its cursor,
+//   written in one transaction, C3).  The log is read only as far as it must be (daybreak3's LIMIT-PR58-3): from just
+//   before the oldest record accepted and awaiting its echo (else from the in-memory cursor), up to a fixed target,
+//   the newest such record's seq (and, with onIndex, welcome's index_head), in pulls paced by a bucket, at most
+//   CLIENT.replayPages pages a connection; a `more` page that doesn't move the cursor is refused.
 // - A data file's bytes go up before its op: `blobs/check` (at most 1,000 hashes a request), then
 //   `PUT /blob/<sha256>` for those missing, at most 2 at once, each reserving size × COPIES from the page's
 //   reservation before its bytes are read (L2).  An op whose bytes can't be uploaded yet (a timer, storage_full)
@@ -50,6 +53,13 @@ export const CLIENT = {
   maxPut: 95 * 2 ** 20,
   /** refusals kept for the Sync panel */
   refusalsKept: 100,
+  /** records whose bytes weren't what they said, remembered so as never to be read twice */
+  mismatchesKept: 1000,
+  /** index pages read at most per connection (each at most 1,000 ops and 1 MiB: LIMIT-PR58-3) */
+  replayPages: 64,
+  /** pulls: at most `pullBurst` at once, then `pullsPerSecond` */
+  pullBurst: 4,
+  pullsPerSecond: 2,
 };
 
 /** The clock the client's timers and pace use (a fake one in tests). */
@@ -107,6 +117,9 @@ const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a a
 type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" };
 type Conn = {
   ns: string;
+  /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
+   * and checked by the server against the socket's and the request's own session (CORR-PR58-1) */
+  account: string;
   generation: number;
   ob: Outbox;
   ws: WebSocket;
@@ -122,8 +135,11 @@ type Conn = {
   req: number;
   pending: Map<number, Pending>;
   pulling: boolean;
-  /** a pull asked for while one was in flight: made when it answers */
-  pullAgain: boolean;
+  /** the seq the log is read up to on this connection: the newest accepted record awaiting its echo, and (with
+   * onIndex) welcome's index_head; only ever raised, by those and by acks' accepted seqs */
+  target: number;
+  /** index pages read on this connection (hello's and pulls'), at most CLIENT.replayPages */
+  pages: number;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -144,6 +160,9 @@ export class SyncClient {
   private stopped = false;
   private abort = new AbortController();
   private cancels = new Set<() => void>();
+  /** the wake-ups scheduled, at most one per kind (daybreak3's LIMIT-PR58-1) */
+  private wakes = new Map<string, { at: number; cancel: () => void }>();
+  private pullBucket: Bucket;
   private conn: Conn | null = null;
   private running = false;
   private again = false;
@@ -159,7 +178,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -167,6 +186,7 @@ export class SyncClient {
     this.fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
     this.WS = opts.WebSocket ?? globalThis.WebSocket;
     this.bucket = new Bucket(CLIENT.opsPerMessage, CLIENT.opsPerMinute / 60, this.clock.now());
+    this.pullBucket = new Bucket(CLIENT.pullBurst, CLIENT.pullsPerSecond, this.clock.now());
   }
 
   /** `f(status)` on each change; returns how to stop. */
@@ -201,6 +221,7 @@ export class SyncClient {
     this.abort.abort();
     for (const c of this.cancels) c();
     this.cancels.clear();
+    this.unwake();
     const c = this.conn;
     if (c) {
       c.end("stopped");
@@ -222,7 +243,7 @@ export class SyncClient {
   /** (tests) the in-memory cursor, and what is in flight */
   debug() {
     const c = this.conn;
-    return { cursor: this.cursor, ns: c?.ns, inflight: c?.pending.size ?? 0, next: c?.next, writable: c?.writable, halted: c?.halted, paused: this.paused };
+    return { cursor: this.cursor, wakes: this.wakes.size, target: c?.target, pages: c?.pages, ns: c?.ns, inflight: c?.pending.size ?? 0, next: c?.next, writable: c?.writable, halted: c?.halted, paused: this.paused };
   }
 
   // ---- the namespace: the account and its generation (D1)
@@ -236,7 +257,9 @@ export class SyncClient {
       if (this.stopped) return null;
       this.say({ state: "connecting" });
       try {
-        if (!this.hashOf) {
+        // (asked every time: the page's session may be another account's since the last connection, CORR-PR58-1;
+        // and the socket and blob requests then carry the account and generation, which the server checks)
+        {
           const me = await this.http("GET", "/api/share/me");
           if (me.status === 401) return this.offWith("sign in first");
           if (!me.ok) throw new Retry(me.retryAfter);
@@ -307,18 +330,24 @@ export class SyncClient {
     const ob = new Outbox(this.w, lease);
     // (a namespace's scan starts here, at the latest op, until step 4's first sync sends the tree as it was)
     if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
+    // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
+    const awaiting = await this.awaitingEcho(ob);
+    const start = awaiting ? awaiting.lo - 1 : this.cursor;
+    // (stopped while this connection was being prepared: no socket is opened)
+    if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";
     this.stats.connects++;
     const ws = new this.WS(url);
     return new Promise<End>((done) => {
       let ended = false;
       const c: Conn = {
-        ns, generation: Number(ns.split(":")[1]), ob, ws, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, pullAgain: false,
+        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
         have: new Set(), missing: new Set(), final: new Set(), gone: new Set(), chain: Promise.resolve(),
         end: (why) => {
           if (ended) return;
           ended = true;
           if (this.conn === c) this.conn = null;
+          this.unwake();
           try { ws.close(1000, why); } catch {}
           void (async () => {
             if (why === "closed" && !this.stopped) {
@@ -330,8 +359,9 @@ export class SyncClient {
         },
       };
       this.conn = c;
+      this.cursor = start;
       ws.onopen = () => {
-        this.send(c, { t: "hello", v: 1, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: this.cursor });
+        this.send(c, { t: "hello", v: 1, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation });
       };
       ws.onmessage = (ev) => {
         c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {
@@ -399,6 +429,8 @@ export class SyncClient {
     if (m.generation !== c.generation) return c.end("generation");
     await this.timerOk(c.ns, "connect");
     c.welcomed = true;
+    // (step 4's confirmed index reads the whole log as it stood: up to the head welcome gives, no further)
+    if (this.opts.onIndex && isNat(m.index_head)) c.target = Math.max(c.target, m.index_head);
     c.writable = m.state === "active";
     // (storage_full lifts on a welcome with another generation or state than when it began)
     if (this.paused && (this.paused.generation !== m.generation || this.paused.state !== m.state)) {
@@ -413,6 +445,7 @@ export class SyncClient {
       const rb = await this.metaGet<{ why: string }>(key(c.ns, "rebuild"));
       if (rb?.why === "invalid" || rb?.why === "diverged") c.halted = rb.why;
     }
+    if (this.paused?.until) this.wake("unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
     this.kick();
   }
@@ -424,6 +457,10 @@ export class SyncClient {
       await this.timerOk(c.ns, "index");
     }
     if (!Array.isArray(m.ops) || typeof m.more !== "boolean") return c.end("closed");
+    // (a page that says there is more but moves nothing: refused, rather than asked again for ever)
+    if (m.more && m.ops.length === 0) return c.end("closed");
+    c.pages++;
+    this.stats.pages++;
     const ops: IndexOp[] = [];
     let last = this.cursor;
     for (const o of m.ops as Record<string, unknown>[]) {
@@ -451,21 +488,42 @@ export class SyncClient {
     }
     if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
     this.cursor = last;
-    if (m.more || (isNat(m.req) && c.pullAgain)) {
-      c.pullAgain = false;
-      this.pull(c);
-    }
+    // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
+    if (!m.more && c.target > last) c.target = last;
+    this.pull(c);
     this.kick();
   }
 
+  /** The next page of the log, if the cursor is short of the target: one pull at a time, paced, at most
+   * CLIENT.replayPages pages a connection (then the rest waits for the next one). */
   private pull(c: Conn) {
-    if (c.pulling || c.pending.size >= CLIENT.inflight) {
-      c.pullAgain = true;
-      return;
-    }
+    if (this.conn !== c || c.pulling || this.cursor >= c.target || c.pages >= CLIENT.replayPages) return;
+    if (c.pending.size >= CLIENT.inflight) return;
+    // (the index timer, however the pull was asked for (a page, an ack, a reconnect): woken at its end, when the
+    // timer is checked again, so a prolonged one waits on, CORR-PR58-3)
+    const left = this.left(c.ns, "index");
+    if (left > 0) return this.wake("index", this.clock.now() + left, () => this.pull(c));
+    const wait = this.pullBucket.take(1, this.clock.now());
+    if (wait > 0) return this.wake("pull", this.clock.now() + wait, () => this.pull(c));
     c.pulling = true;
     this.stats.pulls++;
     this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
+  }
+
+  /** The seqs of the records accepted and awaiting their echo, lowest and highest (read in pages: the outbox is
+   * bounded, 10,000 records at most). */
+  private async awaitingEcho(ob: Outbox): Promise<{ lo: number; hi: number } | null> {
+    let lo = Infinity, hi = 0, at = 1;
+    for (;;) {
+      const page = await ob.records(at, 500);
+      for (const r of page) if (r.accepted !== undefined) {
+        lo = Math.min(lo, r.accepted);
+        hi = Math.max(hi, r.accepted);
+      }
+      if (page.length < 500) break;
+      at = page[page.length - 1].dseq + 1;
+    }
+    return hi > 0 ? { lo, hi } : null;
   }
 
   private async ack(c: Conn, m: Record<string, unknown>) {
@@ -487,8 +545,9 @@ export class SyncClient {
       await this.metaPut(key(c.ns, "refused"), list.slice(-CLIENT.refusalsKept));
       await this.flagRebuild(c.ns, "refused");
     }
-    // (accepted ones wait for their echo: the log is read on from the cursor)
-    if (results.some((d) => "seq" in d)) this.pull(c);
+    // (accepted ones wait for their echo: the log is read on, to the newest of them, and no further)
+    for (const d of results) if ("seq" in d && isNat(d.seq)) c.target = Math.max(c.target, d.seq);
+    this.pull(c);
     this.kick();
   }
 
@@ -512,7 +571,7 @@ export class SyncClient {
     if (p?.kind === "index") {
       c.pulling = false;
       const at = await this.timerFail(c.ns, "index", ra);
-      this.later(at, () => this.conn === c && this.pull(c));
+      this.wake("index", at, () => this.pull(c));
       return;
     }
     if (p?.kind !== "ops") return;
@@ -589,7 +648,7 @@ export class SyncClient {
     }
     const left = this.left(c.ns, "ops");
     if (left > 0) {
-      this.later(this.clock.now() + left, () => this.kick());
+      this.wake("ops", this.clock.now() + left, () => this.kick());
       this.showWaiting(c, (await c.ob.status()).count, this.clock.now() + left);
       return;
     }
@@ -609,12 +668,16 @@ export class SyncClient {
       this.showWaiting(c, (await c.ob.status()).count);
       const n = await this.blobsFor(c, recs);
       if (this.conn !== c || c.resync) return;
-      if (n === 0) return;
+      if (n === 0) {
+        // (waiting on bytes: a pause or a timer an upload just set is said)
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
       const batch = recs.slice(0, n);
       const wait = this.bucket.take(batch.length, this.clock.now());
       if (wait === Infinity) throw new Error("sync: a message larger than the pace allows");
       if (wait > 0) {
-        this.later(this.clock.now() + wait, () => this.kick());
+        this.wake("pace", this.clock.now() + wait, () => this.kick());
         return;
       }
       this.stats.opsMessages++;
@@ -665,13 +728,19 @@ export class SyncClient {
       ask.push({ sha256: sha, size: r.op.size ?? 0 });
     }
     for (let i = 0; i < ask.length && this.conn === c; i += CLIENT.checkItems) {
-      if (this.left(c.ns, "check") > 0) break;
+      // (a check timer, persisted, maybe from before a reload: woken at its end, CORR-PR58-2)
+      if (this.left(c.ns, "check") > 0) {
+        this.wake("check", this.clock.now() + this.left(c.ns, "check"), () => this.kick());
+        break;
+      }
       const page = ask.slice(i, i + CLIENT.checkItems);
       this.stats.checks++;
-      const r = await this.http("POST", "/api/sync/v1/blobs/check", { blobs: page });
+      const r = await this.http("POST", "/api/sync/v1/blobs/check", { blobs: page }, this.binding(c));
+      if (this.conn !== c) break;
       if (!r.ok) {
-        if (r.status === 401 || r.status === 403) c.end("closed");
-        else this.later(await this.timerFail(c.ns, "check", r.retryAfter), () => this.kick());
+        // (another account's session, or another generation: this connection ends, and the namespace is read again)
+        if (r.status === 401 || r.status === 403 || (r.status === 409 && r.code === "conflict")) c.end("closed");
+        else this.wake("check", await this.timerFail(c.ns, "check", r.retryAfter), () => this.kick());
         break;
       }
       await this.timerOk(c.ns, "check");
@@ -716,23 +785,46 @@ export class SyncClient {
   private async upload(c: Conn, r: OutboxRecord): Promise<"have" | "gone" | "final" | "wait"> {
     const size = r.op.size ?? 0;
     if (size > CLIENT.maxPut) return "final";
-    if (!c.writable || this.paused) return "wait";
-    if (this.left(c.ns, "upload") > 0) {
-      this.later(this.clock.now() + this.left(c.ns, "upload"), () => this.kick());
+    if (!c.writable) return "wait";
+    // (a storage_full pause with an end: over once it has passed, durably; else woken at its end, CORR-PR58-2)
+    if (this.paused?.until !== undefined && this.paused.until <= this.clock.now()) {
+      this.paused = null;
+      await this.metaPut(key(c.ns, "paused"), undefined);
+    }
+    if (this.paused) {
+      if (this.paused.until !== undefined) this.wake("unpause", this.paused.until, () => this.unpause(c));
       return "wait";
     }
-    // (the reservation first, before any bytes are read, held until the request is done: L2)
+    if (this.left(c.ns, "upload") > 0) {
+      this.wake("upload", this.clock.now() + this.left(c.ns, "upload"), () => this.kick());
+      return "wait";
+    }
+    // (bytes found before not to be what their record says: never read again, LIMIT-PR58-2)
+    if (await this.mismatched(c.ns, r.dseq)) return "gone";
+    // (the reservation first, before any bytes are read, held until the request is done: L2; bytesFor reads only
+    // bytes whose stored size is the record's, and lets go any whose length isn't)
     const token = await reserve(size * COPIES);
     try {
       if (this.conn !== c) return "wait";
+      if (token.n < size * COPIES) throw new Error("sync: a reservation that doesn't cover an upload");
       const bytes = await bytesFor(this.w, r, token);
+      if (bytes === "mismatch") {
+        // (not this device's bytes for that record: sent all the same, as bytes gone are, and the server decides
+        // (C1); the file's present state goes as its own write after, by the pending summary's successor path)
+        this.stats.mismatches++;
+        await this.noteMismatch(c.ns, r.dseq);
+        return "gone";
+      }
       if (!bytes) return "gone";
+      if (bytes.length !== size || bytes.length > CLIENT.maxPut) return "gone";
+      // (the connection still the one these bytes are for: never sent under another lease, CORR-PR58-1)
+      if (this.conn !== c) return "wait";
       this.stats.puts++;
       this.stats.putsAtOnce++;
       this.stats.maxPutsAtOnce = Math.max(this.stats.maxPutsAtOnce, this.stats.putsAtOnce);
       let res;
       try {
-        res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes);
+        res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, this.binding(c));
       } finally {
         this.stats.putsAtOnce--;
       }
@@ -744,7 +836,7 @@ export class SyncClient {
       if (res.status === 507) {
         this.paused = { why: "storage_full", at: this.clock.now(), generation: c.generation, state: "active", ...(res.retryAfter !== undefined ? { until: this.clock.now() + res.retryAfter } : {}) };
         await this.metaPut(key(c.ns, "paused"), this.paused);
-        if (this.paused.until) this.later(this.paused.until, () => this.unpause(c));
+        if (this.paused.until) this.wake("unpause", this.paused.until, () => this.unpause(c));
         return "wait";
       }
       if (res.status === 409 && (res.code === "readonly" || res.code === "deleting")) {
@@ -752,15 +844,29 @@ export class SyncClient {
         this.say({ state: "paused", ns: c.ns, reason: res.code === "readonly" ? "read-only" : "deleting" });
         return "wait";
       }
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 || res.status === 403 || (res.status === 409 && res.code === "conflict")) {
         c.end("closed");
         return "wait";
       }
-      this.later(await this.timerFail(c.ns, "upload", res.retryAfter), () => this.kick());
+      this.wake("upload", await this.timerFail(c.ns, "upload", res.retryAfter), () => this.kick());
       return "wait";
     } finally {
       token();
     }
+  }
+
+  // (records whose bytes weren't what they say, by dseq: kept so they are read at most once; at most
+  // CLIENT.mismatchesKept, the oldest let go first: those are decided long since)
+  private async mismatched(ns: string, dseq: number): Promise<boolean> {
+    return ((await this.metaGet<number[]>(key(ns, "mismatch"))) ?? []).includes(dseq);
+  }
+  private async noteMismatch(ns: string, dseq: number) {
+    // (read and written in one transaction: two uploads at once each add theirs)
+    await inTx(this.w.ws, META, "readwrite", async (tx) => {
+      const meta = tx.objectStore(META), k = key(ns, "mismatch");
+      const list = ((await req(meta.get(k))) as number[] | undefined) ?? [];
+      if (!list.includes(dseq)) meta.put([...list, dseq].slice(-CLIENT.mismatchesKept), k);
+    });
   }
 
   private async unpause(c: Conn) {
@@ -828,14 +934,30 @@ export class SyncClient {
   private async timerOk(ns: string, kind: Work) {
     if (ns !== this.timerNs || !this.timers.has(kind)) return;
     this.timers.delete(kind);
+    this.unwake(kind);
     if (ns !== "-") await this.metaPut(key(ns, "retry:" + kind), undefined);
   }
-  private later(at: number, f: () => void) {
+  /** `f` at `at`, as the one wake-up of `kind`: one already set for the same time is kept, one for another time
+   * replaced, so however often it is asked for (an edit during a backoff asks each time), at most one is pending
+   * per kind (LIMIT-PR58-1).  Ended with the connection, on success of its kind, and by stop(). */
+  private wake(kind: string, at: number, f: () => void) {
+    const cur = this.wakes.get(kind);
+    if (cur && cur.at === at) return;
+    cur?.cancel();
     const cancel = this.clock.after(Math.max(0, at - this.clock.now()), () => {
-      this.cancels.delete(cancel);
+      if (this.wakes.get(kind)?.cancel !== cancel) return;
+      this.wakes.delete(kind);
+      this.stats.wakesFired++;
       if (!this.stopped) f();
     });
-    this.cancels.add(cancel);
+    this.wakes.set(kind, { at, cancel });
+    this.stats.maxWakes = Math.max(this.stats.maxWakes, this.wakes.size);
+  }
+  private unwake(kind?: string) {
+    for (const [k, w] of this.wakes) if (kind === undefined || k === kind) {
+      w.cancel();
+      this.wakes.delete(k);
+    }
   }
   private sleep(ms: number): Promise<void> {
     return new Promise((ok) => {
@@ -864,10 +986,15 @@ export class SyncClient {
     });
   }
 
-  private async http(method: string, path: string, body?: unknown): Promise<{ ok: boolean; status: number; body: unknown; code?: string; retryAfter?: number }> {
+  /** The headers that bind a blob request to a connection's account and generation (CORR-PR58-1). */
+  private binding(c: Conn): Record<string, string> {
+    return { "x-sync-account": c.account, "x-sync-generation": String(c.generation) };
+  }
+
+  private async http(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ ok: boolean; status: number; body: unknown; code?: string; retryAfter?: number }> {
     let res: Response;
     try {
-      const init: RequestInit = { method, credentials: "same-origin", headers: {} };
+      const init: RequestInit = { method, credentials: "same-origin", headers: { ...headers } };
       if (body instanceof Uint8Array) {
         init.body = body as BodyInit;
         (init.headers as Record<string, string>)["content-type"] = "application/octet-stream";

@@ -388,7 +388,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   private async handle(ws: WebSocket, att: Attachment, m: Record<string, unknown>) {
     const t = m.t;
-    if (t === "hello") return this.hello(ws, att, fields(m, ["t", "v", "device", "name", "index_after", "docs"], "hello"));
+    if (t === "hello") return this.hello(ws, att, fields(m, ["t", "v", "device", "name", "index_after", "docs", "account", "generation"], "hello"));
     const dev = (ws.deserializeAttachment() as Attachment).device;
     if (!dev) throw new SyncError("invalid", "say hello first");
     const req = m.req;
@@ -429,6 +429,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!isNat(m.index_after)) throw new SyncError("invalid", "index_after");
     if (has(m, "docs") && (!Array.isArray(m.docs) || m.docs.length > LIMITS.helloDocs)) throw new SyncError("limit", "hello: too many docs", { limit: "hello_docs", max: LIMITS.helloDocs });
     this.admit(att.account, false);
+    // (the client's binding: the account and generation whose outbox it sends.  A socket whose session is another
+    // account's, or another generation, is refused before anything is sent on it (CORR-PR58-1))
+    this.bound(m.account, m.generation);
     const now = Date.now();
     this.sql.exec(
       "INSERT INTO devices (device, name, created, last_seen, session_hash, next_dseq) VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT(device) DO UPDATE SET name = excluded.name, last_seen = excluded.last_seen, session_hash = excluded.session_hash",
@@ -439,6 +442,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const head = Number(this.one("SELECT COALESCE(MAX(seq), 0) AS n FROM ops")!.n);
     send(ws, { t: "welcome", v: VERSION, state: this.state(), generation: Number(this.get("generation")), index_head: head, next_dseq: next, server_time: now });
     send(ws, { t: "index", ...this.index(m.index_after) });
+  }
+
+  /** A client's binding (§5.2 hello, §5.4's headers): the account's hash and its generation, each if given,
+   * must be this object's; else `forbidden`, reason "account", or `conflict`, reason "generation". */
+  private bound(account: unknown, generation: unknown) {
+    if (account !== undefined && account !== null && account !== this.get("account_hash")) throw new SyncError("forbidden", "this session is another account's than the one the client syncs", { reason: "account" });
+    if (generation !== undefined && generation !== null && generation !== Number(this.get("generation"))) throw new SyncError("conflict", "this account's sync is another generation than the one the client syncs", { reason: "generation" });
   }
 
   // ---- the index's ops (§3, §5.2)
@@ -1506,9 +1516,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * Reserve the bytes of one upload: one transaction, against the limits,
    * with at most uploadsAtOnce running.  A blob already held needs no upload.
    */
-  async reserve(a: { account: string; sha256: string; size: number }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+  async reserve(a: { account: string; sha256: string; size: number; bind?: { account?: string; generation?: number } }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
     // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    const b = attempt(() => this.bound(a.bind?.account, a.bind?.generation));
+    if ("error" in b) return b;
     const l = await this.limits();
     // room in the one budget first (§6.1), for an upload the checks below would take
     if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) {
@@ -1629,9 +1641,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: string[] }): Promise<Result<string[]>> {
+  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<string[]>> {
     return attempt(() => {
       this.admit(a.account, false);
+      this.bound(a.bind?.account, a.bind?.generation);
       return a.blobs.filter((sha) => !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha));
     });
   }
