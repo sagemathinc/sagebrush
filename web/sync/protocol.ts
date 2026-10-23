@@ -172,6 +172,8 @@ export interface Op {
   parent?: string;
 }
 const OP_FIELDS = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
+/** The ops that may say `to`: where it goes. */
+const TO_OPS = new Set<string>(["rename", "duplicate", "remove", "restore"]);
 /** The ops that put something in a folder, and so may name it by `parent`: on rename and duplicate, the destination's. */
 const PLACES = new Set<string>(["create", "mkdir", "adopt", "write", "rename", "duplicate", "restore"]);
 
@@ -185,7 +187,10 @@ export function checkOp(v: unknown): Op {
   if (typeof o.kind !== "string" || !KINDS.has(o.kind)) throw invalid("op: kind");
   const op: Op = { dseq: o.dseq, t: o.t, by: o.by, op: o.op as OpName, path: path(o.path, "op path"), kind: o.kind as Kind };
   if (has(o, "to")) op.to = path(o.to, "op to");
-  if ((op.op === "rename" || op.op === "duplicate") !== (op.to !== undefined)) throw invalid("op: `to` is for rename and duplicate only, and they need it");
+  // (rename and duplicate need `to`; remove and restore may say where in Trash, or where back to, as the client's
+  // log and the shared reducer have them (sync-reduce.ts remove(to), restore(to)); no other op has it)
+  if ((op.op === "rename" || op.op === "duplicate") && op.to === undefined) throw invalid("op: rename and duplicate need `to`");
+  if (op.to !== undefined && !TO_OPS.has(op.op)) throw invalid("op: `to` is for rename, duplicate, remove and restore only");
   if (has(o, "ref")) {
     if (typeof o.ref !== "string" || o.ref.length === 0 || o.ref.length > 1024) throw invalid("op: ref");
     op.ref = o.ref;
