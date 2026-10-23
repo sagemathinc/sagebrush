@@ -18,21 +18,26 @@ _SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 
 def _quote_plus(s):
     # (as urllib.parse.quote_plus: letters, digits and _.-~ as they are, a
-    # space as +, every other byte of its UTF-8 as %XX)
+    # space as +, every other byte as %XX: a str's bytes are its UTF-8, a
+    # bytes value's its own)
+    data = s if isinstance(s, bytes) else s.encode("utf-8")
     out = []
-    for ch in s:
+    for b in data:
+        ch = chr(b)
         if ch in _SAFE:
             out.append(ch)
-        elif ch == " ":
+        elif b == 0x20:
             out.append("+")
         else:
-            out.extend("%%%02X" % b for b in ch.encode("utf-8"))
+            out.append("%%%02X" % b)
     return "".join(out)
 
 
 def _urlencode(params):
-    # (as urllib.parse.urlencode of a dict: key=value, each str() and quoted, joined by &)
-    return "&".join(_quote_plus(str(k)) + "=" + _quote_plus(str(v)) for k, v in params.items())
+    # (as urllib.parse.urlencode of a dict: key=value, each quoted, joined
+    # by &; a bytes key or value as its bytes, anything else as its str())
+    q = lambda x: _quote_plus(x if isinstance(x, bytes) else str(x))
+    return "&".join(q(k) + "=" + q(v) for k, v in params.items())
 
 
 class IFrame:
