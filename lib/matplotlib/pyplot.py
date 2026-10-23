@@ -19,6 +19,8 @@ import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
+# (one rcParams: matplotlib's, with its defaults and its key checks)
+from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
 
 PT = 100 / 72  # pixels per point at 100 dpi
 
@@ -57,22 +59,8 @@ def _opaque(css):
             return css[:len(css) - (1 if len(css) == 5 else 2)]
     return css
 
-# rc settings (only those set: unset ones keep matplotlib's defaults below)
-rcParams = {}
 _NAMED_SIZES = {"xx-small": 0.579, "x-small": 0.694, "small": 0.833, "medium": 1.0, "large": 1.2, "x-large": 1.44,
                 "xx-large": 1.728, "larger": 1.2, "smaller": 0.833}
-_RC_ALIASES = {"fontsize": "size", "lw": "linewidth", "c": "color"}
-
-
-def rc(group, **kw):
-    """plt.rc('axes', titlesize=15): font sizes are honored, the rest is kept."""
-    for g in (group if isinstance(group, (list, tuple)) else [group]):
-        for k, v in kw.items():
-            rcParams["%s.%s" % (g, _RC_ALIASES.get(k, k))] = v
-
-
-def rcdefaults():
-    rcParams.clear()
 
 
 def _size_px(v, default_pt):
@@ -1509,21 +1497,6 @@ def yticks(ticks=None, labels=None, **kw):
 
 def colorbar(mappable=None, cax=None, ax=None, **kw):
     return _colorbar(gcf(), mappable, cax, ax, **kw)
-
-
-def rc_context(rc=None):
-    import contextlib
-
-    @contextlib.contextmanager
-    def ctx():
-        saved = dict(rcParams)
-        rcParams.update(rc or {})
-        try:
-            yield
-        finally:
-            rcParams.clear()
-            rcParams.update(saved)
-    return ctx()
 
 
 def contourf(*args, **kw):
