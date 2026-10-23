@@ -8,7 +8,7 @@
 
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
-import { NDArray, empty, toDtype, ascontig, copy as npcopy } from "./numpy";
+import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
@@ -16,6 +16,15 @@ import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
 const F64 = () => toDtype("float64");
+
+// An operation's working memory, admitted before anything is allocated
+// (LIMIT-PR55-3): `units` float64s, an upper bound of what it allocates (its
+// float64 copies of the operands, work arrays, WebAssembly buffers, and the
+// outputs), from the matrix sizes alone
+function work(units: number, what: string): void {
+  admitWork(8 * units, what);
+}
+const dims = (a: NDArray): [number, number] => (a.ndim === 2 ? [a.shape[0], a.shape[1]] : [0, 0]);
 
 // A float64 copy of a 2-D matrix: [data, rows, cols]
 function mat(a: NDArray): [Float64Array, number, number] {
@@ -1195,6 +1204,9 @@ newBuiltinModule("_nplinalg", (m) => {
   fn("wasm", () => wasmKernels());
   fn("wasm_fma", () => wasmFusedFMA());
   fn("det", (a: NDArray) => {
+    // (mat's two copies, LU's working copy and WebAssembly's)
+    const [r0, c0] = dims(a);
+    work(5 * r0 * c0, "det");
     const [A, r, c] = mat(a);
     if (r !== c) linalgError("Last 2 dimensions of the array must be square");
     const L = lu(A, r);
@@ -1209,6 +1221,8 @@ newBuiltinModule("_nplinalg", (m) => {
     return sign * glibcExp(logdet);
   });
   fn("slogdet", (a: NDArray) => {
+    const [r0, c0] = dims(a);
+    work(5 * r0 * c0, "slogdet");
     const [A, r] = mat(a);
     const L = lu(A, r);
     let sign = L.sign, logdet = 0;
@@ -1221,6 +1235,10 @@ newBuiltinModule("_nplinalg", (m) => {
     return tuple([sign, logdet]);
   });
   fn("solve", (a: NDArray, b: NDArray) => {
+    // (A: mat's copies, LU and WebAssembly's; B: its column copy, mat's
+    // copies, the solution and the output)
+    const [r0, c0] = dims(a);
+    work(5 * r0 * c0 + 6 * b.size, "solve");
     const [A, n, c] = mat(a);
     if (n !== c) linalgError("Last 2 dimensions of the array must be square");
     const vec = b.ndim === 1;
@@ -1234,6 +1252,9 @@ newBuiltinModule("_nplinalg", (m) => {
     return out(X, vec ? [n] : [n, bc]);
   });
   fn("inv", (a: NDArray) => {
+    // (as det's, and the identity, the solution and the output)
+    const [r0, c0] = dims(a);
+    work(10 * r0 * c0, "inv");
     const [A, n, c] = mat(a);
     if (n !== c) linalgError("Last 2 dimensions of the array must be square");
     const L = lu(A, n);
@@ -1243,11 +1264,18 @@ newBuiltinModule("_nplinalg", (m) => {
     return out(luSolve(L, n, I, n), [n, n]);
   });
   fn("qr", (a: NDArray, complete: any) => {
+    // (mat's copies, Q (r x r when complete), R, WebAssembly's buffers and
+    // copies of both, and the outputs)
+    const [r0, c0] = dims(a);
+    const q0 = complete ? r0 : Math.min(r0, c0);
+    work(3 * r0 * c0 + 3 * r0 * q0 + 3 * q0 * c0, "qr");
     const [A, r, c] = mat(a);
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
   fn("cholesky", (a: NDArray) => {
+    const [r0, c0] = dims(a);
+    work(5 * r0 * c0, "cholesky");
     const [A, n] = mat(a);
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
@@ -1265,6 +1293,10 @@ newBuiltinModule("_nplinalg", (m) => {
     return out(L, [n, n]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
+    // (mat's copies, the symmetric copy, the eigenvectors in and out of
+    // WebAssembly, the outputs)
+    const [r0, c0] = dims(a);
+    work(10 * r0 * c0 + 8 * r0, "eigh");
     const [A, n] = mat(a);
     // use one triangle, as LAPACK (UPLO='L' by default)
     const S = new Float64Array(n * n);
@@ -1273,6 +1305,10 @@ newBuiltinModule("_nplinalg", (m) => {
     return tuple([out(w, [n]), out(v, [n, n])]);
   });
   fn("eig", (a: NDArray, nobalance: any) => {
+    // (mat's copies, balancing, the Hessenberg and Schur work (JS arrays of
+    // rows), the complex eigenvectors, WebAssembly's buffers, the outputs)
+    const [r0, c0] = dims(a);
+    work(20 * r0 * c0 + 16 * r0, "eig");
     const [A, n, c] = mat(a);
     if (n !== c) linalgError("Last 2 dimensions of the array must be square");
     for (const v of A) if (!Number.isFinite(v)) linalgError("Array must not contain infs or NaNs");
@@ -1294,6 +1330,11 @@ newBuiltinModule("_nplinalg", (m) => {
     return tuple([w, v]);
   });
   fn("svd", (a: NDArray, fullMatrices: any, computeUV: any) => {
+    // (mat's copies, U and V as rows and as columns, the transpose work,
+    // WebAssembly's buffers, the completed bases and the outputs)
+    const [r0, c0] = dims(a);
+    const k0 = Math.min(r0, c0), K0 = Math.max(r0, c0);
+    work(10 * r0 * c0 + 10 * k0 * k0 + (fullMatrices && computeUV ? 6 * K0 * K0 : 0) + 4 * (r0 + c0), "svd");
     const [A, r, c] = mat(a);
     const [U, S, V] = svd(A, r, c);
     const k = Math.min(r, c);
