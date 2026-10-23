@@ -49,7 +49,7 @@ export const PINS = {
   afterSlice: null as null | (() => Promise<unknown>),
   /** (tests: called in bytesFor's transaction right after the value is read, before anything is marked or
    * committed: throwing aborts it, as a page killed there would) */
-  cutAfterRead: null as null | (() => void),
+  cutAfterRead: null as null | ((rec: { id: string; op: { sha256?: string } }) => void),
 };
 /** The stores a local change's transaction takes for this, besides its own. */
 export const SYNC_STORES = ["pending", "pins", "meta"];
@@ -639,7 +639,7 @@ export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pi
       return ("version" in p.storage ? await req(tx.objectStore("versionBytes").get(p.storage.version)) : await req(tx.objectStore("fileBytes").get(p.storage.fileBytes))) as Uint8Array | undefined;
     };
     const v = await read();
-    PINS.cutAfterRead?.();
+    PINS.cutAfterRead?.(rec);
     if (v === "mismatch") return found("mismatch");
     // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent; "length", as they were read)
     if (v !== undefined && v.length !== size) return found("length");

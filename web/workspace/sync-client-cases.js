@@ -944,7 +944,8 @@ async function cutRead() {
   const f = await w.create("/after-cut.bin", { content: bytes(300, 92) });
   await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").put(bytes(3000, 93), f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
   let cuts = 0;
-  W.PINS.cutAfterRead = () => { cuts++; W.PINS.cutAfterRead = null; throw new Error("cut (test)"); };
+  // (only this file's read: a client of an earlier case still finishing a read never takes the cut)
+  W.PINS.cutAfterRead = (rec) => { if (rec.id !== f.fid) return; cuts++; W.PINS.cutAfterRead = null; throw new Error("cut (test)"); };
   const c = client(w);
   check(await until(() => cuts === 1), "cut read: the read cut after its value was materialized");
   await sleep(300);
