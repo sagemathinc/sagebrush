@@ -7528,7 +7528,9 @@ class _MExtMap(MMap):
     printed as Magma's (no rule shown)."""
 
     def __repr__(self):
-        return "Mapping from: %s to %s" % (_struct_name(self.dom), _struct_name(self.cod))
+        # (a field no global variable holds is GF(q) here, as Magma's)
+        name = lambda F: _struct_name(F) if _global_name(F) is not None else _gf_name(F)
+        return "Mapping from: %s to %s" % (name(self.dom), name(self.cod))
 
 
 def _ext(F, args, pos):
