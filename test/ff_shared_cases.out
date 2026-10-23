@@ -1,0 +1,33 @@
+first target True b^2 + b
+image for the second target True
+second target True c^2 + c
+interleaved [(True, 'b^2 + b + 1'), (True, 'c^2 + c + 1'), (True, 'b^2 + b + 1'), (True, 'c^2 + c + 1')] 1
+sage z2 + z4 z4^2 [(2, 2, 4)]
+magma same field objects True True
+magma a + b $.1^2 [(2, 2, 4)]
+magma a + c $.1^61 [(2, 2, 4), (2, 2, 6), (2, 3, 6)]
+sage z3 * z6 z6^5 + z6^4 + 1 [(2, 2, 4), (2, 2, 6), (2, 3, 6)]
+coerce up [('charge', 1), ('up', 1)] z4^2 + z4
+descend [('charge', 1), ('down', 1)] z2
+pushout [('admit', 1), ('charge', 3), ('up', 2)] Finite Field in z6 of size 2^6
+Hom [('charge', 1), ('conjugates', 1)] 2
+hom check [('charge', 1)] [b^2 + b]
+hom apply [('apply', 1), ('charge', 2)] b^2 + b + 1
+subfields [('charge', 2), ('subfields_admit', 1), ('up', 1)] 3
+coerce_map_from [('charge', 1), ('up', 1)] [z4^2 + z4]
+prime value [] 1
+common field past 2^20 NotImplementedError arithmetic of elements of Finite Field in z11 of size 2^11 and Finite Field in z10 of size 2^10 is not supported yet
+embedding past 2^20 NotImplementedError coercion of elements of Finite Field in z3 of size 2^3 and Finite Field in z21 of size 2^21 is not supported yet
+GF(2^21) itself 2097152
+prime degree past 2^20 refused NotImplementedError made 0 unchanged True subfields of Finite Field in u of size 3^13 are not supported yet
+prime degree past 2^20, itself refused NotImplementedError made 0 unchanged True subfields of Finite Field in u of size 3^13 are not supported yet
+prime degree past 2^20, characteristic 2 refused NotImplementedError made 0 unchanged True subfields of Finite Field in v of size 2^23 are not supported yet
+composite past 2^20 refused NotImplementedError made 0 unchanged True subfields of Finite Field in w of size 2^21 are not supported yet
+composite past 2^20, one proper refused NotImplementedError made 0 unchanged True subfields of Finite Field in w of size 2^21 are not supported yet
+odd composite past 2^20 refused NotImplementedError made 0 unchanged True subfields of Finite Field in t of size 5^9 are not supported yet
+a name missing refused KeyError made 0 unchanged True 1
+aggregate one short refused NotImplementedError made 0 unchanged True subfields of Finite Field in r of size 2^20 are not supported yet
+aggregate exact admitted 6 made 8
+images [(2, 2, 20), (2, 4, 20), (2, 5, 20), (2, 10, 20)]
+conway missing refused NotImplementedError made 0 unchanged True subfields of Finite Field in r of size 2^20 are not supported yet
+fault at the reservation refused NotImplementedError made 0 unchanged True injected fault
