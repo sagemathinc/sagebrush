@@ -1,5 +1,5 @@
 # Generated from ../test_ff_f2.sage by Sage's preparser (run_cpython.py --regen).
-_sage_const_4 = Integer(4); _sage_const_16 = Integer(16); _sage_const_7 = Integer(7); _sage_const_3 = Integer(3); _sage_const_64 = Integer(64); _sage_const_9 = Integer(9); _sage_const_5 = Integer(5); _sage_const_0 = Integer(0); _sage_const_1 = Integer(1); _sage_const_2 = Integer(2); _sage_const_10 = Integer(10); _sage_const_20 = Integer(20); _sage_const_41 = Integer(41); _sage_const_21 = Integer(21); _sage_const_11 = Integer(11); _sage_const_30 = Integer(30); _sage_const_13 = Integer(13); _sage_const_8 = Integer(8); _sage_const_25 = Integer(25)# Finite fields, F2 of plan-finite-fields (Sage's side of the shared core):
+_sage_const_4 = Integer(4); _sage_const_16 = Integer(16); _sage_const_3 = Integer(3); _sage_const_64 = Integer(64); _sage_const_7 = Integer(7); _sage_const_9 = Integer(9); _sage_const_5 = Integer(5); _sage_const_0 = Integer(0); _sage_const_1 = Integer(1); _sage_const_2 = Integer(2); _sage_const_10 = Integer(10); _sage_const_20 = Integer(20); _sage_const_41 = Integer(41); _sage_const_21 = Integer(21); _sage_const_11 = Integer(11); _sage_const_30 = Integer(30); _sage_const_13 = Integer(13); _sage_const_8 = Integer(8); _sage_const_25 = Integer(25)# Finite fields, F2 of plan-finite-fields (Sage's side of the shared core):
 # trace, norm, minimal and characteristic polynomials, nth_root where its
 # answer is determined (one root, or none), extension, and the field data
 # (prime_subfield, gen, modulus). Expected output from Sage 10.9.
@@ -8,7 +8,11 @@ def t(label, f):
         print(label, f())
     except Exception as e:
         print(label, type(e).__name__, str(e))
-F = GF(_sage_const_4 , names=('a',)); (a,) = F._first_ngens(1); K = GF(_sage_const_16 , names=('b',)); (b,) = K._first_ngens(1); P = GF(_sage_const_7 ); Q = GF(_sage_const_3 **_sage_const_4 , names=('e',)); (e,) = Q._first_ngens(1); L = GF(_sage_const_64 , names=('d',)); (d,) = L._first_ngens(1); Z4 = GF(_sage_const_16 )
+F = GF(_sage_const_4 , names=('a',)); (a,) = F._first_ngens(1)
+K = GF(_sage_const_16 , names=('b',)); (b,) = K._first_ngens(1)
+Q = GF(_sage_const_3 **_sage_const_4 , names=('e',)); (e,) = Q._first_ngens(1)
+L = GF(_sage_const_64 , names=('d',)); (d,) = L._first_ngens(1)
+P = GF(_sage_const_7 ); Z4 = GF(_sage_const_16 )
 t('prime_subfield', lambda: (F.prime_subfield(), K.prime_subfield(), P.prime_subfield(), Q.prime_subfield()))
 t('gen', lambda: (F.gen(), K.gen(), Z4.gen()))
 t('modulus', lambda: (F.modulus(), K.modulus(), Q.modulus(), GF(_sage_const_9 ).modulus(), GF(_sage_const_3 **_sage_const_5 ).modulus()))

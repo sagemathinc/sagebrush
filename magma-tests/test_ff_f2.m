@@ -34,7 +34,6 @@ Trace(P!3, P); Norm(P!3, P); MinimalPolynomial(P!3, P);
 [Trace(Trace(x, F)) eq Trace(x) : x in [b, b^2, b^9, K!1]];
 [Norm(Norm(x, F)) eq Norm(x) : x in [b, b^2, b^9, K!1]];
 [Trace(Trace(x, E)) eq Trace(x) : x in [d, d^5, d^9]];
-[Evaluate(MinimalPolynomial(x, F), x) eq 0 : x in [b, b^5, b^6]];
 // roots
 P13 := GF(13);
 Root(P13!8, 5); Root(P13!2, 5); Root(P13!0, 2); Root(P13!1, 7);

@@ -1637,7 +1637,8 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
   // (Magma has these signatures: not Bad argument types)
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a RngUPolElt is not supported yet"), out);
-  assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldFinElt, FldFin is not supported yet"), out);
+  // (Trace(z, GF(3)), relative to a subfield, is implemented now: F2)
+  assert.doesNotMatch(out, /Trace of a FldFinElt, FldFin/);
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldQuadElt, FldRat is not supported yet"), out);
   // (a value whose type the signatures don't know)
   assert.ok(out.includes("Runtime error in 'Trace': Trace with these arguments is not supported yet"), out);
@@ -1658,9 +1659,9 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   const index = JSON.parse(spawnSync(process.execPath, [cli, "-m", "_magma_docsearch", "--index"], { encoding: "utf8" }).stdout);
   const trace = index.filter((e: any) => e.name === "Trace");
   assert.deepEqual(trace.map((e: any) => e.signature),
-    ["(<RngIntElt> x) -> RngIntElt", "(<FldRatElt> x) -> FldRatElt", "(<FldFinElt> x) -> FldFinElt", "(<FldAlgElt> x) -> RngElt", "(<MtrxS> a) -> RngElt"]);
-  assert.equal(new Set(trace.map((e: any) => e.summary)).size, 5);
-  assert.match(trace[4].summary, /square matrix/);
+    ["(<RngIntElt> x) -> RngIntElt", "(<FldRatElt> x) -> FldRatElt", "(<FldFinElt> x) -> FldFinElt", "(<FldFinElt> x, <FldFin> F) -> FldFinElt", "(<FldAlgElt> x) -> RngElt", "(<MtrxS> a) -> RngElt"]);
+  assert.equal(new Set(trace.map((e: any) => e.summary)).size, 6);
+  assert.match(trace[5].summary, /square matrix/);
   assert.match(trace[4].doc, /The signatures of Trace:\n\n[\s\S]*Trace\(<RngUPolElt> x1\) -> RngUPolElt    \(not supported yet\)/);
   // an intrinsic prints as Magma prints one, with Sagebrush's signatures and words
   const shown = spawnSync(process.execPath, [cli, "--magma"], { input: "Trace;\nFactorial;\n#Sprint(Trace) gt 0;\n", encoding: "utf8" }).stdout as string;

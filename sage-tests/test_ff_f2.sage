@@ -7,7 +7,11 @@ def t(label, f):
         print(label, f())
     except Exception as e:
         print(label, type(e).__name__, str(e))
-F.<a> = GF(4); K.<b> = GF(16); P = GF(7); Q.<e> = GF(3^4); L.<d> = GF(64); Z4 = GF(16)
+F.<a> = GF(4)
+K.<b> = GF(16)
+Q.<e> = GF(3^4)
+L.<d> = GF(64)
+P = GF(7); Z4 = GF(16)
 t('prime_subfield', lambda: (F.prime_subfield(), K.prime_subfield(), P.prime_subfield(), Q.prime_subfield()))
 t('gen', lambda: (F.gen(), K.gen(), Z4.gen()))
 t('modulus', lambda: (F.modulus(), K.modulus(), Q.modulus(), GF(9).modulus(), GF(3^5).modulus()))
