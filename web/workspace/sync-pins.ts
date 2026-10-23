@@ -47,6 +47,9 @@ export const PINS = {
   cleanAfter: null as Promise<unknown> | null,
   /** (tests: awaited between the cleanup's slices) */
   afterSlice: null as null | (() => Promise<unknown>),
+  /** (tests: called in bytesFor's transaction right after the value is read, before anything is marked or
+   * committed: throwing aborts it, as a page killed there would) */
+  cutAfterRead: null as null | (() => void),
 };
 /** The stores a local change's transaction takes for this, besides its own. */
 export const SYNC_STORES = ["pending", "pins", "meta"];
@@ -598,25 +601,45 @@ async function cleanSlice(w: Workspace, tag?: Tag): Promise<boolean> {
  * read), "length" if the bytes read aren't as long as their metadata says (daybreak3's LIMIT-PR58-2).  The reservation must cover the record's size: nothing is read that it
  * doesn't, by the metadata, and bytes longer than it are never hashed or sent.  Never other bytes under the
  * record's hash. */
-export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pin?: number; op: { sha256?: string; size?: number } }, token: Release): Promise<Uint8Array | undefined | "mismatch" | "length"> {
+export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pin?: number; op: { sha256?: string; size?: number } }, token: Release, marks?: { mismatch: string; untrusted: string; reading: string; ns: string; dseq: number }): Promise<Uint8Array | undefined | "mismatch" | "length"> {
   if (!rec.op.sha256) return undefined;
   if (!token.live()) throw new Error("sync: bytes read in the name of a reservation that isn't held");
   const size = rec.op.size;
   if (size === undefined || !Number.isSafeInteger(size) || size < 0) return "mismatch";
   if (token.n < size) throw new Error("sync: bytes read in the name of a reservation smaller than they are");
-  const b = await inTx(w.ws, ["entries", "pins", "fileBytes", "versionBytes"], "readonly", async (tx) => {
-    const e = (await req(tx.objectStore("entries").index("byIdent").get(rec.id))) as Entry | undefined;
-    if (e?.kind === "file" && e.migrated && e.sha256 === rec.op.sha256) {
-      if (e.size !== size) return "mismatch" as const;
-      return (await req(tx.objectStore("fileBytes").get(e.fid!))) as Uint8Array | undefined;
-    }
-    const p = (await req(tx.objectStore("pins").get([rec.id, rec.pin ?? rec.lseq]))) as Pin | undefined;
-    if (!p || p.sha256 !== rec.op.sha256) return undefined;
-    if (p.size !== size) return "mismatch" as const;
-    return ("version" in p.storage ? await req(tx.objectStore("versionBytes").get(p.storage.version)) : await req(tx.objectStore("fileBytes").get(p.storage.fileBytes))) as Uint8Array | undefined;
+  // (with `marks`: what is found is marked in the very transaction that finds it (daybreak3): a mismatch's own mark,
+  // and, for bytes read and found to be another length, the workspace's bytes marked untrusted; the read-in-progress
+  // mark the caller made before is cleared in it too.  A crash before it commits leaves that mark, which the next
+  // start takes as untrusted bytes: so no crash lets an unreserved read happen twice)
+  const stores = ["entries", "pins", "fileBytes", "versionBytes", ...(marks ? ["meta"] : [])];
+  const b = await inTx(w.ws, stores, marks ? "readwrite" : "readonly", async (tx) => {
+    const found = (what: "mismatch" | "length") => {
+      if (!marks) return what;
+      const meta = tx.objectStore("meta");
+      meta.put(1, marks.mismatch);
+      if (what === "length") meta.put({ ns: marks.ns, dseq: marks.dseq }, marks.untrusted);
+      meta.delete(marks.reading);
+      return what;
+    };
+    const read = async (): Promise<Uint8Array | undefined | "mismatch"> => {
+      const e = (await req(tx.objectStore("entries").index("byIdent").get(rec.id))) as Entry | undefined;
+      if (e?.kind === "file" && e.migrated && e.sha256 === rec.op.sha256) {
+        if (e.size !== size) return "mismatch";
+        return (await req(tx.objectStore("fileBytes").get(e.fid!))) as Uint8Array | undefined;
+      }
+      const p = (await req(tx.objectStore("pins").get([rec.id, rec.pin ?? rec.lseq]))) as Pin | undefined;
+      if (!p || p.sha256 !== rec.op.sha256) return undefined;
+      if (p.size !== size) return "mismatch";
+      return ("version" in p.storage ? await req(tx.objectStore("versionBytes").get(p.storage.version)) : await req(tx.objectStore("fileBytes").get(p.storage.fileBytes))) as Uint8Array | undefined;
+    };
+    const v = await read();
+    PINS.cutAfterRead?.();
+    if (v === "mismatch") return found("mismatch");
+    // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent; "length", as they were read)
+    if (v !== undefined && v.length !== size) return found("length");
+    if (marks) tx.objectStore("meta").delete(marks.reading);
+    return v;
   });
-  if (b === undefined || b === "mismatch") return b;
-  // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent; "length", as they were read)
-  if (b.length !== size) return "length";
+  if (b === undefined || b === "mismatch" || b === "length") return b;
   return (await bytesHash(b)) === rec.op.sha256 ? b : undefined;
 }

@@ -111,6 +111,8 @@ const key = (ns: string, what: string) => `sync:${ns}:${what}`;
 const mismatchKey = (ns: string, dseq: number) => key(ns, "mismatch:" + String(dseq).padStart(16, "0"));
 /** this workspace's stored bytes were once found longer or shorter than their metadata (LIMIT-PR58-2) */
 const UNTRUSTED = "sync:bytes-untrusted";
+/** a narrow upload read in progress (cleared in the transaction that reads; left by a page killed in it) */
+const READING = "sync:bytes-reading";
 const META = "meta";
 const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 // (the fields of an op that make it this op: what an echo must repeat of its record)
@@ -504,6 +506,9 @@ export class SyncClient {
     // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
     // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
     if (c.pages >= CLIENT.replayPages) {
+      // (the first rest's end stands until the slice resumes: a pull asked for meanwhile (each ack asks) never moves
+      // it later, astra's narrowed CORR-PR58-4)
+      if (this.wakes.has("replay")) return;
       return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => {
         c.pages = 0;
         this.pull(c);
@@ -832,10 +837,10 @@ export class SyncClient {
         // this one is read under the largest reservation, not the one it took before)
         const bytes = await this.oneRead(async () => {
           if (!wide && (await this.untrusted())) return "widen" as const;
-          const b = await bytesFor(this.w, r, token);
-          // (found here, the mark made before the next read may begin)
-          if (b === "length") await this.metaPut(UNTRUSTED, { at: this.clock.now(), ns: c.ns, dseq: r.dseq });
-          return b;
+          // (a narrow read is announced durably first: one that never ends (the page killed while it held the
+          // value) leaves this mark, and the next start then reads wide, daybreak3's third round)
+          if (!wide) await this.metaPut(READING, { ns: c.ns, dseq: r.dseq });
+          return bytesFor(this.w, r, token, { mismatch: mismatchKey(c.ns, r.dseq), untrusted: UNTRUSTED, reading: READING, ns: c.ns, dseq: r.dseq });
         });
         if (bytes === "widen") {
           wide = true;
@@ -907,8 +912,20 @@ export class SyncClient {
       if (low > 1) meta.delete(IDBKeyRange.bound(mismatchKey(c.ns, 0), mismatchKey(c.ns, low), false, true));
     });
   }
+  /** Whether the stored bytes are untrusted: one was found another length than its metadata, or a narrow read was
+   * cut short (its mark left: it may have held such a value), which is made durable here. */
   private async untrusted(): Promise<boolean> {
-    return (await this.metaGet(UNTRUSTED)) !== undefined;
+    return inTx(this.w.ws, META, "readwrite", async (tx) => {
+      const meta = tx.objectStore(META);
+      if ((await req(meta.get(UNTRUSTED))) !== undefined) return true;
+      // (while this page reads, the mark is its own read's, not one cut short)
+      if (this.stats.readsAtOnce > 0) return false;
+      const cut = await req(meta.get(READING));
+      if (cut === undefined) return false;
+      meta.put({ cut }, UNTRUSTED);
+      meta.delete(READING);
+      return true;
+    });
   }
   /** `f`, the only upload read running: bytes read one value at a time (LIMIT-PR58-2). */
   private reading: Promise<unknown> = Promise.resolve();
