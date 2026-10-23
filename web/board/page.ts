@@ -42,6 +42,7 @@ import { BoardCode, siteEngine } from "./code";
 import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
 import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
+import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
@@ -912,30 +913,21 @@ const host: BoardHost = {
     // revision said winning; Edit not offered)
     ...(fromLocal && localInfo ? {
       subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) {
-        let want = "", reading = false, stopped = false;
-        const next = async () => {
-          if (reading || stopped || !want || want === localShown) return;
-          reading = true;
-          try {
-            const target = want, r = await localRead();
-            if (stopped) return;
-            // (the file said to have changed again while it was read: read once more; else this version, good or not)
-            if (want !== target) return;
-            localShown = r.revision || target;
-            if (r.doc) { localBar(null); await f(r.doc, r.notice || undefined); }
-            else localBar(localTrouble(r.error ?? "unknown"));
-          } catch (e: any) {
-            localBar(`Couldn't read ${localInfo.name} from \`sagebrush board open\`: ${String(e?.message ?? e).slice(0, 300)}`);
-          } finally {
-            reading = false;
-            if (!stopped) void next();
-          }
-        };
-        const es = new EventSource(`events?key=${localInfo.key}`);
-        es.addEventListener("board", (e) => { const rev = String((e as MessageEvent).data).slice(0, 64); if (/^[0-9a-f]{64}$/.test(rev)) { want = rev; void next(); } });
-        es.onerror = () => { if (!stopped) localBar("`sagebrush board open` isn't answering (stopped?). This page shows the board as it last was; run the command again to follow the file."); };
-        es.onopen = () => { if (document.getElementById("sbb-local")?.textContent?.startsWith("`sagebrush board open` isn't")) localBar(null); };
-        return () => { stopped = true; es.close(); };
+        // (the bar a failed read or the stopped server put up: the one `answering` takes down)
+        let transient = false;
+        return localFollow({
+          events: () => new EventSource(`events?key=${localInfo.key}`) as any,
+          read: localRead,
+          show: (d, note) => f(d as BoardDoc, note),
+          shown: localShown,
+          trouble: (t) => {
+            if (t === null) { transient = false; localBar(null); }
+            else if ("error" in t) { transient = false; localBar(localTrouble(t.error)); }
+            else if ("failed" in t) { transient = true; localBar(`Couldn't read ${localInfo.name} from \`sagebrush board open\`: ${t.failed} (trying again)`); }
+            else if ("stopped" in t) { transient = true; localBar("`sagebrush board open` isn't answering (stopped?). This page shows the board as it last was; run the command again to follow the file."); }
+            else if (transient) { transient = false; localBar(null); }
+          },
+        });
       },
       editing(f: (s: EditingState) => void) { f({ allowed: false, hidden: true }); return () => {}; },
     } : {}),
