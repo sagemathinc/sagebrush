@@ -1,0 +1,53 @@
+# Generated from ../test_ff_embed.sage by Sage's preparser (run_cpython.py --regen).
+_sage_const_4 = Integer(4); _sage_const_16 = Integer(16); _sage_const_8 = Integer(8); _sage_const_64 = Integer(64); _sage_const_1 = Integer(1); _sage_const_5 = Integer(5); _sage_const_9 = Integer(9); _sage_const_21 = Integer(21); _sage_const_2 = Integer(2); _sage_const_15 = Integer(15); _sage_const_0 = Integer(0)# Embeddings and coercions between finite fields (plan-ff1-shared-core):
+# prefix fields (GF(q) given no name, or prefix=...) coerce Conway-compatibly
+# into prefix fields of a multiple degree; named fields only have explicit
+# maps (Hom, hom, subfields). Expected output from Sage 10.9 (sagebrush's own
+# inputs, after astra's probe).
+def t(label, f):
+    try:
+        print(label, f())
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+F = GF(_sage_const_4 , names=('a',)); (a,) = F._first_ngens(1); K = GF(_sage_const_16 , names=('b',)); (b,) = K._first_ngens(1); E = GF(_sage_const_8 , names=('c',)); (c,) = E._first_ngens(1); L = GF(_sage_const_64 , names=('d',)); (d,) = L._first_ngens(1)
+t('named map', lambda: K.has_coerce_map_from(F))
+t('named call', lambda: K(a))
+t('named scalar', lambda: K(F(_sage_const_1 )))
+t('named sum', lambda: a + b)
+t('named membership', lambda: (a in K, b**_sage_const_5  in F))
+t('Hom repr', lambda: Hom(F, K))
+t('Hom list', lambda: list(Hom(F, K)))
+t('Hom len', lambda: len(Hom(F, K)))
+t('Hom EL', lambda: list(Hom(E, L)))
+t('Hom FF', lambda: (Hom(F, F), list(Hom(F, F))))
+t('Hom empty', lambda: (len(Hom(F, E)), list(Hom(F, E)), len(Hom(F, GF(_sage_const_9 , 'h')))))
+t('hom good', lambda: K.hom([b], K) if False else F.hom([b**_sage_const_5 ], K))
+t('hom bad', lambda: F.hom([b], K))
+t('hom natural', lambda: F.hom(K))
+t('hom call', lambda: (F.hom([d**_sage_const_21 ], L)(a + _sage_const_1 ), F.hom([d**_sage_const_21 ], L).im_gens(), F.hom([a + _sage_const_1 ], F)(a)))
+t('subfields', lambda: K.subfields())
+t('subfields 64', lambda: L.subfields())
+Z2 = GF(_sage_const_4 ); Z3 = GF(_sage_const_8 ); Z4 = GF(_sage_const_16 ); Z6 = GF(_sage_const_64 ); W2 = GF(_sage_const_4 , prefix='w'); W3 = GF(_sage_const_8 , prefix='w'); W4 = GF(_sage_const_16 , prefix='w')
+t('same prefix', lambda: (Z4.has_coerce_map_from(Z2), Z4(Z2.gen()), W4.has_coerce_map_from(W2), W4(W2.gen())))
+t('descent', lambda: Z2(Z4.gen()**_sage_const_5 ))
+t('bad descent', lambda: Z2(Z4.gen()))
+t('nonnested', lambda: (Z2.gen() + Z3.gen(), parent(Z2.gen() + Z3.gen()), parent(Z2.gen() * Z3.gen())))
+t('nonnested call', lambda: Z2(Z3.gen()))
+t('nonnested call one', lambda: Z2(Z3(_sage_const_1 )))
+t('in by value', lambda: (Z4.gen()**_sage_const_5  in Z2, Z4.gen() in Z2, Z2.gen() in Z4, Z3.gen() in Z2))
+t('eq', lambda: (Z2.gen() == Z4.gen()**_sage_const_5 , Z2.gen() == Z3.gen(), Z2(_sage_const_1 ) == Z3(_sage_const_1 )))
+t('cross prefix', lambda: (W4.has_coerce_map_from(Z2), W4(Z2.gen()), Z2.gen() + W4.gen(), Z2(_sage_const_1 ) == W4(_sage_const_1 ), Z2(_sage_const_1 ) in W4))
+t('cross nonnested', lambda: Z2.gen() + W3.gen())
+t('named-prefix map', lambda: (Z4.has_coerce_map_from(F), K.has_coerce_map_from(Z2)))
+N2 = GF(_sage_const_4 , 'z2'); N4 = GF(_sage_const_16 , 'z4')
+t('named z-looking', lambda: (Z4.has_coerce_map_from(N2), N4.has_coerce_map_from(Z2), N4.has_coerce_map_from(N2), N2 is Z2, N2.gen() == Z2.gen()))
+t('named self', lambda: (F.has_coerce_map_from(F), F(a), a in F))
+t('prefix hom', lambda: (Z2.hom(Z4), list(Hom(Z2, Z4))))
+t('prefix subfields', lambda: Z4.subfields())
+t('coerce maps', lambda: (Z4.coerce_map_from(Z2), Z4.coerce_map_from(GF(_sage_const_2 )), Z3.coerce_map_from(Z2)))
+t('product', lambda: Z2.gen() * Z6.gen())
+P = GF(_sage_const_2 )
+t('prime value', lambda: (P(Z4(_sage_const_1 )), P(Z4.gen()**_sage_const_15 ), P(b**_sage_const_15 )))
+t('prime not in', lambda: P(b))
+t('prime in', lambda: (Z4(_sage_const_1 ) in P, Z4.gen() in P, b**_sage_const_0  in P))
+t('prime coerce', lambda: (P.has_coerce_map_from(Z4), Z4.has_coerce_map_from(P)))

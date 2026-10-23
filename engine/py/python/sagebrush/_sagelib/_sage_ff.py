@@ -232,8 +232,13 @@ class IntegerModRing_:
             if "/" in s:
                 return self(_F(s))
             return self(int(s))
-        if isinstance(x, FiniteFieldElement) and x._parent._p == self._n and x.is_in_prime_field():
-            return _elt(self, x._c[0])
+        if isinstance(x, FiniteFieldElement) and x._parent._p == self._n:
+            # (by value, the shared core's prime-field test; else Sage's
+            # error, naming the prime field's embedding)
+            v = _ffsub().prime_value(x)
+            if v is None:
+                raise ValueError("%s is not in the image of (map internal to coercion system -- copy before use)\nRing morphism:\n  From: %r\n  To:   %r" % (x, self, x._parent))
+            return _elt(self, v)
         tn = type(x).__name__
         if tn in ("AlgebraicNumber", "AlgebraicReal"):
             # (an algebraic number converts when it is rational; otherwise
@@ -1325,22 +1330,92 @@ def conway_polynomial(p, n):
     return R(_conway(p, n))
 
 
-def _conway(p, n):
-    """Coefficients (constant first) of the Conway polynomial C_{p,n}."""
+class ConwayBudgetExceeded(NotImplementedError):
+    """A cold Conway search that would pass its work budget (see _conway)."""
+
+
+def _conway_charge(budget, cops, p, n):
+    if budget is not None:
+        if cops > budget[0]:
+            raise ConwayBudgetExceeded("the Conway polynomial for %d^%d is beyond the bounded search here" % (p, n))
+        budget[0] -= cops
+
+
+# a cold search for one Conway polynomial (GF, conway_polynomial, in Sage and
+# Magma modes alike) does at most this much work, counted by _conway's budget
+# (prime-field coefficient operations).  Measured cold over every p^n <= 10^7
+# that GF admits (all 555 with n >= 2), the most is C_max = 594,117,177, for
+# GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
+# field admitted before is admitted still.  A common field made inside an
+# embedding (_sage_ffsub) has that operation's budget instead.
+CONWAY_WORK = 653528895
+
+
+def _conway(p, n, budget=None):
+    """Coefficients (constant first) of the Conway polynomial C_{p,n}.
+
+    budget: None (a fresh CONWAY_WORK; the p^n <= 10^7 cutoff too), or a
+    one-element list holding the caller's remaining work in prime-field
+    coefficient operations, charged before each step of a cold search (the
+    factoring of p^n - 1, each primitive-root candidate, each polynomial
+    candidate, with M(n) = 2 n^2 w(p) per product) and shared by the
+    recursive construction of the subfields; ConwayBudgetExceeded when it
+    would pass.  Cache hits are free."""
     key = (p, n)
     if key in _CONWAY:
         return _CONWAY[key]
+    if budget is None:
+        budget = [CONWAY_WORK]
+    # (transactional: every polynomial the search finds, the subfields'
+    # too, is staged and committed only once the target is found, so a
+    # refusal, an error or an interrupt leaves _CONWAY as it was;
+    # daybreak2 LIMIT-PR48-1)
+    stage = {}
+    c = _conway_search(p, n, budget, stage)
+    _CONWAY.update(stage)
+    return c
+
+
+def _conway_search(p, n, budget, stage):
+    """_conway's search, reading _CONWAY and the operation's stage and
+    writing found polynomials into the stage only."""
+    key = (p, n)
+    if key in _CONWAY:
+        return _CONWAY[key]
+    if key in stage:
+        return stage[key]
+    w = max(1, -(-p.bit_length() // 30)) ** 2
     if n == 1:
-        g = int(primitive_root(p)) if p > 2 else 1
+        if p == 2:
+            g = 1
+        elif budget is None:
+            g = int(primitive_root(p))
+        else:
+            # (the least primitive root, each candidate charged first: the
+            # prime factors of p - 1 by trial division, then one power per
+            # factor; p <= 10^7 here, the cardinality cutoff below)
+            if p > 10 ** 7:
+                raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
+            _conway_charge(budget, 3163 * w, p, n)
+            fs = [r for r, e in _factor_int(p - 1)]
+            g = 1
+            while True:
+                g += 1
+                _conway_charge(budget, (len(fs) + 1) * 2 * p.bit_length() * w, p, n)
+                if all(pow(g, (p - 1) // r, p) != 1 for r in fs):
+                    break
         c = [(-g) % p, 1]
-        _CONWAY[key] = c
+        stage[key] = c
         return c
     if p ** n > 10 ** 7:
         raise NotImplementedError("the Conway polynomial for %d^%d is beyond the exhaustive search here (give modulus=...)" % (p, n))
+    _conway_charge(budget, 3163 * w, p, n)  # (trial factoring of p^n - 1 <= 10^7)
     primes = [r for r, e in _factor_int(p ** n - 1)]
     subs = [m_ for m_ in range(1, n) if n % m_ == 0]
-    sub_polys = [(m_, _conway(p, m_)) for m_ in subs]
+    sub_polys = [(m_, _conway_search(p, m_, budget, stage)) for m_ in subs]
     q1 = p ** n - 1
+    mn = 2 * n * n * w                  # one product mod the candidate, M(n)
+    expo = 2 * q1.bit_length() * mn     # one power x^e, e < p^n
     # enumerate (c_{n-1}, ..., c_0) lexicographically; the coefficient of
     # x^(n-i) is (-1)^i c_{n-i}
     for idx in range(p ** n):
@@ -1355,13 +1430,21 @@ def _conway(p, n):
         for i in range(1, n + 1):
             c = digits[i - 1]
             coeffs[n - i] = c if i % 2 == 0 else (-c) % p
+        _conway_charge(budget, n, p, n)  # (the candidate itself)
         if coeffs[0] == 0:
             continue
-        if not _is_primitive_poly(coeffs, p, n, primes):
+        # x primitive mod the candidate (as _is_primitive_poly), each power
+        # charged before it is taken: most candidates fail the first
+        _conway_charge(budget, expo, p, n)
+        if _ppowmod([0, 1], q1, coeffs, p) != [1]:
+            continue
+        _conway_charge(budget, len(primes) * expo, p, n)
+        if any(_ppowmod([0, 1], q1 // r, coeffs, p) == [1] for r in primes):
             continue
         ok = True
         for m_, cm in sub_polys:
             e = q1 // (p ** m_ - 1)
+            _conway_charge(budget, expo + len(cm) * (mn + m_), p, n)
             # the norm of x to GF(p^m) is x^e: a root of C_{p,m}
             xe = _ppowmod([0, 1], e, coeffs, p)
             val = []
@@ -1373,7 +1456,7 @@ def _conway(p, n):
                 ok = False
                 break
         if ok:
-            _CONWAY[key] = coeffs
+            stage[key] = coeffs
             return coeffs
     raise ArithmeticError("no Conway polynomial found")
 
@@ -1396,6 +1479,8 @@ class FiniteField_ext:
         sage: k.modulus(), list(k)
         (x^2 + 2*x + 2, [0, a, a + 1, 2*a + 1, 2, 2*a, 2*a + 2, a + 2, 1])
     """
+
+    _prefix = None  # (the prefix of a prefix field, GF made it; None for a named one)
 
     def __init__(self, p, n, name, modulus):
         self._p, self._n, self._name = p, n, name
@@ -1603,11 +1688,10 @@ class FiniteField_ext:
         if isinstance(x, FiniteFieldElement):
             if x._parent is self:
                 return x
-            if x._parent._p == self._p and x.is_in_prime_field():
-                return self._make([x._c[0]])
-            # Sage's message for givaro fields (q < 2^16, checked with the
-            # Sage oracle); Sage's other backends word it differently
-            raise TypeError("unable to coerce from a finite field other than the prime subfield")
+            # (as Sage's: up along a coercion, down by value along one into
+            # x's field, else no conversion, even of a prime-field value;
+            # the shared bounded core does the work)
+            return _ff_convert(x, self)
         if isinstance(x, IntegerMod):
             if x._parent._n == self._p:
                 return self._make([x._v])
@@ -1851,8 +1935,6 @@ class FiniteFieldElement:
         if isinstance(b, FiniteFieldElement):
             if b._parent is self._parent:
                 return b
-            if b._parent._p == self._parent._p and b.is_in_prime_field():
-                return self._parent._make([b._c[0]])
             _no_coercion(op, self, b)
         if isinstance(b, IntegerMod):
             if b._parent._n == self._parent._p:
@@ -1865,6 +1947,9 @@ class FiniteFieldElement:
         return None
 
     def __add__(self, b):
+        if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
+            a, b = _ff_pair(self, b, "+")
+            return a.__add__(b)
         b = self._coerce(b, "+")
         if b is None:
             return NotImplemented
@@ -1874,6 +1959,9 @@ class FiniteFieldElement:
     __radd__ = __add__
 
     def __sub__(self, b):
+        if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
+            a, b = _ff_pair(self, b, "-")
+            return a.__sub__(b)
         b = self._coerce(b, "-")
         if b is None:
             return NotImplemented
@@ -1894,6 +1982,9 @@ class FiniteFieldElement:
         return self
 
     def __mul__(self, b):
+        if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
+            a, b = _ff_pair(self, b, "*")
+            return a.__mul__(b)
         b = self._coerce(b, "*")
         if b is None:
             return NotImplemented
@@ -1910,6 +2001,9 @@ class FiniteFieldElement:
         return K._make(_pxgcd_inverse(_ptrim(list(self._c)), K._f, K._p))
 
     def __truediv__(self, b):
+        if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
+            a, b = _ff_pair(self, b, "/")
+            return a.__truediv__(b)
         b = self._coerce(b, "/")
         if b is None:
             return NotImplemented
@@ -1941,6 +2035,12 @@ class FiniteFieldElement:
     def __eq__(self, b):
         if getattr(b, "_is_ffmatrix", False):
             return NotImplemented  # (the matrix compares: a == A as A == a)
+        if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
+            try:
+                a, b = _ff_pair(self, b, "==")
+            except TypeError:
+                return False
+            return a._c == b._c
         try:
             b = self._coerce(b, "==")
         except TypeError:
@@ -2283,7 +2383,14 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=None, **kwds
             _RINGS[key] = IntegerModRing_(p, field_repr=True)
             _RINGS[key]._prime = True
         return _RINGS[key]
-    name = _gf_name(q, names) or _gf_name(q, name) or "z%d" % n
+    # a field given no name is a prefix field (Sage's: GF(4) is z2, GF(16,
+    # prefix='w') w4): prefix fields of one characteristic coerce into those
+    # of a multiple degree (Conway-compatibly, lib/_sage_ffsub.py); a named
+    # field, even GF(4, 'z2'), is another field, with no coercions but its
+    # prime field's (checked with Sage 10.9)
+    given = _gf_name(q, names) or _gf_name(q, name)
+    prefix = None if given is not None else str(kwds.get("prefix") or "z")
+    name = given if given is not None else "%s%d" % (prefix, n)
     if modulus is not None:
         if isinstance(modulus, str):
             raise NotImplementedError("named moduli (%r)" % modulus)
@@ -2301,13 +2408,404 @@ def GF(order, name=None, modulus=None, names=None, impl=None, proof=None, **kwds
     else:
         f = _conway(p, n)
         mod_key = None
-    key = ("GFext", p, n, name, mod_key)
+    if mod_key is not None:
+        prefix = None  # (a field with a modulus of its own: no coercions)
+    key = ("GFext", p, n, name, mod_key, prefix)
     if key not in _RINGS:
         _RINGS[key] = FiniteField_ext(p, n, name, f)
+        _RINGS[key]._prefix = prefix
     return _RINGS[key]
 
 
 FiniteField = GF
+
+
+# ---- coercions and embeddings between finite fields: Sage's surface on the
+# shared core, lib/_sage_ffsub.py (its budgets, its 2^20 bound, its one
+# image cache; plan-ff1-shared-core).  Checked with Sage 10.9: prefix fields
+# (GF(4) is z2) coerce Conway-compatibly into prefix fields of a multiple
+# degree, whatever their prefixes; named fields have only their prime
+# field's coercion, and explicit maps (Hom, hom, subfields).
+
+def _ffsub():
+    import _sage_ffsub
+    return _sage_ffsub
+
+
+def _is_finite_field(K):
+    return isinstance(K, FiniteField_ext) or (isinstance(K, IntegerModRing_) and getattr(K, "_prime", False))
+
+
+def _ff_char(K):
+    return K._n if isinstance(K, IntegerModRing_) else K._p
+
+
+def _ff_degree(K):
+    return 1 if isinstance(K, IntegerModRing_) else K._n
+
+
+def _ff_embeds(S, K):
+    """Whether Sage coerces the finite field S into K: S is K, or S is the
+    prime field of K's characteristic, or both are prefix fields (made with
+    no name) with deg S | deg K (GF(4) into GF(16, prefix='w'), but not
+    GF(4, 'z2') into GF(16))."""
+    if S is K:
+        return True
+    if not (_is_finite_field(S) and _is_finite_field(K)) or _ff_char(S) != _ff_char(K):
+        return False
+    if _ff_degree(S) == 1:
+        return True
+    return S._prefix is not None and getattr(K, "_prefix", None) is not None and K._n % S._n == 0
+
+
+def _ff_bounded(what, A, B):
+    """The refusal (a function making it) past the shared core's bounds."""
+    return lambda: NotImplementedError("%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)" % (what, A, B))
+
+
+def _ff_convert(x, K):
+    """K(x) for x in another finite field, as Sage: up along a coercion,
+    down by value along one into x's field (ValueError if x isn't in K),
+    else TypeError."""
+    A, S = x._parent, _ffsub()
+    if _ff_embeds(A, K):
+        return S.up(x, K, [S.WORK], _ff_bounded("coercion", A, K))
+    if _ff_embeds(K, A):
+        y = S.down(x, K, [S.WORK], _ff_bounded("coercion", A, K))
+        if y is None:
+            raise ValueError("%s is not in the image of (map internal to coercion system -- copy before use)\nRing morphism:\n  From: %r\n  To:   %r" % (x, K, A))
+        return y
+    # (Sage's message for its givaro fields)
+    raise TypeError("unable to coerce from a finite field other than the prime subfield")
+
+
+def _ff_pair(a, b, op):
+    """a and b, elements of two finite fields, in their common parent as
+    Sage's coercion model finds it: the field the other coerces into, or,
+    for prefix fields of one prefix neither in the other, the prefix field
+    of the lcm degree (GF(4) + GF(8) in GF(64)); else Sage's error.  One
+    budget, admitted before anything is made (_ffsub.admit)."""
+    A, B = a._parent, b._parent
+    if _ff_char(A) != _ff_char(B):
+        _no_coercion(op, a, b)
+    if _ff_embeds(B, A) or _ff_embeds(A, B):
+        prefix = None
+    elif A._prefix is not None and A._prefix == B._prefix:
+        prefix = A._prefix
+    else:
+        _no_coercion(op, a, b)
+    S = _ffsub()
+    refuse = _ff_bounded("a comparison" if op == "==" else "arithmetic", A, B)
+    U, paid = S.admit({id(A): 1, id(B): 1}, [A, B], [S.WORK], refuse, prefix)
+    return S.up(a, U, paid, refuse), S.up(b, U, paid, refuse)
+
+
+class FiniteFieldHomomorphism:
+    """A ring morphism between finite fields, as Sage prints it (from Hom,
+    hom, subfields, coerce_map_from), applied by the shared core.
+
+    EXAMPLES::
+
+        sage: F.<a> = GF(4); K.<b> = GF(16)
+        sage: f = F.hom([b^2 + b], K); f
+        Ring morphism:
+          From: Finite Field in a of size 2^2
+          To:   Finite Field in b of size 2^4
+          Defn: a |--> b^2 + b
+        sage: f(a + 1), f.im_gens()
+        (b^2 + b + 1, [b^2 + b])
+    """
+
+    def __init__(self, domain, codomain, img, identity=False):
+        self._domain, self._codomain, self._img, self._identity = domain, codomain, img, identity
+
+    def domain(self):
+        return self._domain
+
+    def codomain(self):
+        return self._codomain
+
+    def im_gens(self):
+        return [self._img]
+
+    def __call__(self, x):
+        x = self._domain(x)
+        S = _ffsub()
+        return S.apply(x, self._codomain, self._img, [S.WORK], _ff_bounded("a map", self._domain, self._codomain))
+
+    def __eq__(self, other):
+        return (isinstance(other, FiniteFieldHomomorphism) and self._domain is other._domain
+                and self._codomain is other._codomain and self._img == other._img)
+
+    def __hash__(self):
+        return hash((id(self._domain), id(self._codomain)))
+
+    def __repr__(self):
+        D, C = self._domain, self._codomain
+        if self._identity:
+            return "Identity endomorphism of %r" % D
+        g = "1" if _ff_degree(D) == 1 else D._name
+        if D is C:
+            return "Ring endomorphism of %r\n  Defn: %s |--> %r" % (D, g, self._img)
+        return "Ring morphism:\n  From: %r\n  To:   %r\n  Defn: %s |--> %r" % (D, C, g, self._img)
+
+
+class FiniteFieldHomset:
+    """Hom(F, K) for finite fields F and K: the field embeddings, Sage's
+    order (by the integer representations of the images' negatives),
+    computed by the shared core (bounded).
+
+    EXAMPLES::
+
+        sage: F.<a> = GF(4); K.<b> = GF(16)
+        sage: H = Hom(F, K); H
+        Set of field embeddings from Finite Field in a of size 2^2 to Finite Field in b of size 2^4
+        sage: len(H), [f.im_gens()[0] for f in H]
+        (2, [b^2 + b, b^2 + b + 1])
+        sage: Hom(F, F)
+        Automorphism group of Finite Field in a of size 2^2
+    """
+
+    def __init__(self, domain, codomain):
+        self._domain, self._codomain = domain, codomain
+
+    def domain(self):
+        return self._domain
+
+    def codomain(self):
+        return self._codomain
+
+    def __repr__(self):
+        if self._domain is self._codomain:
+            return "Automorphism group of %r" % self._domain
+        return "Set of field embeddings from %r to %r" % (self._domain, self._codomain)
+
+    def list(self):
+        D, C = self._domain, self._codomain
+        if _ff_char(D) != _ff_char(C) or _ff_degree(C) % _ff_degree(D):
+            return []
+        S = _ffsub()
+        roots = S.conjugates(D, C, [S.WORK], _ff_bounded("embeddings", D, C))
+        return [FiniteFieldHomomorphism(D, C, r) for r in roots]
+
+    def __iter__(self):
+        return iter(self.list())
+
+    def __len__(self):
+        return len(self.list())
+
+    def __getitem__(self, i):
+        return self.list()[i]
+
+
+def Hom(X, Y, category=None):
+    """The set of homomorphisms from X to Y (finite fields only, here).
+
+    EXAMPLES::
+
+        sage: list(Hom(GF(4, 'a'), GF(8, 'c')))
+        []
+    """
+    if _is_finite_field(X) and _is_finite_field(Y):
+        return FiniteFieldHomset(X, Y)
+    raise NotImplementedError("Hom of %r and %r is not supported yet" % (X, Y))
+
+
+def _ff_has_coerce_map_from(self, S):
+    """Whether there is a coercion from S into this field (Sage's rule,
+    _ff_embeds; the integers coerce into every field)."""
+    if _is_finite_field(S):
+        return _ff_embeds(S, self)
+    return S is int or repr(S) == "Integer Ring"
+
+
+def _ff_coerce_map_from(self, S):
+    """The coercion from the finite field S into this field, as a morphism,
+    or None."""
+    if not (_is_finite_field(S) and _ff_embeds(S, self)):
+        return None
+    if S is self:
+        return FiniteFieldHomomorphism(self, self, self.gen(), identity=True)
+    Sub = _ffsub()
+    img = Sub.up(S.gen(), self, [Sub.WORK], _ff_bounded("coercion", S, self)) if _ff_degree(S) > 1 else self(1)
+    return FiniteFieldHomomorphism(S, self, img)
+
+
+def _ff_hom(self, im_gens, codomain=None, check=True):
+    """The homomorphism from this field sending its generator to the one
+    image in im_gens (a root of its defining polynomial, checked), or, for
+    a field, the coercion into it (Sage's errors otherwise)."""
+    if _is_finite_field(im_gens):
+        if not _ff_embeds(self, im_gens):
+            raise TypeError("natural coercion morphism from %r to %r not defined" % (self, im_gens))
+        return _ff_coerce_map_from(im_gens, self)
+    imgs = list(im_gens)
+    if len(imgs) != 1:
+        raise ValueError("number of images must equal number of generators")
+    C = codomain if codomain is not None else imgs[0].parent()
+    # (no field map unless C has a subfield of this degree, check or not:
+    # astra CORR-PR53-1; a Horner check alone would admit GF(4) -> GF(9))
+    if not _is_finite_field(C) or _ff_char(C) != self._p or _ff_degree(C) % self._n:
+        raise ValueError("No embedding of %r into %r" % (self, C))
+    img = C(imgs[0])
+    if check:
+        S = _ffsub()
+        p, cn, _ = S.pnq(C)
+        S.charge([S.WORK], len(self._f) * (S.mn(p, cn) + cn), _ff_bounded("a map", self, C))
+        r = C(0)
+        for c in reversed(self._f):
+            r = r * img + c
+        if r:
+            raise ValueError("relations do not all (canonically) map to 0 under map determined by images of generators")
+    return FiniteFieldHomomorphism(self, C, img)
+
+
+def _ff_var_name(name):
+    """name as a variable name, or Sage's ValueError."""
+    s = str(name)
+    if not s.replace("_", "").isalnum():
+        raise ValueError("variable name %r is not alphanumeric" % s)
+    if not s[0].isalpha():
+        raise ValueError("variable name %r does not start with a letter" % s)
+    return s
+
+
+def _ff_subfields(self, degree=0, name=None):
+    """The subfields of this field with their embeddings, by degree (Sage's
+    list): the prime field, each proper subfield by its Conway embedding,
+    and this field by the identity; computed by the shared core, for fields
+    of at most 2^20 elements, admitted as a whole before anything is made
+    (daybreak2 LIMIT-PR53-1).  A proper subfield is named as Sage names it
+    (astra CORR-PR53-2): for one degree, name itself; else name with its
+    degree appended, or name[degree] for a dict (which must have every
+    degree); with no name, the prefix field of a prefix field, else this
+    field's name with the degree appended.
+
+    EXAMPLES::
+
+        sage: K.<b> = GF(16)
+        sage: [S for S, f in K.subfields()]
+        [Finite Field of size 2, Finite Field in b2 of size 2^2, Finite Field in b of size 2^4]
+        sage: K.subfields(2, name='v')[0][1]
+        Ring morphism:
+          From: Finite Field in v of size 2^2
+          To:   Finite Field in b of size 2^4
+          Defn: v |--> b^2 + b
+        sage: [S for S, f in GF(16).subfields(name={1: 'p', 2: 'u', 4: 'v'})]
+        [Finite Field of size 2, Finite Field in u of size 2^2, Finite Field in z4 of size 2^4]
+    """
+    S, n, degree = _ffsub(), self._n, int(degree)
+    if degree < 0:
+        raise KeyError(degree)
+    if degree:
+        degrees = [degree] if n % degree == 0 else []
+    else:
+        degrees = [m for m in range(1, n + 1) if n % m == 0]
+    # (the names first: pure, and Sage's errors before anything is made)
+    names = {}
+    for m in degrees:
+        if degree and name is not None:
+            given = name
+        elif isinstance(name, dict):
+            given = name[m]
+        elif name is not None:
+            given = str(name) + str(m)
+        else:
+            given = None if self._prefix is not None else self._name + str(m)
+        if 1 < m < n:
+            names[m] = None if given is None else _ff_var_name(given)
+    if not degrees:
+        return []
+    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most 2^20 elements, within a bounded amount of work)" % self)
+    budget = S.subfields_admit(self, degrees, [S.WORK], refuse)
+    out = []
+    for m in degrees:
+        if m == 1:
+            P = self._prime_field
+            out.append((P, FiniteFieldHomomorphism(P, self, self(1))))
+        elif m == n:
+            out.append((self, FiniteFieldHomomorphism(self, self, self.gen(), identity=True)))
+        else:
+            sub = GF(self._p ** m, prefix=self._prefix) if names[m] is None else GF(self._p ** m, names[m])
+            out.append((sub, FiniteFieldHomomorphism(sub, self, S.up(sub.gen(), self, budget, refuse))))
+    return out
+
+
+def _zmod_has_coerce_map_from(self, S):
+    """Whether there is a coercion from S into Z/nZ: from itself, the
+    integers, and Z/mZ with n | m; from no extension field (GF(2) has
+    none from GF(16), as in Sage)."""
+    if S is self or S is int or repr(S) == "Integer Ring":
+        return True
+    if isinstance(S, IntegerModRing_):
+        return S._n % self._n == 0
+    return False
+
+
+def _zmod_coerce_map_from(self, S):
+    """The coercion from S into this ring (a finite field's prime field:
+    only its identity), or None."""
+    if S is self and getattr(self, "_prime", False):
+        return FiniteFieldHomomorphism(self, self, self(1), identity=True)
+    return None
+
+
+def _zmod_hom(self, im_gens, codomain=None, check=True):
+    """The homomorphism from this prime field sending 1 to the one image in
+    im_gens (1, checked), or, for a field, the coercion into it; Sage's
+    errors otherwise (No embedding into another characteristic, check or
+    not).  O(1): no budget.
+
+    EXAMPLES::
+
+        sage: B.<b> = GF(16)
+        sage: GF(2).hom([B(1)], B)
+        Ring morphism:
+          From: Finite Field of size 2
+          To:   Finite Field in b of size 2^4
+          Defn: 1 |--> 1
+    """
+    if not getattr(self, "_prime", False):
+        raise NotImplementedError("hom from %r is not supported yet" % self)
+    if _is_finite_field(im_gens):
+        if _ff_char(im_gens) != self._n:
+            raise TypeError("natural coercion morphism from %r to %r not defined" % (self, im_gens))
+        if im_gens is self:
+            return FiniteFieldHomomorphism(self, self, self(1), identity=True)
+        return FiniteFieldHomomorphism(self, im_gens, im_gens(1))
+    imgs = list(im_gens)
+    if len(imgs) != 1:
+        raise ValueError("number of images must equal number of generators")
+    C = codomain if codomain is not None else (imgs[0].parent() if hasattr(imgs[0], "parent") else self)
+    if not _is_finite_field(C) or _ff_char(C) != self._n:
+        raise ValueError("No embedding of %r into %r" % (self, C))
+    img = C(imgs[0])
+    if check and img != C(1):
+        raise ValueError("relations do not all (canonically) map to 0 under map determined by images of generators")
+    return FiniteFieldHomomorphism(self, C, img)
+
+
+def _zmod_subfields(self, degree=0, name=None):
+    """The subfields of this prime field: itself, by the identity (Sage's
+    list; KeyError for a negative degree).  O(1), any size."""
+    if not getattr(self, "_prime", False):
+        raise AttributeError("'IntegerModRing_' object has no attribute 'subfields'")
+    degree = int(degree)
+    if degree < 0:
+        raise KeyError(degree)
+    if degree > 1:
+        return []
+    return [(self, FiniteFieldHomomorphism(self, self, self(1), identity=True))]
+
+
+IntegerModRing_.hom = _zmod_hom
+IntegerModRing_.subfields = _zmod_subfields
+IntegerModRing_.has_coerce_map_from = _zmod_has_coerce_map_from
+IntegerModRing_.coerce_map_from = _zmod_coerce_map_from
+FiniteField_ext.has_coerce_map_from = _ff_has_coerce_map_from
+FiniteField_ext.coerce_map_from = _ff_coerce_map_from
+FiniteField_ext.hom = _ff_hom
+FiniteField_ext.subfields = _ff_subfields
 
 
 # ------------------------------------------------------------------ polynomials over finite fields
