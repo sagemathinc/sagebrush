@@ -69,6 +69,8 @@ const ctl = {
   rewriteWelcome: null,
   /** PUTs held until released */
   holdPut: false,
+  /** the next n unasked-for index pages (a hello's) dropped */
+  dropIndex: 0,
 };
 const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [] };
 const held = [];
@@ -126,7 +128,7 @@ async function control(body) {
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0 }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -225,6 +227,11 @@ server.on("upgrade", async (req, socket, head) => {
         Object.assign(m, ctl.rewriteWelcome);
         ctl.rewriteWelcome = null;
         client.send(JSON.stringify(m));
+        return;
+      }
+      if (m.t === "index" && m.req === undefined && ctl.dropIndex > 0) {
+        ctl.dropIndex--;
+        log.got.at(-1).dropped = true;
         return;
       }
       if (m.t === "ack" && m.ops && ctl.dropAcks > 0) {
