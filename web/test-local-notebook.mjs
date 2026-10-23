@@ -145,9 +145,18 @@ ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[
   </script>`));
   await new Promise((r) => attacker.listen(aport, "127.0.0.1", r));
   await send("Page.navigate", { url: `http://127.0.0.1:${aport}/` });
-  await until("document.title === 'tried'", 15000);
+  ok(await until("document.title === 'tried'", 15000), "...(the other page did try)");
   await sleep(4000);
   ok(!existsSync(pwned), "a page on another port of this computer can't run code through the server");
+  // (nor start a session by framing the server's API: a navigation, but in a frame, and not to a page)
+  const framer = http.createServer((q, r) => r.writeHead(200, { "Content-Type": "text/html" }).end(`<iframe src="${base}/api/session/framed/events"></iframe><script>setTimeout(() => (document.title = "framed"), 2500)</script>`));
+  const fport = await freePort();
+  await new Promise((r) => framer.listen(fport, "127.0.0.1", r));
+  await send("Page.navigate", { url: `http://127.0.0.1:${fport}/` });
+  ok(await until("document.title === 'framed'", 15000), "...(the other page framed the API)");
+  const tok0 = /token=(\w+)/.exec(printed)[1];
+  ok((await fetch(base + "/api/session/framed/stop", { method: "POST", headers: { Cookie: `sagebrush_token=${tok0}` } })).status === 404, "...and no session was started for it");
+  framer.close();
   attacker.close();
   const tok = /token=(\w+)/.exec(printed)[1], cookie = `sagebrush_token=${tok}`;
   const from = (headers) => fetch(base + "/api/session/x2/stop", { method: "POST", headers: { Cookie: cookie, ...headers } }).then((r) => r.status);
@@ -159,6 +168,10 @@ ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[
   const hostIs = (h) => raw({ Host: h });
   ok((await raw({ Host: `127.0.0.1:${port}`, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" })) === 302, "...while the URL with the token opens from anywhere (a link in another site's terminal)");
   ok((await raw({ Host: `127.0.0.1:${port}`, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" })) === 403, "...but not as another site's subresource");
+  ok((await raw({ Host: `127.0.0.1:${port}`, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" })) === 403, "...nor in another site's frame");
+  const rawPath = (path, headers, method = "GET") => new Promise((r) => request({ host: "127.0.0.1", port, path, method, headers: { Host: `127.0.0.1:${port}`, Cookie: cookie, ...headers } }, (res) => { res.resume(); r(res.statusCode); }).on("error", () => r(0)).end());
+  ok((await rawPath("/api/session/nav/events", { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" })) === 403, "...and a navigation from elsewhere to the API is refused, even top-level");
+  ok((await rawPath("/api/session/nav/events", {}, "POST")) === 405, "...and a session's events take GET only");
   ok((await hostIs(`127.0.0.1:${aport}`)) === 403 && (await hostIs("127.0.0.1")) === 403 && (await hostIs(`localhost:${port}`)) === 302, "...and the Host must be its own host and port (fetch() can't send another)");
 }
 
