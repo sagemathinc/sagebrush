@@ -16,3 +16,5 @@ export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, sc
 export { SyncClient, CLIENT, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
 export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
 export { applyView, fetchKey, VIEW_STORES, type ListedWhy, type JournalRecord } from "./sync-view";
+export { REBUILD, passOf, obligationOf, cleanKey, journalKey, floorKey, journalPrefix, type Pass } from "./sync-rebuild";
+export { obligate, rebuildKey, type Obligation } from "./sync-outbox";

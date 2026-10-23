@@ -31,9 +31,11 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, sender, obligate, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
-import { cursorOf } from "./sync-confirmed";
+import { cursorOf, applyOps, genPrefix } from "./sync-confirmed";
+import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
+import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync/protocol";
@@ -85,7 +87,7 @@ export const realClock: Clock = {
 };
 
 /** The kinds of work with a retry timer each (L3). */
-export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "enable" | "connect";
+export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "enable" | "connect" | "rebuilt";
 type Timer = { at: number; n: number };
 type Paused = { why: "storage_full"; at: number; until?: number; generation: number; state: string };
 /** What the foot shows (step 5). */
@@ -130,7 +132,7 @@ const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as numb
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
 
-type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" };
+type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number };
 type Conn = {
   ns: string;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
@@ -158,6 +160,14 @@ type Conn = {
   pages: number;
   /** an idle pull's discovery (D8b r2): pulls may go past the target, each page raising it, until one ends the log */
   discover?: boolean;
+  /** welcome's next_dseq: the server's decided prefix (D6's server_next) */
+  serverNext?: number;
+  /** a rebuild is under way (D6): sending halted, pages read only for it */
+  rebuilding?: boolean;
+  /** the rebuild's `log` phase: pages go to its staging index, from its own cursor */
+  logMode?: boolean;
+  /** the rebuild's driver is running */
+  rebuildRunning?: boolean;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -197,7 +207,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -455,6 +465,7 @@ export class SyncClient {
     if (m.generation !== c.generation) return c.end("generation");
     await this.timerOk(c.ns, "connect");
     c.welcomed = true;
+    c.serverNext = m.next_dseq;
     // (step 4's confirmed index reads the whole log as it stood: up to the head welcome gives, no further)
     if (this.opts.onIndex && isNat(m.index_head)) c.target = Math.max(c.target, m.index_head);
     c.writable = m.state === "active";
@@ -505,6 +516,11 @@ export class SyncClient {
     if (!Array.isArray(m.ops) || typeof m.more !== "boolean") return c.end("closed");
     // (a page that says there is more but moves nothing: refused, rather than asked again for ever)
     if (m.more && m.ops.length === 0) return c.end("closed");
+    // (a rebuild under way: only the pages its log asked for are read; the live index waits for its `done`)
+    if (c.rebuilding) {
+      if (c.logMode && isNat(m.req)) return this.logPage(c, m.ops as Record<string, unknown>[], m.more);
+      return;
+    }
     c.pages++;
     this.stats.pages++;
     const ops: IndexOp[] = [];
@@ -595,6 +611,10 @@ export class SyncClient {
   private async ack(c: Conn, m: Record<string, unknown>) {
     if (!isNat(m.req)) return;
     const p = c.pending.get(m.req);
+    if (p?.kind === "rebuilt") {
+      c.pending.delete(m.req);
+      return this.rebuiltAck(c, m);
+    }
     if (!p || p.kind !== "ops") return;
     c.pending.delete(m.req);
     if (!Array.isArray(m.ops)) return c.end("closed");
@@ -632,6 +652,21 @@ export class SyncClient {
       }
       // (a refused hello: not this account's sync, not now; asked again on the timer)
       if (!c.welcomed) return c.end("closed");
+      return;
+    }
+    if (p?.kind === "rebuilt") {
+      // (rate: halted, retried at retry_after under its own timer; invalid (through >= next_dseq): server_next was
+      // stale, so the pass ends and the next starts from a new connection's welcome (plan-sync-rebuilt r3 §4))
+      // (a server without `rebuilt` (no refusal reset: core's own, before the cloud half) answers "unknown message":
+      // the same compare-and-swap, with no new floor)
+      if (code === "invalid" && /unknown message/.test(detail.message ?? "")) return this.rebuiltAck(c, { rebuilt: { floor: 0, count: 0 } });
+      if (code === "invalid") {
+        await announceInvalid(this.w, c.ns);
+        return c.end("closed");
+      }
+      const at = await this.timerFail(c.ns, "rebuilt", ra);
+      this.say({ state: "paused", ns: c.ns, reason: "rebuilding sync: the server asks to wait", resumesAt: at });
+      this.wake(c, "rebuilt", at, () => this.rebuildRun(c));
       return;
     }
     if (p?.kind === "index") {
@@ -700,6 +735,14 @@ export class SyncClient {
 
   private async drain(c: Conn) {
     if (this.conn !== c || !c.welcomed) return;
+    // (an obligation recorded (a refusal, the server's invalid, a divergence): the rebuild runs before anything is
+    // sent (D6); with the confirmed index only, step 3 has none)
+    if (this.opts.onIndex && !c.rebuilding && (await this.metaGet(rebuildKey(c.ns)))) c.rebuilding = true;
+    if (c.rebuilding) {
+      this.rebuildRun(c);
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
     const st0 = await c.ob.status();
     if (!c.writable || c.halted) {
       this.showWaiting(c, st0.count);
@@ -769,6 +812,8 @@ export class SyncClient {
 
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
+    if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
+    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
     this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }) });
@@ -1142,7 +1187,164 @@ export class SyncClient {
     return "wait";
   }
 
-  // ---- the rebuild (step 4 does it; step 3 asks for it)
+  // ---- the rebuild (D6; sync-rebuild.ts), driven here
+
+  /** The rebuild's driver: its phases in order, from their durable positions, each page its own transaction with a
+   * yield between; `log` reads pages through the usual pacing; `announce` waits for its ack. */
+  private rebuildRun(c: Conn) {
+    if (c.rebuildRunning || this.conn !== c) return;
+    c.rebuildRunning = true;
+    void (async () => {
+      try {
+        await this.rebuildPhases(c);
+      } catch (e) {
+        if (e instanceof Fenced) c.end("fenced");
+        else {
+          console.warn("sync: rebuild", e);
+          c.end("closed");
+        }
+      } finally {
+        c.rebuildRunning = false;
+      }
+    })();
+  }
+
+  private async rebuildPhases(c: Conn) {
+    const yieldNow = () => new Promise<void>((ok) => setTimeout(ok, 0));
+    for (;;) {
+      if (this.conn !== c || this.stopped) return;
+      let p = await passOf(this.w, c.ns);
+      if (!p) {
+        while (await cleanStep(this.w, c.ns)) await yieldNow();
+        const r = await stage(this.w, c.ns, c.serverNext ?? 1);
+        if (r === "clean") continue;
+        if (r === "none") {
+          c.rebuilding = false;
+          c.halted = undefined;
+          c.resync = true;
+          this.kick();
+          return;
+        }
+        if (r === "halt") {
+          c.halted = "stuck";
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        p = r;
+        this.stats.rebuildPasses++;
+      }
+      this.stats.rebuildPhase = p.phase;
+      if (REBUILD.before) await REBUILD.before(p.phase, c.ns);
+      if (this.conn !== c || this.stopped) return;
+      if (p.phase === "log") {
+        // (the server's log from the pass's own cursor, through the usual pacing, every page to its end (discover))
+        this.cursor = await passCursor(this.w, c.ns);
+        c.logMode = true;
+        c.discover = true;
+        this.pull(c);
+        return;
+      }
+      if (p.phase === "capture") {
+        while (!(await captureStep(this.w, c.ns))) await yieldNow();
+        continue;
+      }
+      if (p.phase === "done") {
+        const r = await done(this.w, c.ns);
+        if (r === "committed") this.stats.rebuildDoneAt = this.clock.now();
+        continue;
+      }
+      if (p.phase === "view") {
+        for (;;) {
+          if (REBUILD.before) await REBUILD.before("view-page", c.ns);
+          const v = await viewStep(this.w, c.ns);
+          this.w.tell({ ops: v.ops });
+          if (v.done) break;
+          await yieldNow();
+        }
+        continue;
+      }
+      if (p.phase === "retire") {
+        for (;;) {
+          if (REBUILD.before) await REBUILD.before("retire-page", c.ns);
+          if (await retireStep(this.w, c.ns)) break;
+          await yieldNow();
+        }
+        continue;
+      }
+      if (p.phase === "announce") {
+        // (recorded before it is sent (retire's last page); nothing else is sent on this connection until it is answered)
+        const left = this.left(c.ns, "rebuilt");
+        if (left > 0) return this.wake(c, "rebuilt", this.clock.now() + left, () => this.rebuildRun(c));
+        if ([...c.pending.values()].some((x) => x.kind === "rebuilt")) return;
+        this.ask(c, { t: "rebuilt", through: p.through! }, { kind: "rebuilt", through: p.through! });
+        return;
+      }
+    }
+  }
+
+  /** A log page of the rebuild: this device's echoes matched and staged; the ops reduced into the staging index with
+   * the pass's cursor; the log's end moves the pass on to `capture`. */
+  private async logPage(c: Conn, raw: Record<string, unknown>[], more: boolean) {
+    const p = await passOf(this.w, c.ns);
+    if (!p || p.phase !== "log") return;
+    const ops: IndexOp[] = [];
+    let last = this.cursor;
+    for (const o of raw) {
+      if (!o || typeof o !== "object" || !isNat(o.seq) || o.seq <= last || typeof o.device !== "string" || !isNat(o.dseq)) return c.end("closed");
+      last = o.seq;
+      ops.push(o as unknown as IndexOp);
+    }
+    c.pages++;
+    this.stats.pages++;
+    const mine = ops.filter((o) => o.device === this.w.device);
+    if (mine.length) {
+      const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
+      const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
+      const staged: { dseq: number; seq: number }[] = [];
+      for (const o of mine) {
+        const r = recs.get(o.dseq);
+        if (!r) continue;
+        // (not this record's op: a divergence, recorded (its counter moves, so this pass's done fails and another runs))
+        if (!sameOp(r.op, o as unknown as Record<string, unknown>)) await this.flagRebuild(c.ns, "diverged", `the server's op ${o.seq} for dseq ${o.dseq} isn't this device's record`);
+        else staged.push({ dseq: o.dseq, seq: o.seq });
+      }
+      await stageEchoes(this.w, c.ns, p, staged);
+    }
+    if (ops.length) await applyOps(this.w, c.ns, ops as unknown as SyncOp[], { prefix: genPrefix(c.ns, p.gen), cursorAt: `sync:${c.ns}:pass:cursor` });
+    this.cursor = last;
+    if (!more) {
+      c.logMode = false;
+      c.discover = false;
+      await logDone(this.w, c.ns);
+      this.rebuildRun(c);
+      return;
+    }
+    this.pull(c);
+  }
+
+  /** The announce's ack: the floor recorded, and the flag cleared only if its counter is still the pass's n0. */
+  private async rebuiltAck(c: Conn, m: Record<string, unknown>) {
+    const rb = (m.rebuilt && typeof m.rebuilt === "object" ? m.rebuilt : {}) as { floor?: unknown; count?: unknown };
+    if (!isNat(rb.floor) || !isNat(rb.count)) return c.end("closed");
+    await this.timerOk(c.ns, "rebuilt");
+    // (a count still at the limit after an idempotent ack: halted, said; it can't follow a fresh reset)
+    if (rb.count >= 10_000) {
+      c.halted = "invalid";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
+    const r = await rebuiltAcked(this.w, c.ns, rb.floor);
+    this.stats.rebuildResumedAt = this.clock.now();
+    if (r === "resumed") {
+      c.rebuilding = false;
+      c.halted = undefined;
+      c.resync = true;
+      c.next = undefined;
+      this.kick();
+    } else this.rebuildRun(c);
+  }
+
+  // ---- the rebuild's obligation
 
   private async flagRebuild(ns: string, why: "refused" | "invalid" | "diverged", detail?: string) {
     // (the obligation, its counter incremented in the same transaction (D7 r2); a halt is never lowered to a refusal)
