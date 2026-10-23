@@ -5,7 +5,7 @@
 import * as SP from "./strpos";
 import {
   T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, typeGetattr, isinstance,
-  dictGet, dictSet, dictDelete, dictKeyOf, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
+  dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
 import { INTR } from "./interrupt";
@@ -1598,23 +1598,26 @@ export class StrIter {
 // (an exhausted dict iterator's dict: empty, never changed, so the checks
 // at each step pass and it gives no more, whatever its dict does after)
 const ENDED = new PyDict();
+const ENDED_META = dictMeta(ENDED);
 const NOTHING: Iterator<any> = [][Symbol.iterator]();
 export class DictIter {
   it: Iterator<any>;
   size: number;
   left: number;
+  x: DictMeta;
   clears: number;
   constructor(public d: PyDict, public kind: number = 0) {
     const m = d.$m;
     this.it = kind === 1 ? m.values() : kind === 0 ? m.keys() : m.entries();
     this.size = this.left = m.size;
-    this.clears = d.$clears;
+    this.x = dictMeta(d);
+    this.clears = this.x.clears;
   }
   // (each kind's $next has the checks written out: the hot path)
   $next(): any {
     const d = this.d;
     // (one branch for both: the size changed, or the dict was cleared)
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
     const r = this.it.next();
     if (r.done) return this.end();
     if (--this.left < 0) this.keysChanged();
@@ -1625,7 +1628,7 @@ export class DictIter {
   // $next at a time)
   rest(): any[] {
     const d = this.d;
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
     const it = this.it;
     const out: any[] = [];
     if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
@@ -1639,6 +1642,7 @@ export class DictIter {
   // (exhausted: no more, as CPython's, whatever the dict does after)
   end(): any {
     this.d = ENDED;
+    this.x = ENDED_META;
     this.size = this.left = 0;
     this.clears = 0;
     this.it = NOTHING;
@@ -1655,7 +1659,7 @@ export class DictIter {
       raise(T.RuntimeError, "dictionary changed size during iteration");
     }
     // (cleared: on in the new entries, from the position it had reached)
-    this.clears = d.$clears;
+    this.clears = this.x.clears;
     this.it = this.kind === 1 ? m.values() : this.kind === 0 ? m.keys() : m.entries();
     for (let i = this.size - this.left; i > 0; i--) this.it.next();
   }
@@ -1666,7 +1670,7 @@ export class DictValueIter extends DictIter {
   }
   $next(): any {
     const d = this.d;
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
     const r = this.it.next();
     if (r.done) return this.end();
     if (--this.left < 0) this.keysChanged();
@@ -1679,7 +1683,7 @@ export class DictItemIter extends DictIter {
   }
   $next(): any {
     const d = this.d;
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
     const r = this.it.next();
     if (r.done) return this.end();
     if (--this.left < 0) this.keysChanged();
@@ -1710,48 +1714,65 @@ export class SetIter {
 // reversed() of a dict or its views: from the last entry back, as CPython's;
 // a changed size raises; an entry deleted since is passed over; a value is
 // read as it is when reached; after clear(), it goes on in the new entries
-// from the same position. Its keys, and for the values and items its
-// values, are taken at the start (LIMIT-PR66-2): a plain dict counts its
-// deletions ($dels) and its stores ($stores), and while there are none the
-// keys are all there and the values are the ones taken, so nothing is
-// looked up. After a deletion each key is looked up as it is reached, after
-// a store each value, for good (one-way); a dict of attributes, globals or
-// a class, or one sharing its Map (a function's __dict__), can change
-// without the dict, so for it each is always looked up.
+// from the same position. What it needs is taken at the start, the keys
+// and, for the values and items, the values (LIMIT-PR66-2); a plain dict
+// counts, once it has had an iterator, the changes that leave its size as
+// it was (ver: a deletion, a clear(), a value stored over one there), and
+// while its size and that are as they were, what was taken is the dict's,
+// and nothing is looked up. After a change, each key is looked up as it is
+// reached, and each value read from the dict, for good (one-way).
+// reversed() of the values takes no keys: told just before a key is
+// deleted (rev), it takes them then, as they were; after only values were
+// stored, the dict's keys are in the order they had. A dict of attributes,
+// globals or a class, or one sharing its Map (a function's __dict__), can
+// change without the dict: for it, each is always looked up.
 export class DictRevIter {
-  keys: any[];
+  keys: any[] | null;
   vals: any[] | null;
+  x: DictMeta;
   size: number;
   i: number;
   clears: number;
-  dels: number;
-  stores: number;
+  ver: number;
   live: boolean;
   constructor(public d: PyDict, public kind: number) {
     const m = d.$m;
-    this.keys = [...m.keys()];
+    const x = (this.x = dictMeta(d));
     this.size = m.size;
-    this.i = this.keys.length - 1;
-    this.clears = d.$clears;
-    this.dels = d.$dels;
-    this.stores = d.$stores;
-    this.live = m.constructor !== Map || d.$shared;
-    this.vals = kind !== 0 && !this.live ? [...m.values()] : null;
+    this.i = m.size - 1;
+    this.clears = x.clears;
+    this.ver = x.ver;
+    this.live = m.constructor !== Map || x.shared;
+    if (kind === 1 && !this.live) {
+      this.keys = null;
+      this.vals = [...m.values()];
+      // (the reversed() of its values before this one takes its keys now)
+      x.rev?.deref()?.keep();
+      x.rev = new WeakRef(this);
+    } else {
+      this.keys = [...m.keys()];
+      this.vals = kind === 2 && !this.live ? [...m.values()] : null;
+    }
+  }
+  // (the keys as they are now: before a deletion, or after only stores)
+  keep(): void {
+    if (this.keys === null) this.keys = [...this.d.$m.keys()];
   }
   $next(): any {
     const d = this.d;
-    if (((d.$m.size !== this.size) as any) | ((d.$clears !== this.clears) as any) | ((d.$dels !== this.dels) as any) | ((d.$stores !== this.stores) as any)) this.changed();
+    if (((d.$m.size !== this.size) as any) | ((this.x.ver !== this.ver) as any)) this.changed();
     if (!this.live) {
       const i = this.i;
       if (i < 0) return this.end();
       this.i = i - 1;
-      const k = this.keys[i];
+      if (this.kind === 1) return this.vals![i];
+      const k = this.keys![i];
       if (this.kind === 0) return dictKeyOf(d, k);
-      const v = this.vals !== null ? this.vals[i] : d.$m.get(k);
-      return this.kind === 1 ? v : tuple([dictKeyOf(d, k), v]);
+      return tuple([dictKeyOf(d, k), this.vals![i]]);
     }
+    const keys = this.keys!;
     while (this.i >= 0) {
-      const k = this.keys[this.i--];
+      const k = keys[this.i--];
       if (!d.$m.has(k)) continue;
       if (this.kind === 0) return dictKeyOf(d, k);
       if (this.kind === 1) return d.$m.get(k);
@@ -1760,41 +1781,39 @@ export class DictRevIter {
     return this.end();
   }
   changed(): void {
-    const d = this.d;
+    const d = this.d, x = this.x;
     if (d.$m.size !== this.size) {
       this.size = -1;
       raise(T.RuntimeError, "dictionary changed size during iteration");
     }
-    if (d.$clears !== this.clears) {
+    this.ver = x.ver;
+    if (x.rev?.deref() === this) x.rev = null;
+    if (x.clears !== this.clears) {
       // (cleared: the new entries, from the same position)
-      this.clears = d.$clears;
+      this.clears = x.clears;
       this.keys = [...d.$m.keys()];
-      this.vals = null;
+    } else {
+      // (a key deleted (its keys were taken just before), or values stored
+      // (its keys are in the order they had))
+      this.keep();
     }
-    if (d.$dels !== this.dels) {
-      // (a key deleted: each looked up from now on)
-      this.dels = d.$dels;
-      this.live = true;
-      this.vals = null;
-    }
-    if (d.$stores !== this.stores) {
-      // (a value stored: each value read from the dict from now on)
-      this.stores = d.$stores;
-      this.vals = null;
-    }
+    this.vals = null;
+    this.live = true;
   }
   // (exhausted: no more, whatever the dict does after)
   end(): any {
+    if (this.x.rev?.deref() === this) this.x.rev = null;
     this.d = ENDED;
+    this.x = ENDED_META;
     this.size = 0;
     this.clears = 0;
-    this.dels = 0;
-    this.stores = 0;
+    this.ver = 0;
     this.keys = [];
     this.vals = null;
     return DONE;
   }
 }
+
 export class BytesIter {
   i = 0;
   constructor(public b: PyBytes) {}
