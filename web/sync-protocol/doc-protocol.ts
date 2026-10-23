@@ -157,6 +157,18 @@ export interface ChainedBatch { seq: number; recv: number; epoch: number; author
 /** Where a reader is in a prefix: the last batch checked (seq 0 and the seed at the start). */
 export interface ChainState { seq: number; recv: number; chain: Uint8Array }
 export const chainStart = (ownerHash: string, doc: string, epoch: number): ChainState => ({ seq: 0, recv: 0, chain: chainSeed(ownerHash, doc, epoch) });
+/**
+ * Where a reader starts an epoch whose first batch has the stored seq
+ * `firstSeq` (r9 §5.1).  The server's seq keeps counting across a clear, so a
+ * cleared document's epoch begins at its root's seq, not at 1: verify it from
+ * chainStartAt(owner, doc, epoch, root.seq), and never renumber the root.
+ * chainStart(...) is chainStartAt(..., 1), which is every course document
+ * (one epoch).
+ */
+export function chainStartAt(ownerHash: string, doc: string, epoch: number, firstSeq: number): ChainState {
+  if (!Number.isSafeInteger(firstSeq) || firstSeq < 1) throw invalid("chainStartAt: the epoch's first seq is a positive safe integer");
+  return { seq: firstSeq - 1, recv: 0, chain: chainSeed(ownerHash, doc, epoch) };
+}
 type Verdict = { ok: true; state: ChainState } | { ok: false; at: number; why: string };
 /**
  * One page of a prefix (§6.5), from the state after the batches before it:
