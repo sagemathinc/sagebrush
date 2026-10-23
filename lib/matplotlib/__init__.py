@@ -2,7 +2,6 @@
 renderer in _graphics.  Figures display inline in the notebook and save as
 SVG; see matplotlib.pyplot for what is supported."""
 
-import contextlib as _contextlib
 import re as _re
 
 __version__ = "3.10.0+sagebrush"
@@ -263,10 +262,10 @@ _RC_ALIASES = {"lw": "linewidth", "ls": "linestyle", "c": "color", "fc": "faceco
                "mew": "markeredgewidth", "aa": "antialiased"}
 
 
-def rc(group, **kwargs):
+def rc(group, **kw):
     """rc('lines', lw=2): rcParams['lines.linewidth'] = 2, for each group given."""
     for g in ((group,) if isinstance(group, str) else group):
-        for name, value in kwargs.items():
+        for name, value in kw.items():
             key = "%s.%s" % (g, _RC_ALIASES.get(name, name))
             if key not in _defaults():
                 raise KeyError('Unrecognized key "%s" for group "%s" and name "%s"' % (key, g, name))
@@ -279,17 +278,35 @@ def rcdefaults():
     dict.update(rcParams, _defaults())
 
 
-@_contextlib.contextmanager
+class _RcContext:
+    def __init__(self, rc):
+        self._rc = rc
+
+    def __enter__(self):
+        self._orig = dict(rcParams)
+        try:
+            if self._rc:
+                rcParams.update(self._rc)
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def __exit__(self, *exc):
+        dict.clear(rcParams)
+        dict.update(rcParams, self._orig)
+        return False
+
+    def __call__(self, f):  # (as a decorator, as matplotlib's)
+        def wrapped(*a, **k):
+            with _RcContext(self._rc):
+                return f(*a, **k)
+        return wrapped
+
+
 def rc_context(rc=None, fname=None):
     """A with-block in which the given rc parameters apply, restored after it
     exactly as they were (even after an exception)."""
     if fname is not None:
         raise NotImplementedError("rc_context(fname=...): Sagebrush reads no matplotlibrc files")
-    orig = dict(rcParams)
-    try:
-        if rc:
-            rcParams.update(rc)
-        yield
-    finally:
-        dict.clear(rcParams)
-        dict.update(rcParams, orig)
+    return _RcContext(rc)
