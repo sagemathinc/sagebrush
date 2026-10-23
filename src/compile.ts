@@ -12,6 +12,7 @@ import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R } from "./runtime/index";
 import { cwdPath, isBuiltinModule } from "./runtime/modules";
+import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
@@ -254,7 +255,7 @@ export function execModule(source: string, filename: string, name: string, isPac
     if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
     fn(m, R);
   } catch (e) {
-    R.sysModules.$m.delete(name);
+    dictDelete(R.sysModules, name);
     throw e;
   }
   return m;
