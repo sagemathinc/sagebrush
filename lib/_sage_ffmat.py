@@ -594,6 +594,15 @@ def _entries(rows):
         yield from list.__iter__(r)
 
 
+def _characteristic(R):
+    """R's characteristic, or 0 when R has none to tell."""
+    f = getattr(R, "characteristic", None)
+    try:
+        return int(f()) if callable(f) else 0
+    except Exception:
+        return 0
+
+
 def _coerced_eq(x, y):
     """Sage's x == y for a Sage-mode matrix or vector x (see above): True
     or False, or NotImplemented when y is nothing it compares with.  Entry
@@ -609,7 +618,11 @@ def _coerced_eq(x, y):
             return _integral_zero(y) and not any(_entries(rows))
         P = _vector_pushout(R, b[1])
         if P is None:
-            return False
+            # (Sage meets a ring of positive characteristic and the symbolic
+            # ring in SR, where sagebrush has no images of its elements; the
+            # empty matrix has none to compare, so it equals every symbolic
+            # scalar, as in Sage: matrix(GF(5), 0, 0) == SR(1))
+            return not rows and b[1] is _sa().SR and _characteristic(R) > 0
         c, zero = P(y), P(0)  # (the image of the scalar: c times the identity)
         for i, r in enumerate(rows):
             for j, e in enumerate(list.__iter__(r)):
