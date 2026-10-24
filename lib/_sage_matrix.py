@@ -2979,9 +2979,82 @@ def _int_dims(args):
     return tuple(int(a) if k < 3 and type(a).__name__ == "Rational" and a.denominator == 1 else a for k, a in enumerate(args))
 
 
+def _dict_index(v):
+    """A row or column index of a matrix's dict of entries, as Sage converts
+    it: an integer (an integral rational too), else Sage's TypeError."""
+    import operator
+    if isinstance(v, float):
+        raise TypeError("'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer")
+    if type(v).__name__ == "Rational" or isinstance(v, _F):
+        if v.denominator != 1:
+            raise TypeError("unable to convert rational %s to an integer" % v)
+        return int(v.numerator)
+    try:
+        return operator.index(v)
+    except TypeError:
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(v).__name__)
+
+
+def _dict_key(k):
+    """The (row, column) of a key of a matrix's dict of entries: a pair,
+    each an integer, with Sage's errors for another key."""
+    import itertools
+    if not hasattr(k, "__iter__"):
+        raise TypeError("'%s' object is not iterable" % ("sage.rings.integer.Integer" if type(k) is int else type(k).__name__))
+    ij = list(itertools.islice(iter(k), 3))
+    if len(ij) < 2:
+        raise ValueError("need more than %d value%s to unpack" % (len(ij), "" if len(ij) == 1 else "s"))
+    if len(ij) > 2:
+        raise ValueError("too many values to unpack (expected 2)")
+    return _dict_index(ij[0]), _dict_index(ij[1])
+
+
+def _dict_entries(d, dims):
+    """matrix(..., {(i, j): x, ...}): the dimensions and the row-major
+    entries (zeros elsewhere), as Sage (black-box against Sage 10.9).
+    dims is () (the dimensions from the largest indices), (n,) (n x n) or
+    (r, c).  Every key is read, and checked, before any entry is placed or
+    converted: given dimensions, all are made integers first, then each is
+    range-checked (row first; a negative index counts from the end, as in
+    Python); without them, each key in turn (no negative index).  A later
+    key for the same position wins.  The size is admitted (_shape) after
+    the keys and before the entries are allocated.  A dict of more keys than
+    any admitted matrix has positions is refused before it is read, and a
+    dict subclass is read as a dict (its own items() not called)."""
+    if dict.__len__(d) > _MAX_ENTRIES:
+        raise ValueError("more than %d entries" % _MAX_ENTRIES)
+    items = dict.items(d)
+    if dims:
+        r, c = _dim(dims[0]), _dim(dims[-1], "columns")
+        keys = [(_dict_key(k), v) for k, v in items]
+        placed = []
+        for (i, j), v in keys:
+            if not -r <= i < r:
+                raise IndexError("invalid row index %d" % i)
+            if not -c <= j < c:
+                raise IndexError("invalid column index %d" % j)
+            placed.append((i % r, j % c, v))
+    else:
+        placed = []
+        for k, v in items:
+            i, j = _dict_key(k)
+            if i < 0:
+                raise IndexError("invalid row index %d" % i)
+            if j < 0:
+                raise IndexError("invalid column index %d" % j)
+            placed.append((i, j, v))
+        r = max((i for i, _, _ in placed), default=-1) + 1
+        c = max((j for _, j, _ in placed), default=-1) + 1
+    r, c = _shape(r, c)
+    ent = [0] * (r * c)
+    for i, j, v in placed:
+        ent[i * c + j] = v
+    return r, c, ent
+
+
 def matrix(*args, **kwds):
     """matrix([[1, 2], [3, 4]]), matrix(ZZ, rows), matrix(QQ, 2, 2, entries),
-    matrix(ZZ, 3, 3, range(9)).
+    matrix(ZZ, 3, 3, range(9)); entries may be a dict {(i, j): x}.
 
     EXAMPLES::
 
@@ -3006,6 +3079,17 @@ def matrix(*args, **kwds):
     # dispatch (matrix(QQ, 4/2, 4/2, 1) failed once 4/2 was a Rational;
     # over Qp the column count became the scalar entry)
     args = _int_dims(args)
+    if args and isinstance(args[-1], dict) and 1 <= len(args) <= 4:
+        # matrix(D), matrix(R, D), matrix([R,] n, D), matrix([R,] r, c, D):
+        # the entries of a dict of positions (its keys were read as a list
+        # of entries: matrix(ZZ, 2, 2, {(0, 1): 3}) was [0 1] / [0 1])
+        head = list(args[:-1])
+        ring = head[:1] if head and not isinstance(head[0], int) else []
+        dims = head[len(ring):]
+        if len(dims) <= 2:
+            r, c, ent = _dict_entries(args[-1], tuple(dims))
+            # (as rows, so that an entry that is a list stays one entry)
+            return matrix(*ring, r, c, [ent[i * c:(i + 1) * c] for i in range(r)] if c else ent, **kwds)
     base = None
     is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
     if any(is_graph(a) for a in args):
