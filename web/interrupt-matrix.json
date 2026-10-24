@@ -1,0 +1,1307 @@
+{
+ "comment": "plan-interrupt-harness r4: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
+ "fingerprints": {
+  "pollSites": {
+   "builtins.ts": 2,
+   "crmath.ts": 5,
+   "engine.ts": 7,
+   "format.ts": 4,
+   "index.ts": 1,
+   "interrupt.ts": 2,
+   "json.ts": 3,
+   "modules.ts": 7,
+   "numpy.ts": 2,
+   "numpy_linalg.ts": 4,
+   "ops.ts": 5,
+   "re.ts": 2,
+   "strpos.ts": 2,
+   "types.ts": 12
+  },
+  "registries": {
+   "magma": {
+    "count": 184,
+    "sha": "b17e39e27d2d7de5"
+   },
+   "matlab": {
+    "count": 262,
+    "sha": "0722c9cb6ec1db21"
+   },
+   "sage": {
+    "count": 182,
+    "sha": "d31e3cb209fb9e83"
+   }
+  },
+  "libModules": {
+   "count": 122,
+   "sha": "c65a1782f5b08f9b"
+  }
+ },
+ "entries": [
+  {
+   "id": "P1",
+   "transport": "pyloop:while",
+   "owner": "python",
+   "mode": "python",
+   "calibration": "nonterminating",
+   "setup": "k = 0",
+   "target": "while True:\n    k += 1",
+   "probe": "assert sum(range(10)) == 45",
+   "hosts": [
+    "cli",
+    "prompt",
+    "browser"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "P2a",
+   "transport": "runtime:sorted-key",
+   "owner": "python",
+   "mode": "python",
+   "s0": 3000000,
+   "smin": 100000,
+   "smax": 10000000,
+   "grow": {
+    "kind": "scale",
+    "p": 1
+   },
+   "setup": "",
+   "target": "_r = sorted(range(S), key=lambda v: -v)",
+   "probe": "assert sorted([3, 1, 2]) == [1, 2, 3]",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E2",
+   "transport": "engineCall:factor_integer",
+   "owner": "number theory",
+   "mode": "sage",
+   "s0": 22,
+   "smin": 12,
+   "smax": 44,
+   "grow": {
+    "kind": "log",
+    "c": 0.18
+   },
+   "setup": "n = next_prime(10**S) * next_prime(3 * 10**S)",
+   "target": "_r = factor(n)",
+   "probe": "assert len(factor(2**64 + 1)) == 2",
+   "hosts": [
+    "cli",
+    "prompt",
+    "browser"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E3a",
+   "transport": "engineCall:mat_rank",
+   "owner": "linear algebra (ff matrices)",
+   "mode": "sage",
+   "s0": 450,
+   "smin": 200,
+   "smax": 600,
+   "grow": {
+    "kind": "scale",
+    "p": 3
+   },
+   "setup": "M = random_matrix(GF(32003), S)",
+   "target": "_r = M.rank()",
+   "probe": "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E6a",
+   "transport": "mpCall:groebner",
+   "owner": "multivariate (sage)",
+   "mode": "sage",
+   "s0": 6,
+   "smin": 4,
+   "smax": 9,
+   "grow": {
+    "kind": "step",
+    "step": 1
+   },
+   "retained": true,
+   "setup": "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
+   "target": "_r = I.groebner_basis()",
+   "probe": "R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "engineCall:agl1",
+   "transport": "engineCall:agl1",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:alternating",
+   "transport": "engineCall:alternating",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:ap",
+   "transport": "engineCall:ap",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:aplist",
+   "transport": "engineCall:aplist",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:aplist_many",
+   "transport": "engineCall:aplist_many",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ball_log",
+   "transport": "engineCall:ball_log",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:base",
+   "transport": "engineCall:base",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:batch_exact",
+   "transport": "engineCall:batch_exact",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:block_system",
+   "transport": "engineCall:block_system",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:blocks",
+   "transport": "engineCall:blocks",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:bnf",
+   "transport": "engineCall:bnf",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:bnf_certify",
+   "transport": "engineCall:bnf_certify",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:bnf_relations",
+   "transport": "engineCall:bnf_relations",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:characters",
+   "transport": "engineCall:characters",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:charpoly",
+   "transport": "engineCall:charpoly",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:charpoly_exact",
+   "transport": "engineCall:charpoly_exact",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:charpoly_mod",
+   "transport": "engineCall:charpoly_mod",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:commute",
+   "transport": "engineCall:commute",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:complex_roots",
+   "transport": "engineCall:complex_roots",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:contains",
+   "transport": "engineCall:contains",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:cycle_type_counts",
+   "transport": "engineCall:cycle_type_counts",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:cyclic",
+   "transport": "engineCall:cyclic",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:derived_series",
+   "transport": "engineCall:derived_series",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:derived_subgroup",
+   "transport": "engineCall:derived_subgroup",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:dihedral",
+   "transport": "engineCall:dihedral",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:dims",
+   "transport": "engineCall:dims",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:ec_height",
+   "transport": "engineCall:ec_height",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ec_l_value",
+   "transport": "engineCall:ec_l_value",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ec_low_rank",
+   "transport": "engineCall:ec_low_rank",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ec_modsym",
+   "transport": "engineCall:ec_modsym",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ec_point_search",
+   "transport": "engineCall:ec_point_search",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:ec_real_period",
+   "transport": "engineCall:ec_real_period",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:elementary_divisors",
+   "transport": "engineCall:elementary_divisors",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:elements",
+   "transport": "engineCall:elements",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:estimate",
+   "transport": "engineCall:estimate",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:estimate_newforms",
+   "transport": "engineCall:estimate_newforms",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:factor",
+   "transport": "engineCall:factor",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:factor_mod",
+   "transport": "engineCall:factor_mod",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:galois_group",
+   "transport": "engineCall:galois_group",
+   "status": "planned",
+   "family": "E10 Galois",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:hecke_charpoly",
+   "transport": "engineCall:hecke_charpoly",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:hermite_form",
+   "transport": "engineCall:hermite_form",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:is_abelian",
+   "transport": "engineCall:is_abelian",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:is_normal",
+   "transport": "engineCall:is_normal",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:is_prime",
+   "transport": "engineCall:is_prime",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:is_primitive",
+   "transport": "engineCall:is_primitive",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:is_solvable",
+   "transport": "engineCall:is_solvable",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:is_subgroup",
+   "transport": "engineCall:is_subgroup",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:is_transitive",
+   "transport": "engineCall:is_transitive",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:level_data",
+   "transport": "engineCall:level_data",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:lll",
+   "transport": "engineCall:lll",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_charpoly",
+   "transport": "engineCall:mat_charpoly",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_det",
+   "transport": "engineCall:mat_det",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_inverse",
+   "transport": "engineCall:mat_inverse",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_kernel",
+   "transport": "engineCall:mat_kernel",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_mul",
+   "transport": "engineCall:mat_mul",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_rref",
+   "transport": "engineCall:mat_rref",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mat_solve",
+   "transport": "engineCall:mat_solve",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:mathieu",
+   "transport": "engineCall:mathieu",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:min_block",
+   "transport": "engineCall:min_block",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:moments",
+   "transport": "engineCall:moments",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:newforms",
+   "transport": "engineCall:newforms",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:newspace",
+   "transport": "engineCall:newspace",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:nf_data",
+   "transport": "engineCall:nf_data",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:nf_factor",
+   "transport": "engineCall:nf_factor",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:nf_gcd",
+   "transport": "engineCall:nf_gcd",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:nmod_charpoly",
+   "transport": "engineCall:nmod_charpoly",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "engineCall:normal_closure",
+   "transport": "engineCall:normal_closure",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:ntt_cache_stats",
+   "transport": "engineCall:ntt_cache_stats",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:orbit",
+   "transport": "engineCall:orbit",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:orbits",
+   "transport": "engineCall:orbits",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:order",
+   "transport": "engineCall:order",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:perm_group",
+   "transport": "engineCall:perm_group",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:perm_group_named",
+   "transport": "engineCall:perm_group_named",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:pgl2",
+   "transport": "engineCall:pgl2",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:poly_divexact",
+   "transport": "engineCall:poly_divexact",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:poly_gcd",
+   "transport": "engineCall:poly_gcd",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:poly_mul",
+   "transport": "engineCall:poly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:primes_above",
+   "transport": "engineCall:primes_above",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:psl2",
+   "transport": "engineCall:psl2",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:quadratic_class_group",
+   "transport": "engineCall:quadratic_class_group",
+   "status": "planned",
+   "family": "E7 number fields",
+   "owner": "number fields"
+  },
+  {
+   "id": "engineCall:quartic_search",
+   "transport": "engineCall:quartic_search",
+   "status": "planned",
+   "family": "E12 elliptic curves / analytic",
+   "owner": "analytic"
+  },
+  {
+   "id": "engineCall:random",
+   "transport": "engineCall:random",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:rational_newforms",
+   "transport": "engineCall:rational_newforms",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:stabilizer",
+   "transport": "engineCall:stabilizer",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:strong_gens",
+   "transport": "engineCall:strong_gens",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:symmetric",
+   "transport": "engineCall:symmetric",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:transitive_group",
+   "transport": "engineCall:transitive_group",
+   "status": "planned",
+   "family": "E10 Galois",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:transitivity",
+   "transport": "engineCall:transitivity",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:weight2",
+   "transport": "engineCall:weight2",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
+  },
+  {
+   "id": "symCall:add",
+   "transport": "symCall:add",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:canonicalize_radical",
+   "transport": "symCall:canonicalize_radical",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:coefficient",
+   "transport": "symCall:coefficient",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:coefficients",
+   "transport": "symCall:coefficients",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:complex",
+   "transport": "symCall:complex",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:const",
+   "transport": "symCall:const",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:const_sign",
+   "transport": "symCall:const_sign",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:decide",
+   "transport": "symCall:decide",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:degree",
+   "transport": "symCall:degree",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:denominator",
+   "transport": "symCall:denominator",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:desolve",
+   "transport": "symCall:desolve",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:diff",
+   "transport": "symCall:diff",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:div",
+   "transport": "symCall:div",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:e",
+   "transport": "symCall:e",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:enclose",
+   "transport": "symCall:enclose",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:euler_gamma",
+   "transport": "symCall:euler_gamma",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:eval_many",
+   "transport": "symCall:eval_many",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:expand",
+   "transport": "symCall:expand",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:expand_log",
+   "transport": "symCall:expand_log",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:expand_trig",
+   "transport": "symCall:expand_trig",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:factor",
+   "transport": "symCall:factor",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:float",
+   "transport": "symCall:float",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:fun",
+   "transport": "symCall:fun",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:int",
+   "transport": "symCall:int",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:integrate",
+   "transport": "symCall:integrate",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:integrate_steps",
+   "transport": "symCall:integrate_steps",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:is_zero",
+   "transport": "symCall:is_zero",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:latex",
+   "transport": "symCall:latex",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:limit",
+   "transport": "symCall:limit",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:mul",
+   "transport": "symCall:mul",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:n",
+   "transport": "symCall:n",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:neg",
+   "transport": "symCall:neg",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:number",
+   "transport": "symCall:number",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:numerator",
+   "transport": "symCall:numerator",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:operator",
+   "transport": "symCall:operator",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:parse",
+   "transport": "symCall:parse",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:partial_fraction",
+   "transport": "symCall:partial_fraction",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:pi",
+   "transport": "symCall:pi",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:pow",
+   "transport": "symCall:pow",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:pysrc",
+   "transport": "symCall:pysrc",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:rat",
+   "transport": "symCall:rat",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:reduce_trig",
+   "transport": "symCall:reduce_trig",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:rel",
+   "transport": "symCall:rel",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:simplify_factorial",
+   "transport": "symCall:simplify_factorial",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:simplify_full",
+   "transport": "symCall:simplify_full",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:simplify_log",
+   "transport": "symCall:simplify_log",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:simplify_rational",
+   "transport": "symCall:simplify_rational",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:simplify_trig",
+   "transport": "symCall:simplify_trig",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:solve",
+   "transport": "symCall:solve",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:special_calls",
+   "transport": "symCall:special_calls",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:str",
+   "transport": "symCall:str",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:sub",
+   "transport": "symCall:sub",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:subs",
+   "transport": "symCall:subs",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:sym",
+   "transport": "symCall:sym",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:taylor",
+   "transport": "symCall:taylor",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:together",
+   "transport": "symCall:together",
+   "status": "planned",
+   "family": "E11 symbolics",
+   "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:uinf",
+   "transport": "symCall:uinf",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "symCall:variables",
+   "transport": "symCall:variables",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:add",
+   "transport": "mpCall:add",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:divexact",
+   "transport": "mpCall:divexact",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:divrem",
+   "transport": "mpCall:divrem",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:eq",
+   "transport": "mpCall:eq",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:factor",
+   "transport": "mpCall:factor",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:gcd",
+   "transport": "mpCall:gcd",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:len",
+   "transport": "mpCall:len",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:mul",
+   "transport": "mpCall:mul",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:mulred",
+   "transport": "mpCall:mulred",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:neg",
+   "transport": "mpCall:neg",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:new",
+   "transport": "mpCall:new",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:newp",
+   "transport": "mpCall:newp",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:pow",
+   "transport": "mpCall:pow",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:powred",
+   "transport": "mpCall:powred",
+   "status": "planned",
+   "family": "E6 multivariate",
+   "owner": "multivariate (sage)"
+  },
+  {
+   "id": "mpCall:scale",
+   "transport": "mpCall:scale",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:sub",
+   "transport": "mpCall:sub",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "mpCall:text",
+   "transport": "mpCall:text",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "wasm:kernels.ts",
+   "transport": "wasm:kernels.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "P3f NumPy kernels",
+   "owner": "numerics (python)"
+  },
+  {
+   "id": "wasm:raster.ts",
+   "transport": "wasm:raster.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "E13g raster",
+   "owner": "board/plot"
+  }
+ ]
+}

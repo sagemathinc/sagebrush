@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { classify, rowOutcome } from "./interrupt-classify.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = join(ROOT, "packages/sagebrush/bin/sagebrush.cjs");
@@ -190,22 +191,6 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
   });
 }
 
-// classify one trial (plan r3 §1, §6.2): PASS needs KI, no RET, probes ok, no stray
-function classify(t) {
-  if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before Stop" : "no Stop sent" };
-  // a return after the Stop was sent, with the target running at the send: the route did not
-  // stop (FAIL); only a return before the send makes the trial INVALID
-  if (t.marks.RET) return t.marks.RET.t > t.t_send ? { outcome: "FAIL", why: "did not stop (returned " + Math.round(t.marks.RET.t - t.t_send) + " ms after the Stop)" } : { outcome: "INVALID", why: "returned before the Stop" };
-  if (t.stray && !t.stray.startsWith("late")) return { outcome: "INVALID", why: "stray " + t.stray };
-  if (!t.marks.KI) return { outcome: "FAIL", why: "no KeyboardInterrupt" };
-  const latency = t.marks.KI.t - t.t_send;
-  if (latency < 0) return { outcome: "FAIL", why: "harness bug: negative latency" };
-  const enter = Number(t.marks.ENTER?.rest), ki = Number(t.marks.KI.rest);
-  const r = { latency_ms: Math.round(latency), recognition_s: Number.isFinite(enter + ki) ? +(ki - enter).toFixed(3) : null };
-  if (!t.probe?.startsWith("ok")) return { outcome: "FAIL", why: "probe " + t.probe, ...r };
-  return { outcome: latency > 10_000 ? "SLOW" : "PASS", ...r };
-}
-
 async function calibrate(host, c) {
   if (c.calibration === "nonterminating") return { s: null, T: null, attempts: [] };
   let s = c.s0;
@@ -238,8 +223,9 @@ async function runHost(host) {
     const d = c.calibration === "nonterminating" ? 1000 : Math.round(cal.T * 0.5);
     const r = await session(host, c, cal.s, [d, d, d, d, d]);
     const trials = r.trials.map((t) => ({ i: t.i, ...classify(t) }));
+    const outcome = rowOutcome(trials);
     const rss = r.samples.map((x) => x.rss_kb), thr = r.samples.map((x) => x.threads);
-    rows.push({ case: c.id, host, mode: c.mode, s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, trials, rss_kb: rss, threads: thr, end: r.end, wall_ms: Math.round(r.wall_ms), left_in_group: r.left, ...(trials.some((t) => t.outcome !== "PASS") ? { tail: r.tail } : {}) });
+    rows.push({ case: c.id, host, mode: c.mode, outcome, s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, trials, rss_kb: rss, threads: thr, end: r.end, wall_ms: Math.round(r.wall_ms), left_in_group: r.left, ...(trials.some((t) => t.outcome !== "PASS") ? { tail: r.tail } : {}) });
     console.log(JSON.stringify(rows.at(-1)));
   }
   return rows;
