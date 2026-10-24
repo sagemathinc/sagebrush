@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The core's growth gate (plan-growth-budget-r5; it replaces the exact
+// The core's growth gate (plan-growth-budget-r6; it replaces the exact
 // totals of size-budget.json, plan-modular-packages-r4 §7.2).  This file is
 // the whole measurement: its sha256 is part of every size record's
 // comparability key (r5 §1.1), so any change to how bytes are counted or
@@ -770,7 +770,9 @@ async function cli() {
     for (const [k, c] of Object.entries(m.counts)) if (c.VERSION || c.BUILD_ID) console.log(`${k}: VERSION ${c.VERSION}, BUILD_ID ${c.BUILD_ID}`);
     if (m.problems.length) console.log("against EXPECTED_COUNTS:\n  " + m.problems.join("\n  "));
   } else if (mode === "--legacy") {
+    // (r6 §1.2: the base's own measure(), on this same build; fails closed if it can't run)
     const legacy = await import(pathToFileURL(join(dir, "scripts", "size-budget.mjs")).href);
+    if (typeof legacy.measure !== "function") throw new Error(`${dir}/scripts/size-budget.mjs has no measure(): the bootstrap cross-check fails closed`);
     const recorded = existsSync(join(dir, "size-budget.json")) ? JSON.parse(readFileSync(join(dir, "size-budget.json"), "utf8")).sizes : null;
     writeFileSync(arg("--out"), JSON.stringify({ measured: legacy.measure(dir), recorded }, null, 1) + "\n");
   } else if (mode === "--resolve-base") {

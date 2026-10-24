@@ -166,6 +166,24 @@ fails("the merge built with another bun than budgets.json pins", transition({ n:
   fails("the bootstrap without the legacy measurement", boot(B, null), /cross-check/);
   fails("the bootstrap, growth without a marker", boot(B, legacy, S(100001, 5000, 300)), /needs a marker/);
 }
+{
+  // r6 §1.2: the real case, push run 40070967084 (cli/pyjs.cjs measured 28160134 < recorded 28160137)
+  const n = { "cli/pyjs.cjs": 28160145, "cli/packages.gen.js": 278428 };
+  const B = { format: "sagebrush-budgets", v: 1, toolchain: { bun: "1.4.4" }, bundles: { "cli/pyjs.cjs": ne(30976159), "cli/packages.gen.js": { exact: true, max: 278428 } }, epoch: { sizes: { "cli/pyjs.cjs": 28160145 }, reset: null } };
+  const boot = (pyjs, recorded = 28160137) => {
+    const N = rec(BASE, { ...n, "cli/pyjs.cjs": pyjs });
+    N.neutral["cli/pyjs.cjs"] = 11;
+    const B2 = clone(B);
+    B2.epoch.sizes["cli/pyjs.cjs"] = pyjs;
+    return evaluate({ mode: "transition", merge: { record: rec(MERGE, N.sizes), budgets: B2, markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: N, budgets: null, declaredKey: { bun: null, node: "24.21.0", measure_sha256: null } }, legacy: { measured: { "cli/pyjs.cjs": 28160134, "cli/packages.gen.js": 278428 }, recorded: { "cli/pyjs.cjs": recorded, "cli/packages.gen.js": 278428 } }, markerDiff: [] });
+  };
+  const r = boot(28160145);
+  passes("r6: the real −3 B case (28160134 + 11 = 28160145)", r);
+  check("r6: the real case's 3 B of slack is printed", r.notes.some((x) => /3 B over its build for cli\/pyjs\.cjs/.test(x)), jcs(r.notes));
+  fails("r6: the real case, 28160146", boot(28160146), /cross-check/);
+  fails("r6: the real case, a recorded 28160133", boot(28160145, 28160133), /over its size-budget|> its size-budget/);
+}
+
 // ---- epoch resets (r5 §1.3 rule 5)
 function resetCase({ O, N, M, growth = {}, keyChanged = true, markers = [], map = [], added = [], removed = [], baseB, B, old, mutate }) {
   baseB ??= budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 } });
