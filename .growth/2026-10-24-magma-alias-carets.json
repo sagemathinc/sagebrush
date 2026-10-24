@@ -1,0 +1,1 @@
+{"v":1, "reason":"#105 Magma: an intrinsic called through a variable or parameter, or in a function body, says its errors at the call's \"(\" (src/magma.ts)", "bytes":{"cli/pyjs.cjs": 468, "engine/sagebrush-analyze.js": 168, "engine/sagebrush-worker.js": 170}}

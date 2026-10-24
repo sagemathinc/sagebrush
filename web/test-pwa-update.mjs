@@ -20,7 +20,7 @@ import { createServer, request } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { devtoolsPort, freePort } from "./test-port.mjs";
+import { SERVE_OUT_MAX, devtoolsPort, startServe } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const here = new URL(".", import.meta.url).pathname;
@@ -75,7 +75,10 @@ function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
   })()`;
   return async (why) => {
     const r = await within(ms, send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms), { timedOut: true });
-    const state = r?.timedOut ? "unavailable (diagnostic timeout)" : r?.result?.value ?? "unavailable: " + clip(JSON.stringify(r?.exceptionDetails?.text ?? r));
+    // (on a page that threw, as Chrome's own error page does, returnByValue gives the error as {}: say the exception)
+    const state = r?.timedOut ? "unavailable (diagnostic timeout)"
+      : r?.exceptionDetails ? "unavailable: " + clip(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text)
+      : typeof r?.result?.value === "string" ? r.result.value : "unavailable: " + clip(JSON.stringify(r));
     log(`  diagnostics (${why}):`);
     log("    page: " + String(state).slice(0, 2000));
     for (const [k, list] of Object.entries(notes)) for (const line of list) log(`    ${k}: ${line}`);
@@ -114,6 +117,34 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
     // (always a string, so a check of it fails in words, never with a TypeError)
     return (await output()) ?? "(no output: the cell didn't run)";
   };
+}
+
+// ---- the site's server: started on a port it picks itself (startServe, web/test-port.mjs), bounded in time and
+// bytes, never left running
+const READY_MS = 10_000;
+/** The one cleanup for the test's resources in `h` ({mf, server, front, chrome, profile}, each null until made):
+ * it disposes of whichever exist, so it is right on every path, however early the failure. */
+function makeCleanup(h) {
+  return async () => {
+    h.chrome?.kill("SIGKILL");
+    h.server?.kill("SIGKILL");
+    if (h.front) { h.front.closeAllConnections?.(); h.front.close(); }
+    await h.mf?.dispose();
+    await sleep(300);
+    if (h.profile) rmSync(h.profile, { recursive: true, force: true });
+  };
+}
+/** Whether `url` answers 200 within `ms`: {ok} or {ok: false, why}, never a hang (LIMIT-PWA103-3). */
+async function siteReady(url, ms = READY_MS) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    await r.body?.cancel();
+    return r.status === 200 ? { ok: true } : { ok: false, why: `it answered ${r.status}` };
+  } catch (e) {
+    // (fetch's own error says only "fetch failed": the reason is in its cause, or in the cause's errors)
+    const cause = e?.cause?.code ?? e?.cause?.errors?.find((x) => x?.code)?.code ?? e?.cause?.message;
+    return { ok: false, why: e?.name === "TimeoutError" ? `no answer within ${ms / 1000} s` : String(cause ?? e) };
+  }
 }
 
 // ---- self-checks of the diagnostics, without a browser (they run first, and count like any check)
@@ -206,6 +237,78 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
   let calls = 0;
   ok((await makeUntil(async () => ++calls >= 3, sleep, 200)("x", 3000)) === true && calls === 3, "(self-check) until returns as soon as the page says yes");
 }
+// ---- self-checks of the server's start and the readiness check: every failure ends within its bound (50 ms for the
+// scheduler), kills the child and detaches the listeners (#103 review: CORR-PWA103-1, LIMIT-PWA103-1/3, LIFE-PWA103-2)
+{
+  const STOL = 50;
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const fake = () => { const c = new EventEmitter(); c.stdout = new PassThrough(); c.stderr = new PassThrough(); c.killed = false; c.kill = () => { c.killed = true; return true; }; return c; };
+  const outcome = async (s) => { try { return { port: await s.port }; } catch (e) { return { error: e.message }; } };
+  const attached = (c) => c.stdout.listenerCount("data") + c.listenerCount("exit") + c.listenerCount("error");
+  let c = null, t0 = Date.now();
+  let o = await outcome(startServe(() => (c = fake()), 150));
+  let took = Date.now() - t0;
+  ok(/within 0.15 s/.test(o.error) && c.killed && attached(c) === 0 && took <= 150 + STOL, `(self-check) a silent server fails at its deadline, killed, its listeners gone (${took} ms; bound 150 + ${STOL}): ${o.error}`);
+  // (each case below: its event comes 20 ms after the spawn, and it must end by 20 ms + STOL, with a 5 s deadline unused)
+  const timed = async (make, ms = 5000) => { const t = Date.now(); const r = await outcome(startServe(make, ms)); return { ...r, took: Date.now() - t }; };
+  o = await timed(() => { c = fake(); setTimeout(() => c.emit("exit", 1, null), 20); return c; });
+  ok(/exited before listening \(1\)/.test(o.error) && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a server that exits before its port line fails at once (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.emit("error", Object.assign(new Error("x"), { code: "ENOENT" })), 20); return c; });
+  ok(/couldn't start \(ENOENT\)/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a spawn error fails in words, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("x".repeat(SERVE_OUT_MAX + 1)), 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) one chunk past ${SERVE_OUT_MAX} bytes is refused before it is kept, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("x".repeat(100_000) + "\n"), 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) an overlong line that ends in a newline is refused, not parsed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => { c.stdout.write("x".repeat(SERVE_OUT_MAX - 2)); setTimeout(() => c.stdout.write("é\n"), 5); }, 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && o.took <= 25 + STOL, `(self-check) a chunk that crosses the cap is refused, counted in bytes (a 2-byte character, ${o.took} ms; bound 25 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("Traceback (most recent call last):\n"), 20); return c; });
+  ok(/other than its port/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a line that isn't a port fails, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => { c.stdout.write("401"); setTimeout(() => c.stdout.write("23\n"), 5); }, 20); return c; });
+  ok(o.port === 40123 && !c.killed && attached(c) === 0 && o.took <= 25 + STOL, `(self-check) a port line, even in two chunks, is the port, and the listeners go once it is read (${o.took} ms)`);
+  // (real processes: a binary that doesn't exist, and a live child that never speaks, which must be gone after)
+  o = await timed(() => (c = spawn("sagebrush-no-such-binary", [], { stdio: ["ignore", "pipe", "pipe"] })));
+  ok(/couldn't start \(ENOENT\)/.test(o.error) && o.took <= 200 + STOL, `(self-check) a real spawn error fails in words (${o.took} ms; bound 200 + ${STOL}): ${o.error}`);
+  t0 = Date.now();
+  o = await outcome(startServe(() => (c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: ["ignore", "pipe", "pipe"] })), 200));
+  took = Date.now() - t0;
+  const gone = c.exitCode !== null || c.signalCode !== null || (await within(2000, new Promise((r) => c.once("exit", () => r(true))), false));
+  ok(/within 0.2 s/.test(o.error) && took <= 200 + STOL && gone, `(self-check) a real silent child fails at its 200 ms deadline (${took} ms; bound 200 + ${STOL}) and is no longer running`);
+  // (the readiness check: bounded, and a failure in words)
+  const { createServer: makeServer } = await import("node:http");
+  const hang = makeServer(() => {});
+  await new Promise((r) => hang.listen(0, "127.0.0.1", r));
+  t0 = Date.now();
+  const rh = await siteReady(`http://127.0.0.1:${hang.address().port}/`, 200);
+  took = Date.now() - t0;
+  const hangPort = hang.address().port;
+  hang.closeAllConnections?.();
+  await new Promise((r) => hang.close(r));
+  ok(!rh.ok && /no answer within 0.2 s/.test(rh.why) && took <= 200 + STOL, `(self-check) a site that never answers fails its readiness check at its 200 ms deadline (${took} ms; bound 200 + ${STOL}): ${rh.why}`);
+  // (the port just closed: nothing listens there now; fetch itself refuses well-known ports such as 1)
+  t0 = Date.now();
+  const rr = await siteReady(`http://127.0.0.1:${hangPort}/`, 2000);
+  took = Date.now() - t0;
+  ok(!rr.ok && /ECONNREFUSED/.test(rr.why) && took <= 2000 + STOL, `(self-check) a site nothing listens on fails its readiness check in words, within its 2 s deadline (${took} ms; bound 2000 + ${STOL}): ${rr.why}`);
+  // (the cleanup: after a failure before anything else exists, such as a setup read, the resources made are gone)
+  const hh = { mf: null, server: null, front: null, chrome: null, profile: null };
+  let disposed = false;
+  try {
+    hh.mf = { dispose: async () => { disposed = true; } };
+    readFileSync(join(here, "dist", "no-such-file-for-the-self-check"));
+  } catch {} finally {
+    await makeCleanup(hh)();
+  }
+  ok(disposed, "(self-check) a setup read that fails after Miniflare exists still leaves it disposed");
+  // (and in this file, nothing that can fail sits between making Miniflare and the try that cleans it up)
+  // (the patterns are built from parts, so that this check's own text can't match them)
+  const src = readFileSync(new URL(import.meta.url), "utf8");
+  const NEW_MF = "new " + "Miniflare(", MADE = "h.mf = " + NEW_MF, SW_READ = "const sw = " + "readFileSync(";
+  const made = src.indexOf(MADE), tryAt = src.lastIndexOf("\ntry {\n", made), swAt = src.indexOf(SW_READ);
+  const before = src.slice(0, tryAt).split(NEW_MF).length - 1; // (Miniflare made before the try: must be none)
+  ok(made > 0 && tryAt > 0 && src.slice(tryAt, made).split("\n").length <= 3 && swAt > 0 && swAt < tryAt && before === 0 && src.split(NEW_MF).length - 1 === 1,
+    `(self-check) Miniflare is made once, inside the try, as its first statement, after the setup reads (made at ${made}, try at ${tryAt}, sw read at ${swAt})`);
+}
 
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
 const require = createRequire(join(here, "test-workers/package.json"));
@@ -214,20 +317,18 @@ const entryFile = join(mkdtempSync(join(tmpdir(), "sb-update-")), "entry.ts");
 writeFileSync(entryFile, `import { handleLibChunk } from ${JSON.stringify(join(here, "engines.ts"))};
 export default { async fetch(req, env, ctx) { return (await handleLibChunk(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`);
 const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "site", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
-const bucket = await mf.getR2Bucket("ENGINES");
-// (with the pinned zone data's files, in lib/tzdata/)
-const chunks = readdirSync(join(here, "dist", "lib"), { recursive: true }).filter((f) => statSync(join(here, "dist", "lib", f)).isFile());
-for (const f of chunks) if (!f.startsWith("matlab")) await bucket.put("lib/" + f, readFileSync(join(here, "dist", "lib", f)));
-
-const upstream = await freePort();
-const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
+// (the setup reads come first, before any resource exists: the service worker's source is read here)
+const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
+// (every resource is created inside the try below, in `h`, and disposed of by one cleanup on every path,
+// whatever was created: CORR-PWA103-1, LIFE-PWA103-2)
+const h = { mf: null, server: null, front: null, chrome: null, profile: null };
+const cleanup = makeCleanup(h);
+let upstream = 0;
 let deployed = false;
 const seen = { site: [], r2: [] };
 // (what the diagnostics print if the page doesn't load: the front's failed requests, the page's console, its failed loads)
 const notes = { front: [], console: [], network: [] };
-const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
-const front = createServer(async (req, res) => {
+const frontHandler = async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   if (deployed && path === "/sw.js") {
     // (the next build's service worker: another version, whose lists name its own chunks, not these)
@@ -237,7 +338,7 @@ const front = createServer(async (req, res) => {
   }
   if (path.startsWith("/lib/")) {
     if (deployed) {
-      const r = await mf.dispatchFetch("https://sagebrush.test" + path, { method: req.method });
+      const r = await h.mf.dispatchFetch("https://sagebrush.test" + path, { method: req.method });
       seen.r2.push(path + " " + r.status);
       const body = Buffer.from(await r.arrayBuffer());
       res.writeHead(r.status, { ...Object.fromEntries(r.headers), "cross-origin-resource-policy": "cross-origin" });
@@ -252,16 +353,29 @@ const front = createServer(async (req, res) => {
   });
   up.on("error", (e) => { note(notes.front, `${req.method} ${path} 502 (upstream: ${e?.code ?? e})`); res.writeHead(502); res.end(); });
   req.pipe(up);
-});
-await new Promise((r) => front.listen(0, "127.0.0.1", r));
-const url = `http://127.0.0.1:${front.address().port}/`;
-await sleep(800);
-
-const profile = mkdtempSync(join(tmpdir(), "sb-update-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-const cleanup = async () => { chrome.kill("SIGKILL"); server.kill(); front.close(); await mf.dispose(); await sleep(300); rmSync(profile, { recursive: true, force: true }); };
+};
 try {
-  const cdpPort = await devtoolsPort(profile);
+  h.mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "site", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
+  const bucket = await h.mf.getR2Bucket("ENGINES");
+  // (with the pinned zone data's files, in lib/tzdata/)
+  const chunks = readdirSync(join(here, "dist", "lib"), { recursive: true }).filter((f) => statSync(join(here, "dist", "lib", f)).isFile());
+  for (const f of chunks) if (!f.startsWith("matlab")) await bucket.put("lib/" + f, readFileSync(join(here, "dist", "lib", f)));
+  // (serve.py picks its own free port and says it once it is listening: no port chosen here that something else can
+  // take before serve.py binds it, and no fixed wait for it to start; a CI flake was the front's 502, ECONNREFUSED,
+  // for the first page load, run 40090051590)
+  const serve = startServe(() => (h.server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
+  upstream = await serve.port;
+  h.front = createServer(frontHandler);
+  await new Promise((resolve, reject) => { h.front.once("error", reject); h.front.listen(0, "127.0.0.1", resolve); });
+  const url = `http://127.0.0.1:${h.front.address().port}/`;
+  // (the root page answers, within READY_MS, before Chrome is sent to it)
+  const ready = await siteReady(url);
+  ok(ready.ok, "the site answers before the page is opened" + (ready.ok ? "" : ": " + ready.why));
+  if (!ready.ok) throw new Error("stopped: the site didn't answer, so the page can't be opened");
+
+  h.profile = mkdtempSync(join(tmpdir(), "sb-update-"));
+  h.chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${h.profile}`, "about:blank"], { stdio: "ignore" });
+  const cdpPort = await devtoolsPort(h.profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
