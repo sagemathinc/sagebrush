@@ -69,3 +69,10 @@ check('map zero', lambda: V(_sage_const_0 ).map_coefficients(phi))
 check('map into F16', lambda: (t + a).map_coefficients(lambda c: c**_sage_const_2 , F16))
 check('map ZZ', lambda: (_sage_const_3 *x**_sage_const_2  + _sage_const_1 ).map_coefficients(lambda c: c + _sage_const_1 ))
 check('map ZZ GF5', lambda: (_sage_const_3 *x**_sage_const_2  + _sage_const_1 ).map_coefficients(GF(_sage_const_5 )))
+# callbacks see each coefficient in the polynomial's own ring (QQ's, also
+# when integral), and the result goes to the given ring
+S2 = QQ['y2']; (y2,) = S2._first_ngens(1)
+check('map QQ parent', lambda: (y2 + _sage_const_2 ).map_coefficients(lambda c: c.parent() is QQ))
+check('map QQ half', lambda: (y2 + _sage_const_1 /_sage_const_2 ).map_coefficients(lambda c: _sage_const_1  if c.parent() is QQ else _sage_const_0 ))
+check('map QQ to ZZ', lambda: (y2/_sage_const_2  + _sage_const_3 ).map_coefficients(lambda c: _sage_const_2 *c, ZZ))
+check('map ZZ parent', lambda: (_sage_const_3 *x + _sage_const_1 ).map_coefficients(lambda c: c.parent() is ZZ))
