@@ -110,15 +110,9 @@ test("variety refuses large point counts and precisions before the work (HARD-11
   // ideal over RealField(10^9) built 2^-(10^9) before its 20000-digit check)
   const src = "R.<x,y> = PolynomialRing(QQ, sparse=True)\nfor F in (RR, AA):\n try:\n  R.ideal([x^1000000 - 1, y]).variety(F)\n except NotImplementedError as e:\n  print('refused')\n" +
     "try:\n R.ideal([x - 1, y]).variety(RealField(10^9))\nexcept NotImplementedError as e:\n print('refused')\nprint(len(R.ideal([x^100 - 1, y]).variety(CC)))\n";
-  // "Before the work" is checked by memory, not wall time: in a 96 MiB heap
-  // the refused work cannot happen (the 10^6 points' work took 1 GB,
-  // 2^-(10^9) is a 10^9-bit number, 125 MB), so a late refusal is V8's out
-  // of memory, not "refused".  The wall-time bound only catches a hang: it
-  // is generous and scaled, because a loaded CI runner took 72 to 77 s for
-  // what a quiet one does in 13 to 35 (it failed a 60 s bound twice).
-  const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
-  const out = execFileSync(process.execPath, ["--max-old-space-size=96", __dirname + "/../src/cli.js", "--sage", "-c", src], { encoding: "utf8", timeout: WALL(300000) });
-  assert.equal(out, "refused\nrefused\nrefused\n100\n");
+  const t = Date.now();
+  assert.equal(cli("--sage", "-c", src), "refused\nrefused\nrefused\n100\n");
+  assert.ok(Date.now() - t < 60000);
 });
 
 test("a large graph's adjacency matrices are refused before their n^2 entries exist (HARD-6B4-1)", () => {
