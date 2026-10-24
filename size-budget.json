@@ -4,9 +4,9 @@
   "bun": "1.4.4"
  },
  "sizes": {
-  "cli/lib.gen.js": 7040797,
+  "cli/lib.gen.js": 7050499,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 28183797,
+  "cli/pyjs.cjs": 28193885,
   "engine/lib/core.pre": 1797229,
   "engine/lib/core.src": 415801,
   "engine/lib/magma-more.src": 146156,
@@ -65,8 +65,8 @@
   "engine/lib/pkg-scipy-io.pre": 61127,
   "engine/lib/pkg-scipy-io.src": 12835,
   "engine/lib/sage-more.src": 287233,
-  "engine/lib/sage.pre": 12759930,
-  "engine/lib/sage.src": 2675880,
+  "engine/lib/sage.pre": 12786221,
+  "engine/lib/sage.src": 2685582,
   "engine/lib/sci.pre": 1896228,
   "engine/lib/sci.src": 366319,
   "engine/lib/tzdata": 257239,
