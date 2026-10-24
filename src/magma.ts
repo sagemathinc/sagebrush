@@ -1523,6 +1523,21 @@ class Parser {
       const m = this.mapCtor(t.v, `(${lt.line}, ${lt.col})`);
       if (m !== null) return m;
     }
+    if (t.v === "ext") {
+      // ext< F | k, ... >: lib/_magma.py _ext checks the right-hand side
+      // (Magma points at the '<')
+      const start = this.i;
+      const base = this.expr();
+      if (this.eat("|")) {
+        const args: string[] = [];
+        do {
+          args.push(this.expr());
+        } while (this.eat(","));
+        this.expect(">");
+        return `_m._ext(${base}, [${args.join(", ")}], (${lt.line}, ${lt.col}))`;
+      }
+      this.i = start;
+    }
     // not implemented yet: skip to the matching '>' (tuples and nested
     // constructors are the only other uses of < and >)
     let depth = 1;

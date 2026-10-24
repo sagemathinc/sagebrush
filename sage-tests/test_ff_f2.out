@@ -1,0 +1,80 @@
+prime_subfield (Finite Field of size 2, Finite Field of size 2, Finite Field of size 7, Finite Field of size 3)
+gen (a, b, z4)
+modulus (x^2 + x + 1, x^4 + x + 1, x^4 + 2*x^3 + 2, x^2 + 2*x + 2, x^5 + 2*x + 1)
+trace norm b (0, 1)
+minpoly charpoly b (x^4 + x + 1, x^4 + x + 1, y^4 + y + 1, t^4 + t + 1)
+trace norm 0 (0, 0)
+minpoly charpoly 0 (x, x^4, y, t^4)
+trace norm 1 (0, 1)
+minpoly charpoly 1 (x + 1, x^4 + 1, y + 1, t^4 + 1)
+trace norm b^5 (0, 1)
+minpoly charpoly b^5 (x^2 + x + 1, x^4 + x^2 + 1, y^2 + y + 1, t^4 + t^2 + 1)
+trace norm b^7 (1, 1)
+minpoly charpoly b^7 (x^4 + x^3 + 1, x^4 + x^3 + 1, y^4 + y^3 + 1, t^4 + t^3 + 1)
+trace norm e (1, 2)
+minpoly charpoly e (x^4 + 2*x^3 + 2, x^4 + 2*x^3 + 2, y^4 + 2*y^3 + 2, t^4 + 2*t^3 + 2)
+trace norm 2 (2, 1)
+minpoly charpoly 2 (x + 1, x^4 + x^3 + x + 1, y + 1, t^4 + t^3 + t + 1)
+trace norm e^10 (2, 1)
+minpoly charpoly e^10 (x^2 + 2*x + 2, x^4 + x^3 + 2*x^2 + 2*x + 1, y^2 + 2*y + 2, t^4 + t^3 + 2*t^2 + 2*t + 1)
+trace norm e^20 (0, 1)
+minpoly charpoly e^20 (x^2 + 1, x^4 + 2*x^2 + 1, y^2 + 1, t^4 + 2*t^2 + 1)
+trace norm e^41 (2, 2)
+minpoly charpoly e^41 (x^4 + x^3 + 2, x^4 + x^3 + 2, y^4 + y^3 + 2, t^4 + t^3 + 2)
+trace norm d^9 (0, 1)
+minpoly charpoly d^9 (x^3 + x + 1, x^6 + x^2 + 1, y^3 + y + 1, t^6 + t^2 + 1)
+trace norm d^21 (1, 1)
+minpoly charpoly d^21 (x^2 + x + 1, x^6 + x^5 + x^3 + x + 1, y^2 + y + 1, t^6 + t^5 + t^3 + t + 1)
+trace norm z4^3 (1, 1)
+minpoly charpoly z4^3 (x^4 + x^3 + x^2 + x + 1, x^4 + x^3 + x^2 + x + 1, y^4 + y^3 + y^2 + y + 1, t^4 + t^3 + t^2 + t + 1)
+parents (Finite Field of size 2, Finite Field of size 3, True)
+prime (3, 3, x + 4, x + 4)
+laws ([True, True, True, True, True, True, True, True, True], [True, True, True, True, True, True, True, True, True])
+roots of minpoly [True, True, True, True]
+nth_root 13:8,5 8
+nth_root all 13:8,5 [8]
+nth_root 13:2,5 6
+nth_root all 13:2,5 [6]
+nth_root 13:0,2 0
+nth_root all 13:0,2 [0]
+nth_root 13:2,2 ValueError no nth root
+nth_root all 13:2,2 []
+nth_root 13:4,25 4
+nth_root all 13:4,25 [4]
+nth_root 13:4,-1 10
+nth_root all 13:4,-1 [10]
+nth_root b,2 b^2 + 1
+nth_root all b,2 [b^2 + 1]
+nth_root b^3,2 b^3 + b
+nth_root all b^3,2 [b^3 + b]
+nth_root b,7 b^3 + b^2 + 1
+nth_root all b,7 [b^3 + b^2 + 1]
+nth_root b^3,4 b^3 + b^2 + b + 1
+nth_root all b^3,4 [b^3 + b^2 + b + 1]
+nth_root b,-7 b^2
+nth_root all b,-7 [b^2]
+nth_root 0,3 0
+nth_root all 0,3 [0]
+nth_root b^5,3 ValueError no nth root
+nth_root all b^5,3 []
+nth_root e,3 e^3 + 2*e^2 + 1
+nth_root all e,3 [e^3 + 2*e^2 + 1]
+nth_root e^3,7 2*e^2 + 2*e
+nth_root all e^3,7 [2*e^2 + 2*e]
+nth_root e,2 ValueError no nth root
+nth_root all e,2 []
+nth_root Q0,4 0
+nth_root all Q0,4 [0]
+nth_root 2:1,5 1
+nth_root all 2:1,5 [1]
+nth_root 0 ValueError 
+nth_root zero neg ([], [])
+nth_root zero neg one ValueError 
+nth_root cube (2, [])
+nth_root check [True, True, True]
+extension (Finite Field in z4 of size 2^4, Finite Field in w of size 2^4, Finite Field in v of size 2^4, Finite Field in u of size 2^4)
+extension prime (Finite Field in z4 of size 3^4, Finite Field in h of size 3^4, Finite Field of size 7)
+extension modulus (x^4 + 2*x^3 + 2, x^6 + x^4 + x^3 + x + 1)
+extension coerce (True, True)
+extension 0 ValueError the order of a finite field must be a prime power
+extension -1 ValueError the order of a finite field must be a prime power
