@@ -599,7 +599,9 @@ def new_record(store, handle, kind, mode, session, run_seq, started_by, label=No
         "session": session, "run_seq": run_seq, "started_by": started_by, "label": label,
         "started_at": now, "elapsed_s": 0.0, "last_seen_at": now, "state": "running",
         "owner": store.owner, "requests": [], "restarted": False, "keep": False, "ticketed": False,
-        "covers": "worker_and_tracked_helpers" if os.name != "nt" else "worker",
+        # (H′1a observes and stops only the session's worker process: no
+        # process group or job yet (H′1b), so it never claims more)
+        "covers": "worker",
         "output": {"stdout_bytes": 0, "stderr_bytes": 0, "retained_bytes": 0, "truncated_bytes": 0, "tail": "", "path": None},
         "resources": {"store_bytes": 0}, "files": [], "retained": [],
         "notes": [SHARED_NOTE, DETACHED_NOTE],
