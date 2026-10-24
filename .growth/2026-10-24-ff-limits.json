@@ -3,10 +3,10 @@
  "reason": "Engine limits (#93, plan-ff-limits r3): lib/_limits.py (imported at every runtime's start, so in core), the finite-field core reading its budgets from it, the CLI/launcher --limits gate and the browser worker's init gate; with the EMBED_BITS follow-up for #92's splitting fields",
  "bytes": {
   "cli/lib.gen.js": 11739,
-  "cli/pyjs.cjs": 15514,
+  "cli/pyjs.cjs": 15548,
   "engine/lib/core.pre": 49689,
   "engine/lib/core.src": 10645,
-  "engine/lib/magma.pre": 2336,
+  "engine/lib/magma.pre": 2345,
   "engine/lib/magma.src": 814,
   "engine/lib/sage.pre": 644,
   "engine/lib/sage.src": 280,
