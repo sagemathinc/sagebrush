@@ -29,14 +29,16 @@ const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if 
 
 // ---- failure diagnostics: bounded in time and bytes, and never able to turn a failure into a pass
 const NOTE_MAX = 40, NOTE_CHARS = 300, ID_CHARS = 64, URL_MAX = 2000, DIAG_MS = 5000;
+/** Every other CDP call's deadline: far more than a healthy page needs, so only a wedged one meets it. */
+const CALL_MS = 30_000;
 const clip = (x, n = NOTE_CHARS) => String(x).slice(0, n);
 const note = (list, line) => { list.push(clip(line)); if (list.length > NOTE_MAX) list.shift(); };
-/** A CDP session: send() with an optional deadline, after which it answers {timedOut} and forgets the
- * request, so a reply after it (or to an id never sent) is inert (PWA-DIAG-1). */
-function cdpSession(post) {
+/** A CDP session: send() with a deadline (`defaultMs` unless given), after which it answers {timedOut} and
+ * forgets the request, so a reply after it (or to an id never sent) is inert (PWA-DIAG-1). */
+function cdpSession(post, defaultMs = Infinity) {
   let n = 0;
   const waiting = new Map();
-  const send = (method, params = {}, ms = Infinity) => new Promise((resolve) => {
+  const send = (method, params = {}, ms = defaultMs) => new Promise((resolve) => {
     const id = ++n;
     const timer = Number.isFinite(ms) ? setTimeout(() => { waiting.delete(id); resolve({ timedOut: true }); }, ms) : null;
     waiting.set(id, (v) => { if (timer) clearTimeout(timer); waiting.delete(id); resolve(v); });
@@ -78,6 +80,22 @@ function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
     log("    page: " + String(state).slice(0, 2000));
     for (const [k, list] of Object.entries(notes)) for (const line of list) log(`    ${k}: ${line}`);
     if (!Object.values(notes).some((l) => l.length)) log("    (no failed requests, console errors or failed loads recorded)");
+  };
+}
+/** Poll `ev(expr, deadline)` until it's truthy, 100 ms apart, for `ms`: no call starts at or after start + ms
+ * (so a healthy page is polled for its whole time, as before). The wall is start + ms + callMs: each call
+ * is given min(callMs, the time left to the wall), and no sleep runs past it, so the whole wait is at most
+ * ms + callMs (120 s for the 90 s cell wait) however slow the page (PWA-CALL101-1). `now` is the clock. */
+function makeUntil(ev, pause, callMs, now = Date.now) {
+  return async (expr, ms = 30000) => {
+    const start = now(), cutoff = start + ms, wall = cutoff + callMs;
+    while (now() < cutoff) {
+      if (await ev(expr, Math.max(1, Math.min(callMs, wall - now())))) return true;
+      const left = wall - now();
+      if (left <= 0) break;
+      await pause(Math.min(100, left));
+    }
+    return false;
   };
 }
 /** What a cell that didn't finish by its deadline returns: no check accepts it. */
@@ -136,6 +154,57 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
   recordEvent({ method: "Network.loadingFailed", params: { requestId: "r" + big, errorText: big, blockedReason: big } }, ns, us);
   ok(us.size === URL_MAX && [...us.keys()].every((k) => k.length <= ID_CHARS) && [...us.values()].every((v) => v.length <= NOTE_CHARS), "(self-check) request URLs and ids are kept cut, at most " + URL_MAX);
   ok([...ns.console, ...ns.network].every((l) => l.length <= NOTE_CHARS) && ns.console.length === 1 && ns.network.length === 1, "(self-check) console and network notes are cut to " + NOTE_CHARS + " characters");
+  // ordinary calls: a session's default deadline applies to every send; until keeps its minimum and has a bound
+  const dflt = cdpSession(() => {}, 150);
+  t0 = Date.now();
+  const rd = await dflt.send("Page.navigate", { url: "about:blank" });
+  const took3 = Date.now() - t0;
+  ok(rd?.timedOut === true && took3 >= 100 && took3 < 1500 && dflt.pending() === 0, `(self-check) a session's default deadline ends an ordinary call nobody answers (${took3} ms)`);
+  // until's bound is ms + callMs, exactly (PWA-CALL101-1): first on a virtual clock, with no tolerance
+  {
+    let t = 0;
+    const clock = () => t, tick = async (d) => { t += d; };
+    // (astra's probe: every call takes 29 s and answers no; until(x, 90 s) with 30 s calls)
+    const slow = makeUntil(async (_, deadline) => { t += Math.min(29_000, deadline); return undefined; }, tick, 30_000, clock);
+    ok((await slow("x", 90_000)) === false && t <= 90_000 + 30_000, `(self-check) until with 29 s calls ends by its bound of 90 + 30 s (virtual ${t} ms)`);
+    // (the last call starts 1 ms before the cutoff, and nothing answers it: it gets only the time left to the wall)
+    t = 0;
+    let starts = [];
+    // (the 100 ms pause is free here, so the second call starts exactly 1 ms before the cutoff)
+    const late = makeUntil(async (_, deadline) => { starts.push(t); t += starts.length === 1 ? 89_999 : deadline; return undefined; }, async (d) => { t += d === 100 ? 0 : d; }, 30_000, clock);
+    ok((await late("x", 90_000)) === false && starts.at(-1) === 89_999 && t <= 90_000 + 30_000, `(self-check) a last call begun 1 ms before the cutoff still ends by the wall (virtual ${t} ms, starts ${JSON.stringify(starts)})`);
+    // (a call never starts at or after the cutoff)
+    t = 0;
+    starts = [];
+    const busy = makeUntil(async () => { starts.push(t); t += 40; return false; }, tick, 30_000, clock);
+    await busy("x", 1_000);
+    ok(starts.every((s) => s < 1_000) && t <= 1_000 + 30_000, `(self-check) no call starts at or after the cutoff (${starts.length} calls, last at ${starts.at(-1)} ms of 1,000)`);
+  }
+  // ...and in real time, against the same bound with only 50 ms for the scheduler
+  const TOL = 50;
+  const neverAnswers = cdpSession(() => {}); // (a wedged page: each call ends only at the deadline until gives it)
+  const wedgedEv = async (_, deadline) => { const r = await neverAnswers.send("Runtime.evaluate", {}, deadline); return r?.timedOut ? undefined : r; };
+  const quick = makeUntil(async () => false, sleep, 200);
+  t0 = Date.now();
+  const q = await quick("x", 300);
+  const took4 = Date.now() - t0;
+  ok(q === false && took4 >= 300 && took4 <= 300 + 200 + TOL, `(self-check) until polls a page that answers no at once for its whole time, within its bound (${took4} ms; 300 to 500 + ${TOL})`);
+  const wedged = makeUntil(wedgedEv, sleep, 200);
+  t0 = Date.now();
+  const w = await wedged("x", 300);
+  const took5 = Date.now() - t0;
+  ok(w === false && took5 <= 300 + 200 + TOL && neverAnswers.pending() === 0, `(self-check) until ends within ms + callMs when the page never answers (${took5} ms; bound 500 + ${TOL})`);
+  // (the first call answers no after 180 ms, so the second starts at about 280 ms, just before the 300 ms
+  // cutoff, and is never answered: the wall alone ends it, at ms + callMs)
+  const lateStarts = [];
+  const lastLate = makeUntil(async (expr, deadline) => { lateStarts.push(Date.now() - t0); if (lateStarts.length === 1) { await sleep(180); return false; } return wedgedEv(expr, deadline); }, sleep, 200);
+  t0 = Date.now();
+  const ll = await lastLate("x", 300);
+  const took6 = Date.now() - t0;
+  ok(ll === false && lateStarts.length === 2 && lateStarts[1] < 300 && took6 >= 500 - TOL && took6 <= 300 + 200 + TOL,
+    `(self-check) a call begun just before the cutoff, never answered, runs to the wall and no further (${took6} ms, calls at ${JSON.stringify(lateStarts)}; bound 500 + ${TOL})`);
+  let calls = 0;
+  ok((await makeUntil(async () => ++calls >= 3, sleep, 200)("x", 3000)) === true && calls === 3, "(self-check) until returns as soon as the page says yes");
 }
 
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
@@ -197,7 +266,7 @@ try {
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
-  const cdp = cdpSession((m) => ws.send(m));
+  const cdp = cdpSession((m) => ws.send(m), CALL_MS);
   const urls = new Map();
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
@@ -205,8 +274,9 @@ try {
     recordEvent(m, notes, urls); // (events, kept for the diagnostics)
   };
   const send = cdp.send;
-  const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
-  const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
+  // (a call past its deadline has no value: a check of it fails, and until polls on)
+  const ev = async (expression, deadline) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, deadline); return r?.timedOut ? undefined : r?.result?.value; };
+  const until = makeUntil(ev, sleep, CALL_MS);
   const diagnose = makeDiagnose({ send, notes, log: (l) => console.log(l) });
   const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
   const runCode = cellRunner({
