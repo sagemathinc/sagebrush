@@ -35,6 +35,9 @@ const TYPES: Record<string, string> = {
 };
 const typeOf = (name: string) => TYPES[name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream";
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/** `v` as JSON that is safe inside an inline <script>: no "<", ">" or "&" (so no "</script>" or "<!--" in it),
+ * and no U+2028 or U+2029, each written \uXXXX, which JSON and JavaScript read as the same characters. */
+export const htmlJson = (v: unknown) => JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
 // ---- the worker thread: one notebook's Python
 export function notebookWorker(data: { dir: string }) {
@@ -134,14 +137,31 @@ li.d a{font-weight:600}li.f{color:#888}button{font:inherit;padding:5px 12px;bord
 </style></head><body><h1><span>Sagebrush</span> notebooks</h1><div class="p">${esc(join(dir, rel))}</div>
 <p><button id="new">New notebook</button></p><ul>${up}${rows.join("") || '<li class="f">No notebooks here yet.</li>'}</ul>
 <script>document.getElementById("new").onclick=async()=>{let n=prompt("Name of the new notebook","Untitled.ipynb");if(!n)return;if(!/\\.ipynb$/i.test(n))n+=".ipynb";
-const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb/"+encodeURIComponent(p).replace(/%2F/g,"/");};</script></body></html>`;
+const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURIComponent(p).replace(/%2F/g,"/");};</script></body></html>`;
   };
 
   const server = http.createServer(async (req, res) => {
     try {
-      const host = (req.headers.host ?? "").replace(/:\d+$/, "");
-      if (host !== "127.0.0.1" && host !== "localhost") { res.writeHead(403).end("forbidden host"); return; }
+      // (its own host and port only; and a browser's request only from its own pages: another page, on another
+      // port of this computer too (the cookie is for the host, whatever the port), never reaches it)
+      const host = req.headers.host ?? "";
+      if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) { res.writeHead(403).end("forbidden host"); return; }
+      // (a link to a page of it may be followed from anywhere: the URL with the token is opened from a terminal,
+      // which may be another site's page; it shows the page, which no other page can read)
+      const origin = req.headers.origin, site = req.headers["sec-fetch-site"];
+      // (the path, decoded once: what these checks look at is what the routes below are given.  An encoded slash
+      // or backslash, a malformed escape, or a dot segment left after decoding is no path of this server's)
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      if (/%(2f|5c)/i.test(url.pathname)) { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
+      let path: string;
+      try { path = decodeURIComponent(url.pathname); } catch { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
+      if (/(^|\/)\.\.?(\/|$)/.test(path) || path.includes("\\")) { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
+      // (only a top-level navigation to one of its pages, never to its API, nor in another page's frame)
+      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && !/(^|\/)api(\/|$)/i.test(path);
+      if ((origin !== undefined && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) || (!opened && site !== undefined && site !== "same-origin" && site !== "none")) {
+        res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden: not this server's own page\n");
+        return;
+      }
       const cookie = /(?:^|;\s*)sagebrush_token=([0-9a-f]+)/.exec(req.headers.cookie ?? "")?.[1];
       if (url.searchParams.get("token") === token) {
         // trade the token in the URL for a cookie, and drop it from the address bar
@@ -150,11 +170,11 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
         return;
       }
       if (cookie !== token) { res.writeHead(403, { "Content-Type": "text/plain" }).end("Open the URL with the token that `sagebrush notebook` printed.\n"); return; }
-      const path = decodeURIComponent(url.pathname);
+      // (`path`, decoded above; its routes' patterns match any character, U+2028 and U+2029 too: the "s" flag)
       const method = req.method ?? "GET";
 
       // the API
-      if (/^\/(?:nb\/.+?\.ipynb\/)?api\/file$/i.test(path)) {
+      if (/^\/(?:nb\/.+?\.ipynb\/)?api\/file$/is.test(path)) {
         const p = inside(url.searchParams.get("path"));
         if (!p) { res.writeHead(400).end("bad path"); return; }
         if (method === "GET") {
@@ -172,12 +192,13 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
         } else res.writeHead(405).end();
         return;
       }
-      const m = /^\/(?:nb\/.*\/)?api\/session\/([\w-]+)\/(events|send|interrupt|stop)$/.exec(path);
+      const m = /^\/(?:nb\/.*\/)?api\/session\/([\w-]+)\/(events|send|interrupt|stop)$/s.exec(path);
       if (m) {
         const [, sid, what] = m;
         if (what === "events") {
+          if (method !== "GET") { res.writeHead(405, { Allow: "GET" }).end(); return; }
           // the notebook's directory: from the page's address (…/nb/<path>/api/…)
-          const nb = /^\/nb\/(.*)\/api\//.exec(path)?.[1] ?? "";
+          const nb = /^\/nb\/(.*)\/api\//s.exec(path)?.[1] ?? "";
           const s = sessions.get(sid) ?? startSession(sid, dirname(inside(nb) ?? join(dir, "x")));
           clearTimeout(s.timer);
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
@@ -191,6 +212,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
           });
           return;
         }
+        if (method !== "POST") { res.writeHead(405, { Allow: "POST" }).end(); return; }
         const s = sessions.get(sid);
         if (!s) { res.writeHead(404).end("no such session"); return; }
         if (what === "send") s.worker.postMessage(JSON.parse((await body(req)).toString("utf8")));
@@ -211,7 +233,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       }
       // a notebook: the page, told where its file is (its scripts load relative
       // to /nb/<path>/, so they are served under any /nb/ prefix)
-      const nbm = /^\/nb\/(.+?\.ipynb)(\/.*)?$/i.exec(path);
+      const nbm = /^\/nb\/(.+?\.ipynb)(\/.*)?$/is.exec(path);
       if (nbm && !nbm[2]) {
         // …/nb/a.ipynb -> …/nb/a.ipynb/ (relative URLs then resolve beneath it)
         res.writeHead(302, { Location: "/nb/" + encodeURIComponent(nbm[1]).replace(/%2F/g, "/") + "/" }).end();
@@ -221,7 +243,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       if (nbm && rest === "") {
         if (!inside(nbm[1])) { res.writeHead(400).end("bad path"); return; }
         const local = { path: nbm[1], name: basename(nbm[1]), dir: relative(dir, dirname(inside(nbm[1])!)) };
-        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${JSON.stringify(local).replace(/</g, "\\u003c")};</script>`);
+        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${htmlJson(local)};</script>`);
         res.writeHead(200, { "Content-Type": TYPES.html, "Cache-Control": "no-store" }).end(page);
         return;
       }
