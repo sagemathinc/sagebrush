@@ -17,7 +17,7 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { devtoolsPort, freePort } from "./test-port.mjs";
+import { devtoolsPort, startServe } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
@@ -28,33 +28,42 @@ const chunk = (prefix) => "lib/" + chunks.find((f) => f.startsWith(prefix));
 setTimeout(() => { console.log("FAIL the test did not end within 400 s"); process.exit(1); }, 400_000).unref();
 
 // web/dist (web/serve.py) behind a proxy that records each path asked for,
-// and answers some with other bytes
+// and answers some with other bytes.  serve.py picks its own port and says it
+// once it is listening (startServe, web/test-port.mjs: bounded, and the child
+// killed if it fails), as in test-pwa-update.mjs since #103; anything that
+// fails after it started stops it again.
 function site() {
   return (async () => {
-    const upstream = await freePort();
-    const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
-    const asked = [], tamper = new Set();
-    const front = createServer((req, res) => {
-      const path = new URL(req.url, "http://x").pathname;
-      asked.push(path);
-      const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
-        if (tamper.has(path) && r.statusCode === 200) {
-          r.resume();
-          const h = { ...r.headers };
-          delete h["content-length"]; delete h["etag"]; delete h["last-modified"];
-          res.writeHead(200, h);
-          return res.end('{"build":"not this one","group":"x","kind":"src","files":{}}');
-        }
-        res.writeHead(r.statusCode, r.headers);
-        r.pipe(res);
+    let server = null, front = null;
+    try {
+      const serve = startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
+      const upstream = await serve.port;
+      const asked = [], tamper = new Set();
+      front = createServer((req, res) => {
+        const path = new URL(req.url, "http://x").pathname;
+        asked.push(path);
+        const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
+          if (tamper.has(path) && r.statusCode === 200) {
+            r.resume();
+            const h = { ...r.headers };
+            delete h["content-length"]; delete h["etag"]; delete h["last-modified"];
+            res.writeHead(200, h);
+            return res.end('{"build":"not this one","group":"x","kind":"src","files":{}}');
+          }
+          res.writeHead(r.statusCode, r.headers);
+          r.pipe(res);
+        });
+        up.on("error", () => { res.destroy(); });
+        req.pipe(up);
       });
-      up.on("error", () => { res.destroy(); });
-      req.pipe(up);
-    });
-    await new Promise((r) => front.listen(0, "127.0.0.1", r));
-    for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${upstream}/`); break; } catch { await sleep(100); } }
-    const stop = () => new Promise((r) => { server.kill(); front.closeAllConnections?.(); front.close(() => r()); });
-    return { url: `http://127.0.0.1:${front.address().port}/`, asked, tamper, stop };
+      await new Promise((resolve, reject) => { front.once("error", reject); front.listen(0, "127.0.0.1", resolve); });
+      const stop = () => new Promise((r) => { server.kill(); front.closeAllConnections?.(); front.close(() => r()); });
+      return { url: `http://127.0.0.1:${front.address().port}/`, asked, tamper, stop };
+    } catch (e) {
+      server?.kill("SIGKILL");
+      if (front) { front.closeAllConnections?.(); front.close(); }
+      throw e;
+    }
   })();
 }
 
