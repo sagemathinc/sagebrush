@@ -4189,11 +4189,11 @@
   "class": "1+2",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-limits.ts ::  :: { name: \"MERGE_MS\", unit: \"ms\", def: 2_000, min: 100, max: 60_000, at: \"one merge, all its phases\" }, #0": {
+ "src/board-edit-limits.ts ::  :: { name: \"MERGE_MS\", unit: \"ms\", def: 10_000, min: 100, max: 60_000, at: \"one merge, all its phases\" }, #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
- "src/board-edit-limits.ts ::  :: { name: \"MERGE_WORK\", unit: \"work units\", def: 50_000_000, min: 100_000, max: 1_000_000_000, at: \"the cumulative ledger of one merge\" }, #0": {
+ "src/board-edit-limits.ts ::  :: { name: \"MERGE_WORK\", unit: \"work units\", def: 250_000_000, min: 524_288, max: 1_073_741_824, at: \"the cumulative ledger of one merge\" }, #0": {
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
@@ -4259,6 +4259,10 @@
  },
  "src/board-edit-limits.ts :: bound :: if (limits.MEMORY_MAX < 8 * limits.EDIT_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX})` }; #0": {
   "class": "1+2",
+  "owner": "board open --edit (@sagebrush-board)"
+ },
+ "src/board-edit-limits.ts :: bound :: if (limits.MERGE_WORK < 8 * limits.EDIT_MAX) return { error: `MERGE_WORK=${limits.MERGE_WORK} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX}), so that an edit of a board EDIT_MAX allows fits its work` }; #0": {
+  "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
  "src/board-edit-limits.ts :: bound :: if (v < lo || v > hi) return { error: `${c.name}=${v} is out of its range [${typeof c.min === \"string\" ? c.min + \" = \" + lo : lo}, ${typeof c.max === \"string\" ? c.max + \" = \" + hi : hi}] (${c.unit})` }; #0": {

@@ -7,7 +7,8 @@
 //     [--tabs 256] [--rounds 40] [--board-mib 8] [--memory-mib 1024]
 //
 // The margin (MARGIN_MIB below) is the implementation's own: the runtime, the test's own boards and the
-// patchflow module.  Measured once with --no-hub (the same boards and snapshots made and hashed, nothing
+// patchflow module.  It runs at the default MERGE_WORK and MERGE_MS (daybreak3, Oct 24: the quiet-slot run is at those).
+// Measured once with --no-hub (the same boards and snapshots made and hashed, nothing
 // submitted; the hub holding only P₀): VM2, node 26, Oct 24 2026, 256 tabs, 2 rounds: peak heap 200 MiB
 // at --board-mib 4 and 537 MiB at --board-mib 15.  MARGIN_MIB is 640, the larger with 1.2x headroom.  Not in the default suite (minutes, and
 // gigabytes): run on a build VM, its output reported with the change that needs it.
@@ -44,7 +45,7 @@ async function main() {
   const n = nodesFor(BOARD_MIB * MiB);
   fs.writeFileSync(file, JSON.stringify(board(n, 0, "start"), null, 2) + "\n");
   let now = 1_000_000;
-  const limits = { ...defaultLimits(), MEMORY_MAX: MEMORY_MIB * MiB, MAX_CLIENTS: Math.max(TABS, 1), TAB_TOMBSTONES: Math.max(16, Math.floor(TABS / 4)), MERGE_MS: 60_000, MERGE_WORK: 1_000_000_000, BODY_MAX: Math.min(16 * MiB, Math.floor((MEMORY_MIB * MiB) / 36)) };
+  const limits = { ...defaultLimits(), MEMORY_MAX: MEMORY_MIB * MiB, MAX_CLIENTS: Math.max(TABS, 1), TAB_TOMBSTONES: Math.max(16, Math.floor(TABS / 4)), BODY_MAX: Math.min(16 * MiB, Math.floor((MEMORY_MIB * MiB) / 36)) };
   const hub = new EditHub(file, limits, { mergeStrings3, now: () => now });
   const started = await hub.start(fs.readFileSync(file));
   if (!started.ok) throw new Error(started.why);
