@@ -279,8 +279,9 @@ def structured():
 
 def cancelling():
     """notifications/cancelled interrupts the computation of that request
-    only; one still waiting for the session never starts (daybreak2's
-    CANCEL-479-1)."""
+    only (daybreak2's CANCEL-479-1).  A call for a session that is running
+    another run doesn't wait for it: it is refused, busy, naming that run
+    (design-hprime-host-r5 §7), so it can never start late."""
     p = start()
     rpc(p, 1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}})
     rpc(p, 2, "tools/call", {"name": "sage", "arguments": {"code": "1"}})  # (the session started)
@@ -297,18 +298,18 @@ def cancelling():
                 got[m["id"]] = m["result"]
         return got
 
-    # A runs, B waits for the session; cancelling B leaves A alone
+    # A runs; B, for the same session, is refused (busy, naming A's run), and
+    # cancelling B afterwards leaves A alone
     t0 = time.time()
     send({"id": 10, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(3)\n'A done'"}}})
     time.sleep(0.5)
     send({"id": 11, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "'B ran'"}}})
-    time.sleep(0.2)
+    b = replies([11])[11]
     send({"method": "notifications/cancelled", "params": {"requestId": 11}})
-    got = replies([10, 11])
-    a, b = got[10], got[11]
+    a = replies([10])[10]
     assert not a["isError"] and a["structuredContent"]["result"] == "'A done'", a
-    assert b["isError"] and b["structuredContent"]["error"]["type"] == "interrupted" and "before it started" in b["structuredContent"]["error"]["message"], b
-    assert time.time() - t0 >= 2.5
+    assert b["isError"] and b["structuredContent"]["error"]["type"] == "busy" and b["structuredContent"]["run"]["handle"] == a["structuredContent"]["run"]["handle"], b
+    assert b["structuredContent"]["run"]["state"] == "running" and time.time() - t0 >= 2.5
     # cancelling the running one interrupts it
     t0 = time.time()
     send({"id": 12, "method": "tools/call", "params": {"name": "sage", "arguments": {"code": "import time\ntime.sleep(30)"}}})
