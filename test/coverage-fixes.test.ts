@@ -21,7 +21,7 @@ test("dir() of a module lists its names (or its own __dir__), not the module typ
   cases("dir_module_cases.py");
 });
 
-test("an int's decimal conversions are limited to 4300 digits as in CPython, and sys.set_int_max_str_digits changes it", () => {
+test("an int's decimal conversions under a limit a program sets (sys.set_int_max_str_digits) are CPython's", () => {
   cases("int_digits_cases.py");
 });
 
@@ -37,11 +37,11 @@ test("a SyntaxError's attributes, args and str() are CPython's; compile(..., 'si
   cases("syntax_error_cases.py");
 });
 
-test("Sage, Magma and MATLAB have no CPython-style 4300-digit limit on an integer's digits, as those systems (Sagebrush's own ceiling remains: int-digit-limits.test.ts)", () => {
+test("no mode has CPython's default 4300-digit limit on an integer's digits: Sage, Magma and MATLAB as those systems, Python mode as Sagebrush's policy (int-digit-limits.test.ts)", () => {
   const run = (args: string[]) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", ...args], { encoding: "utf8" }).trim();
   assert.equal(run(["--sage", "-c", "print(len(str(2^20000)), len(str(int(2)**20000)))"]), "6021 6021");
   assert.equal(run(["--magma", "-c", "print #Sprint(2^20000);"]), "6021");
-  assert.equal(run(["-c", "import sys\nprint(sys.get_int_max_str_digits())"]), "4300");
+  assert.equal(run(["-c", "import sys\nprint(sys.get_int_max_str_digits(), len(str(2**20000)))"]), "0 6021");
 });
 
 test("readlines' hint, each class's own way (an index, or BytesIO's int), counted in characters; a write takes only a real buffer (CORR-606-3, CORR-50F-1)", () => {
