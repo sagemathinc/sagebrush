@@ -6,16 +6,19 @@
 //   prompt  the same launcher's interactive prompt, in a pseudo-terminal (script -qfec), with Ctrl-C;
 //   browser the notebook page's worker, with its Stop button (served at SB_URL, Chromium over CDP).
 // Usage:
-//   node web/test-interrupt-matrix.mjs --pilot [--host cli,prompt,browser] [--rows P1,E2] [--out FILE]
-// The pilot calibrates each case on each host (uninterrupted, capped, a bounded number of resizes),
-// then runs one trial set per case (Stop at 0.5 T, or 1 s after the target starts for a loop
-// without an end), and writes what it measured as JSON.  This is the plan's pilot (plan-
-// interrupt-harness r3 §8); the full matrix and the CI job follow it.
+//   node web/test-interrupt-matrix.mjs [--pilot | --ci | --full] [--host cli,prompt,browser] [--rows P1,E2]
+//        [--out FILE] [--budget-ms N]
+// Each case is calibrated on each host (uninterrupted, capped, a bounded number of resizes).  Its
+// row's required cells are then 5 repeats at 0.5 T (1 s after the target starts for a loop
+// without an end), the short leak check; --full adds the early/middle/late phases and makes the
+// leak series 20 repeats (plan-interrupt-harness r4 §3, §6.1, §8).  Rows are checked against
+// web/interrupt-baseline.json; --ci exits 1 on FAIL, INCOMPLETE or FIXED.
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, rowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, leakCheck, rowOutcome } from "./interrupt-classify.mjs";
+import { killTree, procTable, sessionTree, survivors } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -35,9 +38,13 @@ const RUN_BUDGET_MS = Number(opt("--budget-ms", String(30 * 60_000)));
 const RUN_T0 = Number(process.hrtime.bigint()) / 1e6;
 const overBudget = () => Number(process.hrtime.bigint()) / 1e6 - RUN_T0 > RUN_BUDGET_MS;
 export const record = (row) => { appendFileSync(ROWS_OUT, JSON.stringify(row) + "\n"); console.log(JSON.stringify(row)); };
+// --pilot (default): 5 trials at the middle per row; --ci: the plan's CI set (r4 §8), baseline
+// rows watched 20 s; --full (VM): early/middle/late cells and the 20-repeat leak series
+const MODE = args.includes("--full") ? "full" : args.includes("--ci") ? "ci" : "pilot";
 const G_MS = 120_000; // the hang guard after a Stop (test infrastructure, not a computation limit)
+const BASELINE_WINDOW_MS = 20_000; // CI only: a baseline row's signature is pinned (r4 §8)
 const CAL_CAP_MS = 60_000; // one uninterrupted calibration run at most
-const BAND = { min: 3_000, max: 8_000 }; // the CI band (plan r3 §3)
+const BAND = MODE === "full" ? { min: 6_000, max: 30_000 } : { min: 3_000, max: 8_000 }; // VM / CI bands (r4 §3)
 const MAX_RESIZE = 4;
 const dir = mkdtempSync(join(tmpdir(), "sb-intr-"));
 const now = () => Number(process.hrtime.bigint()) / 1e6; // the one observer clock (ms)
@@ -115,23 +122,14 @@ function launcherChild(pid) {
   }
   return pid;
 }
-// processes still in a process group (the cleanup check)
-function groupMembers(pgid) {
-  const left = [];
-  for (const p of readdirSync("/proc")) {
-    if (!/^\d+$/.test(p)) continue;
-    try {
-      const f = readFileSync(`/proc/${p}/stat`, "utf8");
-      const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
-      if (Number(fields[2]) === pgid) left.push(Number(p));
-    } catch {}
-  }
-  return left;
-}
+// sessions still running: killed if the harness itself is stopped (timeout, Ctrl-C)
+const live = new Map(); // root -> known
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { for (const [r, k] of live) killTree(r, k); process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[sig]); });
+process.on("exit", () => { for (const [r, k] of live) killTree(r, k); });
 
 // ---- running one session (cli or prompt): delays[i] (ms after ENTER i, or null for none)
 // returns the per-trial evidence, read on the harness's own clock
-function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.length) {
+function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.length, guard_ms = G_MS) {
   const n = delays.length;
   const src = driver(c, s, n);
   return new Promise((resolve) => {
@@ -153,12 +151,23 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
     const t0 = now();
     const overall = setTimeout(() => finish("budget"), budget_ms);
     let tail = "";
-    const kill = () => { try { process.kill(-p.pid, "SIGKILL"); } catch {} };
+    const known = new Map();
+    live.set(p.pid, known);
+    const remember = () => { const t = procTable(); for (const q of sessionTree(p.pid, known)) if (t.has(q)) known.set(q, t.get(q).start); };
+    const watch = setInterval(remember, 1000);
+    let done = false;
     const finish = (why) => {
+      if (done) return;
+      done = true;
       clearTimeout(overall);
       if (guard) clearTimeout(guard);
-      kill();
-      setTimeout(() => resolve({ trials, samples, end: why, wall_ms: now() - t0, left: groupMembers(p.pid), tail: tail.slice(-1500) }), 500);
+      clearInterval(watch);
+      const killed = killTree(p.pid, known);
+      setTimeout(() => {
+        const left = survivors(killed);
+        if (left.length === 0) live.delete(p.pid);
+        resolve({ trials, samples, end: why, wall_ms: now() - t0, left, tail: tail.slice(-1500) });
+      }, 500);
     };
     const onLine = (line) => {
       const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END)\b ?(\d+)? ?(.*)$/);
@@ -176,7 +185,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
           trials[id - 1].t_send = now();
           if (host === "cli") process.kill(p.pid, "SIGINT");
           else p.stdin.write("\x03");
-          guard = setTimeout(() => finish("guard"), G_MS);
+          guard = setTimeout(() => finish("guard"), guard_ms);
         }, delays[t.i - 1]);
       }
       if (mk === "KI" && guard) { clearTimeout(guard); guard = null; }
@@ -207,7 +216,7 @@ async function calibrate(host, c) {
     const r = await session(host, c, s, [null], CAL_CAP_MS);
     const t = r.trials[0];
     const T = t.marks.RET && t.marks.ENTER ? t.marks.RET.t - t.marks.ENTER.t : null;
-    attempts.push({ s, T_ms: T && Math.round(T), end: r.end, rss_kb: r.samples[0]?.rss_kb, ...(T == null ? { tail: r.tail } : {}) });
+    attempts.push({ s, T_ms: T && Math.round(T), end: r.end, left: r.left, rss_kb: r.samples[0]?.rss_kb, ...(T == null ? { tail: r.tail } : {}) });
     if (T == null) {
       if (r.end === "budget" || r.end === "guard") s = c.grow(s, 0.25);
       else return { s, T: null, attempts, error: "no RET (" + r.end + ")" };
@@ -222,6 +231,7 @@ async function calibrate(host, c) {
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
+    if (MODE === "ci" && host === "prompt" && !["P1", "E2"].includes(c.id)) continue; // the CI set (r4 §8)
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -233,13 +243,42 @@ async function runHost(host) {
       record(rows.at(-1));
       continue;
     }
-    // 5 trials in one session: Stop at 0.5 T (or 1 s after ENTER) — the short leak series too
-    const d = c.calibration === "nonterminating" ? 1000 : Math.round(cal.T * 0.5);
-    const r = await session(host, c, cal.s, [d, d, d, d, d]);
-    const trials = r.trials.map((t) => ({ i: t.i, ...classify(t) }));
-    const outcome = againstBaseline({ case: c.id, host, outcome: rowOutcome(trials), trials }, BASELINE);
-    const rss = r.samples.map((x) => x.rss_kb), thr = r.samples.map((x) => x.threads);
-    rows.push({ case: c.id, host, mode: c.mode, outcome, s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, trials, rss_kb: rss, threads: thr, end: r.end, wall_ms: Math.round(r.wall_ms), left_in_group: r.left, ...(trials.some((t) => t.outcome !== "PASS") ? { tail: r.tail } : {}) });
+    const nonterm = c.calibration === "nonterminating";
+    const at = (f) => (nonterm ? { "0.15": 1000, "0.5": 1000, "0.85": 1000 }[f] : Math.round(cal.T * Number(f)));
+    const inBaseline = (BASELINE.entries ?? []).some((e) => e.case === c.id && e.host === host);
+    const guard_ms = MODE === "ci" && inBaseline ? BASELINE_WINDOW_MS : G_MS;
+    const sessions = [];
+    const run = async (label, delays) => {
+      const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
+      sessions.push({ label, end: r.end, wall_ms: Math.round(r.wall_ms), left: r.left, samples: r.samples, ...(r.trials.some((t) => classify(t).outcome !== "PASS") ? { tail: r.tail } : {}) });
+      return r;
+    };
+    // the required cells: early/middle/late (1/3/10 s without an end) in --full, else the middle
+    const offsets = MODE === "full" ? (nonterm ? [1000, 3000, 10000] : ["0.15", "0.5", "0.85"].map(at)) : [];
+    const cells = [];
+    if (offsets.length) {
+      const r = await run("phases", offsets);
+      for (const t of r.trials) cells.push({ cell: "phase", delay_ms: offsets[t.i - 1], ...classify(t) });
+    }
+    // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise
+    const reps = MODE === "full" ? 20 : 5;
+    const d = at("0.5");
+    const lr = await run("repeats", Array(reps).fill(d));
+    for (const t of lr.trials) cells.push({ cell: "repeat", i: t.i, delay_ms: d, ...classify(t) });
+    // one retry for a cell whose target returned before the Stop, at 0.6 of its delay (r4 §3)
+    for (const [k, x] of cells.entries()) {
+      if (overBudget() || x.outcome !== "INVALID" || x.why !== "returned before the Stop") continue;
+      const rd = Math.round(x.delay_ms * 0.6);
+      const rr = await run("retry", [rd]);
+      cells[k] = { ...x, ...classify(rr.trials[0]), delay_ms: rd, retried_from_ms: x.delay_ms };
+    }
+    // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
+    const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
+    const leak0 = leakCheck(lr.samples);
+    const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
+    const own = rowOutcome(cells, leak && leak.ok);
+    const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
+    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(outcome !== own ? { own_outcome: own } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, cells, leak, sessions });
     record(rows.at(-1));
   }
   return rows;
@@ -250,14 +289,17 @@ const tRun = now();
 for (const h of HOSTS) {
   if (h === "browser") {
     const { browserPilot } = await import("./test-interrupt-browser.mjs");
-    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget });
+    // (a browser that can't start is an uncovered host, reported, not a crash that loses the run)
+    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, baseline: BASELINE }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
 }
 out.wall_ms = Math.round(now() - tRun);
 writeFileSync(OUT, JSON.stringify(out, null, 1));
 console.log("wrote", OUT, "in", out.wall_ms, "ms");
-// the pilot measures and always exits 0; --ci fails on a new failure, an unresolved row, or a
-// FIXED baseline row (remove its entry from web/interrupt-baseline.json in the same change)
-const bad = Object.values(out.hosts).flatMap((v) => (Array.isArray(v) ? v : [])).filter((r) => ["FAIL", "FIXED", "INCOMPLETE"].includes(r.outcome));
-for (const r of bad) console.log(r.outcome, r.case, r.host, r.outcome === "FIXED" ? "(remove its baseline entry)" : "");
+// the pilot measures and always exits 0; --ci fails on a new failure, an unresolved or uncovered
+// row (INCOMPLETE; INVALID: uncalibrated or out of budget), or a FIXED baseline row (remove its
+// entry from web/interrupt-baseline.json in the same change)
+const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ case: "*", host: h, outcome: "INVALID", why: v?.skipped ?? v?.error ?? "no rows" }]);
+const bad = Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)).filter((r) => ["FAIL", "FIXED", "INCOMPLETE", "INVALID"].includes(r.outcome));
+for (const r of bad) console.log(r.outcome, r.case, r.host, r.outcome === "FIXED" ? "(remove its baseline entry)" : r.why ?? "");
 process.exit(args.includes("--ci") && bad.length ? 1 : 0);

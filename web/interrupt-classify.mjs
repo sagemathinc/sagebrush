@@ -26,11 +26,26 @@ export function classify(t) {
 
 // a (case, host) row from its required cells (r4 §6.1): FAIL, INCOMPLETE, or the worst of
 // SLOW / EXCEPTION / PASS.  cells: [{ outcome }], with every required cell present.
+// leakOk: false fails the row; null (not measured) leaves it INCOMPLETE.
 export function rowOutcome(cells, leakOk = true) {
-  if (!leakOk || cells.some((c) => c.outcome === "FAIL")) return "FAIL";
-  if (cells.length === 0 || cells.some((c) => c.outcome === "INVALID" || c.outcome === "UNCALIBRATED")) return "INCOMPLETE";
+  if (leakOk === false || cells.some((c) => c.outcome === "FAIL")) return "FAIL";
+  if (leakOk == null || cells.length === 0 || cells.some((c) => c.outcome === "INVALID" || c.outcome === "UNCALIBRATED")) return "INCOMPLETE";
   for (const o of ["SLOW", "EXCEPTION"]) if (cells.some((c) => c.outcome === o)) return o;
   return "PASS";
+}
+
+// the leak criterion (r4 §6.1): from repeat 3 to the last, each metric grows at most
+// max(64 MiB, 10%) and the thread count does not change.  samples: [{ i, rss_kb, threads }], one
+// per repeat.  20 repeats is the full check; fewer is the short one (CI), labelled as such.
+// Returns null when it can't be measured (fewer than 3 repeats, or no metric).
+export function leakCheck(samples, full = 20) {
+  const from = samples.find((x) => x.i === 3), last = samples.at(-1);
+  if (!from || !last || last.i <= 3 || !Number.isFinite(from.rss_kb) || !Number.isFinite(last.rss_kb)) return null;
+  const growth_kb = last.rss_kb - from.rss_kb;
+  const allowed_kb = Math.max(64 * 1024, 0.1 * from.rss_kb);
+  const threads = samples.filter((x) => x.i >= 3).map((x) => x.threads);
+  const threadsSame = threads.every((t) => t === threads[0]);
+  return { ok: growth_kb <= allowed_kb && threadsSame, check: last.i >= full ? "full" : "short", from: 3, to: last.i, growth_kb, allowed_kb: Math.round(allowed_kb), threads_same: threadsSame };
 }
 
 // a row against the baseline (r4 §6.3): KNOWN if its failure matches the pinned signature, FIXED
@@ -38,7 +53,7 @@ export function rowOutcome(cells, leakOk = true) {
 // baseline: the parsed web/interrupt-baseline.json; why: the failing cells' reasons.
 export function againstBaseline(row, baseline) {
   const b = (baseline?.entries ?? []).find((e) => e.case === row.case && e.host === row.host);
-  if (!b) return row.outcome;
+  if (!b || row.leak?.ok === false) return row.outcome;
   if (row.outcome === "PASS" || row.outcome === "SLOW" || row.outcome === "EXCEPTION") return "FIXED";
   const re = new RegExp(b.signature);
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
