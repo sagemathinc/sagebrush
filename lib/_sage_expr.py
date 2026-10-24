@@ -11,6 +11,9 @@ and gives the results Sage's methods and printing.
 import math as _m
 import re as _re
 from fractions import Fraction as _Fraction
+import sys as _sys
+import _display_budget
+from _display_budget import _charge
 
 try:  # the CPython package
     from sagebrush._native import sym_call as _raw
@@ -1496,16 +1499,30 @@ class Typeset:
         self._objs = objs
 
     def __repr__(self):
-        return " ".join(repr(o) for o in self._objs)
+        return self._plain()
 
     def _repr_latex_(self):
-        return "$$" + " \\ ".join(latex(o) for o in self._objs) + "$$"
+        with _display_budget.display():
+            parts = [latex(o) for o in self._objs]
+            _charge(1, 4 + 3 * len(parts), "a _latex_")
+            return "$$" + " \\ ".join(parts) + "$$"
+
+    def _plain(self):
+        # (each piece charged before it is joined: _repr_charged)
+        with _display_budget.display():
+            parts = []
+            for o in self._objs:
+                parts.append(_repr_charged(o, ()))
+            _charge(1, len(parts))
+            return " ".join(parts)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         # the marker: the notebook typesets what show() asked for, and
-        # leaves other values with a LaTeX form (2/3) as text, as Sage
-        return {"text/latex": self._repr_latex_(), "text/plain": repr(self),
-                "application/vnd.sagebrush.typeset": "1"}
+        # leaves other values with a LaTeX form (2/3) as text, as Sage.
+        # One display: both forms built within one budget (LIMIT-SHOW87-2)
+        with _display_budget.display():
+            return {"text/latex": self._repr_latex_(), "text/plain": self._plain(),
+                    "application/vnd.sagebrush.typeset": "1"}
 
 
 def show_typeset(*objs):
@@ -5505,12 +5522,51 @@ _TEXT_ESC["-"] = "{-}"
 
 def _latex_text(s):
     """latex() of a string, as Sage writes it: \\text{\\texttt{...}}, one
-    line per row of an array when it has several."""
+    line per row of an array when it has several.  Charged to the display's
+    budget at its escaped length before it is built (LIMIT-SHOW87-2)."""
     if not s:
         return ""
     if "\n" in s:
         return "\\begin{array}{l}\n" + "\\\\\n".join(_latex_text(l) for l in s.split("\n")) + "\n\\end{array}"
+    _charge(1, 15 + sum(len(_TEXT_ESC.get(c, c)) for c in s))
     return "\\text{\\texttt{%s}}" % "".join(_TEXT_ESC.get(c, c) for c in s)
+
+
+def _repr_charged(v, path):
+    """repr(v), with a list, tuple or dict (exactly those types) walked here
+    piece by piece, each piece charged to the display's budget before it is
+    added: a __repr__ that adds to its list is not followed past the length
+    the list had (LIMIT-SHOW87-2); a container inside itself is [...],
+    {...} or (...), as repr writes it."""
+    t = type(v)
+    if t is not list and t is not tuple and t is not dict:
+        return _charged(repr(v))
+    if id(v) in path:
+        return _charged("[...]" if t is list else "{...}" if t is dict else "(...)")
+    if len(path) > _sys.getrecursionlimit() // 4:
+        raise RecursionError("maximum recursion depth exceeded while getting the repr of an object")
+    path = path + (id(v),)
+    parts = []
+    if t is dict:
+        for k, x in v.items():
+            _charge(1, 4)
+            parts.append(_repr_charged(k, path) + ": " + _repr_charged(x, path))
+        return "{" + ", ".join(parts) + "}"
+    n = len(v)
+    for i in range(n):
+        if i >= len(v):
+            break
+        _charge(1, 2)
+        parts.append(_repr_charged(v[i], path))
+    if t is tuple:
+        return "(" + parts[0] + ",)" if len(parts) == 1 else "(" + ", ".join(parts) + ")"
+    return "[" + ", ".join(parts) + "]"
+
+
+def _charged(t, by="a __repr__"):
+    """t, charged to the display's budget (one step, its characters)."""
+    _charge(1, len(t), by)
+    return t
 
 
 def _delim(d, side):
@@ -5564,30 +5620,57 @@ class _Latex:
         self._engine = "latex"
 
     def __call__(self, v):
+        # (one display's budget, shared with the text of the value and with
+        # nested displays: steps and characters charged as the LaTeX is
+        # built, each piece before it is added (_display_budget,
+        # LIMIT-SHOW87-1/2); a container inside itself or nested past the
+        # recursion depth raises RecursionError, as Sage's latex())
+        with _display_budget.display():
+            return _LatexExpr(self._of(v, ()))
+
+    def _of(self, v, path):
         # LaTeX already, and the _latex_ protocol (also of a str subclass),
         # before a string is escaped as text
         if isinstance(v, _LatexExpr):
-            return v
+            return _charged(str(v))
         if hasattr(v, "_latex_"):
-            return _LatexExpr(v._latex_())
+            return _charged(v._latex_(), "a _latex_")
         if isinstance(v, str):
-            return _LatexExpr(_latex_text(v))
+            return _latex_text(v)
         if isinstance(v, _Fraction):
-            return _LatexExpr(_expr(v)._latex_())
-        if isinstance(v, (list, tuple)):
-            inner = ", ".join(self(t) for t in v)
-            return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
+            return _charged(_expr(v)._latex_())
+        if isinstance(v, (list, tuple, dict)):
+            if id(v) in path or len(path) > _sys.getrecursionlimit() // 4:
+                raise RecursionError("maximum recursion depth exceeded")
+            path = path + (id(v),)
+            parts = []
+            if isinstance(v, dict):
+                # (the dict's own iterator: a _latex_ that changes its keys
+                # meets its RuntimeError)
+                for k, t in v.items():
+                    _charge(1, 3, "a _latex_")
+                    parts.append("%s : %s" % (self._of(k, path), self._of(t, path)))
+                o, c = "\\left\\{", "\\right\\}"
+            else:
+                # (the length it had when the walk began: a _latex_ that adds
+                # to the list is not followed past it)
+                n = len(v)
+                for i in range(n):
+                    if i >= len(v):
+                        break
+                    _charge(1, 2, "a _latex_")
+                    parts.append(self._of(v[i], path))
+                o, c = ("\\left[", "\\right]") if isinstance(v, list) else ("\\left(", "\\right)")
+            _charge(1, 14, "a _latex_")
+            return o + ", ".join(parts) + c
         # Python's own values as Sage writes them: None and booleans upright,
-        # numbers as they print, dicts as {k : v}, anything else as its text
-        # (\texttt), never its bare str as math
+        # numbers as they print, anything else as its text (\\texttt), never
+        # its bare str as math
         if v is None or isinstance(v, bool):
-            return _LatexExpr("\\mathrm{%s}" % v)
+            return _charged("\\mathrm{%s}" % v)
         if isinstance(v, (int, float)):
-            return _LatexExpr(str(v))
-        if isinstance(v, dict):
-            inner = ", ".join("%s : %s" % (self(k), self(t)) for k, t in v.items())
-            return _LatexExpr("\\left\\{%s\\right\\}" % inner)
-        return _LatexExpr(_latex_text(str(v)))
+            return _charged(str(v))
+        return _latex_text(str(v))
 
     def __repr__(self):
         return "LaTeX definitions"
