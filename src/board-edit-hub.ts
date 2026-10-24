@@ -469,9 +469,21 @@ export class EditHub {
 
   /** One save of the frozen head, now. */
   async save(): Promise<WriteOutcome> {
-    const T = this.H; // (the frozen tuple: its value, seq and bytes)
-    this.writing = T;
-    try { return await this.saveTuple(T); } finally { this.writing = null; this.account(); }
+    // (one write queue: a save asked for while one runs follows it, r7 §5.6)
+    const run = (this.saving ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const T = this.H; // (the frozen tuple: its value, seq and bytes)
+      this.writing = T;
+      try { return await this.saveTuple(T); } finally { this.writing = null; this.account(); }
+    });
+    this.saving = run;
+    try { return await run; } finally { if (this.saving === run) this.saving = null; }
+  }
+  private saving: Promise<WriteOutcome> | null = null;
+
+  /** Whether anything is unsaved that a save could write now (the exit flush's test: no WRITE_MIN_MS, no quiet). */
+  unsaved(): boolean {
+    if (this.H.seq === this.P.seq) return false;
+    return !(this.state.state === "held" && this.state.why !== "error" && this.state.why !== "slots");
   }
 
   private async saveTuple(T: Version): Promise<WriteOutcome> {
