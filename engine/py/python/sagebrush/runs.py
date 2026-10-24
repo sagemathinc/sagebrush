@@ -146,15 +146,23 @@ def _write_atomic(path, data, durable=False):
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o600)
     try:
-        view = memoryview(data)
-        while view:
-            n = os.write(fd, view)
-            view = view[n:]
-        if durable:
-            os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+        try:
+            view = memoryview(data)
+            while view:
+                n = os.write(fd, view)
+                view = view[n:]
+            if durable:
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        # (a failed write, fsync or replace leaves no temporary behind, daybreak2 PR120-FIX-1)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     if durable and os.name == "posix":
         d = os.open(os.path.dirname(path), os.O_RDONLY)
         try:
@@ -220,6 +228,18 @@ class StorageError(Exception):
     """A write the store couldn't admit (its budget, the free-space reserve)."""
 
 
+class SlotRefused(Exception):
+    """No session slot left: (used, ceiling, slots, unknown runs)."""
+
+    def __init__(self, used, ceiling, slots, unknown):
+        super().__init__("%d of %d session slots are held" % (used, ceiling))
+        self.used, self.ceiling, self.slots, self.unknown = used, ceiling, slots, unknown
+
+
+_HOST = __import__("socket").gethostname()
+_LIVE_NONCES = set()  # (the owners alive in this process: its stores')
+
+
 class Store:
     """The run store.  One per server; several processes may share it."""
 
@@ -234,6 +254,7 @@ class Store:
         # (this process's identity, for "is this run mine": H′1a has no
         # leases; a run owned by another process is liveness unknown)
         self.owner = owner or {"pid": os.getpid(), "nonce": secrets.token_hex(16)}
+        _LIVE_NONCES.add(self.owner["nonce"])
         fs = self._fs_size()
         if fs and self.cfg["SAGEBRUSH_RUNS_STORE_BYTES"] > fs // 2:
             raise ValueError("SAGEBRUSH_RUNS_STORE_BYTES=%d: more than half the filesystem (%d bytes)" % (self.cfg["SAGEBRUSH_RUNS_STORE_BYTES"], fs // 2))
@@ -299,7 +320,17 @@ class Store:
         return s.get("total") if isinstance(s.get("total"), int) else None
 
     def _set_total(self, total):
-        _write_atomic(os.path.join(self.root, "store.json"), json.dumps({"total": total}).encode(), durable=True)
+        """The running total, written in place in a fixed 64 bytes (no
+        temporary file, so it needs no room of its own; a torn write reads as
+        no total, and the walk recomputes it)."""
+        data = json.dumps({"total": total}).encode().ljust(64)
+        fd = os.open(os.path.join(self.root, "store.json"), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o600)
+        try:
+            os.write(fd, data) if os.lseek(fd, 0, 0) == 0 else None
+            os.ftruncate(fd, 64)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def used(self):
         with self.lock:
@@ -372,9 +403,9 @@ class Store:
         p = os.path.join(self.run_dir(handle), name)
         with self.lock:
             before = _charge(p)
-            grow = self.physical(len(data)) - before
-            if grow > 0:
-                self.admit(grow, kind)
+            # (the whole new file: it exists beside the old one until the
+            # replace, daybreak2 PR120-FIX-1)
+            self.admit(self.physical(len(data)), kind)
             _write_atomic(p, data, durable)
             t = self._total()
             if t is not None:
@@ -422,6 +453,13 @@ class Store:
     def save(self, record, durable=False):
         self.write_file(record["handle"], "run.json", json.dumps(record, separators=(",", ":")).encode(), durable)
 
+    def exists(self, handle):
+        """Whether the run's directory is still in the store."""
+        try:
+            return os.path.isdir(self.run_dir(handle))
+        except KeyError:
+            return False
+
     def load(self, handle):
         """The record of handle, or a tombstone ({"state": "gone", ...}), or
         None when nothing is known of it."""
@@ -448,9 +486,7 @@ class Store:
                 idx[handle] = entry
             data = json.dumps(idx, separators=(",", ":")).encode()
             before = _charge(self._index_path())
-            grow = self.physical(len(data)) - before
-            if grow > 0 and entry is not None:
-                self.admit(grow, "meta")
+            self.admit(self.physical(len(data)), "meta")
             _write_atomic(self._index_path(), data)
             t = self._total()
             if t is not None:
@@ -471,7 +507,78 @@ class Store:
             if isinstance(r, dict) and r.get("state") == "running":
                 idx[name] = {"started_at": r.get("started_at"), "started_by": r.get("started_by"), "owner": r.get("owner"),
                              "label": r.get("label")}
-        _write_atomic(self._index_path(), json.dumps(idx, separators=(",", ":")).encode())
+        data = json.dumps(idx, separators=(",", ":")).encode()
+        try:
+            self.admit(self.physical(len(data)), "meta")
+        except StorageError:
+            return  # (no room even for the index: the old one stays, repaired at a later cleanup)
+        _write_atomic(self._index_path(), data)
+
+    # ---- session slots (daybreak2 PR120-FIX-2)
+    def _slots_path(self):
+        return os.path.join(self.root, "slots.json")
+
+    def slots(self):
+        return _read_json(self._slots_path(), {})
+
+    def _owner_gone(self, owner):
+        """Whether a slot's owning server has certainly exited: a process of
+        this host that no longer exists (or this very pid, with another
+        nonce).  Anything else, Windows included, is not proof."""
+        if not isinstance(owner, dict) or owner.get("host") != _HOST or os.name != "posix":
+            return False
+        if owner.get("nonce") == self.owner["nonce"]:
+            return False  # (never this store's own)
+        pid = owner.get("pid")
+        if pid == os.getpid():
+            return owner.get("nonce") not in _LIVE_NONCES
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except (OSError, TypeError, ValueError):
+            return False
+        return False
+
+    def slot_take(self, slot, ceiling):
+        """Under the store lock: the session slot `slot` of this server
+        (taken now, or already held), or a SlotRefused.  Every live session
+        of every server sharing the store holds one, idle or not; a run of
+        another owner in the active index without a slot (an unknown run)
+        holds one too.  An idle slot is reclaimed only when its owner has
+        certainly exited: its worker then reads EOF on its pipe and ends;
+        a slot whose owner left a run in the index is kept (liveness
+        unknown, design §6)."""
+        with self.lock:
+            slots, idx = self.slots(), self.index()
+            before = dict(slots)
+            busy = {(e.get("owner") or {}).get("nonce") for e in idx.values()}
+            for k, e in list(slots.items()):
+                o = e.get("owner") or {}
+                if o.get("nonce") not in busy and self._owner_gone(o):
+                    del slots[k]
+            if slot not in slots:
+                holders = {(e.get("owner") or {}).get("nonce") for e in slots.values()}
+                unslotted = sorted(h for h, e in idx.items() if (e.get("owner") or {}).get("nonce") not in holders and not self.mine(e))
+                used = len(slots) + len(unslotted)
+                if used >= ceiling:
+                    raise SlotRefused(used, ceiling, sorted(slots), unslotted)
+                slots[slot] = {"owner": dict(self.owner, host=_HOST), "since": time.time()}
+            if slots == before:
+                return
+            data = json.dumps(slots, separators=(",", ":")).encode()
+            self.admit(self.physical(len(data)), "meta")
+            _write_atomic(self._slots_path(), data)
+
+    def slot_release(self, slot):
+        with self.lock:
+            slots = self.slots()
+            if slots.pop(slot, None) is not None:
+                try:
+                    self.admit(self.physical(len(json.dumps(slots))), "meta")
+                    _write_atomic(self._slots_path(), json.dumps(slots, separators=(",", ":")).encode())
+                except (OSError, StorageError):
+                    pass  # (left: reclaimed once this server has exited)
 
     def mine(self, entry):
         o = entry.get("owner") or {}
@@ -532,12 +639,19 @@ class Store:
         recomputed by the walk, under the lock."""
         now = time.time() if now is None else now
         with self.lock:
-            for name in os.listdir(self.root):
-                if name.endswith(".tmp"):
-                    try:
-                        os.unlink(os.path.join(self.root, name))
-                    except OSError:
-                        pass
+            # (temporaries a crash left, in the store and in its runs: under
+            # the lock no write of ours is in progress)
+            for d in [self.root, os.path.join(self.root, "gone")] + [os.path.join(self.root, n) for n in os.listdir(self.root) if n.startswith("run_")]:
+                try:
+                    names = os.listdir(d)
+                except OSError:
+                    continue
+                for name in names:
+                    if name.endswith(".tmp"):
+                        try:
+                            os.unlink(os.path.join(d, name))
+                        except OSError:
+                            pass
             done = []
             for name in os.listdir(self.root):
                 if not name.startswith("run_"):
@@ -579,10 +693,15 @@ class Store:
         h = record["handle"]
         d = os.path.join(self.root, h)
         tomb = {"handle": h, "state": "gone", "ended_at": record.get("ended_at"), "removed_at": now, "reason": reason}
-        _write_atomic(os.path.join(self.root, "gone", h + ".json"), json.dumps(tomb).encode())
+        # (the run's files go first, so the tombstone, one block, is written
+        # into room they freed; a crash between leaves no tombstone: not_found)
         for name in os.listdir(d):
             os.unlink(os.path.join(d, name))
         os.rmdir(d)
+        try:
+            _write_atomic(os.path.join(self.root, "gone", h + ".json"), json.dumps(tomb).encode())
+        except OSError:
+            pass
 
     def _prune_tombstones(self, now):
         g = os.path.join(self.root, "gone")
@@ -612,7 +731,7 @@ class Output:
         self.truncated = 0
 
     def add(self, text, stream="stdout"):
-        b = text.encode("utf-8", "replace")
+        b = text.encode("utf-8", "surrogatepass")  # (the bytes the worker counted)
         self.total[stream] += len(b)
         room = HEAD_KEEP - len(self.head)
         if room > 0:
