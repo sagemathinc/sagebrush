@@ -55,6 +55,9 @@ class FakeSession:
         return self.generation, self.q
 
     def finish(self, result=None, stdout="", error_info=None):
+        # (output streams first, in chunks, as the real worker sends it)
+        for i in range(0, len(stdout), 64 * 1024):
+            self.q.put({"out": stdout[i:i + 64 * 1024]})
         r = {"stdout": stdout, "result": result, "error": None if error_info is None else error_info["message"],
              "error_info": error_info, "displays": [], "seconds": 0.01}
         self.pending = None
@@ -193,6 +196,11 @@ def test_other_owner_unknown():
     sm = s.summary()
     assert sm["running"] == 0 and sm["unknown"] == 1 and sm["handles"] == [h], sm
     r = runner(s)
+    r.ceiling = 1
+    # (and it keeps its slot: with a ceiling of 1, no session can start here, daybreak2 PR120-2)
+    e = refused("capacity", r.start, "auto:1", "sage")
+    assert e.extra["unknown"] == [h] and e.extra["limit"] == 1, e.extra
+    r.ceiling = 2
     assert r.record(h)["liveness"] == "unknown"
     assert r.cancel(h, "hard")["result"] == "not_owned"
     refused("not_owned", r.keep, h, True)
@@ -400,6 +408,335 @@ def test_cleanup():
     print("cleanup: ok")
 
 
+def _settled(r, run):
+    """A run that ended has settled: its waiter woken, its session free, not
+    counted as running, and the next run starts."""
+    assert run.done.is_set() and run.session_name not in r.current, (run.done.is_set(), r.current)
+    assert r.summary()["running"] == 0, r.summary()
+    nxt, done = r.start("auto:1", "sage", session=run.session_name)
+    assert done and r.record(nxt.record["handle"])["state"] == "finished"
+
+
+def test_settles_on_storage_failure():
+    """astra PR120-SEM-1, daybreak2 PR120-3: a failed output, value, record or
+    index write never strands a run: it settles, says what couldn't be
+    written, and the session takes the next run."""
+    import errno
+
+    def enospc(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    # the output file
+    r = runner()
+    real = r.store.write_file
+    r.store.write_file = lambda h, name, *a, **k: enospc() if name == "output.txt" else real(h, name, *a, **k)
+    run, _ = r.start("slow", "sage", wait=0)
+    r.made[0].finish("7", stdout="x" * 1000)
+    until(run.done.is_set, "the run's end")
+    rec = r.record(run.record["handle"])
+    assert rec["state"] == "finished" and rec["ended_by"] == "return" and rec["value"] == {"text": "7"}, rec
+    assert rec["output"]["stdout_bytes"] == 1000 and rec["output"]["path"] is None and "No space" in rec["output"]["unavailable"], rec["output"]
+    assert r.store.load(rec["handle"])["state"] == "finished"
+    r.store.write_file = real
+    _settled(r, run)
+    # a large value
+    r = runner()
+    r.store.reserve = enospc
+    run, done = r.start("auto:" + "9" * 70000, "sage")
+    v = r.record(run.record["handle"])["value"]
+    assert done and "No space" in v["unavailable"] and "path" not in v, v
+    _settled(r, run)
+    # the terminal record, and the index
+    for what in ("save", "index_set"):
+        r = runner()
+        run, _ = r.start("slow", "sage", wait=0)
+        real = getattr(r.store, what)
+        if what == "save":
+            setattr(r.store, what, lambda rec, durable=False: enospc() if durable else real(rec, durable))
+        else:
+            setattr(r.store, what, lambda h, e: enospc() if e is None else real(h, e))
+        r.made[0].finish("8")
+        until(run.done.is_set, "the run's end")
+        rec = r.record(run.record["handle"])
+        assert rec["state"] == "finished" and rec["storage"]["state"] == "unavailable" and "No space" in rec["storage"]["reason"], rec
+        assert r.result(run.record["handle"], wait=0)[1]["result"] == "8"
+        setattr(r.store, what, real)
+        _settled(r, run)
+    # a bug in the end's bookkeeping: still settled
+    r = runner()
+    run, _ = r.start("slow", "sage", wait=0)
+    r._end = lambda *a: 1 / 0
+    r.made[0].finish("9")
+    until(run.done.is_set, "the run's end")
+    rec = r.record(run.record["handle"])
+    assert rec["state"] == "finished" and "ZeroDivisionError" in rec["storage"]["reason"], rec
+    del r._end
+    _settled(r, run)
+    print("storage failures settle the run: ok")
+
+
+def test_output_bounded_streaming():
+    """daybreak2 PR120-3: output is taken as it streams, in chunks, into the
+    bounded head and tail with exact counters; the store keeps at most
+    SAGEBRUSH_RUNS_OUTPUT_BYTES of it; and output that the store can't admit
+    stays counters and tail."""
+    r = runner(fresh({"SAGEBRUSH_RUNS_OUTPUT_BYTES": str(2 * R.MiB)}))
+    run, _ = r.start("slow", "sage", wait=0)
+    s = r.made[0]
+    chunk = "y" * 65536
+    for _ in range(1600):  # (100 MiB, in the worker's chunks)
+        s.q.put({"out": chunk})
+    s.finish("1")
+    until(run.done.is_set, "the run's end", 60)
+    o = r.record(run.record["handle"])["output"]
+    assert o["stdout_bytes"] == 1600 * 65536 and o["retained_bytes"] == 2 * R.MiB and o["truncated_bytes"] == 1600 * 65536 - 2 * R.MiB, o
+    size = os.path.getsize(os.path.join(r.store.root, run.record["handle"], "output.txt"))
+    assert size <= 2 * R.MiB + 100, size
+    # (a store too full for the output file: counters and tail, the run unaffected)
+    r = runner()
+    r.store.admit = lambda n, kind: (_ for _ in ()).throw(R.StorageError("the run store is full")) if kind == "data" else None
+    run, _ = r.start("slow", "sage", wait=0)
+    r.made[0].finish("2", stdout="z" * 5000)
+    until(run.done.is_set, "the run's end")
+    o = r.record(run.record["handle"])["output"]
+    assert o["stdout_bytes"] == 5000 and o["tail"].endswith("z" * 100) and "full" in o["unavailable"] and o["path"] is None, o
+    print("output bounded as it streams: ok")
+
+
+def test_admission_boundaries():
+    """daybreak2 PR120-1: one formula at the boundary, the reservation record
+    included; records and output admitted before they are written; the
+    free-space floor kept."""
+    s = fresh()
+    budget = s.cfg["SAGEBRUSH_RUNS_STORE_BYTES"]
+    limit = budget - min(R.DATA_HEADROOM_MAX, budget // 8)
+    free_total = [10 ** 15, 10 ** 15]
+    s._free = lambda: tuple(free_total)
+    s.reserve_floor = lambda: R.GiB
+    h = s.new_handle()
+    used = s.used()
+    rec_size = s.physical(len(json.dumps({"bytes": 0, "target": "x" * 300, "owner": s.owner})))
+    # exactly at the data limit: admitted; one byte more: refused
+    s.admit(limit - used, "data")
+    try:
+        s.admit(limit - used + 1, "data")
+        raise AssertionError("over the limit admitted")
+    except R.StorageError:
+        pass
+    # a reservation charges its record too: nbytes alone fitting isn't enough
+    target = os.path.join(s.run_dir(h), "value.json")
+    try:
+        s.reserve(h, target, limit - used)
+        raise AssertionError("the reservation record's charge was not admitted")
+    except R.StorageError:
+        pass
+    assert s.used() == s.walk_total() and not os.listdir(os.path.join(s.root, "reservations"))
+    p = s.reserve(h, target, limit - used - 2 * rec_size)
+    assert s.used() <= limit and s.used() == s.walk_total(), (s.used(), limit)
+    s.release(p)
+    # records may use the whole budget, data may not
+    s.admit(budget - s.used(), "meta")
+    try:
+        s.admit(limit - s.used() + 1, "data")
+        raise AssertionError("data admitted into the records' headroom")
+    except R.StorageError:
+        pass
+    # the free-space floor, at the boundary
+    free_total[0] = R.GiB + 4096
+    s.admit(4096, "meta")
+    try:
+        s.admit(4097, "meta")
+        raise AssertionError("the free-space floor was crossed")
+    except R.StorageError:
+        pass
+    # a write into a full store is refused before it replaces anything
+    free_total[0] = R.GiB
+    try:
+        s.write_file(h, "output.txt", b"o" * 10000, kind="data")
+        raise AssertionError("output written into a full store")
+    except R.StorageError:
+        pass
+    assert not os.path.exists(os.path.join(s.run_dir(h), "output.txt"))
+    # the active index too: an entry isn't added into a full store, and one is always removed
+    s.index_set(h, None)
+    try:
+        s.index_set(h, {"started_at": 1, "owner": s.owner, "label": "x" * 5000})
+        raise AssertionError("an index entry written into a full store")
+    except R.StorageError:
+        pass
+    assert h not in s.index()
+    # and a run doesn't start without room for its records
+    r = runner(s)
+    e = refused("storage", r.start, "auto:1", "sage")
+    assert "no room" in str(e)
+    assert [n for n in os.listdir(s.root) if n.startswith("run_")] == [h], "a refused run left its directory"
+    print("admission at the boundaries: ok")
+
+
+def test_unknown_runs_bounded():
+    """daybreak2 PR120-2: runs left running by earlier owners hold their
+    slots, so repeated owner restarts can't grow the active index past the
+    ceiling; cleanup repairs the index on both sides of the crash window."""
+    root = tempfile.mkdtemp(prefix="sb-runs-")
+    for i in range(5):
+        r = runner(fresh(root=root, owner={"pid": 10 + i, "nonce": "owner%d" % i}))
+        r.ceiling = 2
+        try:
+            r.start("slow", "sage", wait=0)  # (and the server "crashes": never closed)
+        except RN.Refused as e:
+            assert e.kind == "capacity" and len(e.extra["unknown"]) == 2, e.extra
+        assert len(r.store.index()) <= 2, r.store.index()
+    assert len(r.store.index()) == 2
+    # cleanup repairs: a terminal record whose index entry was left behind ...
+    s = fresh()
+    h = s.new_handle()
+    rec = R.new_record(s, h, "code", "sage", {"id": "main", "generation": 1}, 1, "t")
+    rec.update(state="finished", ended_at=time.time())
+    s.save(rec)
+    s.index_set(h, {"started_at": rec["started_at"], "owner": s.owner})
+    s.cleanup()
+    assert h not in s.index()
+    # ... and a running record whose entry was never written
+    h2 = s.new_handle()
+    rec = R.new_record(s, h2, "code", "sage", {"id": "main", "generation": 1}, 1, "t")
+    s.save(rec)
+    s.cleanup()
+    assert h2 in s.index()
+    print("unknown runs bounded, the index repaired: ok")
+
+
+def test_tombstones_win():
+    """astra PR120-SEM-2: a run removed by cleanup (here, or by another
+    server) is gone for status, result and keep, whatever this server has
+    cached."""
+    for other in (False, True):
+        root = tempfile.mkdtemp(prefix="sb-runs-")
+        r = runner(fresh(root=root, env={"SAGEBRUSH_RUNS_KEEP_DAYS": "1"}))
+        run, done = r.start("auto:1", "sage")
+        h = run.record["handle"]
+        cleaner = fresh(root=root, env={"SAGEBRUSH_RUNS_KEEP_DAYS": "1"}, owner={"pid": 2, "nonce": "other"}) if other else r.store
+        assert h in cleaner.cleanup(now=time.time() + 3 * 86400)
+        rec = r.record(h)
+        assert rec["state"] == "gone" and rec["reason"] == "age", rec
+        assert r.result(h, wait=0) == (rec, None)
+        e = refused("not_found", r.keep, h, True)
+        assert "removed" in str(e) and e.extra["tombstone"]["state"] == "gone"
+        assert r.cancel(h, "hard")["result"] == "not_running"
+        assert h not in r.runs
+    print("tombstones win over the cache: ok")
+
+
+def test_cancel_contract():
+    """astra PR120-SEM-3: a cancel's answer carries its request id (made here
+    when none was given), retrying it gives the same answer, reusing it for
+    another target or mode is refused, and a run that has ended or is gone
+    answers not_running in either mode."""
+    old = RN.ESCALATE_S
+    RN.ESCALATE_S = 0.2
+    try:
+        r = runner()
+        run, _ = r.start("slow", "sage", wait=0)
+        h = run.record["handle"]
+        a = r.cancel(h, "soft")
+        assert a["result"] == "soft_unavailable" and a["request_id"].startswith("cancel_"), a
+        b = r.cancel(h, "hard")
+        rid = b["request_id"]
+        assert b["result"] == "delivered" and rid.startswith("cancel_") and rid != a["request_id"], b
+        assert [x["request_id"] for x in r.record(h)["requests"]] == [rid]
+        assert r.cancel(h, "hard", request_id=rid) == b and r.made[0].interrupts == 1  # (a retry: no second interrupt)
+        refused("invalid", r.cancel, h, "soft", request_id=rid)
+        until(run.done.is_set, "the cancel")
+        for mode in ("soft", "hard"):
+            c = r.cancel(h, mode)
+            assert c["result"] == "not_running" and c["state"] == "finished" and "reason" not in c, c
+        mine = r.cancel(h, "soft", request_id="mine")
+        assert mine["request_id"] == "mine" and mine["result"] == "not_running"
+        # killed
+        run, _ = r.start("slow", "sage", wait=0)
+        r.made[0].stubborn = True
+        r.cancel(run.record["handle"], "hard")
+        until(lambda: run.done.is_set() and "replacement_generation" in run.record, "the restart")
+        for mode in ("soft", "hard"):
+            c = r.cancel(run.record["handle"], mode)
+            assert c["result"] == "not_running" and c["state"] == "killed", c
+        # gone
+        r.made[0].stubborn = False
+        g, _ = r.start("auto:1", "sage")
+        r.store._remove(r.store.load(g.record["handle"]), "count", time.time())
+        for mode in ("soft", "hard"):
+            c = r.cancel(g.record["handle"], mode)
+            assert c["result"] == "not_running" and c["state"] == "gone", c
+    finally:
+        RN.ESCALATE_S = old
+    print("the cancel contract: ok")
+
+
+def test_close_settles():
+    """A server that exits closes its sessions, and a run they were
+    computing is settled as killed (server_exit), not left holding a slot."""
+    r = runner()
+    run, _ = r.start("slow", "sage", wait=0)
+    s = r.made[0]
+    s.close = lambda: (setattr(s, "live", False), setattr(s, "closed", True))
+    r.close()
+    rec = r.store.load(run.record["handle"])
+    assert rec["state"] == "killed" and rec["ended_by"] == "server_exit" and run.done.is_set(), rec
+    assert run.record["handle"] not in r.store.index()
+    print("close settles: ok")
+
+
+def test_capture():
+    """The session worker's capture (session._Capture): everything printed
+    goes out in chunks of at most CHUNK, in order; the reply keeps a bounded
+    head and tail with the exact count."""
+    from sagebrush import session as S
+
+    sent = []
+    c = S._Capture(sent.append)
+    for i in range(200000):
+        c.write("line %d\n" % i)
+    c.flush()
+    whole = "".join("line %d\n" % i for i in range(200000))
+    assert "".join(m["out"] for m in sent) == whole and all(len(m["out"]) <= S.CHUNK for m in sent)
+    t = c.text()
+    assert c.total == len(whole) and t.startswith(whole[:S.REPLY_HEAD]) and t.endswith(whole[-S.REPLY_TAIL:]) and "not shown" in t
+    assert len(t) < S.REPLY_HEAD + S.REPLY_TAIL + 200
+    c = S._Capture(sent.append)
+    c.write("hi\n")
+    assert c.text() == "hi\n"
+    x = "a" * (S.REPLY_HEAD + 10)
+    c = S._Capture(lambda m: None)
+    c.write(x)
+    assert c.text() == x
+    print("capture: ok")
+
+
+def test_real_session_output():
+    """The real session, when the package's engine is built (CI's
+    engine-cpython, a VM): a 100 MiB printer streams through Session and
+    Runner bounded, with exact counters, and the computation is unaffected."""
+    try:
+        import sagebrush._native  # noqa: F401
+    except ImportError:
+        print("real session output: skipped (no built engine)")
+        return
+    import resource
+
+    r = RN.Runner(store=fresh({"SAGEBRUSH_RUNS_OUTPUT_BYTES": str(4 * R.MiB)}))
+    try:
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        run, done = r.start("for i in range(1600):\n    print('p' * 65535)\n6 * 7", "python", wait=300)
+        rec = r.record(run.record["handle"])
+        grew = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
+        assert done and rec["state"] == "finished" and rec["value"] == {"text": "42"}, rec
+        assert rec["output"]["stdout_bytes"] == 1600 * 65536 and rec["output"]["retained_bytes"] == 4 * R.MiB, rec["output"]
+        assert len(run.reply["stdout"]) <= 1100 * 1024 and run.reply["stdout_chars"] == 1600 * 65536, len(run.reply["stdout"])
+        assert grew < 64 * 1024, "the parent's peak RSS grew by %d KiB" % grew  # (KiB on Linux)
+    finally:
+        r.close()
+    print("real session output: ok")
+
+
 def test_server():
     """The MCP server around the runner (with fake sessions): the ticket,
     the run tools, `runs` in every result, the startup listing, and
@@ -418,6 +755,7 @@ def test_server():
     out = io.StringIO()
     srv = M.Server(out)
     srv._runner = runner(fresh(root=root))
+    srv._runner.ceiling = 3  # (the earlier server's unknown run holds one slot)
     srv.client = {"name": "claude-code"}
     intro = srv.startup_runs()
     assert h0 in intro and "liveness unknown" in intro and "the long one" in intro and "10 min ago" in intro, intro
@@ -517,5 +855,14 @@ if __name__ == "__main__":
     test_memory_error()
     test_idempotency_and_keep()
     test_cleanup()
+    test_settles_on_storage_failure()
+    test_output_bounded_streaming()
+    test_admission_boundaries()
+    test_unknown_runs_bounded()
+    test_tombstones_win()
+    test_cancel_contract()
+    test_close_settles()
+    test_capture()
+    test_real_session_output()
     test_server()
     print("runs: all ok")

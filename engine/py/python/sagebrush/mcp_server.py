@@ -309,6 +309,7 @@ ERROR_TYPES = [
     "capacity",  # the most sessions this machine allows are running
     "not_found",  # no such run (or it was removed: its tombstone says when)
     "not_owned",  # the run belongs to another server
+    "storage",  # the run store has no room (its budget, the free-space floor) or can't be written
 ]
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
@@ -867,10 +868,18 @@ class Server:
                     sc["result"] = rec
                     sc["content_of_result"] = True
                     return content, sc, err
-                return ok(rec, "%s: %s%s" % (handle, rec.get("state"), "; still running: wait again, or run_cancel" if rec.get("state") == "running" else ""))
+                if rec.get("liveness") == "unknown":
+                    note = "; listed as running by another server, liveness unknown: this server can't confirm it is running, or cancel it"
+                elif rec.get("state") == "running":
+                    note = "; still running: wait again, or run_cancel"
+                elif rec.get("state") == "gone":
+                    note = " (removed %s: %s)" % (time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(rec.get("removed_at") or 0)), rec.get("reason"))
+                else:
+                    note = ""
+                return ok(rec, "%s: %s%s" % (handle, rec.get("state"), note))
             if name == "run_cancel":
                 a = r.cancel(handle, args.get("mode", "soft"), args.get("request_id"))
-                return ok(a, "%s: %s" % (handle, a.get("result")))
+                return ok(a, "%s: %s (request %s)" % (handle, a.get("result"), a.get("request_id")))
             if name == "run_keep":
                 a = r.keep(handle, args.get("keep"))
                 return ok(a, "%s: keep %s" % (handle, a["keep"]))
