@@ -8,7 +8,7 @@
  "bundles": {
   "cli/lib.gen.js": {
    "exact": false,
-   "ceiling": 7723426,
+   "ceiling": 7732133,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -19,7 +19,7 @@
   },
   "cli/pyjs.cjs": {
    "exact": false,
-   "ceiling": 30976212,
+   "ceiling": 30985386,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -292,7 +292,7 @@
   },
   "engine/lib/mod-pyjs-pretty.src": {
    "exact": false,
-   "ceiling": 27616,
+   "ceiling": 27021,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -432,14 +432,14 @@
   },
   "engine/lib/sage.pre": {
    "exact": false,
-   "ceiling": 14001331,
+   "ceiling": 14035266,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2933909,
+   "ceiling": 2943210,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -516,7 +516,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1653540,
+   "ceiling": 1653571,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -528,8 +528,8 @@
  },
  "epoch": {
   "sizes": {
-   "cli/lib.gen.js": 7021297,
-   "cli/pyjs.cjs": 28160193,
+   "cli/lib.gen.js": 7029212,
+   "cli/pyjs.cjs": 28168533,
    "engine/lib/core.pre": 1747540,
    "engine/lib/core.src": 405156,
    "engine/lib/magma-more.src": 146156,
@@ -568,7 +568,7 @@
    "engine/lib/mod-pyjs-help.src": 8050,
    "engine/lib/mod-pyjs-magic.src": 21074,
    "engine/lib/mod-pyjs-open.src": 8301,
-   "engine/lib/mod-pyjs-pretty.src": 25106,
+   "engine/lib/mod-pyjs-pretty.src": 24565,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sb-check.src": 4356,
@@ -588,8 +588,8 @@
    "engine/lib/pkg-scipy-io.pre": 61127,
    "engine/lib/pkg-scipy-io.src": 12835,
    "engine/lib/sage-more.src": 287233,
-   "engine/lib/sage.pre": 12728483,
-   "engine/lib/sage.src": 2667190,
+   "engine/lib/sage.pre": 12759333,
+   "engine/lib/sage.src": 2675646,
    "engine/lib/sci.pre": 1896228,
    "engine/lib/sci.src": 366319,
    "engine/lib/tzdata": 257239,
@@ -600,7 +600,7 @@
    "engine/sagebrush-notebook.js": 207740,
    "engine/sagebrush-raster.wasm": 808830,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1503219
+   "engine/sagebrush-worker.js": 1503247
   },
   "reset": null
  }
