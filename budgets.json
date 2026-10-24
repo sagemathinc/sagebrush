@@ -19,7 +19,7 @@
   },
   "cli/pyjs.cjs": {
    "exact": false,
-   "ceiling": 30976159,
+   "ceiling": 30976229,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -529,7 +529,7 @@
  "epoch": {
   "sizes": {
    "cli/lib.gen.js": 7021297,
-   "cli/pyjs.cjs": 28160145,
+   "cli/pyjs.cjs": 28160209,
    "engine/lib/core.pre": 1747540,
    "engine/lib/core.src": 405156,
    "engine/lib/magma-more.src": 146156,
