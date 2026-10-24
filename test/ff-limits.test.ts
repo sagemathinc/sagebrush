@@ -39,7 +39,9 @@ function run(mode: "sage" | "magma", src: string, limits: Record<string, number>
   // (whitespace as one space: Magma wraps its errors at 80 columns)
   return { out: (r.stdout + r.stderr).replace(/\s+/g, " "), status: r.status, ms: Date.now() - t };
 }
-// admitted at `at` (and by default if `byDefault`), refused at at - 1 with `refused` in the output
+// admitted at `at` (and by default if `byDefault`: since plan-c0 every limit
+// is unlimited by default, so every operation here is), refused at at - 1
+// with `refused` in the output
 function boundary(mode: "sage" | "magma", key: string, at: number, src: string, admitted: string, refused: string, byDefault: boolean) {
   const yes = run(mode, src, { [key]: at });
   assert.ok(yes.out.includes(admitted) && !yes.out.includes(refused), `${mode} ${key} = ${at}: ${yes.out}`);
@@ -54,17 +56,17 @@ test("ff.work, lowered: MinimalPolynomial in GF(2^20) is admitted at its 343620 
   boundary("magma", "ff.work", 343620, 'L := GF(2^20); x := L.1^3 + L.1; print "ADMITTED", Degree(MinimalPolynomial(x));\n', "ADMITTED 20", "is not supported yet (work)", true);
 });
 
-test("ff.work, raised: a relative MinimalPolynomial of 14745056 cops, refused by default, is admitted at that limit (Magma)", () => {
-  boundary("magma", "ff.work", 14745056, 'L := GF(2^20); k := GF(4); x := L.1^3 + L.1; print "ADMITTED", Degree(MinimalPolynomial(x, k));\n', "ADMITTED 10", "within a bounded amount of work", false);
+test("ff.work, raised: a relative MinimalPolynomial of 14745056 cops is admitted at that limit, refused one short, and admitted by default (unlimited, plan-c0) (Magma)", () => {
+  boundary("magma", "ff.work", 14745056, 'L := GF(2^20); k := GF(4); x := L.1^3 + L.1; print "ADMITTED", Degree(MinimalPolynomial(x, k));\n', "ADMITTED 10", "within a bounded amount of work", true);
 });
 
-test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) is admitted in a 96 MiB heap; refused one short and by default (Sage)", () => {
+test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) is admitted in a 96 MiB heap; refused one short; admitted by default (unlimited, plan-c0) (Sage)", () => {
   const src = 'R.<x> = GF(2)[]\nK = GF(2^79, "a", modulus=x^79 + x^9 + 1)\nprint("ADMITTED", (K.gen()^3 + K.gen()).minpoly().degree())\n';
   const yes = run("sage", src, { "ff.work": 1e8 }, ["--max-old-space-size=96"]);
   assert.ok(yes.out.includes("ADMITTED 79"), yes.out);
   // (its time, under 15 s on CI's runner, is scripts/bench-ff-limits.mjs's,
   // run alone in the checks job: here it shares the runner with other tests)
-  boundary("sage", "ff.work", 79373117, src, "ADMITTED 79", "is not supported yet (work)", false);
+  boundary("sage", "ff.work", 79373117, src, "ADMITTED 79", "is not supported yet (work)", true);
 });
 
 test("ff.work at its ceiling: the polynomial-degree bound still refuses first", () => {
