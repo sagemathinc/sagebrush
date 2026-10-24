@@ -138,7 +138,7 @@ export type ViewContext = {
   /** (D11) large lifts never made in the page: a folder whose view moves it, with more than `chunk` entries under it,
    * is handed to `debt` (r4 §4, r6 §3: replayed later as a logical move of its own) and left where it is; identities
    * `deferred` says are in such a range are passed over */
-  large?: { chunk: number; debt: (it: { id: string; e: Entry; to: string }) => void; deferred?: (id: string) => boolean; settled?: (id: string, path: string) => boolean; translate?: (p: string) => string | undefined };
+  large?: { chunk: number; debt: (it: { id: string; e: Entry; to: string }) => void; deferred?: (id: string) => boolean; settled?: (id: string, path: string) => boolean; translate?: (p: string, at: string) => string | undefined };
   /** (N6) a folder the view would forget but that still holds entries: handed here (reconsidered once, after the
    * forget's other identities), not listed yet */
   notEmpty?: (id: string) => void;
@@ -288,9 +288,10 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     const it: Item = { id, e, ...(await viewOf(id, e)) };
     // (D11: a top a plan put at a free `name (k)` beside an occupant that stays is where its view puts it)
     if (e && it.v.kind === "entry" && c.large?.settled?.(id, e.path)) it.v = { kind: "entry", e: { ...it.v.e, path: e.path } };
-    // (and what is in it: under its view path, where the top is (N8: as the one-transaction view's lift carries it))
-    else if (it.v.kind === "entry") {
-      const t = c.large?.translate?.(it.v.e.path);
+    // (and what it carries: an entry in it whose view is where the top's view would carry it, where it is (N8: as
+    // the one-transaction view's lift carries it); not one moving on its own (CORR-D11-IMPL-1))
+    else if (e && it.v.kind === "entry") {
+      const t = c.large?.translate?.(it.v.e.path, e.path);
       if (t !== undefined) it.v = { kind: "entry", e: { ...it.v.e, path: t } };
     }
     items.set(id, it);

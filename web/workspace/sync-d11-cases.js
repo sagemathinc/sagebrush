@@ -21,6 +21,52 @@ const tree = async (w) => (await w.list("/", { recursive: true })).map((e) => sh
 /** What differs between two trees (a check's message). */
 const diff = (a, b) => { const A = new Set(a), B = new Set(b); return J({ only: a.filter((x) => !B.has(x)).slice(0, 3), want: b.filter((x) => !A.has(x)).slice(0, 3) }); };
 const raw = (db, store) => new Promise((ok, no) => { const r = db.transaction(store).objectStore(store).getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const byKey = ([x], [y]) => (x < y ? -1 : x > y ? 1 : 0);
+/** Every identity's path (CORR-D11-IMPL-3: the settled result compared identity by identity, not by shape alone). */
+const identities = async (w) => Object.fromEntries((await raw(w.ws, "entries")).filter((e) => e.ident && e.path.startsWith("/")).map((e) => [e.ident, e.path]).sort(byKey));
+/** The identities two maps put in different places: [identity, one's path, the other's] (a check's message). */
+const idDiff = (a, b) => J([...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => a[k] !== b[k]).slice(0, 4).map((k) => [k.slice(0, 6), a[k] ?? null, b[k] ?? null]));
+/** The paths of a tree (shapes) whose folder isn't a folder in it (none: every entry reachable by folder listings). */
+const orphans = (t) => {
+  const kinds = new Map(t.map((x) => JSON.parse(x)).map((e) => [e.path, e.kind]));
+  return [...kinds.keys()].filter((p) => { const f = p.slice(0, p.lastIndexOf("/")) || "/"; return f !== "/" && f !== "/Trash" && kinds.get(f) !== "folder"; });
+};
+
+// ---- (LIMIT-D11-IMPL-1/2) IndexedDB's requests and the rows they return, counted at the browser's own API (not by the
+// replay's meter): each closure or validation transaction's, between the replay's "begin" and "end" of its reads
+
+const probe = { on: false, tx: null, cur: null, txs: [] };
+let probed = false;
+function probeIDB() {
+  if (probed) return;
+  probed = true;
+  for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) for (const k of ["get", "getAll", "getAllKeys", "getKey", "count", "openCursor", "openKeyCursor"]) {
+    const f = P[k];
+    P[k] = function (...a) {
+      const r = f.apply(this, a);
+      if (probe.on) {
+        probe.tx ??= r.transaction;
+        if (r.transaction === probe.tx) {
+          const cur = probe.cur;
+          cur.req++;
+          r.addEventListener("success", () => { const v = r.result; cur.rows += k === "get" ? (v === undefined ? 0 : 1) : Array.isArray(v) ? v.length : k.startsWith("open") && v ? 1 : 0; });
+        }
+      }
+      return r;
+    };
+  }
+}
+/** The probe on: each closure and validation transaction's reads, [{ phase, req, rows }] */
+function startProbe() {
+  probeIDB();
+  probe.txs = [];
+  W.REPLAY.reads = (at, phase) => {
+    if (at === "begin") { probe.cur = { phase, req: 0, rows: 0 }; probe.txs.push(probe.cur); probe.tx = null; probe.on = true; }
+    else probe.on = false;
+  };
+}
+const stopProbe = () => { W.REPLAY.reads = null; probe.on = false; return probe.txs; };
+const sum = (txs, k, phase = "close") => txs.filter((t) => t.phase === phase).reduce((a, t) => a + t[k], 0);
 
 // ---- the local workspace's own large move
 
@@ -303,9 +349,10 @@ async function readAll(w, n) {
  * the final tree, the settled closure's figures and the plan's mappings (N8). */
 async function replayRows(what, f, ranges, expect = {}) {
   const a = await seeded(SMALL, f.confirmed, f.local), o = await seeded(OLD, f.confirmed, f.local);
+  if (expect.seed) { await expect.seed(a.w, a.ns); await expect.seed(o.w, o.ns); }
   const ids = [...new Set([...f.confirmed.map((x) => x[0])])];
   await oneTransactionView(o.w, o.ns, o.gp, ids);
-  const want = await tree(o.w);
+  const want = await tree(o.w), wantById = await identities(o.w);
   const before = await tree(a.w);
   // (the marker, as a rebuild's view leaves it after resume, and the entries' slot reserved)
   await new Promise((ok, no) => {
@@ -319,6 +366,8 @@ async function replayRows(what, f, ranges, expect = {}) {
   let classes = null, crashed = 0, closure = null, nmaps = null;
   if (expect.crashAtTransition) W.REPLAY.cut = (at) => { if (at === "sweep1to2" && !crashed++) throw new Error("crash before the transition (test)"); };
   if (expect.cut) W.REPLAY.cut = (at) => { if (at === expect.cut && !crashed++) throw new Error(`crash at ${at} (test)`); };
+  if (expect.probe) startProbe();
+  let txs = null;
   W.REPLAY.before = async (phase, m) => {
     if (m.closure) closure = m.closure;
     if (expect.hook) await expect.hook(phase, m, a);
@@ -341,6 +390,7 @@ async function replayRows(what, f, ranges, expect = {}) {
   } finally {
     W.REPLAY.before = null;
     W.REPLAY.cut = null;
+    if (expect.probe) txs = stopProbe();
   }
   if (expect.cut || expect.resume) check(crashed >= 1, `${what}: crashed once${expect.cut ? ` at ${expect.cut}` : " between transactions"}, then resumed`);
   const sorted = (o) => o && Object.fromEntries(Object.entries(o).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)));
@@ -349,7 +399,17 @@ async function replayRows(what, f, ranges, expect = {}) {
   const fin = await tree(a.w);
   const paths = (t) => t.map((x) => JSON.parse(x).path);
   const pdiff = () => { const a = paths(fin), b = paths(want); return J({ ours: a.filter((x) => !b.includes(x)).slice(0, 6), oracle: b.filter((x) => !a.includes(x)).slice(0, 6) }); };
-  check(J(fin) === J(want), `${what}: the replay's result equals today's one-transaction view (${fin.length} entries) ${J(fin) === J(want) ? "" : pdiff()}`);
+  const byId = await identities(a.w);
+  if (expect.oracle !== false) {
+    check(J(fin) === J(want), `${what}: the replay's result equals today's one-transaction view (${fin.length} entries) ${J(fin) === J(want) ? "" : pdiff()}`);
+    check(J(byId) === J(wantById), `${what}: every identity where today's one-transaction view puts it (${Object.keys(byId).length} identities) ${J(byId) === J(wantById) ? "" : idDiff(byId, wantById)}`);
+  } else {
+    // (an input today's one-transaction view gets wrong (CORR-D11-IMPL-2): the result named, identity by identity)
+    const got = Object.fromEntries(Object.keys(expect.paths).map((k) => [k, byId[k]]));
+    check(J(got) === J(expect.paths), `${what}: each identity where the plan puts it ${J(got) === J(expect.paths) ? "" : idDiff(got, expect.paths)}`);
+  }
+  const bad = [...snaps.map((s) => [s.phase, s.sweep, orphans(s.t)]), ["end", null, orphans(fin)]].filter((x) => x[2].length);
+  check(!bad.length, `${what}: at every page, every entry's folder a folder ${bad.length ? J(bad[0]) : ""}`);
   const planned = snaps.filter((s) => s.published);
   const after = snaps.find((s) => s.phase === "place")?.t ?? fin;
   const pre = snaps.filter((s) => !s.published && s.phase !== "place");
@@ -365,9 +425,9 @@ async function replayRows(what, f, ranges, expect = {}) {
   check(!m && !(await a.w.rewriteState()), `${what}: the marker and the plan gone`);
   const logged = (await a.w.ops()).filter((x) => x.origin === "server");
   check(logged.every((x) => !String(x.path).startsWith("\u0001") && !String(x.to ?? "").startsWith("\u0001")), `${what}: no op logged with a staging path (${logged.length} ops)`);
-  const byId = Object.fromEntries((await raw(a.w.ws, "entries")).filter((e) => e.ident && e.path.startsWith("/")).map((e) => [e.ident, e.path]));
+  const listed = (await metaOf(a.w, `sync:${a.ns}:listed`))?.paths ?? [];
   a.w.close(); o.w.close();
-  return { fin, want, closure, nmaps, byId };
+  return { fin, want, closure, nmaps, byId, listed, txs };
 }
 const replayCase = (what, spec, ranges, expect = {}) => replayRows(what, folders(spec), ranges, expect);
 
@@ -407,6 +467,7 @@ async function bothOrders(what, f, rangesA, rangesB, expect = {}) {
   const x = await replayRows(`${what} (O first)`, f, rangesA, expect);
   const y = await replayRows(`${what} (I first)`, f, rangesB, expect);
   check(J(x.fin) === J(y.fin), `${what}: the same settled result in both orders ${J(x.fin) === J(y.fin) ? "" : diff(x.fin, y.fin)}`);
+  check(J(x.byId) === J(y.byId), `${what}: every identity in the same place in both orders ${J(x.byId) === J(y.byId) ? "" : idDiff(x.byId, y.byId)}`);
   return x;
 }
 
@@ -469,8 +530,9 @@ async function n8Vacate() {
 }
 
 /** A plan that must fail stably before publication: said, its rows dropped, nothing visible, the sender released. */
-async function replayFails(what, f, ranges, d11, re) {
+async function replayFails(what, f, ranges, d11, re, opts = {}) {
   const a = await seeded(SMALL, f.confirmed, f.local);
+  if (opts.seed) await opts.seed(a.w, a.ns);
   const before = await tree(a.w);
   await new Promise((ok, no) => {
     const tx = a.w.ws.transaction(["meta", "entries"], "readwrite"), now = Date.now();
@@ -478,10 +540,15 @@ async function replayFails(what, f, ranges, d11, re) {
     tx.objectStore("entries").put({ path: W.RW, rid: "c0ffee08", kind: "reserved", published: false, rev: 1, n: 0, fails: 0, at: now });
     tx.oncomplete = ok; tx.onerror = () => no(tx.error);
   });
-  W.configureD11({ ...SMALL, ...d11 });
+  const cfg = W.configureD11({ ...SMALL, ...d11 });
   let err;
+  startProbe();
   try { await W.runReplay(a.w, a.ns); } catch (e) { err = e; }
+  const txs = stopProbe();
   W.configureD11(SMALL);
+  // (LIMIT-D11-IMPL-1: the failing plan's reads too, as IndexedDB served them, within every budget: no read past one made)
+  const most = (k, ph) => Math.max(0, ...txs.filter((t) => t.phase === ph).map((t) => t[k]));
+  check(["close", "validate"].every((ph) => most("req", ph) <= cfg.requests && most("rows", ph) <= cfg.page) && sum(txs, "req") <= cfg.closureRequests && sum(txs, "rows") <= cfg.closureRows, `${what}: no transaction's reads past ${cfg.requests} requests or ${cfg.page} rows, the closure's past ${cfg.closureRequests} or ${cfg.closureRows} (${J({ txs: txs.length, most: [most("req", "close"), most("rows", "close")], all: [sum(txs, "req"), sum(txs, "rows")] })})`);
   const m = await W.replayOf(a.w, a.ns), ctl = (await raw(a.w.ws, "entries")).filter((e) => e.path.startsWith(W.MAPS) || e.path.startsWith("\u0001q/"));
   check(err instanceof W.ReplayHalted && re.test(m?.failed ?? "") && ctl.length === 0 && !(await a.w.rewriteState())?.published && !W.SENDER_HOLD.has(a.ns) && J(await tree(a.w)) === J(before), `${what}: the stable failure before publication: said, the plan dropped, nothing visible, the sender released (${J({ err: err?.constructor?.name, failed: m?.failed?.slice(0, 70), ctl: ctl.length })})`);
   W.REPLAY.reload();
@@ -511,17 +578,72 @@ async function n8CapsNames() {
   await replayFails("N8 9: all 100 taken by ordinary names", outerInner("/U/F", taken(100)), ["/U"], P, /no free name/);
   await replayFails("N8 9: all 100 taken by lookalikes", outerInner("/U/é", taken(100, (i) => (i === 1 ? "é" : `é (${i})`))), ["/U"], P, /no free name/);
 }
+/** (LIMIT-D11-IMPL-1/2) A replay's closure and validation reads against IndexedDB's own count (the probe): every
+ * transaction within D11.requests and D11.page, the closure's counters equal to what IndexedDB served it. */
+function metered(what, r, cfg) {
+  const close = r.txs.filter((t) => t.phase === "close"), val = r.txs.filter((t) => t.phase === "validate");
+  const most = (ts, k) => Math.max(0, ...ts.map((t) => t[k]));
+  check(r.closure && sum(r.txs, "req") === r.closure.requests && sum(r.txs, "rows") === r.closure.rows && most(close, "req") === r.closure.txReq && most(close, "rows") === r.closure.txRows, `${what}: the closure's counters are the requests and rows IndexedDB served it (${J({ ledger: r.closure, idb: { req: sum(r.txs, "req"), rows: sum(r.txs, "rows"), txs: close.length, most: [most(close, "req"), most(close, "rows")] } })})`);
+  check([close, val].every((ts) => most(ts, "req") <= cfg.requests && most(ts, "rows") <= cfg.page) && val.length > 0, `${what}: every closure and validation transaction within ${cfg.requests} requests and ${cfg.page} rows (${J({ close: [close.length, most(close, "req"), most(close, "rows")], validate: [val.length, most(val, "req"), most(val, "rows")] })})`);
+  return { txs: close.length, txReq: most(close, "req"), txRows: most(close, "rows"), waits: r.closure?.waits ?? 0 };
+}
+/** One transaction's budget: measured with one item a transaction, then each at exactly the largest transaction's
+ * use (succeeds) and one under it (that item's next read isn't admitted: the stable failure, nothing past it read),
+ * and at exactly it with many items a transaction (an item that doesn't fit waits for the next). */
+async function txBudget(what, f, ranges, d11, opts = {}) {
+  const one = { ...d11, planPage: 1 };
+  const r = await replayRows(`${what}: one item a transaction`, f, ranges, { d11: one, probe: true, ...opts });
+  const m = metered(`${what}: one item a transaction`, r, { ...SMALL, ...one });
+  check(m.txReq > 50 && m.txRows > 10, `${what}: its largest item's transaction above the floors (50 requests, 10 rows): ${J(m)}`);
+  const xs = [];
+  for (const [k, v] of [["requests", m.txReq], ["page", m.txRows]]) {
+    const at = { ...one, [k]: v };
+    metered(`${what}: ${k} at exactly ${v}`, await replayRows(`${what}: ${k} at exactly ${v}`, f, ranges, { d11: at, probe: true, ...opts }), { ...SMALL, ...at });
+    await replayFails(`${what}: ${k} at ${v - 1}`, f, ranges, { ...one, [k]: v - 1 }, /for one name/, opts);
+    const many = { ...d11, [k]: v };
+    const x = metered(`${what}: ${k} at exactly ${v}, many items a transaction`, await replayRows(`${what}: ${k} at exactly ${v}, many items a transaction`, f, ranges, { d11: many, probe: true, ...opts }), { ...SMALL, ...many });
+    check(x.txs <= m.txs, `${what}: …in no more transactions than one item each (${J({ txs: x.txs, one: m.txs, waited: x.waits })})`);
+    xs.push(x);
+  }
+  check(xs.some((x) => x.waits > 0), `${what}: an item that didn't fit waited for the next transaction (${J(xs.map((x) => x.waits))})`);
+}
 async function n8CapsTx() {
+  // (one transaction's requests and rows: 30 staying names before I's free one)
   const taken = (n) => Array.from({ length: n }, (_, i) => [`X${i}`, `/T/${i === 0 ? "F" : `F (${i + 1})`}`, null, "file"]);
-  // (one transaction's requests and rows: an item past them fails)
-  const many = outerInner("/U/F", taken(30));
+  await txBudget("N8 9: an item of many requests", outerInner("/U/F", taken(30)), ["/U"], { page: 1000 });
+}
+/** The adversarial closure (LIMIT-D11-IMPL-2): I's view under two carriers (A1 and A2, mappings whose targets hold its
+ * folder) as well as O, twelve staying claimants at its candidates, six of them in lookalike pairs, each claimant with
+ * an intent (its view reads its intents and its folders' too). */
+function meterRows() {
+  const items = [["T", "/T", "/U", "folder", 15], ["L", "/T/L", "/U/L"], ["A1", "/T/a", "/U/a2", "folder", 15], ["A2", "/T/a/b", "/U/a2/b2", "folder", 15], ["I", "/T/L/F", "/U/a2/b2/é", "folder", 15]];
+  for (let i = 1; i <= 12; i++) {
+    const name = i === 1 ? "é" : `é (${i})`;
+    items.push([`X${i}`, `/T/a/b/${name}`, null, "file"]);
+    if (i <= 6) items.push([`Y${i}`, `/T/a/b/${name.replace("é", "e\u0301")}`, null, "file"]);
+  }
+  return rows8(items);
+}
+/** Each identity given an intent (held: its view reduced with its intents and its folders'). */
+const held = (ids) => (w, ns) => new Promise((ok, no) => {
+  const tx = w.ws.transaction("pending", "readwrite");
+  for (const id of ids) tx.objectStore("pending").put({ id, byNs: { [ns]: { held: true } } });
+  tx.oncomplete = ok;
+  tx.onerror = () => no(tx.error);
+});
+async function n8Meter() {
+  const f = meterRows(), seed = held(Object.keys(f.ids).filter((k) => /^[XY]/.test(k)).map((k) => f.ids[k]));
   const P = { page: 1000 };
-  const mm = (await replayRows("N8 9: an item of many requests", many, ["/U"], { d11: P })).closure;
-  check(mm.maxReq > 50 && mm.maxRows > 10, `…its largest item: ${J(mm)}`);
-  await replayRows(`N8 9: requests at exactly ${mm.maxReq}`, many, ["/U"], { d11: { ...P, requests: mm.maxReq } });
-  await replayFails(`N8 9: requests at ${mm.maxReq - 1}`, many, ["/U"], { ...P, requests: mm.maxReq - 1 }, /for one name/);
-  await replayRows(`N8 9: page at exactly ${mm.maxRows}`, many, ["/U"], { d11: { page: mm.maxRows } });
-  await replayFails(`N8 9: page at ${mm.maxRows - 1}`, many, ["/U"], { page: mm.maxRows - 1 }, /for one name/);
+  const r = await replayRows("LIMIT: an adversarial closure", f, ["/U"], { d11: P, seed, probe: true });
+  metered("LIMIT: an adversarial closure", r, { ...SMALL, ...P });
+  check(r.nmaps === 4 && r.closure.maxReq > 50 && /é \(13\)$/.test(pathOf(r, f.ids.I) ?? ""), `…I beside its twelve claimants (${J({ I: pathOf(r, f.ids.I), maps: r.nmaps, closure: r.closure })})`);
+  // (the closure's own ceilings: at exactly what it used (succeeds), one under (the read past it never made: stable))
+  for (const [k, v] of [["closureRequests", r.closure.requests], ["closureRows", r.closure.rows]]) {
+    const at = { ...P, [k]: v };
+    metered(`LIMIT: ${k} at exactly ${v}`, await replayRows(`LIMIT: ${k} at exactly ${v}`, f, ["/U"], { d11: at, seed, probe: true }), { ...SMALL, ...at });
+    await replayFails(`LIMIT: ${k} at ${v - 1}`, f, ["/U"], { ...P, [k]: v - 1 }, /requests or \d+ rows: reload/, { seed });
+  }
+  await txBudget("LIMIT: the adversarial closure", f, ["/U"], P, { seed });
 }
 async function n8Crashes() {
   // (10: a crash at each point, then on to the same result)
@@ -555,7 +677,35 @@ async function n8EqualDepth() {
   // (12: two mappings wanting one key at one depth: B's view /U2/F taken by Z (staying), C's view /U2/F (2))
   const f = rows8([["U2", "/U2", "/U2"], ["Z", "/U2/F", null, "file"], ["B", "/b", "/U2/F", "folder", 15], ["C", "/c", "/U2/F (2)", "folder", 15]]);
   const r = await bothOrders("N8 12: equal-depth claims", f, ["/U2/F", "/U2/F (2)"], ["/U2/F (2)", "/U2/F"]);
-  check(true, `…B at ${J(pathOf(r, f.ids.B))}, C at ${J(pathOf(r, f.ids.C))}`);
+  // (B's view first in key order: B beside Z at the first free name, C on past it; Z where it is)
+  const got = { B: pathOf(r, f.ids.B), C: pathOf(r, f.ids.C), Z: pathOf(r, f.ids.Z) };
+  check(J(got) === J({ B: "/U2/F (2)", C: "/U2/F (2) (2)", Z: "/U2/F" }), `…B at /U2/F (2), C at /U2/F (2) (2), Z at /U2/F (${J(got)})`);
+}
+
+// ---- the D11 implementation review's vectors (CORR-D11-IMPL-1/2)
+
+async function astraIndependent() {
+  // (an independent move into the claimant's folder (J, from outside, to /U/F/new.txt) is no carried row of I, which
+  // a settled top beside X: J into X, as in one transaction; I's own rows carried with it)
+  const f = outerInner("/U/F", [["X", "/T/F", null, "folder"], ["J", "/outside", "/U/F/new.txt", "file"]]);
+  const r = await bothOrders("CORR-1: an independent file below a conflicted top", f, ["/U"], ["/U/F", "/U"]);
+  const got = { I: pathOf(r, f.ids.I), X: pathOf(r, f.ids.X), J: pathOf(r, f.ids.J) };
+  check(J(got) === J({ I: "/U/F (2)", X: "/U/F", J: "/U/F/new.txt" }), `…I at /U/F (2), X at /U/F, J at /U/F/new.txt (${J(got)})`);
+}
+async function astraNestedSettled() {
+  // (a settled top inside a settled top's view: each one's rows carried with it)
+  const f = outerInner("/U/F", [["X", "/T/F", null, "folder"], ["J", "/T/L/F/H", "/U/F/G", "folder", 15], ["Y", "/T/F/G", null, "file"]]);
+  await bothOrders("CORR-1: nested settled tops", f, ["/U"], ["/U/F", "/U"]);
+}
+async function astraParentFile() {
+  // (X a file: I beside it, and J's view (/U/F/G) under what is then the file X: J stays where I carries it
+  // (/U/F (2)/H), listed no-folder, never published under a file; today's one-transaction view puts it under the file)
+  const f = outerInner("/U/F", [["X", "/T/F", null, "file"], ["J", "/T/L/F/H", "/U/F/G", "folder", 15]]);
+  const paths = { [f.ids.I]: "/U/F (2)", [f.ids.X]: "/U/F", [f.ids.J]: "/U/F (2)/H" };
+  const x = await replayRows("CORR-2: a retarget leaves a file as the view's folder (O first)", f, ["/U"], { oracle: false, paths });
+  const y = await replayRows("CORR-2: a retarget leaves a file as the view's folder (I first)", f, ["/U/F", "/U"], { oracle: false, paths });
+  check(J(x.byId) === J(y.byId), `CORR-2: every identity in the same place in both orders ${J(x.byId) === J(y.byId) ? "" : idDiff(x.byId, y.byId)}`);
+  check(x.listed.some(([p, why]) => p === "/U/F (2)/H" && why === "no-folder") && !orphans(x.fin).length, `…J listed no-folder where it is, nothing under a file (${J(x.listed.slice(0, 4))})`);
 }
 
 // ---- r8 N2's vectors: an op that relocates two large folders, or writes beneath one it brings back
@@ -1266,7 +1416,7 @@ export async function run(only = "") {
   W.configureD11(SMALL);
   // (WIDE=case:<name>,<name>: those cases alone)
   const pick = String(only).startsWith("case:") ? String(only).slice(5).split(",") : null;
-  for (const t of [n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
+  for (const t of [astraIndependent, astraNestedSettled, astraParentFile, n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Meter, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
     if (pick && !pick.includes(t.name)) continue;
     // (each case at most 2 minutes: one that hangs is named, and the rest go on)
     let timer;
