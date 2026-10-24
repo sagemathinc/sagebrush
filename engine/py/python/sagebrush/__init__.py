@@ -52,8 +52,11 @@ def set_limits(limits):
     """Set this session's engine limits (a mapping such as {"ff.work": 10**8}),
     before the first use of the finite-field layer, which reads them once:
     after it, RuntimeError.  Invalid limits raise ValueError and leave the
-    limits set before unchanged.  The keys, their defaults and ranges:
-    _limits.TABLE (plan-ff-limits r3)."""
+    limits set before unchanged.  Every key is "unlimited" by default (no
+    work or time limit on your own computation; interrupt it instead): a
+    finite value opts in to a limit, and "unlimited" may be given too.  The
+    keys and the ranges of finite values: _limits.TABLE (plan-ff-limits r3,
+    plan-c0 r2).  Memory guards always apply."""
     L = _limits_module()
     # (once locked, that is the answer, whatever the argument: astra)
     if L.finalized():

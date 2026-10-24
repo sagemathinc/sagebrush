@@ -11,10 +11,13 @@ import { CALL_POS } from "../src/magma";
 // embedding, descent or discrete log done, admitted at its cost; between
 // finite fields F1's 2^20 bound holds.  test/ff_f3_cases.py; its .out was
 // checked under CPython.
+// (the cases exercise the limits as a policy sets them: test/limits-finite.json,
+// the values that were the defaults before plan-c0, whose defaults are
+// unlimited)
 const TEST = __dirname + "/../../test/";
 const CLI = __dirname + "/../src/cli.js";
 test("finite fields F3: ChangeRing and change_ring admit their whole work before moving any coefficient (Magma and Sage)", () => {
-  const got = execFileSync(process.execPath, [CLI, TEST + "ff_f3_cases.py"], { encoding: "utf8", maxBuffer: 16 << 20 });
+  const got = execFileSync(process.execPath, [CLI, "--limits", TEST + "limits-finite.json", TEST + "ff_f3_cases.py"], { encoding: "utf8", maxBuffer: 16 << 20 });
   const want = readFileSync(TEST + "ff_f3_cases.out", "utf8");
   const g = got.split("\n"), w = want.split("\n");
   const diffs = w.map((line, i) => (line === g[i] ? null : `${i + 1}: want ${line}\n   got ${g[i]}`)).filter((x) => x !== null);
