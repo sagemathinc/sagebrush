@@ -18,9 +18,74 @@ try {
   require("node:module").enableCompileCache?.();
 } catch {}
 const { join } = require("node:path");
-const { existsSync } = require("node:fs");
+const { existsSync, openSync, readSync, closeSync } = require("node:fs");
 const bundle = [join(__dirname, "..", "dist", "sagebrush.cjs"), join(__dirname, "pyjs.cjs")].find((f) => existsSync(f));
 const argv = process.argv.slice(2);
+
+// The engine's limits (src/limits.ts has the same rules, for the bundle run
+// directly): --limits FILE among the interpreter's own options (taken out of
+// the arguments; after -c, -m, -, a script, a subcommand or --, it is the
+// program's), else SAGEBRUSH_LIMITS=FILE; the file read here with a bounded
+// read of at most 4097 bytes, a failure ending the run with status 2.  The
+// text then goes to the program's worker (workerData) or to the bundle loaded
+// here (a global, never an environment value a child would inherit), whose
+// runtime validates it (lib/_limits.py) before its first statement.
+const LIMITS_MAX = 4096;
+const oneLine = (s) => String(s).replace(/[\x00-\x1f\x7f-\x9f]/g, (c) => "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0"));
+function refuse(msg) {
+  process.stderr.write(`sagebrush: ${msg}\n`);
+  process.exit(2);
+}
+function limitsFile() {
+  let file = null;
+  for (let i = 0; i < argv.length; i++) {
+    const x = argv[i];
+    if (x === "--limits") {
+      if (i + 1 >= argv.length) refuse("--limits takes a file");
+      if (file !== null) refuse("--limits is given more than once");
+      file = argv[i + 1];
+      argv.splice(i, 2);
+      i--;
+      continue;
+    }
+    if (x === "--figures" || x === "--pkgset") {
+      i++;
+      continue;
+    }
+    if (x === "--" || x === "-c" || x === "-m" || x === "-" || !x.startsWith("-")) break;
+  }
+  if (file !== null) return file;
+  try {
+    return process.env.SAGEBRUSH_LIMITS || null;
+  } catch {
+    return null; // (a Deno without --allow-env)
+  }
+}
+const WHY = { ENOENT: "No such file or directory", EACCES: "Permission denied", EISDIR: "Is a directory", ENOTDIR: "Not a directory", ELOOP: "Too many levels of symbolic links" };
+function readLimits(path) {
+  const name = oneLine(path), buf = Buffer.alloc(LIMITS_MAX + 1);
+  let n = 0;
+  try {
+    const fd = openSync(path, "r");
+    try {
+      for (let k; n < buf.length && (k = readSync(fd, buf, n, buf.length - n, null)) > 0; ) n += k;
+    } finally {
+      closeSync(fd);
+    }
+  } catch (e) {
+    refuse(`limits: cannot read ${name}: ${WHY[e && e.code] || oneLine((e && (e.code || e.message)) || e)}`);
+  }
+  if (n > LIMITS_MAX) refuse(`limits: ${name} is larger than ${LIMITS_MAX} bytes`);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buf.subarray(0, n));
+  } catch {
+    refuse(`limits: ${name} is not JSON: it is not UTF-8`);
+  }
+  return { text, name };
+}
+const limitsPath = limitsFile();
+const limits = limitsPath === null ? null : readLimits(limitsPath);
 
 // Whether the arguments run a program, by the rules of src/cli.ts's main()
 function runsProgram(a) {
@@ -43,8 +108,12 @@ function runsProgram(a) {
   return !process.stdin.isTTY;
 }
 
-if (!runsProgram(argv)) require(bundle);
-else {
+if (!runsProgram(argv)) {
+  // (the arguments without --limits FILE, for the bundle's main())
+  process.argv.splice(2, process.argv.length - 2, ...argv);
+  globalThis.__SAGEBRUSH_LIMITS__ = limits;
+  require(bundle);
+} else {
   const { Worker } = require("node:worker_threads");
   let intr = null, last = 0, interrupted = false;
   const die = () => {
@@ -67,7 +136,7 @@ else {
   // (stdout and stderr: true, so that this thread never opens its own
   // process.stdout, which would make the shared descriptor non-blocking: the
   // worker writes to fds 1 and 2 itself, cliWorker in src/cli.ts)
-  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv } } });
+  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits } } });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

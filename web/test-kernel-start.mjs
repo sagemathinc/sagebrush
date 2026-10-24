@@ -20,13 +20,15 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
 
 // a held start: everything waits for it, then goes in order, after what onStart sent
 {
-  const sent = [], log = [];
+  const sent = [], log = [], inits = [];
   let release;
   const gate = new Promise((r) => (release = r));
   const workers = [];
   const k = new WorkerKernel({
     createWorker: () => {
-      const w = { n: workers.length, postMessage: (m) => sent.push({ w: w.n, ...m }), terminate() {} };
+      // (the init message, the worker's limits, goes first and at once:
+      // web/worker.ts runs nothing before it; kept apart from what is asked)
+      const w = { n: workers.length, postMessage: (m) => (m.init ? inits : sent).push({ w: w.n, ...m }), terminate() {} };
       workers.push(w);
       return w;
     },
@@ -43,6 +45,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   k.execute("b = 2", { mode: "python" }, sink(log, "b"));
   await tick();
   ok(sent.length === 0, `while the start is held nothing is sent to the worker (${JSON.stringify(sent)})`);
+  ok(inits.length === 1 && inits[0].w === 0 && inits[0].init.limits === null, `but its limits, at once (the defaults: null) (${JSON.stringify(inits)})`);
   release();
   await k.started;
   await tick();
@@ -58,7 +61,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   const k = new WorkerKernel({
     createWorker: () => {
       const n = made++;
-      return { postMessage: (m) => sent.push({ w: n, ...m }), terminate: () => log.push(`terminate:${n}`) };
+      return { postMessage: (m) => !m.init && sent.push({ w: n, ...m }), terminate: () => log.push(`terminate:${n}`) };
     },
     onStart: async (w) => {
       await tick();
@@ -91,7 +94,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   const k = new WorkerKernel({
     createWorker: () => {
       const n = made++;
-      return { postMessage: (m) => sent.push({ w: n, ...m }), terminate() {} };
+      return { postMessage: (m) => !m.init && sent.push({ w: n, ...m }), terminate() {} };
     },
     onStart: async (w) => {
       if (made === 1) await new Promise((r) => (release = r));

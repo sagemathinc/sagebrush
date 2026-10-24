@@ -50,6 +50,7 @@ import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 import { unbox } from "./runtime/object";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
+import { startLimits, type LimitsText } from "./limits";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -105,7 +106,12 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 // A display costs its envelope too (output-cost.ts displayCost), and at most `displays` of
 // them are posted a run: a million empty displays are not a million messages
 // kept for free (HARD-58F-1).
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number } } = {}): Session {
+// limits: the engine limits (src/limits.ts), or a promise of them (the
+// browser worker's init message); the session's runtime is given them before
+// anything else runs, and is never ready if they are invalid (ready rejects
+// with a LimitsError).  None: the defaults.
+export class LimitsError extends Error {}
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText> } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -233,6 +239,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     await initParser();
     const sys = R.importModule("sys");
     sys.path.push(libDir());
+    const bad = startLimits(R, (await opts.limits) ?? null);
+    if (bad !== null) throw new LimitsError(bad);
     sys.argv.push("");
     opts.init?.(R);
     const main = R.newModule("__main__");
