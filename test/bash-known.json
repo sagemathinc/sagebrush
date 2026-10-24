@@ -1,0 +1,47 @@
+{
+  "about": "Every accepted difference of just-bash 3.6.0 from GNU bash in test/bash-oracle-cases.json (plan-bash-shell r3 §3.3), with what just-bash does instead; test/bash-oracle.test.ts fails on any other difference, or on a change in one of these. Of the 20 cases of the plan's probe, 17 file states match GNU bash's, or 16 counting exit status (D2 differs only in status). The 8 cases added here: 5 match, amp-gt and append-then-dup are D7, missing-folder is D8.",
+  "ipython_notes": [
+    "What the frozen IPython 9.15.0 cases show, for step 6 (not differences yet: the bridge doesn't exist):",
+    "the statement form runs the command on a terminal (a pty), so its output arrives with CRLF line ends and its stderr merged into stdout; the shell has no terminal, so CRLF isn't reproduced (compare with \\r\\n read as \\n)",
+    "the capture form merges stderr into the captured lines (capture-stderr: [\"out\", \"err\"]) and prints nothing",
+    "the capture form doesn't set _exit_code (capture, capture-status: NameError in a fresh shell); the statement form does",
+    "'$$' inside the command reaches the shell as $$ (dollar-escape), an undefined $name stays literal, and {{ }} becomes { }"
+  ],
+  "redirections": {
+    "cat-self-append": {
+      "plan": "D1",
+      "reason": "GNU cat refuses 'input file is output file' (exit 1, f unchanged); just-bash's cat reads a snapshot, so f is doubled once and the status is 0",
+      "differs": { "exit": 0, "files": { "f": "old\nold\n", "n": null, "g": null, "t": null, "c": null, "e": null } }
+    },
+    "group-write-then-read": {
+      "plan": "D2",
+      "reason": "the same file content as GNU bash; GNU cat's 'input file is output file' makes its status 1, just-bash's is 0",
+      "differs": { "exit": 0 }
+    },
+    "two-fds-offset-zero": {
+      "plan": "D6",
+      "reason": "two separately opened redirections of one file: just-bash's last whole-file write wins; in bash two descriptors write at offset 0, so the shorter second write keeps the first one's tail",
+      "differs": { "files": { "f": "X\n", "n": null, "g": null, "t": null, "c": null, "e": null } }
+    },
+    "stderr-first-into-dup": {
+      "plan": "D7",
+      "reason": "> f 2>&1: just-bash collects the command's stdout, then appends its stderr; bash writes both in order through one descriptor",
+      "differs": { "files": { "f": "O\nE\n", "n": null, "g": null, "t": null, "c": null, "e": null } }
+    },
+    "amp-gt": {
+      "plan": "D7",
+      "reason": "&> f is > f 2>&1: the same stdout-then-stderr order",
+      "differs": { "files": { "f": "O\nE\n", "n": null, "g": null, "t": null, "c": null, "e": null } }
+    },
+    "append-then-dup": {
+      "plan": "D7",
+      "reason": ">> f 2>&1: the same stdout-then-stderr order, appended",
+      "differs": { "files": { "f": "old\nO\nE\n", "n": null, "g": null, "t": null, "c": null, "e": null } }
+    },
+    "missing-folder": {
+      "plan": "D8 (found in step 0; proposed to the reviewers)",
+      "reason": "a file system error at a redirection (here ENOENT, the folder is missing) isn't turned into a status by just-bash 3.6.0: exec() rejects, so the script ends there. bash prints the error, sets status 1 and goes on. The shell host turns the rejection into exit 1 with the error on stderr (step 2), so the script still ends at that command",
+      "differs": { "exit": "rejects" }
+    }
+  }
+}
