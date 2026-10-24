@@ -97,20 +97,28 @@ from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_
 
 
 def show(obj, **options):
-    """Show a picture (2D or 3D); typeset an expression or anything with a
-    LaTeX form (in the notebook and Jupyter), else print it.
+    """Show a picture (2D or 3D), or typeset anything else with LaTeX (in
+    the notebook and Jupyter; its text form elsewhere): one display.
 
     EXAMPLES::
 
         sage: show(x^2 + 1)  # random
+        sage: show(EllipticCurve([1, -1, 0, -79, 289]))
+        Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field
     """
     if isinstance(obj, Graphics3d):
         return obj.show(**options)
-    if not isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)) and (
-            hasattr(obj, "_latex_") or isinstance(obj, (int, _Fraction, list, tuple))):
-        from _sage_expr import show_typeset
-        return show_typeset(obj)
-    return _show2d(obj, **options)
+    if isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)):
+        return _show2d(obj, **options)
+    # (a picture-like object without a LaTeX form, a graph or a polyhedron:
+    # its own rich display)
+    if not hasattr(obj, "_latex_") and any(hasattr(obj, m) for m in _RICH_DISPLAY):
+        return _show2d(obj, **options)
+    from _sage_expr import show_typeset
+    return show_typeset(obj)
+
+
+_RICH_DISPLAY = ("_repr_svg_", "_repr_png_", "_repr_html_", "_repr_mimebundle_", "_ipython_display_")
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_hmf import HilbertModularForms
