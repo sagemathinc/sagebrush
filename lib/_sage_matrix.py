@@ -3009,9 +3009,13 @@ def _dict_key(k):
     """The (row, column) of a key of a matrix's dict of entries: a pair,
     each an integer, with Sage's errors for another key."""
     import itertools
-    if not hasattr(k, "__iter__"):
-        raise TypeError("'%s' object is not iterable" % ("sage.rings.integer.Integer" if type(k) is int else type(k).__name__))
-    ij = list(itertools.islice(iter(k), 3))
+    # (Python's iterator protocol: __iter__, or a sequence's __getitem__,
+    # astra2's CORR-PR107-3; at most three items are taken)
+    try:
+        it = iter(k)
+    except TypeError:
+        raise TypeError("'%s' object is not iterable" % ("sage.rings.integer.Integer" if type(k) is int else type(k).__name__)) from None
+    ij = list(itertools.islice(it, 3))
     if len(ij) < 2:
         raise ValueError("need more than %d value%s to unpack" % (len(ij), "" if len(ij) == 1 else "s"))
     if len(ij) > 2:
@@ -3030,7 +3034,12 @@ def _dict_entries(d, dims):
     key for the same position wins.  The size is admitted (_shape) after
     the keys and before the entries are allocated.  A dict of more keys than
     any admitted matrix has positions is refused before it is read, and a
-    dict subclass is read as a dict (its own items() not called)."""
+    dict subclass is read as a dict (its own items() not called).
+    Returns r, c, the (position, value) pairs in the dict's order, the
+    overwritten ones too (Sage infers the ring from all of them, and its
+    default, sparse constructor converts all of them), and whether a
+    position was given twice (only possible with negative indices); the
+    caller places them."""
     if dict.__len__(d) > _MAX_ENTRIES:
         raise ValueError("more than %d entries" % _MAX_ENTRIES)
     items = dict.items(d)
@@ -3056,10 +3065,30 @@ def _dict_entries(d, dims):
         r = max((i for i, _, _ in placed), default=-1) + 1
         c = max((j for _, j, _ in placed), default=-1) + 1
     r, c = _shape(r, c)
-    ent = [0] * (r * c)
-    for i, j, v in placed:
-        ent[i * c + j] = v
-    return r, c, ent
+    placed = [(i * c + j, v) for i, j, v in placed]
+    return r, c, placed, len({p for p, _ in placed}) < len(placed)
+
+
+def _dict_base(vals):
+    """The ring of matrix(..., D) without one: inferred from every value
+    of the dict, the overwritten ones too, as Sage infers it (astra2's
+    CORR-PR107-2), by the rules of matrix(rows): a finite field, the
+    p-adics, else ZZ, QQ or SR (astra2's CORR-PR107-1: finite-field values
+    gave a symbolic matrix)."""
+    sa = _sa()
+    ff = _ff_base_of([vals]) if vals else None
+    if ff is not None:
+        return ff
+    pb = _padic_base_of([vals]) if vals else None
+    if pb is not None:
+        return pb
+
+    def kind(x):
+        try:
+            return 0 if _F(x).denominator == 1 else 1
+        except (TypeError, ValueError):
+            return 2
+    return (sa.ZZ, sa.QQ, sa.SR)[max([kind(x) for x in vals] or [0])]
 
 
 def matrix(*args, **kwds):
@@ -3097,9 +3126,31 @@ def matrix(*args, **kwds):
         ring = head[:1] if head and not isinstance(head[0], int) else []
         dims = head[len(ring):]
         if len(dims) <= 2:
-            r, c, ent = _dict_entries(args[-1], tuple(dims))
+            r, c, placed, aliased = _dict_entries(args[-1], tuple(dims))
+            vals = [v for _, v in placed]
+            base = ring[0] if ring else _dict_base(vals)
+            ent = [0] * (r * c)
+            if aliased and kwds.get("sparse", True) is not False:
+                # a position given twice: Sage's default constructor for a
+                # dict (sparse) converts every value in the dict's order,
+                # the overwritten ones too (one that doesn't convert is its
+                # error), and a value that is zero in the ring does not
+                # overwrite; sparse=False places the values as given, the
+                # last one winning, and converts the result (astra2's
+                # CORR-PR107-2).  (The values are no more than the dict's
+                # keys, converted as one row, which admits them.)
+                conv = vals if base is sa.SR else matrix(base, 1, len(vals), [vals]).list()
+                for (p, _), x in zip(placed, conv):
+                    if x != 0:
+                        ent[p] = x
+            else:
+                for p, v in placed:
+                    ent[p] = v
             # (as rows, so that an entry that is a list stays one entry)
-            return matrix(*ring, r, c, [ent[i * c:(i + 1) * c] for i in range(r)] if c else ent, **kwds)
+            rows = [ent[i * c:(i + 1) * c] for i in range(r)] if c else ent
+            if base is sa.SR:
+                return Matrix(base, rows, c)
+            return matrix(base, r, c, rows, **kwds)
     base = None
     is_graph = lambda a: any(c.__name__ == "GenericGraph" for c in type(a).__mro__)
     if any(is_graph(a) for a in args):
