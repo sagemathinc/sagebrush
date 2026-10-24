@@ -82,6 +82,8 @@
 .sbnb pre.txt { margin: 0; padding: 3px 11px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .sbnb pre.txt .e { color: var(--err); }
 .sbnb figure.plot { margin: 6px 12px; color: var(--fg); --sb-legend-bg: var(--cell); }
+/* (what an output draws stays in its own box: painted within it, stacked within it) */
+.sbnb figure.plot, .sbnb .html-out, .sbnb .md-out { contain: paint; isolation: isolate; }
 .sbnb figure.plot svg, .sbnb figure.plot img { display: block; max-width: 100%; height: auto; }
 .sbnb .interact { margin: 8px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .sbnb .interact .controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; align-items: center; font-size: 14px; }
