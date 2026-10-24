@@ -110,6 +110,24 @@ def main():
     # an irreducible of degree 20 over GF(2): GF(2^20) is within 2^20
     # elements, but its cold Conway search is past what the budget has left
     attempt("Sage splitting_field y^20 + y^3 + 1", lambda: s.PolynomialRing_ff(s.GF(2), "y")([1, 0, 0, 1] + [0] * 16 + [1]).splitting_field("z"))
+    # exactly k - 1 conjugate powers (S.frobenius) for each nonlinear
+    # factor of degree k, none past the last conjugate: what split_cost
+    # charges (daybreak2 LIMIT-SPLIT92-1); multiplicities add none
+    powers = [0]
+    f0 = S.frobenius
+
+    def frob(x, q):
+        powers[0] += 1
+        return f0(x, q)
+    S.frobenius = frob
+    L6 = s.GF(5 ** 6, "c")
+    q2, c3 = SP([2, 0, 1]), SP([1, 1, 0, 1])
+    for label, f, want in (("x^2 + 2", q2, 1), ("(x^2 + 2)^2", q2 * q2, 1), ("(x^2 + 2)(x^3 + x + 1)", q2 * c3, 1 + 2),
+                           ("(x - 1)(x - 2)(x - 3)", SP([-1, 1]) * SP([-2, 1]) * SP([-3, 1]), 0)):
+        powers[0] = 0
+        rs = f.roots(L6)
+        print("conjugate powers for the roots of %s in GF(5^6): %d (want %d), %d roots" % (label, powers[0], want, len(rs)))
+    S.frobenius = f0
 
 
 main()
