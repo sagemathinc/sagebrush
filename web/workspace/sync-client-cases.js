@@ -1474,6 +1474,40 @@ async function rebuildAckThrows() {
   }
 }
 
+async function rebuildExclusive() {
+  // (r5, CORR-D11-R4-1: nothing else is sent on the connection while the announce's answer is held: an index_changed
+  // notice, the idle wake (the pulls) and a local change (ops) wait; once it is answered, the waiting pull runs, once)
+  for (const via of ["notice", "idle", "ops"]) {
+    const what = `rebuild exclusive (${via})`;
+    const w = await rebuildReady(what);
+    const clock = via === "idle" ? fakeClock() : undefined;
+    await ctl("set", { set: { rebuilt: [{ hold: true }] } });
+    const c = viewClient(w, clock ? { clock } : {});
+    try {
+      check(await until(async () => (await ctl("log")).rebuilt.length === 1), `${what}: announced, its answer held`);
+      const t1 = (await ctl("log")).rebuilt[0].at, d0 = c.stats.deferred, r0 = c.stats.resumed;
+      if (via === "notice") {
+        const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/theirs", kind: "folder", fid: "00000000000000b1" }] });
+        await ctl("notice", { head: r.ack.ops[0].seq });
+      }
+      if (via === "idle") await clock.advance(W.CLIENT.idlePullMs + 1000);
+      if (via === "ops") await w.mkdir("/mine");
+      await sleep(800);
+      const during = (await ctl("log")).sent.filter((m) => m.at >= t1 && m.t !== "rebuilt").map((m) => m.t);
+      const waited = via === "ops" || c.stats.deferred > d0;
+      check(during.length === 0 && waited, `${what}: nothing else sent while the answer is held (${J({ sent: during, deferred: c.stats.deferred - d0 })})`);
+      await ctl("release");
+      check(await until(async () => settled(w, c), 15_000), `${what}: answered, and converged`);
+      const after = (await ctl("log")).sent.filter((m) => m.at >= t1 && m.t !== "rebuilt").map((m) => m.t);
+      const ran = via === "ops" ? after.includes("ops") && !!(await w.stat("/mine")) : c.stats.resumed - r0 === 1 && after.includes("pull_index");
+      check(ran && (via !== "notice" || !!(await w.stat("/theirs"))), `${what}: what waited ran after the answer${via === "ops" ? "" : ", the pull resumed once"} (${J({ resumed: c.stats.resumed - r0, after })})`);
+    } finally {
+      await ctl("release");
+      await stop(c);
+    }
+  }
+}
+
 async function rebuildCounter() {
   // (test 19, CORR-REBUILT-1: done services n0; a refusal (n0 + 1) recorded during view, during retire, before the
   // announce, and during the held ack: the ack records the floor, the flag stays set, another pass runs, and its
@@ -1764,7 +1798,7 @@ async function scanAtomic() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
