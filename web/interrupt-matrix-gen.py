@@ -26,6 +26,12 @@ CASES = [
          setup="R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
          target="_r = I.groebner_basis()",
          probe="R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2"),
+    # r5 §6.2: XK with the window signature; s_max at lib/_png.py's pixel cap (4000 x 4000 < 2^24)
+    dict(id="E13g", transport="wasm:raster.ts", owner="board/plot", mode="sage", s0=40, smin=4, smax=4000,
+         grow=dict(kind="scale", p=1), exception="XK", xk=dict(kind="window", wrap="_sbraster.render"), hosts=["cli"],
+         setup="import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))",
+         target="P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)",
+         probe="line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0"),
 ]
 for c in CASES:
     c.setdefault("hosts", ["cli", "prompt", "browser"] if c["id"] in ("P1", "E2") else ["cli", "prompt"])
@@ -71,12 +77,12 @@ for tr in ("engineCall", "symCall", "mpCall"):
     for n in T[tr]:
         add(tr, n)
 for m in T["wasmModules"]:
-    if not m["reads_interrupt"]:
+    if not m["reads_interrupt"] and f"wasm:{m['module']}" not in covered:
         entries.append(dict(id=f"wasm:{m['module']}", transport=f"wasm:{m['module']}", status="planned", exception="XK",
                             family="P3f NumPy kernels" if m["module"] == "kernels.ts" else "E13g raster",
                             owner="numerics (python)" if m["module"] == "kernels.ts" else "board/plot"))
 out = dict(
-    comment="plan-interrupt-harness r4: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
+    comment="plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
     fingerprints=census["fingerprints"],
     entries=entries,
 )

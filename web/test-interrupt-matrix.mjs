@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { againstBaseline, classify, leakCheck, rowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, classifyXK, leakCheck, xkRowOutcome } from "./interrupt-classify.mjs";
 import { killTree, procTable, sessionTree, survivors } from "./interrupt-procs.mjs";
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
@@ -58,6 +58,7 @@ const CASES = [
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
   { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2" },
+  { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
 
@@ -66,11 +67,24 @@ const indent = (src, n) => src.split("\n").map((l) => " ".repeat(n) + l).join("\
 function driver(c, s, n) {
   const sz = (src) => src.replace(/\bS\b/g, String(s ?? 0));
   const setup = c.setup ? sz(c.setup) : "pass";
+  const [wm, wf] = c.xk?.kind === "window" ? c.xk.wrap.split(".") : [];
+  const wrap = wm
+    ? `import ${wm} as _xm
+_xorig = _xm.${wf}
+def _xwrap(*a, **k):
+    _p("XSTART", _i, time.monotonic())
+    r = _xorig(*a, **k)
+    _p("XEND", _i)
+    return r
+_xm.${wf} = _xwrap
+`
+    : "";
   return `import time
 keep = 41
+_i = 0
 def _p(*a):
     print(*a, flush=True)
-for _i in range(1, ${n} + 1):
+${wrap}for _i in range(1, ${n} + 1):
     try:
         _p("SETUP", _i)
 ${indent(setup, 8)}
@@ -99,6 +113,15 @@ ${indent(c.probe, 8)}
         _p("STRAY", _i, "late", time.monotonic())
 _p("END")
 `;
+}
+
+// --print-driver CASE [S] [N]: the driver's source, for checking it by hand; runs nothing
+if (args.includes("--print-driver")) {
+  const [id, sz, n] = args.slice(args.indexOf("--print-driver") + 1);
+  const c = CASES.find((x) => x.id === id);
+  if (!c) { console.error("no case " + id); process.exit(2); }
+  process.stdout.write(driver(c, sz ? Number(sz) : c.s0, n ? Number(n) : 1));
+  process.exit(0);
 }
 
 function procStatus(pid) {
@@ -170,12 +193,14 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       }, 500);
     };
     const onLine = (line) => {
-      const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END)\b ?(\d+)? ?(.*)$/);
+      const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND)\b ?(\d+)? ?(.*)$/);
       if (!m) return;
       const [, mk, si, rest] = m;
       if (mk === "END") return finish("end");
       const t = trials[Number(si) - 1];
       if (!t) return;
+      // (the window's markers: the target's call is the first; a probe on the same route repeats them)
+      if ((mk === "XSTART" || mk === "XEND") && t.marks[mk]) return;
       t.marks[mk] = { t: now(), rest };
       if (mk === "ENTER" && delays[t.i - 1] != null) {
         const id = t.i;
@@ -216,11 +241,13 @@ async function calibrate(host, c) {
     const r = await session(host, c, s, [null], CAL_CAP_MS);
     const t = r.trials[0];
     const T = t.marks.RET && t.marks.ENTER ? t.marks.RET.t - t.marks.ENTER.t : null;
-    attempts.push({ s, T_ms: T && Math.round(T), end: r.end, left: r.left, rss_kb: r.samples[0]?.rss_kb, ...(T == null ? { tail: r.tail } : {}) });
+    const R = t.marks.XSTART && t.marks.XEND ? t.marks.XEND.t - t.marks.XSTART.t : null;
+    attempts.push({ s, T_ms: T && Math.round(T), ...(c.xk?.kind === "window" ? { R_ms: R && Math.round(R) } : {}), end: r.end, left: r.left, rss_kb: r.samples[0]?.rss_kb, ...(T == null ? { tail: r.tail } : {}) });
     if (T == null) {
       if (r.end === "budget" || r.end === "guard") s = c.grow(s, 0.25);
       else return { s, T: null, attempts, error: "no RET (" + r.end + ")" };
-    } else if (T >= BAND.min && T <= BAND.max) return { s, T, attempts };
+    } else if (c.xk?.kind === "window" && R == null) return { s, T: null, attempts, error: "the wrapped call " + c.xk.wrap + " never ran" };
+    else if (T >= BAND.min && T <= BAND.max) return { s, T, R, attempts };
     else s = c.grow(s, ((BAND.min + BAND.max) / 2) / T);
     s = Math.max(c.smin, Math.min(c.smax, s));
     if (attempts.some((x) => x.s === s)) break;
@@ -231,7 +258,8 @@ async function calibrate(host, c) {
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
-    if (MODE === "ci" && host === "prompt" && !["P1", "E2"].includes(c.id)) continue; // the CI set (r4 §8)
+    // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -248,6 +276,9 @@ async function runHost(host) {
     const inBaseline = (BASELINE.entries ?? []).some((e) => e.case === c.id && e.host === host);
     const guard_ms = MODE === "ci" && inBaseline ? BASELINE_WINDOW_MS : G_MS;
     const sessions = [];
+    // an XK case's per-cell context (r5 §6.2): the window's R(s), or the bound's T and f
+    const xkOf = (delay) => (!c.xk ? null : c.xk.kind === "window" ? { kind: "window", R_ms: cal.R } : { kind: "bound", T_ms: cal.T, f: delay / cal.T });
+    const cls = (t, delay) => classifyXK(t, xkOf(delay));
     const run = async (label, delays) => {
       const r = await session(host, c, cal.s, delays, CAL_CAP_MS + guard_ms * delays.length, guard_ms);
       sessions.push({ label, end: r.end, wall_ms: Math.round(r.wall_ms), left: r.left, samples: r.samples, ...(r.trials.some((t) => classify(t).outcome !== "PASS") ? { tail: r.tail } : {}) });
@@ -258,27 +289,27 @@ async function runHost(host) {
     const cells = [];
     if (offsets.length) {
       const r = await run("phases", offsets);
-      for (const t of r.trials) cells.push({ cell: "phase", delay_ms: offsets[t.i - 1], ...classify(t) });
+      for (const t of r.trials) cells.push({ cell: "phase", delay_ms: offsets[t.i - 1], ...cls(t, offsets[t.i - 1]) });
     }
     // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise
     const reps = MODE === "full" ? 20 : 5;
     const d = at("0.5");
     const lr = await run("repeats", Array(reps).fill(d));
-    for (const t of lr.trials) cells.push({ cell: "repeat", i: t.i, delay_ms: d, ...classify(t) });
+    for (const t of lr.trials) cells.push({ cell: "repeat", i: t.i, delay_ms: d, ...cls(t, d) });
     // one retry for a cell whose target returned before the Stop, at 0.6 of its delay (r4 §3)
     for (const [k, x] of cells.entries()) {
       if (overBudget() || x.outcome !== "INVALID" || x.why !== "returned before the Stop") continue;
       const rd = Math.round(x.delay_ms * 0.6);
       const rr = await run("retry", [rd]);
-      cells[k] = { ...x, ...classify(rr.trials[0]), delay_ms: rd, retried_from_ms: x.delay_ms };
+      cells[k] = { cell: x.cell, ...(x.i != null ? { i: x.i } : {}), ...cls(rr.trials[0], rd), delay_ms: rd, retried_from_ms: x.delay_ms };
     }
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
     const leak0 = leakCheck(lr.samples);
     const leak = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
-    const own = rowOutcome(cells, leak && leak.ok);
+    const { outcome: own, why: rowWhy } = xkRowOutcome(cells, leak && leak.ok, c.xk);
     const outcome = againstBaseline({ case: c.id, host, outcome: own, trials: cells, leak }, BASELINE);
-    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(outcome !== own ? { own_outcome: own } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, cells, leak, sessions });
+    rows.push({ case: c.id, host, mode: c.mode, run: MODE, outcome, ...(outcome !== own ? { own_outcome: own } : {}), ...(rowWhy ? { why: rowWhy } : {}), ...(c.xk ? { xk: c.xk.kind } : {}), s: cal.s, T_ms: cal.T && Math.round(cal.T), ...(cal.R != null ? { R_ms: Math.round(cal.R) } : {}), calibration: cal, cells, leak, sessions });
     record(rows.at(-1));
   }
   return rows;

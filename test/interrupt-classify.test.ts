@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, rowOutcome, againstBaseline, leakCheck } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, classifyXK, xkRowOutcome, rowOutcome, againstBaseline, leakCheck } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -76,4 +76,37 @@ test("leak check: growth past max(64 MiB, 10%) from repeat 3, or a thread change
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }], false)`), "FAIL");
   // a leak is never KNOWN, even on a baseline row
   assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "FAIL", leak: { ok: false }, trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, { entries: [{ case: "P1", host: "prompt", signature: "no KeyboardInterrupt" }] })`), "FAIL");
+});
+
+test("XK window (E13g): inside the call, a KI within R + max(1 s, R/4) is EXCEPTION; past it, or a return, FAILs", () => {
+  const w = `{ kind: "window", R_ms: 4000 }`;
+  const tr = (ki: number | null, extra = "") => `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, XSTART: { t: 600, rest: "1.1" }${ki == null ? "" : `, KI: { t: ${ki}, rest: "5" }`}${extra} }, probe: "ok" }`;
+  const ex = run(`classifyXK(${tr(4200)}, ${w})`);
+  assert.equal(ex.outcome, "EXCEPTION");
+  assert.equal(ex.xk_inside, true);
+  assert.equal(ex.xk_bound_ms, 5000);
+  assert.equal(run(`classifyXK(${tr(6100)}, ${w})`).outcome, "FAIL"); // 5100 ms > 5000
+  assert.match(run(`classifyXK(${tr(null, ', RET: { t: 4300 }')}, ${w})`).why, /did not stop/);
+  assert.equal(run(`classifyXK(${tr(1050)}, ${w})`).outcome, "PASS"); // within the poll gap: it polls now
+  // a Stop after the call returned (XEND before the send) is outside the window: ordinary rules
+  const out = run(`classifyXK({ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, XSTART: { t: 600 }, XEND: { t: 900 }, KI: { t: 1020, rest: "2" } }, probe: "ok" }, ${w})`);
+  assert.equal(out.outcome, "PASS");
+  assert.equal(out.xk_inside, false);
+});
+
+test("XK bound (P3f): (1 - f) T + max(1 s, T/4)", () => {
+  const b = `{ kind: "bound", T_ms: 8000, f: 0.5 }`; // bound 4000 + 2000
+  const tr = (ki: number) => `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, KI: { t: ${ki}, rest: "2" } }, probe: "ok" }`;
+  assert.equal(run(`classifyXK(${tr(1050)}, ${b})`).outcome, "PASS");
+  assert.equal(run(`classifyXK(${tr(4000)}, ${b})`).outcome, "EXCEPTION");
+  assert.equal(run(`classifyXK(${tr(7100)}, ${b})`).outcome, "FAIL");
+});
+
+test("XK rows: exercised EXCEPTION; a window never entered is INCOMPLETE; all PASS is a stale exception", () => {
+  const w = `{ kind: "window" }`;
+  assert.equal(run(`xkRowOutcome([{ outcome: "EXCEPTION", xk_inside: true }, { outcome: "PASS", xk_inside: false }], true, ${w})`).outcome, "EXCEPTION");
+  assert.equal(run(`xkRowOutcome([{ outcome: "PASS", xk_inside: false }], true, ${w})`).outcome, "INCOMPLETE");
+  assert.equal(run(`xkRowOutcome([{ outcome: "PASS", xk_inside: true }], true, ${w})`).outcome, "FIXED");
+  assert.equal(run(`xkRowOutcome([{ outcome: "EXCEPTION", xk_inside: true }, { outcome: "FAIL" }], true, ${w})`).outcome, "FAIL");
+  assert.equal(run(`xkRowOutcome([{ outcome: "PASS" }], true, null)`).outcome, "PASS");
 });

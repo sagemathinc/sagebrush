@@ -3,6 +3,43 @@
 // A trial: { t_send (harness ms, or undefined), marks: { ENTER, RET, KI: { t, rest } }, stray, probe }.
 // Every time is on the harness's own monotonic clock; `rest` of ENTER and KI carry the driver's.
 export const SLOW_MS = 10_000;
+export const POLL_GAP_MS = 100; // §5: recognized this fast, the route polled
+
+// an XK case's cell (r5 §6.2).  xk: { kind: "window", R_ms } (the non-polling call is wrapped:
+// XSTART i before it, XEND i after it) or { kind: "bound", T_ms, f } (the Stop at f of T).
+export function classifyXK(t, xk) {
+  const base = classify(t);
+  if (!xk) return base;
+  if (xk.kind === "window") {
+    const x = t.marks.XSTART, e = t.marks.XEND;
+    const inside = t.t_send != null && x && x.t < t.t_send && !(e && e.t < t.t_send);
+    if (!inside) return { ...base, xk_inside: false };
+    const bound = xk.R_ms + Math.max(1000, 0.25 * xk.R_ms);
+    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return { ...base, xk_inside: true };
+    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)`, xk_inside: true };
+    // (recognized within the poll gap inside the window: the call polls now)
+    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_inside: true, xk_bound_ms: Math.round(bound) };
+  }
+  if (xk.kind === "bound") {
+    if (base.outcome !== "PASS" && base.outcome !== "SLOW") return base;
+    const bound = (1 - xk.f) * xk.T_ms + Math.max(1000, 0.25 * xk.T_ms);
+    if (base.latency_ms > bound) return { ...base, outcome: "FAIL", why: `KI past the XK bound (${base.latency_ms} > ${Math.round(bound)} ms)` };
+    return { ...base, outcome: base.latency_ms <= POLL_GAP_MS ? "PASS" : "EXCEPTION", exception: "XK", xk_bound_ms: Math.round(bound) };
+  }
+  return { ...base, outcome: "FAIL", why: "harness bug: unknown XK kind " + xk.kind };
+}
+
+// an XK row (r5 §6.2): FAIL / INCOMPLETE as rowOutcome; then EXCEPTION only if the exception was
+// exercised (a cell inside the window; for bound, a cell past the poll gap); every cell PASS is a
+// stale exception (FIXED: remove the case's xk field with the owner's fix); a window row with no
+// cell inside is INCOMPLETE ("XK not exercised").
+export function xkRowOutcome(cells, leakOk, xk) {
+  const own = rowOutcome(cells, leakOk);
+  if (!xk || own === "FAIL" || own === "INCOMPLETE") return { outcome: own };
+  if (cells.some((c) => c.outcome === "EXCEPTION")) return { outcome: "EXCEPTION" };
+  if (xk.kind === "window" && !cells.some((c) => c.xk_inside)) return { outcome: "INCOMPLETE", why: "XK not exercised (no Stop landed inside the window)" };
+  return { outcome: "FIXED", why: "stale exception: every cell PASS; remove the case's xk field" };
+}
 
 export function classify(t) {
   if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before the Stop" : "no Stop sent" };

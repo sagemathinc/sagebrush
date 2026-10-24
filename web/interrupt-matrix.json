@@ -1,5 +1,5 @@
 {
- "comment": "plan-interrupt-harness r4: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
+ "comment": "plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
  "fingerprints": {
   "pollSites": {
    "builtins.ts": 2,
@@ -137,6 +137,31 @@
     "cli",
     "prompt"
    ],
+   "status": "case"
+  },
+  {
+   "id": "E13g",
+   "transport": "wasm:raster.ts",
+   "owner": "board/plot",
+   "mode": "sage",
+   "s0": 40,
+   "smin": 4,
+   "smax": 4000,
+   "grow": {
+    "kind": "scale",
+    "p": 1
+   },
+   "exception": "XK",
+   "xk": {
+    "kind": "window",
+    "wrap": "_sbraster.render"
+   },
+   "hosts": [
+    "cli"
+   ],
+   "setup": "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))",
+   "target": "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)",
+   "probe": "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0",
    "status": "case"
   },
   {
@@ -1294,14 +1319,6 @@
    "exception": "XK",
    "family": "P3f NumPy kernels",
    "owner": "numerics (python)"
-  },
-  {
-   "id": "wasm:raster.ts",
-   "transport": "wasm:raster.ts",
-   "status": "planned",
-   "exception": "XK",
-   "family": "E13g raster",
-   "owner": "board/plot"
   }
  ]
 }
