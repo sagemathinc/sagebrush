@@ -276,9 +276,12 @@ export class ScopeHost {
       s.steps.charged += n;
       s.steps.measured += n;
     }
+    // (the steps were taken, so they're debited; but an earlier wall expiry is reconciled before
+    // anything latches: CORR-PR118-1)
+    if (!this.catchUp(x, at)) return;
     // innermost first, so a tie names the innermost ledger
     for (const s of x.leaf.chain()) if (s.steps && s.steps.charged > s.steps.budget) this.latch(x, s, "steps", s.steps.budget, at);
-    this.checkGrace(x, this.o.clock());
+    this.checkGrace(x, at);
   }
 
   /**
@@ -291,8 +294,9 @@ export class ScopeHost {
     if (!x) return;
     const spent = x.leaf.chain().filter((s) => s.steps && s.steps.charged >= s.steps.budget);
     if (spent.length === 0) fail("a step was refused with steps left in every ledger");
+    if (!this.catchUp(x, at)) return;
     for (const s of spent) this.latch(x, s, "steps", s.steps!.budget, at);
-    this.checkGrace(x, this.o.clock());
+    this.checkGrace(x, at);
   }
 
   /**
@@ -306,6 +310,9 @@ export class ScopeHost {
     const x = this.live(generation);
     if (!x) return { ok: false, cause: "gone" };
     count(bound, "a reservation's bound");
+    const now = this.o.clock();
+    // (an earlier wall expiry first: it may already have ended this execution, CORR-PR118-1)
+    if (!this.catchUp(x, now)) return { ok: false, cause: "gone" };
     if (callRemaining !== undefined && bound > count(callRemaining, "the call's remaining work")) return { ok: false, cause: "call" };
     const chain = x.leaf.chain().filter((s) => s.work.has(family));
     const failing = chain.find((s) => {
@@ -313,7 +320,6 @@ export class ScopeHost {
       return l.charged + bound > l.budget;
     });
     if (failing) {
-      const now = this.o.clock();
       this.latch(x, failing, "work", failing.work.get(family)!.budget, now, family);
       this.checkGrace(x, now);
       return { ok: false, cause: "allowance", scope_id: failing.id };
@@ -342,13 +348,14 @@ export class ScopeHost {
   /** The runtime recognized the stop at a poll (it reports this as it happens). */
   recognized(generation: number, at: number = this.o.clock()): void {
     const x = this.live(generation);
-    if (x && x.firstHit !== null && x.recognitionAt === null) x.recognitionAt = at;
+    if (!x || !this.catchUp(x, at)) return;
+    if (x.firstHit !== null && x.recognitionAt === null) x.recognitionAt = at;
   }
 
   /** A stop that isn't an allowance's: a cancel, a memory guard, a server bound, or the call's own deadline=/work=. */
   stopRequested(generation: number, cause: Exclude<StopCause, "allowance">, at: number = this.o.clock()): void {
     const x = this.live(generation);
-    if (!x) return;
+    if (!x || !this.catchUp(x, at)) return;
     x.causes.push({ cause, at });
   }
 
@@ -491,6 +498,15 @@ export class ScopeHost {
       x.graceTimer = this.o.timers.set(x.graceDeadline, () => this.graceFired(g));
     }
   }
+  // Before any event can latch a scope or fix the grace origin, every wall expiry already due
+  // by the event's time is latched, earliest first, at its own expiry; then the grace deadline
+  // is checked at that time. Returns whether the execution is still running (CORR-PR118-1).
+  private catchUp(x: Execution, at: number): boolean {
+    this.wallUpTo(x, at);
+    this.checkGrace(x, at);
+    return x.state === "running";
+  }
+
   // termination proceeds once the host's clock reaches the grace deadline,
   // whether or not the timer's callback has run yet
   private checkGrace(x: Execution, now: number): void {

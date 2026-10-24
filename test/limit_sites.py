@@ -27,8 +27,9 @@ The registry maps fingerprint -> {"class", "owner"}; class 1 (shared-resource,
 editor, protocol, display or parser protection), 2 (memory guard), 3 (a
 work/time/input-size limit of a user's computation: unlimited by default,
 opt-in through lib/_limits.py or a trusted host capability, such as an
-allowance armed by grading, an instructor's bundle or a server: item G), their mixtures as the inventories write them
-("2+3"), "coverage" (an unsupported feature, not a cap), "none" (matched
+allowance armed by grading, an instructor's bundle or a server: item G),
+their mixtures as the inventories write them ("2+3"), "coverage" (an
+unsupported feature, not a cap), "none" (matched
 text that refuses nothing).  The sites present at the seed and not yet
 classified are the baseline: grandfathered, certifying nothing, and kept out
 of the registry, as the first 16 hex digits of each fingerprint's sha256 in
