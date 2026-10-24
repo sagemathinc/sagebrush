@@ -8,10 +8,11 @@
 //   - the CLI bundle (build/cli/pyjs.cjs) and its generated library and
 //     packages (build/cli/lib.gen.js, packages.gen.js);
 //   - how many packages the core's registry has.
-// Any increase fails unless this PR also updates size-budget.json (a core
-// feature may grow the core on purpose, visibly, in review; a package
-// never can).  A decrease passes with a reminder to lower the budget.
-// Also: no optional package appears in any of these artifacts.
+// Since plan-growth-budget-r5's PR A, the exact-total comparison is a report
+// only: the growth gate (scripts/size-measure.mjs, ci.yml's size-gate job)
+// enforces growth instead, against budgets.json and .growth/ markers.  What
+// still fails here: no optional package appears in any of these artifacts,
+// and the build must be the CI build (below).  (PR B deletes the totals.)
 //
 //   node scripts/size-budget.mjs --check     (the default tier, after bun web/build.ts and build-cli)
 //   node scripts/size-budget.mjs --update    record the current sizes
@@ -129,11 +130,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const k of Object.keys(budget)) if (!Object.hasOwn(now, k)) shrank.push(`${k}: gone`);
     const leaks = optionalLeaks();
     if (shrank.length) console.log("smaller than the budget (lower it with node scripts/size-budget.mjs --update):\n  " + shrank.join("\n  "));
-    if (grew.length || leaks.length) {
-      console.error("the core's size budget check failed:\n  " + [...grew, ...leaks].join("\n  ") + "\nAn intended core change updates size-budget.json in the same PR (node scripts/size-budget.mjs --update); an optional package never grows the core.");
+    // (report only: the size-gate job enforces growth, plan-growth-budget-r5 §4)
+    if (grew.length) console.log("larger than size-budget.json (a report: the size-gate job decides; plan-growth-budget-r5):\n  " + grew.join("\n  "));
+    if (leaks.length) {
+      console.error("the core's size budget check failed:\n  " + leaks.join("\n  ") + "\nAn optional package never grows the core (plan-modular-packages-r4 §7.2).");
       process.exit(1);
     }
-    console.log(`the core is within its size budget (${Object.keys(now).length} artifacts)`);
+    console.log(`no optional package in the core's ${Object.keys(now).length} artifacts (growth: the size-gate job)`);
   } else {
     console.error("usage: size-budget.mjs --check | --update");
     process.exit(2);
