@@ -146,7 +146,9 @@ await send("Page.navigate", { url: url[0] });
 ok(await until(shown("alpha note")), "the board is shown");
 ok(await ev("location.href") === base + "/" && await ev("(() => { try { return localStorage.length, false; } catch { return true; } })()"), "...at /, the token gone from the address, in an opaque origin (no storage)");
 ok(await until(shown("42"), 120000), "its code item runs in the page");
-ok(await ev("!document.querySelector('[data-sbb=edit]') || document.querySelector('[data-sbb=edit]').hidden || getComputedStyle(document.querySelector('[data-sbb=edit]')).display === 'none'"), "Edit isn't offered (the file is the board's only copy)");
+// (read only, and saying so: Edit shown but not allowed, with how to change the board, on it and in the caption)
+ok(await ev("(() => { const b = document.querySelector('[data-sbb=edit]'); return !!b && !b.hidden && b.disabled && /^Read only: .*change the file/.test(b.title); })()"), "Edit isn't allowed (the file is the board's only copy), and says why and how to change the board");
+ok(await ev("document.body.textContent.includes('Read only: this page follows the board')"), "...which the page says too");
 
 // the file rewritten: shown in place, the camera kept
 await ev("window.__sameDocument = 1, window.board.setCamera({ x: 123, y: 45, z: 1.25 })");
