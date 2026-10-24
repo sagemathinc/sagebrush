@@ -1,0 +1,33 @@
+list \left[\frac{1}{2}, x, \text{\texttt{a{ }b}}\right]
+tuple \left(\frac{1}{2}, x\right)
+tuple1 \left(\frac{1}{2}\right)
+dict \left\{1 : \frac{1}{2}\right\}
+[] \left[\right]
+() \left(\right)
+L \text{\texttt{[1,{ }2]}}
+T \text{\texttt{(1,{ }2)}}
+T1 \text{\texttt{(1,)}}
+D \text{\texttt{{\char`\{}1:{ }2{\char`\}}}}
+L empty \text{\texttt{[]}}
+T empty \text{\texttt{()}}
+L of Sage values \text{\texttt{[1/2,{ }x]}}
+L of str \text{\texttt{['a{ }b',{ }"it's"]}}
+L multiline str \text{\texttt{['a{\char`\\}nb']}}
+L nested \text{\texttt{[[1],{ }[2]]}}
+list of L \left[\text{\texttt{[1/2]}}, 3\right]
+tuple of T \left(\text{\texttt{(1,)}}, 2\right)
+dict of L \left\{1 : \text{\texttt{[2]}}\right\}
+LR \text{\texttt{LR!}}
+LS \text{\texttt{LS{ }str}}
+IterList \text{\texttt{[1]}}
+namedtuple \text{\texttt{P(a=1,{ }b=2)}}
+OrderedDict \text{\texttt{OrderedDict({\char`\{}1:{ }2{\char`\}})}}
+defaultdict \text{\texttt{defaultdict(<class{ }'int'>,{ }{\char`\{}1:{ }2{\char`\}})}}
+basis \left[\left(1,\,0\right), \left(0,\,1\right)\right]
+kernel basis \left[\left(1,\,-1\right)\right]
+groebner basis \left[s^{2} - t, s t - 1, t^{2} - s\right]
+ideal gens \left[s, t\right]
+solve dicts \left[\left\{x : -1\right\}, \left\{x : 1\right\}\right]
+rows \left[\left(1,\,2\right)\right]
+eigenvalues \left[2, 1\right]
+divisors \left[1, 2, 3, 6\right]
