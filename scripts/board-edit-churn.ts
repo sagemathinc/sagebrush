@@ -55,6 +55,7 @@ async function main() {
   let peakHeap = 0, peakRss = 0;
   const sample = () => { const m = process.memoryUsage(); peakHeap = Math.max(peakHeap, m.heapUsed + m.external + m.arrayBuffers); peakRss = Math.max(peakRss, m.rss); };
   const t0 = Date.now();
+  let done = 0;
   for (let round = 1; round <= ROUNDS; round++) {
     for (const t of tabs) {
       const roll = rand();
@@ -85,6 +86,8 @@ async function main() {
       now += 50;
       if (hub.due(now)) { const w = await hub.save(); count(w.saved ? "saved" : "save-" + w.why); sample(); }
       await hub.tickPrevs(150);
+      // (progress, every 32 tabs: so a run cut short still says how far it got)
+      if (++done % 32 === 0) process.stderr.write(`progress: round ${round}, ${done} steps, ${Math.round((Date.now() - t0) / 1000)} s, heap peak ${Math.round(peakHeap / MiB)} MiB, ledger peak ${Math.round(hub.ledger.peak / MiB)} MiB, ${JSON.stringify(counts)}\n`);
       hub.staleTabs.clear();
       hub.events.length = 0;
     }
