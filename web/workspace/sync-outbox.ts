@@ -59,7 +59,7 @@ export type WireOp = { dseq: number; t: number; by: string; op: string; path: st
 export type OutboxRecord = { ns: string; dseq: number; lseq: number; id: string; op: WireOp; accepted?: number; pin?: number; heldSeq?: number };
 /** The ledger row a record owns (task #14, CORR-T14-1): a successor's held write, else its own op; none for a
  * journal's (lseq 0). */
-export const ownedSeq = (r: OutboxRecord): number | undefined => r.heldSeq ?? (r.lseq > 0 ? r.lseq : undefined);
+export const ownedSeq = (r: OutboxRecord): number | undefined => r.heldSeq !== undefined ? (r.heldSeq > 0 ? r.heldSeq : undefined) : r.lseq > 0 ? r.lseq : undefined;
 /** The outbox's totals: `bytes`, what its records hold now; `charged`, what they may come to hold, each at its
  * largest (accepted with the largest seq there is: chargeOf), the sum the bound is kept on, so accepting never
  * takes `bytes` past it (daybreak2's LIMIT-855-1); `full`: when a scan last stopped at a bound, until one goes on
@@ -320,7 +320,9 @@ export class Outbox {
         }
         if (e.trashed || within(e.path, TRASH)) { left.push(id); continue; }
         const op: WireOp = { dseq, t: Date.now(), by: p.latest?.by ?? "person", op: "write", path: e.path, kind: "file", fid: e.fid!, sha256: e.sha256, size: e.size ?? 0, ...(st.successor.base ? { base: st.successor.base } : {}), ...(p.latest?.after?.parent ? { parent: p.latest.after.parent } : {}) };
-        const r: OutboxRecord = { ns: this.ns, dseq, lseq, id, op, ...(st.heldSeq !== undefined ? { heldSeq: st.heldSeq } : {}) };
+        // (heldSeq always set on a successor: 0 when its held write isn't known (held before task #14): then it owns no
+        // row, never its bookkeeping lseq's)
+        const r: OutboxRecord = { ns: this.ns, dseq, lseq, id, op, heldSeq: st.heldSeq ?? 0 };
         // (its present bytes pinned for it: the pin on them now, else a new one, owned by this record)
         const cur = await pinOfCurrent(tx, e.fid!, e.sha256);
         r.pin = cur ? cur.seq : lseq;
@@ -330,7 +332,7 @@ export class Outbox {
         next.allocated = { dseq, sha256: e.sha256, pinned: true, state: "undecided" };
         admit(r);
         // (the held write's row now this record's: its decisions are that write's)
-        if (r.heldSeq !== undefined) await lg.own(r.heldSeq, r.dseq);
+        if (r.heldSeq) await lg.own(r.heldSeq, r.dseq);
         putPending(tx, p, this.ns, next, at);
       }
       if (succ.length && left.length !== succ.length) meta.put(left, succKey);
