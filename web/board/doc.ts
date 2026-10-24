@@ -640,7 +640,9 @@ export function canonical(d: BoardDoc): string {
 export function boardText(d: any): string {
   const c: any = d, out: any = {};
   for (const k of DOC_KEYS) if (c[k] !== undefined) out[k] = c[k];
-  for (const k of Object.keys(c)) if (!(k in out)) out[k] = c[k];
+  // (own keys only, defined as own properties: an extension key named "toString", "constructor" or "__proto__" is
+  // the board's, never the object's)
+  for (const k of Object.keys(c)) if (!Object.hasOwn(out, k)) Object.defineProperty(out, k, { value: c[k], enumerable: true, writable: true, configurable: true });
   const text = (v: any, indent: string): string => {
     if (Array.isArray(v)) {
       if (!v.length) return "[]";

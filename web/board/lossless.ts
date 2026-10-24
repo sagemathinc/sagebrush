@@ -105,8 +105,14 @@ export function roundTrips(input: any, given: { pos: number; id: string }[] = []
   // (the allowed transformation 2: an id given only to a page that had none)
   for (const g of given) if (!Array.isArray(input.pages) || !input.pages[g.pos] || input.pages[g.pos].id != null) return { ok: false, at: `/pages/${g.pos}/id` };
   const want = given.length ? { ...input, pages: input.pages.map((p: any, i: number) => { const g = given.find((x) => x.pos === i); return g ? { id: g.id, ...p } : p; }) } : input;
-  const at = firstDifference(want, fromEditRecords(editRecords(want)), "");
-  return at === null ? { ok: true } : { ok: false, at };
+  const back = fromEditRecords(editRecords(want));
+  const at = firstDifference(want, back, "");
+  if (at !== null) return { ok: false, at };
+  // (and through the real write: serialized as the file would be, and parsed back)
+  let written: any;
+  try { written = JSON.parse(serialize(back)); } catch { return { ok: false, at: "serialize" }; }
+  const wat = firstDifference(want, written, "");
+  return wat === null ? { ok: true } : { ok: false, at: wat };
 }
 
 /** Whether `bytes` are exactly the board `d` (equal JSON values): the check before a write. */
@@ -120,7 +126,8 @@ export function bytesAre(bytes: string, d: any): { ok: true } | { ok: false; at:
 /** The first JSON path where x and y differ as JSON values (key order ignored, an undefined key absent), or null. */
 export function firstDifference(x: any, y: any, path: string): string | null {
   if (x === y) return null;
-  if (typeof x !== typeof y || x === null || y === null || typeof x !== "object") return canon(x) === canon(y) ? null : path || "/";
+  // (primitives compared exactly, not by their JSON: Infinity, which a file can't hold, is not null)
+  if (typeof x !== typeof y || x === null || y === null || typeof x !== "object") return typeof x === typeof y && Number.isNaN(x) && Number.isNaN(y) ? null : path || "/";
   if (Array.isArray(x) !== Array.isArray(y)) return path || "/";
   if (Array.isArray(x)) {
     if (x.length !== y.length) return `${path}/length`;
