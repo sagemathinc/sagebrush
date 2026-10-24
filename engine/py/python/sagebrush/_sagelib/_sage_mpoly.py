@@ -3630,6 +3630,7 @@ class PolynomialSequence(list):
         sage: B.universe()
         Multivariate Polynomial Ring in x, y over Rational Field
     """
+    _latex_container = True  # (latex() writes it as Sage's plain list: it stands in for one)
 
     def __init__(self, ring, items):
         super().__init__(items)
