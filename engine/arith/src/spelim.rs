@@ -216,7 +216,7 @@ impl Pivots<'_> {
             let mut acc = Acc { d: vec![0; ncols] };
             let mut out = vec![];
             for (k, b) in blocks.iter().enumerate() {
-                sagebrush_interrupt::check();
+                sagebrush_interrupt::check_coarse();
                 out.extend(self.reduce_block(b, &mut acc, seed ^ (k as u64).wrapping_mul(0x9E3779B97F4A7C15)));
             }
             return out;
@@ -259,8 +259,11 @@ impl Pivots<'_> {
                 .iter()
                 .enumerate()
                 .map(|(k, r)| {
-                    if k & 63 == 0 {
-                        sagebrush_interrupt::check();
+                    // (coarse: a block of rows takes milliseconds, and in
+                    // WebAssembly a plain check asks the host only every
+                    // 1024th time, seconds apart)
+                    if k & 15 == 0 {
+                        sagebrush_interrupt::check_coarse();
                     }
                     self.reduce_one(r, &mut acc)
                 })
@@ -451,7 +454,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
                 continue;
             }
             let Some(r) = piv.rows[j] else { continue };
-            sagebrush_interrupt::check();
+            sagebrush_interrupt::check_coarse();
             for x in acc.iter_mut() {
                 *x = 0;
             }
@@ -476,7 +479,10 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
             }
         }
         let mut out = Vec::with_capacity(rows.len());
-        for row in rows {
+        for (k, row) in rows.iter().enumerate() {
+            if k & 7 == 0 {
+                sagebrush_interrupt::check_coarse();
+            }
             for x in acc.iter_mut() {
                 *x = 0;
             }
@@ -589,7 +595,7 @@ pub fn fl_parts(piv: &Pivots, rows: &[Row], ncols: usize) -> FlParts {
             continue;
         }
         let r = piv.rows[j].unwrap();
-        sagebrush_interrupt::check();
+        sagebrush_interrupt::check_coarse();
         for x in acc.iter_mut() {
             *x = 0;
         }
@@ -615,7 +621,10 @@ pub fn fl_parts(piv: &Pivots, rows: &[Row], ncols: usize) -> FlParts {
         }
     }
     let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (k, row) in rows.iter().enumerate() {
+        if k & 7 == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         for x in acc.iter_mut() {
             *x = 0;
         }
@@ -702,6 +711,9 @@ pub fn echelonize_idx(rows: Vec<Row>, ncols: usize, p: u32) -> (Vec<Row>, Vec<us
     let mut at: Vec<u32> = vec![u32::MAX; ncols];
     let mut acc = Acc { d: vec![0; ncols] };
     for (ri, r) in rows.into_iter().enumerate() {
+        if ri & 7 == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         if r.is_empty() {
             continue;
         }
@@ -765,7 +777,10 @@ pub fn back_reduce(rows: Vec<Row>, ncols: usize, p: u32) -> Vec<Row> {
     let pp = p as i64;
     let p2 = pp * pp;
     let red = Red::new(p);
-    for &i in &order {
+    for (k, &i) in order.iter().enumerate() {
+        if k & 7 == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         let r = &rows[i];
         let d = &mut acc.d;
         let mut last = 0usize;
