@@ -7,7 +7,9 @@
 // same source, a value that isn't an integer, one out of its range, or a
 // cross-field check failing (BODY_MAX <= EDIT_MAX <= FILE_MAX;
 // SAVE_QUIET_MS <= SAVE_MAX_DELAY_MS; MEMORY_MAX >= 8 x EDIT_MAX;
-// QUEUE_BYTES <= MEMORY_MAX / 2).
+// MEMORY_MAX >= 36 x BODY_MAX, so that a body of BODY_MAX bytes is never too
+// large for the ledger as such, addendum 2; QUEUE_BYTES <= MEMORY_MAX / 2).
+// MEMORY_MAX's default is 1 GiB (addendum 2: 512 MiB in r7's table).
 
 const KiB = 1024, MiB = 1024 * KiB, GiB = 1024 * MiB;
 
@@ -19,7 +21,7 @@ export const CAPS: readonly Cap[] = [
   { name: "EDIT_MAX", unit: "bytes", def: 16 * MiB, min: KiB, max: "FILE_MAX", at: "Edit offered; each outside version; each head" },
   { name: "RECORDS_MAX", unit: "records", def: 50_000, min: 100, max: 500_000, at: "as EDIT_MAX" },
   { name: "BODY_MAX", unit: "bytes", def: 16 * MiB, min: 64 * KiB, max: "EDIT_MAX", at: "/edit, streamed" },
-  { name: "MEMORY_MAX", unit: "bytes", def: 512 * MiB, min: 64 * MiB, max: 8 * GiB, at: "the ledger, before every admission" },
+  { name: "MEMORY_MAX", unit: "bytes", def: GiB, min: 64 * MiB, max: 8 * GiB, at: "the ledger, before every admission" },
   { name: "HISTORY_PATCHES", unit: "patches", def: 2_000, min: 100, max: 100_000, at: "the hub's history window; compaction" },
   { name: "MERGE_MS", unit: "ms", def: 2_000, min: 100, max: 60_000, at: "one merge, all its phases" },
   { name: "MERGE_WORK", unit: "work units", def: 50_000_000, min: 100_000, max: 1_000_000_000, at: "the cumulative ledger of one merge" },
@@ -84,6 +86,7 @@ export function resolveLimits(flags: string[], env: Record<string, string | unde
     if (v < lo || v > hi) return { error: `${c.name}=${v} is out of its range [${typeof c.min === "string" ? c.min + " = " + lo : lo}, ${typeof c.max === "string" ? c.max + " = " + hi : hi}] (${c.unit})` };
   }
   if (limits.MEMORY_MAX < 8 * limits.EDIT_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX})` };
+  if (limits.MEMORY_MAX < 36 * limits.BODY_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 36 x BODY_MAX (${36 * limits.BODY_MAX})` };
   return { limits };
 }
 

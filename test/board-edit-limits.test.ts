@@ -27,8 +27,8 @@ const companions = (name: string, v: number): string[] => {
   const MiB = 1024 * 1024;
   switch (name) {
     case "FILE_MAX": return [`EDIT_MAX=${Math.min(v, 16 * MiB)}`, `BODY_MAX=${Math.min(v, 16 * MiB)}`];
-    case "EDIT_MAX": return [`BODY_MAX=${Math.min(v, 16 * MiB)}`, `MEMORY_MAX=${Math.max(512 * MiB, 8 * v)}`];
-    case "MEMORY_MAX": return [`EDIT_MAX=${Math.min(16 * MiB, Math.floor(v / 8))}`, `BODY_MAX=${Math.min(16 * MiB, Math.floor(v / 8))}`, `QUEUE_BYTES=${Math.min(64 * MiB, Math.floor(v / 2))}`];
+    case "EDIT_MAX": return [`BODY_MAX=${Math.min(v, 16 * MiB)}`, `MEMORY_MAX=${Math.max(1024 * MiB, 8 * v)}`];
+    case "MEMORY_MAX": return [`EDIT_MAX=${Math.min(16 * MiB, Math.floor(v / 8))}`, `BODY_MAX=${Math.max(64 * 1024, Math.min(16 * MiB, Math.floor(v / 36)))}`, `QUEUE_BYTES=${Math.min(64 * MiB, Math.floor(v / 2))}`];
     case "SAVE_QUIET_MS": return [`SAVE_MAX_DELAY_MS=${Math.max(5000, v)}`];
     default: return [];
   }
@@ -61,10 +61,13 @@ test("board open limits: the cross-field checks, at their exact bounds", () => {
   refused(["EDIT_MAX=67108865", "BODY_MAX=65536", "FILE_MAX=67108864"], {}, /EDIT_MAX/);
   ok(["SAVE_QUIET_MS=5000", "SAVE_MAX_DELAY_MS=5000"]);
   refused(["SAVE_QUIET_MS=5001", "SAVE_MAX_DELAY_MS=5000"], {}, /SAVE_MAX_DELAY_MS/);
-  ok(["MEMORY_MAX=134217728", "EDIT_MAX=16777216"]);
-  refused(["MEMORY_MAX=134217727", "EDIT_MAX=16777216", "QUEUE_BYTES=1048576"], {}, /8 x EDIT_MAX/);
-  ok(["QUEUE_BYTES=268435456"]);
-  refused(["QUEUE_BYTES=268435457"], {}, /QUEUE_BYTES/);
+  ok(["MEMORY_MAX=134217728", "EDIT_MAX=16777216", "BODY_MAX=65536"]);
+  refused(["MEMORY_MAX=134217727", "EDIT_MAX=16777216", "BODY_MAX=65536", "QUEUE_BYTES=1048576"], {}, /8 x EDIT_MAX/);
+  // (addendum 2: a body of BODY_MAX bytes never too large for the ledger as such)
+  ok(["MEMORY_MAX=603979776", "BODY_MAX=16777216"]);
+  refused(["MEMORY_MAX=603979775", "BODY_MAX=16777216"], {}, /36 x BODY_MAX/);
+  ok(["QUEUE_BYTES=536870912"]);
+  refused(["QUEUE_BYTES=536870913"], {}, /QUEUE_BYTES/);
 });
 
 test("board open limits: refused for an unknown name, a name twice, or not a whole number", () => {

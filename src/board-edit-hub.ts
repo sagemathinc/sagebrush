@@ -22,8 +22,10 @@ import { boardMerge3, keyOf, canon, type Rec, type MergeReport, type MergeAltern
 import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, recordsAre } from "../web/board/lossless";
 import { writeOnce, Slots, hashOf, realFs, type WriteFs, type WriteOutcome } from "./board-edit-write";
 import type { Limits } from "./board-edit-limits";
+import { Ledger, Reservation, submitCharge, keptCharge } from "./board-edit-memory";
 
-export interface Version { seq: number; records: Rec[]; json: any; bytes: Buffer; hash: string }
+/** A version the hub keeps; `charge` its Rv on the ledger (src/board-edit-memory.ts). */
+export interface Version { seq: number; records: Rec[]; json: any; bytes: Buffer; hash: string; charge: number }
 export type HubReport =
   | MergeReport
   | { kind: "older-copy"; key: string; field: string; value: unknown; board: unknown }
@@ -43,7 +45,7 @@ export type HubState =
 
 interface Budget { used: number; deadline: number; charge: (n: number) => boolean; left: () => number; why: () => "work" | "time" }
 
-interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; persistedGen: number; lastSeen: number }
+interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; persistedGen: number; lastSeen: number; pin?: number }
 
 export interface HubDeps {
   mergeStrings3: (o: { base: string; a: string; b: string }) => string;
@@ -74,14 +76,26 @@ export class EditHub {
   events: HeadEvent[] = [];
   /** the last version ingested from FILE, with the hash of its bytes as read */
   private observed: { raw: string; version: Version } | null = null;
+  /** MEMORY_MAX's ledger (§8.2): every kept version charged its Rv, every submission and outside version its R */
+  readonly ledger: Ledger;
+  private charged = new Map<Version, number>();
+  /** the history window: the latest heads' seqs, at most HISTORY_PATCHES, dropped first by compaction */
+  private window: number[] = [];
+  /** tabs told `stale` by compaction (§8.2), for the server to send */
+  staleTabs = new Set<string>();
 
   constructor(readonly file: string, readonly limits: Limits, private deps: HubDeps) {
     this.slots = new Slots(limits.BACKUPS_MAX);
+    this.ledger = new Ledger(limits.MEMORY_MAX);
   }
 
   /** The hub on FILE's bytes as found (P₀), or why the board can't be edited. */
   async start(bytes: Buffer): Promise<{ ok: true } | { ok: false; why: string }> {
-    const v = await this.version(bytes);
+    const R = submitCharge(bytes);
+    const res = this.ledger.admissible(R) ? this.ledger.reserve(R) : null;
+    if (!res) return { ok: false, why: "it needs more memory than MEMORY_MAX allows" };
+    let v: Awaited<ReturnType<EditHub["version"]>>;
+    try { v = await this.version(bytes); if (!("why" in v)) { this.res = res; this.keep(v.version); } } finally { this.res = null; res.close(); }
     if ("why" in v) return { ok: false, why: v.why };
     this.P = this.H = v.version;
     this.O = hashOf(bytes);
@@ -104,15 +118,71 @@ export class EditHub {
     const records = editRecords(g.doc);
     if (records.length > this.limits.RECORDS_MAX) return { why: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
     const out = Buffer.from(serialize(g.doc), "utf8");
-    return { version: { seq: ++this.seq, records, json: g.doc, bytes: g.given.length ? out : bytes, hash: hashOf(g.given.length ? out : bytes) }, given: g.given.length > 0 };
+    const kept = g.given.length ? out : bytes;
+    return { version: { seq: ++this.seq, records, json: g.doc, bytes: kept, hash: hashOf(kept), charge: keptCharge(records) }, given: g.given.length > 0 };
   }
 
+  /** an outside version waits for memory (§8.2: deferred, it waits in the watcher) */
+  deferred = false;
+  /** the reservation of the operation in progress, which every version it keeps is retained out of */
+  private res: Reservation | null = null;
+
+  /** A version kept: its Rv charged, once, retained out of the current operation's reservation (R covers it). */
+  private keep(v: Version) {
+    if (this.charged.has(v)) return;
+    this.charged.set(v, v.charge);
+    if (this.res) this.res.retain(v.charge);
+    else { this.ledger.used += v.charge; this.ledger.peak = Math.max(this.ledger.peak, this.ledger.used); }
+  }
+
+  /** A head: servable by its seq, in the history window. */
   private remember(v: Version) {
+    this.keep(v);
     this.heads.set(v.seq, v);
-    // (heads still referenced: H, P and the retained saves; the window bounded by HISTORY_PATCHES)
-    const keep = new Set([this.H?.seq, this.P?.seq, ...this.saves.map((s) => s.seq)]);
-    const seqs = [...this.heads.keys()].sort((a, b) => a - b);
-    while (seqs.length > this.limits.HISTORY_PATCHES) { const s = seqs.shift()!; if (!keep.has(s)) this.heads.delete(s); }
+    this.window.push(v.seq);
+    while (this.window.length > this.limits.HISTORY_PATCHES) this.window.shift();
+    this.account();
+  }
+
+  /** the tuple being written, while it is */
+  private writing: Version | null = null;
+
+  /**
+   * What is still referenced, each reference independent of the others: H, P, the tuple being written, each
+   * tab's pinned head, prevs' ingestion bases, the last observed version; and the comparison history (the
+   * retained saves and the window), the only references compaction drops.
+   */
+  private referenced(): Set<Version> {
+    const out = new Set<Version>([this.H, this.P, ...this.saves]);
+    if (this.writing) out.add(this.writing);
+    for (const seq of this.window) { const v = this.heads.get(seq); if (v) out.add(v); }
+    for (const t of this.tabs.values()) { const v = t.pin === undefined ? undefined : this.heads.get(t.pin); if (v) out.add(v); }
+    for (const p of this.prevs) out.add(p.base);
+    if (this.observed) out.add(this.observed.version);
+    return out;
+  }
+
+  /** Versions no longer referenced released; then, past half of MEMORY_MAX, compaction (§8.2, addendum 2). */
+  private account() {
+    if (!this.H || !this.P) return;
+    const release = () => {
+      const refs = this.referenced();
+      for (const [v, n] of this.charged) if (!refs.has(v)) { this.charged.delete(v); this.ledger.release(n); }
+      for (const [seq, v] of this.heads) if (!refs.has(v)) this.heads.delete(seq);
+    };
+    release();
+    const half = this.ledger.max / 2;
+    // (the window first, oldest first; then the retained saves other than P, oldest first; then the stalest tab's pin)
+    while (this.ledger.used > half && this.window.length) { this.window.shift(); release(); }
+    while (this.ledger.used > half && this.saves.some((v) => v !== this.P)) { this.saves.splice(this.saves.findIndex((v) => v !== this.P), 1); release(); }
+    while (this.ledger.used > half) {
+      const pinned = [...this.tabs].filter(([, t]) => t.pin !== undefined && t.pin !== this.H.seq && t.pin !== this.P.seq).sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
+      if (!pinned.length) break;
+      const [tab, t] = pinned[0];
+      t.pin = undefined;
+      this.staleTabs.add(tab);
+      release();
+    }
   }
 
   /** One merge's ledger and deadline (§8.3, addendum 1 A2): every phase charged to MERGE_WORK, run under MERGE_MS. */
@@ -148,7 +218,7 @@ export class EditHub {
   private newHead(records: Rec[], source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[], made?: { json: any; bytes: Buffer }): Version {
     const json = made?.json ?? fromEditRecords(records);
     const bytes = made?.bytes ?? Buffer.from(serialize(json), "utf8");
-    const v: Version = { seq: ++this.seq, records, json, bytes, hash: hashOf(bytes) };
+    const v: Version = { seq: ++this.seq, records, json, bytes, hash: hashOf(bytes), charge: keptCharge(records) };
     this.H = v;
     this.remember(v);
     this.events.push({ seq: v.seq, persistedSeq: this.persistedSeq, reports: reports.slice(0, this.limits.CONFLICTS_MAX), alternatives: alternatives.slice(0, this.limits.CONFLICTS_MAX), source });
@@ -162,8 +232,11 @@ export class EditHub {
     if (bytes === null) { this.state = { state: "held", why: "deleted", detail: "FILE was deleted or moved" }; return; }
     const h = hashOf(bytes);
     if (h === this.O || h === this.P.hash) { this.O = h; return; }
-    this.O = h;
     const v = await this.ingest(bytes, base);
+    // (no memory for it now: not taken as observed, so the next read tries again; the save's W2 check sees it too)
+    if ("deferred" in v) { this.deferred = true; return; }
+    this.deferred = false;
+    this.O = h;
     if ("why" in v) { this.state = { state: "held", why: v.held, detail: v.why }; return; }
     this.observed = { raw: h, version: v };
     if (canon(this.H.records) === canon(v.records)) {
@@ -176,13 +249,29 @@ export class EditHub {
   }
 
   /** Bytes read at FILE or from a prev, merged against `base` into H (§4.2): the version they are, or why not. */
-  private async ingest(bytes: Buffer, base: Version): Promise<Version | { why: string; held: "invalid" | "unmergeable" }> {
+  private async ingest(bytes: Buffer, base: Version): Promise<Version | { why: string; held: "invalid" | "unmergeable" } | { deferred: true }> {
+    // (memory first: R, reserved before the bytes are parsed; what is kept retained out of it, the rest released)
+    const R = submitCharge(bytes);
+    if (!this.ledger.admissible(R)) return { why: "it needs more memory than MEMORY_MAX allows", held: "invalid" };
+    const res = this.ledger.reserve(R);
+    if (!res) return { deferred: true };
+    this.res = res;
+    try { return await this.ingestWithin(bytes, base); } finally { this.res = null; res.close(); this.account(); }
+  }
+
+  private async ingestWithin(bytes: Buffer, base: Version): Promise<Version | { why: string; held: "invalid" | "unmergeable" } | { deferred: true }> {
     const budget = this.budget();
     // (parsed, checked, given page ids and serialized: four passes over the bytes)
     if (!budget.charge(4 * bytes.length)) return { why: `can't merge (${budget.why()})`, held: "unmergeable" };
     const v = await this.version(bytes);
     if ("why" in v) return { why: v.why, held: "invalid" };
     const C = v.version;
+    // (C is kept too, as the observed version or a prev's base: R covers it while it is made, and only the merged
+    // head is retained out of R; C's own Rv is admitted on top, or the version waits)
+    if (!this.charged.has(C)) {
+      if (!this.ledger.admit(C.charge)) return { deferred: true };
+      this.charged.set(C, C.charge);
+    }
     const r = this.merge(base.records, this.H.records, C.records, budget);
     if ("refused" in r) return { why: `can't merge (${r.refused})`, held: "unmergeable" };
     const made = this.nextHead(r.records, budget);
@@ -214,10 +303,12 @@ export class EditHub {
       }
       const h = hashOf(bytes), now = this.deps.now();
       if (h !== p.hash) {
+        if (h === p.base.hash) { p.hash = h; p.quietSince = now; p.ingestedSeq = Math.min(p.ingestedSeq, this.H.seq); continue; }
+        const v = await this.ingest(bytes, p.base);
+        // (no memory for it now: read again next time)
+        if ("deferred" in v) continue;
         p.hash = h;
         p.quietSince = now;
-        if (h === p.base.hash) { p.ingestedSeq = Math.min(p.ingestedSeq, this.H.seq); continue; }
-        const v = await this.ingest(bytes, p.base);
         if ("why" in v) {
           if (v.held === "unmergeable") this.state = { state: "held", why: "unmergeable", detail: v.why };
           p.ingestedSeq = Infinity;
@@ -263,13 +354,13 @@ export class EditHub {
   }
 
   // ---- tabs (§6.2)
-  /** A tab's submission: its snapshot (records, JSON lines) made from the head it adopted last (baseSeq). */
-  submit(tab: string, gen: number, baseSeq: number, snapshot: string, hash: string): SubmitAnswer {
+  /**
+   * What a submission is answered without its body, from its URL alone (CORR-BOARD-A1-1), or null when its body
+   * is to be read: an unknown tab; a tombstoned one (reactivated, told what is included); a gen at or below the
+   * watermark (replayed by its hash, a mismatch, or included); a base the hub doesn't hold (stale).
+   */
+  before(tab: string, gen: number, baseSeq: number, hash: string): SubmitAnswer | null {
     const op = `${tab}:${gen}`;
-    // (every phase on the one ledger and deadline: hashed, parsed, decoded and checked, four passes over the bytes)
-    const budget = this.budget(), size = snapshot.length;
-    if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` };
-    if (sha(snapshot) !== hash) return { op, refused: "the snapshot's hash doesn't match" };
     let t = this.tabs.get(tab);
     if (!t) {
       const w = this.tombstones.get(tab);
@@ -286,11 +377,40 @@ export class EditHub {
       if (!a) return { op, included: t.watermark, seq: this.H.seq };
       return a.hash === hash ? { op, accepted: true, seq: a.seq } : { op, mismatch: true };
     }
-    const base = this.heads.get(baseSeq);
-    if (!base) return { op, stale: true, seq: this.H.seq };
+    if (!this.heads.has(baseSeq)) return { op, stale: true, seq: this.H.seq };
+    return null;
+  }
+
+  /**
+   * A tab's submission: its snapshot S (records as JSON lines, the request's body) made from the head it adopted
+   * last (baseSeq), and the SHA-256 of the body's bytes.  Memory first (addendum 2): R = 18·b + 256·t reserved
+   * before the body is parsed, refused for good past MEMORY_MAX / 2, busy if it doesn't fit now; `bodyCharged`,
+   * what the server charged for the body's bytes as they arrived, is taken over by R.  The new head's Rv is
+   * retained out of R and the rest released, on every path.
+   */
+  submit(tab: string, gen: number, baseSeq: number, body: Buffer | string, hash: string, bodyCharged = 0): SubmitAnswer {
+    const op = `${tab}:${gen}`;
+    const early = this.before(tab, gen, baseSeq, hash);
+    if (early) { this.ledger.release(bodyCharged); return early; }
+    const bytes = typeof body === "string" ? Buffer.from(body, "utf8") : body;
+    const R = submitCharge(bytes);
+    // (the body's own charge given back as R is taken: R covers the body)
+    this.ledger.release(bodyCharged);
+    if (!this.ledger.admissible(R)) return { op, refused: `the snapshot needs more memory than MEMORY_MAX allows (${R} bytes, at most ${Math.floor(this.ledger.max / 2)})` };
+    const res = this.ledger.reserve(R);
+    if (!res) return { op, busy: "memory" };
+    this.res = res;
+    try { return this.submitWithin(this.tabs.get(tab)!, op, gen, this.heads.get(baseSeq)!, bytes, hash); } finally { this.res = null; res.close(); this.account(); }
+  }
+
+  private submitWithin(t: TabRecord, op: string, gen: number, base: Version, bytes: Buffer, hash: string): SubmitAnswer {
+    // (every phase on the one ledger and deadline: hashed, parsed, decoded and checked, four passes over the bytes)
+    const budget = this.budget(), size = bytes.length;
+    if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` };
+    if (sha(bytes) !== hash) return { op, refused: "the snapshot's hash doesn't match" };
     if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` };
     let records: Rec[];
-    try { records = snapshot.split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return { op, refused: "the snapshot isn't JSON lines" }; }
+    try { records = bytes.toString("utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return { op, refused: "the snapshot isn't JSON lines" }; }
     if (records.length > this.limits.RECORDS_MAX) return { op, refused: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
     if (!budget.charge(2 * size + records.length)) return { op, refused: `can't merge (${budget.why()})` };
     // (the records exactly the board they decode to, every one and every field: CORR-BOARD-A1-2; and that board's
@@ -302,17 +422,23 @@ export class EditHub {
     if ("refused" in r) return { op, refused: `can't merge (${r.refused})` };
     const made = this.nextHead(r.records, budget);
     if ("why" in made) return { op, refused: made.why };
+    const tab = op.slice(0, op.lastIndexOf(":"));
     this.includedGens.set(tab, gen);
     this.newHead(r.records, "tab", r.reports, r.alternatives, made);
     t.watermark = gen;
+    t.pin = base.seq;
     t.acks.push({ gen, seq: this.H.seq, hash });
     while (t.acks.length > this.limits.ACKS_KEPT) t.acks.shift();
     this.dirty();
     return { op, accepted: true, seq: this.H.seq };
   }
 
+  /** A tab was sent head `seq` (/board?at=): the head it may name as its base next, pinned (§8.2). */
+  adopted(tab: string, seq: number) { const t = this.tabs.get(tab); if (t && this.heads.has(seq)) { t.pin = seq; this.account(); } }
+
+
   /** A tab connected (its record made, if new). */
-  connect(tab: string) { if (!this.tabs.has(tab) && !this.tombstones.has(tab)) this.tabs.set(tab, { watermark: 0, acks: [], persistedGen: 0, lastSeen: this.deps.now() }); }
+  connect(tab: string) { if (!this.tabs.has(tab) && !this.tombstones.has(tab)) this.tabs.set(tab, { watermark: 0, acks: [], persistedGen: 0, lastSeen: this.deps.now(), pin: this.H.seq }); }
 
   /** A tab released (disconnected): its accounting released, a tombstone of its watermark kept. */
   release(tab: string) {
@@ -321,6 +447,7 @@ export class EditHub {
     this.tabs.delete(tab);
     this.tombstones.set(tab, t.watermark);
     while (this.tombstones.size > this.limits.TAB_TOMBSTONES) this.tombstones.delete(this.tombstones.keys().next().value!);
+    this.account(); // (its pinned head released)
   }
 
   /** What a tab is told with each head: the highest gen of its ops in it, and its persistedGen. */
@@ -343,6 +470,11 @@ export class EditHub {
   /** One save of the frozen head, now. */
   async save(): Promise<WriteOutcome> {
     const T = this.H; // (the frozen tuple: its value, seq and bytes)
+    this.writing = T;
+    try { return await this.saveTuple(T); } finally { this.writing = null; this.account(); }
+  }
+
+  private async saveTuple(T: Version): Promise<WriteOutcome> {
     const included = new Map(this.includedGens);
     this.lastWrite = this.deps.now();
     const before = this.P;
