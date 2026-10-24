@@ -34,7 +34,7 @@ export const PINS = {
   capBytes: 2 ** 30,
   /** pins released at once by a collapse, in the save's transaction (a few, so that a collapsing save stays
    * within its 64 IndexedDB calls); the rest by cleanPins, begun after the save returns */
-  collapseRelease: 3,
+  collapseRelease: 2,
   /** each cleanup slice, one transaction: at most `examine` records read a step, and at most `requests`
    * IndexedDB requests made (an item is begun only while its costliest outcome still fits); then the next slice,
    * after a timer, until nothing durable is left (daybreak2's LIMIT-E5C-1) */
@@ -49,7 +49,7 @@ export const PINS = {
   afterSlice: null as null | (() => Promise<unknown>),
   /** (tests: called in bytesFor's transaction right after the value is read, before anything is marked or
    * committed: throwing aborts it, as a page killed there would) */
-  cutAfterRead: null as null | (() => void),
+  cutAfterRead: null as null | ((rec: { id: string; op: { sha256?: string } }) => void),
 };
 /** The stores a local change's transaction takes for this, besides its own. */
 export const SYNC_STORES = ["pending", "pins", "meta"];
@@ -73,7 +73,11 @@ export type NsState = {
   /** the current state to send once there is room, based on `base` (a held identity's, once its record was decided) */
   successor?: { base?: string };
 };
-export type Pending = { id: string; latest?: { seq: number; by: string; after: OpAfter | null | undefined }; byNs?: Record<string, NsState> };
+/** `latest.movedAt`: the seq of the identity's last op that placed it (made, moved, put in Trash or out, removed for
+ * good).  Past the scan watermark, the view (C3) takes its placement from `after`; a write alone leaves the placement
+ * to the confirmed index.  Carried from op to op, so a save reads nothing more. */
+export type Pending = { id: string; latest?: { seq: number; by: string; after: OpAfter | null | undefined; movedAt?: number }; byNs?: Record<string, NsState> };
+const PLACING = new Set(["create", "adopt", "mkdir", "rename", "remove", "restore", "forget", "emptyTrash", "discard"]);
 export type Skipped = { count: number; files: string[] };
 type Purge = { epoch: number; cursor?: [string, number] };
 
@@ -162,12 +166,14 @@ export function putPending(tx: IDBTransaction, p: Pending, ns: string, s: NsStat
  * for a data file's new bytes (`pin`), those bytes pinned, tagged with the epoch.  Nothing if sync is off. */
 export async function noteChange(tx: IDBTransaction, rec: Op, pin: boolean) {
   const meta = tx.objectStore("meta");
-  if (!(await syncOn(meta))) return;
+  // (a change applied from the server is no local intent: nothing pending, nothing pinned (C3))
+  if (rec.origin === "server" || !(await syncOn(meta))) return;
   const id = rec.after?.id ?? rec.fid ?? rec.ref;
   if (!id) return;
   const ps = tx.objectStore("pending");
   const cur = ((await req(ps.get(id))) as Pending | undefined) ?? { id };
-  ps.put({ ...cur, latest: { seq: rec.seq!, by: rec.by, after: rec.after } });
+  const movedAt = PLACING.has(rec.op) ? rec.seq! : cur.latest?.movedAt;
+  ps.put({ ...cur, latest: { seq: rec.seq!, by: rec.by, after: rec.after, ...(movedAt !== undefined ? { movedAt } : {}) } });
   if (pin && rec.sha256 && rec.size !== undefined && rec.fid) await pinPresent(tx, id, rec.seq!, rec.path, rec.sha256, rec.size, rec.fid);
   // (tests: a save failing after its pin, as one meeting the quota would: the whole change refused)
   if (PINS.failAfterPin) throw new DOMException("the quota (a test's)", "QuotaExceededError");
@@ -633,7 +639,7 @@ export async function bytesFor(w: Workspace, rec: { id: string; lseq: number; pi
       return ("version" in p.storage ? await req(tx.objectStore("versionBytes").get(p.storage.version)) : await req(tx.objectStore("fileBytes").get(p.storage.fileBytes))) as Uint8Array | undefined;
     };
     const v = await read();
-    PINS.cutAfterRead?.();
+    PINS.cutAfterRead?.(rec);
     if (v === "mismatch") return found("mismatch");
     // (stored bytes longer, or shorter, than their metadata: let go unhashed, unsent; "length", as they were read)
     if (v !== undefined && v.length !== size) return found("length");
