@@ -7592,7 +7592,8 @@ def RootsInSplittingField(*args):
     against Magma 2.18): ordered by their discrete logs to L's generator,
     0 first; a constant has none (and L = K).  By the shared core, under
     one budget of _ffsub.WORK: f's factorization (its work charged first),
-    then L of at most 2^20 elements (checked on the degrees), then the
+    then L of at most EMBED_MAX elements (ff.embed_max, 2^20 by default;
+    checked on the degrees), then the
     roots' whole work reserved before L is made or any root found; past
     any of these, refused in words."""
     name = "RootsInSplittingField"

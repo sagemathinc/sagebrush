@@ -987,13 +987,14 @@ def split_degree(degrees, K, refuse):
     polynomial over K whose irreducible factors have these degrees: deg K
     times their lcm; K itself (any size) when every factor is linear, else
     refuse() when the field would have more than EMBED_MAX elements
-    (checked on n log2 p before p^n is formed)."""
+    (checked on n (bits(p) - 1) against EMBED_BITS before p^n is formed,
+    as cover() does)."""
     p, kn, _ = pnq(K)
     d = 1
     for k in degrees:
         d = d * k // _math.gcd(d, k)
     n = kn * d
-    if d > 1 and (n * (p.bit_length() - 1) > 20 or p ** n > EMBED_MAX):
+    if d > 1 and (n * (p.bit_length() - 1) > EMBED_BITS or p ** n > EMBED_MAX):
         raise refuse()
     return n
 
