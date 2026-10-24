@@ -224,6 +224,26 @@
   "owner": "HMF engine",
   "row": "inv-39"
  },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_ns :: MAX_POLL_GAP_NS.load(Relaxed) #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_ns :: pub fn max_poll_gap_ns() -> u64 { #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: trace :: MAX_POLL_GAP_NS.store(0, Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -348,6 +368,14 @@
   "class": "2+3",
   "owner": "multivariate engine",
   "row": "inv-36"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let poll = hooks::max_poll_gap_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
  },
  "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
   "class": "3",
