@@ -12,7 +12,7 @@ import {
 import * as O from "./ops";
 import * as UC from "./unicodecs";
 import * as AC from "./argconv";
-import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, HARD_MAX_DIGITS, hardLimit, parseDigits } from "./format";
+import { repr, str, defaultRepr, dictRepr, setRepr, format, floatRepr, seqRepr, percentFormat, intDigits, admitDigits, parseDigits } from "./format";
 
 // Store a builtin method (a JS function taking self first) in a type's dict.
 export function method(cls: PyType, name: string, f: any, s: Signature | null = null) {
@@ -1307,9 +1307,6 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
   // (an underscore may follow a base prefix, as in 0x_1f: not start a number)
   if (prefixed && t.startsWith("_")) t = t.slice(1);
   const pow2 = (base & (base - 1)) === 0;
-  // (Sagebrush's own ceiling, before the text is scanned or copied: even
-  // with an underscore between every two digits it has too many)
-  if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit("");
   if (!/^[0-9a-zA-Z]+(_[0-9a-zA-Z]+)*$/.test(t)) return undefined;
   t = t.replace(/_/g, "").toLowerCase();
   for (let i = 0; i < t.length; i++) {
@@ -1321,7 +1318,9 @@ function parseIntLiteral(s: string, base: number): number | bigint | undefined {
   const m = intDigits.max;
   if (m > 0 && !pow2 && t.length > m)
     raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`);
-  if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length);
+  // (the memory the value and its powers of the base take, before any is
+  // made: the text itself is already in memory)
+  if (!pow2) admitDigits(t.length, (t.length * Math.log2(base)) / 8);
   // (powers of 2 natively, in linear time; the others by halves, with Stop
   // tested between the pieces)
   let v: bigint;
