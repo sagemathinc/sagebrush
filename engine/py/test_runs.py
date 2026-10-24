@@ -209,6 +209,7 @@ def test_finish_and_ticket():
     run, done = r.start("auto:'2'", "sage", wait=5, label="a\x07b" + "c" * 100, started_by="claude")
     rec = r.record(run.record["handle"])
     assert done and rec["state"] == "finished" and rec["ended_by"] == "return" and rec["value"] == {"text": "'2'"}, rec
+    assert rec["covers"] == "worker" and R.DETACHED_NOTE in rec["notes"], rec  # (no more than H′1a observes)
     assert rec["label"] == "ab" + "c" * 78 and rec["started_by"] == "claude" and rec["ticketed"] is False, rec
     assert r.store.load(rec["handle"])["state"] == "finished" and r.summary()["running"] == 0
     # a ticket: the call returns, the run keeps going
