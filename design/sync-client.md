@@ -870,11 +870,32 @@ Where the code settles what the plan left open, or differs from it:
   - the fetch queue is the entries' sparse index `byFetch` (DB v6, unreleased), so queuing a file costs no write of its own;
   - retire reads its records by range, and pending states only where they exist.
 - **D10's read set is loaded before an op runs** (r1's list, plus a move's destination listings), so rounds miss only on derived-identity candidates. A derived identity's entry and gone row are one stored row, learned from one miss.
-- **Memory is counted before it is allocated, every live population** (daybreak3's LIMIT-PR65-IMPL-1): base rows; overlay clones and copied `children` Set members; each changed identity twice (the reducer's Set and the array it returns); the page's dirty set; and a folder listing's 10,000 rows, reserved before it is read. An overlay that would pass the ceiling is discarded whole: a lone op halts, a page is cut before it. The single-op ceiling is 520,000 units, from that full sum at a maximum move (D10 r3 said 250,000). Short rows at a 100,000-entry move measure under 256 MiB and 1 s. Maximum-width rows (1,024-character paths at depth 32) don't fit any single-transaction move, the workspace's own included (639 MiB): D11 (plan-pr65-d11-chunked-moves-r1, in review) applies large moves in chunks; until it lands that fixture is measured and reported (`WIDE=1`), not asserted.
+- **Memory is counted before it is allocated, every live population** (daybreak3's LIMIT-PR65-IMPL-1): base rows; overlay clones and copied `children` Set members; each changed identity twice (the reducer's Set and the array it returns); the page's dirty set; and a folder listing's 10,000 rows, reserved before it is read. An overlay that would pass the ceiling is discarded whole: a lone op halts, a page is cut before it. The single-op ceiling is 520,000 units, from that full sum at a maximum move (D10 r3 said 250,000). Short rows at a 100,000-entry move measure under 256 MiB and 1 s. Maximum-width rows (1,024-character paths at depth 32) don't fit any single-transaction move, the workspace's own included (639 MiB): D11 applies large moves in chunks (below).
 - **Long write loops await a cheap read every 200 writes**, which ends the task while the transaction stays alive. A 100,000-entry move is then many short tasks, apart from the reducer's own synchronous move.
 - **Page counts are exact:** view and retire read one past their page. A retire page takes 100 items across its steps (staged confirmations, replaced records, the old journal's records), so the walks end on their last full page.
 
 Measured on VM 1 (Chrome, the timed fixture of D6 r6; see the PR for the run): the figures are in #65's description.
+
+### As built (D11: large moves and forgets in chunks)
+
+The plan is plan-pr65-d11-chunked-moves r7 with its r8 notes v2 (N1–N5) and N6 v2 with addendum 1 (forget). Modules (web/workspace): `sync-rewrite.ts` (the records, the read model, the fence, the bounds `D11` with `configureD11` under `D11_CEILING`), `sync-replay.ts` (the view's replay), the confirmed side in `sync-confirmed.ts` and `sync-overlay.ts`, the local move in `api.ts`.
+
+Where the code settles what the plan left open:
+- **Readers:** every reader of `entries` goes through `entriesOf(tx)`. With no record, it reads the store as before, so existing request counts change only by the record's one `get` per transaction. The pins' exact per-save counts went from 33 to 38, and from 59 to 64 for a collapsing save: five entries transactions each read the record.
+- **Listings and lookalikes:** under a published record, they go through the index `byNfc` (r7 §1's sources). Unpublished, a folder's listing is the subtree's keys, as before.
+- **Writers:** every writer of `entries` calls `fenceCheck` first. `FENCE_READ` is the participation test's witness. Downloads' installs and finalizations change no path; they mark participation and write by identity.
+- **The confirmed side's hidden folders:** a row under one is answered afresh at every read, its path projected through its folder's present place, and never kept in the overlay unless the op writes it. A copy kept before its folder moved would keep the old path.
+- **Partial listings** (r2 §2): a folder past 10,000 children has a count, adds and removes, and no members. Its name probes load the next 1,000 of their series by key, in one round.
+- **The replay's pass** examines folders only (only a folder can be a large lift) and reads files in bulk. Every replay page prefetches its identities' five sources at once. Replay pages publish the durability witness once, at the end, not each page.
+- **Lateness and failure:** a replay that finishes past its deadline after publication keeps `sync:<ns>:replayLate`. A failed or late-before-publication replay is retried once by the next page load (`REPLAY.reload` in tests).
+- **The client:**
+  - runs pending large-move work in the connection's message chain at welcome, and before a rebuild's `stage`;
+  - holds pages, with the reason said, when the work stops;
+  - pauses sending while a plan is made (`SENDER_HOLD`).
+- **Rebuilds:**
+  - a local large move during a rebuild's `view` or `retire` is refused `busy`;
+  - `stage` waits for a local move's rewrite;
+  - `done` waits for a local or published entries record, and supersedes the replaced generation's replay, debts, unpublished plan and forget ledgers.
 
 ## 4. Who builds what, in order, and the size of each
 

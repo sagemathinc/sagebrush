@@ -23,9 +23,11 @@
 // Nothing a pass writes is visible to the view, the scanner or the sender until its `done` succeeds.  Sending is halted
 // throughout, until the announce's ack.
 import type { Entry, Op, Workspace } from "./api";
-import { inTx, req } from "./db";
+import { inTx, req, hex } from "./db";
+import { entriesOf, D11, RW, MAPS, queueKey, FENCE_READ, type EntriesView, type ERecord } from "./sync-rewrite";
+import { markerKey, type Marker } from "./sync-replay";
 import { TRASH, nameOf, parentOf } from "./paths";
-import { genKey, genPrefix, cursorKey, idbStore } from "./sync-confirmed";
+import { genKey, genPrefix, cursorKey, idbStore, crecordKey, ledgerNs, againNs } from "./sync-confirmed";
 import { VIEW_STORES, applyView, type JournalRecord, type ListedWhy } from "./sync-view";
 import { rebuildKey, wireOf, recordBytes, chargeOf, type Obligation, type OutboxRecord } from "./sync-outbox";
 import { RELEASE_STORES, release, pendingOf, stateOf, putPending, capNow, afterReleases, type Pin } from "./sync-pins";
@@ -67,6 +69,8 @@ export type Pass = {
   oldJournal?: string;
   /** announce: through = serverNext - 1 */
   through?: number;
+  /** (D11) the view's deferred ranges: debts' confirmed keys */
+  deferred?: string[];
   /** counts, for the tests and the foot's progress */
   pages?: { log: number; capture: number; view: number; retire: number; clean: number };
 };
@@ -113,6 +117,8 @@ export async function cleanStep(w: Workspace, ns: string): Promise<boolean> {
     for (const k of keys) st.delete(k);
     cut("clean");
     if (keys.length < REBUILD.cleanPage) {
+      // (a generation's large-move record goes with it (D11 r2 §5))
+      if (what === "i") meta.delete(crecordKey(prefix));
       list.shift();
       if (list.length) meta.put(list, cleanKey(ns));
       else meta.delete(cleanKey(ns));
@@ -181,12 +187,12 @@ async function setPass(w: Workspace, ns: string, f: (p: Pass) => Pass) {
 // ---- capture
 
 /** A journal record of `e`'s present state (its folder's identity, or "" for the root). */
-async function stateRecord(st: IDBObjectStore, jp: string, e: Entry, n: { requests: number }): Promise<JournalRecord> {
+async function stateRecord(ev: EntriesView, jp: string, e: Entry, n: { requests: number }): Promise<JournalRecord> {
   let parent = "";
   const folder = parentOf(e.trashed ? e.trashed.from : e.path);
   if (folder !== "/" && folder !== TRASH && !e.trashed) {
     n.requests++;
-    parent = (((await req(st.get(folder))) as Entry | undefined)?.fid) ?? "";
+    parent = (await ev.get(folder))?.fid ?? "";
   }
   return { ns: jp, id: e.ident!, parent, name: nameOf(e.path), kind: e.kind, ...(e.kind === "file" ? { sha256: e.sha256, size: e.size } : {}), trashed: !!e.trashed, ...(e.trashed ? { from: e.trashed.from } : {}) };
 }
@@ -194,26 +200,26 @@ async function stateRecord(st: IDBObjectStore, jp: string, e: Entry, n: { reques
 /** `id`'s present state, and its folders', into journal `jp` (an identity already there is left: the walk's record
  * stands until the replay assigns it). */
 async function captureId(tx: IDBTransaction, jp: string, id: string, kind: Entry["kind"], n: { requests: number }) {
-  const st = tx.objectStore("entries"), j = tx.objectStore("adoptJournal");
+  const ev = await entriesOf(tx), j = tx.objectStore("adoptJournal");
   n.requests += 2;
   if ((await req(j.getKey([jp, id]))) !== undefined) return;
-  const e = (await req(st.index("byIdent").get(id))) as Entry | undefined;
+  const e = await ev.byIdent(id);
   if (!e) {
     n.requests++;
     j.put({ ns: jp, id, parent: "~gone", name: "", kind, trashed: false, gone: true } satisfies JournalRecord);
     return;
   }
   n.requests++;
-  j.put(await stateRecord(st, jp, e, n));
+  j.put(await stateRecord(ev, jp, e, n));
   // (its folders, to the root: a folder made or moved here and not yet confirmed is where its entries go)
   if (e.trashed) return;
   for (let p = parentOf(e.path); p !== "/" && p !== TRASH; p = parentOf(p)) {
     n.requests += 2;
-    const f = (await req(st.get(p))) as Entry | undefined;
+    const f = await ev.get(p);
     if (!f?.ident) break;
     if ((await req(j.getKey([jp, f.ident]))) !== undefined) break;
     n.requests++;
-    j.put(await stateRecord(st, jp, f, n));
+    j.put(await stateRecord(ev, jp, f, n));
   }
 }
 
@@ -297,7 +303,7 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
     } else if (at.step === "replay") {
       // (an empty (W0, W1]: nothing logged since the watermark)
       const ops = (at.seq ?? 0) < p.W1! ? ((await req(tx.objectStore("ops").getAll(IDBKeyRange.bound(at.seq ?? 0, p.W1!, true, false), REBUILD.replayPage))) as Op[]) : [];
-      const j = tx.objectStore("adoptJournal"), st = tx.objectStore("entries");
+      const j = tx.objectStore("adoptJournal");
       for (const o of ops) {
         at.seq = o.seq;
         // (own intents only: what the server applied, dropVersions, and ops without an identity yet pass (D6 r4))
@@ -309,7 +315,7 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
         }
         const a = o.after!;
         let from: string | undefined;
-        if (a.trashed) from = (((await req(st.index("byIdent").get(id))) as Entry | undefined)?.trashed?.from);
+        if (a.trashed) from = (await (await entriesOf(tx)).byIdent(id))?.trashed?.from;
         j.put({ ns: jp, id, parent: a.parent ?? "", name: a.name, kind: a.kind, ...(a.kind === "file" ? { sha256: a.sha256, size: a.size } : {}), trashed: a.trashed, ...(from ? { from } : {}) } satisfies JournalRecord);
       }
       if (ops.length < REBUILD.replayPage || at.seq === p.W1) {
@@ -333,10 +339,15 @@ export async function captureStep(w: Workspace, ns: string): Promise<boolean> {
  * the pass is dropped: nothing live was touched, so this is pure deletion.  The flag stays set either way: only the
  * announce's ack clears it.
  */
-export async function done(w: Workspace, ns: string): Promise<"committed" | "failed"> {
-  return inTx(w.ws, META, "readwrite", async (tx) => {
-    const meta = tx.objectStore(META);
+export async function done(w: Workspace, ns: string): Promise<"committed" | "failed" | "wait"> {
+  return inTx(w.ws, [META, "entries"], "readwrite", async (tx) => {
+    const meta = tx.objectStore(META), st = tx.objectStore("entries");
     const p = (await req(meta.get(passKey(ns)))) as Pass;
+    // (D11 r4 §4: the timed interval starts with no entries record pending: a local large move made since `stage`
+    // is waited for (its own 300 s), this compare-and-swap retried after it; a published plan likewise)
+    FENCE_READ.add(tx);
+    const rw = (await req(st.get(RW))) as ERecord | undefined;
+    if (rw && (rw.kind === "local" || rw.published)) return "wait";
     const flag = (await req(meta.get(rebuildKey(ns)))) as Obligation | undefined;
     const clean = ((await req(meta.get(cleanKey(ns)))) as string[] | undefined) ?? [];
     const jp = journalPrefix(ns, p.gen);
@@ -349,7 +360,19 @@ export async function done(w: Workspace, ns: string): Promise<"committed" | "fai
     }
     const old = ((await req(meta.get(genKey(ns)))) as number | undefined) ?? 0;
     meta.put(p.gen, genKey(ns));
-    meta.put([...clean, "i:" + genPrefix(ns, old)], cleanKey(ns));
+    // (the replaced generation's view work superseded, in this transaction (r5 §4, N6 §3): its replay marker, its
+    // debts, an unpublished plan; this pass's view recomputes every identity)
+    const mk = (await req(meta.get(markerKey(ns)))) as Marker | undefined;
+    if (mk && mk.gen !== genPrefix(ns, p.gen)) meta.delete(markerKey(ns));
+    meta.delete(IDBKeyRange.bound(`sync:${ns}:debt:`, `sync:${ns}:debt;`, false, true));
+    meta.delete(`sync:${ns}:moreDebts`);
+    if (rw && !rw.published) {
+      st.delete(RW);
+      st.delete(IDBKeyRange.bound(`${MAPS}${rw.rid}/`, `${MAPS}${rw.rid}0`, false, true));
+      st.delete(queueKey(rw.rid));
+    }
+    // (with it, its large forget's ledgers, if any (N6 §3): cleaned with their generation)
+    meta.put([...clean, "i:" + genPrefix(ns, old), "i:" + ledgerNs(genPrefix(ns, old)), "i:" + againNs(genPrefix(ns, old))], cleanKey(ns));
     meta.put((await req(meta.get(passCursorKey(ns)))) ?? 0, cursorKey(ns));
     const next: Pass = { ...p, phase: "view", at: { key: "" } };
     if (p.captured) {
@@ -386,7 +409,29 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
     // (one past the page, to know whether this page is the last: so the walk takes exactly ⌈union / page⌉ pages)
     const peek = await nextIds(tx, gp, p.at?.key ?? "", REBUILD.page + 1);
     const ids = peek.slice(0, REBUILD.page);
-    const v = ids.length ? await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true, range: { lo: ids[0], hi: ids[ids.length - 1], prefix: gp }, replacedBelow: p.serverNext }, ids) : { ops: [], gone: [], listed: [] };
+    // (D11 r4 §4: a lift of more than D11.chunk entries is never made here: a debt (one row), replayed after resume;
+    // identities in a deferred range passed over (their confirmed key compared, read only when there are debts))
+    const deferred = p.deferred ?? [];
+    const inDeferred = (k: string) => deferred.some((d) => k === d || k.startsWith(d + "/"));
+    const skip = new Set<string>();
+    if (deferred.length) for (const id of ids) {
+      const r = (await req(tx.objectStore("syncIndex").get([gp, id]))) as { key?: string } | undefined;
+      if (r?.key && inDeferred(r.key)) skip.add(id);
+    }
+    const debts: string[] = [];
+    const v = ids.length ? await applyView({ w, tx, ns, store: idbStore(tx, gp), journalNs: journalPrefix(ns, p.gen), cap, keepGone: true, range: { lo: ids[0], hi: ids[ids.length - 1], prefix: gp }, replacedBelow: p.serverNext, large: { chunk: D11.chunk, debt: (it) => debts.push(it.id), deferred: (id) => skip.has(id) } }, ids) : { ops: [], gone: [], listed: [] };
+    if (debts.length) {
+      let nd = (await req(meta.count(IDBKeyRange.bound(`sync:${ns}:debt:`, `sync:${ns}:debt;`, false, true)))) as number;
+      for (const id of debts) {
+        const c = (await req(tx.objectStore("syncIndex").get([gp, id]))) as { key?: string } | undefined;
+        if (!c?.key) continue;
+        deferred.push(c.key);
+        // (at the cap: one "more debts" row, replayed after resume as a walk of the whole generation (r6))
+        if (nd < D11.debts) meta.put(c.key, `sync:${ns}:debt:${String(nd++).padStart(4, "0")}`);
+        else meta.put(true, `sync:${ns}:moreDebts`);
+      }
+      p.deferred = deferred;
+    }
     bump(p, "view");
     cut("view");
     const fin = peek.length <= REBUILD.page;
@@ -520,8 +565,21 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
  * and the pass ended (sending resumes).  Otherwise the flag stays, and another pass runs.
  */
 export async function acked(w: Workspace, ns: string, floor: number): Promise<"resumed" | "again"> {
-  return inTx(w.ws, META, "readwrite", async (tx) => {
+  return inTx(w.ws, [META, "entries"], "readwrite", async (tx) => {
     const meta = tx.objectStore(META), p = (await req(meta.get(passKey(ns)))) as Pass | undefined;
+    // (D11 r4 §4: the view's debts, replayed after resume as one logical move, its own deadline; a later confirmed
+    // page waits for it (r5 §4))
+    const debts = (await req(meta.getAll(IDBKeyRange.bound(`sync:${ns}:debt:`, `sync:${ns}:debt;`, false, true)))) as string[];
+    const more = (await req(meta.get(`sync:${ns}:moreDebts`))) !== undefined;
+    if (p && (debts.length || more) && !(await req(meta.get(markerKey(ns))))) {
+      const now = Date.now(), rid = hex(8);
+      meta.put({ gen: genPrefix(ns, p.gen), rid, kind: "debts", ranges: more ? ["/"] : debts, phase: "pass", start: now, deadline: now + D11.deadlineMs, times: {} } satisfies Marker, markerKey(ns));
+      meta.delete(IDBKeyRange.bound(`sync:${ns}:debt:`, `sync:${ns}:debt;`, false, true));
+      meta.delete(`sync:${ns}:moreDebts`);
+      FENCE_READ.add(tx);
+      const st = tx.objectStore("entries");
+      if ((await req(st.getKey(RW))) === undefined) st.put({ path: RW, rid, kind: "reserved", published: false, rev: 1, n: 0, fails: 0, at: now } satisfies ERecord);
+    }
     const prev = (await req(meta.get(floorKey(ns)))) as number | undefined;
     meta.put(Math.max(prev ?? 0, floor), floorKey(ns));
     meta.delete(passKey(ns));

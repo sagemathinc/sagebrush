@@ -209,6 +209,9 @@ jobs:
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
           bun web/workspace/test-sync-overlay.mjs
+          # (the view, and D11's large moves in chunks: here, beside the sync client, as their 100,000-entry moves take minutes)
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
@@ -265,7 +268,6 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs

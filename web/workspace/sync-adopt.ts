@@ -16,6 +16,7 @@
 // view (layer 2).  The scanner stays idle until the journal has drained.
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
+import { entriesOf, type EntriesView } from "./sync-rewrite";
 import { TRASH, nameOf, parentOf } from "./paths";
 import { wireOf } from "./sync-outbox";
 import { pinOfCurrent, pinPresent, type Pin } from "./sync-pins";
@@ -35,10 +36,10 @@ export const adoptPrefix = (ns: string) => `${ns}#adopt`;
 const META = "meta";
 
 /** A journal record of `e`'s present state (its folder's identity, or "" for the root, or for Trash itself). */
-async function recordOf(st: IDBObjectStore, jp: string, e: Entry): Promise<JournalRecord> {
+async function recordOf(ev: EntriesView, jp: string, e: Entry): Promise<JournalRecord> {
   let parent = "";
   const folder = parentOf(e.path);
-  if (!e.trashed && folder !== "/" && folder !== TRASH) parent = (((await req(st.get(folder))) as Entry | undefined)?.fid) ?? "";
+  if (!e.trashed && folder !== "/" && folder !== TRASH) parent = (await ev.get(folder))?.fid ?? "";
   return { ns: jp, id: e.ident!, parent, name: nameOf(e.path), kind: e.kind, ...(e.kind === "file" ? { sha256: e.sha256, size: e.size } : {}), trashed: !!e.trashed, ...(e.trashed ? { from: e.trashed.from } : {}) };
 }
 
@@ -68,6 +69,8 @@ export async function capture(w: Workspace, ns: string): Promise<void> {
     if (s.step === "walk") {
       await inTx(w.ws, [META, "entries", "adoptJournal", "pins"], "readwrite", async (tx) => {
         const meta = tx.objectStore(META), st = tx.objectStore("entries"), j = tx.objectStore("adoptJournal");
+        // (through the read model: the tree as it is after a large move being applied (D11))
+        const ev = await entriesOf(tx);
         // (by identity: a rename or a move during the walk doesn't change an identity's place in this order, so
         // nothing is hidden or seen twice)
         const list = await new Promise<Entry[]>((ok, no) => {
@@ -76,14 +79,14 @@ export async function capture(w: Workspace, ns: string): Promise<void> {
           c.onsuccess = () => {
             const cur = c.result;
             if (!cur || out.length >= ADOPT.page) return ok(out);
-            out.push(cur.value as Entry);
+            out.push(ev.logical(cur.value as Entry));
             cur.continue();
           };
           c.onerror = () => no(c.error);
         });
         for (const e of list) {
           if (!e.ident) continue;
-          j.put(await recordOf(st, jp, e));
+          j.put(await recordOf(ev, jp, e));
           // (its bytes pinned for the journal until it drains: the pin on them now, else a new one)
           if (e.kind === "file" && e.migrated && e.sha256 && e.fid && !e.remote) {
             const cur = await pinOfCurrent(tx, e.fid, e.sha256);
@@ -115,7 +118,7 @@ export async function capture(w: Workspace, ns: string): Promise<void> {
             continue;
           }
           const a = o.after!;
-          const from = a.trashed ? (((await req(st.index("byIdent").get(id))) as Entry | undefined)?.trashed?.from) : undefined;
+          const from = a.trashed ? (await (await entriesOf(tx)).byIdent(id))?.trashed?.from : undefined;
           j.put({ ns: jp, id, parent: a.parent ?? "", name: a.name, kind: a.kind, ...(a.kind === "file" ? { sha256: a.sha256, size: a.size } : {}), trashed: a.trashed, ...(from ? { from } : {}) } satisfies JournalRecord);
         }
         if (ops.length < ADOPT.replayPage || at >= s.W1!) {

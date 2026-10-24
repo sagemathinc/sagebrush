@@ -285,8 +285,8 @@ async function seedRows(db, store, values, n = 20_000) {
 
 /** A folder with `dirs` subfolders of `per` files, here and in the confirmed index alike; then the server's rename of it
  * applied (one page), its longest task and the heap's growth measured. */
-async function moveMeasured(dirs, per, wide = false) {
-  const { w, ns, op, apply } = await setup();
+async function moveMeasured(dirs, per, wide = false, kind = "rename") {
+  const { w, ns, op } = await setup();
   const gp = W.genPrefix(ns, 0), now = Date.now(), SHA_A = "a".repeat(64);
   const big = hex(16), rows = [], ents = [];
   const add = (id, path, kind) => {
@@ -328,16 +328,17 @@ async function moveMeasured(dirs, per, wide = false) {
   let heapMax = heap0;
   const sampler = setInterval(() => { heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }, 5);
   const t0 = performance.now();
-  const r = await apply([op({ op: "rename", path: "/big", to: wide ? "/bag" : "/big2", kind: "folder", fid: big })]);
+  // (through the client's onIndex: a large move's rewrite and its view's replay (D11) run in it)
+  const r = await W.confirmedIndex(w)({ ns, ops: [kind === "forget" ? op({ op: "forget", path: "/big", kind: "folder", fid: big }) : op({ op: "rename", path: "/big", to: wide ? "/bag" : "/big2", kind: "folder", fid: big })] }).then(() => ({ cursor: undefined }));
   const ms = performance.now() - t0;
   await new Promise((ok) => setTimeout(ok, 50));
   clearInterval(sampler);
   obs.disconnect();
-  const moved = (await w.list(wide ? "/bag" : "/big2", { recursive: true })).length;
+  const moved = kind === "forget" ? n - 1 - (await w.list("/big", { recursive: true })).length - ((await w.stat("/big")) ? 0 : -1) : (await w.list(wide ? "/bag" : "/big2", { recursive: true })).length;
   const logged = (await w.ops()).filter((o) => o.origin === "server").length;
   const out = { n, ms, longest: Math.max(0, ...longs), heapMiB: (heapMax - heap0) / 2 ** 20, moved, logged, cursor: r.cursor };
   // (the baseline: the workspace's own move of the same tree back (api.ts move, one transaction), measured alike)
-  if (wide) {
+  if (wide && kind !== "forget") {
     globalThis.gc?.();
     await new Promise((ok) => setTimeout(ok, 200));
     const longs2 = [];
@@ -391,7 +392,18 @@ async function journalCursorReplaced() {
   }
 }
 
+/** (N5 of D11's r8 notes: measured, not asserted here: a server forget of a 100,000-entry folder, short or maximum-width
+ * rows; FORGET=1 or FORGET=wide runs only this) */
+async function bigForget(wide) {
+  const m = await moveMeasured(10, 9_998, wide, "forget");
+  check(true, "big forget figures: " + J({ wide, entries: m.n, gone: m.moved, ms: Math.round(m.ms), longestTaskMs: Math.round(m.longest), heapGrowthMiB: +m.heapMiB.toFixed(1) }));
+}
+
 export async function run(wide = "") {
+  if (wide === "forget" || wide === "forget-wide") {
+    try { await bigForget(wide === "forget-wide"); } catch (e) { check(false, `bigForget: threw ${e?.stack ?? e}`); }
+    return results;
+  }
   for (const t of [remoteCreate, remoteMoves, collisions, intentsKept, keptNotDeleted, traceA4, traceA3, nCasRestartPins, drainOrder, journalCursorReplaced, () => bigMove(wide)]) {
     try { await t(); } catch (e) { check(false, `${t.name}: threw ${e?.stack ?? e}`); }
   }
