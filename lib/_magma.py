@@ -7347,6 +7347,255 @@ def Sqrt(x):
     return _rsqrt(MReal.of(x))
 
 
+# Finite-field intrinsics of plan-finite-fields F2 (PrimeField, Generator,
+# DefiningPolynomial, IsSubfield, Embed, Trace, Norm, MinimalPolynomial,
+# CharacteristicPolynomial, Root, ext< >): the math, its budgets and its
+# refusal points are the shared core's, lib/_sage_ffsub.py (Sage mode's
+# trace, norm, minpoly, charpoly, nth_root and extension call the same);
+# here only Magma's signatures, words (checked against Magma 2.18) and
+# objects.
+
+def _call_pos(name):
+    """Where Magma points at an error of the intrinsic `name`: the "(" of its
+    first call at or after the current statement's start (line, col),
+    outside string literals and comments (astra on dae43019: not a "Root("
+    in a string), or None (the statement's start, as before)."""
+    line, col = _pos[0], _pos[1]
+    text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
+    rx = _re.compile(r"%s\s*\(" % _re.escape(name))
+    i, n = max(0, col - 1), len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            # (a string literal, its escapes skipped)
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if text.startswith("//", i):
+            return None
+        if text.startswith("/*", i):
+            k = text.find("*/", i + 2)
+            if k < 0:
+                return None
+            i = k + 2
+            continue
+        if c.isalpha() or c == "_":
+            k = i
+            while k < n and (text[k].isalnum() or text[k] in "_'"):
+                k += 1
+            if text[i:k] == name:
+                m = rx.match(text, i)
+                if m:
+                    return (line, m.end())
+            i = k
+            continue
+        i += 1
+    return None
+
+
+def _fferr(msg, name):
+    """Magma's error `msg` in the intrinsic `name`, at its call."""
+    return MagmaError(msg, "'%s'" % name, True, _call_pos(name))
+
+
+def _ff_work(what, x):
+    """The refusal past the one-call budget (WORK), in words."""
+    return lambda: _fferr("%s of an element of a finite field of degree %d is not supported yet (work)"
+                          % (what, _ffsub.pnq(x.parent())[1]), what)
+
+
+def _ff_poly(K, coeffs):
+    """The polynomial with these coefficients (constant first: ints or
+    elements of the field K) in PolynomialRing(K), Magma's one ring per
+    field."""
+    R = _ffpoly_ring(_ffwrap(K))
+    return _MFFPoly(R, R.P([K(c) for c in coeffs]))
+
+
+def _ff_absolute(what, x):
+    """Trace, Norm, MinimalPolynomial or CharacteristicPolynomial of x over
+    its prime field."""
+    p = _ffsub.pnq(x.parent())[0]
+    P = _sff.GF(p)
+    refuse = _ff_work(what, x)
+    if what == "Trace":
+        return P(_ffsub.trace(x, [_ffsub.WORK], refuse))
+    if what == "Norm":
+        return P(_ffsub.norm(x, [_ffsub.WORK], refuse))
+    f = (_ffsub.minpoly if what == "MinimalPolynomial" else _ffsub.charpoly)(x, [_ffsub.WORK], refuse)
+    return _ff_poly(P, f)
+
+
+def _ff_relative(what, x, F, name=None):
+    """The same over F, a subfield of x's field (Magma's error otherwise);
+    over a proper subfield bounded as F1's descent.  (name: the intrinsic
+    said in a refusal, when not `what`.)"""
+    name = name or what
+    if not isinstance(F, _MFinField):
+        raise _bad_types(name, (x, F), _call_pos(name))
+    K = x.parent()
+    if not _ffsub.is_subfield(F.K, K):
+        raise _fferr("Argument 2 is not a subfield of the parent of argument 1", name)
+    kind = {"Trace": "trace", "Norm": "norm", "MinimalPolynomial": "minpoly"}.get(what, "charpoly")
+    r = _ffsub.relative(kind, x, F.K, [_ffsub.WORK], _ff_refuse(name, _ffwrap(K), F, "'%s'" % name, _call_pos(name)))
+    return _ff_poly(F.K, r) if isinstance(r, list) else r
+
+
+def PrimeField(F):
+    if isinstance(F, _MFinField):
+        return _ffwrap(_sff.GF(F.p))
+    if F is _ZZ:
+        raise _bad_types("PrimeField", (F,), _call_pos("PrimeField"))
+    raise _fferr("PrimeField of this argument is not supported yet", "PrimeField")
+
+
+def Generator(F, sub=None):
+    """F.1 (1 in a prime field, as Magma's: not the primitive element);
+    with sub, a subfield of F (Magma's error otherwise), the same."""
+    if not isinstance(F, _MFinField) or (sub is not None and not isinstance(sub, _MFinField)):
+        raise _fferr("Generator of this argument is not supported yet", "Generator")
+    if sub is not None and not _ffsub.is_subfield(sub.K, F.K):
+        raise _fferr("Argument 2 is not a subfield of argument 1", "Generator")
+    return F.K(1) if F.n == 1 else F.K.gen()
+
+
+def DefiningPolynomial(F, sub=None):
+    """The defining polynomial of F over GF(p): its Conway polynomial, and
+    X - 1 for GF(p) itself ($.1 + (p - 1), as Magma's, whose generator
+    there is 1); with sub, a subfield of F (Magma's error otherwise), the
+    minimal polynomial of F.1 over sub."""
+    if not isinstance(F, _MFinField) or (sub is not None and not isinstance(sub, _MFinField)):
+        raise _fferr("DefiningPolynomial of this argument is not supported yet", "DefiningPolynomial")
+    P = _sff.GF(F.p)
+    if sub is not None and not _ffsub.is_subfield(sub.K, F.K):
+        raise _fferr("Argument 2 is not a subfield of argument 1", "DefiningPolynomial")
+    if F.n == 1:
+        return _ff_poly(P if sub is None else sub.K, [F.p - 1, 1])
+    if sub is None or sub.n == 1:
+        return _ff_poly(P if sub is None else sub.K, F.K._f)
+    return _ff_relative("MinimalPolynomial", F.K.gen(), sub, "DefiningPolynomial")
+
+
+def IsSubfield(F, K):
+    if isinstance(F, _MFinField) and isinstance(K, _MFinField):
+        return _ffsub.is_subfield(F.K, K.K)
+    raise _fferr("IsSubfield of these arguments is not supported yet", "IsSubfield")
+
+
+def Embed(F, K, x=None):
+    """Embed(F, K[, x]), a procedure: every subfield of a finite field is
+    already embedded (Conway-compatibly), so Magma's checks only."""
+    if not (isinstance(F, _MFinField) and isinstance(K, _MFinField)):
+        raise _fferr("Embed of these arguments is not supported yet", "Embed")
+    if F.p != K.p:
+        raise _fferr("Arguments 1 and 2 have different characteristics", "Embed")
+    if K.n % F.n:
+        raise _fferr("Degree of argument 1 does not divide degree of argument 2", "Embed")
+    if x is not None:
+        raise _fferr("Argument 1 is already a subfield of argument 2", "Embed")
+    return None
+
+
+# Root(x, 2) takes Magma's choice of square root where it is verified
+# (black-box against Magma 2.18: Root(x, 2) eq Sqrt(x) for every square of
+# GF(q) for q < 1000; _ff_sqrt's rule for GF(p^n), n > 1, every square up
+# to 3^12 elements; x^((p + 1)/4) in GF(p), p = 3 mod 4); elsewhere refused.
+_ROOT2_MAX = 3 ** 12
+
+
+def _root2_cost(x):
+    """The closed-form cops of Magma's square root of x (odd p) where its
+    choice is verified, or None where it isn't (refused).  In GF(p),
+    p = 3 mod 4: x^((p + 1)/4).  In GF(p^n), n > 1, q <= _ROOT2_MAX:
+    x.sqrt() (the generator's primitivity check, omega(q - 1) + 1 powers;
+    is_square, one power; Tonelli-Shanks' three powers and at most
+    S (2 S + 3) products, q - 1 = 2^S Q) and one discrete log (D(q, n),
+    the trial factoring included)."""
+    K = x.parent()
+    p, n, q = _ffsub.pnq(K)
+    if n == 1:
+        return _ffsub.prime_pow_cost((p + 1) // 4, p) if p % 4 == 3 else None
+    if q > _ROOT2_MAX:
+        return None
+    S = (q - 1 & -(q - 1)).bit_length() - 1
+    M = _ffsub.mn(p, n)
+    return ((len(_sff._factor_int(q - 1)) + 5) * _ffsub.pow_bound(q, M) + S * (2 * S + 3) * M
+            + _ffsub.dlog_cost(K))
+
+
+def _root2(x):
+    """Magma's square root of the square x (odd p, nonzero, _root2_cost not
+    None), its cost already charged with the rest of Root's (one budget)."""
+    K = x.parent()
+    p, n, q = _ffsub.pnq(K)
+    if n == 1:
+        return x ** ((p + 1) // 4)
+    r = x.sqrt()
+    k = _sff._dlog(r, K.gen(), None, q - 1, lambda u, v: u * v, K.one())
+    # (_ff_sqrt's choice: of r and -r, the one with the smaller logarithm;
+    # log(-r) = log(r) + (q - 1)/2)
+    return r if k < (q - 1) // 2 else -r
+
+
+def Root(x, k):
+    """A k-th root of x in its finite field, Magma's: the unique one when
+    gcd(k, q - 1) = 1 (or x = 0), Magma's square root for k = 2 where its
+    choice is verified, "No solution exists" when there is none; other
+    roots (several, Magma's choice unverified) and exponents of more than
+    1024 bits (Magma takes them) are refused.  ONE budget: the shared
+    root()'s cost and, for k = 2, the square root's, charged together
+    before any power (astra CORR-FF2-3)."""
+    if not _is_ff(x) or not isinstance(k, int) or isinstance(k, bool):
+        raise _fferr("Root of these arguments is not supported yet", "Root")
+    if k <= 0:
+        # (Magma's own words, its argument number included)
+        raise _fferr("Argument 85 is not positive", "Root")
+    sq = _root2_cost(x) if k == 2 and _ffsub.pnq(x.parent())[0] != 2 else None
+    st, r = _ffsub.root(x, k, [_ffsub.WORK],
+                        lambda: _fferr("Root of an exponent of more than %d bits is not supported yet" % _ffsub.ROOT_BITS, "Root"),
+                        _ff_work("Root", x), extra=sq or 0)
+    if st == "unique":
+        return r
+    if st == "none":
+        raise _fferr("No solution exists", "Root")
+    if sq is None:
+        raise _fferr("Root of degree %d in this finite field is not supported yet" % k, "Root")
+    return _root2(x)
+
+
+class _MExtMap(MMap):
+    """The second value of ext<F | k>: the embedding of F in the extension,
+    printed as Magma's (no rule shown)."""
+
+    def __repr__(self):
+        # (a field no global variable holds is GF(q) here, as Magma's)
+        name = lambda F: _struct_name(F) if _global_name(F) is not None else _gf_name(F)
+        return "Mapping from: %s to %s" % (name(self.dom), name(self.cod))
+
+
+def _ext(F, args, pos):
+    """ext<F | k>: GF(p^(m k)) (its Conway field, as Magma's), and the
+    embedding of F; the construction bounded as GF's (its bit size, then the
+    shared Conway budget).  ext<F | f> by a polynomial is refused."""
+    where = "ext< ... >"
+    if len(args) != 1:
+        raise MagmaError("Rhs arity (%d) should be 1" % len(args), where, True, pos)
+    k = args[0]
+    if not isinstance(F, _MFinField):
+        raise MagmaError("ext< ... > of this structure is not supported yet", where, True, pos)
+    if not isinstance(k, int) or isinstance(k, bool):
+        raise MagmaError("ext< ... > by a polynomial or anything but a degree is not supported yet", where, True, pos)
+    if k <= 0:
+        raise MagmaError("Extension degree should be a small integer greater than 0", where, True, pos)
+    try:
+        G = GF(F.p, F.n * k)
+    except MagmaError as e:
+        raise MagmaError(str(e), where, True, pos)
+    return _multi([G, _MExtMap(F, G, rule=lambda y: _coerce(G, y))])
+
+
 def _rsqrt(x):
     if x.m < 0:
         # (a complex number in Magma, which Sagebrush doesn't have)
@@ -8721,7 +8970,11 @@ def HeckeOperator(M, p):
     return _HeckeOp(_msym("HeckeOperator", M), p)
 
 
-def CharacteristicPolynomial(T):
+def CharacteristicPolynomial(T, sub=None):
+    if _is_ff(T):
+        return _ff_absolute("CharacteristicPolynomial", T) if sub is None else _ff_relative("CharacteristicPolynomial", T, sub)
+    if sub is not None:
+        raise MagmaError("CharacteristicPolynomial of these arguments is not supported yet", "'CharacteristicPolynomial'")
     if isinstance(T, _MFFMat):
         # (in a new polynomial ring, its variable unnamed: $.1, as Magma's)
         _ffm_square(T, "CharacteristicPolynomial")
@@ -9461,11 +9714,15 @@ def Decomposition(O, p):
     return MSeq(MTuple([_MPrime(P, F._maximal_order()), P.ramification_index()]) for P in F.primes_above(int(p)))
 
 
-def Norm(x):
+def Norm(x, sub=None):
+    if sub is not None:
+        if not _is_ff(x):
+            raise MagmaError("Norm of these arguments is not supported yet", "'Norm'")
+        return _ff_relative("Norm", x, sub)
     if hasattr(x, "_magma_norm"):
         return x._magma_norm()
     if _is_ff(x):
-        return x.norm()
+        return _ff_absolute("Norm", x)
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
     return x * x
@@ -9479,7 +9736,12 @@ def _trace_rational(x):
 
 @_signature("Trace", "FldFinElt", ret="FldFinElt")
 def _trace_ff(x):
-    return x.trace()
+    return _ff_absolute("Trace", x)
+
+
+@_signature("Trace", "FldFinElt", "FldFin", ret="FldFinElt")
+def _trace_ff_relative(x, F):
+    return _ff_relative("Trace", x, F)
 
 
 @_signature("Trace", "FldAlgElt", ret="RngElt")
@@ -9496,12 +9758,15 @@ def _trace_matrix(a):
 
 _unimplemented_signature("Trace", "RngUPolElt", ret="RngUPolElt")
 _unimplemented_signature("Trace", "RngOrdElt", ret="RngElt")
-_unimplemented_signature("Trace", "FldFinElt", "FldFin", ret="FldFinElt")
 _unimplemented_signature("Trace", "FldAlgElt", "Rng", ret="RngElt")
 _unimplemented_signature("Trace", "RngOrdElt", "Rng", ret="RngElt")
 
 
-def MinimalPolynomial(x):
+def MinimalPolynomial(x, sub=None):
+    if _is_ff(x):
+        return _ff_absolute("MinimalPolynomial", x) if sub is None else _ff_relative("MinimalPolynomial", x, sub)
+    if sub is not None:
+        raise MagmaError("MinimalPolynomial of these arguments is not supported yet", "'MinimalPolynomial'")
     if isinstance(x, _snf.NumberFieldElement):
         f = x.minpoly()
         R = _sp.PolynomialRing_(_sp.QQ, "$.1")
