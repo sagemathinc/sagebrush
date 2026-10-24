@@ -9,10 +9,12 @@ import { readFileSync } from "node:fs";
 // LRU, every Sage hook (coercion, descent, pushout, Hom, hom, subfields)
 // calls the core's bounded functions, and refusals are in words.
 // test/ff_shared_cases.py; its .out was checked under CPython.
+// (the cases exercise the limits as a policy sets them: test/limits-finite.json;
+// plan-c0 made the defaults unlimited)
 const TEST = __dirname + "/../../test/";
 const CLI = __dirname + "/../src/cli.js";
 test("finite fields: one shared bounded core for Sage and Magma (F1)", () => {
-  const got = execFileSync(process.execPath, [CLI, TEST + "ff_shared_cases.py"], { encoding: "utf8", maxBuffer: 16 << 20 });
+  const got = execFileSync(process.execPath, [CLI, "--limits", TEST + "limits-finite.json", TEST + "ff_shared_cases.py"], { encoding: "utf8", maxBuffer: 16 << 20 });
   const want = readFileSync(TEST + "ff_shared_cases.out", "utf8");
   const g = got.split("\n"), w = want.split("\n");
   const diffs = w.map((line, i) => (line === g[i] ? null : `${i + 1}: want ${line}\n   got ${g[i]}`)).filter((x) => x !== null);

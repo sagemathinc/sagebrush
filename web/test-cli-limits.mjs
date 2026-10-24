@@ -39,7 +39,7 @@ for (const [how, env] of [["a program's worker", {}], ["in-process (SAGEBRUSH_NO
   r = run(["-c", show], { ...env, SAGEBRUSH_LIMITS: good });
   ok(r.status === 0 && r.stdout === "123456 123456\n", `${how}: SAGEBRUSH_LIMITS=FILE (${r.stdout}${r.stderr})`);
   r = run(["-c", show], env);
-  ok(r.status === 0 && r.stdout === "10000000 10000000\n", `${how}: none, the defaults (${r.stdout}${r.stderr})`);
+  ok(r.status === 0 && r.stdout === "inf inf\n", `${how}: none, the defaults, unlimited (${r.stdout}${r.stderr})`);
   const big = file("big.json", '{"ff.work": 100000' + " ".repeat(5000) + "}");
   const missing = join(dir, "missing.json");
   for (const [path, want] of [

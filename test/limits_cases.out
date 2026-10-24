@@ -1,20 +1,20 @@
-ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 10000000}
-ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 100000}
-ok {'ff.conway_work': 1000000, 'ff.embed_max': 4096, 'ff.root_bits': 64, 'ff.work': 100000000}
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': 100000} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})
+ok {'ff.conway_work': 1000000, 'ff.embed_max': 4096, 'ff.root_bits': 64, 'ff.work': 100000000} Limits({'ff.conway_work': 1000000, 'ff.embed_max': 4096, 'ff.root_bits': 64, 'ff.work': 100000000})
 ValueError limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
 ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
-ValueError limits: ff.work must be an integer, not true
-ValueError limits: ff.work must be an integer, not true
-ValueError limits: ff.work must be an integer, not false
-ValueError limits: ff.work must be an integer, not 1.5
-ValueError limits: ff.work must be an integer, not 10000000.0
-ValueError limits: ff.work must be an integer, not 10000000.0
-ValueError limits: ff.work must be an integer, not "big"
-ValueError limits: ff.work must be an integer, not null
-ValueError limits: ff.work must be an integer, not an array
-ValueError limits: ff.work must be an integer, not an object
-ValueError limits: ff.work must be an integer, not NaN
-ValueError limits: ff.work must be an integer, not -Infinity
+ValueError limits: ff.work must be an integer or "unlimited", not true
+ValueError limits: ff.work must be an integer or "unlimited", not true
+ValueError limits: ff.work must be an integer or "unlimited", not false
+ValueError limits: ff.work must be an integer or "unlimited", not 1.5
+ValueError limits: ff.work must be an integer or "unlimited", not 10000000.0
+ValueError limits: ff.work must be an integer or "unlimited", not 10000000.0
+ValueError limits: ff.work must be an integer or "unlimited", not "big"
+ValueError limits: ff.work must be an integer or "unlimited", not null
+ValueError limits: ff.work must be an integer or "unlimited", not an array
+ValueError limits: ff.work must be an integer or "unlimited", not an object
+ValueError limits: ff.work must be an integer or "unlimited", not NaN
+ValueError limits: ff.work must be an integer or "unlimited", not -Infinity
 ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
 ValueError limits: ff.work = 99999 is outside the range this engine allows, [100000, 100000000]
 ValueError limits: ff.work = 100000001 is outside the range this engine allows, [100000, 100000000]
@@ -40,15 +40,24 @@ ValueError limits: a\nb is not a limit of this engine (its limits: ff.conway_wor
 ValueError limits: the limits are larger than 4096 bytes
 ValueError limits: the limits are larger than 4096 bytes
 ValueError limits: the limits are larger than 4096 bytes
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': 100000} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})
+ok {'ff.conway_work': inf, 'ff.embed_max': 4096, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ValueError limits: ff.work must be an integer or "unlimited", not "Unlimited"
+ValueError limits: ff.work must be an integer or "unlimited", not " unlimited"
+ValueError limits: ff.work must be an integer or "unlimited", not "inf"
+ValueError limits: ff.work must be an integer or "unlimited", not Infinity
+ValueError limits: ff.work is given more than once
 ValueError limits: /etc/limits.json is not JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
 ValueError limits: big.json is larger than 4096 bytes
-ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 10000000}
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
 ValueError limits: the key 3 is not a string
 ValueError limits: the key 3 is not a string
-ValueError limits: ff.work must be an integer, not true
+ValueError limits: ff.work must be an integer or "unlimited", not true
 ValueError limits: a key of type tuple is not a string
 ValueError limits: a key of more than 64 characters
-ValueError limits: ff.work must be an integer, not 1.5
+ValueError limits: ff.work must be an integer or "unlimited", not 1.5
 ValueError limits: ff.work is an integer of more than 64 bits
 ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
 ValueError limits: zz is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
@@ -56,3 +65,10 @@ ValueError limits: more than 16 entries
 ValueError limits: the limits must be a mapping, not an array
 ValueError limits: the limits are not JSON: Expecting value: line 1 column 1 (char 0)
 ValueError limits: the limits must be text, not bytes
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': 64, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})
+ValueError limits: ff.work must be an integer or "unlimited", not "Unlimited"
+ValueError limits: ff.work must be an integer or "unlimited", not null
+ValueError limits: ff.work must be an integer or "unlimited", not Infinity
+ok {'ff.conway_work': inf, 'ff.embed_max': inf, 'ff.root_bits': inf, 'ff.work': inf} Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})
+ValueError limits: ff.work must be an integer or "unlimited", not "big"

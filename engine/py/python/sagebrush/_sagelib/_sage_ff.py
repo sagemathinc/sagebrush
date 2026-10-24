@@ -1358,8 +1358,9 @@ def _conway_charge(budget, cops, p, n):
 # GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
 # field admitted before is admitted still.  A common field made inside an
 # embedding (_sage_ffsub) has that operation's budget instead.  It is the
-# session's ff.conway_work (lib/_limits.py), this bound by default, which a
-# deployment may lower, never raise.
+# session's ff.conway_work (lib/_limits.py): unlimited by default (plan-c0
+# r2; the p^n <= 10^7 cutoff below still applies), this bound at most when a
+# policy sets it.
 import _limits
 CONWAY_WORK = _limits.finalize()["ff.conway_work"]
 
@@ -2822,7 +2823,7 @@ def _ff_embeds(S, K):
 
 def _ff_bounded(what, A, B):
     """The refusal (a function making it) past the shared core's bounds."""
-    return lambda: NotImplementedError("%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements, within a bounded amount of work)" % (what, A, B, _ffsub().embed_max_text()))
+    return lambda: NotImplementedError("%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements%s)" % (what, A, B, _ffsub().embed_max_text(), _ffsub().work_clause()))
 
 
 def _ff_convert(x, K):
@@ -3078,7 +3079,7 @@ def _ff_subfields(self, degree=0, name=None):
             names[m] = None if given is None else _ff_var_name(given)
     if not degrees:
         return []
-    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most %s elements, within a bounded amount of work)" % (self, S.embed_max_text()))
+    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most %s elements%s)" % (self, S.embed_max_text(), S.work_clause()))
     budget = S.subfields_admit(self, degrees, [S.WORK], refuse)
     out = []
     for m in degrees:
@@ -4042,7 +4043,7 @@ class Polynomial_ff:
         (K itself when they are linear), and with map=True the embedding of
         K (Conway's: its generator to g^((q_L - 1)/(q_K - 1))), by the
         shared core: the factorization's work charged first, the field of at
-        most EMBED_MAX elements (ff.embed_max, 2^20 by default) checked on
+        most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on
         the degrees, its Conway search within
         the budget left (plan-finite-fields F3).
 
