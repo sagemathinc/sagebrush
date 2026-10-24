@@ -161,6 +161,7 @@ const PAGES = {
   "/sagebrush.html": `<!doctype html><meta charset="utf-8"><script type="module">
 const t0 = performance.now();
 const w = new Worker("/sb/sagebrush-worker.js", { type: "module" });
+w.postMessage({ init: { limits: null } }); // (the worker runs nothing before its limits: web/worker.ts)
 let n = 0, waiting = new Map();
 window.log = [];
 w.onerror = (e) => window.log.push("worker error: " + (e.message || e));
