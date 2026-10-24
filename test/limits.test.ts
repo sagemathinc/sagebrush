@@ -204,13 +204,16 @@ test("the class-group and polynomial keys reach the engine only when finite, and
   const cert = file("cert.json", '{"nf.certify_norm_max": 1000000}');
   r = run(["--limits", cert, "--sage", "-c", "x = polygen(QQ, 'x')\ntry:\n    NumberField(x^2 + 3*10^12 + 1, 'a').class_number(proof=True)\nexcept NotImplementedError as e:\n    print(e)\n"]);
   assert.match(r.stdout, /beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000/, r.stderr);
-  // a finite poly.work refuses a factorization that needs more: x^1001 - 1
-  // (degree 1001, eight cyclotomic factors) needs more than 2^20 limb
-  // operations; the small product of three factors fits
+  // a finite poly.work refuses a factorization that needs more: the
+  // trinomial x^400 + x^3 + 2 (irreducible; a binomial would take the
+  // cyclotomic path, which this limit doesn't meter) has its modular
+  // factorization ask for 425060 limb operations when 26173 of the 2^20 are
+  // left (VM1; unlimited, 3.0 s in all); a small product of three factors fits
   const pw = file("pw.json", '{"poly.work": 1048576}');
   const f = (g: string) => `x = polygen(ZZ, 'x')\ntry:\n    print(len(list(factor(${g}))))\nexcept Exception as e:\n    print(type(e).__name__, 'work' in str(e))\n`;
   assert.equal(run(["--limits", pw, "--sage", "-c", f("(x^4 + x + 1) * (x^3 - 2) * (x^2 + 3)")]).stdout, "3\n");
-  assert.match(run(["--limits", pw, "--sage", "-c", f("x^1001 - 1")]).stdout, /True\n$/);
+  assert.equal(run(["--sage", "-c", f("x^400 + x^3 + 2")]).stdout, "1\n");
+  assert.equal(run(["--limits", pw, "--sage", "-c", f("x^400 + x^3 + 2")]).stdout, "ValueError True\n");
 });
 
 test("a descent's discrete-log table stays at most 35 entries with every limit unlimited (plan-c0 r2)", () => {
