@@ -74,17 +74,23 @@ function engine(): Engine {
 
 // The memory share of a default polynomial factorization (item D0,
 // plan-d0-capacity-r2 §3): lib/_capacity.py's poly_share, pushed into the
-// instance before a dispatch when the last push to it is 100 ms old or more
+// instance before a dispatch when the last push to it is 250 ms old or more
 // (one clock comparison per call otherwise), so a factorization sees the
 // share of its call's entry, and a long call keeps it.  An instance's
 // dispatches are serialized.  The push is optional both ways: an engine
 // without sb_set_memory_share is left alone, and a share that can't be had
 // is pushed as -1 (none: the factorization keeps its 512 MiB).
 let shareTo: Engine | null = null, shareAt = 0;
-const SHARE_MAX_AGE_MS = 100, WASM_CEILING = 2 ** 32;
+const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32;
+// (the clock, monotonic; replaced by tests)
+let shareClock = () => performance.now();
+export function setShareClock(f: (() => number) | null) {
+  shareClock = f ?? (() => performance.now());
+  shareTo = null;
+}
 export function pushShare(e: Engine) {
   if (typeof e.sb_set_memory_share !== "function") return;
-  const now = performance.now();
+  const now = shareClock();
   if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return;
   shareTo = e;
   shareAt = now;

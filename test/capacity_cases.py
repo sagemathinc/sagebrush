@@ -102,7 +102,7 @@ for n in (None, 0, 10 * 1000, 10 * 1000 + 1, 256 * MiB, 300 * MiB):
     rec = {"bytes": n, "reserve_bytes": C.reserve_bytes(n)}
     print("reserve", n, rec["reserve_bytes"], C.effective_guard_bytes(rec))
 
-# 7. the poly share: floor(effective / 2), the 100 ms snapshot
+# 7. the poly share: floor(effective / 2), the 250 ms snapshot
 with open(r + "/sys/fs/cgroup/user.slice/job/memory.current", "w") as f:
     f.write("%d\n" % (100 * MiB))
 t = [0.0]
@@ -111,9 +111,9 @@ e = C.effective_guard_bytes(C.capacity())
 print("poly", e, C.poly_share(), e // 2)
 r6 = tree("low2", {"/proc/self/cgroup": "0::/\n", "/proc/meminfo": meminfo(4 * GiB, 300 * MiB)})
 C._src.root = r6
-t[0] = 0.0999
+t[0] = 0.2499
 print("poly snapshot", C.poly_share())
-t[0] = 0.1
+t[0] = 0.25
 print("poly after", C.poly_share(), C.effective_guard_bytes(C.capacity()) // 2)
 C._set_sources(root=os.path.join(BASE, "none"), platform="linux", rlimits={}, runtime=NO_RUNTIME)
 print("poly none", C.poly_share())
