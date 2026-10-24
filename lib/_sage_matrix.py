@@ -73,16 +73,25 @@ class Vector(list):
     def __eq__(self, o):
         """Equality through coercion, as Sage (_sage_ffmat._coerced_eq): a
         vector of another ring in the common parent; a scalar only when it
-        is an integral zero and the vector is zero.
+        is an integral zero and the vector is zero.  A list or tuple is not
+        a vector, so it is unequal (compare v.list() with a list instead).
 
         EXAMPLES::
 
             sage: v = vector(ZZ, [0, 0]); v == 0, 0 == v, v != 0, v == QQ(0), vector([1, 0]) == 1
             (True, True, False, False, False)
+            sage: v == [0, 0], [0, 0] == v, v.list() == [0, 0]
+            (False, False, True)
         """
         import _sage_ffmat
         r = _sage_ffmat._coerced_eq(self, o)
-        return list.__eq__(self, o) if r is NotImplemented else r
+        if r is NotImplemented:
+            # (a vector _coerced_eq leaves alone, a SeriesVector: entry by
+            # entry, as before; a list or tuple that is no vector: unequal)
+            if isinstance(o, Vector):
+                return list.__eq__(self, o)
+            return False if isinstance(o, (list, tuple)) else NotImplemented
+        return r
 
     def __ne__(self, o):
         r = self.__eq__(o)
