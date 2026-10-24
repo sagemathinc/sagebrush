@@ -67,6 +67,66 @@ def _failure(kind, message):
     return {"type": kind, "exception": None, "message": message, "traceback": ""}
 
 
+CHUNK = 64 * 1024            # (output goes to the parent in chunks of at most this)
+REPLY_HEAD = REPLY_TAIL = 512 * 1024  # (and the reply keeps at most this much of it)
+
+
+class _Capture:
+    """The computation's printed output, bounded at the source: it goes to
+    the parent as it is written, in {"out": text} messages of at most CHUNK
+    characters (each line sent whole: SIGINT is blocked while one is
+    written), and the reply keeps only its first REPLY_HEAD and last
+    REPLY_TAIL characters, with the exact count."""
+
+    def __init__(self, send):
+        self.send = send
+        self.buf, self.pending = [], 0
+        self.head = ""
+        self.tail, self.tail_n = [], 0
+        self.total = 0
+
+    def write(self, text):
+        if not isinstance(text, str):
+            raise TypeError("write() argument must be str, not %s" % type(text).__name__)
+        self.total += len(text)
+        rest = text
+        if len(self.head) < REPLY_HEAD:
+            room = REPLY_HEAD - len(self.head)
+            self.head += text[:room]
+            rest = text[room:]
+        if rest:
+            self.tail.append(rest)
+            self.tail_n += len(rest)
+            if self.tail_n > 2 * REPLY_TAIL:
+                t = "".join(self.tail)[-REPLY_TAIL:]
+                self.tail, self.tail_n = [t], len(t)
+        self.buf.append(text)
+        self.pending += len(text)
+        if self.pending >= CHUNK:
+            self.flush()
+        return len(text)
+
+    def flush(self):
+        if self.pending:
+            data = "".join(self.buf)
+            self.buf, self.pending = [], 0
+            for i in range(0, len(data), CHUNK):
+                self.send({"out": data[i:i + CHUNK]})
+
+    def text(self):
+        tail = "".join(self.tail)[-REPLY_TAIL:]
+        dropped = self.total - len(self.head) - len(tail)
+        if dropped <= 0:
+            return self.head + tail
+        return self.head + "\n[... %d characters not shown here: the run's output file keeps more ...]\n" % dropped + tail
+
+    def isatty(self):
+        return False
+
+    def writable(self):
+        return True
+
+
 def _worker():
     """The child: JSON requests on stdin, JSON replies on the original
     stdout; everything else written to stdout goes to stderr."""
@@ -94,10 +154,22 @@ def _worker():
     builtins.__pyjs_display__ = display
     from sagebrush.preparse import preparse
 
+    def send(msg):
+        # (one whole line, never cut by a Ctrl-C: SIGINT waits while it is written)
+        data = json.dumps(msg) + "\n"
+        blocked = hasattr(signal, "pthread_sigmask")
+        if blocked:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            proto.write(data)
+            proto.flush()
+        finally:
+            if blocked:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
-    proto.write(json.dumps({"ready": True}) + "\n")
-    proto.flush()
+    send({"ready": True})
     inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     while True:
         try:
@@ -113,7 +185,7 @@ def _worker():
         if isolated:
             ns = {"__name__": "__main__"}
             exec("from sagebrush.sage import *", ns)
-        out = io.StringIO()
+        out = _Capture(send)
         del displays[:]
         result = error = info = data = None
         t0 = time.perf_counter()
@@ -139,12 +211,17 @@ def _worker():
         except BaseException as e:  # SystemExit too: the session survives
             error = _format_exception(e, e.__traceback__)
             info = _error_info(e, e.__traceback__)
-        reply = {"stdout": out.getvalue(), "result": result, "error": error, "error_info": info, "data": data if info is None else None,
+        while True:
+            try:
+                out.flush()
+                break
+            except KeyboardInterrupt:
+                continue
+        reply = {"stdout": out.text(), "stdout_chars": out.total, "result": result, "error": error, "error_info": info, "data": data if info is None else None,
                  "displays": list(displays), "seconds": time.perf_counter() - t0}
         while True:
             try:
-                proto.write(json.dumps(reply) + "\n")
-                proto.flush()
+                send(reply)
                 break
             except KeyboardInterrupt:
                 continue
@@ -223,12 +300,18 @@ class Session:
         return self.generation, self.replies
 
     def _get(self, timeout):
+        """The next reply (not an {"out"} chunk: Session.run's caller has the
+        reply's bounded stdout), None if the process ended, False on time."""
         import queue
 
-        try:
-            return self.replies.get(timeout=timeout)
-        except queue.Empty:
-            return False
+        end = time.monotonic() + timeout
+        while True:
+            try:
+                r = self.replies.get(timeout=max(0.0, end - time.monotonic()))
+            except queue.Empty:
+                return False
+            if not (isinstance(r, dict) and "out" in r):
+                return r
 
     def run(self, code, mode="sage", timeout=60.0, isolated=False, data=False):
         """Run code ("sage" syntax or plain "python"); a dict with stdout,
