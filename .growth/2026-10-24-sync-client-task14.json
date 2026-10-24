@@ -1,0 +1,1 @@
+{"v":1,"reason":"task #14 (#128): each op's sync state (the ledger, syncState, waitSync, the verbs' collectors) in the CLI bundle's workspace code; size-gate's figure on ef1655aa","bytes":{"cli/pyjs.cjs":18876}}
