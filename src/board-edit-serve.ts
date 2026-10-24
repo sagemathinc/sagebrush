@@ -229,6 +229,8 @@ export async function startEdit(path: string, limits: Limits, deps: { mergeStrin
   const { dirname, join } = await import("path");
   const { randomBytes } = await import("crypto");
   const { recoverAtStart } = await import("./board-edit-write");
+  // (a symlink's target is what is written, §5.4)
+  try { path = fs.realpathSync(path); } catch { return { why: "no such file" }; }
   try { fs.accessSync(path, fs.constants.W_OK); fs.accessSync(dirname(path), fs.constants.W_OK); } catch { return { why: "FILE (or its directory) isn't writable" }; }
   const probe = join(dirname(path), `.sagebrush-probe-${randomBytes(6).toString("hex")}`);
   try {

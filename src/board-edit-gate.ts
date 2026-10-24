@@ -12,13 +12,18 @@ export class TokenBucket {
   private tokens: number;
   private at: number;
   constructor(readonly rate: number, private now: () => number) { this.tokens = rate; this.at = now(); }
-  /** Take one, if there is one; else how many ms until there is. */
-  take(): { ok: true } | { ok: false; retryMs: number } {
+  /** Whether one could be taken now; else how many ms until one could. */
+  peek(): { ok: true } | { ok: false; retryMs: number } {
     const t = this.now();
     this.tokens = Math.min(this.rate, this.tokens + ((t - this.at) * this.rate) / 1000);
     this.at = t;
-    if (this.tokens >= 1) { this.tokens -= 1; return { ok: true }; }
-    return { ok: false, retryMs: Math.ceil(((1 - this.tokens) * 1000) / this.rate) };
+    return this.tokens >= 1 ? { ok: true } : { ok: false, retryMs: Math.ceil(((1 - this.tokens) * 1000) / this.rate) };
+  }
+  /** Take one, if there is one; else how many ms until there is. */
+  take(): { ok: true } | { ok: false; retryMs: number } {
+    const p = this.peek();
+    if (p.ok) this.tokens -= 1;
+    return p;
   }
 }
 
@@ -45,11 +50,12 @@ export class Gate {
     if (!bucket) { bucket = new TokenBucket(this.limits.TAB_RATE, this.now); this.tabs.set(tab, bucket); }
     const bytes = length ?? this.limits.BODY_MAX;
     if (this.queued + 1 > this.limits.QUEUE_MAX || this.queuedBytes + bytes > this.limits.QUEUE_BYTES) return { ok: false, busy: "queue", retryMs: 1000 };
-    // (the rates last: a request refused for another reason doesn't use a token)
-    const g = this.global.take();
+    // (the rates last, both checked before either is taken: a request refused doesn't use a token)
+    const g = this.global.peek(), t = bucket.peek();
     if (!g.ok) return { ok: false, busy: "rate", retryMs: g.retryMs };
-    const t = bucket.take();
     if (!t.ok) return { ok: false, busy: "rate", retryMs: t.retryMs };
+    this.global.take();
+    bucket.take();
     this.inFlight.add(tab);
     this.queued++;
     this.queuedBytes += bytes;
