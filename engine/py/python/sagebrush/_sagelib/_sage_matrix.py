@@ -70,6 +70,26 @@ class Vector(list):
         # (read boundedly: a Vector is built from any iterable)
         list.__init__(self, _bounded_list(entries))
 
+    def __eq__(self, o):
+        """Equality through coercion, as Sage (_sage_ffmat._coerced_eq): a
+        vector of another ring in the common parent; a scalar only when it
+        is an integral zero and the vector is zero.
+
+        EXAMPLES::
+
+            sage: v = vector(ZZ, [0, 0]); v == 0, 0 == v, v != 0, v == QQ(0), vector([1, 0]) == 1
+            (True, True, False, False, False)
+        """
+        import _sage_ffmat
+        r = _sage_ffmat._coerced_eq(self, o)
+        return list.__eq__(self, o) if r is NotImplemented else r
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
+
+    __hash__ = list.__hash__
+
     def __getitem__(self, i):
         x = list.__getitem__(self, i)
         if isinstance(i, slice):
@@ -677,8 +697,30 @@ class MatrixSpace_:
             [1 0 0]
             [0 1 0]
             [0 0 1]
+            sage: MatrixSpace(ZZ, 2, 3).identity_matrix()
+            Traceback (most recent call last):
+            ...
+            TypeError: identity matrix must be square
         """
+        if self._nrows != self._ncols:
+            raise TypeError("identity matrix must be square")
         return identity_matrix(self._base, self._nrows)
+
+    def one(self):
+        """The identity matrix, immutable (a square space's one).
+
+        EXAMPLES::
+
+            sage: MS = MatrixSpace(ZZ, 2); MS.one(), MS.one().is_mutable(), MS.one() == 1
+            (
+            [1 0]
+            [0 1], False, True
+            )
+        """
+        m = self.identity_matrix()
+        if hasattr(m, "set_immutable"):  # (GF(p) matrices have none yet)
+            m.set_immutable()
+        return m
 
 
 class _MatrixBasis:
@@ -1129,7 +1171,23 @@ class Matrix:
         return _norm(x)
 
     def __eq__(self, other):
-        return isinstance(other, Matrix) and other._rows == self._rows
+        """Equality through coercion, as Sage: the images in the common
+        parent of the two (MatrixSpace over the pushout of the base rings,
+        where a scalar c is c times the identity of a square matrix; a
+        non-square one equals only an integral zero), unequal where there
+        is none (_sage_ffmat._coerced_eq).
+
+        EXAMPLES::
+
+            sage: a = matrix(QQ, 1, [1]); a == 1, 1 == a, a != 1, a == 1/2
+            (True, True, False, False)
+            sage: matrix(ZZ, [[2, 0], [0, 2]]) == GF(3)(2), matrix(ZZ, 2, 3) == 0, matrix(ZZ, 2, 3) == QQ(0)
+            (True, True, False)
+            sage: matrix(ZZ, [[4]]) == matrix(GF(3), [[1]]), matrix(QQ, [[1/2]]) == matrix(GF(3), [[2]])
+            (True, False)
+        """
+        import _sage_ffmat
+        return _sage_ffmat._coerced_eq(self, other)
 
     def set_immutable(self):
         """Make the matrix immutable (then it is hashable).
@@ -1166,7 +1224,10 @@ class Matrix:
         # systematic review's API-F4)
         if not getattr(self, "_immutable", False):
             raise TypeError("mutable matrices are unhashable")
-        return hash(tuple(tuple(r) for r in self._rows))
+        # (a zero matrix hashes as 0 and c times the identity as c, which
+        # they equal, as in Sage; one pass, no copy: _matrix_hash)
+        import _sage_ffmat
+        return _sage_ffmat._matrix_hash(self._rows, self.ncols())
 
     def __repr__(self):
         if self.nrows() > 19 or self.ncols() > 49:
