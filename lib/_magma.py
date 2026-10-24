@@ -7597,7 +7597,7 @@ def RootsInSplittingField(*args):
     against Magma 2.18): ordered by their discrete logs to L's generator,
     0 first; a constant has none (and L = K).  By the shared core, under
     one budget of _ffsub.WORK: f's factorization (its work charged first),
-    then L of at most EMBED_MAX elements (ff.embed_max, 2^20 by default;
+    then L of at most EMBED_MAX elements (ff.embed_max, unlimited by default;
     checked on the degrees), then the
     roots' whole work reserved before L is made or any root found; past
     any of these, refused in words."""
@@ -8452,8 +8452,8 @@ def _ffwrap(K):
 
 def _ff_refuse(what, A, B, where, pos=None):
     """The refusal (a function making it) for subfield work past F1's
-    bounds: fields of more than EMBED_MAX (2^20) elements, or the work."""
-    return lambda: MagmaError("%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most %s elements, within a bounded amount of work)" % (what, _ff_desc(A), _ff_desc(B), _ffsub.embed_max_text()), where, where != "'!'", pos)
+    bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work."""
+    return lambda: MagmaError("%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most %s elements%s)" % (what, _ff_desc(A), _ff_desc(B), _ffsub.embed_max_text(), _ffsub.work_clause()), where, where != "'!'", pos)
 
 
 def _ff_desc(W):
