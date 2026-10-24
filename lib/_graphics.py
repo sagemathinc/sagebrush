@@ -1107,6 +1107,13 @@ class Panel:
     legend_loc, aspect_ratio (1 for equal scales), frame (a box with ticks,
     matplotlib style) or Sage's axes crossing at the origin, axes (False:
     none), xticks/yticks (positions), xticklabels/yticklabels, margins.
+
+    Colors (CSS; each absent one is the page's text color, so the plot
+    follows a light or dark theme): facecolor (the plot area's background),
+    edgecolor and frame_width (the frame), grid_color, grid_dash (an SVG
+    dasharray), grid_width, grid_alpha, grid_above (the grid over the
+    data), xtick_color/ytick_color (ticks and their labels), label_color
+    (axis labels), title_color.
     """
 
     def __init__(self, primitives=None, **options):
@@ -1291,6 +1298,10 @@ class Panel:
         cid = "sbclip%d" % _next_id()
         out.append('<clipPath id="%s"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>' % (
             cid, _fmt(P.left - 4), _fmt(P.top - 4), _fmt(pw + 8), _fmt(ph + 8)))
+        if o.get("facecolor") not in (None, "none"):
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s" stroke="none"/>' % (
+                _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph), _esc(o["facecolor"])))
+        grid = ""
         if o.get("grid"):
             g = []
             for v, _ in xt:
@@ -1301,22 +1312,33 @@ class Panel:
                 p = P.map(xlo, v, clamp=False)
                 if p:
                     g.append("M%s %sH%s" % (_fmt(P.left), _fmt(p[1]), _fmt(P.left + pw)))
-            out.append('<path d="%s" stroke="currentColor" stroke-opacity="0.15" stroke-width="1"/>' % "".join(g))
+            if any(o.get(k) is not None for k in ("grid_color", "grid_dash", "grid_width", "grid_alpha")):
+                grid = '<path d="%s" fill="none" stroke="%s"%s stroke-width="%s"%s/>' % (
+                    "".join(g), _esc(o.get("grid_color") or "currentColor"),
+                    ' stroke-opacity="%s"' % _fmt(o["grid_alpha"]) if o.get("grid_alpha") is not None else
+                    ("" if o.get("grid_color") else ' stroke-opacity="0.15"'),
+                    _fmt(o.get("grid_width", 1)), ' stroke-dasharray="%s"' % _esc(o["grid_dash"]) if o.get("grid_dash") else "")
+            else:
+                grid = '<path d="%s" stroke="currentColor" stroke-opacity="0.15" stroke-width="1"/>' % "".join(g)
+            if not o.get("grid_above"):
+                out.append(grid)
         if show_axes:
             out.append(self._axes_svg(P, xt, yt, frame))
         out.append('<g clip-path="url(#%s)">' % cid)
         for p in self.primitives:
             out.append(p.svg(P))
         out.append("</g>")
+        if grid and o.get("grid_above"):
+            out.append(grid)
         if show_axes and frame and any(isinstance(p, Patches) for p in self.primitives):
             # filled regions reach the frame: draw it again on top
-            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="currentColor" stroke-width="0.8"/>' % (
-                _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph)))
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="%s" stroke-width="%s"/>' % (
+                _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph), _esc(o.get("edgecolor") or "currentColor"), _fmt(o.get("frame_width", 0.8))))
         if show_axes and (xlabel or ylabel):
             if xlabel:
                 has_xt = bool(xt)
-                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s">%s</text>' % (
-                    _fmt(P.left + pw / 2), _fmt(P.top + ph + (ts * 1.75 if has_xt else 4) + ls * 1.0), _fmt(ls), rich(xlabel, ls)))
+                out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+                    _fmt(P.left + pw / 2), _fmt(P.top + ph + (ts * 1.75 if has_xt else 4) + ls * 1.0), _fmt(ls), _fill(o.get("label_color")), rich(xlabel, ls)))
             if ylabel:
                 lwr = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
                 pad = float(o.get("ylabel_pad", 0))
@@ -1326,13 +1348,14 @@ class Panel:
                 else:
                     cx, rot = P.left - lwr - ls * 0.55 - pad, -90
                 cy = P.top + ph / 2
-                out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)">%s</text>' % (
-                    _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), rich(ylabel, ls)))
+                out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="%s" transform="rotate(%s %s %s)"%s>%s</text>' % (
+                    _fmt(cx), _fmt(cy), _fmt(ls), rot, _fmt(cx), _fmt(cy), _fill(o.get("label_color")), rich(ylabel, ls)))
         if title:
             ty = P.top - max(8, tts * 0.6 + 4)
-            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
+            out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s%s>%s</text>' % (
                 _fmt(P.left + pw / 2), _fmt(ty - sub_h), _fmt(tts),
-                ' font-weight="%s"' % _esc(o.get("title_weight", "600")) if o.get("title_weight", "600") != "normal" else "", rich(title, tts)))
+                ' font-weight="%s"' % _esc(o.get("title_weight", "600")) if o.get("title_weight", "600") != "normal" else "",
+                _fill(o.get("title_color")), rich(title, tts)))
             if sub:
                 out.append('<text x="%s" y="%s" text-anchor="middle" font-size="%s"%s>%s</text>' % (
                     _fmt(P.left + pw / 2), _fmt(ty), _fmt(tts), ' font-weight="bold"' if sub[1] == "bold" else "", rich(sub[0], tts)))
@@ -1345,9 +1368,10 @@ class Panel:
         tick = []
         ts = float(self.options.get("tick_size", 10.5))
         right_y = self.options.get("yaxis_side") == "right"
+        o = self.options
         if frame:
-            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="currentColor" stroke-width="0.8"/>' % (
-                _fmt(P.left), _fmt(P.top), _fmt(P.w), _fmt(P.h)))
+            out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="none" stroke="%s" stroke-width="%s"/>' % (
+                _fmt(P.left), _fmt(P.top), _fmt(P.w), _fmt(P.h), _esc(o.get("edgecolor") or "currentColor"), _fmt(o.get("frame_width", 0.8))))
             ax_y, ax_x = P.top + P.h, P.left
             skip_x = skip_y = None
         else:
@@ -1360,7 +1384,7 @@ class Panel:
                 _fmt(P.left), _fmt(ax_y), _fmt(P.left + P.w), _fmt(ax_x), _fmt(P.top), _fmt(P.top + P.h)))
             skip_x = xv if (P.ylo < 0 < P.yhi and xv == 0.0) else None
             skip_y = yv if (P.xlo < 0 < P.xhi and yv == 0.0) else None
-        labels = []
+        labels, ylabels, ytick = [], [], []
         for v, s in xt:
             p = P.map(v, P.ylo, clamp=False)
             if p is None:
@@ -1375,16 +1399,23 @@ class Panel:
             if p is None:
                 continue
             if right_y:
-                tick.append("M%s %sh4" % (_fmt(P.left + P.w), _fmt(p[1])))
-                labels.append('<text x="%s" y="%s" text-anchor="start" dominant-baseline="middle">%s</text>' % (_fmt(P.left + P.w + 6), _fmt(p[1]), s))
+                ytick.append("M%s %sh4" % (_fmt(P.left + P.w), _fmt(p[1])))
+                ylabels.append('<text x="%s" y="%s" text-anchor="start" dominant-baseline="middle">%s</text>' % (_fmt(P.left + P.w + 6), _fmt(p[1]), s))
                 continue
-            tick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
+            ytick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
             if skip_y is not None and abs(v - skip_y) < 1e-12:
                 continue
             lx = (P.left if frame else min(max(ax_x, P.left), P.left + P.w)) - 6
-            labels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
-        out.append('<path d="%s" stroke="currentColor" stroke-width="0.8"/>' % "".join(tick))
-        out.append('<g font-size="%s">%s</g>' % (_fmt(ts), "".join(labels)))
+            ylabels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
+        xc, yc = o.get("xtick_color"), o.get("ytick_color")
+        if xc is None and yc is None:
+            # (both the page's text color: one path and one group, as always)
+            out.append('<path d="%s" stroke="currentColor" stroke-width="0.8"/>' % "".join(tick + ytick))
+            out.append('<g font-size="%s">%s</g>' % (_fmt(ts), "".join(labels + ylabels)))
+        else:
+            for c, tk, lb in ((xc, tick, labels), (yc, ytick, ylabels)):
+                out.append('<path d="%s" stroke="%s" stroke-width="0.8"/>' % ("".join(tk), _esc(c or "currentColor")))
+                out.append('<g font-size="%s"%s>%s</g>' % (_fmt(ts), _fill(c), "".join(lb)))
         return "".join(out)
 
     def _legend_svg(self, P):
@@ -1451,6 +1482,11 @@ class Panel:
         parts.append("x%s from %s to %s%s, y%s from %s to %s%s" % (
             xl, _short(xlo), _short(xhi), " log scale" if xlog else "", yl, _short(ylo), _short(yhi), " log scale" if ylog else ""))
         return "; ".join(parts)
+
+
+def _fill(c):
+    """a text's fill attribute for a color, or none for the page's"""
+    return ' fill="%s"' % _esc(c) if c else ""
 
 
 def _short(v):
