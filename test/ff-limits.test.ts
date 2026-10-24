@@ -101,3 +101,19 @@ test("ff.root_bits: at 64, an exponent of 64 bits is taken and one of 65 refused
   const m64 = run("magma", magma, { "ff.root_bits": 64 }).out;
   assert.ok(m64.startsWith("5 ") && m64.includes("Root of an exponent of more than 64 bits is not supported yet"), m64);
 });
+
+test("ff.embed_max bounds #92's splitting fields too: at the bit pre-check (EMBED_BITS) and at the exact size, with the same refusal (Magma and Sage)", () => {
+  // GF(2^9) = 512 elements: admitted at 512 (and by default), refused at
+  // 511; at 256 (EMBED_BITS 8) refused by the pre-check on 9 * 1 > 8
+  const m2 = 'P<x> := PolynomialRing(GF(2)); r, L := RootsInSplittingField(x^9 + x^4 + 1); print "ADMITTED", #r, #L;\n';
+  const magmaRefusal = "RootsInSplittingField of this polynomial is not supported yet (splitting field or work)";
+  boundary("magma", "ff.embed_max", 512, m2, "ADMITTED 9 512", magmaRefusal, true);
+  assert.ok(run("magma", m2, { "ff.embed_max": 256 }).out.includes(magmaRefusal));
+  // GF(3^6) = 729 elements: the pre-check passes (6 * 1 <= EMBED_BITS 9 at
+  // 728), the exact comparison decides: admitted at 729, refused at 728
+  boundary("magma", "ff.embed_max", 729, 'Q<y> := PolynomialRing(GF(3)); r, L := RootsInSplittingField(y^6 + y + 2); print "ADMITTED", #r, #L;\n', "ADMITTED 6 729", magmaRefusal, true);
+  const s2 = 'R.<x> = GF(2)[]\nL = (x^9 + x^4 + 1).splitting_field("c")\nprint("ADMITTED", L.order())\n';
+  const sageRefusal = "splitting_field of a polynomial of degree 9 over Finite Field of size 2 is not supported yet (splitting field or work)";
+  boundary("sage", "ff.embed_max", 512, s2, "ADMITTED 512", sageRefusal, true);
+  assert.ok(run("sage", s2, { "ff.embed_max": 256 }).out.includes(sageRefusal));
+});

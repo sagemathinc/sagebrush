@@ -4042,7 +4042,8 @@ class Polynomial_ff:
         (K itself when they are linear), and with map=True the embedding of
         K (Conway's: its generator to g^((q_L - 1)/(q_K - 1))), by the
         shared core: the factorization's work charged first, the field of at
-        most 2^20 elements checked on the degrees, its Conway search within
+        most EMBED_MAX elements (ff.embed_max, 2^20 by default) checked on
+        the degrees, its Conway search within
         the budget left (plan-finite-fields F3).
 
         EXAMPLES::
