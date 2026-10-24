@@ -4,9 +4,9 @@
   "bun": "1.4.4"
  },
  "sizes": {
-  "cli/lib.gen.js": 6936995,
+  "cli/lib.gen.js": 6938737,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 28068836,
+  "cli/pyjs.cjs": 28071277,
   "engine/lib/core.pre": 1738852,
   "engine/lib/core.src": 402678,
   "engine/lib/magma-more.src": 145159,
@@ -67,8 +67,8 @@
   "engine/lib/sage-more.src": 287233,
   "engine/lib/sage.pre": 12696996,
   "engine/lib/sage.src": 2659833,
-  "engine/lib/sci.pre": 1752877,
-  "engine/lib/sci.src": 308907,
+  "engine/lib/sci.pre": 1759055,
+  "engine/lib/sci.src": 310649,
   "engine/lib/tzdata": 257239,
   "engine/runner/index.html": 4275,
   "engine/sagebrush-analyze.js": 355585,
