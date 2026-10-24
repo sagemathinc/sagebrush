@@ -442,8 +442,11 @@ export function syncFrames(area: Uint32Array | null) {
 
 /** The engine call returned, raised or trapped: its frames' calls end. */
 export function endFrames(trapped: boolean) {
-  for (let i = engineCalls.length - 1; i >= 0; i--) engineCalls[i].call.end();
-  engineCalls = [];
+  // (the common case, an engine call that reported nothing, costs nothing)
+  if (engineCalls.length) {
+    for (let i = engineCalls.length - 1; i >= 0; i--) engineCalls[i].call.end();
+    engineCalls = [];
+  }
   lastEpoch = -1;
   if (trapped) newGeneration();
 }
