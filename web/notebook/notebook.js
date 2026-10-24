@@ -70,13 +70,24 @@ function svgValue(v, pre) {
   for (const m of rest.matchAll(/([\w-]*)\s*\(/g)) if (!SVG_FUNCS.has(m[1].toLowerCase())) return null;
   return v.replace(LOCAL_URL, (_, q, id) => `url(#${pre}${id})`);
 }
+// (the properties a style may set: how the picture's own shapes and text are painted, never where the picture
+// sits on the page, how big it is or what it stacks over (position, inset, z-index, width, margin, ...), so a
+// picture stays within its place in the output)
+const SVG_STYLE_PROPS = new Set(("fill fill-opacity fill-rule stroke stroke-width stroke-opacity stroke-dasharray stroke-dashoffset " +
+  "stroke-linecap stroke-linejoin stroke-miterlimit opacity color font font-family font-size font-style font-weight " +
+  "font-variant font-stretch text-anchor dominant-baseline alignment-baseline baseline-shift letter-spacing word-spacing " +
+  "text-decoration writing-mode transform transform-origin transform-box visibility clip-path clip-rule mask marker " +
+  "marker-start marker-mid marker-end stop-color stop-opacity flood-color flood-opacity lighting-color vector-effect " +
+  "shape-rendering text-rendering image-rendering color-interpolation paint-order animation-delay").split(" "));
+// (and no viewport unit in a value: a length relative to the page, not the picture)
+const VIEWPORT_UNIT = /\d(vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh)\b/i;
 function svgStyle(v, pre) {
   const out = [];
   for (const decl of v.split(";")) {
     const i = decl.indexOf(":");
     if (i < 0) continue;
     const p = decl.slice(0, i).trim().toLowerCase(), val = svgValue(decl.slice(i + 1), pre);
-    if (/^[a-z][a-z-]*$/.test(p) && !SVG_NO_PROPS.test(p) && val !== null) out.push(`${p}:${val.trim()}`);
+    if (SVG_STYLE_PROPS.has(p) && val !== null && !VIEWPORT_UNIT.test(val)) out.push(`${p}:${val.trim()}`);
   }
   return out.join(";");
 }
@@ -103,6 +114,7 @@ export function safeSvg(text, pixels = new PixelBudget(Infinity)) {
         if (/^(aria|data)-/i.test(n)) keep = value;
         else keep = n === "style" ? svgStyle(value, pre) : svgValue(value, pre);
         if (keep !== null && n === "id") keep = pre + keep;
+        if (keep !== null && !/^(aria|data)-/i.test(n) && VIEWPORT_UNIT.test(keep)) keep = null;
       }
       if (keep === null) el.removeAttributeNode(a);
       else if (keep !== value) a.value = keep;
@@ -389,7 +401,20 @@ export function createNotebook(root, opts = {}) {
       }
     }
   }
+  // (an output that can't be drawn, however malformed: said, with its text, the rest of the document drawn all the same)
   function appendDisplay(box, b) {
+    try {
+      drawDisplay(box, b);
+    } catch (e) {
+      const el = h("div", "html-out");
+      el.sbBundle = { ...b };
+      const plain = typeof b["text/plain"] === "string" ? b["text/plain"] : "";
+      el.textContent = `(this output couldn't be shown: ${String(e?.message ?? e).slice(0, 200)})` + (plain ? "\n" + plain : "");
+      el.style.whiteSpace = "pre-wrap";
+      box.appendChild(el);
+    }
+  }
+  function drawDisplay(box, b) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
