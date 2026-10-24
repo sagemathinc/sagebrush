@@ -52,13 +52,13 @@ _src = _Sources()
 def _set_sources(**kw):
     """Tests only: replace the sources (keyword names as in _Sources);
     _set_sources() restores the real ones."""
-    global _src, _poly_snap, _total_snap
+    global _src, _poly_snap, _total_snap, _cg_dirs
     _src = _Sources()
     for k, v in kw.items():
         if not hasattr(_Sources, k):
             raise TypeError("no source %r" % k)
         setattr(_src, k, v)
-    _poly_snap = _total_snap = None
+    _poly_snap = _total_snap = _cg_dirs = None
 
 
 def _read(path):
@@ -91,9 +91,18 @@ def _kib_field(text, name):
     return None
 
 
-def _cgroups():
-    """[(source, limit, used)] for this process's memory cgroup, v2 and its
-    ancestors, or v1; [] when it has none; None when it can't be read."""
+# (the directories of this process's memory cgroups, found once: a
+# process's cgroup doesn't change under it; their limits and usage are read
+# at each call)
+_cg_dirs = None
+
+
+def _cgroup_dirs():
+    """[("v2", source, dir) or ("v1", dirs)] from /proc/self/cgroup, or
+    None when it can't be read."""
+    global _cg_dirs
+    if _cg_dirs is not None:
+        return _cg_dirs
     text = _read("/proc/self/cgroup")
     if text is None:
         return None
@@ -103,30 +112,60 @@ def _cgroups():
         if len(parts) != 3:
             continue
         if parts[0] == "0" and parts[1] == "":
-            # v2: the group and each ancestor may set memory.max
             path = parts[2].strip().rstrip("/")
             seen = 0
             while True:
-                d = "/sys/fs/cgroup" + path
-                lim = _read(d + "/memory.max")
-                if lim is not None and lim.strip() != "max":
-                    n, used = _int(lim), _int(_read(d + "/memory.current") or "")
-                    if n is not None:
-                        out.append(("cgroup " + (path or "/"), n, used))
+                # (only the groups that have the controller's files: the
+                # others never will under a running process)
+                if _read("/sys/fs/cgroup" + path + "/memory.max") is not None:
+                    out.append(("v2", "cgroup " + (path or "/"), "/sys/fs/cgroup" + path))
                 if path == "" or seen > 64:
                     break
                 path = path.rsplit("/", 1)[0]
                 seen += 1
         elif "memory" in parts[1].split(","):
-            # v1: the controller's own hierarchy (in a container, mounted at
-            # its root)
-            for d in ("/sys/fs/cgroup/memory" + parts[2].strip().rstrip("/"), "/sys/fs/cgroup/memory"):
+            out.append(("v1", ("/sys/fs/cgroup/memory" + parts[2].strip().rstrip("/"), "/sys/fs/cgroup/memory")))
+    _cg_dirs = out
+    return out
+
+
+def _cgroups():
+    """[(source, limit, used)] for this process's memory cgroup, v2 and its
+    ancestors, or v1; [] when it has none; None when it can't be read."""
+    dirs = _cgroup_dirs()
+    if dirs is None:
+        return None
+    out = []
+    for kind, a, *b in dirs:
+        if kind == "v2":
+            lim = _read(b[0] + "/memory.max")
+            if lim is not None and lim.strip() != "max":
+                n, used = _int(lim), _int(_read(b[0] + "/memory.current") or "")
+                if n is not None:
+                    out.append((a, n, used))
+        else:
+            for d in a:
                 n = _int(_read(d + "/memory.limit_in_bytes") or "")
                 if n is not None:
                     if n < _NO_CEILING:
                         out.append(("cgroup v1", n, _int(_read(d + "/memory.usage_in_bytes") or "")))
                     break
     return out
+
+
+_resource_mod = 0  # (0: not tried yet; None: there is none)
+
+
+def _resource():
+    """The resource module, imported once (pyjs has none)."""
+    global _resource_mod
+    if _resource_mod == 0:
+        try:
+            import resource as r
+        except Exception:
+            r = None
+        _resource_mod = r
+    return _resource_mod
 
 
 def _rlimit(name):
@@ -137,7 +176,9 @@ def _rlimit(name):
             soft = _src.rlimits[name][0]
             inf = -1
         else:
-            import resource
+            resource = _resource()
+            if resource is None:
+                return False
             soft = resource.getrlimit(getattr(resource, name))[0]
             inf = resource.RLIM_INFINITY
     except Exception:
@@ -341,12 +382,14 @@ def capacity():
         else:
             for name, lim, used in groups:
                 add(name, lim, used)
-        status = _read("/proc/self/status")
+        status = None  # (read only when a limit is set)
         for r, field in (("RLIMIT_AS", "VmSize"), ("RLIMIT_DATA", "VmData")):
             v = _rlimit(r)
             if v is False:
                 unknown.append(r)
             elif v is not None:
+                if status is None:
+                    status = _read("/proc/self/status") or ""
                 used = _kib_field(status, field)
                 add(r, v, used)
         meminfo = _read("/proc/meminfo")
