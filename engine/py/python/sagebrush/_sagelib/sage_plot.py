@@ -879,6 +879,11 @@ def show(obj, **options):
         return obj.show(**options)
     if isinstance(obj, (Graphics, GraphicsArray)):
         return obj.show(**options) if isinstance(obj, Graphics) else obj.show()
+    import builtins
+    d = getattr(builtins, "__pyjs_display__", None)
+    if d is not None:
+        d(obj)  # (it prints the text form itself when the host cannot show it)
+        return None
     from _graphics import host_display
     if not host_display(obj):
         print(obj)
