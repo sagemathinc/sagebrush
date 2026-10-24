@@ -96,11 +96,13 @@ Both entry points load with `import`, and with `require()` from CommonJS
 The board package has versions of its own. `sagebrush-board/submission`
 checks what the `sagebrush` CLI's `board answers --apply` writes, so each
 version names the CLI it pairs with as an optional peer dependency: 0.2.x,
-0.3.x and 0.4.x pair with `sagebrush` 0.5.x. 0.3.0 adds `editState` and
+0.3.x and 0.4.0 pair with `sagebrush` 0.5.x, and 0.4.1 pairs with `sagebrush`
+0.6.x. 0.3.0 adds `editState` and
 `require()` from CommonJS; it is published with `sagebrush` 0.5.1. 0.4.0 adds
 `editState`'s `preview` (with `previewThrottled` and `sharedPreviewBudget`),
 typed refusals (`reason`, `what`, `limit`, `size`) and pictures by reference
-(`pictureAllowed`); it is published with `sagebrush` 0.5.2.
+(`pictureAllowed`); it is published with `sagebrush` 0.5.2. 0.4.1 changes only
+that pairing; it is published with `sagebrush` 0.6.0.
 
 ## Build and test
 
