@@ -32,40 +32,44 @@ const orphans = (t) => {
   return [...kinds.keys()].filter((p) => { const f = p.slice(0, p.lastIndexOf("/")) || "/"; return f !== "/" && f !== "/Trash" && kinds.get(f) !== "folder"; });
 };
 
-// ---- (LIMIT-D11-IMPL-1/2) IndexedDB's requests and the rows they return, counted at the browser's own API (not by the
-// replay's meter): each closure or validation transaction's, between the replay's "begin" and "end" of its reads
+// ---- (LIMIT-D11-IMPL-1/2/3) IndexedDB's requests (reads and writes) and the rows its reads return, counted at the
+// browser's own API (not by the replay's meter): every request of each closure or validation transaction, from its first
+// to its last (the transaction named as it begins)
 
-const probe = { on: false, tx: null, cur: null, txs: [] };
+const probe = { txs: [], by: new Map() };
 let probed = false;
+const WRITES = new Set(["put", "add", "delete", "clear"]);
 function probeIDB() {
   if (probed) return;
   probed = true;
-  for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) for (const k of ["get", "getAll", "getAllKeys", "getKey", "count", "openCursor", "openKeyCursor"]) {
+  for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) for (const k of ["get", "getAll", "getAllKeys", "getKey", "count", "openCursor", "openKeyCursor", "put", "add", "delete", "clear"]) {
     const f = P[k];
+    if (typeof f !== "function") continue;
     P[k] = function (...a) {
       const r = f.apply(this, a);
-      if (probe.on) {
-        probe.tx ??= r.transaction;
-        if (r.transaction === probe.tx) {
-          const cur = probe.cur;
-          cur.req++;
-          r.addEventListener("success", () => { const v = r.result; cur.rows += k === "get" ? (v === undefined ? 0 : 1) : Array.isArray(v) ? v.length : k.startsWith("open") && v ? 1 : 0; });
-        }
+      const cur = probe.by.get(r.transaction);
+      if (cur && WRITES.has(k)) cur.writes++;
+      else if (cur) {
+        cur.req++;
+        r.addEventListener("success", () => { const v = r.result; cur.rows += k === "get" ? (v === undefined ? 0 : 1) : Array.isArray(v) ? v.length : k.startsWith("open") && v ? 1 : 0; });
       }
       return r;
     };
   }
 }
-/** The probe on: each closure and validation transaction's reads, [{ phase, req, rows }] */
+/** The probe on: each closure and validation transaction's requests, [{ phase, req, rows, writes }] */
 function startProbe() {
   probeIDB();
   probe.txs = [];
-  W.REPLAY.reads = (at, phase) => {
-    if (at === "begin") { probe.cur = { phase, req: 0, rows: 0 }; probe.txs.push(probe.cur); probe.tx = null; probe.on = true; }
-    else probe.on = false;
+  probe.by = new Map();
+  W.REPLAY.reads = (at, phase, tx) => {
+    if (at !== "begin") return;
+    const cur = { phase, req: 0, rows: 0, writes: 0 };
+    probe.txs.push(cur);
+    probe.by.set(tx, cur);
   };
 }
-const stopProbe = () => { W.REPLAY.reads = null; probe.on = false; return probe.txs; };
+const stopProbe = () => { W.REPLAY.reads = null; probe.by = new Map(); return probe.txs; };
 const sum = (txs, k, phase = "close") => txs.filter((t) => t.phase === phase).reduce((a, t) => a + t[k], 0);
 
 // ---- the local workspace's own large move
@@ -363,18 +367,19 @@ async function replayRows(what, f, ranges, expect = {}) {
   });
   const snaps = [];
   W.configureD11({ ...SMALL, ...(expect.d11 ?? {}) });
-  let classes = null, crashed = 0, closure = null, nmaps = null;
+  let classes = null, crashed = 0, closure = null, validation = null, nmaps = null;
   if (expect.crashAtTransition) W.REPLAY.cut = (at) => { if (at === "sweep1to2" && !crashed++) throw new Error("crash before the transition (test)"); };
   if (expect.cut) W.REPLAY.cut = (at) => { if (at === expect.cut && !crashed++) throw new Error(`crash at ${at} (test)`); };
   if (expect.probe) startProbe();
   let txs = null;
   W.REPLAY.before = async (phase, m) => {
     if (m.closure) closure = m.closure;
+    if (m.validation) validation = m.validation;
     if (expect.hook) await expect.hook(phase, m, a);
     const rec = await a.w.rewriteState();
     if (rec?.published && nmaps === null) nmaps = rec.n;
     if (rec?.published && !classes) classes = Object.fromEntries((await raw(a.w.ws, "entries")).filter((e) => e.path.startsWith(W.MAPS)).map((e) => [e.from, !!e.direct]));
-    snaps.push({ phase, sweep: rec?.sweep ?? null, published: !!rec?.published, t: await tree(a.w), r1: await readAll(a.w, 1), r2: await readAll(a.w, 2), r1000: await readAll(a.w, 1000) });
+    snaps.push({ rid: m.rid, phase, sweep: rec?.sweep ?? null, published: !!rec?.published, t: await tree(a.w), r1: await readAll(a.w, 1), r2: await readAll(a.w, 2), r1000: await readAll(a.w, 1000) });
   };
   try {
     try {
@@ -410,11 +415,17 @@ async function replayRows(what, f, ranges, expect = {}) {
   }
   const bad = [...snaps.map((s) => [s.phase, s.sweep, orphans(s.t)]), ["end", null, orphans(fin)]].filter((x) => x[2].length);
   check(!bad.length, `${what}: at every page, every entry's folder a folder ${bad.length ? J(bad[0]) : ""}`);
-  const planned = snaps.filter((s) => s.published);
-  const after = snaps.find((s) => s.phase === "place")?.t ?? fin;
-  const pre = snaps.filter((s) => !s.published && s.phase !== "place");
-  check(pre.every((s) => J(s.t) === J(before)), `${what}: before the publication (${pre.length} pages) every reader sees the old tree`);
-  check(planned.length >= 2 && planned.every((s) => J(s.t) === J(after)), `${what}: from the publication, after every sweep page (${planned.length}: ${J(planned.map((s) => s.sweep))}), the logical tree is the planned one ${J(snaps.map((s) => [s.phase, s.sweep, s.published]))}`);
+  // (each logical move of the replay on its own (a move, then the debts its placement left, CORR-D11-R1-1): before its
+  // plan's publication, the tree it began with; from it, the tree it plans)
+  const rids = [...new Set(snaps.map((s) => s.rid))];
+  const cycles = rids.map((rid, c) => {
+    const ss = snaps.filter((s) => s.rid === rid), nextFirst = snaps.find((s) => s.rid === rids[c + 1]);
+    return { ss, before: c === 0 ? before : ss[0].t, after: ss.find((s) => s.phase === "place")?.t ?? nextFirst?.t ?? fin };
+  });
+  const pre = cycles.flatMap((x) => x.ss.filter((s) => !s.published && s.phase !== "place").map((s) => [s, x.before]));
+  check(pre.every(([s, b]) => J(s.t) === J(b)), `${what}: before each plan's publication (${pre.length} pages, ${cycles.length} logical moves) every reader sees the tree it began with`);
+  const planned = cycles.map((x) => ({ ...x, ps: x.ss.filter((s) => s.published) })).filter((x) => x.ps.length);
+  check(planned.length >= 1 && planned.every((x) => x.ps.length >= 2 && x.ps.every((s) => J(s.t) === J(x.after))), `${what}: from each publication, after every sweep page (${J(planned.map((x) => x.ps.map((s) => s.sweep)))}), the logical tree is the planned one ${J(snaps.map((s) => [s.phase, s.sweep, s.published]))}`);
   const listingsOk = snaps.every((s) => {
     const want = J(s.t.map((x) => JSON.parse(x).path).sort());
     return [s.r1, s.r2, s.r1000].every((r) => J(r.paths) === want && r.bad.length === 0);
@@ -427,7 +438,7 @@ async function replayRows(what, f, ranges, expect = {}) {
   check(logged.every((x) => !String(x.path).startsWith("\u0001") && !String(x.to ?? "").startsWith("\u0001")), `${what}: no op logged with a staging path (${logged.length} ops)`);
   const listed = (await metaOf(a.w, `sync:${a.ns}:listed`))?.paths ?? [];
   a.w.close(); o.w.close();
-  return { fin, want, closure, nmaps, byId, listed, txs };
+  return { fin, want, closure, validation, nmaps, byId, listed, txs, cycles: cycles.length };
 }
 const replayCase = (what, spec, ranges, expect = {}) => replayRows(what, folders(spec), ranges, expect);
 
@@ -548,7 +559,8 @@ async function replayFails(what, f, ranges, d11, re, opts = {}) {
   W.configureD11(SMALL);
   // (LIMIT-D11-IMPL-1: the failing plan's reads too, as IndexedDB served them, within every budget: no read past one made)
   const most = (k, ph) => Math.max(0, ...txs.filter((t) => t.phase === ph).map((t) => t[k]));
-  check(["close", "validate"].every((ph) => most("req", ph) <= cfg.requests && most("rows", ph) <= cfg.page) && sum(txs, "req") <= cfg.closureRequests && sum(txs, "rows") <= cfg.closureRows, `${what}: no transaction's reads past ${cfg.requests} requests or ${cfg.page} rows, the closure's past ${cfg.closureRequests} or ${cfg.closureRows} (${J({ txs: txs.length, most: [most("req", "close"), most("rows", "close")], all: [sum(txs, "req"), sum(txs, "rows")] })})`);
+  const sr = W.PLAN_STATE.requests, sw = cfg.large + cfg.small + 6;
+  check(["close", "validate"].every((ph) => most("req", ph) <= cfg.requests + sr && most("rows", ph) <= cfg.page + sw) && sum(txs, "req") <= cfg.closureRequests && sum(txs, "rows") <= cfg.closureRows, `${what}: no transaction's requests, from its first to its last, past ${cfg.requests} + ${sr} or its rows past ${cfg.page} + ${sw}; the closure's past ${cfg.closureRequests} or ${cfg.closureRows} (${J({ txs: txs.length, most: [most("req", "close"), most("rows", "close")], all: [sum(txs, "req"), sum(txs, "rows")] })})`);
   const m = await W.replayOf(a.w, a.ns), ctl = (await raw(a.w.ws, "entries")).filter((e) => e.path.startsWith(W.MAPS) || e.path.startsWith("\u0001q/"));
   check(err instanceof W.ReplayHalted && re.test(m?.failed ?? "") && ctl.length === 0 && !(await a.w.rewriteState())?.published && !W.SENDER_HOLD.has(a.ns) && J(await tree(a.w)) === J(before), `${what}: the stable failure before publication: said, the plan dropped, nothing visible, the sender released (${J({ err: err?.constructor?.name, failed: m?.failed?.slice(0, 70), ctl: ctl.length })})`);
   W.REPLAY.reload();
@@ -583,9 +595,12 @@ async function n8CapsNames() {
 function metered(what, r, cfg) {
   const close = r.txs.filter((t) => t.phase === "close"), val = r.txs.filter((t) => t.phase === "validate");
   const most = (ts, k) => Math.max(0, ...ts.map((t) => t[k]));
-  check(r.closure && sum(r.txs, "req") === r.closure.requests && sum(r.txs, "rows") === r.closure.rows && most(close, "req") === r.closure.txReq && most(close, "rows") === r.closure.txRows, `${what}: the closure's counters are the requests and rows IndexedDB served it (${J({ ledger: r.closure, idb: { req: sum(r.txs, "req"), rows: sum(r.txs, "rows"), txs: close.length, most: [most(close, "req"), most(close, "rows")] } })})`);
-  check([close, val].every((ts) => most(ts, "req") <= cfg.requests && most(ts, "rows") <= cfg.page) && val.length > 0, `${what}: every closure and validation transaction within ${cfg.requests} requests and ${cfg.page} rows (${J({ close: [close.length, most(close, "req"), most(close, "rows")], validate: [val.length, most(val, "req"), most(val, "rows")] })})`);
-  return { txs: close.length, txReq: most(close, "req"), txRows: most(close, "rows"), waits: r.closure?.waits ?? 0 };
+  const st = { requests: W.PLAN_STATE.requests, rows: cfg.large + cfg.small + 6, writes: cfg.large + cfg.small + 4 };
+  const ledger = (L, ts) => L && sum(ts, "req", ts[0]?.phase) === L.requests && sum(ts, "rows", ts[0]?.phase) === L.rows && sum(ts, "writes", ts[0]?.phase) === L.writes && ts.length === L.txs && most(ts, "req") === L.allTxReq && most(ts, "rows") === L.allTxRows;
+  check(ledger(r.closure, close) && ledger(r.validation, val), `${what}: the closure's and validation's counters are every request, row and write IndexedDB served their transactions, from the first to the last (${J({ ledger: [r.closure, r.validation], idb: [[close.length, sum(close, "req"), sum(close, "rows"), sum(close, "writes"), most(close, "req"), most(close, "rows")], [val.length, sum(val, "req", "validate"), sum(val, "rows", "validate"), sum(val, "writes", "validate"), most(val, "req"), most(val, "rows")]] })})`);
+  const within = (ts, L) => L.txReq <= cfg.requests && L.txRows <= cfg.page && ts.every((t) => t.req <= cfg.requests + st.requests && t.rows <= cfg.page + st.rows && t.writes <= st.writes);
+  check(val.length > 0 && within(close, r.closure) && within(val, r.validation), `${what}: every closure and validation transaction's work within ${cfg.requests} requests and ${cfg.page} rows, and all of it within that and its state's (${st.requests} requests, ${st.rows} rows; ${st.writes} writes) (${J({ close: [close.length, r.closure.txReq, r.closure.txRows, most(close, "req"), most(close, "rows"), most(close, "writes")], validate: [val.length, r.validation.txReq, r.validation.txRows, most(val, "req"), most(val, "rows"), most(val, "writes")] })})`);
+  return { txs: close.length, txReq: r.closure.txReq, txRows: r.closure.txRows, waits: r.closure?.waits ?? 0 };
 }
 /** One transaction's budget: measured with one item a transaction, then each at exactly the largest transaction's
  * use (succeeds) and one under it (that item's next read isn't admitted: the stable failure, nothing past it read),
@@ -696,6 +711,14 @@ async function astraNestedSettled() {
   // (a settled top inside a settled top's view: each one's rows carried with it)
   const f = outerInner("/U/F", [["X", "/T/F", null, "folder"], ["J", "/T/L/F/H", "/U/F/G", "folder", 15], ["Y", "/T/F/G", null, "file"]]);
   await bothOrders("CORR-1: nested settled tops", f, ["/U"], ["/U/F", "/U"]);
+}
+async function astraConfirmedParent() {
+  // (CORR-D11-R1-1: A's view under a folder this device hasn't yet (P, confirmed only): not no-folder; A's lift is left
+  // to placement, which makes /dest, and replayed as a debt once /dest is there, as in one transaction)
+  const f = rows8([["P", null, "/dest", "folder"], ["A", "/a", "/dest/a", "folder", 15]]);
+  const r = await bothOrders("CORR-D11-R1-1: a confirmed-only folder for a large move's view", f, ["/dest"], ["/dest/a", "/dest"]);
+  check(pathOf(r, f.ids.A) === "/dest/a" && pathOf(r, f.ids.P) === "/dest" && r.cycles >= 2, `…A at /dest/a after its debt's replay (${J({ A: pathOf(r, f.ids.A), P: pathOf(r, f.ids.P), cycles: r.cycles })})`);
+  for (const at of ["pass", "place", "close", "close-settled", "validate", "publish", "sweep1", "sweep1to2"]) await replayRows(`CORR-D11-R1-1: a crash at ${at}`, f, ["/dest"], { cut: at });
 }
 async function astraParentFile() {
   // (X a file: I beside it, and J's view (/U/F/G) under what is then the file X: J stays where I carries it
@@ -1416,7 +1439,7 @@ export async function run(only = "") {
   W.configureD11(SMALL);
   // (WIDE=case:<name>,<name>: those cases alone)
   const pick = String(only).startsWith("case:") ? String(only).slice(5).split(",") : null;
-  for (const t of [astraIndependent, astraNestedSettled, astraParentFile, n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Meter, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
+  for (const t of [astraIndependent, astraNestedSettled, astraParentFile, astraConfirmedParent, n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Meter, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
     if (pick && !pick.includes(t.name)) continue;
     // (each case at most 2 minutes: one that hangs is named, and the rest go on)
     let timer;
