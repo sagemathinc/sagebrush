@@ -514,11 +514,16 @@ def _trim(c, n):
 
 
 def _zmod_ideal_eq(gc, hc, n, budget=None, ring=None):
-    """(g) == (h) in Zmod(n)[t], g and h by their coefficients as stored:
-    canonical, each in [0, n) (an int, or an element whose int() is one),
-    the last nonzero, as Polynomial_ff keeps them and step 4 makes them, so
-    no copy or reduction is needed to compare them.  Decided exactly where
-    its work is admitted first; else NotImplementedError.
+    """(g) == (h) in Zmod(n)[t], g and h by their coefficients as stored.
+
+    Precondition: the coefficients are canonical, each in [0, n) (an int, or
+    an element whose int() is one) with the last nonzero.  That is the
+    invariant of a Polynomial_ff's _c as the ring's supported constructors
+    and arithmetic maintain it (Polynomial_ff.__init__ itself only copies
+    and trims: it does not reduce raw coefficients), and step 4 keeps it
+    (x // d is in [0, n/d), the last nonzero).  So no copy or reduction is
+    needed to compare them.  Decided exactly where its work is admitted
+    first; else NotImplementedError.
 
     In order, each sound:
     1. equal, or opposite, coefficient lists: True;
@@ -548,20 +553,24 @@ def _zmod_ideal_eq(gc, hc, n, budget=None, ring=None):
         budget = [S.WORK]
     w, bits = S.mn(n, 1), n.bit_length()
     lg, lh = len(gc), len(hc)
-    # (1: a read and a comparison per pair, for equal and for opposite
-    # lists, then the integer lists: two operations per coefficient,
-    # admitted before any of them; nothing is allocated before the lists)
-    S.charge(budget, w * 2 * (lg + lh), refuse)
+    # (1: with equal lengths, the equal scan and the opposite scan read
+    # every coefficient once each at worst, and the integer lists read them
+    # a third time: 3 operations per coefficient, 1 for the lists alone
+    # with different lengths, all admitted before the first read; nothing
+    # is allocated before the lists)
+    S.charge(budget, w * (3 if lg == lh else 1) * (lg + lh), refuse)
     if lg == lh:
         if all(int(x) == int(y) for x, y in zip(gc, hc)):
             return True
         if all((int(x) + int(y)) % n == 0 for x, y in zip(gc, hc)):
             return True
     gc, hc = [int(x) for x in gc], [int(x) for x in hc]
-    # (2 and 3: per coefficient its gcd with n and the running content's
-    # gcd, two gcds; the first unit coefficient and whether the leading
-    # coefficients are units are kept for 5 and 6, which scan nothing)
-    S.charge(budget, w * bits * 2 * (lg + lh), refuse)
+    # (2 and 3: per coefficient of g its gcd with n and the running
+    # content's, per coefficient of h the content's, and the two leading
+    # coefficients' gcds with n: 2 lg + lh + 2 gcds (constants: 2); the
+    # first unit coefficient of g and the leading-unit flags are kept for 5
+    # and 6, which scan nothing)
+    S.charge(budget, w * bits * (2 * lg + lh + 2), refuse)
     if lg == 1 and lh == 1:
         return math.gcd(gc[0], n) == math.gcd(hc[0], n)
     cg, ch, unit_i = n, n, None
