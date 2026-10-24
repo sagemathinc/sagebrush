@@ -1826,6 +1826,14 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_sage_ffsub.py :: change :: charge(budget, 2 * k * wn, refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: change :: daybreak2 LIMIT-F3-1 and LIMIT-F4PLAN-2; the others by value); fail(x) for the first nonzero element #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
  "lib/_sage_ffsub.py :: cover :: if p ** L > EMBED_MAX: #0": {
   "class": "3",
   "owner": "finite fields",
