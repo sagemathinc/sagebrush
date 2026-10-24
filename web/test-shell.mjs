@@ -3,6 +3,9 @@
 // built from optional/bash by the publisher, web/shell/worker-boot.js with the
 // policy web/csp.ts writes for it, and a page that runs web/shell/loader.ts.
 //   bun web/test-shell.mjs        (CHROME=... for the browser)
+//   BROWSER=firefox|webkit PLAYWRIGHT=<playwright's index.mjs> bun web/test-shell.mjs
+//                                  (the other two engines of N3, through playwright: on a VM; N1's heap
+//                                  figures are Chromium's alone)
 // Checks:
 // - the shell starts from the set's pinned bytes, and every registered
 //   command (§8) runs under the worker's own policy: no eval needed (N3);
@@ -92,32 +95,53 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-// Chromium, one page, and a CDP evaluate()
+// The browser: Chromium through CDP (CI), or BROWSER=firefox|webkit through
+// playwright (PLAYWRIGHT=<its index.mjs>; the three engines of N3, run on a
+// VM).  evaluate() returns the value, or {error}.
+const ENGINE = process.env.BROWSER ?? "chromium";
 const profile = mkdtempSync(join(tmpdir(), "sb-test-shell-chrome-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--js-flags=--expose-gc", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-let ws;
+let chrome = null, ws = null, pwBrowser = null;
 try {
-  const port = await devtoolsPort(profile);
-  const target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === "page");
-  ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
-  let seq = 0;
-  const waiting = new Map();
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) (waiting.get(m.id)(m), waiting.delete(m.id));
-  };
-  const send = (method, params = {}) => new Promise((r) => {
-    const id = ++seq;
-    waiting.set(id, r);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-  const evaluate = async (expression) => {
-    const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (r.result?.exceptionDetails) return { error: r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text };
-    return r.result?.result?.value;
-  };
-  await send("Page.navigate", { url });
+  let evaluate, navigate, cdp = null;
+  if (ENGINE === "chromium") {
+    chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", "--js-flags=--expose-gc", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+    const port = await devtoolsPort(profile);
+    const target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === "page");
+    ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
+    let seq = 0;
+    const waiting = new Map();
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && waiting.has(m.id)) (waiting.get(m.id)(m), waiting.delete(m.id));
+    };
+    const send = (method, params = {}, sessionId) => new Promise((r) => {
+      const id = ++seq;
+      waiting.set(id, r);
+      ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    });
+    evaluate = async (expression) => {
+      const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+      if (r.result?.exceptionDetails) return { error: r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text };
+      return r.result?.result?.value;
+    };
+    navigate = (u) => send("Page.navigate", { url: u });
+    cdp = { ws, send };
+  } else {
+    const pw = await import(process.env.PLAYWRIGHT ?? "playwright");
+    pwBrowser = await (pw[ENGINE] ?? pw.default[ENGINE]).launch();
+    const page = await pwBrowser.newPage();
+    evaluate = async (expression) => {
+      try {
+        return await page.evaluate(expression);
+      } catch (e) {
+        return { error: String(e?.message ?? e) };
+      }
+    };
+    navigate = (u) => page.goto(u);
+  }
+  console.log(`info engine: ${ENGINE}`);
+  await navigate(url);
   for (let i = 0; i < 100 && (await evaluate("window.ready === true")) !== true; i++) await new Promise((r) => setTimeout(r, 100));
 
   // the shell, and every registered command under the worker's policy (N3)
@@ -190,37 +214,37 @@ try {
   ok(/not the one the index pins/.test(await refusal(S)), "a chunk that isn't the pinned bytes is refused");
   tamper = false;
 
-  // N1, per realm (A1.2): what the page keeps once the module is posted, and
-  // the shell worker's heap while it holds the module (its structured-clone
-  // copy, the Blob, the module's source and the shell), both after a GC
-  const workers = new Map(); // sessionId -> url
-  const onAttach = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") workers.set(m.params.sessionId, m.params.targetInfo.url);
-  };
-  ws.addEventListener("message", onAttach);
-  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-  const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
-  const before = await used();
-  await evaluate(`(async () => { window.sh2 = await startShell(${JSON.stringify(S)}, "/"); return (await sh2.exec("echo ok")).stdout; })()`);
-  const pageAfter = await used();
-  await new Promise((r) => setTimeout(r, 300));
-  const sid = [...workers].find(([, u]) => /worker-boot\.js$/.test(u))?.[0];
-  const sendTo = (method, params = {}) => new Promise((r) => {
-    const id = ++seq;
-    waiting.set(id, r);
-    ws.send(JSON.stringify({ id, method, params, sessionId: sid }));
-  });
-  if (sid) await sendTo("HeapProfiler.collectGarbage");
-  const wheap = sid ? (await sendTo("Runtime.getHeapUsage")).result : null;
-  const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
-  console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
-  ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
-  ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
-  await evaluate("sh2.terminate()");
+  // (N1 needs Chromium's heap figures: CDP and performance.memory)
+  if (cdp) {
+    // N1, per realm (A1.2): what the page keeps once the module is posted, and
+    // the shell worker's heap while it holds the module (its structured-clone
+    // copy, the Blob, the module's source and the shell), both after a GC
+    const workers = new Map(); // sessionId -> url
+    const onAttach = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") workers.set(m.params.sessionId, m.params.targetInfo.url);
+    };
+    cdp.ws.addEventListener("message", onAttach);
+    await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
+    const before = await used();
+    await evaluate(`(async () => { window.sh2 = await startShell(${JSON.stringify(S)}, "/"); return (await sh2.exec("echo ok")).stdout; })()`);
+    const pageAfter = await used();
+    await new Promise((r) => setTimeout(r, 300));
+    const sid = [...workers].find(([, u]) => /worker-boot\.js$/.test(u))?.[0];
+    const sendTo = (method, params = {}) => cdp.send(method, params, sid);
+    if (sid) await sendTo("HeapProfiler.collectGarbage");
+    const wheap = sid ? (await sendTo("Runtime.getHeapUsage")).result : null;
+    const moduleBytes = Buffer.byteLength(JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8")).modules["shell.js"]);
+    console.log(`info N1: module b = ${moduleBytes} bytes, 4b = ${4 * moduleBytes}; page keeps ${pageAfter - before} bytes after a GC; the shell worker's heap ${wheap?.usedSize} bytes (of ${wheap?.totalSize})`);
+    ok(pageAfter - before <= moduleBytes, "the page keeps less than b once the module is posted: its copies are released (N1, page realm)");
+    ok(wheap && wheap.usedSize > 0 && wheap.usedSize <= 4 * moduleBytes + 16 * 2 ** 20, "the shell worker's heap is within 4b plus the shell's live set (16 MiB measured allowance) (N1, worker realm)");
+    await evaluate("sh2.terminate()");
+  }
 } finally {
   try { ws?.close(); } catch {}
-  chrome.kill();
+  chrome?.kill();
+  await pwBrowser?.close().catch(() => {});
   server.close();
   rmSync(profile, { recursive: true, force: true });
   rmSync(dir, { recursive: true, force: true });
