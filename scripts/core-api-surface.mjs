@@ -16,7 +16,9 @@
 // change (needs CORE_API's major bump or a reviewed core-api-changes.json
 // entry).  A compatible expansion, one that keeps every existing call valid
 // with its meaning (widenParams below), is recorded by --update with the new
-// parameters at level + 1.  The work is one CLI run
+// parameters at level + 1 (and a default given to a recorded parameter: its
+// default_since, which keeps the shorter call in the contract, and makes
+// removing that default later an incompatible change).  The work is one CLI run
 // and one diff, however many package sets exist: no package metadata is read.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -166,11 +168,18 @@ function generate() {
 //   - *args may be added, never removed;
 //   - recorded keyword-only parameters stay keyword-only, with a default kept
 //     where it existed; new ones need a default; their order doesn't matter;
-//   - **kwargs may be added, never removed.
+//   - **kwargs may be added, never removed;
+//   - and if there was a **kwargs, no new name a keyword can address: no new
+//     positional-or-keyword or keyword-only parameter (f(a, **kw) ->
+//     f(a, b=None, **kw) moves b out of kw in the old call f(1, b=2)).  A new
+//     positional-only one is fine: a keyword b still goes to kw.
 // So show(obj, **o) -> show(obj, *more, **o) is compatible; -> show(*objs, **o)
 // is not (show(obj=x) would bind x into **o).  Returns the generated
 // parameters, each with the recorded `since` where it existed and `newLevel`
-// where it's new, and the problems found.
+// where it's new; `added`, true if anything new must be recorded: a new
+// parameter, or a default given to a recorded one (the new shorter call: that
+// parameter keeps its `since` and gets `default_since` = newLevel); and the
+// problems found.
 export function widenParams(where, rp, gp, newLevel) {
   const problems = [];
   const isPos = (p) => p.kind === "pos" || p.kind === "posonly";
@@ -205,20 +214,36 @@ export function widenParams(where, rp, gp, newLevel) {
   if (rVarKw) {
     if (!gVarKw) problems.push(`${where}: **${rVarKw.name} removed (an incompatible signature change)`);
     else since.set(gVarKw, rVarKw.since);
+    for (const p of [...newPos, ...gKw]) {
+      if (since.has(p) || p.kind === "posonly") continue;
+      problems.push(`${where}: new parameter ${p.name} can be passed by keyword, which **${rVarKw.name} receives now (an existing call would rebind: incompatible)`);
+    }
   }
   if (problems.length) return { params: rp, problems, added: false };
+  // (the recorded parameter of each kept one, for its default)
+  const recordedOf = new Map();
+  for (let i = 0; i < rPos.length; i++) recordedOf.set(gPos[i], rPos[i]);
+  for (const a of rKw) recordedOf.set(gKw.find((p) => p.name === a.name), a);
   let added = false;
   const params = gp.map((p) => {
-    if (since.has(p)) return { ...p, since: since.get(p) };
-    added = true;
-    return { ...p, since: newLevel };
+    if (!since.has(p)) {
+      added = true;
+      return { ...p, since: newLevel };
+    }
+    const r = recordedOf.get(p), q = { ...p, since: since.get(p) };
+    if (r?.default_since !== undefined) q.default_since = r.default_since;
+    else if (r && p.default && !r.default) {
+      added = true;
+      q.default_since = newLevel;
+    }
+    return q;
   });
   return { params, problems, added };
 }
 
 // Merge the generated surface into the recorded one: new names, members and
 // parameters get `since = level` (the new level); returns {api, problems}
-function merge(recorded, gen, newLevel) {
+export function merge(recorded, gen, newLevel) {
   const problems = [];
   const out = { format: "sagebrush-core-api", api: recorded?.api ?? 1, level: newLevel, prefixes: gen.prefixes, modules: {} };
   let added = 0;
@@ -293,7 +318,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
     const { problems, added } = merge(recorded, gen, recorded.level + 1);
     const errs = [...problems];
-    if (added) errs.push(`${added} addition(s) to the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
+    if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
     if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
     if (readFileSync(FILE, "utf8").length > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");
     if (errs.length) {

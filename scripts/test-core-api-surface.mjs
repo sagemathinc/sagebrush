@@ -2,7 +2,7 @@
 // is compatible exactly when every recorded call stays valid with the same binding.
 //   node scripts/test-core-api-surface.mjs
 
-import { widenParams } from "./core-api-surface.mjs";
+import { merge, widenParams } from "./core-api-surface.mjs";
 
 let failures = 0;
 let passed = 0;
@@ -72,6 +72,58 @@ incompatible("**kwargs removed", ["a", "**kw"], ["a"]);
 incompatible("a new required keyword-only parameter", ["a", "*r"], ["a", "*r", "k:"]);
 incompatible("a keyword-only default removed", ["a", "*r", "k:="], ["a", "*r", "k:"]);
 incompatible("a keyword-only parameter removed", ["a", "*r", "k:="], ["a", "*r"]);
+
+// a recorded **kwargs already receives every keyword, so a new name a keyword
+// can address would take it over: f(1, b=2) moves b out of kw
+incompatible("f(a, **kw) -> f(a, b=None, **kw)", ["a", "**kw"], ["a", "b=", "**kw"]);
+incompatible("f(a, **kw) -> f(a, *, b=None, **kw)", ["a", "**kw"], ["a", "b:=", "**kw"]);
+incompatible("f(a, *r, **kw) -> f(a, *r, k=None, **kw)", ["a", "*r", "**kw"], ["a", "*r", "k:=", "**kw"]);
+incompatible("f(a, **kw) -> f(a, *more, b=None, **kw)", ["a", "**kw"], ["a", "*more", "b:=", "**kw"]);
+compatible("f(a, /, **kw) -> f(a, b=None, /, **kw): positional-only, a keyword b still goes to kw", ["/a", "**kw"], ["/a", "/b=", "**kw"], "b");
+compatible("a new keyword-only parameter with no recorded **kwargs, adding **kwargs too", ["a"], ["a", "k:=", "**kw"], "k,kw");
+compatible("a recorded keyword-only parameter next to **kwargs", ["a", "*r", "k:=", "**kw"], ["a", "*r", "k:=", "**kw"]);
+compatible("a default for a recorded parameter next to **kwargs", ["a", "b", "**kw"], ["a", "b=", "**kw"]);
+{
+  const w = widen(["a", "**kw"], ["a", "b=", "**kw"]);
+  check("the **kwargs rebinding problem names the parameter", w.problems.some((p) => p.includes("new parameter b") && p.includes("**kw")), w.problems.join("; "));
+}
+
+// a default given to a recorded parameter is a widening that must be recorded:
+// the shorter call enters the contract, and removing the default later fails
+{
+  const w = widen(["a", "b"], ["a", "b="]);
+  check("default added: added", w.added === true);
+  check("default added: since kept, default_since = newLevel", w.params[1].since === 1 && w.params[1].default_since === 2 && w.params[0].default_since === undefined, JSON.stringify(w.params));
+}
+function surface(params, level) {
+  return { format: "sagebrush-core-api", api: 1, level, prefixes: [], modules: { m: { since: 1, names: { f: { kind: "function", since: 1, params } } } } };
+}
+const generated = (spec) => ({ prefixes: [], modules: { m: { names: { f: { kind: "function", params: strip(sig(spec)) } } } } });
+function lifecycle(name, from, to, back, index) {
+  const recorded = surface(sig(from), 3);
+  // --check: merge at level + 1 must report something to record
+  const c = merge(recorded, generated(to), 4);
+  check(`${name}: --check asks for --update`, c.problems.length === 0 && c.added > 0, `added ${c.added}; ${c.problems.join("; ")}`);
+  // --update: what it writes, read back
+  const written = JSON.parse(JSON.stringify(c.api));
+  const p = written.modules.m.names.f.params[index];
+  check(`${name}: --update persists the default`, p.default === true && p.since === 1 && p.default_since === 4, JSON.stringify(p));
+  const again = merge(written, generated(to), 5);
+  check(`${name}: then --check is clean`, again.problems.length === 0 && again.added === 0, `added ${again.added}; ${again.problems.join("; ")}`);
+  const removed = merge(written, generated(back), 5);
+  check(`${name}: removing the default later fails`, removed.problems.length > 0, "accepted");
+  // a later widening keeps default_since
+  const later = merge(written, generated([...to, "**more_kw"]), 5);
+  const lp = later.api.modules.m.names.f.params;
+  check(`${name}: a later widening keeps since and default_since`, later.problems.length === 0 && lp[index].since === 1 && lp[index].default_since === 4 && lp.at(-1).since === 5, JSON.stringify(lp));
+}
+lifecycle("positional default", ["a"], ["a="], ["a"], 0);
+lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "*r", "k:"], 2);
+{
+  const recorded = surface(sig(["a="]), 3);
+  const c = merge(recorded, generated(["a="]), 4);
+  check("an unchanged surface records nothing", c.problems.length === 0 && c.added === 0, `added ${c.added}`);
+}
 
 // recorded `since` values survive a widening
 {
