@@ -122,5 +122,357 @@
     "tags": [
       "finite fields"
     ]
+  },
+  {
+    "name": "PrimeField",
+    "kind": "function",
+    "signature": "(<FldFin> F) -> FldFin",
+    "summary": "The prime field GF(p) of a finite field F of characteristic p.",
+    "examples": [
+      {
+        "code": "PrimeField(GF(16)); PrimeField(GF(7));",
+        "expected": "Finite field of size 2\nFinite field of size 7\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Characteristic",
+      "Degree"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Generator",
+    "kind": "function",
+    "signature": "(<FldFin> F) -> FldFinElt",
+    "summary": "The generator F.1 of a finite field over its prime field: a root of DefiningPolynomial(F), and 1 for GF(p) itself (not its primitive element).",
+    "examples": [
+      {
+        "code": "F<a> := GF(16); Generator(F); Generator(GF(7));",
+        "expected": "a\n1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "DefiningPolynomial",
+      "PrimitiveElement"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Generator",
+    "kind": "function",
+    "signature": "(<FldFin> F, <FldFin> E) -> FldFinElt",
+    "summary": "F.1, the generator of F over its subfield E (an error if E is not one).",
+    "examples": [
+      {
+        "code": "F<a> := GF(16); E<c> := GF(4); Generator(F, E);",
+        "expected": "a\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "DefiningPolynomial",
+    "kind": "function",
+    "signature": "(<FldFin> F) -> RngUPolElt",
+    "summary": "The defining polynomial of a finite field over its prime field: its Conway polynomial, and X - 1 for GF(p) itself.",
+    "examples": [
+      {
+        "code": "DefiningPolynomial(GF(16)); DefiningPolynomial(GF(7));",
+        "expected": "$.1^4 + $.1 + 1\n$.1 + 6\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Generator",
+      "MinimalPolynomial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "DefiningPolynomial",
+    "kind": "function",
+    "signature": "(<FldFin> F, <FldFin> E) -> RngUPolElt",
+    "summary": "The minimal polynomial of F.1 over the subfield E of F.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); F<a> := GF(4); DefiningPolynomial(K, F);",
+        "expected": "$.1^2 + $.1 + a\n"
+      }
+    ],
+    "differs": [
+      "Relative to a proper subfield (not the prime field), only in fields of at most 2^20 elements; larger ones are refused.",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "IsSubfield",
+    "kind": "function",
+    "signature": "(<FldFin> F, <FldFin> K) -> BoolElt",
+    "summary": "Whether F is a subfield of K: the same characteristic, and Degree(F) divides Degree(K).",
+    "examples": [
+      {
+        "code": "IsSubfield(GF(4), GF(16)); IsSubfield(GF(8), GF(16));",
+        "expected": "true\nfalse\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "Embed"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Embed",
+    "kind": "function",
+    "signature": "(<FldFin> F, <FldFin> K)",
+    "summary": "A procedure that checks F can be a subfield of K; Sagebrush's finite fields are already embedded in their overfields.",
+    "examples": [
+      {
+        "code": "Embed(GF(4), GF(16)); GF(4).1 in GF(16);",
+        "expected": "true\n"
+      }
+    ],
+    "differs": [
+      "Embed(F, K, x) with an explicit image is Magma's error (F is already a subfield of K)."
+    ],
+    "status": "full",
+    "see_also": [
+      "IsSubfield"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Root",
+    "kind": "function",
+    "signature": "(<FldFinElt> x, <RngIntElt> k) -> FldFinElt",
+    "summary": "A k-th root of x in its finite field (k > 0): the unique one when gcd(k, q - 1) = 1, else as Magma's where verified.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); Root(b, 7); Root(GF(7)!2, 2);",
+        "expected": "b^13\n4\n"
+      }
+    ],
+    "differs": [
+      "When x has several k-th roots (gcd(k, q - 1) > 1), Magma's choice is reproduced only for k = 2 in GF(p) with p = 3 mod 4 and in GF(p^n), n > 1, of at most 3^12 elements; other such roots are refused.",
+      "Exponents of more than 1024 bits are refused (Magma takes them).",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Sqrt"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Trace",
+    "kind": "function",
+    "signature": "(<FldFinElt> x) -> FldFinElt",
+    "summary": "The trace of x over the prime field: x + x^p + ... + x^(p^(n-1)).",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); Trace(b); Trace(b^7);",
+        "expected": "0\n1\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "see_also": [
+      "Norm",
+      "MinimalPolynomial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Trace",
+    "kind": "function",
+    "signature": "(<FldFinElt> x, <FldFin> F) -> FldFinElt",
+    "summary": "The trace of x over the subfield F of its field.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); F<a> := GF(4); Trace(b, F);",
+        "expected": "1\n"
+      }
+    ],
+    "differs": [
+      "Relative to a proper subfield (not the prime field), only in fields of at most 2^20 elements; larger ones are refused.",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Norm",
+    "kind": "function",
+    "signature": "(<FldFinElt> x) -> FldFinElt",
+    "summary": "The norm of x over the prime field: x^((q - 1)/(p - 1)).",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); Norm(b); Norm(b^3);",
+        "expected": "1\n1\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "see_also": [
+      "Trace"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "Norm",
+    "kind": "function",
+    "signature": "(<FldFinElt> x, <FldFin> F) -> FldFinElt",
+    "summary": "The norm of x over the subfield F of its field.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); F<a> := GF(4); Norm(b, F);",
+        "expected": "a\n"
+      }
+    ],
+    "differs": [
+      "Relative to a proper subfield (not the prime field), only in fields of at most 2^20 elements; larger ones are refused.",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "MinimalPolynomial",
+    "kind": "function",
+    "signature": "(<FldFinElt> x) -> RngUPolElt",
+    "summary": "The minimal polynomial of x over the prime field: the product of X - c over its distinct conjugates c.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); MinimalPolynomial(b^5); MinimalPolynomial(b);",
+        "expected": "$.1^2 + $.1 + 1\n$.1^4 + $.1 + 1\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "see_also": [
+      "CharacteristicPolynomial",
+      "DefiningPolynomial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "MinimalPolynomial",
+    "kind": "function",
+    "signature": "(<FldFinElt> x, <FldFin> F) -> RngUPolElt",
+    "summary": "The minimal polynomial of x over the subfield F of its field.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); F<a> := GF(4); MinimalPolynomial(b, F);",
+        "expected": "$.1^2 + $.1 + a\n"
+      }
+    ],
+    "differs": [
+      "Relative to a proper subfield (not the prime field), only in fields of at most 2^20 elements; larger ones are refused.",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "CharacteristicPolynomial",
+    "kind": "function",
+    "signature": "(<FldFinElt> x) -> RngUPolElt",
+    "summary": "The characteristic polynomial of x over the prime field, of degree Degree(Parent(x)): a power of its minimal polynomial.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); CharacteristicPolynomial(b^5);",
+        "expected": "$.1^4 + $.1^2 + 1\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "see_also": [
+      "MinimalPolynomial"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
+  },
+  {
+    "name": "CharacteristicPolynomial",
+    "kind": "function",
+    "signature": "(<FldFinElt> x, <FldFin> F) -> RngUPolElt",
+    "summary": "The characteristic polynomial of x over the subfield F of its field.",
+    "examples": [
+      {
+        "code": "K<b> := GF(16); F<a> := GF(4); CharacteristicPolynomial(b^5, F);",
+        "expected": "$.1^2 + a^2\n"
+      }
+    ],
+    "differs": [
+      "Relative to a proper subfield (not the prime field), only in fields of at most 2^20 elements; larger ones are refused.",
+      "Work is bounded (prime-field coefficient operations, counted before the first power): past the bound it is refused in words."
+    ],
+    "status": "full",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields"
+    ]
   }
 ]
