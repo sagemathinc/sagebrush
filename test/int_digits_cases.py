@@ -1,6 +1,9 @@
 # CPython's limit on an int's decimal conversions (sys.set_int_max_str_digits),
 # as CPython 3.14 applies it (test/coverage-fixes.test.ts compares with python3).
+# Sagebrush's default is 0, no limit, where CPython's is 4300, so the limit is
+# set first: a program that sets one gets CPython's checks and messages.
 import sys
+sys.set_int_max_str_digits(4300)
 
 
 def show(label, f):
