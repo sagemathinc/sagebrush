@@ -1844,7 +1844,242 @@ async function scanAtomic() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+const caught = async (p) => { try { await p; return null; } catch (e) { return e; } };
+
+// ---- step 5: the page's sync owner, the Storage panel's Sync section, the foot and the rows' icons
+// (plan-step5-sync-ui r4)
+
+/** A fake server for the panel: answers by path, counts POSTs; `next` answers the next delete/enable. */
+function fakeServer(status, account = "acct-x") {
+  const s = { status, posts: [], deletes: [], next: [], me: account };
+  s.fetch = async (url, init = {}) => {
+    const path = String(url).replace(/^https?:\/\/[^/]+/, "");
+    if (path === "/api/share/me") return Response.json({ account_id: s.me });
+    if (path === "/api/sync/v1/status") return Response.json(typeof s.status === "function" ? s.status() : s.status);
+    if (init.method === "POST") {
+      s.posts.push(path);
+      if (path.endsWith("/delete")) s.deletes.push(JSON.parse(init.body));
+      const a = s.next.shift() ?? { status: 202, body: { state: "deleting" } };
+      if (a.throw) throw new TypeError("lost");
+      return new Response(JSON.stringify(a.body ?? {}), { status: a.status, headers: { "content-type": "application/json", ...(a.headers ?? {}) } });
+    }
+    return new Response("{}", { status: 404 });
+  };
+  return s;
+}
+const hostOf = (w, answers = {}) => ({ say: () => {}, fail: () => {}, usage: () => w.usage(), confirm: () => answers.confirm ?? true, prompt: () => answers.prompt ?? "delete" });
+const buttons = (el) => [...el.querySelectorAll("button")].map((b) => (b.disabled ? "[x] " : "") + b.textContent);
+const text = (el) => el.textContent;
+
+async function s5Poll() {
+  // (PanelPoll: one request in flight, one timer, the clamp, the backoff, and nothing after close)
+  check(W.clampDelay(-1) === undefined && W.clampDelay(1.5) === undefined && W.clampDelay("5") === undefined && W.clampDelay(Infinity) === undefined && W.clampDelay(10) === 1000 && W.clampDelay(5e9) === 600_000 && W.clampDelay(30_000) === 30_000, "poll: the server's delay validated and clamped to [1 s, 600 s]");
+  const clock = fakeClock();
+  let calls = 0, release = [];
+  const ask = () => { calls++; return new Promise((ok) => release.push(() => ok({ ok: false, why: "network" }))); };
+  const answers = [];
+  const p = new W.PanelPoll(ask, (a) => answers.push(a), () => 0.5, (ms, f) => clock.after(ms, f));
+  p.request(); p.request(); p.request();
+  check(calls === 1 && p.busy, "poll: single-flight (three asks, one request)");
+  const waits = [];
+  for (let i = 0; i < 7; i++) {
+    release.shift()();
+    await sleep(10);
+    waits.push(p.later());
+    await clock.advance(waits.at(-1));
+  }
+  check(J(waits) === J([2000, 4000, 8000, 16000, 32000, 60000, 60000]), "poll: the fallback backoff 2 s doubling to 60 s (jitter at its middle): " + J(waits));
+  // (closed during a fetch: its answer dropped; closed during a wait: no request after)
+  const n0 = answers.length;
+  p.close();
+  release.shift()?.();
+  await sleep(10);
+  await clock.advance(120_000);
+  check(answers.length === n0 && calls === 8 && !p.armed && !p.busy && clock.nextAt() === null, "poll: closed during a fetch, the answer dropped; no timer, no request after: " + J({ calls, timers: clock.nextAt() }));
+  const p2 = new W.PanelPoll(async () => ({ ok: false, why: "network" }), () => {}, () => 0.5, (ms, f) => clock.after(ms, f));
+  p2.request(); p2.later(5000); p2.close();
+  await clock.advance(10_000);
+  check(p2.requests === 1 && clock.nextAt() === null, "poll: closed during its backoff, nothing more");
+}
+
+async function s5Section() {
+  // (the switch's shapes, from status alone; delete only with the server's precondition)
+  const w = await fresh();
+  const shapes = [
+    [{ available: false, reason: "not_allowlisted", state: "off" }, (el) => el.textContent === "", "not_allowlisted: hidden"],
+    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /isn't available/.test(text(el)), "plan_has_no_sync: disabled, the fallback words"],
+    [{ available: false, reason: "cocalc_unreachable", state: "off", message: "CoCalc says no" }, (el) => /CoCalc says no/.test(text(el)), "cocalc_unreachable: the server's own words"],
+    [{ available: true, state: "deleting", generation: 2 }, (el) => /\[x\] Deleting your synced data/.test(buttons(el).join()), "deleting: said, disabled"],
+    [{ available: true, state: "active", generation: 2 }, (el) => !/Delete my synced data/.test(buttons(el).join()), "active, no limit_bytes (no server precondition): no delete"],
+    [{ available: true, state: "active", generation: 2, limit_bytes: 2 ** 30, used_bytes: 2 ** 20 }, (el) => /Delete my synced data/.test(buttons(el).join()) && /1\.0 MB of 1\.00 GB used/.test(text(el)), "active with limit_bytes: delete offered, the limit shown"],
+    [{ available: true, state: "off", limit_bytes: null, used_bytes: 0 }, (el) => /Turn on sync/.test(buttons(el).join()) && !/storage:/.test(text(el)), "off, limit_bytes null: no limit (shown after enabling)"],
+  ];
+  for (const [status, ok, what] of shapes) {
+    const el = document.createElement("div"), srv = fakeServer(status);
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch });
+    await until(() => el.textContent !== "" || status.reason === "not_allowlisted", 3000);
+    await sleep(50);
+    check(ok(el), "section: " + what + ": " + J(buttons(el)) + " " + text(el).slice(0, 120));
+    check(srv.posts.length === 0, "section: " + what + ": nothing POSTed without a click");
+    s.dispose();
+  }
+  const el = document.createElement("div"), down = W.syncSection(w, el, hostOf(w), { fetch: async () => { throw new TypeError("down"); } });
+  await until(() => /Can't check sync/.test(el.textContent), 3000);
+  check(/Can't check sync right now/.test(el.textContent) && down.poll.armed, "section: status unreadable: unknown (neither off nor on), asked again later");
+  down.dispose();
+  check(!down.poll.armed && !down.poll.busy, "section: dispose (the panel closed) leaves no timer, no request");
+}
+
+async function s5Delete() {
+  // (the delete's outcomes, bound to the account and generation shown; never a POST without a click)
+  const w = await fresh();
+  const status = { available: true, state: "active", generation: 3, limit_bytes: 1000, used_bytes: 10 };
+  const run = async (answers, what, extra = {}) => {
+    const el = document.createElement("div"), srv = fakeServer(extra.status ?? status), clock = fakeClock();
+    srv.next = answers;
+    const s = W.syncSection(w, el, hostOf(w, extra), { fetch: srv.fetch, random: () => 0.5, after: (ms, f) => clock.after(ms, f) });
+    await until(() => /Delete my synced data/.test(buttons(el).join()), 3000);
+    [...el.querySelectorAll("button")].find((b) => /Delete my synced data/.test(b.textContent)).click();
+    await sleep(200);
+    return { el, srv, clock, s, what };
+  };
+  // (409: nothing deleted, said; the body carried the account and the generation)
+  let r = await run([{ status: 409, body: { error: "account_mismatch" } }]);
+  check(r.srv.deletes.length === 1 && r.srv.deletes[0].generation === 3 && typeof r.srv.deletes[0].account === "string" && r.srv.deletes[0].confirm === "delete" && /another account: nothing was deleted/.test(text(r.el)), "delete: the POST carries confirm, generation and account; 409 account_mismatch said: " + J(r.srv.deletes));
+  r.s.dispose();
+  // (the confirmation not typed: no POST)
+  r = await run([], "", { prompt: "nope" });
+  check(r.srv.deletes.length === 0, "delete: not typed \"delete\": nothing sent");
+  r.s.dispose();
+  // (429: the button off for the clamped wait, then back; never a POST by itself)
+  r = await run([{ status: 429, body: { retry_after: 5000 } }]);
+  check(/\[x\] Try again in 5 s/.test(buttons(r.el).join()), "delete: 429: Retry disabled for the server's wait: " + J(buttons(r.el)));
+  await r.clock.advance(60_000);
+  await sleep(50);
+  check(r.srv.deletes.length === 1 && /Delete my synced data/.test(buttons(r.el).join()) && !/\[x\] Delete/.test(buttons(r.el).join()), "delete: after the wait, enabled again, still one POST (no automatic retry): " + J(buttons(r.el)));
+  r.s.dispose();
+  check(r.clock.nextAt() === null, "delete: closed: no timer left");
+  // (stale: a newer generation; nothing done here, a new confirmation needed)
+  r = await run([{ status: 202, body: { state: "stale", generation: 4 } }]);
+  check(/turned on again since; confirm again/.test(text(r.el)) && r.srv.deletes.length === 1, "delete: stale: said, nothing sent again");
+  r.s.dispose();
+  // (deleting: sync off here, followed until status says off for the same account)
+  let st = { ...status };
+  r = await run([{ status: 202, body: { state: "deleting", generation: 3 } }], "", { status: () => st });
+  check(/\[x\] Deleting your synced data/.test(buttons(r.el).join()), "delete: deleting: said, and followed: " + J(buttons(r.el)));
+  st = { available: true, state: "off" };
+  await r.clock.advance(2000);
+  await until(() => /was deleted/.test(text(r.el)), 3000);
+  check(/was deleted/.test(text(r.el)), "delete: done only once status says off");
+  r.s.dispose();
+  // (a lost answer: one read-only status; same generation active: Retry by a click only)
+  r = await run([{ throw: true }]);
+  await sleep(200);
+  check(r.srv.deletes.length === 1 && /Couldn't confirm the deletion/.test(text(r.el)), "delete: a lost answer: said, no POST again: " + text(r.el).slice(0, 100));
+  r.s.dispose();
+  // (a lost answer, and status shows a later generation: the stale branch)
+  let st2 = { ...status };
+  r = await run([{ throw: true }], "", { status: () => st2 });
+  st2 = { ...status, generation: 5 };
+  await sleep(300);
+  check(/turned on again since/.test(text(r.el)) && r.srv.deletes.length === 1, "delete: lost, then a later generation active: the stale branch");
+  r.s.dispose();
+}
+
+async function s5Lifecycle() {
+  // (turned on through the panel against the real server; the owner runs the client, renews its lease on a
+  // reconnect (eligible throughout), and stops for good on off)
+  await account();
+  const w = await fresh();
+  const owner = W.SyncOwner.of(w, { origin: location.origin });
+  owner.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => owner.view().s.state === "synced", 15_000), "lifecycle: on through the panel: the owner's client synced: " + J(owner.view()));
+  const c1 = owner.client, gen1 = (await metaGet(w.ws, "sync:current")).gen;
+  await ctl("closeAll");
+  check(await until(async () => owner.view().s.state === "synced" && (await metaGet(w.ws, "sync:current")).gen > gen1, 15_000), "lifecycle: a reconnect renews the lease (gen raised), the owner keeps its client");
+  check(owner.client === c1, "lifecycle: the same client throughout (eligibility is the lifecycle, not gen)");
+  const epoch = await metaGet(w.ws, "sync:epoch");
+  await until(() => /Turn off sync here/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+  check(await until(() => owner.client === null, 10_000), "lifecycle: off: the client stopped");
+  const cur = await metaGet(w.ws, "sync:current");
+  check(cur.off === true && (await metaGet(w.ws, "sync:epoch")) === epoch + 1, "lifecycle: off is durable, the epoch moved on");
+  // (a renewal can't bring it back: the compare-and-set refuses an off lease)
+  const e = await caught(W.renewLease(w, cur.ns, epoch + 1));
+  check(e instanceof W.Fenced, "lifecycle: renewLease refuses an off lease (only enable clears off)");
+  s.dispose();
+  owner.destroy();
+}
+
+async function s5Tabs() {
+  // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
+  // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "tabs: the first tab holds and syncs");
+  await sleep(1200);
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.view().from === "holder" && o2.view().s.state === "synced", 5000), "tabs: a follower opened after a steady second gets the holder's snapshot: " + J(o2.view()));
+  // (a flood of requests: the holder's state is one boolean; publications at most one a slot)
+  const p0 = o1.stats.published, t0 = Date.now();
+  const ch = new BroadcastChannel(`sagebrush-sync-status:${w1.ws.name}:${(await metaGet(w1.ws, "sync:current")).ns}`);
+  const epoch = await metaGet(w1.ws, "sync:epoch"), ns = (await metaGet(w1.ws, "sync:current")).ns;
+  for (let i = 0; i < 10_000; i++) ch.postMessage({ t: "status?", ns, epoch });
+  await sleep(2000);
+  const pubs = o1.stats.published - p0, secs = (Date.now() - t0) / 1000;
+  check(pubs <= Math.ceil(secs / 0.5) + 1 && pubs >= 1, `tabs: 10,000 status? in a burst: ${pubs} publications in ${secs.toFixed(1)} s (at most one per 500 ms)`);
+  // (an old holder's status: dropped by (gen, rev))
+  const h0 = o2.holder;
+  ch.postMessage({ t: "status", ns, epoch, gen: 1, rev: 99, snapshot: { state: "offline" } });
+  await sleep(200);
+  check(o2.view().s.state === "synced" && o2.holder.gen === h0.gen, "tabs: an old holder's message dropped");
+  ch.close();
+  s.dispose();
+  o2.destroy();
+  o1.destroy();
+}
+
+async function s5Rows() {
+  // (↑ for every op kind until its own ack; one transaction; at most ROWICON.max identities)
+  await account();
+  const w = await fresh();
+  const owner = W.SyncOwner.of(w, { origin: location.origin });
+  owner.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => owner.view().s.state === "synced", 15_000), "rows: synced");
+  await ctl("set", { set: { dropAcks: 1 } });
+  const d = await w.mkdir("/r1");
+  const f = await w.create("/r1/f.txt", { content: "x" });
+  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 2, 5000), "rows: a mkdir and a create waiting (scanned, sent, ack withheld): ↑ on both");
+  await ctl("closeAll");
+  check(await until(async () => (await W.rowIcons(w, [d.ident, f.ident], [])).up.size === 0, 15_000), "rows: after the resend and its ack: cleared");
+  await ctl("set", { set: { dropAcks: 1 } });
+  await w.rename("/r1", "/r2");
+  check(await until(async () => (await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 5000), "rows: an undecided rename on a folder whose mkdir was accepted: ↑");
+  await ctl("closeAll");
+  check(await until(async () => !(await W.rowIcons(w, [d.ident], [])).up.has(d.ident), 15_000), "rows: …cleared at its own ack");
+  const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
+  check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
+  s.dispose();
+  owner.destroy();
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
