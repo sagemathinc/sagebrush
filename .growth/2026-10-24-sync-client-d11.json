@@ -1,1 +1,1 @@
-{"v":1,"reason":"#65 sync client step 4 and D11 (the large-move record, read model, fence, chunked local and confirmed moves, replay and its closure) in the CLI bundle's workspace code","bytes":{"cli/pyjs.cjs":37400}}
+{"v":1,"reason":"#65 sync client step 4 and D11 (the large-move record, read model, fence, chunked local and confirmed moves, replay and its closure) in the CLI bundle's workspace code","bytes":{"cli/pyjs.cjs":36916}}
