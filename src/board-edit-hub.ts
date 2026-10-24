@@ -19,12 +19,15 @@
 //   persistedSeq and each tab's persistedGen.
 import { createHash } from "crypto";
 import { boardMerge3, keyOf, canon, type Rec, type MergeReport, type MergeAlternative } from "../web/board/merge";
-import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre } from "../web/board/lossless";
-import { writeOnce, Slots, hashOf, type WriteFs, type WriteOutcome } from "./board-edit-write";
+import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, recordsAre } from "../web/board/lossless";
+import { writeOnce, Slots, hashOf, realFs, type WriteFs, type WriteOutcome } from "./board-edit-write";
 import type { Limits } from "./board-edit-limits";
 
 export interface Version { seq: number; records: Rec[]; json: any; bytes: Buffer; hash: string }
-export type HubReport = MergeReport | { kind: "older-copy"; key: string; field: string; value: unknown; board: unknown };
+export type HubReport =
+  | MergeReport
+  | { kind: "older-copy"; key: string; field: string; value: unknown; board: unknown }
+  | { kind: "prev-kept"; path: string; why: string };
 export interface HeadEvent { seq: number; persistedSeq: number; reports: HubReport[]; alternatives: MergeAlternative[]; source: "outside" | "tab" | "save" }
 export type SubmitAnswer =
   | { op: string; accepted: true; seq: number }
@@ -37,6 +40,8 @@ export type SubmitAnswer =
 export type HubState =
   | { state: "ok" }
   | { state: "held"; why: "invalid" | "deleted" | "unmergeable" | "not-editable" | "slots" | "stuck" | "error"; detail: string };
+
+interface Budget { used: number; deadline: number; charge: (n: number) => boolean; left: () => number; why: () => "work" | "time" }
 
 interface TabRecord { watermark: number; acks: { gen: number; seq: number; hash: string }[]; persistedGen: number; lastSeen: number }
 
@@ -65,8 +70,10 @@ export class EditHub {
   private dirtySince: number | null = null;
   private lastWrite = -Infinity;
   /** retained prev files: path, last content hash ingested, the seq whose save includes it */
-  prevs: { path: string; hash: string; base: Version; ingestedSeq: number; quietSince: number }[] = [];
+  prevs: { path: string; hash: string; base: Version; ingestedSeq: number; quietSince: number; invalid?: string }[] = [];
   events: HeadEvent[] = [];
+  /** the last version ingested from FILE, with the hash of its bytes as read */
+  private observed: { raw: string; version: Version } | null = null;
 
   constructor(readonly file: string, readonly limits: Limits, private deps: HubDeps) {
     this.slots = new Slots(limits.BACKUPS_MAX);
@@ -108,13 +115,39 @@ export class EditHub {
     while (seqs.length > this.limits.HISTORY_PATCHES) { const s = seqs.shift()!; if (!keep.has(s)) this.heads.delete(s); }
   }
 
-  private merge(base: Rec[], a: Rec[], b: Rec[]) {
-    return boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: this.limits.MERGE_WORK, deadline: this.deps.now() + this.limits.MERGE_MS, now: this.deps.now });
+  /** One merge's ledger and deadline (§8.3, addendum 1 A2): every phase charged to MERGE_WORK, run under MERGE_MS. */
+  private budget(): Budget {
+    const deadline = this.deps.now() + this.limits.MERGE_MS, max = this.limits.MERGE_WORK;
+    const b: Budget = {
+      used: 0,
+      deadline,
+      // (using exactly the ledger succeeds; the next unit, or the clock past the deadline, refuses)
+      charge: (n) => { b.used += n; return b.used <= max && this.deps.now() <= deadline; },
+      left: () => max - b.used,
+      why: () => (b.used > max ? "work" : "time"),
+    };
+    return b;
   }
 
-  private newHead(records: Rec[], source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[]): Version {
+  private merge(base: Rec[], a: Rec[], b: Rec[], budget = this.budget()) {
+    const r = boardMerge3(base, a, b, { mergeStrings3: this.deps.mergeStrings3, work: budget.left(), deadline: budget.deadline, now: this.deps.now });
+    budget.used += r.used;
+    return r;
+  }
+
+  /** The merged records as the next head, or why not (a head is bounded as FILE is: EDIT_MAX, RECORDS_MAX; its serialization charged). */
+  private nextHead(records: Rec[], budget: Budget): { json: any; bytes: Buffer } | { why: string } {
+    if (records.length > this.limits.RECORDS_MAX) return { why: `the merged board has more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
     const json = fromEditRecords(records);
     const bytes = Buffer.from(serialize(json), "utf8");
+    if (bytes.length > this.limits.EDIT_MAX) return { why: `the merged board is larger than EDIT_MAX (${this.limits.EDIT_MAX} bytes)` };
+    if (!budget.charge(2 * bytes.length + records.length)) return { why: `can't merge (${budget.why()})` };
+    return { json, bytes };
+  }
+
+  private newHead(records: Rec[], source: HeadEvent["source"], reports: HubReport[], alternatives: MergeAlternative[], made?: { json: any; bytes: Buffer }): Version {
+    const json = made?.json ?? fromEditRecords(records);
+    const bytes = made?.bytes ?? Buffer.from(serialize(json), "utf8");
     const v: Version = { seq: ++this.seq, records, json, bytes, hash: hashOf(bytes) };
     this.H = v;
     this.remember(v);
@@ -125,25 +158,84 @@ export class EditHub {
   private dirty() { if (this.dirtySince === null) this.dirtySince = this.deps.now(); }
 
   /** An outside version seen at FILE (null: FILE absent). */
-  async observe(bytes: Buffer | null, base: Version = this.P): Promise<void> {
+  async observe(bytes: Buffer | null, base: Version = this.P): Promise<Version | undefined> {
     if (bytes === null) { this.state = { state: "held", why: "deleted", detail: "FILE was deleted or moved" }; return; }
     const h = hashOf(bytes);
     if (h === this.O || h === this.P.hash) { this.O = h; return; }
     this.O = h;
+    const v = await this.ingest(bytes, base);
+    if ("why" in v) { this.state = { state: "held", why: v.held, detail: v.why }; return; }
+    this.observed = { raw: h, version: v };
+    if (canon(this.H.records) === canon(v.records)) {
+      // (the file already holds the board's state: adopted as the latest save, nothing written)
+      this.P = this.H;
+      this.persistedSeq = this.H.seq;
+      this.retainSave(this.H);
+    }
+    return v;
+  }
+
+  /** Bytes read at FILE or from a prev, merged against `base` into H (§4.2): the version they are, or why not. */
+  private async ingest(bytes: Buffer, base: Version): Promise<Version | { why: string; held: "invalid" | "unmergeable" }> {
+    const budget = this.budget();
+    // (parsed, checked, given page ids and serialized: four passes over the bytes)
+    if (!budget.charge(4 * bytes.length)) return { why: `can't merge (${budget.why()})`, held: "unmergeable" };
     const v = await this.version(bytes);
-    if ("why" in v) { this.state = { state: "held", why: "invalid", detail: v.why }; return; }
+    if ("why" in v) return { why: v.why, held: "invalid" };
     const C = v.version;
-    const r = this.merge(base.records, this.H.records, C.records);
-    if ("refused" in r) { this.state = { state: "held", why: "unmergeable", detail: `can't merge (${r.refused})` }; return; }
+    const r = this.merge(base.records, this.H.records, C.records, budget);
+    if ("refused" in r) return { why: `can't merge (${r.refused})`, held: "unmergeable" };
+    const made = this.nextHead(r.records, budget);
+    if ("why" in made) return { why: made.why, held: "unmergeable" };
     this.state = { state: "ok" };
     const reports: HubReport[] = [...r.reports, ...this.olderCopy(C.records)];
-    const head = this.newHead(r.records, "outside", reports, r.alternatives);
-    if (canon(head.records) === canon(C.records)) {
-      // (the file already holds the board's state: adopted as the latest save, nothing written)
-      this.P = head;
-      this.persistedSeq = head.seq;
-      this.retainSave(head);
-    } else this.dirty();
+    const head = this.newHead(r.records, "outside", reports, r.alternatives, made);
+    if (canon(head.records) !== canon(C.records)) this.dirty();
+    return C;
+  }
+
+  // ---- prev files (§5.3)
+  /**
+   * Each retained prev's content, read again (every WATCH_MS, by the caller): a content that differs from the last
+   * one ingested is ingested, against that one (or, for none yet, the P current at the save's W2).  A prev is
+   * unlinked, its slot released, once its content has been the same for `quietMs`, its last content has been
+   * ingested, and a save including that has completed.  One whose content can't be read as a board is kept and
+   * reported, never unlinked.
+   */
+  async tickPrevs(quietMs: number): Promise<void> {
+    const f = this.deps.fs ?? realFs;
+    for (const p of [...this.prevs]) {
+      let bytes: Buffer;
+      try { bytes = f.readFile(p.path); } catch {
+        // (gone: removed by someone else; its name no longer beside FILE)
+        this.prevs.splice(this.prevs.indexOf(p), 1);
+        this.slots.release(1);
+        continue;
+      }
+      const h = hashOf(bytes), now = this.deps.now();
+      if (h !== p.hash) {
+        p.hash = h;
+        p.quietSince = now;
+        if (h === p.base.hash) { p.ingestedSeq = Math.min(p.ingestedSeq, this.H.seq); continue; }
+        const v = await this.ingest(bytes, p.base);
+        if ("why" in v) {
+          if (v.held === "unmergeable") this.state = { state: "held", why: "unmergeable", detail: v.why };
+          p.ingestedSeq = Infinity;
+          p.invalid = v.why;
+          this.events.push({ seq: this.H.seq, persistedSeq: this.persistedSeq, reports: [{ kind: "prev-kept", path: p.path, why: v.why }], alternatives: [], source: "outside" });
+          continue;
+        }
+        p.base = v;
+        p.invalid = undefined;
+        p.ingestedSeq = this.H.seq;
+        continue;
+      }
+      if (p.invalid === undefined && now - p.quietSince >= quietMs && p.ingestedSeq <= this.persistedSeq) {
+        try { f.unlink(p.path); } catch (e: any) { if (e?.code !== "ENOENT") continue; }
+        this.prevs.splice(this.prevs.indexOf(p), 1);
+        this.slots.release(1);
+      }
+    }
   }
 
   /** §4.3: fields where C differs from P and equals one of the retained saves (where that save had it otherwise than P). */
@@ -174,6 +266,9 @@ export class EditHub {
   /** A tab's submission: its snapshot (records, JSON lines) made from the head it adopted last (baseSeq). */
   submit(tab: string, gen: number, baseSeq: number, snapshot: string, hash: string): SubmitAnswer {
     const op = `${tab}:${gen}`;
+    // (every phase on the one ledger and deadline: hashed, parsed, decoded and checked, four passes over the bytes)
+    const budget = this.budget(), size = snapshot.length;
+    if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` };
     if (sha(snapshot) !== hash) return { op, refused: "the snapshot's hash doesn't match" };
     let t = this.tabs.get(tab);
     if (!t) {
@@ -193,16 +288,22 @@ export class EditHub {
     }
     const base = this.heads.get(baseSeq);
     if (!base) return { op, stale: true, seq: this.H.seq };
+    if (!budget.charge(size)) return { op, refused: `can't merge (${budget.why()})` };
     let records: Rec[];
     try { records = snapshot.split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return { op, refused: "the snapshot isn't JSON lines" }; }
     if (records.length > this.limits.RECORDS_MAX) return { op, refused: `more than RECORDS_MAX (${this.limits.RECORDS_MAX}) records` };
-    // (its bytes as written must be the board it says: the lossless check)
-    const json = fromEditRecords(records);
-    if (!bytesAre(serialize(json), json).ok) return { op, refused: "the snapshot can't be written without losing something" };
-    const r = this.merge(base.records, this.H.records, records);
+    if (!budget.charge(2 * size + records.length)) return { op, refused: `can't merge (${budget.why()})` };
+    // (the records exactly the board they decode to, every one and every field: CORR-BOARD-A1-2; and that board's
+    // bytes as written exactly it)
+    const are = recordsAre(records);
+    if (!are.ok) return { op, refused: `the snapshot isn't a board's records (${are.at})` };
+    if (!bytesAre(serialize(are.doc), are.doc).ok) return { op, refused: "the snapshot can't be written without losing something" };
+    const r = this.merge(base.records, this.H.records, records, budget);
     if ("refused" in r) return { op, refused: `can't merge (${r.refused})` };
+    const made = this.nextHead(r.records, budget);
+    if ("why" in made) return { op, refused: made.why };
     this.includedGens.set(tab, gen);
-    this.newHead(r.records, "tab", r.reports, r.alternatives);
+    this.newHead(r.records, "tab", r.reports, r.alternatives, made);
     t.watermark = gen;
     t.acks.push({ gen, seq: this.H.seq, hash });
     while (t.acks.length > this.limits.ACKS_KEPT) t.acks.shift();
@@ -260,11 +361,16 @@ export class EditHub {
     }
     switch (r.why) {
       case "changed": await this.observe(r.bytes); break;
-      case "classified":
-        // (C, the bytes W4 read, is an observed version made from the P current at W2; prev retained)
-        this.prevs.push({ path: r.prev, hash: hashOf(r.bytes), base: before, ingestedSeq: Infinity, quietSince: this.deps.now() });
-        await this.observe(r.bytes, before);
+      case "classified": {
+        // (C, the bytes W4 read, is an observed version made from the P current at W2; prev retained, C its base)
+        const p = { path: r.prev, hash: hashOf(r.bytes), base: before, ingestedSeq: Infinity, quietSince: this.deps.now() };
+        this.prevs.push(p);
+        const v = await this.observe(r.bytes, before);
+        // (or, already seen at FILE: the version it was then)
+        const seen = v ?? (this.observed?.raw === p.hash ? this.observed.version : this.P.hash === p.hash ? this.P : undefined);
+        if (seen && this.state.state === "ok") { p.base = seen; p.ingestedSeq = this.H.seq; }
         break;
+      }
       case "replaced":
         this.prevs.push({ path: r.prev, hash: before.hash, base: before, ingestedSeq: T.seq, quietSince: this.deps.now() });
         break;
