@@ -6,6 +6,7 @@ polynomials, multiplicative orders, subspaces.  Gaussian elimination over
 the field; printed as Sage prints them."""
 
 import random as _random
+import sys as _sys
 
 import _sage_ff as _ff
 from fractions import Fraction as _F
@@ -69,7 +70,11 @@ _HEAP_SHARE = 4
 
 
 def _heap_limit():
-    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    # (pyjs: its heap limit, read here so that no mode's start imports
+    # _capacity; CPython: the machine's total, _capacity's, D0)
+    n = getattr(_sys, "_sagebrush_heap_limit", None)
+    if n:
+        return int(n)
     import _capacity
     return _capacity.heap_figure()
 

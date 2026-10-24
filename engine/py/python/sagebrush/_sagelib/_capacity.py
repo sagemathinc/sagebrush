@@ -23,7 +23,12 @@ the engine.  The tests replace the sources through _set_sources().
 """
 
 import sys as _sys
-import time as _time
+try:
+    # (pyjs: the runtime's own clock; importing the time module would bring
+    # _pytime, _tzrules and their file reading into every mode's start)
+    import _time
+except ImportError:  # (CPython)
+    import time as _time
 
 _NOMINAL = 1 << 30                 # (a host that cannot say: as before D0)
 _RESERVE_BASE = 256 << 20
