@@ -1,0 +1,175 @@
+bare
+[0 3]
+(1, 2) Integer Ring
+bare, two keys
+[-1  0  0]
+[ 0  0  3]
+(2, 3) Integer Ring
+bare, empty
+[]
+(0, 0) Integer Ring
+bare, a rational
+[  0   2]
+[1/2   0]
+(2, 2) Rational Field
+bare, zeros only
+[0 0 0 0]
+[0 0 0 0]
+[0 0 0 0]
+[0 0 0 0]
+(4, 4) Integer Ring
+ZZ
+[0 3]
+(1, 2) Integer Ring
+QQ
+[  0]
+[1/2]
+(2, 1) Rational Field
+ZZ, 2 x 2
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+ZZ, 2 x 2, sparse=True
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+ZZ, 2 x 2, sparse=False
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+2 x 2, no ring
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+2 x 3, no ring, a rational
+[  0   0   0]
+[  0   0 1/3]
+(2, 3) Rational Field
+ZZ, 2 x 3
+[0 0 0]
+[0 0 5]
+(2, 3) Integer Ring
+ZZ, 3 rows
+[0 3 0]
+[0 0 0]
+[0 0 0]
+(3, 3) Integer Ring
+3 rows, no ring
+[0 3 0]
+[0 0 0]
+[0 0 0]
+(3, 3) Integer Ring
+ZZ, 2 x 2, empty
+[0 0]
+[0 0]
+(2, 2) Integer Ring
+ZZ, 0 x 0, empty
+[]
+(0, 0) Integer Ring
+ZZ, 3 x 0, empty
+[]
+(3, 0) Integer Ring
+ZZ, 0 x 3, empty
+[]
+(0, 3) Integer Ring
+a zero value
+[0 0]
+[0 0]
+(2, 2) Integer Ring
+negative row index
+[0 0]
+[1 0]
+(2, 2) Integer Ring
+negative row index -2
+[1 0]
+[0 0]
+(2, 2) Integer Ring
+negative column index
+[0 0 1]
+[0 0 0]
+(2, 3) Integer Ring
+the same position twice, -1 then 1
+[0 0]
+[5 0]
+(2, 2) Integer Ring
+the same position twice, 1 then -1
+[0 0]
+[7 0]
+(2, 2) Integer Ring
+integral rational index
+[0 0]
+[0 1]
+(2, 2) Integer Ring
+Integer and bool indices
+[0 0]
+[4 0]
+(2, 2) Integer Ring
+a frozenset key
+[0 1]
+[0 0]
+(2, 2) Integer Ring
+GF(5), 2 x 2
+[0 3]
+[0 0]
+(2, 2) Finite Field of size 5
+GF(5), 2 x 3
+[0 0 0]
+[0 0 2]
+(2, 3) Finite Field of size 5
+GF(5), bare
+[0 0]
+[0 2]
+(2, 2) Finite Field of size 5
+GF(5), 2 rows
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
+GF(4), 2 x 2
+[0 0]
+[0 a]
+(2, 2) Finite Field in a of size 2^2
+MatrixSpace(ZZ, 2)
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+MatrixSpace(QQ, 2, 3)
+[  0   0   0]
+[  0   0 1/2]
+(2, 3) Rational Field
+MatrixSpace(ZZ, 2), negative
+[0 0]
+[0 4]
+(2, 2) Integer Ring
+row out of range error: IndexError invalid row index 2
+column out of range error: IndexError invalid column index 5
+both out of range error: IndexError invalid row index 5
+negative row index -3 error: IndexError invalid row index -3
+negative column index -4 error: IndexError invalid column index -4
+bare, negative row error: IndexError invalid row index -1
+bare, negative column error: IndexError invalid column index -1
+bare, negative column before a negative row error: IndexError invalid column index -1
+3 rows, an index past them error: IndexError invalid row index 2
+QQ, 2 rows, a column past them error: IndexError invalid column index 2
+0 x 0, a key error: IndexError invalid row index 0
+GF(5), out of range error: IndexError invalid row index 2
+GF(5), bare, negative error: IndexError invalid row index -1
+MatrixSpace, out of range error: IndexError invalid row index 3
+a float index error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+an integral float index error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+a rational index error: TypeError unable to convert rational 1/2 to an integer
+a string index error: TypeError 'str' object cannot be interpreted as an integer
+a two-letter string key error: TypeError 'str' object cannot be interpreted as an integer
+an integer key error: TypeError 'sage.rings.integer.Integer' object is not iterable
+a bool key error: TypeError 'bool' object is not iterable
+bare, an integer key error: TypeError 'sage.rings.integer.Integer' object is not iterable
+a triple key error: ValueError too many values to unpack (expected 2)
+a 1-tuple key error: ValueError need more than 1 value to unpack
+bare, a 0-tuple key error: ValueError need more than 0 values to unpack
+bare, a float index error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+bare, a string index error: TypeError 'str' object cannot be interpreted as an integer
+out of range, then a float error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+a float, then out of range error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+out of range, then a triple error: ValueError too many values to unpack (expected 2)
+in range, then out of range error: IndexError invalid row index 9
+bare, negative, then a float error: IndexError invalid row index -1
+bare, a float, then negative error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
