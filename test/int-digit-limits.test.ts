@@ -96,6 +96,30 @@ test("a user's report: an integer of 6,000,001 digits prints in full, in Sage mo
   }
 });
 
+// The heap's figure that admits a conversion is read once a session: Bun's
+// getHeapStatistics takes about 12 ms a call, and reading it at each of the
+// 4,400 conversions of micropython's int_big_div timed that test out there.
+// (V8's own call, counted here by a preload: at most once for the session,
+// with 4,400 small conversions and 3 large ones)
+test("the heap's figure is read once a session, not at each conversion", () => {
+  const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-heapreads-"));
+  try {
+    const pre = join(dir, "count.js");
+    writeFileSync(pre, `const v8 = require("node:v8"), f = v8.getHeapStatistics; let n = 0;
+v8.getHeapStatistics = function () { n++; return f.apply(this, arguments); };
+process.on("exit", () => process.stderr.write("reads " + n + "\\n"));`);
+    const code = "for a in (10**24, 12349083434598210349871029923874109871234789):\n    for b in range(1, 2201):\n        s = str(a // b)\nfor k in range(3):\n    s = str(10**500000 + k)\nprint(len(s))";
+    const r = spawnSync(process.execPath, ["--require", pre, CLI, "-c", code], { encoding: "utf8", timeout: 120000 });
+    assert.equal(r.stdout, "500001\n");
+    const reads = Number(/reads (\d+)/.exec(r.stderr)?.[1]);
+    assert.ok(reads <= 1, r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("large conversions by pieces are exact: decimal both ways, and int() in bases 2 to 36", () => {
   const code = [
     "import sys",
