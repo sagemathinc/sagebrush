@@ -20,7 +20,7 @@ import { createServer, request } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { devtoolsPort, freePort } from "./test-port.mjs";
+import { devtoolsPort } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const here = new URL(".", import.meta.url).pathname;
@@ -73,7 +73,10 @@ function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
   })()`;
   return async (why) => {
     const r = await within(ms, send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms), { timedOut: true });
-    const state = r?.timedOut ? "unavailable (diagnostic timeout)" : r?.result?.value ?? "unavailable: " + clip(JSON.stringify(r?.exceptionDetails?.text ?? r));
+    // (on a page that threw, as Chrome's own error page does, returnByValue gives the error as {}: say the exception)
+    const state = r?.timedOut ? "unavailable (diagnostic timeout)"
+      : r?.exceptionDetails ? "unavailable: " + clip(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text)
+      : typeof r?.result?.value === "string" ? r.result.value : "unavailable: " + clip(JSON.stringify(r));
     log(`  diagnostics (${why}):`);
     log("    page: " + String(state).slice(0, 2000));
     for (const [k, list] of Object.entries(notes)) for (const line of list) log(`    ${k}: ${line}`);
@@ -151,8 +154,22 @@ const bucket = await mf.getR2Bucket("ENGINES");
 const chunks = readdirSync(join(here, "dist", "lib"), { recursive: true }).filter((f) => statSync(join(here, "dist", "lib", f)).isFile());
 for (const f of chunks) if (!f.startsWith("matlab")) await bucket.put("lib/" + f, readFileSync(join(here, "dist", "lib", f)));
 
-const upstream = await freePort();
-const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
+// (serve.py picks its own free port and says it once it is listening: no port chosen here that something else can
+// take before serve.py binds it, and no fixed wait for it to start; a CI flake was the front's 502, ECONNREFUSED,
+// for the first page load, run 40090051590)
+const server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] });
+let serverErr = "";
+server.stderr.on("data", (d) => { serverErr = (serverErr + d).slice(-2000); });
+const upstream = await new Promise((resolve, reject) => {
+  let out = "";
+  const timer = setTimeout(() => reject(new Error("serve.py didn't say its port within 30 s: " + serverErr)), 30_000);
+  server.stdout.on("data", (d) => {
+    out += d;
+    const m = /^(\d+)\n/.exec(out);
+    if (m) { clearTimeout(timer); resolve(Number(m[1])); }
+  });
+  server.on("exit", (code, signal) => { clearTimeout(timer); reject(new Error(`serve.py exited before listening (${code ?? signal}): ${serverErr}`)); });
+});
 let deployed = false;
 const seen = { site: [], r2: [] };
 // (what the diagnostics print if the page doesn't load: the front's failed requests, the page's console, its failed loads)
@@ -186,7 +203,8 @@ const front = createServer(async (req, res) => {
 });
 await new Promise((r) => front.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${front.address().port}/`;
-await sleep(800);
+// (the root page answers before Chrome is sent to it)
+ok((await fetch(url)).status === 200, "the site answers before the page is opened");
 
 const profile = mkdtempSync(join(tmpdir(), "sb-update-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
