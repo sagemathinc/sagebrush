@@ -14,8 +14,9 @@
 // --check fails on any difference not recorded: an addition (record it with
 // --update, which raises the level), a removal or an incompatible signature
 // change (needs CORE_API's major bump or a reviewed core-api-changes.json
-// entry).  A compatible expansion (new parameters with defaults) is recorded
-// by --update with the new parameters at level + 1.  The work is one CLI run
+// entry).  A compatible expansion, one that keeps every existing call valid
+// with its meaning (widenParams below), is recorded by --update with the new
+// parameters at level + 1.  The work is one CLI run
 // and one diff, however many package sets exist: no package metadata is read.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -154,6 +155,67 @@ function generate() {
   }
 }
 
+// A signature widening is compatible exactly when every call valid against the
+// recorded parameters stays valid and binds the same arguments to the same
+// parameters:
+//   - the recorded positional parameters keep their names, kinds and order, and
+//     a default is never removed (one may be added);
+//   - new positional parameters may only be appended, each with a default, and
+//     only if there was no *args (else an extra positional argument would move
+//     from *args to the new parameter);
+//   - *args may be added, never removed;
+//   - recorded keyword-only parameters stay keyword-only, with a default kept
+//     where it existed; new ones need a default; their order doesn't matter;
+//   - **kwargs may be added, never removed.
+// So show(obj, **o) -> show(obj, *more, **o) is compatible; -> show(*objs, **o)
+// is not (show(obj=x) would bind x into **o).  Returns the generated
+// parameters, each with the recorded `since` where it existed and `newLevel`
+// where it's new, and the problems found.
+export function widenParams(where, rp, gp, newLevel) {
+  const problems = [];
+  const isPos = (p) => p.kind === "pos" || p.kind === "posonly";
+  const rPos = rp.filter(isPos), gPos = gp.filter(isPos);
+  const rVar = rp.find((p) => p.kind === "varargs"), gVar = gp.find((p) => p.kind === "varargs");
+  const rKw = rp.filter((p) => p.kind === "kwonly"), gKw = gp.filter((p) => p.kind === "kwonly");
+  const rVarKw = rp.find((p) => p.kind === "varkw"), gVarKw = gp.find((p) => p.kind === "varkw");
+  const since = new Map();
+  for (let i = 0; i < rPos.length; i++) {
+    const a = rPos[i], b = gPos[i];
+    if (!b || a.name !== b.name || a.kind !== b.kind || (a.default && !b.default)) {
+      problems.push(`${where}: parameter ${a.name} changed or removed (an incompatible signature change)`);
+      return { params: rp, problems, added: false };
+    }
+    since.set(b, a.since);
+  }
+  const newPos = gPos.slice(rPos.length);
+  for (const p of newPos) {
+    if (!p.default) problems.push(`${where}: new parameter ${p.name} has no default (an incompatible signature change)`);
+    if (rVar) problems.push(`${where}: new positional parameter ${p.name} after *${rVar.name} (an extra positional argument would bind to it: incompatible)`);
+  }
+  if (rVar) {
+    if (!gVar) problems.push(`${where}: *${rVar.name} removed (an incompatible signature change)`);
+    else since.set(gVar, rVar.since);
+  }
+  for (const a of rKw) {
+    const b = gKw.find((p) => p.name === a.name);
+    if (!b || (a.default && !b.default)) problems.push(`${where}: keyword-only parameter ${a.name} changed or removed (an incompatible signature change)`);
+    else since.set(b, a.since);
+  }
+  for (const p of gKw) if (!since.has(p) && !p.default) problems.push(`${where}: new keyword-only parameter ${p.name} has no default (an incompatible signature change)`);
+  if (rVarKw) {
+    if (!gVarKw) problems.push(`${where}: **${rVarKw.name} removed (an incompatible signature change)`);
+    else since.set(gVarKw, rVarKw.since);
+  }
+  if (problems.length) return { params: rp, problems, added: false };
+  let added = false;
+  const params = gp.map((p) => {
+    if (since.has(p)) return { ...p, since: since.get(p) };
+    added = true;
+    return { ...p, since: newLevel };
+  });
+  return { params, problems, added };
+}
+
 // Merge the generated surface into the recorded one: new names, members and
 // parameters get `since = level` (the new level); returns {api, problems}
 function merge(recorded, gen, newLevel) {
@@ -163,18 +225,11 @@ function merge(recorded, gen, newLevel) {
   const sinceOf = (r, fallback) => (r && typeof r.since === "number" ? r.since : fallback);
   const mergeParams = (where, rp, gp, since) => {
     if (gp === "opaque" || rp === "opaque" || !Array.isArray(rp)) return gp === "opaque" ? "opaque" : gp.map((p) => ({ ...p, since }));
-    // (an expansion: every recorded parameter unchanged and in place, the new ones with defaults)
-    for (let i = 0; i < rp.length; i++) {
-      const a = rp[i], b = gp[i];
-      if (!b || a.name !== b.name || a.kind !== b.kind || a.default !== b.default) {
-        problems.push(`${where}: parameter ${a.name} changed or removed (an incompatible signature change)`);
-        return rp;
-      }
-    }
-    const extra = gp.slice(rp.length);
-    for (const p of extra) if (!p.default) problems.push(`${where}: new parameter ${p.name} has no default (an incompatible signature change)`);
-    if (extra.length) added++;
-    return [...rp, ...extra.map((p) => ({ ...p, since: newLevel }))];
+    // (a compatible widening, or a problem: widenParams above)
+    const w = widenParams(where, rp, gp, newLevel);
+    problems.push(...w.problems);
+    if (w.added) added++;
+    return w.params;
   };
   const mergeEntry = (where, r, g) => {
     const since = sinceOf(r, newLevel);
