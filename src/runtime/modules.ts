@@ -5,6 +5,7 @@ import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import { INTR } from "./interrupt";
+import { fullGc } from "./gc";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
 import * as FD from "./fdlibm";
@@ -374,26 +375,9 @@ newBuiltinModule("sys", (m) => {
   // browser, Bun, Deno)
   m._sagebrush_heap_used = builtin(() => {
     try {
-      const p = (globalThis as any).process;
-      // (Node only: Bun and Deno answer node:v8 with other engines' numbers)
-      if (!p?.versions?.v8 || p.versions.bun || p.versions.deno) return null;
-      const v8 = p.getBuiltinModule?.("node:v8");
-      const vm = p.getBuiltinModule("node:vm");
-      // (gc from a fresh context: a host started with --expose-gc already
-      // has it there, and its setting is left alone; otherwise the flag is
-      // set for that one context and cleared again, whatever happens, so no
-      // context made later gets gc: astra CORR-341-1)
-      let gc = (globalThis as any).gc;
-      if (typeof gc !== "function") gc = vm.runInNewContext("typeof gc === 'function' ? gc : undefined");
-      if (typeof gc !== "function") {
-        v8.setFlagsFromString("--expose-gc");
-        try {
-          gc = vm.runInNewContext("gc");
-        } finally {
-          v8.setFlagsFromString("--no-expose-gc");
-        }
-      }
-      gc();
+      // (Node only, and only where the collection ran: gc.ts)
+      if (!fullGc()) return null;
+      const v8 = (globalThis as any).process.getBuiltinModule("node:v8");
       const n = v8.getHeapStatistics().used_heap_size;
       return typeof n === "number" && n > 0 ? Math.floor(n) : null;
     } catch {
