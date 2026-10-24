@@ -1348,7 +1348,7 @@ async function reportPlan(w, ns, what, label, m, marker, maps, want, counts, lea
   check(m.ms <= 900_000, `${what}: the whole ${Math.round(m.ms / 1000)} s from the page (at most 900 s)`);
   const stores = {};
   for (const n of ["pending", "outbox", "adoptJournal", "ops"]) stores[n] = await new Promise((ok) => { const r = w.ws.transaction(n).objectStore(n).count(); r.onsuccess = () => ok(r.result); r.onerror = () => ok(-1); });
-  check(true, `fixture figures (${label}): ` + J({ ...counts, mappings: maps, moved: marker?.moved ?? null, closure: marker?.closure ?? null, placed: marker?.placed ?? null, stores, totalMs: m.ms, rewriteMs, ...times, longestTaskMs: m.longestTaskMs, heapGrowthMiB: m.heapMiB }));
+  check(true, `fixture figures (${label}): ` + J({ ...counts, mappings: maps, moved: marker?.moved ?? null, closure: marker?.closure ?? null, validation: marker?.validation ?? null, headroom: marker?.closure && marker?.validation ? { requests: W.D11.closureRequests - marker.closure.requests - marker.validation.requests, rows: W.D11.closureRows - marker.closure.rows - marker.validation.rows } : null, placed: marker?.placed ?? null, stores, totalMs: m.ms, rewriteMs, ...times, longestTaskMs: m.longestTaskMs, heapGrowthMiB: m.heapMiB }));
 }
 
 // ---- N6: a large forget, bounded
