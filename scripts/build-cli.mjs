@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 
@@ -82,6 +83,10 @@ if (web["index.html"]) {
   if (page.includes("alpha-banner") && without.includes("alpha-banner")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
   web["index.html"] = Buffer.from(without, "utf8").toString("base64");
 }
+// (`sagebrush board open`'s page, src/board-open.ts: the frame other sites show a board in, gzipped (1.4 MB, of
+// which it serves only one copy; its scripts are text: 43%), and the policy the site serves it with, in _headers)
+if (existsSync(join(webDir, "frame/board/index.html"))) web["frame/board/index.html.gz"] = gzipSync(readFileSync(join(webDir, "frame/board/index.html")), { level: 9 }).toString("base64");
+if (existsSync(join(webDir, "_headers"))) web["_headers"] = readFileSync(join(webDir, "_headers")).toString("base64");
 const katexDir = join(webDir, "katex");
 const walkKatex = (dir) => {
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
