@@ -284,15 +284,42 @@ N = 10 ** 5
 ints = {"t": "list", "v": [{"t": "int", "v": str(k)} for k in range(N)]}
 data = {"t": "list", "v": [nest(30, ints), nest(30, {"t": "list", "v": [{"t": "rat", "v": "1/3"}]})]}
 nodes = N + 2 * 31 + 2
-t0 = time.time()
+
+
+def flat_decode_time():
+    # (the same N integers, flat, into Magma: no universe to unify, no
+    # coercion; a measure of this machine's speed, taken in this process;
+    # CPU time, so that waiting for a CPU another test holds doesn't count)
+    t = time.process_time()
+    _sbx.decode(ints, "magma")
+    return time.process_time() - t
+
+
+base = flat_decode_time()
+t0 = time.process_time()
 a = _sbx.decode(data, "magma")
-took = time.time() - t0
+took = time.process_time() - t0
+work = _sbx._magma_work
+base = (base + flat_decode_time()) / 2
 inner = a[0]
 for _ in range(30):
     inner = inner[0]
 report(len(inner) == N and str(M.Type(inner[7])) == "FldRatElt" and inner[7] == 7, "a depth-32 nest of 10^5 integers beside one of a rational: the integers coerced into Q")
-report(_sbx._magma_work <= 2 * nodes + 64, "its work linear: %d node visits for %d nodes (at most 2 x nodes + 64)" % (_sbx._magma_work, nodes))
-report(took < 60, "and within 60 s (here %.1f s)" % took)
+report(work <= 2 * nodes + 64, "its work linear: %d node visits for %d nodes (at most 2 x nodes + 64)" % (work, nodes))
+# Its CPU time, two ways.  Relative: at most 25 times the flat decode of the
+# same integers measured around it, so that a slower per-node step fails on
+# any machine (on the test VMs the ratio is 10 to 11, and 10 to 12 with 4 or
+# 8 copies sharing 2 CPUs, whose CPU times stay 5 to 6 s; the coercion into Q
+# made 3 times as costly gives 29, 10 times 92).
+# Absolute: a ceiling for a hang, 60 s scaled by SAGEBRUSH_TIME_SCALE as the
+# other limits are.  (It was 60 s of wall-clock time: on GitHub's 4-CPU
+# runners, where the test runner runs this beside catalog gate 3 and other
+# tests, the decode took up to 62.6 s of wall-clock time, against 3.8 s on
+# the test VMs.)
+import os
+limit = 60 * (float(os.environ.get("SAGEBRUSH_TIME_SCALE") or 1))
+report(took <= 25 * base, "and at most 25 times the CPU time of the flat decode of its integers (here %.1f s, %.1f times %.2f s)" % (took, took / base, base))
+report(took < limit, "and within %d s of CPU time (here %.1f s)" % (limit, took))
 # (a list refused early: its first two elements already have no universe, the rest never visited)
 bad = {"t": "list", "v": [{"t": "int", "v": "1"}, {"t": "str", "v": "a"}, ints]}
 try:
