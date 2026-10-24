@@ -107,6 +107,79 @@ print(fig._repr_svg_())
   assert.ok(Math.abs(edges[0] - 0.25) < 0.01 && Math.abs(edges[1] - 0.75) < 0.01, String(edges));
 });
 
+// (expected as matplotlib 3.11.1's, run on the same program)
+test("plt.axes: a new Axes every call, a rect, an Axes made current, properties by keyword; errors as matplotlib's", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+def t(label, f):
+    try:
+        print(label, f())
+    except Exception as e:
+        print(label, type(e).__name__, e)
+fig = plt.figure()
+a = plt.axes()
+b = plt.axes()
+print(len(fig.axes), a is b, plt.gca() is b, a.figure is fig)
+plt.close("all")
+plt.plot([1, 2])
+c = plt.axes()
+print(len(plt.gcf().axes), plt.gca() is c)
+plt.close("all")
+ax = plt.axes(xlim=(0, 10), ylim=(-2, 2), title="T")
+print(ax.get_xlim(), ax.get_ylim(), "T" in ax.figure._repr_svg_())
+plt.close("all")
+ax = plt.axes([0.1, 0.2, 0.3, 0.4], ylim=(0, 3))
+print(ax.get_ylim(), len(plt.gcf().axes))
+d = plt.subplot()
+plt.axes(ax)
+print(plt.gca() is ax)
+t("bad kw", lambda: plt.axes(foo=1))
+t("rect 3", lambda: plt.axes((0.1, 0.1, 0.8)))
+t("3d", lambda: plt.axes(projection="3d"))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "2 False True True",
+    "2 True",
+    "(0.0, 10.0) (-2.0, 2.0) True",
+    "(0.0, 3.0) 1",
+    "True",
+    "bad kw AttributeError Axes.set() got an unexpected keyword argument 'foo'",
+    "rect 3 TypeError plt.axes(rect): rect is [left, bottom, width, height], not (0.1, 0.1, 0.8)",
+    "3d NotImplementedError plt.axes(projection='3d'): Sagebrush draws rectilinear Axes only",
+  ]);
+});
+
+test("plt.axes(ax) selects ax without reordering fig.axes (the panels' draw order): overlapping Axes draw the same; pyplot then draws on ax; a new Axes is current", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import re
+def two(select):
+    fig = plt.figure()
+    a = plt.axes([0.1, 0.1, 0.6, 0.6])
+    b = plt.axes([0.3, 0.3, 0.6, 0.6])
+    a.set_title("A"); b.set_title("B")
+    if select:
+        plt.axes(a)
+    return fig, a, b
+fig0, _, _ = two(False)
+fig, a, b = two(True)
+svg = lambda f: re.sub(r"sbclip[0-9]+", "sbclip", f._repr_svg_())
+print("order kept", fig.axes == [a, b], "current", plt.gca() is a, "same picture", svg(fig) == svg(fig0))
+plt.plot([1, 2, 3])
+print("plot on selected", a.get_ylim() != (0.0, 1.0), b.get_ylim() == (0.0, 1.0))
+plt.axes(b); plt.axes(a)
+print("reselect", fig.axes == [a, b], plt.gca() is a)
+c = plt.axes([0.5, 0.5, 0.2, 0.2])
+print("new is current", plt.gca() is c, fig.axes == [a, b, c])
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "order kept True current True same picture True",
+    "plot on selected True True",
+    "reselect True True",
+    "new is current True True",
+  ]);
+});
+
 test("errorbar: scalar, 1-D and (2, N) errors as matplotlib's (limits, errors); fmt '' a line", () => {
   const out = run(`
 import matplotlib.pyplot as plt
