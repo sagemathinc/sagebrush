@@ -4102,6 +4102,7 @@ def _sort_key(c):
 class _FFFactorization(list):
     """A factorization of a polynomial over a finite field: (factor,
     exponent) pairs and a unit, printed as Sage prints it."""
+    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
 
     def __init__(self, items, unit, ring):
         list.__init__(self, items)

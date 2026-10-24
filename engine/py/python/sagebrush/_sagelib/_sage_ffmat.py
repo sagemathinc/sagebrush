@@ -594,6 +594,15 @@ def _entries(rows):
         yield from list.__iter__(r)
 
 
+def _characteristic(R):
+    """R's characteristic, or 0 when R has none to tell."""
+    f = getattr(R, "characteristic", None)
+    try:
+        return int(f()) if callable(f) else 0
+    except Exception:
+        return 0
+
+
 def _coerced_eq(x, y):
     """Sage's x == y for a Sage-mode matrix or vector x (see above): True
     or False, or NotImplemented when y is nothing it compares with.  Entry
@@ -609,7 +618,11 @@ def _coerced_eq(x, y):
             return _integral_zero(y) and not any(_entries(rows))
         P = _vector_pushout(R, b[1])
         if P is None:
-            return False
+            # (Sage meets a ring of positive characteristic and the symbolic
+            # ring in SR, where sagebrush has no images of its elements; the
+            # empty matrix has none to compare, so it equals every symbolic
+            # scalar, as in Sage: matrix(GF(5), 0, 0) == SR(1))
+            return not rows and b[1] is _sa().SR and _characteristic(R) > 0
         c, zero = P(y), P(0)  # (the image of the scalar: c times the identity)
         for i, r in enumerate(rows):
             for j, e in enumerate(list.__iter__(r)):
@@ -959,13 +972,13 @@ class FFVector:
 
     def __eq__(self, o):
         # (through coercion, as Sage: the common parent's images, _coerced_eq;
-        # a Sage vector, also a list, goes there first (CORR-EQ89-1), and a
-        # plain list or tuple is compared entry by entry, as before)
+        # a Sage vector, also a list, goes there first (CORR-EQ89-1); a list
+        # or tuple, of any subclass, is not a vector and is unequal, as in Sage)
         r = _coerced_eq(self, o)
         if r is not NotImplemented:
             return r
         if isinstance(o, (list, tuple)):
-            return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
+            return False
         return NotImplemented
 
     def __ne__(self, o):
@@ -2586,6 +2599,7 @@ class _Basis(list):
         sage: C = list(B); C[0] = C[1]; C
         [(0, 1, 0), (0, 1, 0), (0, 0, 1)]
     """
+    _latex_container = True  # (latex() writes it as Sage's plain list: it stands in for one)
 
     def __str__(self):
         return "[\n" + ",\n".join(repr(v) for v in self) + "\n]"

@@ -443,10 +443,212 @@ class PrincipalIdeal:
         return self._R(f) % self._g
 
     def __eq__(self, o):
-        return isinstance(o, PrincipalIdeal) and o._R == self._R and (o._g % self._g == 0) and (self._g % o._g == 0)
+        """Equality of ideals: their generators are associates (over a
+        field, equal up to a nonzero constant; over ZZ, up to a sign; over
+        Zmod(n), up to a unit of Zmod(n)[t], decided exactly by
+        _zmod_ideal_eq).  An element f of the ring (or a scalar of its base
+        ring) is compared as the ideal (f), as Sage compares it; anything
+        else is unequal.
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[]; P.<u> = ZZ[]
+            sage: R.ideal(2*t) == t, R.ideal(t^2) == t, R.ideal(1) == 3, R.ideal(0) == 0
+            (True, False, True, True)
+            sage: P.ideal(2*u) == u, P.ideal(-u) == u, P.ideal(2) == -2, R.ideal(t) == u
+            (False, True, True, False)
+            sage: Z.<z> = Zmod(4)[]
+            sage: Z.ideal(z) == z + 1, Z.ideal(z) == 2*z, Z.ideal(1) == 1 + 2*z, Z.ideal(z) == 3*z
+            (False, False, True, True)
+        """
+        if not isinstance(o, PrincipalIdeal):
+            # (built by the ring's own ideal(), as R.ideal(f) is: its
+            # admission first; then compared as ideals, below)
+            f = _ideal_operand(self._R, o)
+            if f is None:
+                return False
+            o = self._R.ideal(f)
+        if o._R != self._R:
+            return False
+        g, h = self._g, o._g
+        if not g or not h:
+            return not g and not h  # (the zero ideal is (0) only)
+        # (over a field and over ZZ: associates, compared coefficient by
+        # coefficient, without a division or a new polynomial, stopping at
+        # the first difference: (g) = (h) when lc(h) g = lc(g) h over a
+        # field, and h = g or -g over ZZ, whose polynomials have the units
+        # 1 and -1 only)
+        B = self._R.base_ring()
+        import _sage_ff
+        if isinstance(B, _sage_ff.IntegerModRing_) and not B.is_field():
+            # (Zmod(n), n composite: its polynomials have more units, 1 + 2t
+            # over Zmod(4), and zero divisors; decided exactly, its stored
+            # coefficients read in place, below)
+            return _zmod_ideal_eq(g._c, h._c, int(B.order()))
+        gc, hc = g.list(), h.list()
+        same = len(gc) == len(hc)
+        if B.is_field():
+            a, b = hc[-1], gc[-1]
+            return same and all(a * x == b * y for x, y in zip(gc, hc))
+        if B is _sa().ZZ:
+            return same and (all(x == y for x, y in zip(gc, hc)) or all(x == -y for x, y in zip(gc, hc)))
+        # (another base ring: as before item 1, by the remainders, exact
+        # when the divisor's leading coefficient is a unit)
+        return o._g % g == 0 and g % o._g == 0
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
 
     def __hash__(self):
+        # (one value per ring, consistent with equality of ideals; an ideal
+        # equal to an element hashes otherwise, as in Sage: (2t) equals
+        # both t and 2t, whose hashes differ)
         return hash(repr(self._R))
+
+
+def _trim(c, n):
+    c = [x % n for x in c]
+    while c and not c[-1]:
+        c.pop()
+    return c
+
+
+def _zmod_ideal_eq(gc, hc, n, budget=None, ring=None):
+    """(g) == (h) in Zmod(n)[t], g and h by their coefficients as stored.
+
+    Precondition: the coefficients are canonical, each in [0, n) (an int, or
+    an element whose int() is one) with the last nonzero.  That is the
+    invariant of a Polynomial_ff's _c as the ring's supported constructors
+    and arithmetic maintain it (Polynomial_ff.__init__ itself only copies
+    and trims: it does not reduce raw coefficients), and step 4 keeps it
+    (x // d is in [0, n/d), the last nonzero).  So no copy or reduction is
+    needed to compare them.  Decided exactly where its work is admitted
+    first; else NotImplementedError.
+
+    In order, each sound:
+    1. equal, or opposite, coefficient lists: True;
+    2. constants: (c) = (d) when gcd(c, n) = gcd(d, n);
+    3. different content ideals (the gcd of the coefficients with n, an
+       invariant of the ideal): False;
+    4. with the common content d > 1, g = d g' and h = d h': (g) = (h) in
+       Zmod(n)[t] exactly when (g') = (h') in Zmod(n/d)[t] (d g' q = d h'
+       modulo n is g' q = h' modulo n/d), decided there by these steps;
+    5. h = c g for a unit c of Zmod(n), c found from a coefficient of g that
+       is a unit (known from step 3's scan): True;
+    6. a unit leading coefficient on either side (that generator is no zero
+       divisor, its division exact): equal when it divides the other and the
+       quotient is a unit of Zmod(n)[t] (its constant term a unit, the
+       others nilpotent), as g = h r, h = g q give g (1 - q r) = 0.
+    Every step is charged to one ff.work budget (_sage_ffsub.WORK, the
+    finite-field core's, admin-set: --limits; one per comparison, shared by
+    step 4's) before its work, in coefficient operations of Zmod(n)
+    (_sage_ffsub.mn(n, 1) cops each; a gcd or an inverse bits(n) of them)."""
+    import math
+    import _sage_ffsub as S
+    if not gc or not hc:
+        return not gc and not hc
+    ring = n if ring is None else ring  # (the user's modulus, in messages)
+    refuse = lambda: NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d) is not supported yet (work)" % ring)
+    if budget is None:
+        budget = [S.WORK]
+    w, bits = S.mn(n, 1), n.bit_length()
+    lg, lh = len(gc), len(hc)
+    # (1: with equal lengths, the equal scan and the opposite scan read
+    # every coefficient once each at worst, and the integer lists read them
+    # a third time: 3 operations per coefficient, 1 for the lists alone
+    # with different lengths, all admitted before the first read; nothing
+    # is allocated before the lists)
+    S.charge(budget, w * (3 if lg == lh else 1) * (lg + lh), refuse)
+    if lg == lh:
+        if all(int(x) == int(y) for x, y in zip(gc, hc)):
+            return True
+        if all((int(x) + int(y)) % n == 0 for x, y in zip(gc, hc)):
+            return True
+    gc, hc = [int(x) for x in gc], [int(x) for x in hc]
+    # (2 and 3: per coefficient of g its gcd with n and the running
+    # content's, per coefficient of h the content's, and the two leading
+    # coefficients' gcds with n: 2 lg + lh + 2 gcds (constants: 2); the
+    # first unit coefficient of g and the leading-unit flags are kept for 5
+    # and 6, which scan nothing)
+    S.charge(budget, w * bits * (2 * lg + lh + 2), refuse)
+    if lg == 1 and lh == 1:
+        return math.gcd(gc[0], n) == math.gcd(hc[0], n)
+    cg, ch, unit_i = n, n, None
+    for i, x in enumerate(gc):
+        cg = math.gcd(cg, x)
+        if math.gcd(x, n) == 1 and unit_i is None:
+            unit_i = i
+    for x in hc:
+        ch = math.gcd(ch, x)
+    lead_unit = (math.gcd(gc[-1], n) == 1, math.gcd(hc[-1], n) == 1)
+    if cg != ch:
+        return False
+    if cg > 1:
+        # (4: the quotients by the content, one division per coefficient)
+        S.charge(budget, w * (lg + lh), refuse)
+        m = n // cg
+        return _zmod_ideal_eq([x // cg for x in gc], [x // cg for x in hc], m, budget, ring)
+    if lg == lh and unit_i is not None:
+        # (5: one inverse, about bits operations, then one product per term)
+        S.charge(budget, w * (bits + lg + lh), refuse)
+        x = gc[unit_i]
+        c = hc[unit_i] * pow(x, -1, n) % n
+        if math.gcd(c, n) == 1 and all(c * y % n == z for y, z in zip(gc, hc)):
+            return True
+    for (a, b), unit in zip(((gc, hc), (hc, gc)), lead_unit):
+        if unit:
+            # (6: the division, (len b - len a + 1) len a products, and the
+            # unit test, at most 2 bits products per quotient coefficient,
+            # admitted together before either starts)
+            lq = max(len(b) - len(a) + 1, 0)
+            S.charge(budget, w * (lq * len(a) + bits + 2 * bits * lq), refuse)
+            q, r = _divmod_unit_lc(b, a, n)
+            return not r and _is_unit_poly(q, n)
+    raise NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d) generated by polynomials of content 1 without a unit leading coefficient is not supported yet" % ring)
+
+
+def _divmod_unit_lc(b, a, n):
+    """(q, r), b = q a + r in Zmod(n)[t], deg r < deg a, a's leading
+    coefficient a unit (trimmed lists)."""
+    inv = pow(a[-1], -1, n)
+    r, d = list(b), len(a) - 1
+    q = [0] * max(len(b) - d, 0)
+    for i in range(len(q) - 1, -1, -1):
+        c = r[i + d] * inv % n
+        q[i] = c
+        if c:
+            for j, x in enumerate(a):
+                r[i + j] = (r[i + j] - c * x) % n
+    return _trim(q, n), _trim(r[:d], n)
+
+
+def _is_unit_poly(q, n):
+    """Whether q (a trimmed list) is a unit of Zmod(n)[t]: its constant
+    term a unit, the others nilpotent (c^k = 0 for k the bits of n)."""
+    import math
+    if not q or math.gcd(q[0], n) != 1:
+        return False
+    k = n.bit_length()
+    return all(pow(c, k, n) == 0 for c in q[1:])
+
+
+def _ideal_operand(R, o):
+    """o, when Sage compares an ideal of R with it as with the ideal (o):
+    an element of R itself, or a scalar whose ring coerces into R's base
+    ring (a Python int, an element of ZZ; of QQ over QQ); None for anything
+    else, an element of another polynomial ring among them (unequal, as
+    Sage: QQ[t].ideal(t) == ZZ[t].gen() is False)."""
+    import _sage_ffmat, _sage_poly, _sage_mpoly
+    S = _sage_ffmat._scalar_parent(o)
+    if S is None:
+        return None
+    if S is R or S == R:
+        return o
+    if isinstance(S, (_sage_poly.PolynomialRing_, _sage_mpoly.MPolynomialRing_)):
+        return None
+    B = R.base_ring()
+    P = _sage_ffmat._vector_pushout(B, S)
+    return o if P is not None and (P is B or P == B) else None
 
 
 def _ideal(self, *gens):
