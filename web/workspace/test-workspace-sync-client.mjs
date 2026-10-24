@@ -44,11 +44,11 @@ const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "sync",
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: ACCOUNTS.join(",") },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: ACCOUNTS.join(","), SYNC_URL_KEY: "url-key", FILES_ORIGIN: "https://files.test" },
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    routes: ["sagebrush.test/*"],
+    routes: ["sagebrush.test/*", "files.test/*"],
     outboundService: cocalc,
-    ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 1000000, period: 60 } } },
+    ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 1000000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1002", simple: { limit: 1000000, period: 60 } } },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "sync");
@@ -73,6 +73,13 @@ const ctl = {
   rewriteWelcome: null,
   /** PUTs held until released */
   holdPut: false,
+  /** GETs of the user-content domain (/__files) held until released */
+  holdGet: false,
+  /** answers for the next `rebuilt` messages, instead of the server's (core's has no `rebuilt`: the server half is
+   * the cloud's): [{ack: {floor, count}} | {code, detail} | {hold: true}] (default: an ack with floor = through) */
+  rebuilt: [],
+  /** `rebuilt` sent on to the real server (core's: it answers "unknown message"), not answered here */
+  rebuiltReal: false,
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
   /** the next n pulled index pages (answers to pull_index) dropped */
@@ -91,9 +98,11 @@ const ctl = {
 };
 /** every open proxied socket's closer */
 const closers = new Set();
-const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] };
+/** every open proxied socket's sender to the page (a notice injected as the server would send it, D8) */
+const toPage = new Set();
+const log = { sent: [], got: [], http: [], sockets: 0, open: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] };
 const held = [];
-const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [] });
+const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [] });
 
 async function upstream(method, path, headers, body) {
   const h = { origin: SITE, ...headers };
@@ -153,7 +162,10 @@ async function control(body) {
     case "closeAll": { const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
+    // open socket: the core server doesn't send them, so the client's side is tested by injecting them here)
+    case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
+    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     default: return { error: "unknown" };
   }
 }
@@ -171,6 +183,20 @@ const server = createServer(async (req, res) => {
       const out = await control(JSON.parse((await readBody(req)).toString() || "{}"));
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify(out));
+    }
+    // (the user-content domain, for the page: the signed URLs a blob GET redirects to are rewritten to /__files/…,
+    // served by the real handler (server.ts handleSyncFiles) on files.test in Miniflare.  Test harness only)
+    if (p.startsWith("/__files/")) {
+      const entry = { method: req.method, path: p, files: true };
+      log.http.push(entry);
+      if (ctl.holdGet) await new Promise((ok) => held.push(ok));
+      const r = await mf.dispatchFetch("https://files.test" + p.slice("/__files".length) + u.search, { method: req.method, headers: req.headers.range ? { range: req.headers.range } : {} });
+      entry.status = r.status;
+      const out = Buffer.from(await r.arrayBuffer());
+      const h = {};
+      r.headers.forEach((v, k) => { if (k !== "content-encoding") h[k] = v; });
+      res.writeHead(r.status, h);
+      return res.end(out);
     }
     if (!p.startsWith("/api/") && !p.startsWith("/auth/")) { res.writeHead(404); return res.end(); }
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
@@ -217,6 +243,7 @@ const server = createServer(async (req, res) => {
     const out = Buffer.from(await r.arrayBuffer());
     const h = {};
     r.headers.forEach((v, k) => { if (k !== "set-cookie" && k !== "content-length" && k !== "content-encoding") h[k] = v; });
+    if (h.location?.startsWith("https://files.test/")) h.location = "/__files/" + h.location.slice("https://files.test/".length);
     res.writeHead(r.status, h);
     res.end(out);
   } catch (e) {
@@ -259,6 +286,9 @@ server.on("upgrade", async (req, socket, head) => {
       try { client.close(okCode(code), "proxy"); } catch {}
     };
     closers.add(closeBoth);
+    const send = (text) => { try { client.send(text); } catch {} };
+    toPage.add(send);
+    client.on("close", () => toPage.delete(send));
     if (ctl.closeOnOpen > 0) {
       ctl.closeOnOpen--;
       return closeBoth(1000);
@@ -267,10 +297,19 @@ server.on("upgrade", async (req, socket, head) => {
       const text = data.toString();
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
-      log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)) } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after });
+      log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
       if (m.t === "hello") helloAccount = m.account ?? null;
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+      if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server", at: Date.now() });
+      if (m.t === "rebuilt" && !ctl.rebuiltReal) {
+        const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
+        log.rebuilt.push({ through: m.through, answer: f, at: Date.now() });
+        const answer = () => client.send(JSON.stringify(f.ack ? { t: "ack", req: m.req, rebuilt: f.ack } : { t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
+        if (f.hold) held.push(() => { f.ack = f.ack ?? { floor: m.through, count: 0 }; answer(); });
+        else answer();
+        return;
+      }
       if (m.t === "pull_index" && ctl.fakePull.length) {
         const f = ctl.fakePull.shift();
         client.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
@@ -329,7 +368,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-sc-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", "--enable-precise-memory-info", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 let code = 1;
 try {
   if (!port) port = await devtoolsPort(profile);
@@ -363,6 +402,8 @@ try {
   });
   clearTimeout(timer);
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
+  // (measurements, printed pass or fail)
+  for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
   for (const e of errors) fails.push("page error: " + e);
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
@@ -372,11 +413,14 @@ try {
   }
   ws.close();
 } finally {
+  // (Chrome's exit awaited before its profile is removed: on a loaded runner it may still be writing there)
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((ok) => chrome.once("exit", ok));
   chrome.kill();
+  await Promise.race([exited, new Promise((ok) => setTimeout(ok, 5000))]);
   server.close();
   await mf.dispose().catch(() => {});
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   rmSync(site, { recursive: true, force: true });
 }
 process.exit(code);

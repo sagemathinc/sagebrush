@@ -28,6 +28,7 @@ import { inTx, req } from "./db";
 import { TRASH, nameOf, normPath, parentOf, safeName, splitExt, within } from "./paths";
 import { COPIES, LEGACY_MAX, WorkspaceError, type BoardRecord, type Entry, type OldBytes, type Workspace } from "./api";
 import { reserve, type Release } from "./reserve";
+import { rewriting } from "./sync-rewrite";
 import { bytesHash, FENCE } from "../notebook/stores.js";
 import { isBoard } from "../board/doc";
 
@@ -60,7 +61,8 @@ export function migrate(w: Workspace, storage: KeyValue, opts: { proceed?: () =>
     const r: MigrateReport = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
     try {
       await migrateBoards(w, storage, r);
-      old.push(...(await reconcile(w, first, r)));
+      // (not while a large move is being applied (D11 r8 N4): the next migrate reconciles)
+      if (!(await rewriting(w.ws))) old.push(...(await reconcile(w, first, r)));
     } catch (e) {
       // (the workspace full: what fitted is in, the rest still where it was, said)
       if (e instanceof WorkspaceError && e.code === "limit") r.full = e.message;
