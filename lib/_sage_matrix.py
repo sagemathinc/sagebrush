@@ -1071,7 +1071,7 @@ class Matrix:
             ....:     A[[0] * 10^5, [0] * 10^5]
             ....: except MemoryError as e:
             ....:     print(str(e).splitlines()[1])
-            A 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for one matrix here.
+            A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.
         """
         if isinstance(ij, tuple):
             if len(ij) != 2:
@@ -2561,7 +2561,9 @@ def _shape(m, n, limit=None):
     m, n = _dim(m, "rows"), _dim(n, "columns")
     if m > limit or n > limit or m * n > limit:
         import _memguard
-        raise _memguard.memory_guard("A %d x %d matrix" % (m, n), max(m, n, m * n) * _SLOT_BYTES, limit * _SLOT_BYTES, "one matrix")
+        # (a fixed limit, not the heap's: more memory wouldn't help)
+        raise _memguard.memory_guard("A %d x %d matrix" % (m, n), max(m, n, m * n) * _SLOT_BYTES, limit * _SLOT_BYTES, "one matrix",
+                                     fixed=True)
     return m, n
 
 

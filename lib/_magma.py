@@ -29,7 +29,7 @@ def _memory_error(e):
     """A memory guard's refusal (a SagebrushMemoryError) as Magma's runtime
     error: its text, and its fields on the MagmaError (the same objects)."""
     m = MagmaError(str(e))
-    for k in ("what", "need_bytes", "limit_bytes", "allowance_for", "record", "partial", "checkpoint"):
+    for k in ("what", "need_bytes", "limit_bytes", "allowance_for", "record", "partial", "checkpoint", "fixed"):
         setattr(m, k, getattr(e, k))
     return m
 
@@ -959,10 +959,12 @@ def _collect_max():
 
 def _collect_refusal():
     """The bound's refusal (item D): the memory guards' message, the
-    allowance _COLLECT_COST bytes for each of _COLLECT_MAX elements."""
+    allowance _COLLECT_COST bytes for each of _COLLECT_MAX elements.  At
+    the 10^6 ceiling the bound is fixed (a larger heap doesn't raise it),
+    and the message says so (astra's PR114-SEM-1)."""
     return _memory_error(_memguard.memory_guard("A collection of more than %d elements" % _COLLECT_MAX,
                                                 (_COLLECT_MAX + 1) * _COLLECT_COST, _COLLECT_MAX * _COLLECT_COST,
-                                                "one collection"))
+                                                "one collection", fixed=_COLLECT_MAX == 10 ** 6))
 
 
 def _collect(gen):

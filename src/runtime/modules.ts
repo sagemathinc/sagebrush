@@ -88,9 +88,10 @@ function halted(name: string): never {
 // MemoryError) with the same text and fields as a lib guard: the wording
 // lives there once.  Called before anything is allocated; the sizes are
 // exact (a bigint past 2^53).
-export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string): never {
+// (fixed: a limit that is the same whatever memory there is)
+export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never {
   const norm = (x: number | bigint) => (typeof x === "bigint" ? O.normBig(x) : x);
-  const e = callObj(getattr(importModule("_memguard"), "memory_guard"), [what, norm(needBytes), norm(limitBytes), allowanceFor]);
+  const e = callKw(getattr(importModule("_memguard"), "memory_guard"), [what, norm(needBytes), norm(limitBytes), allowanceFor], ["fixed"], [fixed]);
   throw raiseExc(e);
 }
 
