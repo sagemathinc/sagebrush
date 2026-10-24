@@ -22,7 +22,7 @@ import { killTree, procTable, sessionTree, survivors } from "./interrupt-procs.m
 const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const LAUNCHER = join(ROOT, "packages/sagebrush/bin/sagebrush.cjs");
+const LAUNCHER = process.env.SB_LAUNCHER ?? join(ROOT, "packages/sagebrush/bin/sagebrush.cjs"); // (SB_LAUNCHER: another build, for checking the harness)
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
   const i = args.indexOf(name);
@@ -315,7 +315,9 @@ async function runHost(host) {
   return rows;
 }
 
-const out = { started: new Date().toISOString(), node: process.version, hosts: {}, cases: CASES.map((c) => c.id) };
+const out = { started: new Date().toISOString(), node: process.version, run: MODE, hosts: {}, cases: CASES.map((c) => c.id) };
+// --signals S1,S2,...,pending (default: all; "none" skips them): the signal-state trials (r5 §8.1)
+const SIGNALS = opt("--signals", "all");
 const tRun = now();
 for (const h of HOSTS) {
   if (h === "browser") {
@@ -324,6 +326,10 @@ for (const h of HOSTS) {
     out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget, baseline: BASELINE }).catch((e) => ({ error: String(e?.stack ?? e).slice(0, 600), rows: [] }));
   } else out.hosts[h] = await runHost(h);
 }
+if (SIGNALS !== "none") {
+  const { runSignals } = await import("./interrupt-signals.mjs");
+  out.signals = await runSignals({ hosts: HOSTS.filter((h) => h !== "browser"), mode: MODE, record, overBudget, baseline: BASELINE, only: SIGNALS === "all" ? null : SIGNALS.split(",") });
+}
 out.wall_ms = Math.round(now() - tRun);
 writeFileSync(OUT, JSON.stringify(out, null, 1));
 console.log("wrote", OUT, "in", out.wall_ms, "ms");
@@ -331,6 +337,6 @@ console.log("wrote", OUT, "in", out.wall_ms, "ms");
 // row (INCOMPLETE; INVALID: uncalibrated or out of budget), or a FIXED baseline row (remove its
 // entry from web/interrupt-baseline.json in the same change)
 const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ case: "*", host: h, outcome: "INVALID", why: v?.skipped ?? v?.error ?? "no rows" }]);
-const bad = Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)).filter((r) => ["FAIL", "FIXED", "INCOMPLETE", "INVALID"].includes(r.outcome));
-for (const r of bad) console.log(r.outcome, r.case, r.host, r.outcome === "FIXED" ? "(remove its baseline entry)" : r.why ?? "");
+const bad = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? [])].filter((r) => ["FAIL", "FIXED", "INCOMPLETE", "INVALID", "PENDING-READY"].includes(r.outcome));
+for (const r of bad) console.log(r.outcome, r.case ?? r.trial, r.host ?? "", r.outcome === "FIXED" ? "(remove its baseline entry)" : r.outcome === "PENDING-READY" ? "(its capability is present: make it required)" : r.why ?? "");
 process.exit(args.includes("--ci") && bad.length ? 1 : 0);
