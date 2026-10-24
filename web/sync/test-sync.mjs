@@ -2067,6 +2067,9 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const ex2 = await post(sx2, "/api/sync/v1/enable", {});
   const ex2b = await ex2.json();
   ok(ex2.status === 200 && ex2b.state === "readonly", "enable on an account whose plan ended answers readonly, not active: " + JSON.stringify(ex2b));
+  // (its status now, before its retention can purge it: 3 "days", 3 s in tests, so a later check races the purge)
+  const stx2 = await (await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: sx2, "sec-fetch-site": "same-origin" } })).json();
+  ok(stx2.available === true && stx2.state === "readonly", "GET /status: an account whose plan ended: readonly: " + JSON.stringify(stx2));
   // CORR-AB4-1: a lapse while a raise's grant is on its way back (storage_bytes unchanged): the upload is
   // refused readonly, and the grant is given back by the alarm, with no further request
   const sz1 = await signIn(Z1);
@@ -2226,8 +2229,6 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   ok(b.available === true, "and once CoCalc answers, after the moment it isn't asked: available");
   [c, b] = await status(sa);
   ok(b.available === true && b.state === "active" && b.generation === (await genOf(A)), "an account on: its state and generation: " + JSON.stringify(b));
-  [c, b] = await status(await signIn(X2));
-  ok(b.available === true && b.state === "readonly", "an account whose plan ended: readonly: " + JSON.stringify(b));
   // beside an enable: the statuses are answered from whatever is so, and the one enable registers once
   const s3 = await signIn(ST3);
   const [en, ...st] = await Promise.all([post(s3, "/api/sync/v1/enable", {}), status(s3), status(s3), status(s3), status(s3)]);
