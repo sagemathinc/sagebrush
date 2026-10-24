@@ -179,3 +179,79 @@ print("after", plt.rcParams["lines.linewidth"])
 `);
   assert.deepEqual(out.trim().split("\n"), ["imported False False", "warned ['UserWarning']", "in context 3.0", "after 1.5"]);
 });
+
+test("font sizes stay with the plot, as matplotlib's: tick and axis labels from rc when the Axes is made, the title when set_title is called (values: matplotlib 3.11.1)", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import re
+big = {"font.size": 30, "axes.labelsize": 30, "axes.titlesize": 30, "xtick.labelsize": 30, "ytick.labelsize": 30}
+def sizes(ax):
+    o = ax._panel().options
+    return tuple(round(o[k] * 72 / 100, 4) for k in ("title_size", "label_size", "tick_size"))
+with plt.style.context(big):
+    fig, ax = plt.subplots(); ax.set_title("T"); ax.set_xlabel("x"); ax.plot([1, 2])
+svg_pt = max(float(x) for x in re.findall(r'font-size="([0-9.]+)', fig._repr_svg_())) * 72 / 100
+print("a inside", sizes(ax), round(svg_pt, 1))
+with plt.style.context(big):
+    fig, ax = plt.subplots(); ax.plot([1, 2])
+ax.set_title("T"); ax.set_xlabel("x")
+print("b axes inside, text after", sizes(ax))
+fig, ax = plt.subplots(); ax.plot([1, 2])
+with plt.style.context(big):
+    ax.set_title("T"); ax.set_xlabel("x")
+print("c axes before, text inside", sizes(ax))
+with plt.style.context({"font.size": 20}):
+    fig, ax = plt.subplots(); ax.set_title("T"); ax.plot([1, 2])
+print("d font.size 20", sizes(ax))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "a inside (30.0, 30.0, 30.0) 30.0",
+    "b axes inside, text after (12.0, 30.0, 30.0)",
+    "c axes before, text inside (30.0, 10.0, 10.0)",
+    "d font.size 20 (24.0, 20.0, 20.0)",
+  ]);
+});
+
+test("axes.prop_cycle: every colour checked before rcParams changes (a Cycler and a string, matplotlib's messages); a cycler is read only as far as its cap", () => {
+  const out = run(`
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+def t(label, f):
+    try:
+        print(label, f())
+    except Exception as e:
+        print(label, type(e).__name__, str(e)[:160], len(str(e)) < 200)
+before = mpl.rcParams["axes.prop_cycle"]
+t("object bad", lambda: mpl.rcParams.__setitem__("axes.prop_cycle", mpl.cycler(color=["red", "not-a-colour"])))
+print("kept", mpl.rcParams["axes.prop_cycle"] == before, "subplots", len(plt.subplots()[0].axes))
+t("string bad", lambda: mpl.rcParams.__setitem__("axes.prop_cycle", "cycler('color', ['red', 'not-a-colour'])"))
+t("update bad", lambda: mpl.rcParams.update({"axes.prop_cycle": mpl.cycler(color=["nope"])}))
+print("kept", mpl.rcParams["axes.prop_cycle"] == before)
+t("rgb tuple", lambda: mpl.rcParams.__setitem__("axes.prop_cycle", mpl.cycler(color=[(1, 0, 0)])))
+def reds(n, stop):
+    # (raises if item number stop is asked for)
+    for i in range(n):
+        if i + 1 == stop:
+            raise RuntimeError("item %d asked for" % stop)
+        yield "red"
+t("4096 from an iterator", lambda: len(mpl.cycler(color=reds(4096, 10 ** 9))))
+t("more from an iterator", lambda: mpl.cycler(color=reds(10 ** 9, 4098)))
+t("list of 4097", lambda: mpl.cycler(color=["red"] * 4097))
+big = "cycler('color', [" + "'red', " * 4096 + "'nope', " + "'red', " * 200000 + "])"
+t("string over the cap", lambda: mpl.rcParams.__setitem__("axes.prop_cycle", big))
+t("string of 4096", lambda: len(mpl.rcParams.__setitem__("axes.prop_cycle", "cycler('color', [" + "'red', " * 4096 + "])") or mpl.rcParams["axes.prop_cycle"]))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "object bad ValueError Key axes.prop_cycle: 'not-a-colour' does not look like a color arg True",
+    "kept True subplots 1",
+    "string bad ValueError Key axes.prop_cycle: \"cycler('color', ['red', 'not-a-colour'])\" is not a valid cycler construction: 'not-a-colour' does not look like a color arg True",
+    "update bad ValueError Key axes.prop_cycle: 'nope' does not look like a color arg True",
+    "kept True",
+    "rgb tuple None",
+    "4096 from an iterator 4096",
+    "more from an iterator ValueError cycler: at most 4096 colours True",
+    "list of 4097 ValueError cycler: at most 4096 colours True",
+    "string over the cap ValueError Key axes.prop_cycle: a cycler string: cycler: at most 4096 colours True",
+    "string of 4096 4096",
+  ]);
+});
