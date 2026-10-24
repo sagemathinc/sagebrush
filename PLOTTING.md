@@ -188,6 +188,8 @@ Supported:
   size allows, in its default subplot layout), autoscaled limits have 5%
   margins, and lines (`plot`, `hist`, `errorbar`) and patches (`bar`,
   `scatter`, `fill_between`, `pie`) take colors from separate cycles.
+- `plt.axes()`: a new Axes each call, a `[left, bottom, width, height]`
+  rect, or an Axes made current; keywords are Axes properties.
 - `rcParams` (one object for `matplotlib` and `pyplot`, with all of
   matplotlib 3.11's keys and defaults and its errors for others), `rc`,
   `rcdefaults`, `rc_context`, and `plt.style` (`use`, `context`,
