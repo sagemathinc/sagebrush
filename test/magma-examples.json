@@ -213,6 +213,7 @@
   "IsSubfield": "> IsSubfield(GF(4), GF(16));\ntrue\n> IsSubfield(GF(8), GF(16));\nfalse",
   "PrimeField": "> PrimeField(GF(16));\nFinite field of size 2",
   "Root": "> K<b> := GF(16);\n> Root(b, 7);\nb^13",
+  "RootsInSplittingField": "> P<x> := PolynomialRing(GF(5));\n> RootsInSplittingField(x^2 + 2);\n[ <$.1^9, 1>, <$.1^21, 1> ]\nFinite field of size 5^2",
   "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"
  }
 }
