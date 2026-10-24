@@ -505,11 +505,6 @@ class PrincipalIdeal:
         return hash(repr(self._R))
 
 
-# The largest modulus whose factorization _zmod_ideal_eq computes, in bits,
-# when neither generator has a unit leading coefficient (else it needs none).
-_ZMOD_FACTOR_BITS = 128
-
-
 def _trim(c, n):
     c = [x % n for x in c]
     while c and not c[-1]:
@@ -517,33 +512,77 @@ def _trim(c, n):
     return c
 
 
-def _zmod_ideal_eq(gc, hc, n):
-    """(g) == (h) in Zmod(n)[t], g and h nonzero, by their coefficient
-    lists (integers): exact, not up to a unit of Zmod(n) alone.
+def _zmod_ideal_eq(gc, hc, n, budget=None, ring=None):
+    """(g) == (h) in Zmod(n)[t], by their coefficient lists (integers),
+    decided exactly where that is cheap or its work is admitted first; else
+    NotImplementedError.  No factorization of n (a known gap, DOCTESTS.md).
 
-    With a unit leading coefficient, g is no zero divisor and dividing by
-    it is exact: (g) = (h) when g divides h and the quotient is a unit
-    (g = h r, h = g q give g (1 - q r) = 0, so q r = 1).  A polynomial
-    over Zmod(n) is a unit when its constant term is a unit and its other
-    coefficients are nilpotent.  Otherwise, prime power by prime power of
-    n (the ring is their product): (g) is p^a (D) for one monic D (modulo
-    p^(e - a)), a the least valuation of g's coefficients; equal ideals have
-    equal (a, D)."""
+    In order, each sound:
+    1. equal, or opposite, coefficient lists: True (no arithmetic);
+    2. constants: (c) = (d) when gcd(c, n) = gcd(d, n);
+    3. different content ideals (the gcd d of the coefficients with n, an
+       invariant of the ideal): False;
+    4. with the common content d > 1, g = d g' and h = d h': (g) = (h) in
+       Zmod(n)[t] exactly when (g') = (h') in Zmod(n/d)[t] (d g' q = d h'
+       modulo n is g' q = h' modulo n/d), decided there by these steps;
+    5. h = c g for a unit c of Zmod(n), c found from a coefficient of g that
+       is a unit: True;
+    6. a unit leading coefficient on either side (that generator is no zero
+       divisor, its division exact): equal when it divides the other and the
+       quotient is a unit of Zmod(n)[t] (its constant term a unit, the
+       others nilpotent), as g = h r, h = g q give g (1 - q r) = 0.
+    Steps 2 to 6 are charged to one ff.work budget (_sage_ffsub.WORK, the
+    finite-field core's, admin-set: --limits; one per comparison, shared by
+    step 4's) before their work, in coefficient operations of Zmod(n)
+    (_sage_ffsub.mn(n, 1) cops each)."""
     import math
+    import _sage_ffsub as S
     gc, hc = _trim(gc, n), _trim(hc, n)
     if not gc or not hc:
         return not gc and not hc
+    if gc == hc or gc == _trim([-x for x in hc], n):
+        return True
+    ring = n if ring is None else ring  # (the user's modulus, in messages)
+    refuse = lambda: NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d) is not supported yet (work)" % ring)
+    if budget is None:
+        budget = [S.WORK]
+    w, bits = S.mn(n, 1), n.bit_length()
+    lg, lh = len(gc), len(hc)
+    # (2 and 3: a gcd with n per coefficient, about bits operations each)
+    S.charge(budget, w * bits * (lg + lh), refuse)
+    if lg == 1 and lh == 1:
+        return math.gcd(gc[0], n) == math.gcd(hc[0], n)
+    cg, ch = n, n
+    for x in gc:
+        cg = math.gcd(cg, x)
+    for x in hc:
+        ch = math.gcd(ch, x)
+    if cg != ch:
+        return False
+    if cg > 1:
+        # (4: the quotients by the content, one division per coefficient)
+        S.charge(budget, w * (lg + lh), refuse)
+        m = n // cg
+        return _zmod_ideal_eq([x // cg for x in gc], [x // cg for x in hc], m, budget, ring)
+    # (5: one inverse, about bits operations, then one product per term)
+    S.charge(budget, w * (bits + lg + lh), refuse)
+    if lg == lh:
+        for i, x in enumerate(gc):
+            if math.gcd(x, n) == 1:
+                c = hc[i] * pow(x, -1, n) % n
+                if math.gcd(c, n) == 1 and all(c * y % n == z for y, z in zip(gc, hc)):
+                    return True
+                break
     for a, b in ((gc, hc), (hc, gc)):
         if math.gcd(a[-1], n) == 1:
+            # (6: the division, (len b - len a + 1) len a products, and the
+            # unit test, at most 2 bits products per quotient coefficient,
+            # admitted together before either starts)
+            lq = max(len(b) - len(a) + 1, 0)
+            S.charge(budget, w * (lq * len(a) + bits + 2 * bits * lq), refuse)
             q, r = _divmod_unit_lc(b, a, n)
             return not r and _is_unit_poly(q, n)
-    if n.bit_length() > _ZMOD_FACTOR_BITS:
-        raise NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d), neither generator with a unit leading coefficient: the modulus is over %d bits" % (n, _ZMOD_FACTOR_BITS))
-    for p, e in _sa().factor(_sa().ZZ(n)):
-        p, e = int(p), int(e)
-        if _local_generator(gc, p, e) != _local_generator(hc, p, e):
-            return False
-    return True
+    raise NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d), neither generator with a unit leading coefficient, is not supported yet (it needs the factorization of the modulus)" % ring)
 
 
 def _divmod_unit_lc(b, a, n):
@@ -569,52 +608,6 @@ def _is_unit_poly(q, n):
         return False
     k = n.bit_length()
     return all(pow(c, k, n) == 0 for c in q[1:])
-
-
-def _local_generator(c, p, e):
-    """(g)'s canonical generator in Zmod(p^e)[t]: None for the zero ideal,
-    else (a, D): p^a times the monic D (modulo p^(e - a)), a the least
-    valuation of g's coefficients.  D is g / p^a = u D, u a unit, by
-    Hensel lifting from modulo p (where u is a constant)."""
-    pe = p ** e
-    c = _trim(c, pe)
-    if not c:
-        return None
-    a = min(_val(x, p) for x in c if x)
-    f, m = e - a, p ** (e - a)
-    G = _trim([x // p ** a for x in c], m)
-    d = max(i for i, x in enumerate(G) if x % p)
-    u0 = G[d] % p
-    iu = pow(u0, -1, p)
-    D = [x * iu % p for x in G[: d + 1]]
-    u = [u0]
-    for k in range(1, f):
-        pk, pk1 = p ** k, p ** (k + 1)
-        uD = _mul(u, D, pk1)
-        E = [((G[i] if i < len(G) else 0) - (uD[i] if i < len(uD) else 0)) % pk1 // pk for i in range(max(len(G), len(uD)))]
-        # (u0 dD + D dU = E modulo p, deg dD < d: E / u0 = qq D + r)
-        qq, r = _divmod_unit_lc(_trim([x * iu for x in E], p), _trim(D, p), p) if d else (_trim([x * iu for x in E], p), [])
-        D = [(D[i] + pk * (r[i] if i < len(r) else 0)) % pk1 for i in range(d + 1)]
-        du = [x * u0 for x in qq]
-        u = [((u[i] if i < len(u) else 0) + pk * (du[i] if i < len(du) else 0)) % pk1 for i in range(max(len(u), len(du)))]
-    return (a, tuple(x % m for x in D))
-
-
-def _val(x, p):
-    v = 0
-    while x % p == 0:
-        x //= p
-        v += 1
-    return v
-
-
-def _mul(a, b, n):
-    r = [0] * (len(a) + len(b) - 1)
-    for i, x in enumerate(a):
-        if x:
-            for j, y in enumerate(b):
-                r[i + j] = (r[i + j] + x * y) % n
-    return r
 
 
 def _ideal_operand(R, o):
