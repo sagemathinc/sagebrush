@@ -1508,6 +1508,52 @@ async function rebuildExclusive() {
   }
 }
 
+async function rebuildInvalidCrash() {
+  // (astra's qualification on #104: the page dies between halt() (in memory) and its flag's write.  The server's
+  // invalid comes only once this device's refusals are at its cap, and each refusal acked here recorded the obligation
+  // "refused" with its record's removal (refusalAtomic): so the crash loses the reason (invalid), never the rebuild.
+  // Here the hook records that obligation, as those refusals have, then the page dies; restarted, the client rebuilds
+  // before it sends anything, sends the record after, and converges)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild invalid crash: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  await w.mkdir("/k1");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "invalid", detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  let crashed = false;
+  W.REBUILD.before = async (phase, at) => {
+    if (phase !== "halt" || crashed) return;
+    crashed = true;
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), at, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    throw new Error("the page dies before the halt's flag is written (test)");
+  };
+  const c1 = viewClient(w);
+  try {
+    check(await until(() => crashed), "rebuild invalid crash: invalid answered, halted, and the page died before the flag");
+  } finally {
+    W.REBUILD.before = null;
+    await stop(c1);
+  }
+  const rb = await metaGet(w.ws, `sync:${ns}:rebuild`);
+  check(rb?.why === "refused" && (await outbox(w)) === 1, "rebuild invalid crash: the reason lost (\"refused\" kept, not \"invalid\"), the obligation and the undecided record kept: " + J(rb));
+  await ctl("log", { reset: true });
+  const c2 = viewClient(w);
+  try {
+    check(await until(async () => (await outbox(w)) === 0 && (await settled(w, c2)), 20_000), "rebuild invalid crash: restarted, converged, the record decided " + J(c2.status));
+    // (the order the front received them in: log.sent is appended as each message arrives (astra2's CORR-PR111-1: not
+    // their times, which can be equal))
+    const log = await ctl("log"), sent = log.sent.map((m) => m.t);
+    const iReb = sent.indexOf("rebuilt"), iOps = sent.indexOf("ops"), nReb = sent.filter((t) => t === "rebuilt").length;
+    const left = await metaGet(w.ws, `sync:${ns}:rebuild`);
+    check(nReb === 1 && log.rebuilt.length === 1 && iOps >= 0 && iReb >= 0 && iReb < iOps && !left, "rebuild invalid crash: rebuilt announced once, before any ops, and no obligation left " + J({ rebuilt: nReb, rebuiltAt: iReb, firstOpsAt: iOps, left }));
+  } finally {
+    await stop(c2);
+  }
+}
+
 async function rebuildCounter() {
   // (test 19, CORR-REBUILT-1: done services n0; a refusal (n0 + 1) recorded during view, during retire, before the
   // announce, and during the held ack: the ack records the floor, the flag stays set, another pass runs, and its
@@ -1798,7 +1844,7 @@ async function scanAtomic() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
