@@ -4,7 +4,7 @@ The design is `plan-growth-budget-r6`: r5 was approved (astra CLEAR on r5, daybr
 
 ## What it guards
 
-1. **No core growth without review.** Every byte a core artifact grows needs a reviewed marker in `.growth/`, beyond a configured jitter allowance. The jitter allowance is **0** today.
+1. **No core growth without review.** Every byte a core artifact grows needs a reviewed marker in `.growth/`, beyond a configured jitter allowance. The jitter allowance is 64 B per integration and 1 KiB in total, for `cli/pyjs.cjs` only (William's later-PR approval); every other bundle has none.
 2. **An optional package never grows the core.** `cli/packages.gen.js` and the registry's package count are *exact*: they may only shrink, except through a reviewed raise of their `max`. `size-budget.mjs --check` still fails on any optional package's name in a core artifact.
 
 ## Files
@@ -57,8 +57,8 @@ Create `.growth/<yyyy-mm-dd>-<topic>.json` with the bytes that the PR's `size-ga
 ## William's decisions (Oct 23 2026, about 11:50 PM PDT, relayed by @sagebrush)
 
 1. **The policy:** "Approve, and a later PR may allow the 64 B / 1 KiB jitter for cli/pyjs.cjs."
-   - This PR (PR A) ships with **zero** jitter: `noise_bytes` = `noise_total` = 0 for every bundle.
-   - `noise_bytes` 64 and `noise_total` 1024, for `cli/pyjs.cjs` only, come in a separate, reviewed later PR.
+   - PR A (#95) shipped with **zero** jitter: `noise_bytes` = `noise_total` = 0 for every bundle.
+   - The follow-up PR sets `noise_bytes` 64 and `noise_total` 1024 for `cli/pyjs.cjs` only. In a reset, a group's charge at most `noise_bytes` needs no growth entry; otherwise the charge bounds apply.
 2. **The single writer:** "Confirmed, no ruleset for now."
 3. **The merge queue and a size-only re-check:** "Yes, as recommended."
    - No merge queue.
