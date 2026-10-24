@@ -856,8 +856,9 @@ def change(xs, U, budget, refuse, fail, W=None):
     charged to budget before any is visited or moved: by value from or into
     a prime field, by F1's up() into an overfield and down() into a subfield
     (a discrete log only for the elements outside the prime field: those are
-    counted by a scan of deg W words each, charged before it, daybreak2
-    LIMIT-F3-1; the others by value); fail(x) for the first nonzero element
+    counted by a scan of deg W words each, and the move reads each element's
+    prime-field value again, so 2 deg W each is charged before either,
+    daybreak2 LIMIT-F3-1 and LIMIT-F4PLAN-2; the others by value); fail(x) for the first nonzero element
     x that isn't in U, as Magma's rules say (section 2B).  An empty xs is []
     (a zero polynomial goes anywhere).  W, xs's field, is the callers' to
     give (none of xs is read before admission); else xs[0]'s parent.
@@ -877,8 +878,10 @@ def change(xs, U, budget, refuse, fail, W=None):
     p, wn, _ = pnq(W)
     un = pnq(U)[1]
     if 1 < un < wn and wn % un == 0:
-        # (into a proper subfield: the scan first charged, then done)
-        charge(budget, k * wn, refuse)
+        # (into a proper subfield: both scans charged first, the count's
+        # here and the move's below (prime_value again for each element,
+        # deg W words each: daybreak2 LIMIT-F4PLAN-2), then the count done)
+        charge(budget, 2 * k * wn, refuse)
         k = sum(1 for x in xs if prime_value(x) is None)
     cost, hits = change_cost(W, U, k, refuse)
     charge(budget, cost, refuse)
