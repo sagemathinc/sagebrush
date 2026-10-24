@@ -281,6 +281,11 @@ round-numbers modes. The named colors of `lib/matplotlib/colors.py`
 `lib/matplotlib/_names.py` lists the public names of matplotlib 3.11's
 `Axes`, `Figure` and `pyplot` (written by `test/mpl_names_gen.py`), so that
 an AttributeError can say which of them Sagebrush does not have yet.
+`lib/matplotlib/_rckeys.py` is data from matplotlib 3.11.1: the name and
+default value of each of its 339 rc parameters, as
+`matplotlib.rcParamsDefault` gives them (from matplotlib's
+`lib/matplotlib/mpl-data/matplotlibrc` and `lib/matplotlib/rcsetup.py`),
+written by `test/mpl_rckeys_gen.py`; no code is copied.
 
 Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved
 
