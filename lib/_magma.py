@@ -904,15 +904,19 @@ def _still_range(v):
 # selection S[I], a set of a range or a sequence made from one builds at
 # most _COLLECT_MAX elements (HARD-FCC-1, HARD-A57-1): 10^6, or fewer in a
 # small heap.  The heap a script has is the limit less what is already in
-# use when Magma mode has loaded (its compiled modules: about 59 MB of a
-# 96 MiB heap in October 2026), so the bound is the least of
+# use when Magma mode has loaded (its compiled modules: about 68 MB of a
+# 96 MiB heap on Node 24 in late October 2026, under the ceiling that
+# heap-budget.json sets and scripts/heap-budget.mjs checks in CI), so the
+# bound is the least of
 #   - 10^6;
 #   - limit // 2048, the earlier bound, which this one never exceeds;
 #   - free // _COLLECT_COST, free = limit - used.
 # used is sys._sagebrush_heap_used() (V8's used heap, Node only), rounded
-# up to a whole MiB so that one script gets one bound run after run, and
-# taken once, when this module has finished importing (the end of the
-# file): the bound never changes within a session.  Where the host has no
+# up to a whole MiB so that the bound moves in steps of 1024 (a heap that
+# lies near a MiB boundary can give either of two neighbouring steps from
+# one run to the next), and taken once, when this module has finished
+# importing (the end of the file): the bound never changes within a
+# session.  _COLLECT_USED keeps the heap it was taken from.  Where the host has no
 # heap statistics (the browser, Bun, Deno; CPython), used is the fixed
 # _COLLECT_RESERVE instead.  (Measured in a 96 MiB heap on Node 24 and 26:
 # 49152 triples <x, [x, x+1], x/3>, the costliest element of the tests,
@@ -924,19 +928,21 @@ _COLLECT_RESERVE = 64 << 20
 
 
 def _collect_max():
+    """The bound, and the heap in use it was taken from, in bytes (None
+    where the host can't say), which scripts/heap-budget.mjs checks."""
     n = getattr(_sys, "_sagebrush_heap_limit", None)
     # (CPython, or a host that cannot say: a nominal 1 GiB)
     limit = int(n) if n else 1 << 30
-    used = None
+    raw = None
     f = getattr(_sys, "_sagebrush_heap_used", None)
     if callable(f):
         try:
-            used = f()
+            raw = f()
         except Exception:
-            used = None
+            raw = None
     mib = 1 << 20
-    used = _COLLECT_RESERVE if used is None else -(-int(used) // mib) * mib
-    return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST)
+    used = _COLLECT_RESERVE if raw is None else -(-int(raw) // mib) * mib
+    return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST), (None if raw is None else int(raw))
 
 
 def _collect_refusal():
@@ -11577,4 +11583,4 @@ __all__ += _CATEGORIES
 
 # (the comprehension bound, taken once, now that this module and all it
 # imports are loaded: see _collect_max)
-_COLLECT_MAX = _collect_max()
+_COLLECT_MAX, _COLLECT_USED = _collect_max()
