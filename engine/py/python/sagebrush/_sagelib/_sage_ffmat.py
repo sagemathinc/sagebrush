@@ -492,17 +492,29 @@ def _vector_pushout(R, S):
     return qb.QQbar  # (AA and QQbar)
 
 
-# ------------------------------------------------------------------ comparison with a scalar
+# ------------------------------------------------------------------ equality through coercion
 #
-# Sage's rules, from Sage 10.10 as a black-box oracle (sage-tests/
-# test_matrix_scalar_eq): a square matrix (0 x 0 too) compared with a
-# scalar s is compared with s times the identity in the ring where its
-# base ring and s's parent meet (_vector_pushout); where they do not meet
-# it is not equal.  A non-square matrix or a vector is equal only to an
-# integral zero (a Python int, bool or float, or an element of ZZ) when it
-# is zero: QQ(0), RR(0) or GF(3)(0) are not equal to it.  Shared by every
-# Sage-mode matrix and vector class; Magma mode has its own rules
-# (lib/_magma.py's eq).
+# Sage's x == y (William, who designed it: "it uses the coercion model to
+# find a common parent, and if possible then compares the image under
+# coercion of the two objects"): the common parent of x's and y's parents
+# by coercion (the pushout); where there is one, the images of x and y in
+# it are compared; where there is none, x != y (False, not an error).
+# _coerced_eq does this for Sage-mode matrices and vectors, with the
+# pushout of their base rings (_vector_pushout):
+# - matrix and matrix of the same dimensions: MatrixSpace(pushout(R, S),
+#   n, m); vector and vector of the same degree: likewise; other shapes
+#   have no common parent;
+# - a square matrix (0 x 0 too) and a scalar s: MatrixSpace(pushout(R,
+#   parent(s)), n), where s's image is s times the identity;
+# - a non-square matrix or a vector and a scalar: Sage embeds no scalar
+#   into such a space by coercion, except that an integral zero (a Python
+#   int, bool or float, or an element of ZZ) is converted to its zero:
+#   QQ(0), RR(0) or GF(3)(0) are not equal to the zero vector.  (Sage
+#   10.10's answers, sage-tests/test_matrix_scalar_eq; one more deviation
+#   from the model there: Sage's matrix(GF(p), 0, 0) == SR(0) is True,
+#   though GF(p) and SR have no pushout; here it is False.)
+# The comparison is entry by entry, with no converted copy of either
+# operand (HARD-F4E-1).  Magma mode has its own rules (lib/_magma.py's eq).
 
 def _scalar_parent(s):
     """The parent of s as Sage's coercion sees it when s is a scalar (a
@@ -552,34 +564,63 @@ def _integral_zero(s):
     return False
 
 
-def _scalar_eq(base, rows, ncols, s):
-    """Whether the matrix over base with these rows equals the scalar s, as
-    Sage decides it (see above); None when s is not a scalar (the caller
-    returns NotImplemented).  Entry by entry, with no converted copy of the
-    matrix (HARD-F4E-1)."""
-    S = _scalar_parent(s)
-    if S is None and type(s) is not float:
-        return None
-    if len(rows) != ncols:
-        return _integral_zero(s) and all(not x for r in rows for x in r)
-    P = _vector_pushout(base, S)
+def _shape(x):
+    """(kind, base ring, rows, ncols) of a value _coerced_eq compares:
+    ("matrix", R, its rows, ncols), ("vector", R, (its entries,), degree)
+    (one row, not copied), ("scalar", parent, None, None); else None."""
+    import _sage_matrix
+    if getattr(x, "_is_ffmatrix", False):
+        return ("matrix", x._base, x._rows, x._ncols)
+    if isinstance(x, _sage_matrix.Matrix):
+        return ("matrix", x._base, x._rows, x.ncols())
+    if isinstance(x, FFVector):
+        return ("vector", x._base, (x._e,), len(x._e))
+    if isinstance(x, _sage_matrix.Vector) and not isinstance(x, _sage_matrix.SeriesVector):
+        return ("vector", x.base_ring(), (x,), list.__len__(x))
+    S = _scalar_parent(x)
+    if S is not None or type(x) is float:
+        return ("scalar", S, None, None)
+    return None
+
+
+def _entries(rows):
+    """The stored entries of rows (lists, or a Vector: its raw entries, an
+    integral one of QQ stored as an int), in order, without a copy."""
+    for r in rows:
+        yield from list.__iter__(r)
+
+
+def _coerced_eq(x, y):
+    """Sage's x == y for a Sage-mode matrix or vector x (see above): True
+    or False, or NotImplemented when y is nothing it compares with.  Entry
+    by entry, without a copy of either operand."""
+    a, b = _shape(x), _shape(y)
+    if a is None or b is None:
+        return NotImplemented
+    kind, R, rows, ncols = a
+    if b[0] == "scalar":
+        if kind == "vector" or len(rows) != ncols:
+            # (no coercion of a scalar into a free module or a non-square
+            # matrix space; an integral zero converts to its zero)
+            return _integral_zero(y) and not any(_entries(rows))
+        P = _vector_pushout(R, b[1])
+        if P is None:
+            return False
+        c, zero = P(y), P(0)  # (the image of the scalar: c times the identity)
+        for i, r in enumerate(rows):
+            for j, e in enumerate(list.__iter__(r)):
+                if not bool(P(e) == (c if i == j else zero)):
+                    return False
+        return True
+    # (a matrix and a vector, or different shapes: no common parent)
+    if kind != b[0] or len(rows) != len(b[2]) or ncols != b[3]:
+        return False
+    if R is b[1] or R == b[1]:
+        return all(bool(u == v) for u, v in zip(_entries(rows), _entries(b[2])))
+    P = _vector_pushout(R, b[1])
     if P is None:
         return False
-    c, zero = P(s), P(0)
-    for i, r in enumerate(rows):
-        for j, x in enumerate(r):
-            if not bool(P(x) == (c if i == j else zero)):
-                return False
-    return True
-
-
-def _vector_scalar_eq(entries, s):
-    """Whether a vector with these entries equals the scalar s, as Sage
-    decides it (only an integral zero, see above); None when s is not a
-    scalar."""
-    if _scalar_parent(s) is None and type(s) is not float:
-        return None
-    return _integral_zero(s) and all(not x for x in entries)
+    return all(bool(P(u) == P(v)) for u, v in zip(_entries(rows), _entries(b[2])))
 
 
 def _scalar_hash(rows, ncols, default):
@@ -885,13 +926,10 @@ class FFVector:
         return len(self._e)
 
     def __eq__(self, o):
-        if isinstance(o, FFVector):
-            return self._e == o._e
         if isinstance(o, (list, tuple)):
             return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
-        # (a scalar: only an integral zero, as in Sage: _vector_scalar_eq)
-        r = _vector_scalar_eq(self._e, o)
-        return NotImplemented if r is None else r
+        # (through coercion, as Sage: the common parent's images, _coerced_eq)
+        return _coerced_eq(self, o)
 
     def __ne__(self, o):
         r = self.__eq__(o)
@@ -1319,17 +1357,11 @@ class FFMatrix:
         return [x for r in self._rows for x in r]
 
     def __eq__(self, o):
-        if isinstance(o, FFMatrix):
-            return self._rows == o._rows and self._ncols == o._ncols
-        import _sage_matrix
-        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
-            return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
-        # a scalar: Sage's rules (_scalar_eq: c times the identity of a
-        # square matrix where the rings meet; only an integral zero for a
-        # non-square one); it was NotImplemented, so A * A.inverse() == 1
-        # was False
-        r = _scalar_eq(self._base, self._rows, self._ncols, o)
-        return NotImplemented if r is None else r
+        # through coercion, as Sage: the images in the common parent
+        # (_coerced_eq: c times the identity for a scalar c and a square
+        # matrix); it was NotImplemented for a scalar, so A * A.inverse()
+        # == 1 was False
+        return _coerced_eq(self, o)
 
     def __ne__(self, o):
         r = self.__eq__(o)

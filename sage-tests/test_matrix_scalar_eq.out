@@ -31,3 +31,11 @@ GF3 2I hash True
 ZZ 1 1;0 1 hash False
 MS (False, True, True, True)
 inverse True
+ZZ[[4]] vs GF3[[1]] (True, True)
+ZZ[[4]] vs GF3[[2]] (False,)
+ZZ vs QQ (True,)
+QQ[[1/2]] vs GF3[[2]] (False,)
+ZZ vs RR (True, True)
+GF3 vs GF5 (False,)
+dimensions (False, False)
+vectors (True, True, False, False)
