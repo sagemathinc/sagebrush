@@ -443,10 +443,75 @@ class PrincipalIdeal:
         return self._R(f) % self._g
 
     def __eq__(self, o):
-        return isinstance(o, PrincipalIdeal) and o._R == self._R and (o._g % self._g == 0) and (self._g % o._g == 0)
+        """Equality of ideals: their generators are associates (over a
+        field, equal up to a nonzero constant; over ZZ, up to a sign).  An
+        element f of the ring (or a scalar of its base ring) is compared as
+        the ideal (f), as Sage compares it; anything else is unequal.
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[]; P.<u> = ZZ[]
+            sage: R.ideal(2*t) == t, R.ideal(t^2) == t, R.ideal(1) == 3, R.ideal(0) == 0
+            (True, False, True, True)
+            sage: P.ideal(2*u) == u, P.ideal(-u) == u, P.ideal(2) == -2, R.ideal(t) == u
+            (False, True, True, False)
+        """
+        if not isinstance(o, PrincipalIdeal):
+            # (built by the ring's own ideal(), as R.ideal(f) is: its
+            # admission first; then compared as ideals, below)
+            f = _ideal_operand(self._R, o)
+            if f is None:
+                return False
+            o = self._R.ideal(f)
+        if o._R != self._R:
+            return False
+        g, h = self._g, o._g
+        if not g or not h:
+            return not g and not h  # (the zero ideal is (0) only)
+        # (associates, compared coefficient by coefficient, without a
+        # division or a new polynomial, stopping at the first difference:
+        # (g) = (h) when lc(h) g = lc(g) h over a field, and h = g or -g
+        # over ZZ, whose polynomials have the units 1 and -1 only)
+        B = self._R.base_ring()
+        gc, hc = g.list(), h.list()
+        same = len(gc) == len(hc)
+        if B.is_field():
+            a, b = hc[-1], gc[-1]
+            return same and all(a * x == b * y for x, y in zip(gc, hc))
+        if same and (all(x == y for x, y in zip(gc, hc)) or all(x == -y for x, y in zip(gc, hc))):
+            return True
+        if B is _sa().ZZ:
+            return False
+        # (over Zmod(4), 1 + 2t is a unit too: not modelled)
+        raise NotImplementedError("equality of ideals of a polynomial ring over %r (not ZZ or a field) whose generators differ by more than a sign" % (B,))
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
 
     def __hash__(self):
+        # (one value per ring, consistent with equality of ideals; an ideal
+        # equal to an element hashes otherwise, as in Sage: (2t) equals
+        # both t and 2t, whose hashes differ)
         return hash(repr(self._R))
+
+
+def _ideal_operand(R, o):
+    """o, when Sage compares an ideal of R with it as with the ideal (o):
+    an element of R itself, or a scalar whose ring coerces into R's base
+    ring (a Python int, an element of ZZ; of QQ over QQ); None for anything
+    else, an element of another polynomial ring among them (unequal, as
+    Sage: QQ[t].ideal(t) == ZZ[t].gen() is False)."""
+    import _sage_ffmat, _sage_poly, _sage_mpoly
+    S = _sage_ffmat._scalar_parent(o)
+    if S is None:
+        return None
+    if S is R or S == R:
+        return o
+    if isinstance(S, (_sage_poly.PolynomialRing_, _sage_mpoly.MPolynomialRing_)):
+        return None
+    B = R.base_ring()
+    P = _sage_ffmat._vector_pushout(B, S)
+    return o if P is not None and (P is B or P == B) else None
 
 
 def _ideal(self, *gens):
