@@ -37,4 +37,6 @@
 |\text{\texttt{{\char`\{}1,{ }2{\char`\}}}}|
 |\text{\texttt{range(0,{ }3)}}|
 'hi there'
+1 2/3
+Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field 7 'x'
 Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field

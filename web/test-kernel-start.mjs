@@ -20,13 +20,15 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
 
 // a held start: everything waits for it, then goes in order, after what onStart sent
 {
-  const sent = [], log = [];
+  const sent = [], log = [], inits = [];
   let release;
   const gate = new Promise((r) => (release = r));
   const workers = [];
   const k = new WorkerKernel({
     createWorker: () => {
-      const w = { n: workers.length, postMessage: (m) => sent.push({ w: w.n, ...m }), terminate() {} };
+      // (the init message, the worker's limits, goes first and at once:
+      // web/worker.ts runs nothing before it; kept apart from what is asked)
+      const w = { n: workers.length, postMessage: (m) => (m.init ? inits : sent).push({ w: w.n, ...m }), terminate() {} };
       workers.push(w);
       return w;
     },
@@ -43,6 +45,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   k.execute("b = 2", { mode: "python" }, sink(log, "b"));
   await tick();
   ok(sent.length === 0, `while the start is held nothing is sent to the worker (${JSON.stringify(sent)})`);
+  ok(inits.length === 1 && inits[0].w === 0 && inits[0].init.limits === null, `but its limits, at once (the defaults: null) (${JSON.stringify(inits)})`);
   release();
   await k.started;
   await tick();
@@ -58,7 +61,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   const k = new WorkerKernel({
     createWorker: () => {
       const n = made++;
-      return { postMessage: (m) => sent.push({ w: n, ...m }), terminate: () => log.push(`terminate:${n}`) };
+      return { postMessage: (m) => !m.init && sent.push({ w: n, ...m }), terminate: () => log.push(`terminate:${n}`) };
     },
     onStart: async (w) => {
       await tick();
@@ -91,7 +94,7 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   const k = new WorkerKernel({
     createWorker: () => {
       const n = made++;
-      return { postMessage: (m) => sent.push({ w: n, ...m }), terminate() {} };
+      return { postMessage: (m) => !m.init && sent.push({ w: n, ...m }), terminate() {} };
     },
     onStart: async (w) => {
       if (made === 1) await new Promise((r) => (release = r));
@@ -107,4 +110,27 @@ const sink = (log, name) => ({ start() {}, out() {}, display() {}, interact() {}
   await tick();
   ok(!sent.some((m) => m.code === "old = 1"), `a run asked of a worker restarted before its start was done never runs (${JSON.stringify(sent)})`);
   ok(log.some((l) => l.startsWith("old:stopped")), "it is told it stopped");
+}
+
+// the limits each worker is given first: omitted or null, the defaults (null);
+// anything else supplied passes on as it is, for the worker to refuse, never
+// turned into the defaults (astra CORR-FF93-1); one postMessage can't copy, as
+// an object, refused all the same
+{
+  const initOf = (limits, cloneable = true) => {
+    const inits = [];
+    const o = { createWorker: () => ({ postMessage: (m) => { if (!cloneable && typeof m.init?.limits === "function") throw new Error("DataCloneError"); if (m.init) inits.push(m.init); }, terminate() {} }) };
+    if (limits !== "omitted") o.limits = limits;
+    new WorkerKernel(o).start();
+    return inits;
+  };
+  ok(JSON.stringify(initOf("omitted")) === '[{"limits":null}]', "limits omitted: {limits: null}, the defaults");
+  ok(JSON.stringify(initOf(null)) === '[{"limits":null}]', "limits null: the defaults");
+  ok(JSON.stringify(initOf('{"ff.work": 100000}')) === '[{"limits":"{\\"ff.work\\": 100000}"}]', "a JSON text: passed on");
+  for (const bad of [{ "ff.work": 100000 }, 42, false, [1], ""]) {
+    const got = initOf(bad);
+    ok(got.length === 1 && JSON.stringify(got[0].limits) === JSON.stringify(bad), `supplied ${JSON.stringify(bad)}: passed on as it is, not the defaults (${JSON.stringify(got)})`);
+  }
+  const fn = initOf(() => 1, false);
+  ok(fn.length === 1 && fn[0].limits && typeof fn[0].limits === "object" && fn[0].limits.uncloneable === "function", `a function postMessage can't copy: an object the worker refuses (${JSON.stringify(fn)})`);
 }

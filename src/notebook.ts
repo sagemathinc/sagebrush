@@ -13,6 +13,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSy
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
 import { Worker, parentPort, workerData } from "worker_threads";
+import { sessionLimits } from "./limits";
 import { spawn } from "child_process";
 
 // ---- the page's files: embedded in the bundle (scripts/build-cli.mjs), or
@@ -45,6 +46,9 @@ export function notebookWorker(data: { dir: string }) {
   const port = parentPort!;
   const session = notebookSession((m: any) => port.postMessage(m), {
     captureStreams: true,
+    // (the limits `sagebrush notebook` was started with; a page's init
+    // message, the browser worker's, is ignored here)
+    limits: workerData?.sagebrushLimits ?? null,
     init: (R: any) => {
       // the notebook's directory (a virtual working directory: worker
       // threads cannot chdir), and on sys.path, as in Jupyter
@@ -52,7 +56,7 @@ export function notebookWorker(data: { dir: string }) {
       R.importModule("sys").path.push(data.dir);
     },
   });
-  port.on("message", (m: any) => session.handle(m));
+  port.on("message", (m: any) => m?.init === undefined && session.handle(m));
   const { R } = require("./compile");
   port.postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt: null, $intr: R.INTR.buffer });
 }
@@ -85,7 +89,7 @@ export async function runNotebookServer(args: string[]) {
   };
 
   const startSession = (sid: string, nbDir: string): Session => {
-    const worker = new Worker(entry, { workerData: { sagebrushNotebook: { dir: nbDir } }, stdout: false, stderr: false });
+    const worker = new Worker(entry, { workerData: { sagebrushNotebook: { dir: nbDir }, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false });
     const s: Session = { worker, intr: null, clients: new Set(), backlog: [], timer: null };
     worker.on("message", (m: any) => {
       if (m.$intr) { s.intr = new Int32Array(m.$intr); delete m.$intr; }

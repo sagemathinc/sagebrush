@@ -1,0 +1,26 @@
+
+>> RootsInSplittingField(P!0);
+                        ^
+Runtime error in 'RootsInSplittingField': Argument 1 is not non-zero
+
+
+>> RootsInSplittingField(z^2 + 1);
+                        ^
+Runtime error in 'RootsInSplittingField': Coefficient ring of argument 1 is not 
+a finite field
+
+
+>> RootsInSplittingField(x, 2);
+                        ^
+Runtime error in 'RootsInSplittingField': Bad argument types
+Argument types given: RngUPolElt[FldFin], RngIntElt
+
+
+>> RootsInSplittingField(5);
+                        ^
+Runtime error in 'RootsInSplittingField': Bad argument types
+Argument types given: RngIntElt
+
+[ <K.1^9, 1>, <K.1^21, 1> ]
+Finite field of size 5^2
+end
