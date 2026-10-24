@@ -1507,6 +1507,8 @@ export class SyncClient {
   }
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {
     c.halted = why;
+    // (tests: between the halt, in memory, and its flag's write: the window a crash can fall in)
+    if (REBUILD.before) await REBUILD.before("halt", c.ns);
     await this.flagRebuild(c.ns, why, detail);
     this.showWaiting(c, (await c.ob.status()).count);
   }
