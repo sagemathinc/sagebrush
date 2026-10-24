@@ -1224,9 +1224,10 @@ class Matrix:
         # systematic review's API-F4)
         if not getattr(self, "_immutable", False):
             raise TypeError("mutable matrices are unhashable")
-        # (c times the identity hashes as c, which it equals, as in Sage)
+        # (a zero matrix hashes as 0 and c times the identity as c, which
+        # they equal, as in Sage; one pass, no copy: _matrix_hash)
         import _sage_ffmat
-        return _sage_ffmat._scalar_hash(self._rows, self.ncols(), hash(tuple(tuple(r) for r in self._rows)))
+        return _sage_ffmat._matrix_hash(self._rows, self.ncols())
 
     def __repr__(self):
         if self.nrows() > 19 or self.ncols() > 49:

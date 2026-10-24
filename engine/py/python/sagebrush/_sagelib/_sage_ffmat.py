@@ -513,6 +513,10 @@ def _vector_pushout(R, S):
 #   10.10's answers, sage-tests/test_matrix_scalar_eq; one more deviation
 #   from the model there: Sage's matrix(GF(p), 0, 0) == SR(0) is True,
 #   though GF(p) and SR have no pushout; here it is False.)
+# Where sagebrush does not model the pushout (a number field with RR or
+# RDF, say), _vector_pushout raises NotImplementedError and so does ==:
+# an unsupported domain is refused, never reported as unequal.  Hashing
+# keeps Sage's own inconsistencies (_matrix_hash).
 # The comparison is entry by entry, with no converted copy of either
 # operand (HARD-F4E-1).  Magma mode has its own rules (lib/_magma.py's eq).
 
@@ -623,15 +627,43 @@ def _coerced_eq(x, y):
     return all(bool(P(u) == P(v)) for u, v in zip(_entries(rows), _entries(b[2])))
 
 
-def _scalar_hash(rows, ncols, default):
-    """The hash of a matrix: the hash of c for c times the identity (n >= 1),
-    as Sage's (it equals c), else `default`."""
+def _matrix_hash(rows, ncols):
+    """The hash of a matrix, in one streaming pass over its stored entries
+    (no copy of them, LIMIT-EQ89-1): as Sage's, a zero matrix of any shape
+    (empty and rectangular too) hashes as 0 and c times the identity as c,
+    which they equal; any other matrix hashes by its shape and entries.
+
+    Equality through coercion cannot always agree with hashing (as in
+    Sage, whose quirks are kept, not hidden): the empty matrix equals every
+    scalar but hashes as 0; matrix(ZZ, [[4]]) == GF(3)(1) holds though the
+    hashes of 4 and GF(3)(1) differ; a zero vector equals 0 but vectors
+    hash by their entries.
+
+    EXAMPLES::
+
+        sage: from _sage_ffmat import _matrix_hash  # sagebrush only
+        sage: _matrix_hash([[0, 0, 0], [0, 0, 0]], 3) == hash(0), _matrix_hash([], 0) == hash(0)  # sagebrush only
+        (True, True)
+        sage: _matrix_hash([[3, 0], [0, 3]], 2) == hash(3), _matrix_hash([[1, 1], [0, 1]], 2) == hash(1)  # sagebrush only
+        (True, False)
+    """
     n = len(rows)
-    if n and n == ncols:
-        c = rows[0][0]
-        if all((x == c) if i == j else (not x) for i, r in enumerate(rows) for j, x in enumerate(r)):
-            return hash(c)
-    return default
+    scalar = n > 0 and n == ncols
+    c = rows[0][0] if scalar and ncols else None
+    zero = True
+    h = hash((n, ncols))
+    for i, r in enumerate(rows):
+        for j, x in enumerate(r):
+            h = hash((h, x))
+            if x:
+                zero = False
+            if scalar and (not (x == c) if i == j else bool(x)):
+                scalar = False
+    if zero:
+        return hash(0)
+    if scalar:
+        return hash(c)
+    return h
 
 
 def _vec_base(v):
@@ -926,10 +958,15 @@ class FFVector:
         return len(self._e)
 
     def __eq__(self, o):
+        # (through coercion, as Sage: the common parent's images, _coerced_eq;
+        # a Sage vector, also a list, goes there first (CORR-EQ89-1), and a
+        # plain list or tuple is compared entry by entry, as before)
+        r = _coerced_eq(self, o)
+        if r is not NotImplemented:
+            return r
         if isinstance(o, (list, tuple)):
             return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
-        # (through coercion, as Sage: the common parent's images, _coerced_eq)
-        return _coerced_eq(self, o)
+        return NotImplemented
 
     def __ne__(self, o):
         r = self.__eq__(o)
@@ -1388,8 +1425,9 @@ class FFMatrix:
         return FFMatrix(self._base, [[c if i == j else zero for j in range(n)] for i in range(n)], n)
 
     def __hash__(self):
-        # (c times the identity hashes as c, which it equals, as in Sage)
-        return _scalar_hash(self._rows, self._ncols, hash(tuple(tuple(r) for r in self._rows)))
+        # (a zero matrix hashes as 0 and c times the identity as c, which
+        # they equal, as in Sage; one pass, no copy: _matrix_hash)
+        return _matrix_hash(self._rows, self._ncols)
 
     def __copy__(self):
         return FFMatrix(self._base, self._rows, self._ncols)

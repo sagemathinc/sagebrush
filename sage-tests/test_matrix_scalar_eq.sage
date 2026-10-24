@@ -44,3 +44,14 @@ row("ZZ vs RR", lambda: (matrix(ZZ,[[1,2]]) == matrix(RR,[[1,2]]), matrix(QQ,[[1
 row("GF3 vs GF5", lambda: (matrix(GF(3),[[1]]) == matrix(GF(5),[[1]]),))
 row("dimensions", lambda: (matrix(ZZ,[[0,0]]) == matrix(ZZ,[[0],[0]]), matrix(ZZ,[[1,2]]) == vector(ZZ,[1,2])))
 row("vectors", lambda: (vector(ZZ,[4,0]) == vector(GF(3),[1,0]), vector(ZZ,[1,2]) == vector(QQ,[1,2]), vector(ZZ,[0]) == vector(ZZ,[0,0]), vector(QQ,[1]) == vector(GF(3),[1])))
+# vectors of different rings in both orders, == and != (CORR-EQ89-1)
+rings = [("ZZ", ZZ), ("QQ", QQ), ("GF3", GF(3)), ("RR", RR), ("SR", SR)]
+for val in [0, 1, 4]:
+    for an, A in rings:
+        print("v%d %s:" % (val, an), " ".join("%s:%d%d%d%d" % (bn, vector(A, [val]) == vector(B, [val]), vector(B, [val]) == vector(A, [val]), vector(A, [val]) != vector(B, [val]), vector(B, [val]) != vector(A, [val])) for bn, B in rings))
+# zero matrices of every shape hash as 0, and c times the identity as c (CORR-EQ89-2)
+for mn, M in [("ZZ 2x3 0", matrix(ZZ, 2, 3)), ("ZZ 0x0", matrix(ZZ, 0, 0)), ("ZZ 0x2", matrix(ZZ, 0, 2)), ("ZZ 2x2 0", matrix(ZZ, 2, 2)),
+              ("QQ 3x1 0", matrix(QQ, 3, 1)), ("ZZ 3I", matrix(ZZ, [[3, 0], [0, 3]])), ("ZZ 1 1;0 1", matrix(ZZ, [[1, 1], [0, 1]]))]:
+    M.set_immutable()
+    d = {0: "zero", 3: "three"}
+    print(mn, M == 0, M in d, d.get(M), hash(M) == hash(0))
