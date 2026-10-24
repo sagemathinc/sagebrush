@@ -18,8 +18,8 @@ import { join } from "node:path";
 //   ff.conway_work the cold search for GF(3^8), 1530226
 //   ff.root_bits   exponents of 64 and 65 bits at 64
 // And at the ceiling, ff.work = 10^8: the polynomial-degree bound still
-// refuses first; the largest call admitted, GF(2^79)'s, in a 96 MiB heap,
-// under 15 s (the plan's CI benchmark).
+// refuses first; the largest call admitted, GF(2^79)'s, runs in a 96 MiB
+// heap (its time: scripts/bench-ff-limits.mjs, the plan's CI benchmark).
 const CLI = __dirname + "/../src/cli.js";
 const dir = mkdtempSync(join(tmpdir(), "sb-fflimits-"));
 let n = 0;
@@ -58,11 +58,12 @@ test("ff.work, raised: a relative MinimalPolynomial of 14745056 cops, refused by
   boundary("magma", "ff.work", 14745056, 'L := GF(2^20); k := GF(4); x := L.1^3 + L.1; print "ADMITTED", Degree(MinimalPolynomial(x, k));\n', "ADMITTED 10", "within a bounded amount of work", false);
 });
 
-test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) in a 96 MiB heap, under 15 s; refused one short and by default (Sage)", () => {
+test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) is admitted in a 96 MiB heap; refused one short and by default (Sage)", () => {
   const src = 'R.<x> = GF(2)[]\nK = GF(2^79, "a", modulus=x^79 + x^9 + 1)\nprint("ADMITTED", (K.gen()^3 + K.gen()).minpoly().degree())\n';
   const yes = run("sage", src, { "ff.work": 1e8 }, ["--max-old-space-size=96"]);
   assert.ok(yes.out.includes("ADMITTED 79"), yes.out);
-  assert.ok(yes.ms < 15000, `${yes.ms} ms`);
+  // (its time, under 15 s on CI's runner, is scripts/bench-ff-limits.mjs's,
+  // run alone in the checks job: here it shares the runner with other tests)
   boundary("sage", "ff.work", 79373117, src, "ADMITTED 79", "is not supported yet (work)", false);
 });
 

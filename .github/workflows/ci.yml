@@ -152,6 +152,7 @@ jobs:
           node scripts/build-cli.mjs
           node web/test-cli-sigint.mjs
           node web/test-cli-limits.mjs
+          node scripts/bench-ff-limits.mjs
           bun web/build.ts
           git diff --exit-code web/js-dependencies.json
           node scripts/build-cli.mjs
