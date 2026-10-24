@@ -49,5 +49,33 @@ try {
 } finally {
   server.kill();
 }
+// `sagebrush board open`'s page, from the bundle's own copy (src/board-open.ts): the frame's page, marked as
+// this computer's, with the policy the site serves the frame with, and the file's text by the page's key
+{
+  const { writeFileSync } = await import("node:fs");
+  const file = join(dir, "probe.board.json"), text = JSON.stringify({ format: "sagebrush-board", version: 1, title: "Probe", nodes: [{ id: "a", text: "hello" }] });
+  writeFileSync(file, text);
+  const bport = await freePort();
+  const b = spawn(process.execPath, [bundle, "board", "open", file, "--port", String(bport), "--no-browser"], { stdio: ["ignore", "pipe", "inherit"] });
+  let out = "";
+  b.stdout.on("data", (d) => (out += d));
+  for (let i = 0; i < 100 && !/token=/.test(out); i++) await sleep(100);
+  const check = (cond, name) => { if (!cond) fail++; console.log((cond ? "ok   " : "FAIL ") + name); };
+  try {
+    const m = /http:\/\/127\.0\.0\.1:(\d+)\/\?token=(\w+)/.exec(out);
+    check(!!m, "board open: prints its URL");
+    const r = await fetch(`http://127.0.0.1:${m[1]}/`, { headers: { Cookie: `sagebrush_board_${m[1]}=${m[2]}` } });
+    const page = await r.text(), csp = r.headers.get("content-security-policy") ?? "";
+    check(r.status === 200 && page.includes('data-sb-from="local"') && page.includes('id="sb-local"'), "board open: its page, from the bundle");
+    check(/\bsandbox allow-scripts\b/.test(csp) && /frame-ancestors 'none'/.test(csp), "board open: the frame's policy, sandboxed, not framed");
+    check(page.includes('"engineSite":"https://sagebrush.space/"'), "board open: away from a checkout's built engine, the page's engine comes from sagebrush.space");
+    const key = JSON.parse(/id="sb-local">(\{.*?\})<\/script>/.exec(page)[1]).key;
+    check((await (await fetch(`http://127.0.0.1:${m[1]}/board?key=${key}`)).text()) === text, "board open: the file's text, by the page's key");
+  } catch (e) {
+    check(false, "board open: " + e.message);
+  } finally {
+    b.kill();
+  }
+}
 console.log(fail ? `${fail} failures` : "every asset served");
 process.exit(fail ? 1 : 0);
