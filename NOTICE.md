@@ -676,6 +676,9 @@ https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10
   in its directory).
 - `bench/pyperformance/`: from pyperformance (MIT;
   `LICENSE.pyperformance`).
+- `scripts/vendor/acorn-8.19.0/`: acorn 8.19.0's `dist/acorn.js`, unchanged
+  (MIT; its `LICENSE`). Publisher tooling only: `scripts/js-module-check.mjs`
+  parses js packages with it before they are published.
 - `engine/hmf/tests/fixtures/lmfdb-*.txt`: numbers (dimensions of spaces and
   of Galois orbits of Hilbert modular newforms over $\mathbb{Q}(\sqrt 5)$,
   Hecke eigenvalues of the rational ones, the exact Hecke eigenvalues (in

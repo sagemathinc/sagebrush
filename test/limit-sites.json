@@ -3177,6 +3177,18 @@
   "owner": "package runtime",
   "row": "src-19"
  },
+ "src/pkgset.ts :: checkJsChunk :: export const GRADER_BUDGET = Object.freeze({ cpuMs: 4000, mb: 72, prodFactor: 1.5 }); #0": {
+  "class": "1",
+  "owner": "package runtime"
+ },
+ "src/pkgset.ts :: checkJsChunk :: if (utf8Bytes(notices).length > PKGSET_LIMITS.jsNoticesBytes) fail(`${id}: its notices are over ${PKGSET_LIMITS.jsNoticesBytes} bytes`); #0": {
+  "class": "1",
+  "owner": "package runtime"
+ },
+ "src/pkgset.ts :: checkJsChunk :: if (utf8Bytes(text).length > PKGSET_LIMITS.jsModuleBytes) fail(`${id}: ${c.entry} is over ${PKGSET_LIMITS.jsModuleBytes} bytes`); #0": {
+  "class": "1",
+  "owner": "package runtime"
+ },
  "src/pkgset.ts :: constructor :: super(message.length > PKGSET_LIMITS.errorChars ? message.slice(0, PKGSET_LIMITS.errorChars - 1) + \"…\" : message); #0": {
   "class": "1",
   "owner": "package runtime",

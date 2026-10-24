@@ -1,0 +1,18 @@
+{
+ "about": "acorn 8.19.0, vendored for scripts/optional-packages.mjs only (publisher tooling: the AST check of js packages, r4 addendum A1.3; in no core artifact). Each file is the npm tarball's, unchanged; test/vendor-acorn.test.ts checks these sha256s, and verify-from-npm.mjs re-checks them against the tarball, by its integrity.",
+ "package": "acorn",
+ "version": "8.19.0",
+ "published": "2026-10-05T12:51:20.979Z",
+ "tarball": "https://registry.npmjs.org/acorn/-/acorn-8.19.0.tgz",
+ "integrity": "sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==",
+ "files": {
+  "acorn.js": {
+   "from": "package/dist/acorn.js",
+   "sha256": "b95392d79457d0357555c5ed3e56302d074b92dff119bcf3b44179500b10e9df"
+  },
+  "LICENSE": {
+   "from": "package/LICENSE",
+   "sha256": "76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7"
+  }
+ }
+}
