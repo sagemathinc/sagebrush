@@ -319,6 +319,8 @@ async function invalidRebuild() {
   await ctl("set", { set: { fakeOps: [{ code: "invalid", detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
   const c = client(w);
   check(await until(() => c.debug().halted === "invalid"), "invalid rebuild: sending halted " + J(c.debug()));
+  // (the halt is in memory first, so nothing more is sent while its durable flag is written: wait for the flag)
+  await until(async () => (await metaGet(w.ws, `sync:${nsOf(c)}:rebuild`))?.why === "invalid");
   const rb = await metaGet(w.ws, `sync:${nsOf(c)}:rebuild`);
   check(rb?.why === "invalid" && (await outbox(w)) === 1, "invalid rebuild: the rebuild asked for, the undecided record kept: " + J(rb));
   await w.mkdir("/i2");
@@ -432,6 +434,7 @@ async function diverged() {
   await ctl("set", { set: { rewriteWelcome: { next_dseq: 1000 } } });
   const c = client(w);
   check(await until(() => c.debug().halted === "diverged"), "diverged: the server has decided dseqs this device never made: halted " + J(c.debug()));
+  await until(async () => (await metaGet(w.ws, `sync:${nsOf(c)}:rebuild`))?.why === "diverged");
   await sleep(300);
   const rb = await metaGet(w.ws, `sync:${nsOf(c)}:rebuild`);
   check(rb?.why === "diverged" && opsMessages(await ctl("log")).length === 0, "diverged: nothing sent, the rebuild asked for: " + J(rb));
