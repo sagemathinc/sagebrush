@@ -47,7 +47,29 @@ TEXTS = [
     '{"ff.work": 100000' + " " * 4100 + "}",
     '{"ff.work": "' + "é" * 2047 + '"}',
     '{"ff.work": "' + "é" * 2049 + '"}',
+    # "unlimited" (plan-c0 r2): the defaults, given explicitly, mixed with
+    # finite values; any other spelling is refused
+    '{"ff.work": "unlimited"}',
+    '{"ff.work": "unlimited", "ff.conway_work": "unlimited", "ff.embed_max": "unlimited", "ff.root_bits": "unlimited"}',
+    '{"ff.work": 100000, "ff.root_bits": "unlimited"}',
+    '{"ff.embed_max": 4096}',
+    '{"ff.work": "Unlimited"}',
+    '{"ff.work": " unlimited"}',
+    '{"ff.work": "inf"}',
+    '{"ff.work": Infinity}',
+    '{"ff.work": "unlimited", "ff.work": 100000}',
 ]
+
+class Sly(str):
+    """A str whose own methods lie: read as its str value."""
+    def __str__(self):
+        return "unlimited"
+
+    def __eq__(self, other):
+        return True
+
+    __hash__ = str.__hash__
+
 
 MAPPINGS = [
     {},
@@ -64,13 +86,20 @@ MAPPINGS = [
     [("ff.work", 100000)],
     "x",
     b"{}",
+    {"ff.work": "unlimited"},
+    {"ff.work": "unlimited", "ff.root_bits": 64},
+    {"ff.work": "Unlimited"},
+    {"ff.work": None},
+    {"ff.work": float("inf")},
+    {"ff.work": Sly("unlimited")},
+    {"ff.work": Sly("big")},
 ]
 
 
 def show(source, name=None):
     try:
         s = L.validate(source, name)
-        print("ok", dict(s.items()))
+        print("ok", dict(s.items()), s)
     except ValueError as e:
         print("ValueError", e)
 
