@@ -176,3 +176,16 @@ test("safe HTML: an https iframe becomes a link that opens it in a new tab", () 
   // (and in Markdown)
   assert.equal(render('<iframe src="https://x.example/v"></iframe>'), link("https://x.example/v", "x.example"));
 });
+
+test("safeHtml: a tag or entity named for a property every object has (constructor, __proto__, toString) is not a tag or entity of the table", () => {
+  for (const name of ["constructor", "__proto__", "toString", "valueOf", "hasOwnProperty"]) {
+    const html = safeHtml(`<${name} foo=bar>x</${name}><${name}>y</${name}>`);
+    // (dropped, or shown as text when it isn't a tag's name at all: never an element, and its text kept)
+    assert.ok(!/<[a-z_]/i.test(html) && html.includes("x") && html.includes("y"), `<${name}>: no element, its text kept: ${html}`);
+    assert.deepEqual(problems(html), []);
+  }
+  // (an entity of no such name is left as it is written, which shows as itself; never a table entry's own property)
+  const ent = safeHtml("a&constructor;b&toString;c");
+  assert.equal(ent, "a&constructor;b&toString;c");
+  assert.ok(!/function|native code/.test(ent));
+});
