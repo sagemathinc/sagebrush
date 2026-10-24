@@ -43,23 +43,29 @@ WORK = _LIMITS["ff.work"]
 # for fields of at most 2^20 elements: while ff.work is finite, so is the
 # effective EMBED_MAX, at most 2^20, so that an opted-in work budget is never
 # undercharged by a larger field; with ff.work unlimited, ff.embed_max
-# unlimited lifts the bound.  An embedding or descent is between Conway
+# unlimited lifts the bound to the Conway search's cutoff, CONWAY_MAX below.  An embedding or descent is between Conway
 # fields only (conway_ok: a modulus= field whose modulus is the Conway
 # polynomial passes, any other modulus is refused), so its fields have at
 # most 10^7 elements, _sage_ff's Conway search cutoff, and a descent's
 # discrete-log table at most 35 entries: plan-c0 r2 section 2)
-EMBED_MAX = _LIMITS["ff.embed_max"] if WORK == _limits.UNLIMITED else min(_LIMITS["ff.embed_max"], 2 ** 20)
+# (with ff.embed_max unlimited, the fields' bound is the one no field can
+# pass anyway: CONWAY_MAX, _sage_ff's Conway search cutoff (p^n <= 10^7),
+# checked before a field is made, so that a common field past it is refused
+# in the operation's own words rather than by the search; a finite
+# ff.embed_max is at most 2^20, below it, and stays the bound)
+CONWAY_MAX = 10 ** 7
+_EMBED = _LIMITS["ff.embed_max"] if WORK == _limits.UNLIMITED else min(_LIMITS["ff.embed_max"], 2 ** 20)
+EMBED_MAX = CONWAY_MAX if _EMBED == _limits.UNLIMITED else _EMBED
 # (the bits of EMBED_MAX: L (bits(p) - 1) past it is refused before p^L is
-# formed; 20 at 2^20, astra CORR-FFLIMIT-1; unlimited when it is)
-EMBED_BITS = _limits.UNLIMITED if EMBED_MAX == _limits.UNLIMITED else EMBED_MAX.bit_length() - 1
+# formed, which only fields of more than 2^EMBED_BITS elements can be; 20 at
+# 2^20, astra CORR-FFLIMIT-1; 23 at 10^7)
+EMBED_BITS = EMBED_MAX.bit_length() - 1
 
 
 def embed_max_text():
-    """The largest field an embedding or descent takes, in refusals: EMBED_MAX
-    (2^20, or the number when it isn't a power of 2); when it is unlimited,
-    10^7, the Conway search's cutoff, which then bounds the fields (a refusal
-    is then for a field past it or not defined by its Conway polynomial)."""
-    if EMBED_MAX == _limits.UNLIMITED:
+    """EMBED_MAX in refusals: 2^20 (the number when it isn't a power of 2),
+    or 10^7, the Conway search's cutoff, when ff.embed_max is unlimited."""
+    if EMBED_MAX == CONWAY_MAX:
         return "10^7"
     return "2^%d" % EMBED_BITS if EMBED_MAX == 1 << EMBED_BITS else str(EMBED_MAX)
 

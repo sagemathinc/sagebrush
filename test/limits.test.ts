@@ -79,8 +79,9 @@ test("valid limits are the session's, read once and locked before the program ru
   }
   // none: the defaults, every key unlimited (plan-c0 r2), which the core
   // reads as infinity; with ff.work finite (above), the effective
-  // ff.embed_max is at most 2^20 (the discrete-log accounting's range)
-  assert.equal(run(["-c", show]).stdout, "inf inf inf inf\n");
+  // ff.embed_max is at most 2^20 (the discrete-log accounting's range);
+  // unlimited, the fields' bound is the Conway search's cutoff, 10^7
+  assert.equal(run(["-c", show]).stdout, "inf inf 10000000 inf\n");
   // --limits FILE wins over SAGEBRUSH_LIMITS; one that can't be read is never replaced by it
   assert.equal(run(["--limits", ok, "-c", show], { SAGEBRUSH_LIMITS: file("other.json", '{"ff.work": 200000}') }).stdout, "123456 100 1048576 123456\n");
   const r = run(["--limits", join(dir, "nope.json"), "-c", show], { SAGEBRUSH_LIMITS: ok });
@@ -154,9 +155,9 @@ test("unlimited by default, finite values opt in, mixed settings key by key (pla
   const show = "import sys, _sage_ffsub as S; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)";
   const cases: [string, string][] = [
     ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})"],
-    ['{"ff.root_bits": 64}', "inf inf 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"],
+    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"],
     ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
-    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf inf inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
+    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
   ];
   for (const [text, want] of cases) {
     const r = run(["--limits", file("mixed.json", text), "-c", show]);
