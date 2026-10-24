@@ -1,7 +1,8 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt } from "./ops";
+import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies } from "./ops";
+import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
 
@@ -41,18 +42,28 @@ function decompose(x: number): [bigint, number] {
 }
 
 // CPython's limit on an int's decimal conversions (sys.set_int_max_str_digits;
-// 0: none).  Python mode keeps CPython's default; Sage, Magma and MATLAB set
-// 0 when their libraries load (lib/sage_all.py, lib/_magma.py, lib/_matlab.py).
-export const intDigits = { max: 4300 };
+// 0: none).  Sagebrush's default is 0 in every mode, where CPython's is
+// 4300: a large integer's decimal digits (to print it, or save it to a
+// file) need no setting, as a user's own computation has no default limits
+// (William, Oct 24 2026; Sage, Magma and MATLAB never had this one).  A
+// program that sets a limit gets CPython's checks and messages.
+export const intDigits = { max: 0 };
 
-// Sagebrush's own ceiling on those conversions, which no setting lifts (0
-// included): past it they are refused, so one stays within seconds.  Below
-// it a large conversion runs in pieces, testing for Stop between them
-// (HARD-606-1).
-export const HARD_MAX_DIGITS = 4_000_000;
-
-export function hardLimit(digits: number | string): never {
-  raise(T.ValueError, `Exceeds Sagebrush's limit (${HARD_MAX_DIGITS} digits) for integer string conversion${typeof digits === "number" ? `: value has ${digits} digits` : ""}; no setting raises this limit`);
+// The memory a conversion between an int and its digits needs, admitted
+// before it starts, the only bound on its size: its digits must fit in V8's
+// longest string, and its peak, about (the digits twice, the pieces and
+// their joins, and the value with the powers of the base it is split by,
+// four times the value), in this session's heap.  A large conversion runs
+// in pieces, testing for Stop between them (HARD-606-1), so one that fits
+// can always be stopped.
+const MAX_STR = 2 ** 29 - 24;
+export function admitDigits(digits: number, valueBytes: number): void {
+  const mb = (n: number) => Math.ceil(n / 2 ** 20);
+  if (digits > MAX_STR)
+    raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`);
+  const need = 2 * digits + 4 * valueBytes, limit = heapLimit();
+  if (need > limit)
+    raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`);
 }
 
 // powers[b] = [b^k, b^2k, b^4k, ...] for the pieces (k digits each at the
@@ -100,9 +111,9 @@ function decimalPieces(a: bigint, level: number, width: number, local: bigint[])
   return decimalPieces(hi, level - 1, width ? width - w : 0, local) + decimalPieces(lo, level - 1, w, local);
 }
 
-function decimalDigits(abs: bigint): string {
+function decimalDigits(abs: bigint, bits: number): string {
   // (an upper bound on the digits, from the bits)
-  const digits = abs.toString(16).length * 4 * Math.log10(2) + 1;
+  const digits = bits * Math.log10(2) + 1;
   let level = 0;
   while (PIECE * 2 ** (level + 1) < digits) level++;
   return decimalPieces(abs, level, 0, []);
@@ -129,19 +140,20 @@ export function parseDigits(t: string, base: number, local: bigint[] = []): bigi
   return parseDigits(t.slice(0, t.length - w), base, local) * powerOf(base, level, local) + parseDigits(t.slice(t.length - w), base, local);
 }
 
-// The decimal digits of an int, or CPython's ValueError past the limit, or
-// Sagebrush's past its own.
+// The decimal digits of an int, or CPython's ValueError past the limit, when
+// a program has set one.
 export function decimalOf(a: bigint): string {
   const m = intDigits.max;
   const abs = a < 0n ? -a : a;
-  // (a lower bound from the hex digits first: a huge value is refused
-  // without being converted)
-  const atLeast = Math.floor((abs.toString(16).length - 1) * Math.log10(16)) + 1;
+  // (its bits found with small copies, and from them a lower bound on its
+  // digits: a value past the limit or the memory is refused without being
+  // converted)
+  const bits = bitLengthSmallCopies(abs);
+  const atLeast = bits <= 1 ? 1 : Math.floor((bits - 1) * Math.log10(2)) + 1;
   if (m > 0 && atLeast > m) tooManyDigits();
-  if (atLeast > HARD_MAX_DIGITS) hardLimit("");
-  const s = decimalDigits(abs);
+  admitDigits(atLeast, bits / 8);
+  const s = decimalDigits(abs, bits);
   if (m > 0 && s.length > m) tooManyDigits();
-  if (s.length > HARD_MAX_DIGITS) hardLimit("");
   return a < 0n ? "-" + s : s;
 }
 
