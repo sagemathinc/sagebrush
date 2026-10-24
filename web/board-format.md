@@ -590,7 +590,9 @@ A picture a note shows, by its name in the document's `images`.
    is supported. `npx sagebrush@0.5.2 board check FILE` checks the whole board
    (the format, ids, edges, pictures, questions) and runs its code items.
 2. Search before you guess: `npx sagebrush@0.5.2 --search "elliptic curve rank"`.
-3. Open the board at https://sagebrush.space/board/ to see the layout.
+3. Open the board at https://sagebrush.space/board/ to see the layout, or, on
+   your own computer, `npx sagebrush@latest board open FILE`: the board in
+   your browser, shown again each time you rewrite FILE.
 
 ## What's new
 
