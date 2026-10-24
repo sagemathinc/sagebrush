@@ -6,7 +6,7 @@
  "sizes": {
   "cli/lib.gen.js": 7032882,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 28175387,
+  "cli/pyjs.cjs": 28175430,
   "engine/lib/core.pre": 1797229,
   "engine/lib/core.src": 415801,
   "engine/lib/magma-more.src": 146156,
@@ -74,10 +74,10 @@
   "engine/sagebrush-analyze.js": 355908,
   "engine/sagebrush-engine.wasm": 7141596,
   "engine/sagebrush-graphview.js": 14111,
-  "engine/sagebrush-notebook.js": 208002,
+  "engine/sagebrush-notebook.js": 208067,
   "engine/sagebrush-raster.wasm": 808830,
   "engine/sagebrush-viewer3d.js": 88151,
-  "engine/sagebrush-worker.js": 1505031,
+  "engine/sagebrush-worker.js": 1505431,
   "registry/packages": 3
  }
 }
