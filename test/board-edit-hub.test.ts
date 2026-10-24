@@ -6,6 +6,7 @@ import { tmpdir } from "os";
 import { createHash } from "crypto";
 import { EditHub } from "../src/board-edit-hub";
 import { defaultLimits } from "../src/board-edit-limits";
+import { submitCharge, keptCharge } from "../src/board-edit-memory";
 import { editRecords, recordsAre } from "../web/board/lossless";
 
 // The hub of `board open --edit` (plan-board-open-edit r7 §4, §5, §6), on a real directory with a fake clock:
@@ -334,5 +335,176 @@ test("board open --edit hub: CORR-BOARD-A1-2, a snapshot's records must be exact
     assert.ok("label" in node(hub, "m") && node(hub, "m").label === null);
     assert.deepEqual(node(hub, "m").extra, { deep: [null, { x: 1 }] });
     assert.deepEqual(hub.H.json.tools, { a: [1, { b: 2 }], c: null });
+  } finally { cleanup(); }
+});
+
+test("board open --edit hub: LIMIT-BOARD-ADD2-1, a submission whose R exactly fills the ledger is accepted, its head retained out of R", async () => {
+  const MiB = 1024 * 1024;
+  const d = B([{ id: "n", text: "hello" }]);
+  const s1 = snap(B([{ id: "n", text: "hello world" }]));
+  const R = submitCharge(Buffer.from(s1));
+  for (const extra of [0, 1]) {
+    const { hub, cleanup } = await setup(d, { MEMORY_MAX: 64 * MiB });
+    try {
+      hub.connect("t1");
+      // (the ledger filled so that R fits exactly, or is one byte short)
+      hub.ledger.used = hub.ledger.max - R + extra;
+      const before = hub.ledger.used, seq = hub.H.seq;
+      const r = hub.submit("t1", 1, seq, s1, sha(s1));
+      if (extra === 0) {
+        assert.ok("accepted" in r, JSON.stringify(r));
+        // (never past the cap, at any point: the new head converted out of R, the rest released)
+        assert.ok(hub.ledger.peak <= hub.ledger.max, `${hub.ledger.peak} > ${hub.ledger.max}`);
+        assert.ok(hub.ledger.used < before + R);
+        assert.equal(node(hub, "n").text, "hello world");
+      } else {
+        assert.deepEqual(r, { op: "t1:1", busy: "memory" });
+        assert.equal(hub.ledger.used, before);
+        assert.equal(hub.H.seq, seq);
+        assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0 });
+      }
+    } finally { cleanup(); }
+  }
+});
+
+test("board open --edit hub: R past MEMORY_MAX / 2 is refused for good, before parsing; many tiny fields count", async () => {
+  const MiB = 1024 * 1024;
+  const { hub, cleanup } = await setup(B([{ id: "n", text: "hello" }]), { MEMORY_MAX: 64 * MiB });
+  try {
+    hub.connect("t1");
+    // (many tiny records, each with many fields: about 2.2 MB, whose bytes alone (18·b ≈ 40 MB) would pass)
+    const recs = editRecords(B(Array.from({ length: 2000 }, (_, i) => ({ id: "n" + i, ...Object.fromEntries(Array.from({ length: 60 }, (_, j) => ["f" + j, 0])) }))));
+    const body = recs.map((r) => JSON.stringify(r)).join("\n") + "\n{ not JSON";
+    const b = Buffer.byteLength(body);
+    assert.ok(18 * b <= hub.ledger.max / 2, "the bytes term alone fits");
+    assert.ok(submitCharge(Buffer.from(body)) > hub.ledger.max / 2, "the tokens make it not fit");
+    const before = hub.ledger.used, seq = hub.H.seq;
+    const r = hub.submit("t1", 1, seq, body, sha(body), 4096);
+    // (refused for memory, not for the JSON that would fail to parse: nothing was parsed)
+    assert.ok("refused" in r && /more memory than MEMORY_MAX/.test(r.refused), JSON.stringify(r));
+    // (the body's charge, taken over, released too)
+    assert.equal(hub.ledger.used, before - 4096 < 0 ? 0 : before - 4096);
+    assert.equal(hub.H.seq, seq);
+  } finally { cleanup(); }
+});
+
+test("board open --edit hub: R released on every refusal path, the head, watermark and persistedGen unchanged", async () => {
+  const KiB = 1024;
+  const { hub, cleanup } = await setup(B([{ id: "n", text: "a".repeat(40 * KiB) }]), { FILE_MAX: 128 * KiB, EDIT_MAX: 64 * KiB, BODY_MAX: 64 * KiB, MEMORY_MAX: 64 * 1024 * KiB });
+  try {
+    hub.connect("t1");
+    const seq = hub.H.seq;
+    const ok = snap(B([{ id: "n", text: "a".repeat(40 * KiB) }]));
+    const tooBig = snap(B([{ id: "n", text: "a".repeat(40 * KiB) }, { id: "m", text: "b".repeat(30 * KiB) }]));
+    const dup = ok + "\n" + JSON.stringify({ type: "doc", page: "", id: "", title: "x" });
+    const cases: [string, string, string][] = [
+      ["hash", ok, sha("other")],
+      ["JSON", ok + "\n{", sha(ok + "\n{")],
+      ["records", dup, sha(dup)],
+      ["EDIT_MAX", tooBig, sha(tooBig)],
+    ];
+    const before = hub.ledger.used;
+    for (const [what, body, h] of cases) {
+      const r = hub.submit("t1", 1, seq, body, h);
+      assert.ok("refused" in r, `${what}: ${JSON.stringify(r)}`);
+      assert.equal(hub.ledger.used, before, what);
+      assert.equal(hub.H.seq, seq, what);
+      assert.deepEqual(hub.tabView("t1"), { includes: 0, persistedGen: 0 }, what);
+    }
+  } finally { cleanup(); }
+});
+
+test("board open --edit hub: compaction drops the window, then old saves, then the stalest tab's pin; never H, P, a pin, a write or a prev's base", async () => {
+  const MiB = 1024 * 1024;
+  const { hub, clock, cleanup } = await setup(B([{ id: "n", text: "v0" }]), { MEMORY_MAX: 64 * MiB });
+  try {
+    hub.connect("t1");
+    hub.connect("t2");
+    // (heads 1..6, two of them saved)
+    for (let g = 1; g <= 6; g++) {
+      const s = snap(B([{ id: "n", text: "v" + g }]));
+      assert.ok("accepted" in hub.submit("t1", g, hub.H.seq, s, sha(s)));
+      if (g === 2 || g === 4) { clock.advance(hub.limits.SAVE_MAX_DELAY_MS); assert.ok((await hub.save()).saved); }
+    }
+    // (t2 pinned to an old head; a prev's base is an old save)
+    const old = hub.H.seq - 4;
+    hub.adopted("t2", old);
+    const prevBase = hub.prevs[0].base;
+    assert.ok(hub.head(old));
+    // (pressure: the ledger made to look over half full, as other heads would)
+    const pressure = hub.ledger.max / 2;
+    hub.ledger.used += pressure;
+    const s = snap(B([{ id: "n", text: "v7" }]));
+    assert.ok("accepted" in hub.submit("t1", 7, hub.H.seq, s, sha(s)));
+    // (everything droppable went, oldest first, then the tabs' pins, the stalest first: t2, then t1, the pressure
+    // here never relieved)
+    assert.deepEqual([...hub.staleTabs], ["t2", "t1"]);
+    assert.equal((hub as any).window.length, 0);
+    assert.deepEqual((hub as any).saves, [hub.P]);
+    // (H, P and the prev's base still kept and charged; t1's pin is a base it named)
+    assert.equal(hub.head(hub.H.seq), hub.H);
+    assert.ok(hub.P && (hub as any).charged.has(hub.P));
+    assert.ok((hub as any).charged.has(prevBase));
+    assert.ok((hub as any).charged.has(hub.H));
+    // (what's charged is exactly what's referenced, nothing double-counted)
+    const sum = [...(hub as any).charged.values()].reduce((a: number, b: number) => a + b, 0);
+    assert.equal(hub.ledger.used - pressure, sum);
+  } finally { cleanup(); }
+});
+
+test("board open --edit hub: a save dropped from the comparison history stays kept while a tab, a write or a prev still holds it", async () => {
+  const MiB = 1024 * 1024;
+  const { hub, clock, cleanup } = await setup(B([{ id: "n", text: "v0" }]), { MEMORY_MAX: 64 * MiB });
+  try {
+    hub.connect("t1");
+    hub.connect("t2");
+    const saved: any[] = [];
+    for (let g = 1; g <= 5; g++) {
+      const s = snap(B([{ id: "n", text: "v" + g }]));
+      assert.ok("accepted" in hub.submit("t1", g, hub.H.seq, s, sha(s)));
+      clock.advance(hub.limits.SAVE_MAX_DELAY_MS);
+      assert.ok((await hub.save()).saved);
+      saved.push(hub.P);
+    }
+    // (t2 pinned to the first save; a write in progress of the second; the prevs' bases are older saves)
+    hub.adopted("t2", saved[0].seq);
+    (hub as any).writing = saved[1];
+    const charged = (hub as any).charged as Map<any, number>;
+    const kept = new Set<any>([hub.H, hub.P, saved[0], saved[1], ...hub.prevs.map((p) => p.base), (hub as any).observed?.version].filter(Boolean));
+    const keptSum = [...kept].reduce((a, v) => a + charged.get(v)!, 0);
+    // (pressure that dropping the window and the saves relieves exactly)
+    const sumAll = [...charged.values()].reduce((a, b) => a + b, 0);
+    const pressure = hub.ledger.max / 2 - keptSum;
+    hub.ledger.used = sumAll + pressure;
+    (hub as any).account();
+    assert.deepEqual([...hub.staleTabs], []);
+    // (the saves only the comparison history held are gone; any left are held otherwise too)
+    for (const v of (hub as any).saves) assert.ok(kept.has(v), `save ${v.seq} kept only as history`);
+    for (const v of kept) assert.ok(charged.has(v), `seq ${v.seq} released`);
+    assert.equal(hub.head(saved[0].seq), saved[0]); // (t2 can still name it as its base)
+    assert.equal(hub.ledger.used, hub.ledger.max / 2);
+  } finally { cleanup(); }
+});
+
+test("board open --edit hub: an outside version without memory now waits, and is merged when there is", async () => {
+  const MiB = 1024 * 1024;
+  const { hub, cleanup } = await setup(B([{ id: "n", text: "hello" }]), { MEMORY_MAX: 64 * MiB });
+  try {
+    const outside = Buffer.from(text(B([{ id: "n", text: "changed outside" }])));
+    // (the boundary: R, and C's own Rv admitted on top of it)
+    const Rv = keptCharge(editRecords(JSON.parse(outside.toString())));
+    const R = submitCharge(outside), O = hub.O;
+    hub.ledger.used = hub.ledger.max - R - Rv + 1;
+    const before = hub.ledger.used;
+    await hub.observe(outside);
+    assert.equal(hub.deferred, true);
+    assert.equal(hub.O, O); // (not taken as observed: read again next time)
+    assert.equal(hub.ledger.used, before);
+    assert.equal(node(hub, "n").text, "hello");
+    hub.ledger.used -= 1; // (now it fits exactly)
+    await hub.observe(outside);
+    assert.equal(hub.deferred, false);
+    assert.equal(node(hub, "n").text, "changed outside");
+    assert.ok(hub.ledger.peak <= hub.ledger.max);
   } finally { cleanup(); }
 });
