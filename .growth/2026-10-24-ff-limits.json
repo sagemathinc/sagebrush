@@ -3,7 +3,7 @@
  "reason": "Engine limits (#93, plan-ff-limits r3): lib/_limits.py (imported at every runtime's start, so in core), the finite-field core reading its budgets from it, the CLI/launcher --limits gate and the browser worker's init gate",
  "bytes": {
   "cli/lib.gen.js": 11596,
-  "cli/pyjs.cjs": 15259,
+  "cli/pyjs.cjs": 15336,
   "engine/lib/core.pre": 49689,
   "engine/lib/core.src": 10645,
   "engine/lib/magma.pre": 2156,
