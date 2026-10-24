@@ -6,7 +6,9 @@
   { "case": "P1", "host": "prompt", "finding": "F3 (Ctrl-C not delivered during a prompt input)", "owner": "python (E3)", "fix": "E3: prompt inputs in a worker", "signature": "no KeyboardInterrupt" },
   { "case": "E2", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
   { "case": "E3a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
-  { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" }
+  { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "S1", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no KeyboardInterrupt|did not take the next input" },
+  { "case": "S3", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "no escalation" }
  ],
  "pending": [
   { "trial": "S1-S4 trace assertions", "waits_for": "E1 (SAGEBRUSH_SIGNAL_TRACE emitter)", "owner": "python" },
