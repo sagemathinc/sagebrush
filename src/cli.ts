@@ -22,6 +22,8 @@ import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData, parentPort } from "worker_threads";
 import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
+import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
+import { selectLimits } from "./limits-file";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -36,6 +38,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
            and run on lib/_matlab.py; implied for other .m files
   -q       no banner on the interactive prompt
+  --limits FILE
+           this run's engine limits (also SAGEBRUSH_LIMITS=FILE): a JSON
+           object of at most 4096 bytes, such as {"ff.work": 100000000};
+           invalid limits end the run with status 2 before it starts
   --pkgset ID|FILE
            an optional package set for this run (also SAGEBRUSH_PKGSET): its
            id, fetched and verified into ~/.cache/sagebrush/pkg, or a local
@@ -441,11 +447,46 @@ function repl(main: any, quiet: boolean): Promise<number> {
 
 // ------------------------------------------------------------------ main
 
-async function main(argv = process.argv.slice(2)) {
+/** The runtime's limits, given to it before any user code: false (status 2,
+ * said on stderr) if they are invalid.  libDir() must be on sys.path. */
+function giveLimits(lim: LimitsText): boolean {
+  const err = startLimits(R, lim);
+  if (err === null) return true;
+  process.stderr.write(`sagebrush: ${oneLine(err)}\n`);
+  process.exitCode = 2;
+  return false;
+}
+
+/** For a command that starts workers (notebook, kernel, board): its limits
+ * checked, and locked, in this thread's runtime before any worker starts. */
+async function serverLimits(lim: LimitsText): Promise<boolean> {
+  await initParser();
+  R.importModule("sys").path.push(libDir());
+  return giveLimits(lim);
+}
+
+async function main(argv = process.argv.slice(2), preset?: LimitsText) {
+  // --limits FILE (or SAGEBRUSH_LIMITS=FILE, or the launcher's): read now,
+  // validated in each runtime before its first statement (src/limits.ts)
+  const opt = takeLimitsOption(argv);
+  if (opt !== null && typeof opt === "object") {
+    process.stderr.write(`sagebrush: ${opt.error}\n${USAGE}`);
+    process.exitCode = 2;
+    return;
+  }
+  const sel = selectLimits(opt, preset !== undefined ? preset : launcherLimits());
+  if (sel !== null && "error" in sel) {
+    process.stderr.write(`sagebrush: ${sel.error}\n`);
+    process.exitCode = 2;
+    return;
+  }
+  const lim: LimitsText = sel;
+  setSessionLimits(lim);
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
   // `board` with a command it doesn't have is said so there, R0-3, unless
   // there is a script named board here, to run as before)
   if (argv[0] === "board" && (["render", "run", "check", "answers", "try", "open", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
+    if (!(await serverLimits(lim))) return;
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
@@ -455,11 +496,13 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (argv[0] === "notebook" || argv[0] === "--notebook") {
+    if (!(await serverLimits(lim))) return;
     await runNotebookServer(argv.slice(1));
     return;
   }
   if (argv[0] === "--jupyter-kernel") {
     const i = argv.indexOf("--mode");
+    if (!(await serverLimits(lim))) return;
     await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
     return;
   }
@@ -580,6 +623,8 @@ async function main(argv = process.argv.slice(2)) {
       return;
     }
   }
+  // (the limits, before the first statement of any program or prompt)
+  if (!giveLimits(lim)) return;
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
@@ -653,7 +698,7 @@ async function main(argv = process.argv.slice(2)) {
 // launcher, whose SIGINT handler sets it, and this thread's process.stdout
 // and process.stderr write straight to the descriptors, as the runtime's
 // own streams do, so that everything comes out in the order written.
-function cliWorker(argv: string[]) {
+function cliWorker(argv: string[], limits?: LimitsText) {
   parentPort!.postMessage({ interrupt: R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null });
   // (a full non-blocking pipe: EAGAIN or nothing written; waited on with a
   // backoff of 1 ms doubling to 50 ms, as readStdin waits, not spun on)
@@ -680,7 +725,7 @@ function cliWorker(argv: string[]) {
       return true;
     };
   }
-  return main(argv);
+  return main(argv, limits);
 }
 
 // Files written but never closed (no reference counting): write them, as
@@ -703,7 +748,7 @@ function execModuleAsMain(name: string): any {
 }
 
 if (isMainThread) main();
-else if (workerData?.sagebrushCli) cliWorker(workerData.sagebrushCli.argv);
+else if (workerData?.sagebrushCli) cliWorker(workerData.sagebrushCli.argv, workerData.sagebrushCli.limits);
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
 // (`board run`'s interpreter, src/board-run.ts)

@@ -1,0 +1,58 @@
+ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 10000000}
+ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 100000}
+ok {'ff.conway_work': 1000000, 'ff.embed_max': 4096, 'ff.root_bits': 64, 'ff.work': 100000000}
+ValueError limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
+ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
+ValueError limits: ff.work must be an integer, not true
+ValueError limits: ff.work must be an integer, not true
+ValueError limits: ff.work must be an integer, not false
+ValueError limits: ff.work must be an integer, not 1.5
+ValueError limits: ff.work must be an integer, not 10000000.0
+ValueError limits: ff.work must be an integer, not 10000000.0
+ValueError limits: ff.work must be an integer, not "big"
+ValueError limits: ff.work must be an integer, not null
+ValueError limits: ff.work must be an integer, not an array
+ValueError limits: ff.work must be an integer, not an object
+ValueError limits: ff.work must be an integer, not NaN
+ValueError limits: ff.work must be an integer, not -Infinity
+ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
+ValueError limits: ff.work = 99999 is outside the range this engine allows, [100000, 100000000]
+ValueError limits: ff.work = 100000001 is outside the range this engine allows, [100000, 100000000]
+ValueError limits: ff.embed_max = 2097152 is outside the range this engine allows, [256, 1048576]
+ValueError limits: ff.embed_max = 255 is outside the range this engine allows, [256, 1048576]
+ValueError limits: ff.conway_work = 653528896 is outside the range this engine allows, [1000000, 653528895]
+ValueError limits: ff.root_bits = 2048 is outside the range this engine allows, [64, 1024]
+ValueError limits: ff.root_bits = 63 is outside the range this engine allows, [64, 1024]
+ValueError limits: ff.work is an integer of more than 64 bits
+ValueError limits: ff.work is an integer of more than 64 bits
+ValueError limits: ff.work is given more than once
+ValueError limits: the limits must be a JSON object, not an array
+ValueError limits: the limits must be a JSON object, not null
+ValueError limits: the limits must be a JSON object, not a string
+ValueError limits: the limits must be a JSON object, not a number
+ValueError limits: the limits must be a JSON object, not a boolean
+ValueError limits: the limits are not JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+ValueError limits: the limits are not JSON: Expecting value: line 1 column 1 (char 0)
+ValueError limits: the limits are not JSON: Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)
+ValueError limits: more than 16 entries
+ValueError limits: kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk... is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
+ValueError limits: a\nb is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
+ValueError limits: the limits are larger than 4096 bytes
+ValueError limits: the limits are larger than 4096 bytes
+ValueError limits: the limits are larger than 4096 bytes
+ValueError limits: /etc/limits.json is not JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+ValueError limits: big.json is larger than 4096 bytes
+ok {'ff.conway_work': 653528895, 'ff.embed_max': 1048576, 'ff.root_bits': 1024, 'ff.work': 10000000}
+ValueError limits: the key 3 is not a string
+ValueError limits: the key 3 is not a string
+ValueError limits: ff.work must be an integer, not true
+ValueError limits: a key of type tuple is not a string
+ValueError limits: a key of more than 64 characters
+ValueError limits: ff.work must be an integer, not 1.5
+ValueError limits: ff.work is an integer of more than 64 bits
+ValueError limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]
+ValueError limits: zz is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)
+ValueError limits: more than 16 entries
+ValueError limits: the limits must be a mapping, not an array
+ValueError limits: the limits are not JSON: Expecting value: line 1 column 1 (char 0)
+ValueError limits: the limits must be text, not bytes

@@ -87,12 +87,16 @@ export class WorkerKernel {
   /**
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
-   * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing is sent to the worker until it is done
+   * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing but its limits ({init}) is sent to the worker until it is done
    * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
+   * @param {string | null} [o.limits] the engine's limits, a JSON text (src/limits.ts): the deployment's
+   *   or the course's, never a document's; null for the defaults.  Every worker this kernel starts,
+   *   restarts too, is given the same text first ({init}), and runs nothing before it is valid
    */
-  constructor({ createWorker, onStart, onMessage }) {
+  constructor({ createWorker, onStart, onMessage, limits = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
+    this.limits = typeof limits === "string" ? limits : null;
     this.onStart = onStart;
     this.onMessage = onMessage;
     this.worker = null;
@@ -128,6 +132,8 @@ export class WorkerKernel {
     this.generation++;
     const t0 = performance.now();
     const w = (this.worker = this.createWorker());
+    // (the worker's first message: its limits, web/worker.ts's init gate)
+    w.postMessage({ init: { limits: this.limits } });
     // (a barrier: every run, interact, question and check waits for onStart,
     // e.g. the notebook's package set resolved and durably pinned (index.html);
     // if it fails, what waits is stopped, and the next one starts a new
@@ -159,6 +165,10 @@ export class WorkerKernel {
     w.onmessage = (ev) => {
       const m = ev.data;
       if (this.onMessage?.(m)) return;
+      if (m.initFailed !== undefined) {
+        this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
+        return;
+      }
       if (m.ready) {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";

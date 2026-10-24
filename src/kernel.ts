@@ -18,7 +18,8 @@ import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-import { Worker, parentPort } from "worker_threads";
+import { Worker, parentPort, workerData } from "worker_threads";
+import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
 import { initParser, R, libDir, packageModuleNames } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
@@ -228,7 +229,7 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
 
   const startWorker = () => {
     const entry = require.main?.filename ?? process.argv[1];
-    worker = new Worker(entry, { workerData: { sagebrushKernel: mode }, stdout: false, stderr: false });
+    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
         if (m.ready) {
@@ -512,6 +513,10 @@ export function kernelWorker(mode: Mode) {
     const sys = R.importModule("sys");
     sys.path.push(process.cwd());
     sys.path.push(libDir());
+    // (the kernel's limits, before any cell: src/limits.ts; checked by the
+    // main thread before this worker started, so a failure here is not expected)
+    const bad = startLimits(R, workerData?.sagebrushLimits ?? null);
+    if (bad !== null) throw new Error(bad);
     sys.argv.push("");
     const main = R.newModule("__main__");
     main.__builtins__ = R.builtins;
