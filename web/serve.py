@@ -1,5 +1,8 @@
 """Serve web/dist locally as sagebrush.space does, cross-origin isolated
-(COOP/COEP, from web/_headers): python3 web/serve.py [port]"""
+(COOP/COEP, from web/_headers): python3 web/serve.py [port]
+
+Port 0: the system picks a free port, and the server prints it (one line, on
+stdout) once it is listening, for a test that starts it and must not race it."""
 import http.server, os, posixpath, sys, urllib.parse
 
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
@@ -43,4 +46,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 os.chdir(DIST)
-http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 8765), Handler).serve_forever()
+port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)  # (bound and listening from here)
+if port == 0:
+    print(server.server_address[1], flush=True)
+server.serve_forever()
