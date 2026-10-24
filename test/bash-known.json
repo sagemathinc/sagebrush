@@ -1,0 +1,214 @@
+{
+  "about": "Every accepted difference of just-bash 3.6.0 from GNU bash in test/bash-oracle-cases.json (plan-bash-shell r3 §3.3), with what just-bash does instead; test/bash-oracle.test.ts fails on any other difference, or on a change in one of these. Of the 20 cases of the plan's probe, 17 file states match GNU bash's, or 16 counting exit status (D2 differs only in status). The 8 cases added here: 6 match (missing-folder through the host's wrapper, D8), amp-gt and append-then-dup are D7. The d8- cases probe D8 (astra2's CORR-BASH-D8-1): 2 match GNU bash, 8 are D8.",
+  "ipython_notes": [
+    "What the frozen IPython 9.15.0 cases show, for step 6 (not differences yet: the bridge doesn't exist):",
+    "the statement form runs the command on a terminal (a pty), so its output arrives with CRLF line ends and its stderr merged into stdout; the shell has no terminal, so CRLF isn't reproduced (compare with \\r\\n read as \\n)",
+    "the capture form merges stderr into the captured lines (capture-stderr: [\"out\", \"err\"]) and prints nothing",
+    "the capture form doesn't set _exit_code (capture, capture-status: NameError in a fresh shell); the statement form does",
+    "'$$' inside the command reaches the shell as $$ (dollar-escape), an undefined $name stays literal, and {{ }} becomes { }"
+  ],
+  "redirections": {
+    "cat-self-append": {
+      "plan": "D1",
+      "reason": "GNU cat refuses 'input file is output file' (exit 1, f unchanged); just-bash's cat reads a snapshot, so f is doubled once and the status is 0",
+      "differs": {
+        "exit": 0,
+        "files": {
+          "f": "old\nold\n",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    },
+    "group-write-then-read": {
+      "plan": "D2",
+      "reason": "the same file content as GNU bash; GNU cat's 'input file is output file' makes its status 1, just-bash's is 0",
+      "differs": {
+        "exit": 0
+      }
+    },
+    "two-fds-offset-zero": {
+      "plan": "D6",
+      "reason": "two separately opened redirections of one file: just-bash's last whole-file write wins; in bash two descriptors write at offset 0, so the shorter second write keeps the first one's tail",
+      "differs": {
+        "files": {
+          "f": "X\n",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    },
+    "stderr-first-into-dup": {
+      "plan": "D7",
+      "reason": "> f 2>&1: just-bash collects the command's stdout, then appends its stderr; bash writes both in order through one descriptor",
+      "differs": {
+        "files": {
+          "f": "O\nE\n",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    },
+    "amp-gt": {
+      "plan": "D7",
+      "reason": "&> f is > f 2>&1: the same stdout-then-stderr order",
+      "differs": {
+        "files": {
+          "f": "O\nE\n",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    },
+    "append-then-dup": {
+      "plan": "D7",
+      "reason": ">> f 2>&1: the same stdout-then-stderr order, appended",
+      "differs": {
+        "files": {
+          "f": "old\nO\nE\n",
+          "n": null,
+          "g": null,
+          "t": null,
+          "c": null,
+          "e": null
+        }
+      }
+    },
+    "d8-before-after": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. the output before the failure is kept; 'after' is skipped",
+      "differs": {
+        "exit": 1,
+        "stdout": "before\n",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-stderr-before": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. stderr before the failure is kept (before, then the error)",
+      "differs": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "before\nENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-or-fallback": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. the || recovery is skipped",
+      "differs": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-if": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. the else branch is skipped",
+      "differs": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-pipeline": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. a failure in a pipeline stage ends the block too",
+      "differs": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-committed-before": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. an earlier committed write stays (g); 'after' is skipped",
+      "differs": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /g \"\"",
+          "writeFile /g \"saved\\n\"",
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-subshell": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. inside ( ), the subshell ends with status 1 and the script goes on after it; bash goes on inside it ('c', status 0)",
+      "differs": {
+        "exit": 0,
+        "stdout": "b\nafter 1\n",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-function": {
+      "plan": "D8",
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. inside a function, the body ends with status 1 and the caller goes on; bash goes on inside it",
+      "differs": {
+        "exit": 0,
+        "stdout": "b\nafter 1\n",
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-and": {
+      "plan": "D8 (matches GNU bash)",
+      "matches": true,
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. the && branch is skipped in both",
+      "differs": {
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    },
+    "d8-pending-before": {
+      "plan": "D8 (matches GNU bash)",
+      "matches": true,
+      "reason": "D8: the shell host runs each invocation as { SCRIPT\\n}. A file system error at a redirection then ends the innermost enclosing group, subshell or function body with status 1 (the host's group, if none is nearer): output already produced is kept, the error's path and reason are on stderr, and the rest of that block is skipped, recovery branches (||, if/else) included. GNU bash prints the error, sets status 1 for that command alone and goes on. a pending truncation (f, opened by the group's > f) and the committed write before it (t) are as in bash: the group ends with status 1, the script goes on, and f ends empty in both",
+      "differs": {
+        "stderr": "ENOENT: /nodir/n\n",
+        "calls": [
+          "writeFile /g \"\"",
+          "writeFile /f \"\"",
+          "writeFile /t \"\"",
+          "writeFile /t \"b\\n\"",
+          "writeFile /nodir/n \"\""
+        ]
+      }
+    }
+  }
+}
