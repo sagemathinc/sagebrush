@@ -82,3 +82,12 @@ test("optional packages alone select no default suite; with a core change they d
   assert.equal(suites(classify(["scripts/optional-packages.mjs"])).node, "true");
   assert.equal(suites(classify(["optional/hello/sagebrush.json", "src/pkgset.ts"])).node, "true");
 });
+
+test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §1.5)", () => {
+  for (const f of ["budgets.json", ".growth/2026-10-24-x.json", ".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
+    assert.equal(classify([f]).size_inputs, "true", f);
+  }
+  assert.equal(classify(["design/board.md", "README.md"]).size_inputs, "false");
+  // (a change to optional.yml alone selects no suite, but the checks job runs for it)
+  assert.equal(classify([".github/workflows/optional.yml"]).node, "false");
+});

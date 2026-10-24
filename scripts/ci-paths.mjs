@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { gateInputs } from "./size-measure.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -123,6 +124,8 @@ const outputs = {
   modes,
   engine_smoke: engineSmoke,
   engine_full: full,
+  // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
+  size_inputs: gateInputs(files).length > 0,
   files: files.length,
 };
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
