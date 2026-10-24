@@ -469,6 +469,21 @@ fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, B
     }
 }
 
+/// Register the host's memory share for default polynomial factorizations
+/// (item D0): `source()` returns bytes or None (lib/_capacity.py
+/// poly_share, through sagebrush._capacity_share).  It is called once per
+/// default budget, with the GIL taken for it (engine calls run without it);
+/// an exception or anything but a non-negative int is "no figure", and the
+/// factorization keeps its default.  The first registration stands.
+/// (Top-level factorizations are serialized in one host worker: see
+/// sagebrush_interrupt::memory_share.)
+#[pyfunction]
+fn set_memory_share_source(source: Py<PyAny>) {
+    sagebrush_interrupt::set_memory_share_host(move || {
+        Python::attach(|py| source.call0(py).ok().and_then(|r| r.extract::<Option<u64>>(py).ok()).flatten())
+    });
+}
+
 /// The native extension, `sagebrush._native`; each engine is a submodule,
 /// re-exported by the pure-Python package (python/sagebrush).
 #[pymodule]
@@ -501,6 +516,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
+    m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)

@@ -1821,9 +1821,9 @@ _PRIME_HEAP_SHARE = 16
 
 
 def _prime_cells():
-    n = getattr(_sys_limit, "_sagebrush_heap_limit", None)
-    # (CPython, or a host that cannot say: a nominal 1 GiB)
-    return (int(n) if n else 1 << 30) // _PRIME_HEAP_SHARE
+    # (pyjs: its heap limit; CPython: the machine's total; _capacity, D0)
+    import _capacity
+    return _capacity.heap_figure() // _PRIME_HEAP_SHARE
 
 
 def _prime_sieve_admits(start, stop):
@@ -1833,8 +1833,14 @@ def _prime_sieve_admits(start, stop):
 
 def _admit_prime_sieve(start, stop, name):
     if not _prime_sieve_admits(start, stop):
-        raise MemoryError("%s over [%d, %d) is not supported in Sagebrush: at most %d integers, with the square root "
-                          "of the end, fit its heap" % (name, start, stop, _prime_cells()))
+        import _capacity
+        cap = _prime_cells()
+        e = MemoryError("%s over [%d, %d) is not supported in Sagebrush: at most %d integers, with the square root "
+                        "of the end, fit its heap" % (name, start, stop, cap))
+        # (the enforced cap, a byte a cell, and the need; the memory
+        # observed free, which decided nothing: D0)
+        e.need_bytes, e.limit_bytes, e.capacity = (stop - start) + _math.isqrt(max(stop - 1, 0)), cap, _capacity.capacity()
+        raise e
 
 
 def _nth_prime_bound(k):

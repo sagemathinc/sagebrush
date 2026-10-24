@@ -73,6 +73,15 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     r.as_ptr()
 }
 
+/// The memory share of a default polynomial factorization (item D0), pushed
+/// by the host before a dispatch: bytes, an integer from 0 to 4 GiB, or -1
+/// for none (anything else is none too).  Optional: a host that never calls
+/// it leaves the factorizations their default.
+#[no_mangle]
+pub extern "C" fn sb_set_memory_share(v: f64) {
+    sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v));
+}
+
 /// After a trap (an error aborts in WebAssembly): "err\x1fKind\x1fmessage"
 /// for the last symbolic error, or "" (an interrupt or a bug).
 #[no_mangle]

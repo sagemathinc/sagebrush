@@ -1,0 +1,57 @@
+cgroup | bytes 759169024 | reserve 344352359 | effective 414816665 | cgroup /user.slice/job 1073741824/314572800 rem 759169024, MemAvailable 17179869184/8589934592 rem 8589934592 | unknown []
+total 1073741824 (1073741824, ['cgroup /user.slice/job'])
+rlimit | bytes 184549376 | reserve 286890394 | effective 0 | cgroup /user.slice/job 1073741824/314572800 rem 759169024, RLIMIT_AS 3221225472/2147483648 rem 1073741824, RLIMIT_DATA 1258291200/1073741824 rem 184549376, MemAvailable 17179869184/8589934592 rem 8589934592 | unknown []
+total 1073741824
+low | bytes 209715200 | reserve 289406976 | effective 0 | MemAvailable 4294967296/4085252096 rem 209715200 | unknown []
+v1 absurd | bytes 6442450944 | reserve 912680551 | effective 5529770393 | MemAvailable 8589934592/2147483648 rem 6442450944 | unknown []
+v1 | bytes 1073741824 | reserve 375809639 | effective 697932185 | cgroup v1 2147483648/1073741824 rem 1073741824, MemAvailable 8589934592/2147483648 rem 6442450944 | unknown []
+shrinks 759169024 130023424
+rlimit shrinks 130023424 52428800
+reserve None 268435456 None
+reserve 0 268435456 0
+reserve 10000 268436456 0
+reserve 10001 268436457 0
+reserve 268435456 295279002 0
+reserve 314572800 299892736 14680064
+poly 393111148 196555574 196555574
+poly snapshot 196555574
+poly after 78643200 7340032
+poly none None
+share_of 0 0 0 0 True
+share_of 1 0 0 0 True
+share_of 2 0 0 0 True
+share_of 3 0 0 0 True
+share_of 4 1 0 1 True
+share_of 5 1 0 1 True
+share_of 298261618 74565404 0 74565404 True
+share_of 298261619 74565404 0 74565404 True
+share_of 671088637 167772159 167772158 167772159 True
+share_of 671088638 167772159 167772159 167772159 True
+share_of 268435456 67108864 0 67108864 True
+share_of 4294967296 1798517555 1798517555 1073741824 True
+share_of None None
+poly small 104857600 26214400 0 26214400
+poly small 297795584 74448896 0 74448896
+poly small 298844160 74711040 262144 74711040
+poly small 314572800 78643200 7340032 78643200
+poly small 670040064 167510016 167300300 167510016
+poly small 672137216 168244019 168244019 168034304
+poly small 2147483648 832149913 832149913 536870912
+nothing | bytes None | reserve 268435456 | effective None |  | unknown ['cgroup', 'RLIMIT_AS', 'RLIMIT_DATA', 'MemAvailable']
+total 1073741824 (1073741824, ['nominal'])
+runtime | bytes 209715200 | reserve 289406976 | effective 0 | MemAvailable 4294967296/4085252096 rem 209715200, wasm engine 4294967296/104857600 rem 4190109696, js heap 2147483648/None rem None | unknown ['js heap usage']
+poly without the js heap 10485760 301780172 301780172
+windows no job | bytes 4294967296 | reserve 697932186 | effective 3597035110 | physical available 17179869184/6442450944 rem 10737418240, wasm engine 4294967296/0 rem 4294967296 | unknown []
+windows total no job 17179869184
+windows job | bytes 1610612736 | reserve 429496730 | effective 1181116006 | physical available 17179869184/6442450944 rem 10737418240, windows job 2147483648/536870912 rem 1610612736, wasm engine 4294967296/0 rem 4294967296 | unknown []
+windows total job 2147483648
+windows job without memory limit | bytes 4294967296 | reserve 697932186 | effective 3597035110 | physical available 17179869184/6442450944 rem 10737418240, wasm engine 4294967296/0 rem 4294967296 | unknown []
+windows total job without memory limit 17179869184
+windows fail physical | bytes None | reserve 268435456 | effective None | wasm engine 4294967296/0 rem 4294967296 | unknown ['windows-job']
+windows total fail physical 1073741824
+windows fail in_job | bytes None | reserve 268435456 | effective None | wasm engine 4294967296/0 rem 4294967296 | unknown ['windows-job']
+windows total fail in_job 1073741824
+windows fail job_limit | bytes None | reserve 268435456 | effective None | wasm engine 4294967296/0 rem 4294967296 | unknown ['windows-job']
+windows total fail job_limit 1073741824
+total snapshot 1073741824 1073741824 536870912
+pyjs figure 100663296
