@@ -2241,7 +2241,26 @@ async function t14Large() {
   }
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large };
+async function t14Figures() {
+  // (measured, for the PR: a ledger row's size as stored (the browser's estimate, 10,000 decided rows of a real-length
+  // namespace), and the fixed per-namespace meta values at their largest)
+  const w = await fresh();
+  const ns = `${"c".repeat(64)}:123456789:${w.device}`;
+  await W.switchTo(w, ns);
+  const est = async () => (await navigator.storage.estimate()).usage ?? 0;
+  await sleep(500);
+  const u0 = await est();
+  for (let p = 0; p < 10; p++) await rawTx(w.ws, ["syncLedger"], (tx) => { const st = tx.objectStore("syncLedger"); for (let i = 0; i < 1000; i++) st.put({ ns, lseq: 1e9 + p * 1000 + i, s: "confirmed", d: 1, dseq: 1e9 + p * 1000 + i }); });
+  await sleep(1500);
+  const u1 = await est();
+  const row = JSON.stringify({ ns, lseq: 1e9, s: "superseded", d: 1, dseq: 1e9, reason: "diverged", by: 1e9 });
+  const skips = JSON.stringify(Array.from({ length: 16 }, () => [2 ** 53 - 1, 2 ** 53 - 1, 2]));
+  const meta = { ledgerCount: 50_000, ledgerFloor: 2 ** 53 - 1, ledgerFrom: 2 ** 53 - 1, ledgerRev: 2 ** 53 - 1, ledgerSeeded: true, ledgerSeedAt: 2 ** 53 - 1, ledgerWipe: true };
+  const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
+  check(skips.length <= 609, "figures (task #14): " + J({ storedBytesPerRowEstimate: Math.round((u1 - u0) / 10_000), rowJsonCharsMax: row.length, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
