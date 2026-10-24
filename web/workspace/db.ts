@@ -84,7 +84,7 @@ import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 5;
+export const WS_VERSION = 6;
 /** How an open went, for detecting a lost workspace (design/workspace-durability.md A.2): whether it made
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
@@ -141,6 +141,17 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
       // (every version kept before is made prunable after the open, from this marker: one write here)
       if (old >= 1) tx.objectStore("meta").put({ after: 0 }, "versions:backfill");
     }
+    if (old < 6) {
+      // (the confirmed index read a page at a time (design/sync-client.md D10): an entry by its path's key, a
+      // folder's listing by its key; gone rows have no key, so neither index holds them.  Schema only: nothing
+      // outside dev has written syncIndex)
+      const ix = tx.objectStore("syncIndex");
+      ix.createIndex("byKey", ["ns", "key"]);
+      ix.createIndex("byParent", ["ns", "parentKey"]);
+      // (the fetch queue (design/sync-client.md L1, C5): a data file listed from the server whose bytes aren't here
+      // carries `fetch`, the SHA-256 to fetch; a sparse index, so queuing one costs no write of its own)
+      tx.objectStore("entries").createIndex("byFetch", "fetch");
+    }
   }, onClose, ms);
 }
 
@@ -155,8 +166,8 @@ export function req<T>(r: IDBRequest<T>): Promise<T> {
 /** `f` in one transaction, its result once the transaction has committed;
  * if `f` throws, the transaction is aborted (nothing of it written) and the
  * error passed on.  `f` may await only the transaction's own requests. */
-export async function inTx<T>(db: IDBDatabase, stores: string | string[], mode: IDBTransactionMode, f: (tx: IDBTransaction) => Promise<T>): Promise<T> {
-  const tx = db.transaction(stores, mode);
+export async function inTx<T>(db: IDBDatabase, stores: string | string[], mode: IDBTransactionMode, f: (tx: IDBTransaction) => Promise<T>, opts?: IDBTransactionOptions): Promise<T> {
+  const tx = opts ? db.transaction(stores, mode, opts) : db.transaction(stores, mode);
   const done = new Promise<void>((ok, no) => {
     tx.oncomplete = () => ok();
     tx.onerror = () => no(tx.error);
