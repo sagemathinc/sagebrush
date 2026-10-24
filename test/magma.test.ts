@@ -2571,3 +2571,45 @@ test("an intrinsic's errors are said at the \"(\" of a call through a parameter,
   assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
   assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
 });
+
+test("a call is located by the binding in scope at it: an optional parameter is, a named function is not, whatever other functions bind (astra's CORR-ALIAS105-1/2)", () => {
+  // (the caret lines are Magma 2.18's; Magma also prints the frame first)
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = [
+    "P<x> := PolynomialRing(Integers());",
+    "procedure p(: h := ChangeRing) a := 1 + h(x,5); end procedure;",
+    "p();",
+    "procedure p2(g) end procedure;",
+    "function g(n) return n; end function;",
+    "g(1);",
+    "procedure p3() g2 := 1; end procedure;",
+    "function g2(n) return n; end function;",
+    "g2(2);",
+    "function q(n : h := ChangeRing) return h(x, n); end function;",
+    "b := q(5);",
+    "f := func< y : k := ChangeRing | k(y, 5) >;",
+    "c := f(x);",
+    "",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  const carets = r.stdout.split("\n").filter((l: string) => l.startsWith(">> ") || /^ *\^$/.test(l));
+  assert.deepEqual(carets, [
+    ">> procedure p(: h := ChangeRing) a := 1 + h(x,5); end procedure;",
+    "                                            ^",
+    ">> function q(n : h := ChangeRing) return h(x, n); end function;",
+    "                                           ^",
+    ">> f := func< y : k := ChangeRing | k(y, 5) >;",
+    "                                     ^",
+  ], r.stdout + r.stderr);
+  assert.match(r.stdout, /\n1\n2\n/);
+  // a named function's call is emitted exactly as before #105, whatever a
+  // parameter or a local of another function is called
+  const call = (s: string) => magmaToPython(s).split("\n").filter((l) => /\b(g|fib)\(1?0?\)/.test(l) && !l.includes("_m._source("));
+  assert.deepEqual(call("procedure p(g) end procedure;\nfunction g(n) return n; end function;\ng(1);\n"), ["    _m._show_values(g(1))"]);
+  assert.deepEqual(call("procedure p() g := 1; end procedure;\nfunction g(n) return n; end function;\ng(1);\n"), ["    _m._show_values(g(1))"]);
+  assert.deepEqual(call("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), ["    _m._show_values(fib(10))"]);
+  assert.doesNotMatch(magmaToPython("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), /_m\._call\(/);
+  // a variable assigned a named function's name later is a variable again
+  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call\(\(3, 2\), g, 1, 2\)/);
+});
