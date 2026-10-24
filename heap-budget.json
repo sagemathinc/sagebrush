@@ -6,5 +6,13 @@
  "heap_mib": 96,
  "runs": 7,
  "ceiling": 73400320,
- "collect_floor": 20000
+ "collect_floor": 20000,
+ "measured": {
+  "median": 68767184,
+  "max": 69263592,
+  "collect_max": [
+   29696,
+   30720
+  ]
+ }
 }
