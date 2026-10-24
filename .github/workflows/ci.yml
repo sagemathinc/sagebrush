@@ -156,6 +156,7 @@ jobs:
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
           node web/test-cli-assets.mjs build/cli/pyjs.cjs
+          node web/test-cli-workers.mjs
           node web/test-app-frontend.mjs
           node web/test-llms.mjs
           node web/test-alpha-banner.mjs
