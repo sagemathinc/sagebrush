@@ -7,7 +7,9 @@
 // same source, a value that isn't an integer, one out of its range, or a
 // cross-field check failing (BODY_MAX <= EDIT_MAX <= FILE_MAX;
 // SAVE_QUIET_MS <= SAVE_MAX_DELAY_MS; MEMORY_MAX >= 8 x EDIT_MAX;
-// MEMORY_MAX >= 36 x BODY_MAX, so that a body of BODY_MAX bytes is never too
+// MERGE_WORK >= 8 x EDIT_MAX, so that a submission's per-byte phases fit (daybreak3, Oct 24: with MERGE_WORK's
+// default 2.5e8 and MERGE_MS's 10 s; MERGE_WORK's range [8 x 64 KiB, 8 x 128 MiB], so that both its
+// range and EDIT_MAX's stay reachable); MEMORY_MAX >= 36 x BODY_MAX, so that a body of BODY_MAX bytes is never too
 // large for the ledger as such, addendum 2; QUEUE_BYTES <= MEMORY_MAX / 2).
 // MEMORY_MAX's default is 1 GiB (addendum 2: 512 MiB in r7's table).
 
@@ -23,8 +25,8 @@ export const CAPS: readonly Cap[] = [
   { name: "BODY_MAX", unit: "bytes", def: 16 * MiB, min: 64 * KiB, max: "EDIT_MAX", at: "/edit, streamed" },
   { name: "MEMORY_MAX", unit: "bytes", def: GiB, min: 64 * MiB, max: 8 * GiB, at: "the ledger, before every admission" },
   { name: "HISTORY_PATCHES", unit: "patches", def: 2_000, min: 100, max: 100_000, at: "the hub's history window; compaction" },
-  { name: "MERGE_MS", unit: "ms", def: 2_000, min: 100, max: 60_000, at: "one merge, all its phases" },
-  { name: "MERGE_WORK", unit: "work units", def: 50_000_000, min: 100_000, max: 1_000_000_000, at: "the cumulative ledger of one merge" },
+  { name: "MERGE_MS", unit: "ms", def: 10_000, min: 100, max: 60_000, at: "one merge, all its phases" },
+  { name: "MERGE_WORK", unit: "work units", def: 250_000_000, min: 524_288, max: 1_073_741_824, at: "the cumulative ledger of one merge" },
   { name: "QUEUE_MAX", unit: "requests", def: 64, min: 1, max: 1_024, at: "the merge queue" },
   { name: "QUEUE_BYTES", unit: "bytes", def: 64 * MiB, min: MiB, max: "MEMORY_MAX/2", at: "the merge queue's bodies" },
   { name: "SAVE_QUIET_MS", unit: "ms", def: 1_000, min: 100, max: 60_000, at: "the page's autosave; the server's coalescing" },
@@ -86,6 +88,7 @@ export function resolveLimits(flags: string[], env: Record<string, string | unde
     if (v < lo || v > hi) return { error: `${c.name}=${v} is out of its range [${typeof c.min === "string" ? c.min + " = " + lo : lo}, ${typeof c.max === "string" ? c.max + " = " + hi : hi}] (${c.unit})` };
   }
   if (limits.MEMORY_MAX < 8 * limits.EDIT_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX})` };
+  if (limits.MERGE_WORK < 8 * limits.EDIT_MAX) return { error: `MERGE_WORK=${limits.MERGE_WORK} must be at least 8 x EDIT_MAX (${8 * limits.EDIT_MAX}), so that an edit of a board EDIT_MAX allows fits its work` };
   if (limits.MEMORY_MAX < 36 * limits.BODY_MAX) return { error: `MEMORY_MAX=${limits.MEMORY_MAX} must be at least 36 x BODY_MAX (${36 * limits.BODY_MAX})` };
   return { limits };
 }
