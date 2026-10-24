@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,8 @@ import { join } from "node:path";
 // test/bash-oracle-cases.json; test/bash-oracle.json is what GNU bash, IPython
 // and CPython did with them (test/bash_oracle.py); test/bash-known.json is
 // every difference of just-bash 3.6.0 from GNU bash that the plan accepts
-// (§3.3, D1 D2 D6 D7), each with what just-bash does instead.  So a redirection
+// (§3.3, D1 D2 D6 D7, and D8 of its addendum), each with what just-bash does
+// instead, run as the shell host runs it (wrapped, D8).  So a redirection
 // case passes only if just-bash does exactly what GNU bash does, or exactly
 // what the accepted difference says: a new difference, or a change in a known
 // one, fails here.  The later steps' adapter is held to the same file.
@@ -17,8 +19,17 @@ const dir = __dirname + "/../../test/";
 const cases = JSON.parse(readFileSync(dir + "bash-oracle-cases.json", "utf8"));
 const oracle = JSON.parse(readFileSync(dir + "bash-oracle.json", "utf8"));
 const known: { redirections: Record<string, { plan: string; reason: string; differs: Record<string, unknown> }> } = JSON.parse(readFileSync(dir + "bash-known.json", "utf8"));
-// (the CommonJS build of the pinned devDependency)
-const { Bash, InMemoryFs } = require("just-bash");
+// just-bash 3.6.0's CommonJS bundle, vendored unchanged (test/vendor/just-bash-3.6.0/vendor.json)
+const VENDOR = dir + "vendor/just-bash-3.6.0/";
+const vendor = JSON.parse(readFileSync(VENDOR + "vendor.json", "utf8"));
+const JUST_BASH = VENDOR + "index.cjs";
+const { Bash, InMemoryFs } = require(JUST_BASH);
+
+test("the vendored just-bash files are the npm tarball's, by their recorded sha256", () => {
+  for (const [name, f] of Object.entries(vendor.files) as [string, { sha256: string }][]) {
+    assert.equal(createHash("sha256").update(readFileSync(VENDOR + name)).digest("hex"), f.sha256, name);
+  }
+});
 
 // bytes as a string when they are UTF-8, else their values (as bash_oracle.py writes them)
 const text = (b: Uint8Array): string | number[] => {
@@ -33,32 +44,54 @@ const byId = (list: { id: string }[]) => new Map(list.map((x) => [x.id, x]));
 
 // just-bash's InMemoryFs makes missing parent folders on a write; a POSIX
 // file system (and the workspace) doesn't.  So the cases run over it with
-// that one rule changed: a write whose folder is missing is ENOENT, as open(2)
-// gives it, and the interpreter's handling of the error is what's compared.
-function posixParents(inner: any) {
+// that one rule changed: a write whose folder is missing is refused, as
+// open(2) refuses it, and the interpreter's handling of the error is what's
+// compared.  `failAt: "commit"` refuses instead the final, non-empty write of
+// such a path (the open succeeds, the content write fails: ENOSPC), which a
+// refused workspace commit looks like.  `calls` records the writes asked for.
+function posixParents(inner: any, failAt: "open" | "commit", calls: string[]) {
   const parentOf = (p: string) => p.replace(/\/[^/]*$/, "") || "/";
   return new Proxy(inner, {
     get(t, k) {
       const v = t[k];
       if (typeof v !== "function") return v;
       if (k !== "writeFile" && k !== "appendFile") return v.bind(t);
-      return async (p: string, ...rest: unknown[]) => {
-        if (!(await t.exists(parentOf(p)))) throw Object.assign(new Error(`ENOENT: no such file or directory, open '${p}'`), { code: "ENOENT" });
-        return v.call(t, p, ...rest);
+      return async (p: string, data: unknown, ...rest: unknown[]) => {
+        calls.push(`${String(k)} ${p} ${JSON.stringify(String(data))}`);
+        if (!(await t.exists(parentOf(p)))) {
+          if (failAt === "open" || String(data) !== "") throw Object.assign(new Error(`${failAt === "open" ? "ENOENT" : "ENOSPC"}: ${p}`), { code: failAt === "open" ? "ENOENT" : "ENOSPC" });
+          return;
+        }
+        return v.call(t, p, data, ...rest);
       };
     },
   });
 }
 
-async function inJustBash(script: string) {
-  const fs = posixParents(new InMemoryFs());
-  for (const [name, content] of Object.entries(cases.setup)) await fs.writeFile("/" + name, typeof content === "string" ? content : new Uint8Array(content as number[]));
-  // (a file system error at a redirection rejects exec() in just-bash 3.6.0: "rejects", D8)
-  const r = await new Bash({ fs, cwd: "/" }).exec(script).catch(() => ({ exitCode: "rejects", stdout: "" }));
+// The shell host runs every invocation as `{ SCRIPT\n}` (D8): in just-bash
+// 3.6.0 a file system error at a redirection ends the innermost enclosing
+// group, subshell or function body with status 1, keeping the output before
+// it; with no enclosing one, exec() rejects and every output is lost.
+const wrap = (script: string) => `{ ${script}\n}`;
+
+async function inJustBash(script: string, { wrapped = true, failAt = "open" as "open" | "commit" } = {}) {
+  const calls: string[] = [];
+  const inner = new InMemoryFs();
+  for (const [name, content] of Object.entries(cases.setup)) await inner.writeFile("/" + name, typeof content === "string" ? content : new Uint8Array(content as number[]));
+  const fs = posixParents(inner, failAt, calls);
+  const r = await new Bash({ fs, cwd: "/" }).exec(wrapped ? wrap(script) : script).catch(() => ({ exitCode: "rejects", stdout: "", stderr: "" }));
   const files: Record<string, string | number[] | null> = {};
-  for (const name of cases.observe) files[name] = (await fs.exists("/" + name)) ? text(await fs.readFileBuffer("/" + name)) : null;
-  return { exit: r.exitCode, stdout: text(latin1(r.stdout)), files };
+  for (const name of cases.observe) files[name] = (await inner.exists("/" + name)) ? text(await inner.readFileBuffer("/" + name)) : null;
+  return { exit: r.exitCode, stdout: text(latin1(r.stdout)), stderr: text(latin1(r.stderr)), files, calls };
 }
+// (what's compared: exit, stdout and files, and stderr and calls where bash-known.json records them)
+const compared = (got: any, k?: { differs: Record<string, unknown> }) => ({
+  exit: got.exit,
+  stdout: got.stdout,
+  files: got.files,
+  ...("stderr" in (k?.differs ?? {}) ? { stderr: got.stderr } : {}),
+  ...("calls" in (k?.differs ?? {}) ? { calls: got.calls } : {}),
+});
 
 test("the oracle file is current: every case has exactly one result, and nothing else", () => {
   for (const part of ["redirections", "ipython", "os_system"]) {
@@ -73,7 +106,7 @@ test("redirections: just-bash 3.6.0 does what GNU bash does, or exactly the acce
   for (const c of cases.redirections) {
     const o = want.get(c.id) as any;
     const expected = { exit: o.exit, stdout: o.stdout, files: o.files, ...(known.redirections[c.id]?.differs ?? {}) };
-    const got = await inJustBash(c.script);
+    const got = compared(await inJustBash(c.script), known.redirections[c.id]);
     try {
       assert.deepEqual(got, expected);
     } catch {
@@ -86,9 +119,32 @@ test("redirections: just-bash 3.6.0 does what GNU bash does, or exactly the acce
 test("the accepted differences are differences: each one's GNU bash result is not what just-bash does", () => {
   const want = byId(oracle.redirections);
   for (const [id, k] of Object.entries(known.redirections)) {
+    if ((k as { matches?: boolean }).matches) continue; // (a probe that records stderr and calls of a case that matches)
     const o = want.get(id) as any;
-    for (const [field, value] of Object.entries(k.differs)) assert.notDeepEqual(o[field], value, `${id}.${field}`);
+    const fields = Object.entries(k.differs).filter(([field]) => field in o && field !== "stderr");
+    assert.ok(fields.some(([field, value]) => JSON.stringify(o[field]) !== JSON.stringify(value)), `${id}: no recorded field differs from GNU bash`);
   }
+});
+
+// D8, beyond the frozen cases: why the host wraps, and that a refused commit
+// (the final write) ends the same way as a refused open.
+const d8 = cases.redirections.filter((c: { id: string }) => c.id.startsWith("d8-") || c.id === "missing-folder");
+test("D8: unwrapped, a refused redirection at the top level rejects exec(), losing every output", async () => {
+  for (const id of ["d8-before-after", "d8-or-fallback", "missing-folder"]) {
+    const got = await inJustBash((byId(cases.redirections).get(id) as any).script, { wrapped: false });
+    assert.equal(got.exit, "rejects", id);
+  }
+});
+test("D8: a refused final write ends an invocation exactly as a refused open does (wrapped)", async () => {
+  for (const c of d8) {
+    const open = await inJustBash(c.script, { failAt: "open" }), commit = await inJustBash(c.script, { failAt: "commit" });
+    assert.deepEqual([commit.exit, commit.stdout, String(commit.stderr).replace(/ENOSPC/g, "ENOENT"), commit.files], [open.exit, open.stdout, open.stderr, open.files], c.id);
+  }
+});
+test("D8: a limit is a typed result (status 126 with its message), not a file system rejection", async () => {
+  const r = await new Bash({ executionLimits: { maxCommandCount: 5 } }).exec(wrap("for i in 1 2 3 4 5 6 7 8; do :; done"));
+  assert.equal(r.exitCode, 126);
+  assert.match(r.stderr, /too many commands executed \(>5\)/);
 });
 
 // The oracle itself, again, where CI has it: GNU bash for the redirections
@@ -149,7 +205,7 @@ for (const [what, script, out] of [
   // run is about 8 times slower)
   test(`+Infinity is accepted for the own-computation limits and lifts just-bash's own default: ${what}`, () => {
     const run = (limits: object | null) => {
-      const program = `const { Bash } = require(${JSON.stringify(require.resolve("just-bash"))});
+      const program = `const { Bash } = require(${JSON.stringify(JUST_BASH)});
         new Bash(${limits ? "{ executionLimits: JSON.parse(process.argv[1], (k, v) => (v === 'Infinity' ? Infinity : v)) }" : ""}).exec(process.argv[2]).then((r) => process.stdout.write(JSON.stringify([r.exitCode, r.stdout])));`;
       const r = spawnSync(process.execPath, ["-e", program, JSON.stringify(limits ?? {}, (k, v) => (v === Infinity ? "Infinity" : v)), script], { encoding: "utf8" });
       return JSON.parse(r.stdout);
