@@ -179,6 +179,10 @@ def structured():
     sc = call("run_list", {})
     assert any(e["handle"] == h for e in sc["result"]["runs"]) and "collaborators" in sc["result"]["note"], sc
     assert call("run_status", {"handle": "run_" + "a" * 26}, "not_found")["result"] is None
+    # (a cancel's answer carries its request id, made by the server when none is given; a finished run is not_running)
+    sc = call("run_cancel", {"handle": h, "mode": "soft"})
+    assert sc["result"]["result"] == "not_running" and sc["result"]["request_id"].startswith("cancel_") and sc["result"]["request_id"] in sc["text"], sc
+    assert call("run_cancel", {"handle": h, "mode": "soft", "request_id": sc["result"]["request_id"]})["result"] == sc["result"]
     sc = call("sage", {"code": "x = var('x'); plot(sin(x), (x, 0, 3))"})
     assert sc["result"] is None and len(sc["plots"]) == 1 and sc["plots"][0] in sc["text"], sc
     assert call("sage", {}, "invalid_arguments")["error"]["exception"] is None
