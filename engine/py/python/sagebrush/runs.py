@@ -37,6 +37,8 @@ TAIL_SHOWN = 4096            # (the tail in a record)
 INLINE_VALUE = 64 * 1024     # (a value up to this is inline in the record)
 TOMBSTONES_MAX = 10000
 TOMBSTONE_DAYS = 30
+RUN_META_BYTES = 64 * 1024   # (a new run is admitted only with this much room for its records)
+DATA_HEADROOM_MAX = 16 * MiB  # (values and output stop short of the budget by this, at most an eighth of it: the records' room)
 
 
 # ------------------------------------------------------------------ settings
@@ -312,15 +314,12 @@ class Store:
         run), under the store lock, with a durable reservation; a
         StorageError if it doesn't fit.  Returns the reservation's path."""
         with self.lock:
-            used = self.used()
-            budget = self.cfg["SAGEBRUSH_RUNS_STORE_BYTES"]
-            free, _ = self._free()
-            if used + nbytes > budget:
-                raise StorageError("the run store is full (%d of %d bytes used)" % (used, budget))
-            if free - nbytes < self.reserve_floor():
-                raise StorageError("too little free disk space (the store keeps %d bytes free)" % self.reserve_floor())
             p = os.path.join(self.root, "reservations", "%s-%s.json" % (handle, secrets.token_hex(4)))
             rec = json.dumps({"bytes": nbytes, "target": target, "owner": self.owner}).encode()
+            # (the formula's whole charge: the declared bytes and the
+            # reservation record's own physical size, daybreak2 PR120-1)
+            self.admit(nbytes + self.physical(len(rec)), "data")
+            used = self.used()
             _write_atomic(p, rec, durable=True)
             self._set_total(used + nbytes + _charge(p))
             return p
@@ -344,15 +343,54 @@ class Store:
             self._set_total(max(0, used))
             os.unlink(reservation)
 
-    def write_file(self, handle, name, data, durable=False):
-        """A small file of a run (record, output), charged by its change."""
+    def physical(self, n):
+        """A conservative physical charge for n bytes: whole blocks, at least one."""
+        try:
+            b = os.statvfs(self.root).f_frsize or 4096
+        except (AttributeError, OSError):
+            b = 4096
+        return max(1, -(-n // b)) * b
+
+    def admit(self, nbytes, kind):
+        """Under the lock: room for nbytes more, or a StorageError.  "meta"
+        (records, the index) may use the whole budget; "data" (output,
+        values) stops short of it by the records' headroom.  Both keep the
+        free-space floor."""
+        with self.lock:
+            budget = self.cfg["SAGEBRUSH_RUNS_STORE_BYTES"]
+            limit = budget if kind == "meta" else budget - min(DATA_HEADROOM_MAX, budget // 8)
+            used = self.used()
+            if used + nbytes > limit:
+                raise StorageError("the run store is full (%d of %d bytes used)" % (used, limit))
+            free, _ = self._free()
+            if free - nbytes < self.reserve_floor():
+                raise StorageError("too little free disk space (the store keeps %d bytes free)" % self.reserve_floor())
+
+    def write_file(self, handle, name, data, durable=False, kind="meta"):
+        """A file of a run (record, output), admitted for its growth before
+        it replaces the old one, then charged by its change."""
         p = os.path.join(self.run_dir(handle), name)
         with self.lock:
             before = _charge(p)
+            grow = self.physical(len(data)) - before
+            if grow > 0:
+                self.admit(grow, kind)
             _write_atomic(p, data, durable)
             t = self._total()
             if t is not None:
                 self._set_total(max(0, t - before + _charge(p)))
+
+    def discard(self, handle):
+        """A run that was never admitted after all: its directory removed."""
+        with self.lock:
+            d = self.run_dir(handle)
+            try:
+                for n in os.listdir(d):
+                    os.unlink(os.path.join(d, n))
+                os.rmdir(d)
+            except FileNotFoundError:
+                pass
+            self._set_total(self.walk_total())
 
     def write_value(self, handle, data):
         """A value file (value.json), admitted first: (path, None) or
@@ -360,8 +398,8 @@ class Store:
         d = self.run_dir(handle)
         target = os.path.join(d, "value.json")
         try:
-            res = self.reserve(handle, target, len(data) + 4096)
-        except StorageError as e:
+            res = self.reserve(handle, target, self.physical(len(data)))
+        except (StorageError, OSError) as e:
             return None, str(e)
         try:
             _write_atomic(target, data, durable=True)
@@ -410,6 +448,9 @@ class Store:
                 idx[handle] = entry
             data = json.dumps(idx, separators=(",", ":")).encode()
             before = _charge(self._index_path())
+            grow = self.physical(len(data)) - before
+            if grow > 0 and entry is not None:
+                self.admit(grow, "meta")
             _write_atomic(self._index_path(), data)
             t = self._total()
             if t is not None:
@@ -436,10 +477,11 @@ class Store:
         o = entry.get("owner") or {}
         return o.get("pid") == self.owner["pid"] and o.get("nonce") == self.owner["nonce"]
 
-    def summary(self, now=None):
-        """The `runs` summary of every MCP result (§9): from the index alone."""
+    def summary(self, now=None, exclude=()):
+        """The `runs` summary of every MCP result (§9): from the index alone
+        (less exclude: runs that have ended whose entry is still there)."""
         now = time.time() if now is None else now
-        idx = self.index()
+        idx = {h: e for h, e in self.index().items() if h not in exclude}
         running = [h for h, e in idx.items() if self.mine(e)]
         unknown = [h for h, e in idx.items() if not self.mine(e)]
         ages = [now - e.get("started_at", now) for e in idx.values() if isinstance(e.get("started_at"), (int, float))]
@@ -527,6 +569,9 @@ class Store:
                 removed.add(r["handle"])
                 total = self.walk_total()
             self._prune_tombstones(now)
+            # (the index repaired here too: an entry left by a crash between a
+            # terminal record and its index update, daybreak2 PR120-2)
+            self._rebuild_index()
             self._set_total(self.walk_total())
             return sorted(removed)
 
