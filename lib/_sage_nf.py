@@ -696,9 +696,12 @@ class NumberField_absolute:
             bound is excluded by power-residue characters;
           * no relation is missing: the same test at each prime dividing h
             (Elsenhans and Voight, arXiv:2510.05501).
-        It refuses when M or that index bound exceeds 10^6, saying which
-        bound and by how much.  M is about 0.64 sqrt|d| for imaginary
-        quadratic fields and sqrt|d|/188 for totally real sextic ones.
+        By default it has no limit on M or that index bound; the opt-in
+        session limits nf.certify_norm_max and nf.certify_index_max make it
+        refuse beyond them, saying which bound and by how much.  M is about
+        0.64 sqrt|d| for imaginary quadratic fields and sqrt|d|/188 for
+        totally real sextic ones (for x^2 + 3*10^12 + 1, M = 2205315: about
+        14 s in the wasm engine).
 
         EXAMPLES::
 
@@ -713,10 +716,6 @@ class NumberField_absolute:
             Class group of order 2 with structure C2 of Number Field in a with defining polynomial x^3 - 11
             sage: NumberField(x^2 + 2184, 'a').class_group(proof=True).invariants()
             (6, 2, 2)
-            sage: NumberField(x^2 + 3*10^12 + 1, 'a').class_group(proof=True)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it)
         """
         if proof:
             p = self._proven_bnf("class_group")
