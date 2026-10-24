@@ -884,6 +884,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py ::  :: _resource_mod = 0 # (0: not tried yet; None: there is none) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py ::  :: budget of a polynomial factorization, floor(effective_guard_bytes / 2), #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -944,6 +948,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _cgroup_dirs :: if _read(\"/sys/fs/cgroup\" + path + \"/memory.max\") is not None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py :: _cgroups :: \"\"\"[(source, limit, used)] for this process's memory cgroup, v2 and its #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -952,7 +960,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _cgroups :: lim = _read(d + \"/memory.max\") #0": {
+ "lib/_capacity.py :: _cgroups :: lim = _read(b[0] + \"/memory.max\") #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1004,6 +1012,34 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_capacity.py :: _resource :: \"\"\"The resource module, imported once (pyjs has none).\"\"\" #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: _resource_mod = r #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: def _resource(): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: global _resource_mod #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: if _resource_mod == 0: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: import resource as r #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: return _resource_mod #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_capacity.py :: _rlimit :: \"\"\"The soft limit `name` (RLIMIT_AS, RLIMIT_DATA): None for none, or #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -1016,11 +1052,15 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _rlimit :: import resource #0": {
+ "lib/_capacity.py :: _rlimit :: if resource is None: #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: _rlimit :: inf = resource.RLIM_INFINITY #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: resource = _resource() #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
@@ -1053,6 +1093,10 @@
   "owner": "python (@sagebrush-python)"
  },
  "lib/_capacity.py :: capacity :: for r, field in ((\"RLIMIT_AS\", \"VmSize\"), (\"RLIMIT_DATA\", \"VmData\")): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity :: status = None # (read only when a limit is set) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
