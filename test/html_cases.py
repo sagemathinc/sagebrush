@@ -3,6 +3,9 @@
 import html
 import html.entities as E
 import zlib
+import sys
+# (CPython's default limit on an int's digits, which Sagebrush's isn't: compared with python3)
+sys.set_int_max_str_digits(4300)
 
 
 def show(label, f):
