@@ -132,7 +132,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
-    "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 2^20 elements",
+    "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -2316,7 +2316,8 @@ test("subfields of finite fields: one budget per operation, every deterministic 
     "print('cache', len(sub.IMAGES), [(S.p, S.n, U.n) in sub.IMAGES for S, U in pairs])",
     "",
   ].join("\n"));
-  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  // (the limits as a policy sets them, test/limits-finite.json: plan-c0 made the defaults unlimited)
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--limits", join(__dirname, "..", "..", "test", "limits-finite.json"), f], { encoding: "utf8", timeout: WALL(120000) });
   const none = "up=0 image=0 GF=0 dlog=0 cached=0 order=same";
   assert.deepEqual(r.stdout.trim().split("\n"), [
     // (the plan's numbers: 1,331,648 at 2^20; at 2^19, q - 1 = 524,287 prime,
@@ -2526,7 +2527,8 @@ test("top-level GF's cold Conway search is bounded by ceil(1.1 C_max), C_max mea
     "attempt('exact', 1770107)",
     "",
   ].join("\n"));
-  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(120000) });
+  // (the limits as a policy sets them, test/limits-finite.json: plan-c0 made the defaults unlimited)
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--limits", join(__dirname, "..", "..", "test", "limits-finite.json"), f], { encoding: "utf8", timeout: WALL(120000) });
   assert.deepEqual(r.stdout.trim().split("\n"), [
     "cap " + cap,
     ...[[3, 6], [2, 12], [113, 2], [7, 6]].map(([p, n]) => `charge ${p} ${n} ${fields.find((x) => x[0] === p && x[1] === n)![2]}`),
