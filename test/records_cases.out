@@ -1,0 +1,44 @@
+estimate: ok
+running: ok
+untracked: ok
+partial: ok
+outcome stopped: ok
+outcome complete: ok
+outcome error: ok
+checkpoint: ok
+estimate without stages: sagebrush.estimate/1: "stages" is missing
+estimate, a work label: sagebrush.estimate/1: stages[0].work.label is "exact", not one of "known", "bound", "forecast"
+estimate, a chance above 1: sagebrush.estimate/1: stages[1].success.p_high is 1.5, above 1
+estimate, a fits outcome: sagebrush.estimate/1: fits.outcome is "fits", not one of "unknown", "estimated to exceed the observed capacity", "uncertain", "estimated to fit, high unavailable", "estimated to fit, high unavailable (observed capacity)", "estimated to fit the observed capacity", "estimated to fit", "exceeds a hard ceiling"
+estimate, capacity bytes negative: sagebrush.estimate/1: fits.host_capacity.bytes is -1, below 0
+estimate, high_s a string: sagebrush.estimate/1: stages[0].time.high_s is string, not number
+estimate, an unknown field: ok
+running, done negative: sagebrush.progress/1: count.done is -1, below 0
+running, done a decimal string: ok
+running, done a non-decimal string: sagebrush.progress/1: count.done is "1e9", not a decimal integer
+running, fraction above 1: sagebrush.progress/1: time_fraction.value is 1.0000001, above 1
+running, fraction exactly 1: ok
+running, count label: sagebrush.progress/1: count.label is "estimated", not "counted"
+running, beyond_forecast 0: sagebrush.progress/1: beyond_forecast is integer, not boolean
+running, stage_index a bool: sagebrush.progress/1: stage_index is boolean, not integer
+running, early part untracked: ok
+untracked, no reason: sagebrush.progress/1: "reason" is missing
+untracked, status running: sagebrush.progress/1: "stage" is missing
+partial, stopped_by: sagebrush.partial/1: stopped_by is "timeout", not one of "deadline", "work", "cancel", "memory"
+partial, no found: sagebrush.partial/1: "found" is missing
+partial, checkpoint kind: sagebrush.partial/1: checkpoint.location.kind is "pickle", not one of "inline", "file", "handle", "deferred"
+partial, checkpoint ref: ok
+outcome, status: sagebrush.outcome/1: status is "done", not one of "complete", "stopped", "error"
+outcome, reason: sagebrush.outcome/1: reason is "allowance", not one of "deadline", "work", "cancel", "memory"
+outcome, no engine_build: sagebrush.outcome/1: "engine_build" is missing
+outcome, error without message: sagebrush.outcome/1: "error.message" is missing
+outcome, peak memory a float: sagebrush.outcome/1: peak_memory_bytes is number, not integer
+checkpoint, format: sagebrush.checkpoint/1: format is "pickle", not "sagebrush-checkpoint"
+checkpoint, version 2: sagebrush.checkpoint/1: version is 2, not 1
+checkpoint, version True: sagebrush.checkpoint/1: version is true, not 1
+checkpoint, no payload_length: sagebrush.checkpoint/1: "payload_length" is missing
+not an object: a record is a JSON object, not array
+no schema: not a Sagebrush record: schema is null
+estimate/2: not a Sagebrush record: schema is "sagebrush.estimate/2"
+an unknown kind: not a Sagebrush record: schema is "sagebrush.limits/1"
+['checkpoint.v1.json', 'estimate.v1.json', 'outcome.v1.json', 'partial.v1.json', 'progress.v1.json']

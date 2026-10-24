@@ -1,0 +1,770 @@
+{
+ "$defs": {
+  "checkpoint_ref": {
+   "properties": {
+    "algorithm": {
+     "type": "string"
+    },
+    "created": {
+     "type": "string"
+    },
+    "engine_build": {
+     "type": "string"
+    },
+    "input_sha256": {
+     "type": "string"
+    },
+    "location": {
+     "properties": {
+      "handle": {
+       "type": "string"
+      },
+      "kind": {
+       "enum": [
+        "inline",
+        "file",
+        "handle",
+        "deferred"
+       ]
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "kind"
+     ],
+     "type": "object"
+    },
+    "op": {
+     "type": "string"
+    },
+    "payload_length": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "payload_sha256": {
+     "type": "string"
+    },
+    "state_version": {
+     "minimum": 1,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "op",
+    "algorithm",
+    "state_version",
+    "engine_build",
+    "input_sha256",
+    "location"
+   ],
+   "type": "object"
+  },
+  "estimate": {
+   "properties": {
+    "args_summary": {
+     "type": "string"
+    },
+    "assumptions": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "calibration": {
+     "properties": {
+      "age_s": {
+       "anyOf": [
+        {
+         "minimum": 0,
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "engine_build": {
+       "type": "string"
+      },
+      "machine_key": {
+       "type": "string"
+      },
+      "runtime": {
+       "type": "string"
+      },
+      "samples": {
+       "minimum": 0,
+       "type": "integer"
+      },
+      "source": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "runtime",
+      "engine_build",
+      "machine_key",
+      "source",
+      "samples",
+      "age_s"
+     ],
+     "type": "object"
+    },
+    "fits": {
+     "properties": {
+      "estimate_bytes": {
+       "properties": {
+        "high": {
+         "anyOf": [
+          {
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "label": {
+         "type": "string"
+        },
+        "typical": {
+         "anyOf": [
+          {
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       },
+       "required": [
+        "typical",
+        "high",
+        "label"
+       ],
+       "type": "object"
+      },
+      "guard_ceiling_bytes": {
+       "anyOf": [
+        {
+         "minimum": 0,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "host_capacity": {
+       "properties": {
+        "basis": {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        "bytes": {
+         "anyOf": [
+          {
+           "minimum": 0,
+           "type": "integer"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "unknown_parts": {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        }
+       },
+       "required": [
+        "bytes",
+        "basis",
+        "unknown_parts"
+       ],
+       "type": "object"
+      },
+      "options": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      "outcome": {
+       "enum": [
+        "unknown",
+        "estimated to exceed the observed capacity",
+        "uncertain",
+        "estimated to fit, high unavailable",
+        "estimated to fit, high unavailable (observed capacity)",
+        "estimated to fit the observed capacity",
+        "estimated to fit",
+        "exceeds a hard ceiling"
+       ]
+      }
+     },
+     "required": [
+      "outcome",
+      "estimate_bytes",
+      "host_capacity",
+      "guard_ceiling_bytes",
+      "options"
+     ],
+     "type": "object"
+    },
+    "note": {
+     "type": "string"
+    },
+    "op": {
+     "type": "string"
+    },
+    "peak_memory": {
+     "$ref": "#/$defs/memory"
+    },
+    "schema": {
+     "const": "sagebrush.estimate/1"
+    },
+    "stages": {
+     "items": {
+      "properties": {
+       "condition": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "memory": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/memory"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "name": {
+        "type": "string"
+       },
+       "success": {
+        "anyOf": [
+         {
+          "properties": {
+           "label": {
+            "const": "heuristic model"
+           },
+           "p_high": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+           },
+           "p_typical": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+           }
+          },
+          "required": [
+           "p_typical",
+           "p_high",
+           "label"
+          ],
+          "type": "object"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "time": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/interval"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "work": {
+        "anyOf": [
+         {
+          "properties": {
+           "label": {
+            "enum": [
+             "known",
+             "bound",
+             "forecast"
+            ]
+           },
+           "units": {
+            "anyOf": [
+             {
+              "minimum": 0,
+              "type": "integer"
+             },
+             {
+              "pattern": "^[0-9]+$",
+              "type": "string"
+             }
+            ]
+           }
+          },
+          "required": [
+           "units",
+           "label"
+          ],
+          "type": "object"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "required": [
+       "name",
+       "work",
+       "time",
+       "memory",
+       "condition",
+       "success"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "total_time": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/interval"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    }
+   },
+   "required": [
+    "schema",
+    "op",
+    "args_summary",
+    "total_time",
+    "peak_memory",
+    "fits",
+    "stages",
+    "assumptions",
+    "calibration"
+   ],
+   "type": "object"
+  },
+  "interval": {
+   "properties": {
+    "high_s": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "label": {
+     "const": "estimated time"
+    },
+    "note": {
+     "type": "string"
+    },
+    "samples": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "typical_s": {
+     "minimum": 0,
+     "type": "number"
+    }
+   },
+   "required": [
+    "typical_s",
+    "high_s",
+    "samples",
+    "label"
+   ],
+   "type": "object"
+  },
+  "memory": {
+   "properties": {
+    "assumptions": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "high_bytes": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "label": {
+     "enum": [
+      "known",
+      "bound",
+      "forecast",
+      "unknown",
+      "required"
+     ]
+    },
+    "typical_bytes": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    }
+   },
+   "required": [
+    "typical_bytes",
+    "high_bytes",
+    "label",
+    "assumptions"
+   ],
+   "type": "object"
+  },
+  "partial": {
+   "properties": {
+    "checkpoint": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/checkpoint_ref"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "checkpoint_unavailable": {
+     "type": "string"
+    },
+    "elapsed_s": {
+     "minimum": 0,
+     "type": "number"
+    },
+    "found": {
+     "type": "object"
+    },
+    "guarantees": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "lost_work": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    },
+    "op": {
+     "type": "string"
+    },
+    "remaining_estimate": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/estimate"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "schema": {
+     "const": "sagebrush.partial/1"
+    },
+    "stage": {
+     "type": "string"
+    },
+    "stage_index": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "stopped_by": {
+     "enum": [
+      "deadline",
+      "work",
+      "cancel",
+      "memory"
+     ]
+    },
+    "work_spent": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    }
+   },
+   "required": [
+    "schema",
+    "op",
+    "stage",
+    "stage_index",
+    "stopped_by",
+    "found",
+    "guarantees",
+    "work_spent",
+    "lost_work",
+    "elapsed_s",
+    "remaining_estimate",
+    "checkpoint"
+   ],
+   "type": "object"
+  }
+ },
+ "$id": "https://sagebrush.space/schemas/progress.v1.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "anyOf": [
+  {
+   "properties": {
+    "beyond_forecast": {
+     "type": "boolean"
+    },
+    "call_id": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    },
+    "count": {
+     "properties": {
+      "done": {
+       "anyOf": [
+        {
+         "minimum": 0,
+         "type": "integer"
+        },
+        {
+         "pattern": "^[0-9]+$",
+         "type": "string"
+        }
+       ]
+      },
+      "label": {
+       "const": "counted"
+      },
+      "saturated": {
+       "type": "boolean"
+      },
+      "total": {
+       "anyOf": [
+        {
+         "minimum": 0,
+         "type": "integer"
+        },
+        {
+         "pattern": "^[0-9]+$",
+         "type": "string"
+        }
+       ]
+      },
+      "unit": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "done",
+      "unit",
+      "label"
+     ],
+     "type": "object"
+    },
+    "early_part_untracked": {
+     "type": "boolean"
+    },
+    "elapsed_s": {
+     "minimum": 0,
+     "type": "number"
+    },
+    "eta": {
+     "$ref": "#/$defs/interval"
+    },
+    "memory_now_bytes": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "memory_peak_bytes": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "op": {
+     "type": "string"
+    },
+    "parent_id": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    },
+    "schema": {
+     "const": "sagebrush.progress/1"
+    },
+    "stage": {
+     "type": "string"
+    },
+    "stage_count": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "stage_index": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "status": {
+     "const": "running"
+    },
+    "time_fraction": {
+     "properties": {
+      "label": {
+       "const": "estimated fraction"
+      },
+      "value": {
+       "maximum": 1,
+       "minimum": 0,
+       "type": "number"
+      }
+     },
+     "required": [
+      "value",
+      "label"
+     ],
+     "type": "object"
+    },
+    "work_spent": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    }
+   },
+   "required": [
+    "schema",
+    "call_id",
+    "parent_id",
+    "op",
+    "stage",
+    "stage_index",
+    "count",
+    "elapsed_s",
+    "beyond_forecast"
+   ],
+   "type": "object"
+  },
+  {
+   "properties": {
+    "call_id": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    },
+    "elapsed_s": {
+     "minimum": 0,
+     "type": "number"
+    },
+    "op": {
+     "type": "string"
+    },
+    "parent_id": {
+     "anyOf": [
+      {
+       "minimum": 0,
+       "type": "integer"
+      },
+      {
+       "pattern": "^[0-9]+$",
+       "type": "string"
+      }
+     ]
+    },
+    "reason": {
+     "type": "string"
+    },
+    "schema": {
+     "const": "sagebrush.progress/1"
+    },
+    "status": {
+     "const": "untracked"
+    }
+   },
+   "required": [
+    "schema",
+    "call_id",
+    "parent_id",
+    "op",
+    "status",
+    "reason"
+   ],
+   "type": "object"
+  }
+ ],
+ "title": "sagebrush.progress/1"
+}
