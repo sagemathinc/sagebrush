@@ -1876,7 +1876,7 @@ async function t14Collect() {
   await w.write("/c1b.txt", "one again", { collect: wr });
   await w.duplicate("/c1b.txt", undefined, { collect: d });
   await w.remove("/c3.txt", undefined, undefined, { collect: rm });
-  check(J(await seqsOf(r)) === J(["rename /c1.txt"]) && J(await seqsOf(wr)) === J(["write /c1b.txt"]) && d.length === 1 && J(await seqsOf(rm)) === J(["remove /c3.txt"]), "collect: rename, write, duplicate and remove each collect their own op: " + J({ r: await seqsOf(r), wr: await seqsOf(wr), d: await seqsOf(d), rm: await seqsOf(rm) }));
+  check(J(await seqsOf(r)) === J(["rename /c1.txt"]) && J(await seqsOf(wr)) === J(["write /c1b.txt"]) && d.length === 1 && J(await seqsOf(rm)) === J(["mkdir /Trash", "remove /c3.txt"]), "collect: rename, write, duplicate and remove each collect their own ops (remove's first Trash folder with it): " + J({ r: await seqsOf(r), wr: await seqsOf(wr), d: await seqsOf(d), rm: await seqsOf(rm) }));
   const all = [...a, ...b, ...r, ...wr, ...d, ...rm];
   check(new Set(all).size === all.length, "collect: no seq collected twice, nor by two calls");
   // (a call refused before it commits collects nothing; one refused after an earlier commit keeps that commit's)
