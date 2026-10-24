@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { Worker } from "node:worker_threads";
 import { execFileSync, spawnSync } from "node:child_process";
 
-// HARD-606-1: int <-> decimal str conversions have a ceiling no setting
-// lifts (sys.set_int_max_str_digits(0), which Sage, Magma and MATLAB modes
-// set, included), and below it a large one can be stopped.
+// int <-> decimal str conversions: no default limit in any mode (Sagebrush's
+// int_max_str_digits default is 0, where CPython's is 4300, and its own
+// 4,000,000-digit ceiling is gone: a user's own computation has no default
+// limits, Oct 24 2026); the only bound is memory, admitted before a
+// conversion starts; and a large one can be stopped (HARD-606-1).
 const DIST = __dirname + "/..";
 const CLI = DIST + "/src/cli.js";
 
@@ -37,7 +39,7 @@ function interruptAfter(code: string, ms: number): Promise<{ last: string; late:
   });
 }
 
-test("Stop interrupts a decimal conversion just under the ceiling, both ways, with the limit off", async () => {
+test("Stop interrupts a large decimal conversion, both ways", async () => {
   // (the value and the text are made first, in a loop that also polls; the
   // conversion itself takes seconds, and Stop lands in it)
   const big = "import sys\nsys.set_int_max_str_digits(0)\nx = (1 << 13_000_000) - 1\n";
@@ -49,32 +51,49 @@ test("Stop interrupts a decimal conversion just under the ceiling, both ways, wi
   assert.ok(r2.late < 3000, `stopped ${r2.late} ms after Stop`);
 });
 
-test("past Sagebrush's ceiling a conversion is refused at once, even with the limit off, in a small heap", () => {
+test("no default limit: conversions past the old 4,000,000-digit ceiling, as CPython's; memory admitted at once in a small heap; a set limit is CPython's", () => {
   const code = [
     "import sys, time",
-    "sys.set_int_max_str_digits(0)",
-    "for f in (lambda: str(1 << 100_000_000), lambda: str(10 ** 4_000_100), lambda: int('1' * 4_000_001), lambda: int('9_' * 4_000_000 + '9'), lambda: '%d' % (1 << 14_000_000), lambda: format(1 << 14_000_000, ',')):",
+    "print(sys.get_int_max_str_digits(), sys.flags.int_max_str_digits, sys.int_info.default_max_str_digits)",
+    "# (just past the old ceiling, both ways: CPython 3.14 with its limit off gives 4000001 111)",
+    "print(len(str(10 ** 4_000_000)), int('1' * 4_000_001) % 1000)",
+    "# (past this 96 MiB heap: refused before any digit is made)",
+    "for f in (lambda: str(1 << 100_000_000), lambda: '%d' % (1 << 100_000_000), lambda: format(1 << 100_000_000, ','), lambda: int('1' * 40_000_000)):",
     "    t = time.perf_counter()",
     "    try:",
     "        f()",
     "        print('converted')",
-    "    except ValueError as e:",
+    "    except MemoryError as e:",
     "        print(time.perf_counter() - t < 2, e)",
-    "sys.set_int_max_str_digits(10_000_000)",
+    "sys.set_int_max_str_digits(4300)",
     "try:",
-    "    str(1 << 14_000_000)",
+    "    str(10 ** 4300)",
     "except ValueError as e:",
     "    print(e)",
-    "print(len(str(10 ** 3_999_999)), int('1' * 4_000_000) % 1000)",
   ].join("\n");
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", CLI, "-c", code], { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
-  const hard = "Exceeds Sagebrush's limit (4000000 digits) for integer string conversion";
-  for (const l of lines.slice(0, 6)) assert.ok(l.startsWith("True " + hard), l);
-  assert.equal(lines[2], `True ${hard}: value has 4000001 digits; no setting raises this limit`);
-  assert.equal(lines[6], `${hard}; no setting raises this limit`);
-  assert.equal(lines[7], "4000000 111");
+  assert.equal(lines[0], "0 0 0");
+  assert.equal(lines[1], "4000001 111");
+  const to = "True converting an int of about 30103000 digits needs about 106 MiB, more than this session's 96 MiB";
+  assert.deepEqual(lines.slice(2, 5), [to, to, to]);
+  assert.equal(lines[5], "True converting an int of about 40000000 digits needs about 140 MiB, more than this session's 96 MiB");
+  assert.equal(lines[6], "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit");
+});
+
+test("a user's report: an integer of 6,000,001 digits prints in full, in Sage mode and in Python mode, with no setting", () => {
+  // (William met the old 4,000,000-digit ceiling, which no setting lifted,
+  // while trying Sagebrush, Oct 22 2026: "It's not hard to hit")
+  const want = "1" + "0".repeat(5_999_999) + "7";
+  for (const [args, code] of [
+    [["--sage"], "x = 10^6000000 + 7\nprint(x)"],
+    [[], "x = 10**6000000 + 7\nprint(x)"],
+  ] as [string[], string][]) {
+    const out = execFileSync(process.execPath, [CLI, ...args, "-c", code], { encoding: "utf8", maxBuffer: 64 * 2 ** 20, timeout: 120000 });
+    assert.equal(out.length, want.length + 1, args.join(" ") || "python");
+    assert.ok(out === want + "\n", args.join(" ") || "python");
+  }
 });
 
 test("large conversions by pieces are exact: decimal both ways, and int() in bases 2 to 36", () => {
