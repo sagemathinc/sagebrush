@@ -18,6 +18,7 @@ Cantor-Zassenhaus, sagebrush.poly); the others by Cantor-Zassenhaus here.
 import array as _array
 import math as _m
 import random as _random
+import collections as _collections
 from fractions import Fraction as _F
 
 
@@ -766,9 +767,13 @@ class IntegerMod:
 
         EXAMPLES::
 
-            sage: Mod(8, 11).nth_root(3), sorted(Mod(1, 7).nth_root(3, all=True))
-            (2, [1, 2, 4])
+            sage: Mod(8, 11).nth_root(3), Mod(2, 7).nth_root(3, all=True)
+            (2, [])
+            sage: sorted(Mod(1, 9).nth_root(3, all=True))
+            [1, 4, 7]
         """
+        if getattr(self._parent, "_prime", False):
+            return _ff_nth_root(self, k, all)
         n = self._parent._n
         k = int(k)
         rs = [_elt(self._parent, v) for v in range(n) if pow(v, k, n) == self._v] if n < 10 ** 6 else None
@@ -1251,14 +1256,19 @@ def _pmod(a, b, p):
 
 
 def _ppowmod(base, e, m, p):
-    r = [1]
+    """base^e mod m in F_p[x] (e >= 0), right to left: bits(e) - 1 squarings
+    and popcount(e) - 1 products, nothing more (no product by 1, no square
+    after the last bit), each a _pmul and a _pmod: the count that
+    _sage_ffsub.pow_cost charges (astra CORR-FF2-2)."""
     b = _pmod(base, m, p)
+    r = None
     while e:
         if e & 1:
-            r = _pmod(_pmul(r, b, p), m, p)
-        b = _pmod(_pmul(b, b, p), m, p)
+            r = b if r is None else _pmod(_pmul(r, b, p), m, p)
         e >>= 1
-    return r
+        if e:
+            b = _pmod(_pmul(b, b, p), m, p)
+    return [1] if r is None else r
 
 
 def _pgcd(a, b, p):
@@ -2124,12 +2134,8 @@ class FiniteFieldElement:
             sage: F.<z> = GF(3^4); (z^5).minimal_polynomial()
             x^4 + 2*x^2 + 2
         """
-        K = self._parent
-        R = PolynomialRing_ff(K, var)
-        f = R([1])
-        for c in self._conjugates():
-            f = f * R([-c, 1])
-        return PolynomialRing_ff(K._prime_field, var)([int(c._c[0]) for c in f.list()])
+        S = _ffsub()
+        return PolynomialRing_ff(self._parent._prime_field, var)(S.minpoly(self, [S.WORK], _ff_work("minpoly", self)))
 
     minpoly = minimal_polynomial
 
@@ -2141,8 +2147,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); k(2).charpoly()
             x^2 + 2*x + 1
         """
-        m = self.minimal_polynomial(var)
-        return m ** (self._parent._n // m.degree())
+        S = _ffsub()
+        return PolynomialRing_ff(self._parent._prime_field, var)(S.charpoly(self, [S.WORK], _ff_work("charpoly", self)))
 
     def trace(self):
         """The trace to GF(p).
@@ -2152,13 +2158,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); a.trace(), a.norm()
             (1, 2)
         """
-        K = self._parent
-        s = K.zero()
-        x = self
-        for _ in range(K._n):
-            s = s + x
-            x = x ** K._p
-        return K._prime_field(s._c[0])
+        S = _ffsub()
+        return self._parent._prime_field(S.trace(self, [S.WORK], _ff_work("trace", self)))
 
     def norm(self):
         """The norm to GF(p).
@@ -2168,8 +2169,8 @@ class FiniteFieldElement:
             sage: k.<a> = GF(9); (a + 1).norm()
             1
         """
-        K = self._parent
-        return K._prime_field((self ** ((K._q - 1) // (K._p - 1)))._c[0])
+        S = _ffsub()
+        return self._parent._prime_field(S.norm(self, [S.WORK], _ff_work("norm", self)))
 
     def multiplicative_order(self):
         """The order in the multiplicative group.
@@ -2316,21 +2317,15 @@ class FiniteFieldElement:
         return _Integer(k)
 
     def nth_root(self, k, all=False):
-        """A k-th root (all=True: all of them), by search.
+        """A k-th root (all=True: all of them), by the shared core (see
+        _ff_nth_root).
 
         EXAMPLES::
 
-            sage: k.<a> = GF(9); (a^3).nth_root(3)
-            a
+            sage: k.<a> = GF(9); (a^3).nth_root(3), a.nth_root(2, all=True)
+            (a, [])
         """
-        K = self._parent
-        k = int(k)
-        rs = [x for x in K if x ** k == self]
-        if all:
-            return rs
-        if not rs:
-            raise ValueError("no %d-th root" % k)
-        return rs[0]
+        return _ff_nth_root(self, k, all)
 
 
 def _gf_name(q, names):
@@ -2430,6 +2425,370 @@ FiniteField = GF
 def _ffsub():
     import _sage_ffsub
     return _sage_ffsub
+
+
+def _ff_work(what, x):
+    """The refusal past the shared core's one-call budget, in words."""
+    return lambda: NotImplementedError("%s of an element of a finite field of degree %d is not supported yet (work)"
+                                       % (what, _ffsub().pnq(x.parent())[1]))
+
+
+def _ff_nth_root(x, k, all):
+    """x.nth_root(k) of a finite field element, as Sage's where its answer
+    is determined: the one root when there is exactly one (x = 0, or
+    gcd(k, q - 1) = 1), ValueError "no nth root" (all=True: []) when there
+    is none; k < 0 as the root of 1/x (of 0: none), k = 0 Sage's
+    ValueError.  When there
+    are several, Sage's choice (and all=True's order) follows no rule found
+    (black-box: GF(13)(4).nth_root(2) is 2 but GF(13)(3).nth_root(2) is 9),
+    so that is refused, as are exponents of more than 1024 bits (Sage takes
+    them)."""
+    S = _ffsub()
+    k = int(k)
+    if k == 0:
+        raise ValueError("")
+    if k < 0 and not x:
+        # (Sage's: no root, its ValueError without words)
+        if all:
+            return []
+        raise ValueError("")
+    # (the exponent's bits, then ONE charge with the inverse, before the
+    # inverse or any power: astra CORR-FF2-3)
+    st, r = S.root(x, abs(k), [S.WORK],
+                   lambda: NotImplementedError("nth_root of an exponent of more than %d bits is not supported yet" % S.ROOT_BITS),
+                   _ff_work("nth_root", x), invert=k < 0)
+    k = abs(k)
+    if st == "unique":
+        return [r] if all else r
+    if st == "none":
+        if all:
+            return []
+        raise ValueError("no nth root")
+    raise NotImplementedError("nth_root of degree %d of an element with several such roots in this finite field is not supported yet" % k)
+
+
+def _ff_extension(self, modulus, name=None, names=None, **kwds):
+    """The extension of this finite field of degree modulus: GF(p^(n k)),
+    named name (else the prefix field z(nk), as Sage's), its construction
+    bounded as GF's (the shared Conway budget).  An extension by a
+    polynomial is refused.
+
+    EXAMPLES::
+
+        sage: GF(3).extension(4, 'h'), GF(4, 'a').extension(2)
+        (Finite Field in h of size 3^4, Finite Field in z4 of size 2^4)
+    """
+    if isinstance(modulus, bool) or not isinstance(modulus, int):
+        raise NotImplementedError("extension of a finite field by a polynomial is not supported yet")
+    p, n, _ = _ffsub().pnq(self)
+    k = int(modulus)
+    if k < 1:
+        raise ValueError("the order of a finite field must be a prime power")
+    # (the size admitted on small integers before p^(n k) is formed:
+    # p^(n k) has at least n k (bits(p) - 1) + 1 bits; astra CORR-FF2-1)
+    if n * k > _FF_EXT_BITS or n * k * (p.bit_length() - 1) >= _FF_EXT_BITS:
+        raise NotImplementedError("extension of a finite field to more than %d bits is not supported yet" % _FF_EXT_BITS)
+    q = p ** (n * k)
+    if q.bit_length() > _FF_EXT_BITS:
+        raise NotImplementedError("extension of a finite field to more than %d bits is not supported yet" % _FF_EXT_BITS)
+    given = _gf_name(q, name if name is not None else names)
+    return GF(q, given) if given else GF(q)
+
+
+_FF_EXT_BITS = 1024  # (as Magma mode's GF and ext< >: _magma._FF_BITS)
+
+
+# Relative extensions, K.over(F): Sage's RingExtension (its reference
+# manual: sage.rings.ring_extension, ring_extension_element), for finite
+# fields only, over the shared core (_sage_ffsub.relative, coordinates):
+# the relative Trace, Norm, MinimalPolynomial and CharacteristicPolynomial
+# that Magma mode has (William's rule: Magma AND Sage).  Printing as Sage
+# 10.9 prints (black-box): the extension "Field in z4 with defining
+# polynomial ... over its base"; an element in the basis 1, z4, z4^2, ...
+# over the base, a coefficient -1 as "-", 1 omitted, one of several terms
+# parenthesized.  A proper non-prime base needs K of at most 2^20 elements
+# (F1's bound); minpoly and charpoly over the extension itself, and other
+# bases, are refused.
+
+# K.over(F) is K.over(F), as Sage's parents are unique: a small LRU of the
+# extensions made (daybreak2 LIMIT-FF2-4), each entry holding its fields
+# themselves and checked by identity (an id() reused after a field is
+# collected never returns a stale extension); at most _OVER_MAX entries,
+# evicted least recently used first; a generator name of more than
+# _OVER_NAME characters is never cached (its extension is made afresh).
+_OVER = _collections.OrderedDict()
+_OVER_MAX = 32
+_OVER_NAME = 64
+
+
+def _ff_over(self, base=None, names=None, **kwds):
+    """This finite field as an extension of its subfield base (default: the
+    prime field), Sage's RingExtension.
+
+    EXAMPLES::
+
+        sage: L = GF(5^4).over(GF(5^2)); L
+        Field in z4 with defining polynomial x^2 + (4*z2 + 3)*x + z2 over its base
+        sage: z = L.gen(); z^10
+        (z2 + 2) + (3*z2 + 1)*z4
+        sage: z.trace(), z.norm(), (z^10).minpoly()
+        (z2 + 2, z2, x^2 + 3*z2*x + 4*z2 + 4)
+    """
+    S = _ffsub()
+    p = S.pnq(self)[0]
+    F = GF(p) if base is None else base
+    if not (F is self or (_is_finite_field(F) and _ff_embeds(F, self))):
+        raise ValueError("No coercion map from %r to %r" % (F, self))
+    name = _gf_name(0, names) or _gf_name(0, kwds.get("name"))
+    if name is not None:
+        name = _ff_var_name(name)
+    key = (id(self), id(F), name)
+    ent = _OVER.get(key)
+    if ent is not None and ent[0] is self and ent[1] is F:
+        _OVER.move_to_end(key)
+        return ent[2]
+    m = S.pnq(F)[1]
+    if 1 < m < S.pnq(self)[1] and not S.descendable(self, F):
+        raise NotImplementedError("%r over %r is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)" % (self, F))
+    L = RingExtension_ff(self, F, name)
+    if name is None or len(name) <= _OVER_NAME:
+        _OVER[key] = (self, F, L)
+        _OVER.move_to_end(key)
+        while len(_OVER) > _OVER_MAX:
+            _OVER.popitem(last=False)
+    return L
+
+
+class RingExtension_ff:
+    """K.over(F) for finite fields F <= K (see _ff_over)."""
+
+    def __init__(self, K, F, name):
+        self._K, self._F = K, F
+        self._name = name or (getattr(K, "_name", None) if K is not F else None)
+        self._r = _ffsub().pnq(K)[1] // _ffsub().pnq(F)[1]
+
+    def _refuse(self):
+        return NotImplementedError("coordinates of elements of %r over its base are not supported yet (work)" % self._K)
+
+    def __repr__(self):
+        if self._K is self._F:
+            return "%r over its base" % self._K
+        return "Field in %s with defining polynomial %r over its base" % (self._name, self.modulus())
+
+    def modulus(self, var="x"):
+        """The minimal polynomial of the generator over the base."""
+        S = _ffsub()
+        f = S.relative("minpoly", self._K.gen(), self._F, [S.WORK], self._refuse)
+        return PolynomialRing_ff(self._F, var)(f)
+
+    def gen(self, i=0):
+        if self._K is self._F or i != 0:
+            raise IndexError("tuple index out of range")
+        return RingExtensionElement_ff(self, self._K.gen())
+
+    def gens(self):
+        return () if self._K is self._F else (self.gen(),)
+
+    def base(self):
+        return self._F
+
+    base_ring = base
+
+    def bases(self):
+        return [self, self._F]
+
+    def backend(self):
+        return self._K
+
+    def _check_base(self, base):
+        if base is None or base is self._F:
+            return self._F
+        if base is self or base is self._K:
+            return self
+        raise ValueError("not (explicitly) defined over %r" % (base,))
+
+    def degree(self, base):
+        return self._r if self._check_base(base) is self._F else 1
+
+    def relative_degree(self):
+        return self._r
+
+    def absolute_degree(self):
+        # (over the bottom of the tower, the base itself: 2 for
+        # GF(5^4).over(GF(5^2)), as Sage 10.9's)
+        return self._r
+
+    def is_field(self, proof=True):
+        return True
+
+    def characteristic(self):
+        return self._K.characteristic()
+
+    def cardinality(self):
+        return self._K.order()
+
+    order = cardinality
+
+    def random_element(self):
+        return RingExtensionElement_ff(self, self._K.random_element())
+
+    def _lift(self, x):
+        """x as an element of the backend K, or None."""
+        if isinstance(x, RingExtensionElement_ff):
+            return x._x if x._L is self else None
+        if isinstance(x, (FiniteFieldElement, IntegerMod)) and _is_finite_field(x.parent()):
+            if x.parent() is self._K:
+                return x
+            if _ff_embeds(x.parent(), self._K):
+                return self._K(x)
+            return None
+        if isinstance(x, int) and not isinstance(x, bool):
+            return self._K(x)
+        return None
+
+    def __call__(self, x):
+        y = self._lift(x)
+        if y is None:
+            raise TypeError("unable to convert %r to an element of %r" % (x, self))
+        return RingExtensionElement_ff(self, y)
+
+    def __contains__(self, x):
+        return self._lift(x) is not None
+
+
+class RingExtensionElement_ff:
+    """An element of K.over(F): an element of K, printed and measured over F."""
+
+    __slots__ = ("_L", "_x")
+
+    def __init__(self, L, x):
+        self._L, self._x = L, x
+
+    def parent(self):
+        return self._L
+
+    def backend(self, force=False):
+        return self._x
+
+    def vector(self, base=None):
+        """The coordinates over base (default: the extension's base), a
+        vector of its VectorSpace, as Sage's; over the extension itself (a
+        vector of dimension 1 over L, in Sage) refused (astra CORR-FF2-4)."""
+        L = self._L
+        if L._check_base(base) is not L._F:
+            raise NotImplementedError("the vector of an element over the extension itself is not supported yet")
+        S = _ffsub()
+        cs = S.coordinates(self._x, L._F, [S.WORK], L._refuse)
+        import _sage_ffmat
+        return _sage_ffmat.VectorSpace(L._F, len(cs))(cs)
+
+    def __repr__(self):
+        L = self._L
+        if L._K is L._F:
+            return repr(self._x)
+        S = _ffsub()
+        cs = S.coordinates(self._x, L._F, [S.WORK], L._refuse)
+        one = L._F(1)
+        terms = []
+        for i, c in enumerate(cs):
+            if not c:
+                continue
+            mono = "" if i == 0 else (L._name if i == 1 else "%s^%d" % (L._name, i))
+            if c == -one:
+                terms.append(("-", mono or "1"))
+            elif c == one:
+                terms.append(("+", mono or "1"))
+            else:
+                t = repr(c)
+                several = " + " in t or " - " in t
+                terms.append(("+", t if i == 0 else ("(%s)" % t if several else t) + "*" + mono))
+        if not terms:
+            return "0"
+        if len(terms) > 1 and terms[0][0] == "+" and cs[0] and (" + " in terms[0][1] or " - " in terms[0][1]):
+            terms[0] = ("+", "(%s)" % terms[0][1])
+        out = ("-" if terms[0][0] == "-" else "") + terms[0][1]
+        for sg, b in terms[1:]:
+            out += (" - " if sg == "-" else " + ") + b
+        return out
+
+    def _other(self, o, op):
+        y = self._L._lift(o)
+        if y is None:
+            raise TypeError("unsupported operand parent(s) for %s: %r and %r" % (op, self._L, getattr(o, "parent", lambda: type(o))()))
+        return y
+
+    def __add__(self, o):
+        return RingExtensionElement_ff(self._L, self._x + self._other(o, "+"))
+
+    def __radd__(self, o):
+        return RingExtensionElement_ff(self._L, self._other(o, "+") + self._x)
+
+    def __sub__(self, o):
+        return RingExtensionElement_ff(self._L, self._x - self._other(o, "-"))
+
+    def __rsub__(self, o):
+        return RingExtensionElement_ff(self._L, self._other(o, "-") - self._x)
+
+    def __mul__(self, o):
+        return RingExtensionElement_ff(self._L, self._x * self._other(o, "*"))
+
+    def __rmul__(self, o):
+        return RingExtensionElement_ff(self._L, self._other(o, "*") * self._x)
+
+    def __truediv__(self, o):
+        return RingExtensionElement_ff(self._L, self._x / self._other(o, "/"))
+
+    def __rtruediv__(self, o):
+        return RingExtensionElement_ff(self._L, self._other(o, "/") / self._x)
+
+    def __neg__(self):
+        return RingExtensionElement_ff(self._L, -self._x)
+
+    def __pow__(self, e):
+        return RingExtensionElement_ff(self._L, self._x ** int(e))
+
+    def __eq__(self, o):
+        y = self._L._lift(o)
+        return y is not None and self._x == y
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
+
+    def __hash__(self):
+        return hash(self._x)
+
+    def __bool__(self):
+        return bool(self._x)
+
+    def _relative(self, what, base, var=None):
+        L = self._L
+        b = L._check_base(base)
+        S = _ffsub()
+        if b is L:
+            if what in ("trace", "norm"):
+                return self
+            raise NotImplementedError("%s over the extension itself is not supported yet" % what)
+        r = S.relative(what, self._x, L._F, [S.WORK], _ff_work(what, self._x))
+        return PolynomialRing_ff(L._F, var)(r) if isinstance(r, list) else r
+
+    def trace(self, base=None):
+        """The trace over base (default: the extension's base)."""
+        return self._relative("trace", base)
+
+    def norm(self, base=None):
+        """The norm over base (default: the extension's base)."""
+        return self._relative("norm", base)
+
+    def minpoly(self, base=None, var="x"):
+        """The minimal polynomial over base (default: the extension's base),
+        in x (Sage 10.9 prints it in x whatever var is: black-box)."""
+        return self._relative("minpoly", base, "x")
+
+    minimal_polynomial = minpoly
+
+    def charpoly(self, base=None, var="x"):
+        """The characteristic polynomial over base (default: the extension's base)."""
+        return self._relative("charpoly", base, var)
 
 
 def _is_finite_field(K):
@@ -2806,6 +3165,9 @@ FiniteField_ext.has_coerce_map_from = _ff_has_coerce_map_from
 FiniteField_ext.coerce_map_from = _ff_coerce_map_from
 FiniteField_ext.hom = _ff_hom
 FiniteField_ext.subfields = _ff_subfields
+FiniteField_ext.extension = _ff_extension
+IntegerModRing_.extension = _ff_extension
+FiniteField_ext.over = _ff_over
 
 
 # ------------------------------------------------------------------ polynomials over finite fields
@@ -2862,6 +3224,16 @@ class PolynomialRing_ff_:
             7
         """
         return self._base.characteristic()
+
+    def change_ring(self, R):
+        """The polynomial ring over R in the same variable.
+
+        EXAMPLES::
+
+            sage: GF(4, 'a')['t'].change_ring(GF(2))
+            Univariate Polynomial Ring in t over Finite Field of size 2 (using GF2X)
+        """
+        return _sa().PolynomialRing(R, self._name)
 
     def variable_name(self):
         """The variable name.
@@ -3495,8 +3867,89 @@ class Polynomial_ff:
 
             sage: R.<x> = GF(7)[]; (x + 3).change_ring(GF(7)).parent()
             Univariate Polynomial Ring in x over Finite Field of size 7
+            sage: (x^2 + 3).change_ring(ZZ)
+            x^2 + 3
+            sage: S.<t> = GF(4)[]; (t^2 + t + 1).change_ring(GF(16))
+            t^2 + t + 1
+
+        As Sage's: the integers and the rationals take a prime field's
+        elements (by their lifts), the integers also an element of a larger
+        field lying in its prime field; another finite field takes them as
+        Sage coerces between the two fields (the shared core's embedding and
+        descent, one budget for all the coefficients, admitted before any
+        is moved), else Sage's error.  A zero polynomial goes anywhere.
         """
-        return _sa().PolynomialRing(R, self._ring._name)(self.list())
+        sa, S = _sa(), _ffsub()
+        P = sa.PolynomialRing(R, self._ring._name)
+        # (the polynomial's own coefficient list: not copied, converted or
+        # visited before its work is charged; daybreak2 LIMIT-F3-2)
+        cs, B = self._c, self._ring._base
+        if not cs:
+            return P(0)
+        budget = [S.WORK]
+        refuse = lambda: NotImplementedError("change_ring of a polynomial of degree %d to %r is not supported yet (work)" % (len(cs) - 1, R))
+        if R is sa.ZZ or R is sa.QQ:
+            if isinstance(B, FiniteField_ext):
+                if R is sa.QQ:
+                    raise TypeError("unable to convert %r to a rational" % cs[0])
+                S.charge(budget, len(cs) * B._n, refuse)
+                vs = [S.prime_value(c) for c in cs]
+                if any(v is None for v in vs):
+                    raise TypeError("not in prime subfield")
+                return P(vs)
+            S.charge(budget, len(cs), refuse)
+            return P([int(c) for c in cs])
+        if _is_finite_field(B) and _is_finite_field(R) and (_ff_embeds(B, R) or _ff_embeds(R, B)):
+            fail = lambda x: ValueError("%s is not in the image of (map internal to coercion system -- copy before use)\nRing morphism:\n  From: %r\n  To:   %r" % (x, R, B))
+            return P(S.change(cs, R, budget, _ff_bounded("change_ring", B, R), fail, B))
+        if isinstance(B, FiniteField_ext) and int(R.characteristic()) != _ff_char(B):
+            # (another characteristic: Sage converts an element of the prime
+            # field by its integer, and refuses any other, as a rational)
+            S.charge(budget, len(cs) * B._n, refuse)
+            vs = [S.prime_value(c) for c in cs]
+            for c, v in zip(cs, vs):
+                if v is None:
+                    raise TypeError("unable to convert %r to a rational" % c)
+            return P([R(v) for v in vs])
+        # (other rings: each coefficient converted as Sage converts it, its
+        # errors Sage's; the conversions are by value, a word each)
+        S.charge(budget, len(cs) * max(_ff_degree(B) if _is_finite_field(B) else 1, int(R.degree()) if hasattr(R, "degree") else 1), refuse)
+        return P([R(c) for c in cs])
+
+    def map_coefficients(self, f, new_base_ring=None):
+        """The polynomial with f applied to each nonzero coefficient (as
+        Sage's: a zero stays zero): over f's codomain for a homomorphism of
+        finite fields (by the shared core: its work for all the
+        coefficients admitted before any is mapped), else over
+        new_base_ring, or this base ring.
+
+        EXAMPLES::
+
+            sage: F.<a> = GF(4); K.<b> = GF(16); R.<t> = F[]
+            sage: (t^2 + a*t + 1).map_coefficients(Hom(F, K)[0])
+            t^2 + (b^2 + b)*t + 1
+            sage: (t + a).map_coefficients(lambda c: c^2)
+            t + a + 1
+        """
+        name = self._ring._name
+        if isinstance(f, FiniteFieldHomomorphism):
+            D, U, S = f.domain(), f.codomain(), _ffsub()
+            p, un, _ = S.pnq(U)
+            sn = _ff_degree(D)
+            # (charged from the number of coefficients before any is
+            # converted or mapped; daybreak2 LIMIT-F3-2)
+            each = 1 + (un if sn == 1 else sn * (S.mn(p, un) + un))
+            refuse = _ff_bounded("map_coefficients", D, U)
+            paid = [len(self._c) * each]
+            S.charge([S.WORK], paid[0], refuse)
+            cs = [D(c) for c in self._c]
+            ys = [S.apply(c, U, f._img, paid, refuse) for c in cs]
+            T = U if new_base_ring is None else new_base_ring
+            return _sa().PolynomialRing(T, name)([T(y) for y in ys] if T is not U else ys)
+        T = self._ring._base if new_base_ring is None else new_base_ring
+        # (a function's own work is the caller's; the copy, a word each)
+        _ffsub().charge([_ffsub().WORK], len(self._c), lambda: NotImplementedError("map_coefficients of a polynomial of degree %d is not supported yet (work)" % self.degree()))
+        return _sa().PolynomialRing(T, name)([T(f(c)) if c else T(0) for c in self._c])
 
     def factor(self):
         """The factorization into monic irreducibles (Sage's order: by degree,

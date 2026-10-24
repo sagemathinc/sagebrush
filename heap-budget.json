@@ -1,0 +1,18 @@
+{
+ "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review",
+ "toolchain": {
+  "node": "24.21.0"
+ },
+ "heap_mib": 96,
+ "runs": 7,
+ "ceiling": 73400320,
+ "collect_floor": 20000,
+ "measured": {
+  "median": 68767184,
+  "max": 69263592,
+  "collect_max": [
+   29696,
+   30720
+  ]
+ }
+}

@@ -26,9 +26,12 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
        sagebrush board try FILE --cases CASES.json [--json]
   try its questions with given answers, as a reader would: each checked,
   its hints shown; a report for an evaluator (sagebrush board try --help)
+       sagebrush board open FILE [--port N] [--no-browser]
+  show it in your browser, read only, as sagebrush.space/board does, and
+  again each time the file changes (sagebrush board open --help)
 `;
 /** The board commands this sagebrush has. */
-const COMMANDS = ["render", "run", "check", "answers", "try"];
+const COMMANDS = ["render", "run", "check", "answers", "try", "open"];
 
 /** The command line as a reader of boards, in what it says of one it can't
  * read: which sagebrush refused it, and what to do (formatError). */
@@ -52,6 +55,8 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (argv[0] === "check") return (await import("./board-check")).boardCheck(argv.slice(1));
   // (sagebrush board try: src/board-try.ts)
   if (argv[0] === "try") return (await import("./board-try")).boardTry(argv.slice(1));
+  // (sagebrush board open: src/board-open.ts)
+  if (argv[0] === "open") return (await import("./board-open")).boardOpen(argv.slice(1));
   // (sagebrush board answers: src/board-answers.ts)
   if (argv[0] === "answers") return (await import("./board-answers")).boardAnswers(argv.slice(1));
   // (a command this sagebrush doesn't have: said so, with the ones it has,

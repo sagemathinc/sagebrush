@@ -1317,6 +1317,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.images = images;
   const editBtn = $("edit");
   editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
+  // (a CoCalc board, converted: said in the caption, with what was left out,
+  // until the next edit; and a notice, there until the next edit too: declared
+  // before the store's editing hook, which may say why at once)
+  let converted = "", notice: string | HTMLElement = "";
   // (whether Edit is offered and allowed, as the store says: a frame its host doesn't let edit offers none; one
   // paused at its bound, or whose host ended editing, leaves Edit and says why: web/board-host-protocol.md)
   const offEditing = host.store?.editing?.((s) => {
@@ -1664,9 +1668,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     step(-1, true);
     sayConverted();
   }
-  // (a CoCalc board, converted: said in the caption, with what was left out,
-  // until the next edit)
-  let converted = "", notice: string | HTMLElement = "";
   function sayConverted() {
     if (!converted) return;
     say(converted);

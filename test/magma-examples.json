@@ -10,6 +10,9 @@
   "Binomial": "> Binomial(10, 3);\n120",
   "CRT": "> CRT([1, 4], [3, 5]);\n4",
   "Ceiling": "> Ceiling(17/5);\n4",
+  "ChangeRing": "> P<x> := PolynomialRing(Integers());\n> ChangeRing(3*x^2 - x + 7, GF(5));\n3*$.1^2 + 4*$.1 + 2",
+  "ChangeRing(RngUPol, Rng)": "> P<x> := PolynomialRing(Integers());\n> ChangeRing(P, GF(25));\nUnivariate Polynomial Ring over GF(5^2)\nMapping from: RngUPol: P to Univariate Polynomial Ring over GF(5^2)",
+  "ChangeRing(RngUPolElt, Rng)": "> K<b> := GF(16); U<u> := PolynomialRing(K); F<a> := GF(4);\n> ChangeRing(u^2 + b^5*u + 1, F);\n$.1^2 + a*$.1 + 1",
   "Characteristic": "> Characteristic(GF(25));\n5",
   "CharacteristicPolynomial": "> S := CuspidalSubspace(ModularSymbols(11, 2, 1));\n> Coefficients(CharacteristicPolynomial(HeckeOperator(S, 2)));\n[ 2, 1 ]",
   "ChineseRemainderTheorem": "> ChineseRemainderTheorem([2, 3], [5, 7]);\n17",
@@ -203,6 +206,13 @@
   "Xgcd": "> g, x, y := Xgcd(30, 42);\n> g, 30*x + 42*y;\n6 6",
   "aInvariants": "> aInvariants(EllipticCurve([3, 5]));\n[ 0, 0, 0, 3, 5 ]",
   "jInvariant": "> jInvariant(EllipticCurve([0, 0, 1, -1, 0]));\n110592/37",
-  "qExpansion": "> f := Newforms(CuspForms(11, 2))[1][1];\n> qExpansion(f, 6);\nq - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)"
+  "qExpansion": "> f := Newforms(CuspForms(11, 2))[1][1];\n> qExpansion(f, 6);\nq - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)",
+  "DefiningPolynomial": "> DefiningPolynomial(GF(16));\n$.1^4 + $.1 + 1\n> K<b> := GF(16); F<a> := GF(4);\n> DefiningPolynomial(K, F);\n$.1^2 + $.1 + a",
+  "Embed": "> Embed(GF(4), GF(16));\n> GF(4).1 in GF(16);\ntrue",
+  "Generator": "> F<a> := GF(16);\n> Generator(F);\na\n> Generator(GF(7));\n1",
+  "IsSubfield": "> IsSubfield(GF(4), GF(16));\ntrue\n> IsSubfield(GF(8), GF(16));\nfalse",
+  "PrimeField": "> PrimeField(GF(16));\nFinite field of size 2",
+  "Root": "> K<b> := GF(16);\n> Root(b, 7);\nb^13",
+  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"
  }
 }

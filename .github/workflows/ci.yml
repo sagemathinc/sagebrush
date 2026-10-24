@@ -133,9 +133,11 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 11
+      # (pinned: heap-budget.json records the load heap V8 reports, which
+      # differs between Node versions; move this pin and re-record in one PR)
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: "24.21.0"
           cache: pnpm
       # (pinned: size-budget.json records exact bytes, and bun's output differs
       # between releases; move this pin and re-record the budget in one PR)
@@ -160,8 +162,11 @@ jobs:
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
+          node scripts/test-core-api-surface.mjs
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
+          node --test scripts/test-heap-budget.mjs
+          node scripts/heap-budget.mjs --check
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -262,6 +267,8 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit.mjs
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
+          CHROME=google-chrome node web/test-board-open.mjs
+          CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
@@ -294,6 +301,7 @@ jobs:
           bun web/board/test-own-names.mjs
           bun web/board/test-edit-state.mjs
           bun web/board/test-edit-channel.mjs
+          bun web/board/test-local-follow.mjs
           bun web/board/test-edit-pictures.mjs
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
