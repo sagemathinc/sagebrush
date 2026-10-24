@@ -1605,6 +1605,11 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
+  // (each of the three refused itself, before the next statement)
+  for (const input of ["(x+1)^100000", "x^(10^20)", "Evaluate(f, f)"]) {
+    const esc = input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(out, new RegExp(`>> ${esc};[^>]*a polynomial of degree more than \\d+ is not supported yet`), input + r.stdout);
+  }
   assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
   assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
   assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
