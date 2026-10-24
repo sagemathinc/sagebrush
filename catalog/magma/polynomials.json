@@ -151,6 +151,53 @@
     ]
   },
   {
+    "name": "ChangeRing",
+    "kind": "function",
+    "signature": "(<RngUPol> P, <Rng> R) -> RngUPol, Map",
+    "summary": "The univariate polynomial ring over R (the integers, the rationals or a finite field), and the map from P to it.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); ChangeRing(P, GF(25));",
+        "expected": "Univariate Polynomial Ring over GF(5^2)\nMapping from: RngUPol: P to Univariate Polynomial Ring over GF(5^2)\n"
+      }
+    ],
+    "differs": [
+      "Only polynomial rings over the integers, the rationals and finite fields, to one of these rings: Integers(m), the reals and other rings are refused in words."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials",
+      "finite fields"
+    ]
+  },
+  {
+    "name": "ChangeRing",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f, <Rng> R) -> RngUPolElt",
+    "summary": "f with each coefficient coerced into R (Z, Q or a finite field): between finite fields into an overfield or a subfield.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Integers()); ChangeRing(3*x^2 - x + 7, GF(5));",
+        "expected": "3*$.1^2 + 4*$.1 + 2\n"
+      },
+      {
+        "code": "K<b> := GF(16); U<u> := PolynomialRing(K); F<a> := GF(4); ChangeRing(u^2 + b^5*u + 1, F);",
+        "expected": "$.1^2 + a*$.1 + 1\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (prime-field coefficient operations, counted before any coefficient is coerced): past the bound, or between finite fields of more than 2^20 elements, it is refused in words.",
+      "Only polynomials over the integers, the rationals and finite fields, to one of these rings: Integers(m), the reals and other rings are refused in words."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials",
+      "finite fields"
+    ]
+  },
+  {
     "name": "Evaluate",
     "kind": "function",
     "signature": "(<RngUPolElt> f, <RngElt> x) -> RngElt",
