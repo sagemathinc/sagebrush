@@ -63,7 +63,7 @@ pub fn requested() -> bool {
 pub fn check() {
     poll_host();
     #[cfg(feature = "test-hooks")]
-    hooks::count();
+    hooks::count(false);
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -75,7 +75,7 @@ pub fn check() {
 pub fn check_coarse() {
     poll_host_now();
     #[cfg(feature = "test-hooks")]
-    hooks::count();
+    hooks::count(true);
     if REQUESTED.load(Relaxed) {
         interrupt()
     }
@@ -137,13 +137,18 @@ pub mod hooks {
     static TRACE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     static LAST_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_GAP_NS: AtomicU64 = AtomicU64::new(0);
+    // the WebAssembly host's polls, simulated: every check_coarse, and
+    // every 1024th check (poll_host's rule)
+    static FINE: AtomicU64 = AtomicU64::new(0);
+    static LAST_POLL_NS: AtomicU64 = AtomicU64::new(0);
+    static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0);
 
     fn now_ns() -> u64 {
         static START: OnceLock<Instant> = OnceLock::new();
         START.get_or_init(Instant::now).elapsed().as_nanos() as u64
     }
 
-    pub(crate) fn count() {
+    pub(crate) fn count(coarse: bool) {
         let cur = CURRENT.load(Relaxed);
         COUNTS[cur].fetch_add(1, Relaxed);
         let t = TOTAL.fetch_add(1, Relaxed) + 1;
@@ -153,6 +158,12 @@ pub mod hooks {
             let last = LAST_NS.swap(n, Relaxed);
             if last != 0 {
                 MAX_GAP_NS.fetch_max(n - last, Relaxed);
+            }
+            if coarse || FINE.fetch_add(1, Relaxed) % 1024 == 0 {
+                let last = LAST_POLL_NS.swap(n, Relaxed);
+                if last != 0 {
+                    MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed);
+                }
             }
         }
         let a = ARMED.load(Relaxed);
@@ -168,6 +179,9 @@ pub mod hooks {
         TRACE.lock().unwrap_or_else(|e| e.into_inner()).clear();
         LAST_NS.store(0, Relaxed);
         MAX_GAP_NS.store(0, Relaxed);
+        FINE.store(0, Relaxed);
+        LAST_POLL_NS.store(0, Relaxed);
+        MAX_POLL_GAP_NS.store(0, Relaxed);
         TRACING.store(true, Relaxed);
     }
 
@@ -182,6 +196,14 @@ pub mod hooks {
     /// The longest wall time between two traced checks, in nanoseconds.
     pub fn max_gap_ns() -> u64 {
         MAX_GAP_NS.load(Relaxed)
+    }
+
+    /// The longest wall time between two traced polls of the WebAssembly
+    /// host, in nanoseconds, as poll_host and poll_host_now would make them
+    /// (every check_coarse, every 1024th check): how long a Stop in the
+    /// browser could go unnoticed.
+    pub fn max_poll_gap_ns() -> u64 {
+        MAX_POLL_GAP_NS.load(Relaxed)
     }
 
     /// The phase that was current when an armed Stop was requested.
