@@ -45,9 +45,12 @@ const bytes = (n, seed) => { const b = new Uint8Array(n); for (let i = 0; i < n;
 /** Everything logged here decided: scanned to the latest op, no record left, the sender idle and saying so. */
 async function settled(w, c) {
   const ns = nsOf(c);
-  if (!ns || c.status.state !== "synced" || (await outbox(w)) !== 0) return false;
+  if (!ns || c.status.state !== "synced") return false;
+  // (the watermark read first: the scan writes it with its records, so an outbox read after it that is empty means
+  // decided, never "not scanned yet" (two reads in two transactions: the other order raced a scan between them))
   const scanned = await metaGet(w.ws, `sync:${ns}:scanned`);
-  return scanned >= (await w.lastSeq()) && c.debug().inflight === 0;
+  if (!(scanned >= (await w.lastSeq()))) return false;
+  return (await outbox(w)) === 0 && c.debug().inflight === 0;
 }
 
 /** The op that made `path` is still to go: an undecided record, or past the scan's watermark. */
@@ -766,8 +769,9 @@ async function accountSwitch() {
 /** As settled(), for one namespace's records only (another namespace's may wait for its own account). */
 async function settledIn(w, c, ns) {
   if (c.status.state !== "synced" || nsOf(c) !== ns) return false;
-  if ((await all(w.ws, "outbox")).some((r) => r.ns === ns)) return false;
-  return (await metaGet(w.ws, `sync:${ns}:scanned`)) >= (await w.lastSeq()) && c.debug().inflight === 0;
+  // (the watermark first, as settled's)
+  if (!((await metaGet(w.ws, `sync:${ns}:scanned`)) >= (await w.lastSeq()))) return false;
+  return !(await all(w.ws, "outbox")).some((r) => r.ns === ns) && c.debug().inflight === 0;
 }
 
 async function restoredCheckTimer() {
@@ -1669,7 +1673,43 @@ async function rebuildRefusalCoreServer() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+async function scanAtomic() {
+  // (the scan writes its records and the watermark in one transaction: sampled in ONE transaction throughout a
+  // create-and-send cycle, the watermark never passes an op whose record isn't there, or wasn't there before (decided).
+  // The client's side of the lost-ack diagnosis: only a reader using two transactions could see otherwise)
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => c.status.state === "synced"), "scan atomic: synced");
+  const ns = nsOf(c), seen = new Set(), bad = [];
+  let samples = 0, halt = false;
+  const sample = () => new Promise((ok, no) => {
+    const tx = w.ws.transaction(["meta", "outbox", "ops"]);
+    const m = tx.objectStore("meta").get(`sync:${ns}:scanned`), o = tx.objectStore("outbox").getAll(), ops = tx.objectStore("ops").getAll();
+    tx.oncomplete = () => {
+      const W = m.result ?? 0;
+      for (const r of o.result) seen.add(r.lseq);
+      for (const op of ops.result) if (op.seq <= W && sendable([op]).length && !seen.has(op.seq)) bad.push([op.seq, op.path, W]);
+      samples++;
+      ok();
+    };
+    tx.onerror = () => no(tx.error);
+  });
+  const sampler = (async () => { while (!halt) { await sample(); await sleep(1); } })();
+  for (let i = 0; i < 5; i++) await w.create(`/atomic${i}.txt`, { content: "a" + i });
+  await w.mkdir("/atomic-folder");
+  const ok = await until(() => settled(w, c), 15_000);
+  halt = true;
+  await sampler;
+  // (an op whose record came and went between two samples is decided: the server has it)
+  const { mine } = await serverOps(w);
+  const decided = new Set(mine.map((o) => o.path));
+  const missed = bad.filter(([, path]) => !decided.has(path));
+  check(ok && samples > 20 && missed.length === 0, `scan atomic: in ${samples} one-transaction samples, the watermark never passed an op without its record (${missed.length}: ${J(missed.slice(0, 3))})`);
+  await stop(c);
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
