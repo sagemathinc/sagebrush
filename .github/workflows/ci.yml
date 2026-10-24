@@ -350,7 +350,7 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -376,6 +376,10 @@ jobs:
           CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
+          bun web/workspace/test-sync-overlay.mjs
+          # (the view, and D11's large moves in chunks: here, beside the sync client, as their 100,000-entry moves take minutes)
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-view.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
           bun web/sync-protocol/test-doc-protocol.mjs
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
           node web/test-engines.mjs
@@ -389,7 +393,7 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
