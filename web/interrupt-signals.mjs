@@ -109,7 +109,7 @@ const markT = (r, mk) => r.marks.find((x) => x.mk === mk)?.t;
 
 // ---- the trials (§8.1).  Each returns { outcome, why, ... } for one cell.
 const REGEX = (n) => `import re\n_s = "a" * ${n} + "b"\n`;
-const TRIALS = {
+export const TRIALS = {
   // S1: one press, no handler: the traceback, then the process ends as SIGINT's default action (130)
   S1: {
     hosts: ["cli", "prompt"],
