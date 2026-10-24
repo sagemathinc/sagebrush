@@ -631,7 +631,14 @@ const DOC_KEYS = ["format", "version", "title", "mode", "engine", "seed", "refBa
  * gives it back as it was.
  */
 export function canonical(d: BoardDoc): string {
-  const c: any = cleanDoc(d), out: any = {};
+  return boardText(cleanDoc(d));
+}
+
+/** A board's JSON in canonical()'s layout (the format's keys first, two-space
+ * indents, short arrays of scalars on one line), as it is: nothing cleaned or
+ * dropped.  What `board open --edit` writes (web/board/lossless.ts). */
+export function boardText(d: any): string {
+  const c: any = d, out: any = {};
   for (const k of DOC_KEYS) if (c[k] !== undefined) out[k] = c[k];
   for (const k of Object.keys(c)) if (!(k in out)) out[k] = c[k];
   const text = (v: any, indent: string): string => {
