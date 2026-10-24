@@ -171,7 +171,13 @@ impl<'a> F4<'a> {
                 see(x, &mut monos, &mut queue);
             }
         }
+        let mut pops = 0u32;
         while let Some(m) = queue.pop() {
+            // (each pop scans every leading monomial)
+            pops = pops.wrapping_add(1);
+            if pops & 255 == 0 {
+                sagebrush_interrupt::check_coarse();
+            }
             if pivots.contains_key(&m) {
                 continue;
             }
@@ -226,7 +232,7 @@ impl<'a> F4<'a> {
         let mut dense = vec![0u64; nc];
         for (k, r) in todo.iter().enumerate() {
             if k & 15 == 0 {
-                sagebrush_interrupt::check();
+                sagebrush_interrupt::check_coarse();
             }
             let mut first = nc;
             for &(w, c) in r {
@@ -380,7 +386,11 @@ impl<'a> F4<'a> {
                 }
             }
         }
-        for f in new {
+        for (k, f) in new.into_iter().enumerate() {
+            // (each update is quadratic in the basis)
+            if k & 15 == 0 {
+                sagebrush_interrupt::check_coarse();
+            }
             self.add(f, dmin);
         }
         Ok(())
@@ -630,7 +640,7 @@ fn f4_direct(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], prob: 
     }
     let mut steps = 0;
     while !st.pairs.is_empty() {
-        sagebrush_interrupt::check();
+        sagebrush_interrupt::check_coarse();
         st.step()?;
         steps += 1;
         let _ = steps;
