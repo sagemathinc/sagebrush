@@ -42,7 +42,12 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
-ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+const responses = []; // (the page's requests' responses: Network.responseReceived)
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.method === "Network.responseReceived") responses.push({ url: m.params.response.url, status: m.params.response.status });
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+};
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
 const go = async (u) => { await send("Page.navigate", { url: u }); await sleep(1200); };
@@ -70,9 +75,17 @@ process.on("unhandledRejection", (e) => { console.log("FAIL " + (e?.stack ?? e))
 await go(url);
 ok(/Sagebrush/.test(await ev("document.body.textContent")) && (await ev("location.pathname")) === "/", "the token becomes a cookie; the directory listing shows");
 ok(await ev("[...document.querySelectorAll('a')].some((a) => a.textContent === 'sub/')"), "the listing shows subdirectories");
+await send("Network.enable");
+responses.length = 0;
 await go(`${base}/nb/sub/first.ipynb`);
 await ready();
 ok((await ev("location.pathname")) === "/nb/sub/first.ipynb/", "a new notebook opens at /nb/<path>/");
+// (its page: no request refused or not found, no share API asked, no web app manifest; a file not saved yet is no content)
+const bad = responses.filter((r) => r.status >= 400 || /\/api\/share\//.test(r.url));
+ok(bad.length === 0, "a new notebook's page makes no failing request: " + JSON.stringify(bad));
+ok(await ev("!document.querySelector('link[rel=manifest]')"), "...and has no web app manifest");
+ok((await ev(`fetch('api/file?path=' + encodeURIComponent('sub/not-yet.ipynb')).then((r) => r.status)`)) === 204, "...and a notebook not saved yet reads as no content (204)");
+await send("Network.disable");
 ok(/sagebrush/.test(await ev("document.querySelector('#status').textContent")), "Python is ready: " + (await ev("document.querySelector('#status').textContent")));
 let out = await runCode("import os\nprint(factor(2^64 + 1), open('data.csv').read().split()[1], os.getcwd().endswith('sub'))");
 ok(out.includes("274177 * 67280421310721") && out.includes("1,2") && out.includes("True"), "Sage runs natively in the notebook's directory, reading its files: " + JSON.stringify(out));

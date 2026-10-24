@@ -178,7 +178,8 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
         const p = inside(url.searchParams.get("path"));
         if (!p) { res.writeHead(400).end("bad path"); return; }
         if (method === "GET") {
-          if (!existsSync(p)) { res.writeHead(404).end("no such file"); return; }
+          // (a notebook not saved yet: no content, which its page reads as a new one; not an error the browser reports)
+          if (!existsSync(p)) { res.writeHead(204, { "Cache-Control": "no-store" }).end(); return; }
           if (!statSync(p).isFile()) { res.writeHead(400).end("not a file"); return; }
           // read before the headers: a read error still gets a response
           const data = readFileSync(p);
@@ -243,7 +244,10 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
       if (nbm && rest === "") {
         if (!inside(nbm[1])) { res.writeHead(400).end("bad path"); return; }
         const local = { path: nbm[1], name: basename(nbm[1]), dir: relative(dir, dirname(inside(nbm[1])!)) };
-        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${htmlJson(local)};</script>`);
+        // (without the site's web app manifest: this page is no app to install, and a browser fetches a manifest
+        // without its cookie, so it would only be refused)
+        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${htmlJson(local)};</script>`)
+          .replace(/<link rel="manifest"[^>]*>\n?/, "");
         res.writeHead(200, { "Content-Type": TYPES.html, "Cache-Control": "no-store" }).end(page);
         return;
       }
