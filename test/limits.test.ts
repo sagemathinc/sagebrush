@@ -143,6 +143,9 @@ test("every census-vocabulary refusal site is registered with a class and owner;
     "register each new or changed site with its class (1, 2, 3, ..., coverage, none) and owner: python3 test/limit_sites.py --register CLASS OWNER [--key K ...]; drop stale entries: --prune",
   );
   assert.equal(r.status, 0, r.stderr);
+  // (the class-2 sites whose guards say so in the memory guards' message,
+  // item D: a count that only goes up, as doctest coverage's)
+  assert.ok(got.explained >= 17, `${got.explained} explained memory-guard sites, fewer than D1's 17`);
 });
 
 // Every limit unlimited by default, finite ones opt-in (plan-c0 r2):

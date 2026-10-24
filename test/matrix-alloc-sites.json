@@ -620,6 +620,7 @@
  "lib/_sage_matrix.py: _select :: call :: range(n)": 1,
  "lib/_sage_matrix.py: _select :: comprehension :: itertools.islice(iter(k), m + 1)": 1,
  "lib/_sage_matrix.py: _select :: comprehension :: k": 1,
+ "lib/_sage_matrix.py: _shape :: call :: max(m, n, m * n)": 1,
  "lib/_sage_matrix.py: _smith_uv :: call :: list(r)": 1,
  "lib/_sage_matrix.py: _smith_uv :: call :: min(m, n)": 1,
  "lib/_sage_matrix.py: _smith_uv :: call :: min(nz)": 1,
