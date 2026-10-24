@@ -30,7 +30,17 @@
     { "id": "input-redirect", "script": "wc -c < f > g" },
     { "id": "missing-folder", "script": "echo x > nodir/n" },
     { "id": "here-string", "script": "cat <<< \"hi\" > g" },
-    { "id": "write-then-fail", "script": "{ echo partial; false; } > f" }
+    { "id": "write-then-fail", "script": "{ echo partial; false; } > f" },
+    { "id": "d8-before-after", "script": "echo before; echo x > nodir/n; echo after" },
+    { "id": "d8-stderr-before", "script": "echo before >&2; echo x > nodir/n; echo after" },
+    { "id": "d8-or-fallback", "script": "echo x > nodir/n || echo fallback" },
+    { "id": "d8-and", "script": "echo x > nodir/n && echo not-run" },
+    { "id": "d8-if", "script": "if echo x > nodir/n; then echo yes; else echo no; fi" },
+    { "id": "d8-pipeline", "script": "echo x > nodir/n | cat; echo after" },
+    { "id": "d8-committed-before", "script": "echo saved > g; echo x > nodir/n; echo after" },
+    { "id": "d8-pending-before", "script": "true > g; { echo b > t; echo x > nodir/n; } > f; echo after" },
+    { "id": "d8-subshell", "script": "( echo b; echo x > nodir/n; echo c ); echo after $?" },
+    { "id": "d8-function", "script": "f1() { echo b; echo x > nodir/n; echo c; }; f1; echo after $?" }
   ],
   "ipython": [
     { "id": "statement", "cell": "!echo hi", "observe": ["_exit_code"] },

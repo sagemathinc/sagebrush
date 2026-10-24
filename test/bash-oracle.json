@@ -402,6 +402,146 @@
     "c": null,
     "e": null
    }
+  },
+  {
+   "id": "d8-before-after",
+   "exit": 0,
+   "stdout": "before\nafter\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-stderr-before",
+   "exit": 0,
+   "stdout": "after\n",
+   "stderr": "before\nbash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-or-fallback",
+   "exit": 0,
+   "stdout": "fallback\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-and",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-if",
+   "exit": 0,
+   "stdout": "no\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-pipeline",
+   "exit": 0,
+   "stdout": "after\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-committed-before",
+   "exit": 0,
+   "stdout": "after\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": "saved\n",
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-pending-before",
+   "exit": 0,
+   "stdout": "after\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "",
+    "n": null,
+    "g": "",
+    "t": "b\n",
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-subshell",
+   "exit": 0,
+   "stdout": "b\nc\nafter 0\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "d8-function",
+   "exit": 0,
+   "stdout": "b\nc\nafter 0\n",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
   }
  ],
  "ipython": [
