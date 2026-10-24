@@ -1,0 +1,626 @@
+{
+ "versions": {
+  "bash": "GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)",
+  "ipython": "9.15.0",
+  "python": "3.14.4"
+ },
+ "redirections": [
+  {
+   "id": "new-gt",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": "hi\n",
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "existing-gt",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "new\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "existing-append",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\nmore\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "new-append",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": "a\n",
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "false-gt-existing",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "false-gt-new",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": "",
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "cat-self-gt",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "cat-self-append",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cat: f: input file is output file\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "group-write-then-read",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cat: f: input file is output file\n",
+   "files": {
+    "f": "x\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "two-gt-same-path",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "a\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "out-err-same-path-equal",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "err\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "gt-then-dup",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "out\nerr\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "dup-then-gt",
+   "exit": 0,
+   "stdout": "err\n",
+   "stderr": "",
+   "files": {
+    "f": "out\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "pipeline-tee",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "a\n",
+    "n": null,
+    "g": null,
+    "t": "a\n",
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "loop-append",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n1\n2\n3\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "loop-read-then-append",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n1\n2\n",
+    "n": null,
+    "g": "old\n1\n",
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "empty-output",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "binary-roundtrip",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": [
+     0,
+     255,
+     128,
+     10,
+     200
+    ],
+    "e": null
+   }
+  },
+  {
+   "id": "two-fds-offset-zero",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "X\ncdef\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "stderr-first-into-dup",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "E\nO\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "amp-gt",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "E\nO\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "append-then-dup",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\nE\nO\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "quoting",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "a  b c $x d 1\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "separate-files-per-stream",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "O\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": "E\n"
+   }
+  },
+  {
+   "id": "input-redirect",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": "4\n",
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "missing-folder",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "bash: line 1: nodir/n: No such file or directory\n",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "here-string",
+   "exit": 0,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "old\n",
+    "n": null,
+    "g": "hi\n",
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  },
+  {
+   "id": "write-then-fail",
+   "exit": 1,
+   "stdout": "",
+   "stderr": "",
+   "files": {
+    "f": "partial\n",
+    "n": null,
+    "g": null,
+    "t": null,
+    "c": null,
+    "e": null
+   }
+  }
+ ],
+ "ipython": [
+  {
+   "id": "statement",
+   "stdout": "hi\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "_exit_code": 0
+   }
+  },
+  {
+   "id": "statement-status",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "_exit_code": 1
+   }
+  },
+  {
+   "id": "capture",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "type(x).__name__": "SList",
+    "list(x)": [
+     "a",
+     "b"
+    ],
+    "x.s": "a b",
+    "x.n": "a\nb",
+    "x.l": [
+     "a",
+     "b"
+    ],
+    "_exit_code": "!NameError"
+   }
+  },
+  {
+   "id": "capture-stderr",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x)": [
+     "out",
+     "err"
+    ]
+   }
+  },
+  {
+   "id": "capture-status",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x)": [],
+    "_exit_code": "!NameError"
+   }
+  },
+  {
+   "id": "capture-blank-lines",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x)": [
+     "a",
+     "",
+     "b"
+    ],
+    "x.n": "a\n\nb"
+   }
+  },
+  {
+   "id": "grep-fields",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x.grep('a'))": [
+     "a 1",
+     "ab 3"
+    ],
+    "list(x.fields(0))": [
+     "a",
+     "b",
+     "ab"
+    ],
+    "list(x.fields(1))": [
+     "1",
+     "2",
+     "3"
+    ],
+    "list(x.fields(0, 1))": [
+     "a 1",
+     "b 2",
+     "ab 3"
+    ]
+   }
+  },
+  {
+   "id": "sort",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x.sort(field=0))": [
+     "a 10",
+     "b 2",
+     "c 1"
+    ],
+    "list(x.sort(field=1, nums=True))": [
+     "c 1",
+     "b 2",
+     "a 10"
+    ]
+   }
+  },
+  {
+   "id": "sx",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "type(x).__name__": "SList",
+    "list(x)": [
+     "hi"
+    ]
+   }
+  },
+  {
+   "id": "expr",
+   "stdout": "4\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "name",
+   "stdout": "w\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "dollar-escape",
+   "stdout": "$$\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "undefined-name",
+   "stdout": "$nosuchname\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "double-braces",
+   "stdout": "{a}\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "subscript-with-quotes",
+   "stdout": "v\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "not-shell-quoted",
+   "stdout": "a\r\nb\r\n",
+   "stderr": "",
+   "error": null,
+   "observed": {}
+  },
+  {
+   "id": "capture-interpolated",
+   "stdout": "",
+   "stderr": "",
+   "error": null,
+   "observed": {
+    "list(x)": [
+     "42"
+    ]
+   }
+  }
+ ],
+ "os_system": [
+  {
+   "id": "true",
+   "status": 0,
+   "stdout": "",
+   "stderr": ""
+  },
+  {
+   "id": "exit-3",
+   "status": 768,
+   "stdout": "",
+   "stderr": ""
+  },
+  {
+   "id": "stdout",
+   "status": 0,
+   "stdout": "hi\n",
+   "stderr": ""
+  },
+  {
+   "id": "stderr-and-status",
+   "status": 256,
+   "stdout": "",
+   "stderr": "err\n"
+  }
+ ]
+}
