@@ -1,0 +1,148 @@
+Finite field of size 2
+Finite field of size 2
+Finite field of size 7
+Finite field of size 3
+a
+b
+1
+1
+b
+b
+b
+$.1^2 + $.1 + 1
+$.1^4 + $.1 + 1
+$.1 + 6
+$.1 + 1
+$.1 + 4
+$.1^2 + 2*$.1 + 2
+$.1^5 + 2*$.1 + 1
+$.1^4 + 2*$.1^3 + 2
+Univariate Polynomial Ring over GF(2)
+$.1^2 + $.1 + a
+$.1^4 + $.1 + 1
+$.1 + b
+$.1^3 + $.1^2 + $.1 + a
+$.1^2 + c*$.1 + c
+true
+false
+false
+true
+true
+false
+false
+0 1 $.1^4 + $.1 + 1
+$.1^4 + $.1 + 1
+0 0 $.1
+$.1^4
+0 1 $.1 + 1
+$.1^4 + 1
+0 1 $.1^2 + $.1 + 1
+$.1^4 + $.1^2 + 1
+1 1 $.1^4 + $.1^3 + 1
+$.1^4 + $.1^3 + 1
+1 2 $.1^4 + 2*$.1^3 + 2
+$.1^4 + 2*$.1^3 + 2
+0 0 $.1
+$.1^4
+2 1 $.1 + 1
+$.1^4 + $.1^3 + $.1 + 1
+2 1 $.1^2 + 2*$.1 + 2
+$.1^4 + $.1^3 + 2*$.1^2 + 2*$.1 + 1
+0 1 $.1^2 + 1
+$.1^4 + 2*$.1^2 + 1
+2 2 $.1^4 + $.1^3 + 2
+$.1^4 + $.1^3 + 2
+3
+3
+$.1 + 4
+$.1 + 4
+Finite field of size 2
+Finite field of size 3
+Univariate Polynomial Ring over GF(2)
+Finite field of size 7
+1
+a
+$.1^2 + $.1 + a
+$.1^2 + $.1 + a
+0
+a^2
+$.1 + a
+$.1^2 + a^2
+0
+0
+$.1
+Finite field of size 2^2
+Univariate Polynomial Ring over GF(2^2)
+b
+b
+$.1 + b
+$.1 + b
+0
+1
+$.1^4 + $.1 + 1
+1
+a
+$.1^3 + $.1^2 + $.1 + a
+$.1^3 + $.1^2 + $.1 + a
+c
+c
+$.1^2 + c*$.1 + c
+$.1^2 + c*$.1 + c
+0
+c^2
+$.1 + c
+$.1^2 + c^2
+a
+$.1 + a
+$.1^3 + a*$.1^2 + a^2*$.1 + 1
+$.1 + $.1^5
+$.1^3
+$.1
+3
+3
+$.1 + 4
+[ true, true, true, true, true, true, true, true, true ]
+[ true, true, true, true, true, true, true, true, true ]
+[ true, true, true, true ]
+[ true, true, true, true ]
+[ true, true, true ]
+8
+6
+0
+1
+b^8
+b^9
+b^13
+b^12
+0
+e
+e^2
+e^20
+1
+e^27
+e^69
+4
+2
+4
+$.1^2
+4
+[ true, true, true ]
+Finite field of size 2^4
+$.1^4 + $.1 + 1
+true
+Finite field of size 3^4
+$.1^4 + 2*$.1^3 + 2
+h^10
+true
+Finite field of size 2^6
+Mapping from: FldFin: F to FldFin: L
+g^21
+true
+6
+Finite field of size 2
+Finite field of size 7
+Mapping from: FldFin: P to FldFin: P
+Finite field of size 2^4
+Mapping from: FldFin: F to FldFin: K
+Finite field of size 5^2
+Mapping from: GF(5) to GF(5^2)
