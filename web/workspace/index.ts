@@ -21,6 +21,6 @@ export { obligate, rebuildKey, type Obligation } from "./sync-outbox";
 export { ADOPT, adoptPrefix, capture as captureAdoption } from "./sync-adopt";
 // (D11: large moves in chunks, for tests)
 export { D11, D11_CEILING, configureD11, RW, MAPS, STAGE, FENCE_READ, entriesOf, rewriting, MapSet, type ERecord, type Mapping } from "./sync-rewrite";
-export { REPLAY, runReplay, replayOf, markerKey, lateKey, SENDER_HOLD, ReplayHalted, type Marker } from "./sync-replay";
+export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOLD, ReplayHalted, type Marker } from "./sync-replay";
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";

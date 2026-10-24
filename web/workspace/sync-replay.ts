@@ -77,9 +77,13 @@ export type Marker = {
   /** (r8 N7) rows moved by sweep 1: directly (D, once) and to staging (S, then again): the sweeps' bound is
    * 300 s × (D + 2S) / (D + S) */
   moved?: { D: number; S: number };
-  /** (r8 N8) the settled closure's figures: its rounds, items, requests and rows (every metered read), one item's most
-   * requests and rows, one transaction's, and the items that waited for the next transaction */
-  closure?: { rounds: number; items: number; requests: number; rows: number; maxReq: number; maxRows: number; txReq: number; txRows: number; waits: number };
+  /** (r8 N8) the settled closure's figures: its rounds, items, every request and row its transactions read (their state
+   * included) and their writes, one item's most requests and rows, one transaction's (its work's, and all of it), its
+   * transactions, and the items that waited for the next transaction */
+  closure?: { rounds: number; items: number; requests: number; rows: number; maxReq: number; maxRows: number; txReq: number; txRows: number; allTxReq: number; allTxRows: number; writes: number; txWrites: number; txs: number; waits: number };
+  /** (LIMIT-D11-IMPL-3) validation's figures so far: its transactions, every request, row and write of them, and one
+   * transaction's most (its work's, and all of it) */
+  validation?: { txs: number; requests: number; rows: number; writes: number; txReq: number; txRows: number; allTxReq: number; allTxRows: number };
   /** sweep 2's next mapping (the ones before it drained: a staging range isn't refilled once sweep 2 begins) */
   s2?: number;
   /** placement's pages so far: identities, ops logged, paths listed, debts (the fixtures' figures) */
@@ -95,9 +99,9 @@ export class ReplayHalted extends Error {}
 export const REPLAY = {
   cut: null as null | ((at: string, m: Marker) => void),
   before: null as null | ((phase: string, m: Marker) => Promise<void>),
-  /** (tests) called where a closure or validation transaction's metered reads begin and end (no other read of it
-   * between) */
-  reads: null as null | ((at: "begin" | "end", phase: "close" | "validate") => void),
+  /** (tests) called with a closure or validation transaction as it begins (before its first request) and as it ends
+   * (after its last) */
+  reads: null as null | ((at: "begin" | "end", phase: "close" | "validate", tx: IDBTransaction) => void),
   /** (tests) as a new page would: the failed replays' one more try available again */
   reload: () => { retried.clear(); validating.clear(); },
 };
@@ -218,8 +222,18 @@ async function folderAfter(st: IDBObjectStore, maps: Mapping[], p: string): Prom
   return ((await req(st.get(at))) as Entry | undefined)?.kind === "folder";
 }
 
-/** One identity of the pass: a large lift planned, unless it is carried by a planned folder.  (Whether its folder is
- * there after the plan is the closure's: one that isn't stays where it is carried, CORR-D11-IMPL-2.) */
+/** (CORR-D11-R1-1) Whether anything will be at `p`'s folder after the plan (of any kind): there now and not moving
+ * away, or brought by a planned mapping.  Nothing there: the view's folder is still to be made (placement makes a
+ * confirmed folder this device hasn't), so the lift is left to placement, a debt replayed once its folder is there. */
+async function parentThere(st: IDBObjectStore, maps: Mapping[], p: string): Promise<boolean> {
+  const pf = parentOf(p);
+  if (pf === "/" || pf === TRASH || maps.some((m) => holds(pf, m.to))) return true;
+  return !!(await req(st.get(pf))) && !srcOwner(maps, pf);
+}
+
+/** One identity of the pass: a large lift planned, unless it is carried by a planned folder, or its folder is still to
+ * be made (left to placement).  (Whether a folder that is there will be a folder is the closure's: one that won't stays
+ * where it is carried, CORR-D11-IMPL-2.) */
 async function planOne(ctx: PlanCtx, id: string) {
   if (ctx.planned.has(id)) return;
   const e = await ctx.V.entryOf(id);
@@ -230,6 +244,7 @@ async function planOne(ctx: PlanCtx, id: string) {
   const up = srcOwner(ctx.maps, parentOf(e.path));
   if (up && up.from !== e.path && (up.want ?? up.to) + e.path.slice(up.from.length) === v.e.path) return;
   if ((await countUnder(ctx.st, e.path)) <= D11.chunk) return;
+  if (!(await parentThere(ctx.st, ctx.maps, v.e.path))) return;
   const m = newMapping(ctx.maps, e, v.e, true, ctx.now)!;
   ctx.maps.push(m);
   ctx.added.push(m);
@@ -241,20 +256,35 @@ async function planOne(ctx: PlanCtx, id: string) {
 /** An unpublished plan's closure state (its control row): the worklist (mapping indices), the round, whether this
  * round added a mapping or saw a name come free, and the counters of all its rounds (every request and row its
  * transactions' metered reads made, an item that waited for the next transaction included). */
-type Queue = { path: string; round: number; queue: number[]; added: boolean; unsettled: boolean; items: number; requests: number; rows: number; maxReq?: number; maxRows?: number; txReq?: number; txRows?: number; waits?: number };
+type Queue = { path: string; round: number; queue: number[]; added: boolean; unsettled: boolean; items: number; requests: number; rows: number; maxReq?: number; maxRows?: number; txReq?: number; txRows?: number; allTxReq?: number; allTxRows?: number; writes?: number; txWrites?: number; txs?: number; waits?: number };
 /** A claimant of a key: another mapping's top (by its target), or a row carried there (`at`). */
 type Claimant = { map: number } | { row: Entry; at: string };
 
-// (LIMIT-D11-IMPL-1/2) The closure's and validation's reads, metered at the IndexedDB boundary: every request they
-// make, theirs and their viewer's, goes through a Meter's stores, each admitted before it is made against what is
-// left of the transaction's D11.requests and D11.page and of the plan's closureRequests and closureRows; no read
-// materializes more rows than are left (one that could is made for what is left, then counted: more is over).
+// (LIMIT-D11-IMPL-1/2/3) A closure or validation transaction metered at the IndexedDB boundary, from its first request
+// to its last: every request it makes (its own and its viewer's) goes through a Meter's stores.  Its state (the marker,
+// the record, the closure's control row, the mapping rows) is read first, within PLAN_STATE; its work then, each
+// request admitted before it is made against what is left of the transaction's D11.requests and D11.page; every read
+// against what is left of the plan's closureRequests and closureRows (the closure's).  No read materializes more rows
+// than are left (one that could is made for what is left, then counted: more is over).  Writes are counted.
 
-/** A read the budget doesn't admit, not made: `tx`, the transaction's budget (the item waits for the next one); else
- * the plan's. */
+/** (LIMIT-D11-IMPL-3) A closure or validation transaction's own state, read before its work, at most: the marker (3
+ * requests), the record and the closure's control row, every mapping row (one request), the intent revision at
+ * publication; its rows bounded by the plan's size (D11.large + D11.small mappings), not by its work's budget.  Its
+ * writes, after its work: each mapping row at most once, the control row, the record and the marker. */
+export const PLAN_STATE = {
+  requests: 8,
+  rows: () => D11.large + D11.small + 6,
+  writes: () => D11.large + D11.small + 4,
+};
+
+/** A read the budget doesn't admit, not made: "tx", the transaction's work budget (the item waits for the next one);
+ * "plan", the plan's; "state", PLAN_STATE. */
 class Over extends Error {
-  constructor(readonly tx: boolean) {
-    super(tx ? "over the transaction's reads" : "over the plan's reads");
+  constructor(readonly of: "tx" | "plan" | "state") {
+    super(`over the ${of === "tx" ? "transaction's" : of === "plan" ? "plan's" : "plan state's"} reads`);
+  }
+  get tx() {
+    return this.of === "tx";
   }
 }
 /** A request answered by `p`, as `req` waits on one (its onsuccess and result, or its onerror and error). */
@@ -265,30 +295,44 @@ function answered<T>(p: Promise<T>): IDBRequest<T> {
 }
 type Query = IDBValidKey | IDBKeyRange | null | undefined;
 class Meter {
-  /** requests made and rows read, in this transaction */
+  /** every request made and row read in this transaction; its work's; its writes */
   req = 0;
   rows = 0;
-  constructor(private txReq: number, private txRows: number, private allReq = Infinity, private allRows = Infinity) {}
+  workReq = 0;
+  workRows = 0;
+  writes = 0;
+  /** reading the transaction's state (PLAN_STATE), not yet its work */
+  state = true;
+  /** the plan's reads left (the closure's), from this transaction's start */
+  allReq = Infinity;
+  allRows = Infinity;
+  constructor(private txReq: number, private txRows: number) {}
   private admit() {
-    if (this.req + 1 > this.allReq) throw new Over(false);
-    if (this.req + 1 > this.txReq) throw new Over(true);
+    if (this.req + 1 > this.allReq) throw new Over("plan");
+    if (this.state ? this.req - this.workReq + 1 > PLAN_STATE.requests : this.workReq + 1 > this.txReq) throw new Over(this.state ? "state" : "tx");
     this.req++;
+    if (!this.state) this.workReq++;
+  }
+  private charge(n: number) {
+    this.rows += n;
+    if (!this.state) this.workRows += n;
   }
   /** a read of at most `max` rows (`get`: one row or none) */
   private async read(t: IDBObjectStore | IDBIndex, how: "get" | "getAll" | "getAllKeys", q: Query, max: number): Promise<unknown> {
-    const a = this.txRows - this.rows, b = this.allRows - this.rows, left = Math.min(a, b), tx = a < b;
+    const a = this.state ? PLAN_STATE.rows() - (this.rows - this.workRows) : this.txRows - this.workRows, b = this.allRows - this.rows;
+    const left = Math.min(a, b), of = b <= a ? "plan" : this.state ? "state" : "tx";
     const take = Math.min(max, left);
     let got: unknown = how === "get" ? undefined : [], n = 0;
     if (take > 0) {
       this.admit();
       got = await req(how === "get" ? t.get(q as IDBValidKey) : t[how](q, take === Infinity ? undefined : take));
       n = how === "get" ? (got === undefined ? 0 : 1) : (got as unknown[]).length;
-      this.rows += n;
+      this.charge(n);
       if (take === max || n < take) return got;
     }
     // (as many rows as are left read: whether there are more, counted (a request, no row))
     this.admit();
-    if (Math.min((await req(t.count(q ?? undefined))) as number, max) > n) throw new Over(tx);
+    if (Math.min((await req(t.count(q ?? undefined))) as number, max) > n) throw new Over(of);
     return got;
   }
   private wrap<T extends IDBObjectStore | IDBIndex>(s: T): T {
@@ -299,13 +343,14 @@ class Meter {
         if (k === "getAll" || k === "getAllKeys") return (q?: Query, n?: number) => answered(self.read(t, k, q, n ? n : Infinity));
         if (k === "count" || k === "getKey") return (q?: Query) => answered((async () => { self.admit(); return req((k === "count" ? t.count(q ?? undefined) : t.getKey(q as IDBValidKey)) as IDBRequest<unknown>); })());
         if (k === "index") return (name: string) => self.wrap((t as IDBObjectStore).index(name));
+        if (k === "put" || k === "add" || k === "delete" || k === "clear") return (...a: unknown[]) => { self.writes++; return (t as unknown as Record<string, (...x: unknown[]) => unknown>)[k](...a); };
         if (k === "openCursor" || k === "openKeyCursor") return () => { throw new Error(`sync: a metered read can't ${k}`); };
         const v = Reflect.get(t, k, t);
         return typeof v === "function" ? v.bind(t) : v;
       },
     }) as T;
   }
-  /** `tx` with its stores' reads metered (its writes as they are) */
+  /** `tx` with every request on its stores metered */
   tx(tx: IDBTransaction): IDBTransaction {
     const self = this;
     return new Proxy(tx, {
@@ -693,30 +738,36 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
     }, { durability: "relaxed" }), undefined, { quiet: true });
   }
   if (m0.phase === "close") {
-    return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, "syncIndex", META])], "readwrite", async (tx) => {
-      const m = await marker(tx, ns, rid, "close");
+    return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, "syncIndex", META])], "readwrite", async (tx0) => {
+      // (the whole transaction metered (LIMIT-D11-IMPL-1/2/3): its state within PLAN_STATE, its work within this
+      // transaction's D11.requests and D11.page, all of it within what is left of the plan's closureRequests and
+      // closureRows, each request admitted before it is made; its writes counted)
+      REPLAY.reads?.("begin", "close", tx0);
+      const M = new Meter(D11.requests, D11.page), tx = M.tx(tx0);
+      const over = (e: Over) => new Cap(e.of === "tx" ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows for one name: reload to try again, or Delete my synced data` : e.of === "plan" ? `sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data` : `sync's plan for a large move is larger than one transaction reads (${PLAN_STATE.requests} requests, ${PLAN_STATE.rows()} rows): reload to try again, or Delete my synced data`);
+      const metered = async <T>(f: () => Promise<T>) => {
+        try {
+          return await f();
+        } catch (e) {
+          throw e instanceof Over ? over(e) : e;
+        }
+      };
+      const m = await metered(() => marker(tx, ns, rid, "close"));
       if (!m) return "next";
       const meta = tx.objectStore(META), st = tx.objectStore("entries");
-      FENCE_READ.add(tx);
-      const rec = (await req(st.get(RW))) as ERecord | undefined;
+      FENCE_READ.add(tx0);
+      const rec = (await metered(() => req(st.get(RW)))) as ERecord | undefined;
       if (!rec || rec.rid !== rid) throw new Cap("sync's plan for a large move was taken over: reload to try again");
-      const q = (await req(st.get(queueKey(rid)))) as Queue | undefined;
+      const q = (await metered(() => req(st.get(queueKey(rid))))) as Queue | undefined;
       if (!q) throw new Cap("sync's plan for a large move lost its closure: reload to try again");
-      const { maps: rows } = await recordOf(tx);
+      // (what is left of the plan's reads: the closure's so far, from this transaction's start (its state's included))
+      M.allReq = D11.closureRequests - q.requests;
+      M.allRows = D11.closureRows - q.rows;
+      const { maps: rows } = await metered(() => recordOf(tx));
       const maps = rows.map((x) => ({ ...x }));
-      // (its reads metered (LIMIT-D11-IMPL-1/2): this transaction's D11.requests and D11.page, and what is left of the
-      // plan's closureRequests and closureRows, each request admitted before it is made)
-      const M = new Meter(D11.requests, D11.page, D11.closureRequests - q.requests, D11.closureRows - q.rows), mt = M.tx(tx);
-      const over = (e: Over) => new Cap(e.tx ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows for one name: reload to try again, or Delete my synced data` : `sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data`);
-      REPLAY.reads?.("begin", "close");
-      let V: Viewer;
-      try {
-        V = await viewer({ w, tx: mt, ns, store: idbStore(mt, m.gen), cap });
-      } catch (e) {
-        if (e instanceof Over) throw over(e);
-        throw e;
-      }
-      const c: CloseCtx = { V, st: mt.objectStore("entries"), maps, dest: destIndex(maps), now: Date.now() };
+      M.state = false;
+      const V = await metered(() => viewer({ w, tx, ns, store: idbStore(tx, m.gen), cap }));
+      const c: CloseCtx = { V, st, maps, dest: destIndex(maps), now: Date.now() };
       const dirty = new Set<number>();
       const prio = (i: number) => [depth(maps[i].to), nk(maps[i].to)] as const;
       const order = (a: number, b: number) => {
@@ -756,90 +807,113 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
         for (const a of r.added) dirty.add(a.i);
         done++;
       }
-      REPLAY.reads?.("end", "close");
+      const next: Marker = { ...m };
+      const settled = !q.queue.length && !q.added && !q.unsettled, reset = !q.queue.length && !settled;
+      if (reset) {
+        // (a round that found a mapping or freed a name: another over the whole plan, from its views (N8 v3 §3))
+        if (q.round + 1 > D11.closureRounds) throw new Cap(`sync's plan for a large move didn't settle in ${D11.closureRounds} rounds: reload to try again, or Delete my synced data`);
+        for (const x of maps) {
+          Object.assign(x, { to: x.want ?? x.to, t: 0, wit: null, occ: null });
+          dirty.add(x.i);
+        }
+        Object.assign(q, { round: q.round + 1, queue: maps.map((x) => x.i), added: false, unsettled: false });
+      }
+      // (the ledger: every read of this transaction (no more come), and the writes it makes next: its dirty mappings,
+      // the control row, the record and the marker)
+      const writes = dirty.size + 3;
       q.requests += M.req;
       q.rows += M.rows;
-      q.txReq = Math.max(q.txReq ?? 0, M.req);
-      q.txRows = Math.max(q.txRows ?? 0, M.rows);
+      q.txReq = Math.max(q.txReq ?? 0, M.workReq);
+      q.txRows = Math.max(q.txRows ?? 0, M.workRows);
+      q.allTxReq = Math.max(q.allTxReq ?? 0, M.req);
+      q.allTxRows = Math.max(q.allTxRows ?? 0, M.rows);
+      q.writes = (q.writes ?? 0) + writes;
+      q.txWrites = Math.max(q.txWrites ?? 0, writes);
+      q.txs = (q.txs ?? 0) + 1;
       REPLAY.cut?.("close", m);
-      const next: Marker = { ...m };
-      if (!q.queue.length) {
-        if (q.added || q.unsettled) {
-          // (a round that found a mapping or freed a name: another over the whole plan, from its views (N8 v3 §3))
-          if (q.round + 1 > D11.closureRounds) throw new Cap(`sync's plan for a large move didn't settle in ${D11.closureRounds} rounds: reload to try again, or Delete my synced data`);
-          for (const x of maps) {
-            Object.assign(x, { to: x.want ?? x.to, t: 0, wit: null, occ: null });
-            dirty.add(x.i);
-          }
-          Object.assign(q, { round: q.round + 1, queue: maps.map((x) => x.i), added: false, unsettled: false });
-          REPLAY.cut?.("close-round", m);
-        } else {
-          // (settled: validation of the final plan next)
-          REPLAY.cut?.("close-settled", m);
-          Object.assign(next, { phase: "validate", vi: 0, closure: { rounds: q.round, items: q.items, requests: q.requests, rows: q.rows, maxReq: q.maxReq ?? 0, maxRows: q.maxRows ?? 0, txReq: q.txReq ?? 0, txRows: q.txRows ?? 0, waits: q.waits ?? 0 } });
-        }
+      if (reset) REPLAY.cut?.("close-round", m);
+      if (settled) {
+        // (settled: validation of the final plan next)
+        REPLAY.cut?.("close-settled", m);
+        Object.assign(next, { phase: "validate", vi: 0, closure: { rounds: q.round, items: q.items, requests: q.requests, rows: q.rows, maxReq: q.maxReq ?? 0, maxRows: q.maxRows ?? 0, txReq: q.txReq, txRows: q.txRows, allTxReq: q.allTxReq, allTxRows: q.allTxRows, writes: q.writes, txWrites: q.txWrites, txs: q.txs, waits: q.waits ?? 0 } });
       }
       // (the closure's state, durable with what it changed: its mappings (fenced from here), the worklist, the counters)
       for (const i of dirty) st.put({ path: mapKey(rid, i), ...maps[i] });
-      if (next.phase === "validate") st.delete(queueKey(rid));
+      if (settled) st.delete(queueKey(rid));
       else st.put(q);
       st.put({ ...rec, n: maps.length, rev: rec.rev + 1 } satisfies ERecord);
+      dropView(tx0);
       dropView(tx);
       meta.put(next, markerKey(ns));
+      REPLAY.reads?.("end", "close", tx0);
       return "more";
     }, { durability: "relaxed" }), undefined, { quiet: true });
   }
   if (m0.phase === "validate") {
-    return inTx(w.ws, [...new Set([...VIEW_STORES, "syncIndex", META])], "readwrite", async (tx) => {
-      const m = await marker(tx, ns, rid, "validate");
+    return inTx(w.ws, [...new Set([...VIEW_STORES, "syncIndex", META])], "readwrite", async (tx0) => {
+      // (metered as the closure's (LIMIT-D11-IMPL-1/2/3): its state within PLAN_STATE, its work within this
+      // transaction's D11.requests and D11.page; tops past them wait for the next transaction, one top's own past them
+      // is the stable failure)
+      REPLAY.reads?.("begin", "validate", tx0);
+      const M = new Meter(D11.requests, D11.page), tx = M.tx(tx0);
+      const over = (e: Over) => new Cap(e.of === "tx" ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows to check one name: reload to try again, or Delete my synced data` : `sync's plan for a large move is larger than one transaction reads (${PLAN_STATE.requests} requests, ${PLAN_STATE.rows()} rows): reload to try again, or Delete my synced data`);
+      const metered = async <T>(f: () => Promise<T>) => {
+        try {
+          return await f();
+        } catch (e) {
+          throw e instanceof Over ? over(e) : e;
+        }
+      };
+      const m = await metered(() => marker(tx, ns, rid, "validate"));
       if (!m) return "next";
       const meta = tx.objectStore(META), st = tx.objectStore("entries");
-      FENCE_READ.add(tx);
-      const { rec, maps } = await recordOf(tx);
+      FENCE_READ.add(tx0);
+      const { rec, maps } = await metered(() => recordOf(tx));
       if (!rec || rec.rid !== rid) throw new Cap("sync's plan for a large move was taken over: reload to try again");
-      // (its reads metered as the closure's (LIMIT-D11-IMPL-1/2): this transaction's D11.requests and D11.page; tops past
-      // them wait for the next transaction, one top's own past them is the stable failure)
-      const M = new Meter(D11.requests, D11.page), mt = M.tx(tx), ms = mt.objectStore("entries");
-      const over = () => new Cap(`sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows to check one name: reload to try again, or Delete my synced data`);
       const vi = m.vi ?? 0;
       const pix = prefixIndex(maps), dest = destIndex(maps);
-      REPLAY.reads?.("begin", "validate");
-      let V: Viewer, done = 0;
-      try {
-        V = await viewer({ w, tx: mt, ns, store: idbStore(mt, m.gen), cap });
-      } catch (e) {
-        throw e instanceof Over ? over() : e;
-      }
+      M.state = false;
+      const V = await metered(() => viewer({ w, tx, ns, store: idbStore(tx, m.gen), cap }));
+      const checked: Mapping[] = [];
       for (const x of maps.slice(vi, vi + D11.validatePage)) {
         let why: string | undefined;
         try {
-          why = await checkOne(V, ms, maps, dest, x);
+          why = await checkOne(V, st, maps, dest, x);
         } catch (e) {
           if (!(e instanceof Over)) throw e;
-          if (!done) throw over();
+          if (!checked.length) throw over(e);
           break;
         }
         if (why) throw new Cap(`sync's plan for a large move no longer holds (${why}): reload to try again`);
-        // (its class, persisted with it, never recomputed from partly drained sources (r8 N7))
-        st.put({ path: mapKey(rid, x.i), ...x, direct: directOf(maps, x, pix) });
-        done++;
+        checked.push(x);
       }
-      REPLAY.reads?.("end", "validate");
+      const last = vi + checked.length >= maps.length;
+      // (the publication (r6 §2): the sender's intent revision unchanged since the pass began, else a fault: stable)
+      M.state = true;
+      const rev = last ? (((await metered(() => req(meta.get(intentRevKey(ns))))) as number | undefined) ?? 0) : undefined;
+      // (the ledger: every read of this transaction, and its writes next: its checked mappings, the marker (and the
+      // record, at publication))
+      const v0 = m.validation ?? { txs: 0, requests: 0, rows: 0, writes: 0, txReq: 0, txRows: 0, allTxReq: 0, allTxRows: 0 };
+      const writes = checked.length + (last ? 2 : 1);
+      const validation = { txs: v0.txs + 1, requests: v0.requests + M.req, rows: v0.rows + M.rows, writes: v0.writes + writes, txReq: Math.max(v0.txReq, M.workReq), txRows: Math.max(v0.txRows, M.workRows), allTxReq: Math.max(v0.allTxReq, M.req), allTxRows: Math.max(v0.allTxRows, M.rows) };
+      // (each one's class, persisted with it, never recomputed from partly drained sources (r8 N7))
+      for (const x of checked) st.put({ path: mapKey(rid, x.i), ...x, direct: directOf(maps, x, pix) });
       REPLAY.cut?.("validate", m);
-      if (vi + done < maps.length) {
-        meta.put({ ...m, vi: vi + done }, markerKey(ns));
+      if (!last) {
+        meta.put({ ...m, vi: vi + checked.length, validation }, markerKey(ns));
+        REPLAY.reads?.("end", "validate", tx0);
         return "more";
       }
-      // (the publication (r6 §2): the sender's intent revision unchanged since the pass began, else a fault: stable)
-      const rev = ((await req(meta.get(intentRevKey(ns)))) as number | undefined) ?? 0;
       if (rev !== m.rev0) throw new Cap("sync's plan for a large move saw its inputs change: reload to try again");
       REPLAY.cut?.("publish", m);
       st.put({ ...rec, published: true, sweep: 1, rev: rec.rev + 1 } satisfies ERecord);
+      dropView(tx0);
       dropView(tx);
       // (the tops put beside a claimant that stays, for placement: from the final plan)
       const settled = maps.filter((x) => x.top && x.to !== x.want).map((x) => [x.top!, x.to, x.want!] as [string, string, string]);
-      meta.put({ ...m, phase: "sweep", settled }, markerKey(ns));
+      meta.put({ ...m, phase: "sweep", settled, validation }, markerKey(ns));
       SENDER_HOLD.delete(ns);
+      REPLAY.reads?.("end", "validate", tx0);
       return "more";
     });
   }
