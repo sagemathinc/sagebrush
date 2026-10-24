@@ -1029,6 +1029,7 @@ class SandpileConfig(dict):
         sage: c.fire_vertex(1), c.stabilize(), ~c
         ({1: 1, 2: 1, 3: 3}, {1: 2, 2: 1, 3: 1}, {1: 2, 2: 1, 3: 1})
     """
+    _latex_container = True  # (latex() writes it as a dict, as before; not yet as Sage writes it)
 
     def __init__(self, S, c):
         self._S = S
@@ -1405,6 +1406,7 @@ class SandpileDivisor(dict):
         sage: D.rank(), D.effective_div(False)
         (2, [[0, 1, 1, 4, 1], [1, 2, 2, 0, 2], [4, 0, 0, 3, 0]])
     """
+    _latex_container = True  # (latex() writes it as a dict, as before; not yet as Sage writes it)
 
     def __init__(self, S, D):
         self._S = S

@@ -3630,6 +3630,7 @@ class PolynomialSequence(list):
         sage: B.universe()
         Multivariate Polynomial Ring in x, y over Rational Field
     """
+    _latex_container = True  # (latex() writes it as Sage's plain list: it stands in for one)
 
     def __init__(self, ring, items):
         super().__init__(items)
@@ -3876,8 +3877,24 @@ class MPolynomialIdeal:
         return not self.reduce(f)._d
 
     def __eq__(self, o):
+        """Equality of ideals, by their reduced Groebner bases.  An element
+        f of the ring (or a scalar of its base ring) is compared as the
+        ideal (f), as Sage compares it; anything else is unequal.
+
+        EXAMPLES::
+
+            sage: R.<x,y> = QQ[]
+            sage: R.ideal(x) == 2*x, R.ideal(x, x^2) == x, R.ideal(x, y) == x, R.ideal(x*y) == x
+            (True, True, False, False)
+        """
         if not isinstance(o, MPolynomialIdeal):
-            return False
+            # (built by the ring's own ideal(), as R.ideal(f) is, then
+            # compared as ideals: no work R.ideal(f) == I would not do)
+            import _sage_frac
+            f = _sage_frac._ideal_operand(self._ring, o)
+            if f is None:
+                return False
+            o = self._ring.ideal(f)
         if o._ring != self._ring:
             return False
         self._over_field("ideal equality")
