@@ -190,6 +190,19 @@ Supported:
   `scatter`, `fill_between`, `pie`) take colors from separate cycles.
 - `plt.axes()`: a new Axes each call, a `[left, bottom, width, height]`
   rect, or an Axes made current; keywords are Axes properties.
+- `rcParams` (one object for `matplotlib` and `pyplot`, with all of
+  matplotlib 3.11's keys and defaults and its errors for others), `rc`,
+  `rcdefaults`, `rc_context`, and `plt.style` (`use`, `context`,
+  `available`).  Drawn from rcParams: the color cycle (`axes.prop_cycle`,
+  and what `'C0'`..`'C9'` mean), the axes' face and edge colors and line
+  width, the grid (`axes.grid`, `grid.color`/`linestyle`/`linewidth`/
+  `alpha`, `axes.axisbelow`), tick, label, title and text colors,
+  `lines.linewidth`, `figure.figsize` and `figure.facecolor`, and the font
+  sizes; other keys are kept, and a style that sets them says so in one
+  warning.  A setting at its default draws in the page's text color, so a
+  plot follows a light or dark theme; one set to another value draws in
+  exactly that color.  As in matplotlib, an Axes takes its settings when it
+  is made: a style in a `with` block stays with the plots made in it.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
