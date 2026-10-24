@@ -90,13 +90,15 @@ export class WorkerKernel {
    * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing but its limits ({init}) is sent to the worker until it is done
    * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
    * @param {string | null} [o.limits] the engine's limits, a JSON text (src/limits.ts): the deployment's
-   *   or the course's, never a document's; null for the defaults.  Every worker this kernel starts,
-   *   restarts too, is given the same text first ({init}), and runs nothing before it is valid
+   *   or the course's, never a document's; omitted or null for the defaults.  Every worker this kernel
+   *   starts, restarts too, is given the same value first ({init}), and runs nothing before it is valid;
+   *   anything else supplied (an object, a number...) is passed on as it is, for the worker to refuse:
+   *   settings given wrongly are never the defaults (astra CORR-FF93-1)
    */
   constructor({ createWorker, onStart, onMessage, limits = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
-    this.limits = typeof limits === "string" ? limits : null;
+    this.limits = limits === undefined ? null : limits;
     this.onStart = onStart;
     this.onMessage = onMessage;
     this.worker = null;
@@ -133,7 +135,12 @@ export class WorkerKernel {
     const t0 = performance.now();
     const w = (this.worker = this.createWorker());
     // (the worker's first message: its limits, web/worker.ts's init gate)
-    w.postMessage({ init: { limits: this.limits } });
+    try {
+      w.postMessage({ init: { limits: this.limits } });
+    } catch {
+      // (a value postMessage can't copy, a function say: refused all the same)
+      w.postMessage({ init: { limits: { uncloneable: typeof this.limits } } });
+    }
     // (a barrier: every run, interact, question and check waits for onStart,
     // e.g. the notebook's package set resolved and durably pinned (index.html);
     // if it fails, what waits is stopped, and the next one starts a new
