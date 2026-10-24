@@ -96,7 +96,9 @@ test("hash-valid hostile sets are refused before anything changes (§4.2)", () =
     ["a module in two packages", [hello, { ...hello, name: "hello2" }], undefined, /module hello is also @sagebrush\/hello2?@0\.1\.0's/],
     ["a cycle", [{ ...hello, requires: ["@sagebrush/b@0.1.0"] }, { name: "b", modules: ["bb"], files: { "py/bb.py": "" }, requires: ["@sagebrush/hello@0.1.0"] }], undefined, /cycle/],
     ["a missing dependency", [{ ...hello, requires: ["@sagebrush/nope@1.0.0"] }], undefined, /not in this set/],
-    ["needs a newer core", [{ ...hello, level: 2 }], undefined, /needs Sagebrush core API 1 level 2; this engine is core API 1 level 1/],
+    // (one level past this engine's, whatever it is: CORE_API_LEVEL rises as the core's API grows)
+    ["needs a newer core", [{ ...hello, level: P.CORE_API_LEVEL + 1 }], undefined,
+      new RegExp(`needs Sagebrush core API 1 level ${P.CORE_API_LEVEL + 1}; this engine is core API 1 level ${P.CORE_API_LEVEL}`)],
     ["an unknown field", [hello], (ix) => (ix.packages["@sagebrush/hello@0.1.0"].extra = 1), /unknown field/],
     ["a dir that isn't its id's", [hello], (ix) => (ix.packages["@sagebrush/hello@0.1.0"].dir = "other"), /dir must be its id's name/],
     ["another core API", [hello], (ix) => (ix.core_api = 2), /core API 2/],
