@@ -22,7 +22,7 @@
   },
   {
    "name": "@nodable/entities",
-   "version": "3.1.0",
+   "version": "3.0.0",
    "license": "MIT"
   },
   {
@@ -47,12 +47,12 @@
   },
   {
    "name": "fast-xml-builder",
-   "version": "1.3.1",
+   "version": "1.3.0",
    "license": "MIT"
   },
   {
    "name": "fast-xml-parser",
-   "version": "5.11.2",
+   "version": "5.10.1",
    "license": "MIT"
   },
   {
@@ -72,7 +72,7 @@
   },
   {
    "name": "is-unsafe",
-   "version": "2.0.2",
+   "version": "2.0.0",
    "license": "MIT"
   },
   {
@@ -87,7 +87,7 @@
   },
   {
    "name": "papaparse",
-   "version": "5.7.0",
+   "version": "5.6.0",
    "license": "MIT"
   },
   {
@@ -102,17 +102,17 @@
   },
   {
    "name": "smol-toml",
-   "version": "1.9.1",
+   "version": "1.9.0",
    "license": "BSD-3-Clause"
   },
   {
    "name": "strnum",
-   "version": "2.5.1",
+   "version": "2.4.1",
    "license": "MIT"
   },
   {
    "name": "strtok3",
-   "version": "10.6.2",
+   "version": "10.3.5",
    "license": "MIT"
   },
   {
@@ -122,7 +122,7 @@
   },
   {
    "name": "uint8array-extras",
-   "version": "1.6.0",
+   "version": "1.5.0",
    "license": "MIT"
   },
   {
@@ -132,7 +132,7 @@
   },
   {
    "name": "yaml",
-   "version": "2.9.1",
+   "version": "2.9.0",
    "license": "ISC"
   }
  ],
@@ -146,5 +146,6 @@
   "turndown",
   "@mongodb-js/zstd",
   "node-liblzma"
- ]
+ ],
+ "inlined_from": "just-bash's own pnpm-lock.yaml at its tag just-bash@3.6.0 (commit 7537a260e38648e8998db7a95504102ad80b0194, sha256 e6f0fd29c66e591987553d68c6d473b2629783d7e3ced39291f0d8a45fca407c)"
 }

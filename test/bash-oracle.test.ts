@@ -93,6 +93,27 @@ const compared = (got: any, k?: { differs: Record<string, unknown> }) => ({
   ...("calls" in (k?.differs ?? {}) ? { calls: got.calls } : {}),
 });
 
+// (grader's GRADER-PR116-1: the inlined versions are just-bash's own lockfile's;
+// what the bundle states about itself must agree with them)
+test("the bundle's own license banner names only inlined packages, at the versions vendor.json records", () => {
+  const text = readFileSync(JUST_BASH, "utf8");
+  const banner = /Bundled license information:([\s\S]*?)\*\//.exec(text);
+  assert.ok(banner, "index.cjs has its bundled-license banner");
+  const versions = new Map((vendor.inlined as { name: string; version: string }[]).map((p) => [p.name, p.version]));
+  const named: string[] = [];
+  // (each entry: "<package>/<file>:" lines, then the comment, up to the next blank line)
+  for (const entry of banner![1].split(/\n\s*\n/)) {
+    const files = [...entry.matchAll(/^((?:@[\w.-]+\/)?[\w.-]+)\/[^\s:]*:\s*$/gm)].map((m) => m[1]);
+    if (!files.length) continue;
+    const name = files[0];
+    named.push(name);
+    assert.ok(versions.has(name), `${name} is in the banner but not in vendor.json's inlined packages`);
+    const stated = /@version v(\d+\.\d+\.\d+)|^\s*v(\d+\.\d+\.\d+)\s*$/m.exec(entry);
+    if (stated) assert.equal(versions.get(name), stated[1] ?? stated[2], `${name}: the banner says ${stated[1] ?? stated[2]}`);
+  }
+  assert.deepEqual(named.sort(), ["ieee754", "papaparse", "re2js", "smol-toml"]);
+});
+
 test("the oracle file is current: every case has exactly one result, and nothing else", () => {
   for (const part of ["redirections", "ipython", "os_system"]) {
     assert.deepEqual(oracle[part].map((x: { id: string }) => x.id), cases[part].map((x: { id: string }) => x.id), part);

@@ -1,11 +1,13 @@
 Third-party notices for test/vendor/just-bash-3.6.0/index.cjs (a test-only copy; not in any package).
 
 index.cjs is just-bash 3.6.0's dist/bundle/index.cjs, unchanged: just-bash, Copyright 2025 Vercel Inc.,
-Apache-2.0 (LICENSE beside this file). It inlines the npm packages below; their versions are those
-just-bash 3.6.0's dependency ranges resolve to on Oct 24 2026 (the bundle doesn't record the exact ones),
-and each license text is from that version's npm tarball. The packages it requires instead of inlining
-(diff, guarded-fetch, run, seek-bzip, sprintf-js, sql.js, turndown, @mongodb-js/zstd, node-liblzma) are
-not vendored, and the oracle cases don't reach them.
+Apache-2.0 (LICENSE beside this file). It inlines the npm packages below, at the versions
+just-bash's own pnpm-lock.yaml at its tag just-bash@3.6.0 (commit 7537a260e38648e8998db7a95504102ad80b0194, sha256 e6f0fd29c66e591987553d68c6d473b2629783d7e3ced39291f0d8a45fca407c),
+resolves for packages/just-bash: the closure of its dependencies that the bundle doesn't require at run
+time. The versions the bundle states itself (its legal-comment banner: re2js v1.3.3, papaparse v5.6.0)
+agree, and test/bash-oracle.test.ts checks that. Each license text is from that exact version's npm
+tarball. The packages it requires instead of inlining (diff, guarded-fetch, run, seek-bzip, sprintf-js,
+sql.js, turndown, @mongodb-js/zstd, node-liblzma) are not vendored, and the oracle cases don't reach them.
 
 ==============================================================================
 @borewit/text-codec 0.2.2 (MIT; its LICENSE.txt)
@@ -22,28 +24,16 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-@nodable/entities 3.1.0 (MIT; no license file in the tarball: the MIT text, with its author from package.json)
+@nodable/entities 3.0.0 (MIT; no license file in the tarball: the MIT text, with its author from package.json)
 ==============================================================================
 
 Copyright (c) Amit Gupta (https://solothought.com)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 @tokenizer/inflate 0.4.1 (MIT; its LICENSE)
@@ -71,23 +61,11 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 
 Copyright (c) Borewit
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 anynum 1.0.1 (MIT; its LICENSE)
@@ -140,7 +118,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-fast-xml-builder 1.3.1 (MIT; its LICENSE)
+fast-xml-builder 1.3.0 (MIT; its LICENSE)
 ==============================================================================
 
 MIT License
@@ -166,7 +144,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-fast-xml-parser 5.11.2 (MIT; its LICENSE)
+fast-xml-parser 5.10.1 (MIT; its LICENSE)
 ==============================================================================
 
 MIT License
@@ -242,7 +220,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ==============================================================================
-is-unsafe 2.0.2 (MIT; its LICENSE)
+is-unsafe 2.0.0 (MIT; its LICENSE)
 ==============================================================================
 
 MIT License
@@ -320,7 +298,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-papaparse 5.7.0 (MIT; its LICENSE)
+papaparse 5.6.0 (MIT; its LICENSE)
 ==============================================================================
 
 The MIT License (MIT)
@@ -397,7 +375,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-smol-toml 1.9.1 (BSD-3-Clause; its LICENSE)
+smol-toml 1.9.0 (BSD-3-Clause; its LICENSE)
 ==============================================================================
 
 Copyright (c) Squirrel Chat et al., All rights reserved.
@@ -426,7 +404,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-strnum 2.5.1 (MIT; its LICENSE)
+strnum 2.4.1 (MIT; its LICENSE)
 ==============================================================================
 
 MIT License
@@ -452,7 +430,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-strtok3 10.6.2 (MIT; its LICENSE.txt)
+strtok3 10.3.5 (MIT; its LICENSE.txt)
 ==============================================================================
 
 MIT License
@@ -492,7 +470,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-uint8array-extras 1.6.0 (MIT; its license)
+uint8array-extras 1.5.0 (MIT; its license)
 ==============================================================================
 
 MIT License
@@ -532,7 +510,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-yaml 2.9.1 (ISC; its LICENSE)
+yaml 2.9.0 (ISC; its LICENSE)
 ==============================================================================
 
 Copyright Eemeli Aro <eemeli@gmail.com>
