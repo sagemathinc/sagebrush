@@ -495,6 +495,16 @@ class PolynomialRing_:
         """
         return self._base
 
+    def change_ring(self, R):
+        """The polynomial ring over R in the same variable.
+
+        EXAMPLES::
+
+            sage: PolynomialRing(ZZ, 'x').change_ring(GF(5))
+            Univariate Polynomial Ring in x over Finite Field of size 5
+        """
+        return _sa().PolynomialRing(R, self._name)
+
     def variable_name(self):
         """The name of the variable.
 
@@ -1159,16 +1169,52 @@ class Polynomial:
             sage: (x^2 + 3*x + 5).change_ring(QQ)
             x^2 + 3*x + 5
         """
+        import _sage_ffsub as S
+        refuse = lambda: NotImplementedError("change_ring of a polynomial of degree %d to %r is not supported yet (work)" % (self.degree(), R))
         if R is QQ or R is ZZ:
-            return PolynomialRing(R, self._ring._name)(self._c)
+            # (a word each, charged before any coefficient is visited, by the
+            # shared core's budget; daybreak2 LIMIT-F3-2)
+            S.charge([S.WORK], len(self._c), refuse)
+            if R is QQ:
+                return PolynomialRing(R, self._ring._name)(self._c)
+            if any(int(a.denominator) != 1 for a in self._c):
+                raise TypeError("no conversion of this rational to integer")
+            return PolynomialRing(R, self._ring._name)([int(a) for a in self._c])
         if isinstance(R, PolynomialRing_):
             return R(self._c)
+        import _sage_ff
+        if isinstance(R, (_sage_ff.IntegerModRing_, _sage_ff.FiniteField_ext)):
+            # (each coefficient reduced, by the shared core: its work, from
+            # the coefficients' number and sizes, admitted before any is
+            # reduced or copied)
+            m = int(R.characteristic())
+            fail = lambda c: ZeroDivisionError("inverse of Mod(%d, %d) does not exist" % (int(c.denominator) % m, m))
+            cs = S.from_rationals(self._c, R, [S.WORK], refuse, fail)
+            return _sage_ff.PolynomialRing_ff(R, self._ring._name)(cs)
         import _sage_nfpoly
         if _sage_nfpoly.is_number_field(R):
             return _sage_nfpoly.PolynomialRing_nf(R, self._ring._name)(self._c)
         if isinstance(R, _sage_nfpoly.PolynomialRing_nf_):
             return R(self._c)
         raise NotImplementedError("change_ring to %r" % (R,))
+
+    def map_coefficients(self, f, new_base_ring=None):
+        """The polynomial with f applied to each nonzero coefficient (as
+        Sage's: a zero stays zero), over new_base_ring (this base ring when
+        None).
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: (3*x^2 + 1).map_coefficients(lambda c: c + 1)
+            4*x^2 + 2
+        """
+        # (each coefficient as an element of this ring, as Sage passes it: an
+        # integral one of a polynomial over QQ is QQ's, not an int; astra
+        # CORR-F3-1)
+        B = self._ring._base
+        T = B if new_base_ring is None else new_base_ring
+        return _sa().PolynomialRing(T, self._ring._name)([T(f(B(c))) if c else T(0) for c in self._c])
 
     def monic(self):
         """The polynomial divided by its leading coefficient.

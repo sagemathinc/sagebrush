@@ -1,0 +1,45 @@
+Magma descent GF(2^20) -> GF(4), the scan's charge one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma descent GF(2^20) -> GF(4), the scan's charge exact refused apply 0 dlog 0 down 0 read 1 scan 3 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma descent GF(2^20) -> GF(4) one short refused apply 0 dlog 0 down 0 read 1 scan 3 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma descent GF(2^20) -> GF(4) exact admitted $.1^2 + $.1*$.1 + 1 | apply 0 dlog 1 down 1 read 2 scan 6 up 0
+Magma descent of x^100 + 1 (scan only) one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 100 to this field is not supported yet (work)
+Magma descent of x^100 + 1 (scan only) exact admitted $.1^100 + 1 | apply 0 dlog 0 down 0 read 2 scan 202 up 0
+descents admitted at WORK: 7 (a polynomial with that many coefficients outside GF(2), after its scan)
+Magma 7 descents admitted $.1*$.1^6 + $.1*$.1^5 + $.1*$.1^4 + $.1*$.1^3 + $.1*$.1^2 + $.1*$.1 + $.1 | apply 0 dlog 7 down 7 read 2 scan 14 up 0
+Magma 8 descents refused apply 0 dlog 0 down 0 read 1 scan 8 up 0 | ChangeRing of a polynomial of degree 7 to this field is not supported yet (work)
+Magma embedding GF(4) -> GF(16) one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma embedding GF(4) -> GF(16) exact admitted $.1^2 + $.1^5*$.1 + 1 | apply 0 dlog 0 down 0 read 1 scan 0 up 3
+Magma GF(4) -> GF(4) one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma GF(4) -> GF(4) exact admitted $.1^2 + $.1*$.1 + 1 | apply 0 dlog 0 down 0 read 1 scan 0 up 0
+Magma GF(4) -> Q one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma GF(4) -> Q exact refused apply 0 dlog 0 down 0 read 1 scan 0 up 0 | Polynomial is not coercible
+Magma GF(16) -> GF(4), b not in GF(4) refused apply 0 dlog 1 down 1 read 2 scan 3 up 0 | Polynomial is not coercible
+Magma Z -> GF(5^3), the count's charge one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 1 to this field is not supported yet (work)
+Magma Z -> GF(5^3), the count's charge exact refused apply 0 dlog 0 down 0 read 1 scan 0 up 0 | ChangeRing of a polynomial of degree 1 to this field is not supported yet (work)
+Magma Z -> GF(5^3), a 3000-digit coefficient one short refused apply 0 dlog 0 down 0 read 1 scan 0 up 0 | ChangeRing of a polynomial of degree 1 to this field is not supported yet (work)
+Magma Z -> GF(5^3), a 3000-digit coefficient exact admitted 3*$.1 + 1 | apply 0 dlog 0 down 0 read 2 scan 0 up 0
+Magma Q -> GF(5) one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 1 to this field is not supported yet (work)
+Magma Q -> GF(5) exact admitted $.1 + 2 | apply 0 dlog 0 down 0 read 2 scan 0 up 0
+Magma Z -> Q one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma Z -> Q exact admitted 3*$.1^2 + 2*$.1 + 1 | apply 0 dlog 0 down 0 read 1 scan 0 up 0
+Magma Z -> Z one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma Z -> Z exact admitted 3*$.1^2 + 2*$.1 + 1 | apply 0 dlog 0 down 0 read 2 scan 0 up 0
+Magma Q -> Z (not integral) one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 1 to this field is not supported yet (work)
+Magma Q -> Z (not integral) exact refused apply 0 dlog 0 down 0 read 1 scan 0 up 0 | Polynomial is not coercible
+Magma GF(2^20) -> Z one short refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing of a polynomial of degree 2 to this field is not supported yet (work)
+Magma GF(2^20) -> Z exact admitted $.1^2 + 1 | apply 0 dlog 0 down 0 read 1 scan 3 up 0
+Magma descent from GF(2^21) refused apply 0 dlog 0 down 0 read 0 scan 0 up 0 | ChangeRing between finite fields of more than 2^20 elements is not supported yet
+Sage change_ring GF(2^20) -> GF(4), the scan's charge one short refused NotImplementedError apply 0 dlog 0 down 0 read 0 scan 0 up 0 | change_ring of elements of Finite Field in z20 of size 2^20 and Finite Field in z2 of size 2^2 is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)
+Sage change_ring GF(2^20) -> GF(4), the scan's charge exact refused NotImplementedError apply 0 dlog 0 down 0 read 1 scan 3 up 0 | change_ring of elements of Finite Field in z20 of size 2^20 and Finite Field in z2 of size 2^2 is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)
+Sage change_ring GF(2^20) -> GF(4) one short refused NotImplementedError apply 0 dlog 0 down 0 read 1 scan 3 up 0 | change_ring of elements of Finite Field in z20 of size 2^20 and Finite Field in z2 of size 2^2 is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)
+Sage change_ring GF(2^20) -> GF(4) exact admitted v^2 + z2*v + 1 | apply 0 dlog 1 down 1 read 2 scan 6 up 0
+Sage GF(7) -> ZZ change_ring one short refused NotImplementedError apply 0 dlog 0 down 0 read 0 scan 0 up 0 | change_ring of a polynomial of degree 1 to Integer Ring is not supported yet (work)
+Sage GF(7) -> ZZ change_ring exact admitted z + 3 | apply 0 dlog 0 down 0 read 1 scan 0 up 0
+Sage ZZ -> GF(5^3) change_ring one short refused NotImplementedError apply 0 dlog 0 down 0 read 1 scan 0 up 0 | change_ring of a polynomial of degree 1 to Finite Field in c of size 5^3 is not supported yet (work)
+Sage ZZ -> GF(5^3) change_ring exact admitted 3*x + 1 | apply 0 dlog 0 down 0 read 2 scan 0 up 0
+Sage ZZ -> QQ change_ring one short refused NotImplementedError apply 0 dlog 0 down 0 read 0 scan 0 up 0 | change_ring of a polynomial of degree 1 to Rational Field is not supported yet (work)
+Sage ZZ -> QQ change_ring exact admitted 3*x + 2 | apply 0 dlog 0 down 0 read 1 scan 0 up 0
+Sage map_coefficients GF(4) -> GF(16) one short refused NotImplementedError apply 0 dlog 0 down 0 read 0 scan 0 up 0 | map_coefficients of elements of Finite Field in a of size 2^2 and Finite Field in b of size 2^4 is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)
+Sage map_coefficients GF(4) -> GF(16) exact admitted t^2 + (b^2 + b)*t + 1 | apply 3 dlog 0 down 0 read 1 scan 0 up 0
+Sage map_coefficients by a function one short refused NotImplementedError apply 0 dlog 0 down 0 read 0 scan 0 up 0 | map_coefficients of a polynomial of degree 2 is not supported yet (work)
+Sage map_coefficients by a function exact admitted t^2 + (a + 1)*t + 1 | apply 0 dlog 0 down 0 read 1 scan 0 up 0
