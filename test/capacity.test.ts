@@ -61,8 +61,8 @@ print(with_total(16 * sneed, lambda: S._admit_prime_sieve(0, 1000, "primes")), w
 # cap 256 MiB, need about 303 MiB, headroom 700 MiB: refused at the cap
 C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("wasm engine", 700 * MiB, 0)])
 print(with_total(1 << 30, lambda: M._admit_size(F, 1450, 1450)))
-# need about 800 MiB, above both: refused at the cap
-print(with_total(1 << 30, lambda: M._admit_size(F, 2350, 2350))[2:])
+# need about 732 MiB (RDF, 1600 x 1600), above both: refused at the cap
+print(with_total(1 << 30, lambda: M._admit_size(RDF, 1600, 1600))[1:])
 # the reverse: cap 1 GiB, headroom 200 MiB, need about 303 MiB: admitted, as
 # the guard's predicate says; the headroom is what capacity() reports
 C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("wasm engine", 200 * MiB, 0)])
@@ -78,7 +78,7 @@ C._set_sources()
     "100 ('refused', 15100, 15099)",
     "None ('refused', 1031, 1030)",
     "('refused', 317477500, 268435456, 734003200)",
-    "(268435456, 734003200)",
+    "(768000000, 268435456, 734003200)",
     "(1450, 1450) 200",
     "('refused', 317477500, 268435456, None)",
     "",
@@ -105,6 +105,7 @@ C.poly_share = lambda: None
 print(factor())
 time.sleep(0.11)
 print(factor())
+# (1.5 is Sage's RealNumber here)
 for bad in (-5, 2 ** 40, 1.5, "x"):
     time.sleep(0.11)
     C.poly_share = lambda bad=bad: 1024 if bad is None else bad
@@ -135,7 +136,7 @@ except KeyboardInterrupt:
   // (within 100 ms of the push: the share is still the one pushed)
   assert.match(out[2], /the limit, 1024 bytes/);
   assert.equal(out[3], "2");
-  assert.deepEqual(out.slice(4, 8), ["-5 2", "1099511627776 2", "1.5 2", "'x' 2"]);
+  assert.deepEqual(out.slice(4, 8), ["-5 2", "1099511627776 2", "1.50000000000000 2", "'x' 2"]);
   assert.equal(out[8], "100000 [[['-1', '1'], 1], [['1', '1'], 1]]");
   assert.equal(out[9], "KeyboardInterrupt");
 });
