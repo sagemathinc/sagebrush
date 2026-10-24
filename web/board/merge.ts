@@ -39,12 +39,14 @@ export type MergeReport =
   | { kind: "cycle"; key: string }
   | { kind: "orphan"; key: string; parent: string }
   | { kind: "page-restored"; key: string }
-  | { kind: "edge-removed"; key: string; missing: string }
+  | { kind: "edge-removed"; key: string; missing: string[] }
   | { kind: "reordered"; key: string };
-/** What a report's one-click alternative would set: a field (ABSENT: removed), or a whole record (null: deleted). */
+/** What a report's one-click alternative would set: a field (ABSENT: removed), a whole record (null: deleted), or
+ * several whole records together (a removed edge with the ends it needs). */
 export type MergeAlternative =
   | { key: string; field: string; value: unknown }
-  | { key: string; record: Rec | null };
+  | { key: string; record: Rec | null }
+  | { key: string; records: { key: string; record: Rec }[] };
 export type MergeResult =
   | { records: Rec[]; reports: MergeReport[]; alternatives: MergeAlternative[]; used: number }
   | { refused: "work" | "paged" | "conservation" | "time"; used: number };
@@ -126,6 +128,7 @@ function merge(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions, charge: (n: num
   // a record changed (or created) on both sides: field by field
   const fields = (key: string, r0: Rec | undefined, r1: Rec, r2: Rec): Rec => {
     const names = [...new Set([...Object.keys(r0 ?? {}), ...Object.keys(r1), ...Object.keys(r2)])].sort();
+    // (fields defined as own properties: a JSON key such as "__proto__" stays a field, never a prototype)
     const res: Rec = {};
     for (const f of names) {
       charge(1);
@@ -143,7 +146,7 @@ function merge(base: Rec[], a: Rec[], b: Rec[], o: MergeOptions, charge: (n: num
         reports.push({ kind: "conflict", key, field: f, kept: out(kept), other: out(other) });
         alternatives.push({ key, field: f, value: out(other) });
       }
-      if (v !== NONE) res[f] = v;
+      if (v !== NONE) Object.defineProperty(res, f, { value: v, enumerable: true, writable: true, configurable: true });
     }
     return res;
   };
@@ -259,19 +262,21 @@ function repair(m: Map<string, Rec>, B: Map<string, Rec>, A: Map<string, Rec>, C
       for (const x of path) state.set(x, 2);
     }
   }
-  // an edge with a missing end: removed, the end's restoring its alternative (each page's items indexed once:
-  // removing edges changes no item)
+  // an edge with a missing end: removed; its alternative brings back the edge as merged (every edit kept) together
+  // with each missing end, from the side that still had it (each page's items indexed once: removing edges
+  // changes no item)
   const idsOf = new Map<unknown, Map<string, Rec>>();
   for (const r of [...m.values()].filter((r) => r.type === "edge").sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1))) {
     charge(1);
     let ids = idsOf.get(r.page);
     if (!ids) { ids = byId(r.page); idsOf.set(r.page, ids); }
-    const missing = [r.from, r.to].find((e) => !ids.has(String(e)));
-    if (missing !== undefined) {
-      const k = keyOf(r), endKey = keyOf({ type: "item", page: r.page, id: missing });
+    const missing = [...new Set([r.from, r.to].map(String))].filter((e) => !ids.has(e));
+    if (missing.length) {
+      const k = keyOf(r), endKeys = missing.map((id) => keyOf({ type: "item", page: r.page, id })).sort();
       m.delete(k);
-      reports.push({ kind: "edge-removed", key: k, missing: endKey });
-      alternatives.push({ key: endKey, record: B.get(endKey) ?? A.get(endKey) ?? C.get(endKey) ?? null });
+      reports.push({ kind: "edge-removed", key: k, missing: endKeys });
+      const ends = endKeys.map((ek) => ({ key: ek, record: A.get(ek) ?? C.get(ek) ?? B.get(ek) })).filter((e): e is { key: string; record: Rec } => !!e.record);
+      alternatives.push({ key: k, records: [{ key: k, record: r }, ...ends] });
     }
   }
   // siblings with the same pos: ordered by (pos, key)

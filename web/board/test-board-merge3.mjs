@@ -93,7 +93,39 @@ const board = recs({
   const y = board.map((r) => (r.type === "edge" ? { ...r, label: "rel" } : r));
   const r = m3(board, x, y);
   check(!r.records.some((e) => e.type === "edge"), "an edge with a missing end: removed");
-  check(r.reports.some((p) => p.kind === "edge-removed") && r.alternatives.some((p) => p.record && p.record.id === "n"), "...reported, its end restorable");
+  check(r.reports.some((p) => p.kind === "edge-removed") && r.alternatives.some((p) => p.records?.some((x) => x.record.id === "n")), "...reported, its end restorable");
+}
+// astra2's CORR-PR121-3: a removed edge that was edited comes back, with every edit and the ends it needs
+for (const gone of [["a"], ["a", "b"]]) {
+  const base = recs({ nodes: [{ id: "a" }, { id: "b" }, { id: "c" }], edges: [{ from: "a", to: "b", label: "old" }] });
+  const x = drop(base, (r) => (r.type === "item" && gone.includes(r.id)) || r.type === "edge");
+  const y = base.map((r) => (r.type === "edge" ? { ...r, label: "new" } : r));
+  for (const [s1, s2] of [[x, y], [y, x]]) {
+    const r = m3(base, s1, s2);
+    check(!r.refused && !r.records.some((e) => e.type === "edge"), `edited dangling edge (${gone}): removed from the merge`);
+    const rep = r.reports.find((p) => p.kind === "edge-removed");
+    check(rep && rep.missing.length === gone.length, `edited dangling edge (${gone}): reported with every missing end`);
+    const alt = r.alternatives.find((p) => p.key === rep?.key && p.records);
+    check(!!alt, `edited dangling edge (${gone}): an alternative restoring it`);
+    // (applying the alternative: the edge as merged, its edit kept, and its ends; then the board conserves)
+    const after = byKey(r.records);
+    for (const x of alt?.records ?? []) after.set(x.key, x.record);
+    const rs = [...after.values()];
+    const e = rs.find((q) => q.type === "edge");
+    check(e?.label === "new", `edited dangling edge (${gone}): restored with its edit`);
+    check(gone.every((id) => item(rs, id)), `edited dangling edge (${gone}): its ends restored`);
+    const again = m3(rs, rs, rs);
+    check(!again.refused && again.records.some((q) => q.type === "edge" && q.label === "new"), `edited dangling edge (${gone}): the restored board is whole`);
+  }
+}
+// astra2's CORR-PR121-1: a field named "__proto__" (or any inherited name) merged field by field stays a field
+for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+  const base = toRecords(JSON.parse(`{"format":"sagebrush-board","version":1,"nodes":[{"id":"n","text":"old","x":0,${JSON.stringify(name)}:{"keep":true}}],"edges":[]}`));
+  const a = base.map((r) => (r.type === "item" ? { ...r, x: 1 } : r)), b = base.map((r) => (r.type === "item" ? { ...r, text: "new" } : r));
+  const r = m3(base, a, b);
+  const n = item(r.records, "n");
+  check(n && Object.hasOwn(n, name) && JSON.stringify(n[name]) === '{"keep":true}' && n.x === 1 && n.text === "new", `a field named ${name}: kept through a field-by-field merge`);
+  check(r.reports.length === 0, `a field named ${name}: no report invented`);
 }
 {
   // two edges added between the same ends: both kept
@@ -161,7 +193,7 @@ for (let t = 0; t < 400; t++) {
   if (!same.refused && !same.reports.length) check(canon(same.records) === canon([...b].sort((p, q) => (keyOf(p) < keyOf(q) ? -1 : 1))), `random ${t}: merge3(x, x, y) == y`);
   if (r1.refused) continue;
   // no edit lost: every record a or b changed (and the other didn't delete unreported) is in the result, or reported
-  const res = byKey(r1.records), B = byKey(base), reported = new Set([...r1.reports.map((p) => p.key), ...r1.reports.map((p) => p.missing).filter(Boolean)]);
+  const res = byKey(r1.records), B = byKey(base), reported = new Set([...r1.reports.map((p) => p.key), ...r1.reports.flatMap((p) => p.missing ?? [])]);
   for (const side of [a, b]) for (const r of side) {
     const k = keyOf(r), r0 = B.get(k);
     if (r0 && canon(r0) === canon(r)) continue;

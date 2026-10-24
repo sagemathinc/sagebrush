@@ -13,6 +13,39 @@ const fails = [];
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const B = (d) => ({ format: "sagebrush-board", version: 1, ...d });
 
+// ---- astra2's CORR-PR121-2: extension keys with inherited names, at the top, in a node, an edge and a page
+for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf"]) {
+  const k = JSON.stringify(name);
+  for (const [where, json] of [
+    ["the board", `{"format":"sagebrush-board","version":1,${k}:{"keep":true},"nodes":[{"id":"a"}],"edges":[]}`],
+    ["a node", `{"format":"sagebrush-board","version":1,"nodes":[{"id":"a",${k}:{"keep":true}}],"edges":[]}`],
+    ["an edge", `{"format":"sagebrush-board","version":1,"nodes":[{"id":"a"},{"id":"b"}],"edges":[{"from":"a","to":"b",${k}:{"keep":true}}]}`],
+    ["a page", `{"format":"sagebrush-board","version":1,"pages":[{"id":"p",${k}:{"keep":true},"nodes":[{"id":"a"}]}]}`],
+  ]) {
+    const d = JSON.parse(json);
+    const r = roundTrips(d);
+    check(r.ok, `${name} in ${where}: comes back${r.ok ? "" : " (differs at " + r.at + ")"}`);
+    const bytes = serialize(fromEditRecords(editRecords(d)));
+    check(bytesAre(bytes, d).ok, `${name} in ${where}: the bytes written keep it`);
+  }
+}
+// (CORR-PR121-1, end to end: raw JSON, edit records, a field-by-field merge, the board, its bytes)
+for (const name of ["__proto__", "constructor", "toString"]) {
+  const d = JSON.parse(`{"format":"sagebrush-board","version":1,"nodes":[{"id":"n","text":"old","x":0,${JSON.stringify(name)}:{"keep":true}}],"edges":[]}`);
+  const base = editRecords(d);
+  const a = base.map((r) => (r.type === "item" ? { ...r, x: 1 } : r)), b = base.map((r) => (r.type === "item" ? { ...r, text: "new" } : r));
+  const r = boardMerge3(base, a, b, { mergeStrings3, work: 1e9 });
+  const back = JSON.parse(serialize(fromEditRecords(r.records)));
+  const n = back.nodes[0];
+  check(Object.hasOwn(n, name) && JSON.stringify(n[name]) === '{"keep":true}' && n.x === 1 && n.text === "new" && r.reports.length === 0, `${name} in a node: kept through a merge and the bytes written`);
+}
+// (admission runs the real write: a value the file can't hold, here a number past double range, is refused)
+{
+  const d = JSON.parse('{"format":"sagebrush-board","version":1,"nodes":[{"id":"a","x":1e400}],"edges":[]}');
+  const r = roundTrips(d);
+  check(!r.ok, `a value the written file can't hold: not editable${r.ok ? "" : " (at " + r.at + ")"}`);
+}
+
 // ---- the example boards
 const dir = new URL("./examples/", import.meta.url).pathname;
 for (const f of readdirSync(dir).filter((f) => f.endsWith(".board.json")).sort()) {
