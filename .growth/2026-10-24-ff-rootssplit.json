@@ -3,7 +3,7 @@
  "reason": "F3 part 2 (#92): Magma RootsInSplittingField and Sage splitting_field / roots(ring) over the shared finite-field core (lib/_sage_ffsub.py split_*, lib/_sage_ff.py, lib/_magma.py), with the catalog and docsearch entries",
  "bytes": {
   "cli/lib.gen.js": 12372,
-  "cli/pyjs.cjs": 14025,
+  "cli/pyjs.cjs": 14102,
   "engine/lib/magma-more.src": 356,
   "engine/lib/magma.pre": 35308,
   "engine/lib/magma.src": 8641,
