@@ -7,7 +7,14 @@
 //           {fsPut: path, data}        a file uploaded (data) or deleted (null) in the page
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
+//           {init: {limits}}          the engine's limits (src/limits.ts), the
+//                                       deployment's or course's JSON text or null
+//                                       (the defaults): required before any run, and
+//                                       accepted once; never from a document, a URL
+//                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//           {initFailed: message}      the limits are invalid: this worker is done
+//                                       (each run then answers with the message)
 //           {ready, version, interrupt, seeded, startup}  started (interrupt: the
 //                                       shared flag, if any; seeded, startup: web/replay-env.ts)
 // The Worker's name carries TimeTravel replay's parameters (web/replay-env.ts).
@@ -40,6 +47,7 @@ import { onChunkInstalled, prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
+import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 
 // The files each run reads and writes (the reactive notebook's file edges):
@@ -47,7 +55,16 @@ import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 // library, under /$pyjs, is not a file of the notebook.)
 let reads = new Set<string>(), writes = new Set<string>();
 const mine = (p: string) => !p.startsWith("/$pyjs");
+// The init gate: awaiting-init -> validating -> ready | failed.  The session's
+// runtime waits for the init message's limits, and runs nothing before it is
+// given them (src/notebook-session.ts); runs that come earlier wait; failed
+// is final, and every run is then answered with its message.
+let gate: "awaiting-init" | "validating" | "ready" | "failed" = "awaiting-init";
+let failure = "";
+let giveLimits: (l: LimitsText) => void = () => {}, refuseLimits: (e: Error) => void = () => {};
+const limits = new Promise<LimitsText>((ok, no) => ((giveLimits = ok), (refuseLimits = no)));
 const session = notebookSession((m) => postMessage(m), {
+  limits,
   runs: {
     begin: (m) => {
       reads = new Set();
@@ -124,9 +141,52 @@ onChunkInstalled((file) => postMessage({ libChunk: file }));
 let pkgsetReady: Promise<void> = Promise.resolve();
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
 
+/** The init message's limits, or the reason they are refused before any
+ * parsing (the validator, lib/_limits.py, checks the rest). */
+// Only {limits: null} means the defaults: an envelope that isn't
+// {limits: text | null}, or limits that aren't text, are settings supplied
+// wrongly, and refused like invalid ones, never taken as the defaults
+// (astra CORR-FF93-1).
+const kind = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "an array" : typeof v === "object" ? "an object" : `a ${typeof v}`);
+function initLimits(init: any): LimitsText | string {
+  if (init === null || typeof init !== "object" || Array.isArray(init)) return `limits: the init message must be {limits: a JSON text or null}, not ${kind(init)}`;
+  if (!Object.prototype.hasOwnProperty.call(init, "limits") || init.limits === undefined) return "limits: the init message has no limits (a JSON text, or null for the defaults)";
+  const l = init.limits;
+  if (l === null) return null;
+  if (typeof l !== "string") return `limits: the limits must be a JSON text, not ${kind(l)}`;
+  if (utf8Bytes(l) > LIMITS_MAX_BYTES) return `limits: the limits are larger than ${LIMITS_MAX_BYTES} bytes`;
+  return { text: l, name: null };
+}
+const failed = (message: string) => {
+  gate = "failed";
+  failure = message;
+  postMessage({ initFailed: message });
+};
+
 self.onmessage = async (ev: MessageEvent) => {
   const m = ev.data;
   if (m.broker && BROKERED && !ctrl) return setBroker(m.broker);
+  if (m.init !== undefined) {
+    // (once: a second init, or any later reconfiguration, is refused)
+    if (gate !== "awaiting-init") return postMessage({ initRefused: "this engine's limits are set already" });
+    gate = "validating";
+    const l = initLimits(m.init);
+    if (typeof l === "string") {
+      // (the session's runtime then never starts: runs waiting for it are refused)
+      failed(l);
+      refuseLimits(new Error(l));
+      return;
+    }
+    giveLimits(l);
+    return;
+  }
+  if (gate === "failed") {
+    if (m.id !== undefined) {
+      postMessage({ id: m.id, stream: "stderr", target: null, text: `This engine's settings are invalid: ${failure}; ask the site's administrator.\n` });
+      postMessage({ id: m.id, done: true, ms: 0, error: true });
+    }
+    return;
+  }
   if (m.pkgset !== undefined) {
     pkgsetReady = useSet(String(m.pkgset), fetchBytes).catch((e) => postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) }));
     return;
@@ -143,13 +203,27 @@ self.onmessage = async (ev: MessageEvent) => {
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }
-  await session.handle(m);
+  try {
+    await session.handle(m);
+  } catch (e) {
+    // (the session never became ready: its limits are invalid)
+    if (gate !== "failed") throw e;
+    if (m.id !== undefined) {
+      postMessage({ id: m.id, stream: "stderr", target: null, text: `This engine's settings are invalid: ${failure}; ask the site's administrator.\n` });
+      postMessage({ id: m.id, done: true, ms: 0, error: true });
+    }
+  }
 };
 // The interrupt flag, shared with the page when it is cross-origin isolated
 // (Stop then raises KeyboardInterrupt here instead of restarting the worker).
 const interrupt = typeof SharedArrayBuffer === "function" && R.INTR.buffer instanceof SharedArrayBuffer ? R.INTR.buffer : null;
 // ready once the interpreter is: `startup` is the clock values read until
 // then (recorded, or replayed), `seeded` whether the entropy is reproducible
-session.ready.then(() =>
-  postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, seeded: replayEnv.seeded, startup: replayEnv.endStartup() }),
+session.ready.then(
+  () => {
+    if (gate === "failed") return;
+    gate = "ready";
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, seeded: replayEnv.seeded, startup: replayEnv.endStartup() });
+  },
+  (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );
