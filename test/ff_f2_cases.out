@@ -1,0 +1,86 @@
+trace boundary at p = 2: 171
+Trace one short refused powers 0 Trace of an element of a finite field of degree 4 is not supported yet
+Trace exact admitted 0
+Norm one short refused powers 0 Norm of an element of a finite field of degree 4 is not supported yet
+Norm exact admitted 2
+MinimalPolynomial one short refused powers 0 MinimalPolynomial of an element of a finite field of degree 4 is not supported yet
+MinimalPolynomial exact admitted $.1^2 + 2*$.1 + 2
+CharacteristicPolynomial one short refused powers 0 CharacteristicPolynomial of an element of a finite field of degree 4 is not supported yet
+CharacteristicPolynomial exact admitted $.1^4 + $.1^2 + 1
+relative Trace one short refused powers 0 Trace of elements of GF(2^6) and GF(2^3) is not supported yet
+relative Trace exact admitted $.1
+relative Norm one short refused powers 0 Norm of elements of GF(2^6) and GF(2^2) is not supported yet
+relative Norm exact admitted $.1
+relative MinimalPolynomial one short refused powers 0 MinimalPolynomial of elements of GF(2^6) and GF(2^2) is not supported yet
+relative MinimalPolynomial exact admitted $.1^3 + $.1^2 + $.1 + $.1
+relative CharacteristicPolynomial one short refused powers 0 CharacteristicPolynomial of elements of GF(2^6) and GF(2^3) is not supported yet
+relative CharacteristicPolynomial exact admitted $.1^2 + $.1^2
+sage trace one short refused NotImplementedError powers 0 trace of an element of a finite field of degree 4 is not supported yet (work)
+sage trace exact admitted 0
+sage norm one short refused NotImplementedError powers 0 norm of an element of a finite field of degree 4 is not supported yet (work)
+sage norm exact admitted 2
+sage minpoly one short refused NotImplementedError powers 0 minpoly of an element of a finite field of degree 4 is not supported yet (work)
+sage minpoly exact admitted x^2 + 2*x + 2
+sage charpoly one short refused NotImplementedError powers 0 charpoly of an element of a finite field of degree 4 is not supported yet (work)
+sage charpoly exact admitted x^4 + x^3 + 2*x^2 + 2*x + 1
+pow products counted = pow_products, GF(243): 27 exponents, mismatches []
+pow products counted = pow_products, GF(512): 31 exponents, mismatches []
+trace products 3 = 3
+norm products 6 = 6
+minpoly products 7 within the charge True
+charpoly products 5 within the charge True
+relative trace products 80 within the charge True
+relative minpoly products 302 within the charge True
+Root one short refused powers 0 Root of an element of a finite field of degree 4 is not supported yet
+Root exact admitted $.1^13
+sage nth_root one short refused NotImplementedError powers 0 nth_root of an element of a finite field of degree 4 is not supported yet (work)
+sage nth_root exact admitted $.1^27
+Root 2 in GF(7) one short refused powers 0 Root of an element of a finite field of degree 1 is not supported yet
+Root 2 in GF(7) exact admitted 4
+Root 2 in GF(9) one short refused powers 0 Root of an element of a finite field of degree 2 is not supported yet
+Root 2 in GF(9) exact admitted $.1
+Root(GF(7)!2, 2) at WORK = 9 refused powers 0 Root of an element of a finite field of degree 1 is not supported yet
+Root 2 in GF(9) products 68 within the charge True
+sage nth_root k = -(2^1024 + 1) refused NotImplementedError powers 0 nth_root of an exponent of more than 1024 bits is not supported yet
+  inverses 0
+sage nth_root k = -7 admitted $.1^2
+  inverses 1
+sage nth_root k = -7 one short refused NotImplementedError powers 0 nth_root of an element of a finite field of degree 4 is not supported yet (work)
+sage nth_root k = -7 exact admitted $.1^2
+Root k of 1024 bits admitted $.1^14
+Root k of 1025 bits refused powers 0 Root of an exponent of more than 1024 bits is not supported yet
+sage nth_root k of 1025 bits refused NotImplementedError powers 0 nth_root of an exponent of more than 1024 bits is not supported yet
+Root 2 in GF(13) refused powers 0 Root of degree 2 in this finite field is not supported yet
+Root 2 in GF(3^13) refused powers 1 Root of degree 2 in this finite field is not supported yet
+Root 2 in GF(3^12) admitted True
+relative Trace past 2^20 refused powers 0 Trace of elements of GF(2^21) and GF(2^3) is not supported yet
+relative MinimalPolynomial past 2^20 refused powers 0 MinimalPolynomial of elements of GF(2^21) and GF(2^7) is not supported yet
+Trace over GF(2) past 2^20 admitted 0
+absolute Trace past 2^20 admitted 0
+ext of more than 1024 bits refused fields made 0 GF of a field of more than 1024 bits is not supported yet
+ext by 0 refused fields made 0 Extension degree should be a small integer greater than 0
+sage extension of more than 1024 bits refused fields made 0 extension of a finite field to more than 1024 bits is not supported yet
+sage extension of degree 10^12 refused fields made 0 extension of a finite field to more than 1024 bits is not supported yet
+ext past the Conway budget refused powers 0 GF(1771561): the search for its Conway polynomial is beyond the work allowed here, and is not supported yet
+sage extension past the Conway budget refused ConwayBudgetExceeded powers 0 the Conway polynomial for 11^6 is beyond the bounded search here
+fields made 0
+cache unchanged True
+sage extension of degree 1000000000000 refused, powers [] extension of a finite field to more than 1024 bits is not supported yet
+sage extension of degree 1025 refused, powers [] extension of a finite field to more than 1024 bits is not supported yet
+sage extension of degree 1024 refused, powers [] extension of a finite field to more than 1024 bits is not supported yet
+magma and sage relative ['1', '1', '$.1', 'z2', '$.1^3 + $.1^2 + $.1 + $.1', 'x^3 + x^2 + x + z2']
+sage over trace one short refused NotImplementedError powers 0 trace of an element of a finite field of degree 6 is not supported yet (work)
+sage over trace exact admitted 1
+sage over printing one short refused NotImplementedError powers 0 coordinates of elements of Finite Field in z6 of size 2^6 over its base are not supported yet (work)
+sage over printing exact admitted z2*z6 + (z2 + 1)*z6^2
+sage over past 2^20 refused NotImplementedError powers 0 Finite Field in z21 of size 2^21 over Finite Field in z3 of size 2^3 is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)
+vector (0, 1, 0) Vector space of dimension 3 over Finite Field in z2 of size 2^2
+vector base L NotImplementedError the vector of an element over the extension itself is not supported yet
+vector base K NotImplementedError the vector of an element over the extension itself is not supported yet
+vector base GF(2) ValueError not (explicitly) defined over Finite Field of size 2
+same object True True
+cache after 100 names 32 cap 32 w0 evicted, made afresh True
+stale entry not returned True
+long name not cached True True
+bad name variable name '1x' does not start with a letter
+core calls [('charpoly', 2), ('coordinates', 1), ('minpoly', 2), ('norm', 2), ('relative', 3), ('root', 3), ('trace', 2)]

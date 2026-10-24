@@ -203,6 +203,13 @@
   "Xgcd": "> g, x, y := Xgcd(30, 42);\n> g, 30*x + 42*y;\n6 6",
   "aInvariants": "> aInvariants(EllipticCurve([3, 5]));\n[ 0, 0, 0, 3, 5 ]",
   "jInvariant": "> jInvariant(EllipticCurve([0, 0, 1, -1, 0]));\n110592/37",
-  "qExpansion": "> f := Newforms(CuspForms(11, 2))[1][1];\n> qExpansion(f, 6);\nq - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)"
+  "qExpansion": "> f := Newforms(CuspForms(11, 2))[1][1];\n> qExpansion(f, 6);\nq - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)",
+  "DefiningPolynomial": "> DefiningPolynomial(GF(16));\n$.1^4 + $.1 + 1\n> K<b> := GF(16); F<a> := GF(4);\n> DefiningPolynomial(K, F);\n$.1^2 + $.1 + a",
+  "Embed": "> Embed(GF(4), GF(16));\n> GF(4).1 in GF(16);\ntrue",
+  "Generator": "> F<a> := GF(16);\n> Generator(F);\na\n> Generator(GF(7));\n1",
+  "IsSubfield": "> IsSubfield(GF(4), GF(16));\ntrue\n> IsSubfield(GF(8), GF(16));\nfalse",
+  "PrimeField": "> PrimeField(GF(16));\nFinite field of size 2",
+  "Root": "> K<b> := GF(16);\n> Root(b, 7);\nb^13",
+  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"
  }
 }
