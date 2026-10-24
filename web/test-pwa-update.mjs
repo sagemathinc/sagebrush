@@ -44,6 +44,10 @@ const upstream = await freePort();
 const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
 let deployed = false;
 const seen = { site: [], r2: [] };
+// (what the diagnostics print if the page doesn't load: the front's failed requests, the page's console, its failed loads)
+const NOTE_MAX = 40;
+const notes = { front: [], console: [], network: [] };
+const note = (list, line) => { list.push(String(line).slice(0, 300)); if (list.length > NOTE_MAX) list.shift(); };
 const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
 const front = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
@@ -63,8 +67,12 @@ const front = createServer(async (req, res) => {
     }
     seen.site.push(path);
   }
-  const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
-  up.on("error", () => { res.writeHead(502); res.end(); });
+  const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
+    if (r.statusCode >= 400) note(notes.front, `${req.method} ${path} ${r.statusCode}`);
+    res.writeHead(r.statusCode, r.headers);
+    r.pipe(res);
+  });
+  up.on("error", (e) => { note(notes.front, `${req.method} ${path} 502 (upstream: ${e?.code ?? e})`); res.writeHead(502); res.end(); });
   req.pipe(up);
 });
 await new Promise((r) => front.listen(0, "127.0.0.1", r));
@@ -82,21 +90,61 @@ try {
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
   const waiting = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+  const urls = new Map();
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); return; }
+    // (events, kept for the diagnostics)
+    const p = m.params ?? {};
+    if (m.method === "Runtime.consoleAPICalled" && (p.type === "error" || p.type === "warning")) note(notes.console, `${p.type}: ${(p.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" ")}`);
+    else if (m.method === "Runtime.exceptionThrown") note(notes.console, `exception: ${p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text}`);
+    else if (m.method === "Log.entryAdded" && p.entry?.level === "error") note(notes.console, `log: ${p.entry.text} ${p.entry.url ?? ""}`);
+    else if (m.method === "Network.requestWillBeSent") { urls.set(p.requestId, p.request?.url); if (urls.size > 2000) urls.delete(urls.keys().next().value); }
+    else if (m.method === "Network.loadingFailed") note(notes.network, `failed: ${urls.get(p.requestId) ?? p.requestId} ${p.errorText ?? ""} ${p.blockedReason ?? ""}`);
+    else if (m.method === "Network.responseReceived" && p.response?.status >= 400) note(notes.network, `${p.response.status}: ${p.response.url}`);
+  };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
   const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
   const runCode = async (code) => {
     await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
     const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
-    await until(`(() => /\\[\\d+\\]/.test(${last}.querySelector('.n').textContent))()`, 90000);
-    return ev(`${last}.querySelector('.out').textContent`);
+    const ran = await until(`(() => /\\[\\d+\\]/.test(${last}.querySelector('.n').textContent))()`, 90000);
+    if (!ran) await diagnose("a cell didn't finish in 90 s");
+    // (always a string, so a check of it fails in words, never with a TypeError)
+    return (await ev(`${last}.querySelector('.out').textContent`)) ?? "(no output: the cell didn't run)";
   };
   const versions = () => ev(`caches.keys().then((ks) => ks.filter((k) => k.startsWith("sagebrush-")))`);
+  // (if the page doesn't load: what it and its service worker were doing, so a CI flake leaves its evidence)
+  const diagnose = async (why) => {
+    const state = await ev(`(async () => {
+      const reg = await navigator.serviceWorker?.getRegistration?.().catch((e) => String(e));
+      const sw = (w) => w ? w.state + " " + w.scriptURL : null;
+      return JSON.stringify({
+        href: location.href, readyState: document.readyState, isolated: globalThis.crossOriginIsolated,
+        status: document.querySelector('#status')?.textContent ?? null,
+        controller: sw(navigator.serviceWorker?.controller),
+        registration: reg && typeof reg === "object" ? { installing: sw(reg.installing), waiting: sw(reg.waiting), active: sw(reg.active) } : reg ?? null,
+        caches: await caches.keys().catch((e) => String(e)),
+      });
+    })()`).catch((e) => "unavailable: " + e);
+    console.log(`  diagnostics (${why}):`);
+    console.log("    page: " + String(state).slice(0, 2000));
+    for (const [k, list] of Object.entries(notes)) for (const line of list) console.log(`    ${k}: ${line}`);
+    if (!Object.values(notes).some((l) => l.length)) console.log("    (no failed requests, console errors or failed loads recorded)");
+  };
+  for (const domain of ["Runtime", "Log", "Network"]) await send(domain + ".enable");
 
   await send("Page.navigate", { url });
-  ok(await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000), "the notebook loads");
-  ok(await until("!!navigator.serviceWorker.controller", 30000), "the service worker controls the page");
+  const loaded = await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+  ok(loaded, "the notebook loads");
+  const controlled = await until("!!navigator.serviceWorker.controller", 30000);
+  ok(controlled, "the service worker controls the page");
+  // (nothing after this can pass without both: say why once, and stop, rather than failing on a missing output)
+  if (!loaded || !controlled) {
+    await diagnose(!loaded ? "the notebook didn't load" : "no service worker controls the page");
+    throw new Error("stopped: the page isn't ready, so the deploy steps can't run (see the diagnostics above)");
+  }
   let out = await runCode("print(6 * 7)");
   ok(out.includes("42") && !seen.site.some((p) => /\/lib\/(sage|mod-heapq)\./.test(p)), "Python runs, with none of Sage's chunks nor heapq's fetched: " + JSON.stringify(out));
   const before = await versions();
