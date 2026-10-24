@@ -5522,21 +5522,43 @@ _TEXT_ESC["-"] = "{-}"
 
 def _latex_text(s):
     """latex() of a string, as Sage writes it: \\text{\\texttt{...}}, one
-    line per row of an array when it has several.  Charged to the display's
-    budget at its escaped length before it is built (LIMIT-SHOW87-2)."""
+    line per row of an array when it has several.  The whole result is
+    charged to the display's budget at its exact length (escapes, wrappers,
+    the array and its separators) by one scan of s, before any of it, or
+    any line of s, is made (LIMIT-SHOW87-2/3)."""
     if not s:
+        _charge(1, 0)
         return ""
-    if "\n" in s:
-        return "\\begin{array}{l}\n" + "\\\\\n".join(_latex_text(l) for l in s.split("\n")) + "\n\\end{array}"
-    _charge(1, 15 + sum(len(_TEXT_ESC.get(c, c)) for c in s))
+    lines, chars, nonempty, cur = 1, 0, 0, 0
+    for c in s:
+        if c == "\n":
+            lines += 1
+            nonempty += cur > 0
+            cur = 0
+        else:
+            n = len(_TEXT_ESC.get(c, c))
+            chars += n
+            cur += n
+    nonempty += cur > 0
+    # each nonempty line \text{\texttt{...}} (16 around it); several lines
+    # an array: \begin{array}{l} and a newline (17), \\ and a newline
+    # between lines (3), a newline and \end{array} (12)
+    total = chars + 16 * nonempty + (0 if lines == 1 else 29 + 3 * (lines - 1))
+    _charge(lines, total)
+    if lines == 1:
+        return _texttt(s)
+    return "\\begin{array}{l}\n" + "\\\\\n".join(_texttt(l) if l else "" for l in s.split("\n")) + "\n\\end{array}"
+
+
+def _texttt(s):
+    # (one line of text, already charged by _latex_text)
     return "\\text{\\texttt{%s}}" % "".join(_TEXT_ESC.get(c, c) for c in s)
 
 
 def _repr_charged(v, path):
     """repr(v), with a list, tuple or dict (exactly those types) walked here
     piece by piece, each piece charged to the display's budget before it is
-    added: a __repr__ that adds to its list is not followed past the length
-    the list had (LIMIT-SHOW87-2); a container inside itself is [...],
+    added (LIMIT-SHOW87-2); a container inside itself is [...],
     {...} or (...), as repr writes it."""
     t = type(v)
     if t is not list and t is not tuple and t is not dict:
@@ -5552,12 +5574,11 @@ def _repr_charged(v, path):
             _charge(1, 4)
             parts.append(_repr_charged(k, path) + ": " + _repr_charged(x, path))
         return "{" + ", ".join(parts) + "}"
-    n = len(v)
-    for i in range(n):
-        if i >= len(v):
-            break
+    # (by iteration, as repr: a __repr__ that adds to the list is followed,
+    # each entry charged, so endless growth meets the budget)
+    for x in v:
         _charge(1, 2)
-        parts.append(_repr_charged(v[i], path))
+        parts.append(_repr_charged(x, path))
     if t is tuple:
         return "(" + parts[0] + ",)" if len(parts) == 1 else "(" + ", ".join(parts) + ")"
     return "[" + ", ".join(parts) + "]"
@@ -5634,7 +5655,8 @@ class _Latex:
         if isinstance(v, _LatexExpr):
             return _charged(str(v))
         if hasattr(v, "_latex_"):
-            return _charged(v._latex_(), "a _latex_")
+            # (its result as text, as before: a _latex_ may return 7)
+            return _charged(str(v._latex_()), "a _latex_")
         if isinstance(v, str):
             return _latex_text(v)
         if isinstance(v, _Fraction):
@@ -5652,14 +5674,12 @@ class _Latex:
                     parts.append("%s : %s" % (self._of(k, path), self._of(t, path)))
                 o, c = "\\left\\{", "\\right\\}"
             else:
-                # (the length it had when the walk began: a _latex_ that adds
-                # to the list is not followed past it)
-                n = len(v)
-                for i in range(n):
-                    if i >= len(v):
-                        break
+                # (by iteration, as before (a subclass's __iter__ is used): a
+                # _latex_ that adds to the list is followed, each entry
+                # charged, so endless growth meets the budget)
+                for x in v:
                     _charge(1, 2, "a _latex_")
-                    parts.append(self._of(v[i], path))
+                    parts.append(self._of(x, path))
                 o, c = ("\\left[", "\\right]") if isinstance(v, list) else ("\\left(", "\\right)")
             _charge(1, 14, "a _latex_")
             return o + ", ".join(parts) + c
