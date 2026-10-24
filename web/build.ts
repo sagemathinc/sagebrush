@@ -402,6 +402,15 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
 if (hasSite) mkdirSync(join(siteDir, "public", "icons"), { recursive: true });
+// the shell worker's bootstrap (web/shell/worker-boot.js; plan-bash-shell r3
+// §6), served with its own policy (web/csp.ts); the shell's module comes from a
+// package set, never from this build
+mkdirSync(join(here, "dist", "shell"), { recursive: true });
+copyFileSync(join(here, "shell", "worker-boot.js"), join(here, "dist", "shell", "worker-boot.js"));
+if (hasSite) {
+  mkdirSync(join(siteDir, "public", "shell"), { recursive: true });
+  copyFileSync(join(here, "shell", "worker-boot.js"), join(siteDir, "public", "shell", "worker-boot.js"));
+}
 // the notebook component's demo page (web/embed)
 mkdirSync(join(here, "dist", "embed"), { recursive: true });
 copyFileSync(join(here, "embed", "index.html"), join(here, "dist", "embed", "index.html"));
