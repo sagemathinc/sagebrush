@@ -104,15 +104,17 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
 // ---- the site's server: started on a port it picks itself, bounded in time and bytes, never left running
 const SERVE_MS = 30_000, SERVE_OUT_MAX = 4096, READY_MS = 10_000;
 /** Start serve.py (spawnChild() spawns it with port 0) and learn its port: the one line it prints once it is
- * listening. Fails in words if it exits, can't start, says anything else, writes SERVE_OUT_MAX bytes without a
- * line, or is silent for `ms`; on every failure the child is killed. Its listeners go once settled, and the rest
+ * listening. Fails in words if it exits, can't start, says anything else, writes more than SERVE_OUT_MAX bytes
+ * before that line (counted in bytes, before anything is kept), or is silent for `ms`; on every failure the child
+ * is killed. Its listeners go once settled, and the rest
  * of its stdout is drained; stderr keeps only a 2,000-character tail (PR #103 review: LIMIT-PWA103-1/LIFE-PWA103-2). */
 function startServe(spawnChild, ms = SERVE_MS) {
   const child = spawnChild();
   let err = "";
   child.stderr?.on("data", (d) => { err = (err + d).slice(-2000); });
   const port = new Promise((resolve, reject) => {
-    let out = "";
+    const kept = [];
+    let bytes = 0;
     const settle = (f, v) => {
       clearTimeout(timer);
       child.stdout?.off("data", onData);
@@ -122,14 +124,19 @@ function startServe(spawnChild, ms = SERVE_MS) {
       f(v);
     };
     const fail = (why) => { try { child.kill("SIGKILL"); } catch {} settle(reject, new Error(why + (err ? " (stderr: " + err.slice(-500) + ")" : ""))); };
+    // (the cap is in bytes and comes first: a chunk that would take what is kept past SERVE_OUT_MAX is refused before
+    // it is kept or parsed, whether or not it holds a newline; PR #103 review, LIMIT-PWA103-1)
     const onData = (d) => {
-      out += d;
-      const nl = out.indexOf("\n");
-      if (nl >= 0) {
-        const line = out.slice(0, nl).trim();
-        if (/^\d{1,5}$/.test(line) && +line > 0 && +line < 65536) settle(resolve, Number(line));
-        else fail("serve.py said something other than its port: " + JSON.stringify(line.slice(0, 80)));
-      } else if (out.length > SERVE_OUT_MAX) fail(`serve.py wrote ${out.length} bytes without a port line`);
+      const chunk = Buffer.isBuffer(d) ? d : Buffer.from(String(d));
+      if (bytes + chunk.length > SERVE_OUT_MAX) return fail(`serve.py wrote more than ${SERVE_OUT_MAX} bytes before its port line`);
+      bytes += chunk.length;
+      kept.push(chunk);
+      const out = Buffer.concat(kept);
+      const nl = out.indexOf(0x0a);
+      if (nl < 0) return;
+      const line = out.subarray(0, nl).toString("utf8").trim();
+      if (/^\d{1,5}$/.test(line) && +line > 0 && +line < 65536) settle(resolve, Number(line));
+      else fail("serve.py said something other than its port: " + JSON.stringify(line.slice(0, 80)));
     };
     const onExit = (code, signal) => fail(`serve.py exited before listening (${code ?? signal})`);
     const onError = (e) => fail(`serve.py couldn't start (${e?.code ?? e})`);
@@ -139,6 +146,18 @@ function startServe(spawnChild, ms = SERVE_MS) {
     child.on("error", onError);
   });
   return { child, port };
+}
+/** The one cleanup for the test's resources in `h` ({mf, server, front, chrome, profile}, each null until made):
+ * it disposes of whichever exist, so it is right on every path, however early the failure. */
+function makeCleanup(h) {
+  return async () => {
+    h.chrome?.kill("SIGKILL");
+    h.server?.kill("SIGKILL");
+    if (h.front) { h.front.closeAllConnections?.(); h.front.close(); }
+    await h.mf?.dispose();
+    await sleep(300);
+    if (h.profile) rmSync(h.profile, { recursive: true, force: true });
+  };
 }
 /** Whether `url` answers 200 within `ms`: {ok} or {ok: false, why}, never a hang (LIMIT-PWA103-3). */
 async function siteReady(url, ms = READY_MS) {
@@ -205,19 +224,25 @@ async function siteReady(url, ms = READY_MS) {
   let o = await outcome(startServe(() => (c = fake()), 150));
   let took = Date.now() - t0;
   ok(/within 0.15 s/.test(o.error) && c.killed && attached(c) === 0 && took <= 150 + STOL, `(self-check) a silent server fails at its deadline, killed, its listeners gone (${took} ms; bound 150 + ${STOL}): ${o.error}`);
-  o = await outcome(startServe(() => { c = fake(); setTimeout(() => c.emit("exit", 1, null), 20); return c; }, 5000));
-  ok(/exited before listening \(1\)/.test(o.error) && attached(c) === 0, "(self-check) a server that exits before its port line fails at once: " + o.error);
-  o = await outcome(startServe(() => { c = fake(); setTimeout(() => c.emit("error", Object.assign(new Error("x"), { code: "ENOENT" })), 20); return c; }, 5000));
-  ok(/couldn't start \(ENOENT\)/.test(o.error) && c.killed && attached(c) === 0, "(self-check) a spawn error fails in words, the child killed: " + o.error);
-  o = await outcome(startServe(() => { c = fake(); setTimeout(() => c.stdout.write("x".repeat(SERVE_OUT_MAX + 1)), 20); return c; }, 5000));
-  ok(/without a port line/.test(o.error) && c.killed && attached(c) === 0, "(self-check) output past " + SERVE_OUT_MAX + " bytes without a port line fails, the child killed: " + o.error);
-  o = await outcome(startServe(() => { c = fake(); setTimeout(() => c.stdout.write("Traceback (most recent call last):\n"), 20); return c; }, 5000));
-  ok(/other than its port/.test(o.error) && c.killed && attached(c) === 0, "(self-check) a line that isn't a port fails, the child killed: " + o.error);
-  o = await outcome(startServe(() => { c = fake(); setTimeout(() => c.stdout.write("40123\n"), 20); return c; }, 5000));
-  ok(o.port === 40123 && !c.killed && attached(c) === 0, "(self-check) a port line is the port, and the listeners go once it is read");
+  // (each case below: its event comes 20 ms after the spawn, and it must end by 20 ms + STOL, with a 5 s deadline unused)
+  const timed = async (make, ms = 5000) => { const t = Date.now(); const r = await outcome(startServe(make, ms)); return { ...r, took: Date.now() - t }; };
+  o = await timed(() => { c = fake(); setTimeout(() => c.emit("exit", 1, null), 20); return c; });
+  ok(/exited before listening \(1\)/.test(o.error) && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a server that exits before its port line fails at once (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.emit("error", Object.assign(new Error("x"), { code: "ENOENT" })), 20); return c; });
+  ok(/couldn't start \(ENOENT\)/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a spawn error fails in words, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("x".repeat(SERVE_OUT_MAX + 1)), 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) one chunk past ${SERVE_OUT_MAX} bytes is refused before it is kept, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("x".repeat(100_000) + "\n"), 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) an overlong line that ends in a newline is refused, not parsed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => { c.stdout.write("x".repeat(SERVE_OUT_MAX - 2)); setTimeout(() => c.stdout.write("é\n"), 5); }, 20); return c; });
+  ok(/more than 4096 bytes/.test(o.error) && c.killed && o.took <= 25 + STOL, `(self-check) a chunk that crosses the cap is refused, counted in bytes (a 2-byte character, ${o.took} ms; bound 25 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => c.stdout.write("Traceback (most recent call last):\n"), 20); return c; });
+  ok(/other than its port/.test(o.error) && c.killed && attached(c) === 0 && o.took <= 20 + STOL, `(self-check) a line that isn't a port fails, the child killed (${o.took} ms; bound 20 + ${STOL}): ${o.error}`);
+  o = await timed(() => { c = fake(); setTimeout(() => { c.stdout.write("401"); setTimeout(() => c.stdout.write("23\n"), 5); }, 20); return c; });
+  ok(o.port === 40123 && !c.killed && attached(c) === 0 && o.took <= 25 + STOL, `(self-check) a port line, even in two chunks, is the port, and the listeners go once it is read (${o.took} ms)`);
   // (real processes: a binary that doesn't exist, and a live child that never speaks, which must be gone after)
-  o = await outcome(startServe(() => (c = spawn("sagebrush-no-such-binary", [], { stdio: ["ignore", "pipe", "pipe"] })), 5000));
-  ok(/couldn't start \(ENOENT\)/.test(o.error), "(self-check) a real spawn error fails in words: " + o.error);
+  o = await timed(() => (c = spawn("sagebrush-no-such-binary", [], { stdio: ["ignore", "pipe", "pipe"] })));
+  ok(/couldn't start \(ENOENT\)/.test(o.error) && o.took <= 200 + STOL, `(self-check) a real spawn error fails in words (${o.took} ms; bound 200 + ${STOL}): ${o.error}`);
   t0 = Date.now();
   o = await outcome(startServe(() => (c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: ["ignore", "pipe", "pipe"] })), 200));
   took = Date.now() - t0;
@@ -235,8 +260,28 @@ async function siteReady(url, ms = READY_MS) {
   await new Promise((r) => hang.close(r));
   ok(!rh.ok && /no answer within 0.2 s/.test(rh.why) && took <= 200 + STOL, `(self-check) a site that never answers fails its readiness check at its 200 ms deadline (${took} ms; bound 200 + ${STOL}): ${rh.why}`);
   // (the port just closed: nothing listens there now; fetch itself refuses well-known ports such as 1)
+  t0 = Date.now();
   const rr = await siteReady(`http://127.0.0.1:${hangPort}/`, 2000);
-  ok(!rr.ok && /ECONNREFUSED/.test(rr.why), "(self-check) a site nothing listens on fails its readiness check in words: " + rr.why);
+  took = Date.now() - t0;
+  ok(!rr.ok && /ECONNREFUSED/.test(rr.why) && took <= 2000 + STOL, `(self-check) a site nothing listens on fails its readiness check in words, within its 2 s deadline (${took} ms; bound 2000 + ${STOL}): ${rr.why}`);
+  // (the cleanup: after a failure before anything else exists, such as a setup read, the resources made are gone)
+  const hh = { mf: null, server: null, front: null, chrome: null, profile: null };
+  let disposed = false;
+  try {
+    hh.mf = { dispose: async () => { disposed = true; } };
+    readFileSync(join(here, "dist", "no-such-file-for-the-self-check"));
+  } catch {} finally {
+    await makeCleanup(hh)();
+  }
+  ok(disposed, "(self-check) a setup read that fails after Miniflare exists still leaves it disposed");
+  // (and in this file, nothing that can fail sits between making Miniflare and the try that cleans it up)
+  // (the patterns are built from parts, so that this check's own text can't match them)
+  const src = readFileSync(new URL(import.meta.url), "utf8");
+  const NEW_MF = "new " + "Miniflare(", MADE = "h.mf = " + NEW_MF, SW_READ = "const sw = " + "readFileSync(";
+  const made = src.indexOf(MADE), tryAt = src.lastIndexOf("\ntry {\n", made), swAt = src.indexOf(SW_READ);
+  const before = src.slice(0, tryAt).split(NEW_MF).length - 1; // (Miniflare made before the try: must be none)
+  ok(made > 0 && tryAt > 0 && src.slice(tryAt, made).split("\n").length <= 3 && swAt > 0 && swAt < tryAt && before === 0 && src.split(NEW_MF).length - 1 === 1,
+    `(self-check) Miniflare is made once, inside the try, as its first statement, after the setup reads (made at ${made}, try at ${tryAt}, sw read at ${swAt})`);
 }
 
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
@@ -246,22 +291,17 @@ const entryFile = join(mkdtempSync(join(tmpdir(), "sb-update-")), "entry.ts");
 writeFileSync(entryFile, `import { handleLibChunk } from ${JSON.stringify(join(here, "engines.ts"))};
 export default { async fetch(req, env, ctx) { return (await handleLibChunk(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`);
 const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "site", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
-// (every resource from here on is disposed of by one cleanup, on every path, whatever was created: LIFE-PWA103-2)
-let server = null, front = null, chrome = null, profile = null, upstream = 0;
-const cleanup = async () => {
-  chrome?.kill("SIGKILL");
-  server?.kill("SIGKILL");
-  if (front) { front.closeAllConnections?.(); front.close(); }
-  await mf.dispose();
-  await sleep(300);
-  if (profile) rmSync(profile, { recursive: true, force: true });
-};
+// (the setup reads come first, before any resource exists: the service worker's source is read here)
+const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
+// (every resource is created inside the try below, in `h`, and disposed of by one cleanup on every path,
+// whatever was created: CORR-PWA103-1, LIFE-PWA103-2)
+const h = { mf: null, server: null, front: null, chrome: null, profile: null };
+const cleanup = makeCleanup(h);
+let upstream = 0;
 let deployed = false;
 const seen = { site: [], r2: [] };
 // (what the diagnostics print if the page doesn't load: the front's failed requests, the page's console, its failed loads)
 const notes = { front: [], console: [], network: [] };
-const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
 const frontHandler = async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   if (deployed && path === "/sw.js") {
@@ -272,7 +312,7 @@ const frontHandler = async (req, res) => {
   }
   if (path.startsWith("/lib/")) {
     if (deployed) {
-      const r = await mf.dispatchFetch("https://sagebrush.test" + path, { method: req.method });
+      const r = await h.mf.dispatchFetch("https://sagebrush.test" + path, { method: req.method });
       seen.r2.push(path + " " + r.status);
       const body = Buffer.from(await r.arrayBuffer());
       res.writeHead(r.status, { ...Object.fromEntries(r.headers), "cross-origin-resource-policy": "cross-origin" });
@@ -289,26 +329,27 @@ const frontHandler = async (req, res) => {
   req.pipe(up);
 };
 try {
-  const bucket = await mf.getR2Bucket("ENGINES");
+  h.mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "site", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
+  const bucket = await h.mf.getR2Bucket("ENGINES");
   // (with the pinned zone data's files, in lib/tzdata/)
   const chunks = readdirSync(join(here, "dist", "lib"), { recursive: true }).filter((f) => statSync(join(here, "dist", "lib", f)).isFile());
   for (const f of chunks) if (!f.startsWith("matlab")) await bucket.put("lib/" + f, readFileSync(join(here, "dist", "lib", f)));
   // (serve.py picks its own free port and says it once it is listening: no port chosen here that something else can
   // take before serve.py binds it, and no fixed wait for it to start; a CI flake was the front's 502, ECONNREFUSED,
   // for the first page load, run 40090051590)
-  const serve = startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
+  const serve = startServe(() => (h.server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
   upstream = await serve.port;
-  front = createServer(frontHandler);
-  await new Promise((resolve, reject) => { front.once("error", reject); front.listen(0, "127.0.0.1", resolve); });
-  const url = `http://127.0.0.1:${front.address().port}/`;
+  h.front = createServer(frontHandler);
+  await new Promise((resolve, reject) => { h.front.once("error", reject); h.front.listen(0, "127.0.0.1", resolve); });
+  const url = `http://127.0.0.1:${h.front.address().port}/`;
   // (the root page answers, within READY_MS, before Chrome is sent to it)
   const ready = await siteReady(url);
   ok(ready.ok, "the site answers before the page is opened" + (ready.ok ? "" : ": " + ready.why));
   if (!ready.ok) throw new Error("stopped: the site didn't answer, so the page can't be opened");
 
-  profile = mkdtempSync(join(tmpdir(), "sb-update-"));
-  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-  const cdpPort = await devtoolsPort(profile);
+  h.profile = mkdtempSync(join(tmpdir(), "sb-update-"));
+  h.chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${h.profile}`, "about:blank"], { stdio: "ignore" });
+  const cdpPort = await devtoolsPort(h.profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
