@@ -11,6 +11,7 @@ import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
+import { heapLimit } from "./heap";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -356,49 +357,15 @@ export function importStar(m: any, g: any) {
 
 // ------------------------------------------------------------------ sys
 
-// The old generation this process can grow to, in bytes: what long-lived
-// values (a matrix, its operands) must fit in.  --max-old-space-size (on
-// the command line or in NODE_OPTIONS) says it exactly.  Otherwise V8's
-// heap_size_limit, which adds a young generation whose size varies by
-// version: for --max-old-space-size=96, Node 22 reports 144 MiB, Node 26
-// 192 and Node 24 288, and a budget taken from it admitted on GitHub's
-// Node 24 what the VMs refused.  Without the flag, a limit of at most 1 GiB
-// is taken as a third old space, a larger one less 256 MiB; Chrome's
-// jsHeapSizeLimit likewise; a nominal 1 GiB when the host cannot say.
-function oldSpaceFlag(): number | null {
-  const g: any = globalThis;
-  const args = [...(g.process?.execArgv ?? []), ...String(g.process?.env?.NODE_OPTIONS ?? "").split(/\s+/)];
-  let mib: number | null = null;
-  for (let i = 0; i < args.length; i++) {
-    const m = /^--max[-_]old[-_]space[-_]size(?:=(\d+))?$/.exec(String(args[i]));
-    if (m) {
-      const v = Number(m[1] ?? args[i + 1]);
-      if (Number.isFinite(v) && v > 0) mib = v;
-    }
-  }
-  return mib === null ? null : mib * 2 ** 20;
-}
-
-export function heapLimit(): number {
-  const g: any = globalThis;
-  const flag = oldSpaceFlag();
-  if (flag !== null) return flag;
-  let n: any = null;
-  try {
-    n = g.process?.getBuiltinModule?.("node:v8")?.getHeapStatistics?.().heap_size_limit;
-  } catch {
-    // (no v8 module: not Node)
-  }
-  if (!(typeof n === "number" && n > 0)) n = g.performance?.memory?.jsHeapSizeLimit;
-  if (!(typeof n === "number" && n > 0)) return 2 ** 30;
-  return n <= 2 ** 30 ? Math.floor(n / 3) : n - 2 ** 28;
-}
+export { heapLimit } from "./heap";
 
 newBuiltinModule("sys", (m) => {
   m.argv = [];
   m.version = "3.14.0 (pyjs-spike)";
   m.hash_info = Ty.structseq("sys.hash_info", ["width", "modulus", "inf", "nan", "imag", "algorithm", "hash_bits", "seed_bits", "cutoff"], [64, 2305843009213693951n, 314159, 0, 1000003, "siphash13", 64, 128, 0]);
-  m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 4300, 640]);
+  // (default_max_str_digits: Sagebrush's default, 0, where CPython's is
+  // 4300: format.ts's intDigits)
+  m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 0, 640]);
   m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
   m.hexversion = 0x30e00f0;
   m.implementation = Ty.simpleNamespace({ name: "pyjs", cache_tag: null, version: m.version_info, _multiarch: "js" });
@@ -857,7 +824,6 @@ newBuiltinModule("math", (m) => {
   unary("cbrt", FD.cbrt);
   // CPython's loghelper: an int (huge ones too) by its own path, refused
   // without its value; anything else as a float, refused with it
-  const LOG_MAX_BITS = 2 ** 27;
   const logOf = (v: any, f: (x: number) => number, ln2: number): number => {
     // (an int subclass too, as CPython's: its int value, not its __float__,
     // CORR-CA8-1)
@@ -866,19 +832,20 @@ newBuiltinModule("math", (m) => {
       if (b <= 0n) raise(T.ValueError, "expected a positive input");
       const d = Number(b);
       if (d !== Infinity) return f(d);
-      // Sagebrush's own bound, where CPython has none: its bit length takes
-      // copies of b, so past 2^27 bits (16 MiB) it is refused, which
-      // asUintN finds with a copy of at most that size (HARD-315-1)
-      if (BigInt.asUintN(LOG_MAX_BITS, b) !== b) {
-        raise(T.OverflowError, `int too large: Sagebrush takes the logarithm of an int of at most ${LOG_MAX_BITS} bits`);
-      }
-      // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond float range
-      const s = O.bitLength(b, LOG_MAX_BITS); // (not b.toString(2): HARD-909-1)
+      // as CPython: frexp (mantissa rounded to 53 bits) for ints beyond
+      // float range, of any size, as CPython has no bound (it was 2^27 bits,
+      // HARD-315-1, before the bit length was found with small copies)
+      const s = O.bitLengthSmallCopies(b); // (not b.toString(2): HARD-909-1)
       let top = b >> BigInt(s - 64);
       // the sticky bit, for correct rounding: it matters only when the 11
       // bits below the 53 kept are exactly half, so only then is the rest
-      // of b examined (a copy)
-      if ((top & 0x7ffn) === 0x400n && BigInt.asUintN(s - 64, b) !== 0n) top |= 1n;
+      // of b examined, a copy of it, admitted against the heap
+      if ((top & 0x7ffn) === 0x400n) {
+        const bytes = (s - 64) / 8;
+        if (bytes > heapLimit() / 2)
+          raise(T.MemoryError, `math.log of an int of ${s} bits needs a copy of it (about ${Math.ceil(bytes / 2 ** 20)} MiB) to round correctly, more than half this session's heap`);
+        if (BigInt.asUintN(s - 64, b) !== 0n) top |= 1n;
+      }
       let x = Number(top) / 18446744073709551616, e = s;
       if (x === 1) {
         x = 0.5;

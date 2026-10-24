@@ -33,21 +33,28 @@ test("log, log2 and log10 of a 100-million-bit int are exact and fit a 96 MiB he
   );
 });
 
-// HARD-315-1: past Sagebrush's bound (2^27 bits) the logarithm is refused,
-// promptly and in a 96 MiB heap, rather than computed from copies of the int.
-test("log, log2 and log10 of an int past 2^27 bits are refused promptly in a 96 MiB heap (HARD-315-1)", () => {
+// The logarithm of an int of any size, as CPython's (no bound since Oct 24
+// 2026: a user's own computation has no default limits; it was 2^27 bits,
+// HARD-315-1): its bit length is found with copies of at most 1/64 of it, so
+// a 400-million-bit int (50 MB) takes it in a 96 MiB heap.  The one copy of
+// the int, for the sticky bit when the bits below the 53 kept are exactly
+// half, is admitted against the heap: a MemoryError past half of it.
+test("log, log2 and log10 of an int of any size, in a 96 MiB heap, as CPython's; the halfway case's copy admitted against the heap", () => {
   const code = [
     "import math",
     "x = 1 << 400000000",
-    "for f in (math.log, math.log2, math.log10):",
-    "    try: print(f(x))",
-    "    except OverflowError as e: print(type(e).__name__, e)",
-    "del x",
-    "print(repr(math.log2((1 << 134217727) + 1)), repr(math.log10((1 << 134217727) + (1 << 134217674))))",
+    "print(repr(math.log(x)), repr(math.log2(x)), repr(math.log10(x)))",
   ].join("\n");
+  // (each a program of its own, as a constant such as 1 << 400000000 stays
+  // in its code object after del; the guard's is halfway by construction,
+  // one allocation: bits 53 apart at the top)
+  const atOldBound = ["import math", "print(repr(math.log2((1 << 134217727) + 1)), repr(math.log10((1 << 134217727) + (1 << 134217674))))"].join("\n");
+  const guard = ["import math", "y = (2 ** 53 + 1) << 410000000", "try: print(math.log(y))", "except MemoryError as e: print(type(e).__name__, e)"].join("\n");
+  const run = (c: string) => execFileSync(process.execPath, ["--max-old-space-size=96", __dirname + "/../src/cli.js", "-c", c], { encoding: "utf8", timeout: 60000 });
   const t = Date.now();
-  const got = execFileSync(process.execPath, ["--max-old-space-size=96", __dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", timeout: 60000 });
-  const msg = "OverflowError int too large: Sagebrush takes the logarithm of an int of at most 134217728 bits\n";
-  assert.equal(got, msg + msg + msg + "134217727.0 40403561.77683941\n");
+  // (CPython 3.14's on the same program)
+  assert.equal(run(code), "277258872.2239781 400000000.0 120411998.26559249\n");
+  assert.equal(run(atOldBound), "134217727.0 40403561.77683941\n");
+  assert.equal(run(guard), "MemoryError math.log of an int of 410000054 bits needs a copy of it (about 49 MiB) to round correctly, more than half this session's heap\n");
   assert.ok(Date.now() - t < 20000);
 });
