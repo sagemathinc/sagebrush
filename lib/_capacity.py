@@ -15,8 +15,8 @@ plan-d-memory-message-r3 §1d, amended by plan-d0-capacity-r2 §0:
 - poly_share(): the one route that does follow free memory: the default
   budget of a polynomial factorization, floor(effective_guard_bytes / 2),
   or a quarter of what is free when that is more (a small session),
-  from a snapshot at most 100 ms old (a burst of small factorizations reads
-  the sources once per 100 ms, not once each).
+  from a snapshot at most 250 ms old (a burst of small factorizations reads
+  the sources once per 250 ms, not once each).
 
 Every figure is in bytes, computed in Python integers.  Nothing here calls
 the engine.  The tests replace the sources through _set_sources().
@@ -28,7 +28,8 @@ import time as _time
 _NOMINAL = 1 << 30                 # (a host that cannot say: as before D0)
 _RESERVE_BASE = 256 << 20
 _NO_CEILING = 1 << 62              # (a cgroup v1 "limit" this large is none)
-_SNAPSHOT_S = 0.1
+_SNAPSHOT_S = 0.1          # (the CPython total's snapshot)
+_POLY_SNAPSHOT_S = 0.25    # (poly's share: daybreak2's 250 ms, D0)
 
 
 # ------------------------------------------------------------------ sources
@@ -308,7 +309,7 @@ def heap_figure():
     n = getattr(_sys, "_sagebrush_heap_limit", None)
     if n:
         return int(n)
-    # (a total, not a usage: a snapshot at most 100 ms old, as poly's; a
+    # (a total, not a usage: a snapshot at most 100 ms old; a
     # read costs about 90 us, and a guard runs at each matrix made)
     global _total_snap
     now = _src.clock()
@@ -435,7 +436,7 @@ _poly_snap = None
 def poly_share():
     """The memory of one default polynomial factorization, in bytes:
     share_of(the bytes observed free), or None (the engine then keeps its
-    512 MiB), from a snapshot at most 100 ms old.  The JS heap is left out
+    512 MiB), from a snapshot at most 250 ms old.  The JS heap is left out
     of it: the engine allocates its own (WebAssembly) memory, outside it.
 
     (Top-level factorizations in one host worker are serialized: one
@@ -445,7 +446,7 @@ def poly_share():
     review, daybreak2's D0 r2 condition.)"""
     global _poly_snap
     now = _src.clock()
-    if _poly_snap is not None and now - _poly_snap[0] < _SNAPSHOT_S:
+    if _poly_snap is not None and now - _poly_snap[0] < _POLY_SNAPSHOT_S:
         return _poly_snap[1]
     # (the engine's memory is its own: the JS heap does not bound it)
     rec = capacity()

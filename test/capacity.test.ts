@@ -85,10 +85,10 @@ C._set_sources()
   ].join("\n"));
 });
 
-// The share reaches the wasm engine before a dispatch, at most 100 ms old:
-// applied exactly and said so; a long call (or calls within 100 ms) keeps it;
+// The share reaches the wasm engine before a dispatch, at most 250 ms old:
+// applied exactly and said so; a long call (or calls within 250 ms) keeps it;
 // none, -1 and anything out of range give the default 512 MiB
-test("the poly share: pushed before a dispatch, applied exactly, kept for 100 ms; none or out of range is the default", () => {
+test("the poly share: pushed before a dispatch, applied exactly, kept for 250 ms; none or out of range is the default", () => {
   const code = String.raw`
 import json, time, _sbengine, _capacity as C
 real_share = C.poly_share
@@ -98,27 +98,27 @@ def factor():
     r = json.loads(_sbengine.call(req))
     return len(r["ok"]["factors"]) if "ok" in r else r["error"]
 print(factor())
-time.sleep(0.11)
+time.sleep(0.26)
 C.poly_share = lambda: 1024
 print(factor())
 C.poly_share = lambda: None
 print(factor())
-time.sleep(0.11)
+time.sleep(0.26)
 print(factor())
 # (1.5 is Sage's RealNumber here)
 for bad in (-5, 2 ** 40, 1.5, "x"):
-    time.sleep(0.11)
+    time.sleep(0.26)
     C.poly_share = lambda bad=bad: 1024 if bad is None else bad
     print(repr(bad), factor())
 # the real share, under a small observed headroom (400000 bytes free:
 # share_of gives 100000): x^2 - 1 still factors
 C.poly_share = real_share
 C._set_sources(root="/nonexistent", rlimits={}, runtime=lambda: [("wasm engine", 400000, 0)])
-time.sleep(0.11)
+time.sleep(0.26)
 print(C.poly_share(), json.loads(_sbengine.call(json.dumps({"fn": "factor", "f": ["-1", "0", "1"]})))["ok"]["factors"])
 C._set_sources()
 # a Ctrl-C the collector's Python code sees is the program's, not lost
-time.sleep(0.11)
+time.sleep(0.26)
 def ctrl_c():
     raise KeyboardInterrupt
 C.poly_share = ctrl_c
@@ -133,7 +133,7 @@ except KeyboardInterrupt:
   const out = sage(code).split("\n");
   assert.equal(out[0], "2");
   assert.match(out[1], /resource limit exceeded \(memory in .*; the limit, 1024 bytes, is this factorization's share of the memory observed free\); not factored/);
-  // (within 100 ms of the push: the share is still the one pushed)
+  // (within 250 ms of the push: the share is still the one pushed)
   assert.match(out[2], /the limit, 1024 bytes/);
   assert.equal(out[3], "2");
   assert.deepEqual(out.slice(4, 8), ["-5 2", "1099511627776 2", "1.50000000000000 2", "'x' 2"]);
@@ -143,8 +143,9 @@ except KeyboardInterrupt:
 
 // The push is optional both ways: an engine without the export (one built
 // before D0, or another module) is left alone; a share is pushed once per
-// 100 ms per instance, and at once to a new instance
-test("pushShare: an engine without sb_set_memory_share is left alone; once per 100 ms, at once to a new instance", () => {
+// 250 ms per instance (just before expiry: not; at it: again), and at once
+// to a new instance
+test("pushShare: an engine without sb_set_memory_share is left alone; once per 250 ms, at once to a new instance", () => {
   const E = require("../src/runtime/engine");
   const old: any = { memory: null };
   E.pushShare(old);
@@ -156,4 +157,24 @@ test("pushShare: an engine without sb_set_memory_share is left alone; once per 1
   E.pushShare(b);
   assert.equal(pushed.length, 2);
   assert.ok(Number.isInteger(pushed[0]) && pushed[0] >= -1 && pushed[0] <= 2 ** 32, String(pushed[0]));
+  // the boundary on a monotonic clock (injected): 249.999 ms after a push,
+  // none; at 250 ms and after, again
+  let t = 1000;
+  E.setShareClock(() => t);
+  try {
+    const at: number[] = [];
+    const c: any = { sb_set_memory_share: () => at.push(t) };
+    E.pushShare(c);
+    t = 1249.999;
+    E.pushShare(c);
+    t = 1250;
+    E.pushShare(c);
+    t = 1499.999;
+    E.pushShare(c);
+    t = 1500.5;
+    E.pushShare(c);
+    assert.deepEqual(at, [1000, 1250, 1500.5]);
+  } finally {
+    E.setShareClock(null);
+  }
 });
