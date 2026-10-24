@@ -2586,6 +2586,7 @@ class _Basis(list):
         sage: C = list(B); C[0] = C[1]; C
         [(0, 1, 0), (0, 1, 0), (0, 0, 1)]
     """
+    _latex_container = True  # (latex() writes it as Sage's plain list: it stands in for one)
 
     def __str__(self):
         return "[\n" + ",\n".join(repr(v) for v in self) + "\n]"

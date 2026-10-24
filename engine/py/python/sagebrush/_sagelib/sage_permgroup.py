@@ -889,6 +889,7 @@ class PermutationGroup:
 class CycleTypeSample(dict):
     """Cycle types among random group elements: {cycle type: count in the
     sample}; not numbers of group elements (Sagebrush)."""
+    _latex_container = True  # (latex() writes it as a dict, as before; not yet as Sage writes it)
 
     exact = False
 

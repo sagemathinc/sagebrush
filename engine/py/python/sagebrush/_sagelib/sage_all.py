@@ -1957,6 +1957,7 @@ class Factorization(list):
         sage: F.value()
         360
     """
+    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
 
     def __init__(self, pairs, unit=1):
         super().__init__(pairs)
@@ -3127,6 +3128,7 @@ class _ContinuedFraction(tuple):
     """Partial quotients, printed as Sage prints a continued fraction.
     Immutable, as Sage's (CORR-1D1-4: a list that could be changed
     disagreed with its cached value)."""
+    _latex_container = True  # (latex() writes it as a tuple, as before; not yet as Sage writes it)
 
     def __new__(cls, qs=(), value=None):
         obj = tuple.__new__(cls, qs)

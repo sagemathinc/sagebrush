@@ -2213,6 +2213,7 @@ class FreeModule_:
 class _Sequence(list):
     """A list printed by print() as Sage prints a Sequence: one element per
     line."""
+    _latex_container = True  # (latex() writes it as Sage's plain list: it stands in for one)
 
     def __str__(self):
         return "[\n" + ",\n".join(str(x) for x in self) + "\n]"
