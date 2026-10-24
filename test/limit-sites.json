@@ -2536,15 +2536,13 @@
   "owner": "number fields",
   "row": "inv-28"
  },
- "lib/_sage_nf.py :: NumberField_absolute.class_group :: It refuses when M or that index bound exceeds 10^6, saying which #0": {
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
-  "owner": "number fields",
-  "row": "inv-28"
+  "owner": "number fields"
  },
- "lib/_sage_nf.py :: NumberField_absolute.class_group :: NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it) #0": {
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: session limits nf.certify_norm_max and nf.certify_index_max make it #0": {
   "class": "3",
-  "owner": "number fields",
-  "row": "inv-28"
+  "owner": "number fields"
  },
  "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
   "class": "2+3",
