@@ -32,3 +32,15 @@ export function rowOutcome(cells, leakOk = true) {
   for (const o of ["SLOW", "EXCEPTION"]) if (cells.some((c) => c.outcome === o)) return o;
   return "PASS";
 }
+
+// a row against the baseline (r4 §6.3): KNOWN if its failure matches the pinned signature, FIXED
+// if a baseline row now passes (its entry must go in the same change), else the row's own outcome.
+// baseline: the parsed web/interrupt-baseline.json; why: the failing cells' reasons.
+export function againstBaseline(row, baseline) {
+  const b = (baseline?.entries ?? []).find((e) => e.case === row.case && e.host === row.host);
+  if (!b) return row.outcome;
+  if (row.outcome === "PASS" || row.outcome === "SLOW" || row.outcome === "EXCEPTION") return "FIXED";
+  const re = new RegExp(b.signature);
+  const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");
+  return row.outcome === "FAIL" && whys.length > 0 && whys.every((w) => re.test(w)) ? "KNOWN" : row.outcome;
+}

@@ -1,0 +1,17 @@
+{
+ "comment": "Known interrupt-matrix failures, each pinned to its expected signature (plan-interrupt-harness r4 §6.3). A row whose failure matches is KNOWN, not FAIL; a different failure is still FAIL; a row here that now passes is FIXED, and the run fails until this entry is removed in the same change as the fix (they flip together). Each entry names its finding and the owner who is fixing it.",
+ "entries": [
+  { "case": "P2a", "host": "cli", "finding": "F1 (interrupt-harness-pilot-1)", "owner": "python", "fix": "poll in the sort/key path", "signature": "did not stop" },
+  { "case": "P2a", "host": "prompt", "finding": "F1 + F3", "owner": "python", "fix": "sort polling; E3 prompt worker", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "P1", "host": "prompt", "finding": "F3 (Ctrl-C not delivered during a prompt input)", "owner": "python (E3)", "fix": "E3: prompt inputs in a worker", "signature": "no KeyboardInterrupt" },
+  { "case": "E2", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "E3a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" },
+  { "case": "E6a", "host": "prompt", "finding": "F3", "owner": "python (E3)", "fix": "E3", "signature": "did not stop|no KeyboardInterrupt" }
+ ],
+ "pending": [
+  { "trial": "S1-S4 trace assertions", "waits_for": "E1 (SAGEBRUSH_SIGNAL_TRACE emitter)", "owner": "python" },
+  { "trial": "S5a", "waits_for": "E1 (frame requests, INTR bit 1)", "owner": "python" },
+  { "trial": "S5b", "waits_for": "PR 5a (soft stop, INTR bit 2)", "owner": "sage2" },
+  { "trial": "S5c", "waits_for": "G (grading allowance scope, INTR bit 3)", "owner": "grader" }
+ ]
+}

@@ -15,7 +15,8 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classify, rowOutcome } from "./interrupt-classify.mjs";
+import { againstBaseline, classify, rowOutcome } from "./interrupt-classify.mjs";
+const BASELINE = JSON.parse(readFileSync(new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const LAUNCHER = join(ROOT, "packages/sagebrush/bin/sagebrush.cjs");
@@ -236,7 +237,7 @@ async function runHost(host) {
     const d = c.calibration === "nonterminating" ? 1000 : Math.round(cal.T * 0.5);
     const r = await session(host, c, cal.s, [d, d, d, d, d]);
     const trials = r.trials.map((t) => ({ i: t.i, ...classify(t) }));
-    const outcome = rowOutcome(trials);
+    const outcome = againstBaseline({ case: c.id, host, outcome: rowOutcome(trials), trials }, BASELINE);
     const rss = r.samples.map((x) => x.rss_kb), thr = r.samples.map((x) => x.threads);
     rows.push({ case: c.id, host, mode: c.mode, outcome, s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, trials, rss_kb: rss, threads: thr, end: r.end, wall_ms: Math.round(r.wall_ms), left_in_group: r.left, ...(trials.some((t) => t.outcome !== "PASS") ? { tail: r.tail } : {}) });
     record(rows.at(-1));
@@ -255,4 +256,8 @@ for (const h of HOSTS) {
 out.wall_ms = Math.round(now() - tRun);
 writeFileSync(OUT, JSON.stringify(out, null, 1));
 console.log("wrote", OUT, "in", out.wall_ms, "ms");
-process.exit(0);
+// the pilot measures and always exits 0; --ci fails on a new failure, an unresolved row, or a
+// FIXED baseline row (remove its entry from web/interrupt-baseline.json in the same change)
+const bad = Object.values(out.hosts).flatMap((v) => (Array.isArray(v) ? v : [])).filter((r) => ["FAIL", "FIXED", "INCOMPLETE"].includes(r.outcome));
+for (const r of bad) console.log(r.outcome, r.case, r.host, r.outcome === "FIXED" ? "(remove its baseline entry)" : "");
+process.exit(args.includes("--ci") && bad.length ? 1 : 0);

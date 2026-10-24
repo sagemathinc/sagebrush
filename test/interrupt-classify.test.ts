@@ -10,7 +10,7 @@ import { join } from "node:path";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, rowOutcome } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { classify, rowOutcome, againstBaseline } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -52,4 +52,13 @@ test("rows: one unresolved required cell makes the row INCOMPLETE; a leak fails 
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }, { outcome: "SLOW" }])`), "SLOW");
   assert.equal(run(`rowOutcome([{ outcome: "PASS" }, { outcome: "FAIL" }, { outcome: "INVALID" }])`), "FAIL");
   assert.equal(run(`rowOutcome([])`), "INCOMPLETE");
+});
+
+test("baseline: a pinned failure is KNOWN, another failure stays FAIL, a fixed row is FIXED", () => {
+  const b = `{ entries: [{ case: "P1", host: "prompt", signature: "no KeyboardInterrupt" }] }`;
+  assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, ${b})`), "KNOWN");
+  assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "probe fail NameError" }] }, ${b})`), "FAIL");
+  assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "PASS", trials: [] }, ${b})`), "FIXED");
+  assert.equal(run(`againstBaseline({ case: "P1", host: "cli", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "no KeyboardInterrupt" }] }, ${b})`), "FAIL");
+  assert.equal(run(`againstBaseline({ case: "P1", host: "prompt", outcome: "INCOMPLETE", trials: [] }, ${b})`), "INCOMPLETE");
 });
