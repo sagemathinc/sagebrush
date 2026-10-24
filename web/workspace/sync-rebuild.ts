@@ -29,7 +29,7 @@ import { markerKey, type Marker } from "./sync-replay";
 import { TRASH, nameOf, parentOf } from "./paths";
 import { genKey, genPrefix, cursorKey, idbStore, crecordKey, ledgerNs, againNs } from "./sync-confirmed";
 import { VIEW_STORES, applyView, type JournalRecord, type ListedWhy } from "./sync-view";
-import { rebuildKey, wireOf, recordBytes, chargeOf, type Obligation, type OutboxRecord } from "./sync-outbox";
+import { rebuildKey, wireOf, recordBytes, chargeOf, ownedSeq, type Obligation, type OutboxRecord } from "./sync-outbox";
 import { RELEASE_STORES, release, pendingOf, stateOf, putPending, capNow, afterReleases, type Pin } from "./sync-pins";
 import { LedgerTx, noteSkip } from "./sync-ledger";
 
@@ -476,7 +476,7 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
     const pendKeys = npend <= 2_000 ? new Set((await req(tx.objectStore("pending").getAllKeys())) as string[]) : null;
     /** A record removed: its totals, its pin handed to `to` (a journal record wanting its bytes) or released. */
     const remove = async (rec: OutboxRecord, keepFor?: JournalRecord, echoed = false) => {
-      const own = rec.heldSeq ?? (rec.lseq > 0 ? rec.lseq : undefined);
+      const own = ownedSeq(rec);
       if (own !== undefined) {
         if (echoed) await lg.decide(own, rec.dseq, "confirmed");
         else await lg.supersede(own, why);

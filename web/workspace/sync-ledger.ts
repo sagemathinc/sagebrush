@@ -533,10 +533,9 @@ async function reread(w: Workspace, x: Waiter) {
         for (; at < x.seqs.length && idx.length < WAIT.page; at++) if (!terminal(x.st[at]) && progressOf(x.st[at]) < LEVEL.confirmed) idx.push(at);
         if (!idx.length) continue;
         const page = await readPage(w, x, idx);
-        if (x.done) return;
-        if (page === "ended") return;
-        if (page === "unseeded") { seeded = false; continue; }
-        for (const [i, code] of page) setSlot(x, i, code);
+        if (x.done || page === "ended") return;
+        if (!page.seeded) seeded = false;
+        for (const [i, code] of page.out) setSlot(x, i, code);
       }
       if (seeded) x.ready = true;
     } while (x.again && !x.done);
@@ -548,7 +547,7 @@ async function reread(w: Workspace, x: Waiter) {
   }
   if (!x.done && satisfied(x)) x.settle("resolve");
 }
-async function readPage(w: Workspace, x: Waiter, idx: number[]): Promise<[number, number][] | "ended" | "unseeded"> {
+async function readPage(w: Workspace, x: Waiter, idx: number[]): Promise<{ out: [number, number][]; seeded: boolean } | "ended"> {
   const tx = w.ws.transaction(["syncLedger", "meta", "ops"], "readonly");
   const v = await viewOf(tx.objectStore("meta"), x.ns);
   // (the lifecycle checked in the same transaction as the rows: moved on, the wait ends as it would on the message)
@@ -568,7 +567,7 @@ async function readPage(w: Workspace, x: Waiter, idx: number[]): Promise<[number
     const c = classOf(seq, v, needsOp(seq, v) ? ((await req(ops.get(seq))) as Op | undefined) : undefined);
     out.push([i, codeOf(c.s, c.reason)]);
   }
-  return v.seeded ? out : out.length ? out : "unseeded";
+  return { out, seeded: v.seeded };
 }
 
 // ---- seeding, after the upgrade (CORR-T14-5) and when a namespace becomes current again
