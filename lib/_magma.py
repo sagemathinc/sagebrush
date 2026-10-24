@@ -5439,6 +5439,8 @@ def _type(x):
         return "Tup"
     if isinstance(x, _sp.Polynomial):
         return "RngUPolElt"
+    if isinstance(x, _sp.PolynomialRing_):
+        return "RngUPol"
     return type(x).__name__
 
 
@@ -5612,7 +5614,8 @@ def _dispatcher(name):
                 # (a value whose type the table doesn't know: its
                 # signatures may exist in Magma, so not Bad argument types)
                 raise MagmaError("%s with these arguments is not supported yet" % name, "'%s'" % name)
-            raise _bad_types(name, args)
+            # (at the call's "(", as Magma points)
+            raise _bad_types(name, args, _call_pos(name))
         # (the most specific: each of its types ISA those of every other fit)
         best = [s for s in fits if all(all(_isa(a, b) for a, b in zip(s[0], o[0])) for o in fits)]
         if len(best) != 1:
@@ -7361,11 +7364,42 @@ def Sqrt(x):
 # here only Magma's signatures, words (checked against Magma 2.18) and
 # objects.
 
+# The intrinsics whose errors Magma points at the "(" of the failing call;
+# the translator emits their calls as _call((line, col), f, args) (src/
+# magma.ts CALL_POS, kept equal to this by a test), and _CALLPOS holds the
+# calls being made, innermost last: an argument's call has returned before
+# its caller's is entered, so a nested or repeated call is told apart.
+_CALL_POS_NAMES = frozenset((
+    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield "
+    "MinimalPolynomial Norm PrimeField Root Solution Submatrix Subsets Sym Trace Vector").split())
+_CALLPOS = []
+
+
+def _call(pos, f, *args, **kw):
+    """f(*args, **kw), made at pos (the "(" of the call in the source)."""
+    _CALLPOS.append((pos, getattr(f, "__name__", None)))
+    try:
+        return f(*args, **kw)
+    finally:
+        _CALLPOS.pop()
+
+
+def _located(name):
+    """Where an intrinsic's own argument checks point: at the call, for one
+    that says its errors there (_CALL_POS_NAMES), else the statement."""
+    return _call_pos(name) if name in _CALL_POS_NAMES else None
+
+
 def _call_pos(name):
-    """Where Magma points at an error of the intrinsic `name`: the "(" of its
-    first call at or after the current statement's start (line, col),
-    outside string literals and comments (astra on dae43019: not a "Root("
-    in a string), or None (the statement's start, as before)."""
+    """Where Magma points at an error of the intrinsic `name`: the "(" of the
+    innermost call of it being made (_call); else (a call through another
+    name) the "(" of its first call at or after the current statement's
+    start (line, col), outside string literals and comments (astra on
+    dae43019: not a "Root(" in a string), or None (the statement's start,
+    as before)."""
+    for pos, n in reversed(_CALLPOS):
+        if n == name:
+            return pos
     line, col = _pos[0], _pos[1]
     text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
     rx = _re.compile(r"%s\s*\(" % _re.escape(name))
@@ -7418,6 +7452,136 @@ def _ff_poly(K, coeffs):
     field."""
     R = _ffpoly_ring(_ffwrap(K))
     return _MFFPoly(R, R.P([K(c) for c in coeffs]))
+
+
+# ChangeRing (plan-finite-fields F3) of a univariate polynomial ring over
+# the integers, the rationals or a finite field, or of one of its
+# polynomials, to another of these rings, as Magma's (black-box against
+# Magma 2.18):
+#   - ChangeRing(P, R) is Magma's one univariate ring over R (the integers'
+#     and the rationals' the one PolynomialRing made last, as Magma's
+#     global ring; a finite field's its own) and the map from P to it;
+#   - ChangeRing(f, R) is f with each coefficient coerced into R, or
+#     Magma's "Polynomial is not coercible" when one isn't (a zero
+#     polynomial goes anywhere): a rational with a denominator to the
+#     integers, or one divisible by p to GF(p^n); an element of a finite
+#     field to the integers only from its prime field, never to the
+#     rationals; between finite fields by section 2B's rules (another
+#     characteristic, or neither field containing the other: nothing
+#     nonzero), through the shared core's change() into an overfield or a
+#     subfield (F1's embedding and descent, of at most 2^20 elements);
+#   - its whole work, from the number and the sizes of the coefficients,
+#     is charged to one budget of _ffsub.WORK before any coefficient is
+#     coerced (the core's change_cost between finite fields; its
+#     rationals_cost for rationals, a coefficient of b bits reduced mod p,
+#     ceil(b/30) w(p), and made an element of GF(p^n), n; a scan of n words
+#     for each coefficient going to the integers), else refused in words;
+#     between finite fields of more than 2^20 elements, refused first.
+# Integers(m), the reals and other rings are refused in words, as are
+# matrices and the other structures Magma's ChangeRing takes.
+
+def _cr_ring(R):
+    """Magma's univariate polynomial ring over R (Z, Q or a finite field)."""
+    if isinstance(R, _MFinField):
+        return _ffpoly_ring(R)
+    key = _fun_base_key(R)
+    S = _FUN_POLY_BY_BASE.get(key)
+    if S is None:
+        S = _sp.PolynomialRing_(_sp.ZZ if R is _ZZ else _sp.QQ, "$.1")
+        _fun_remember_poly(key, S)
+    return S
+
+
+def _cr_base(R):
+    """R when ChangeRing goes to it (Z, Q or a finite field), else the
+    refusal in words."""
+    if R is _ZZ or R is _QQ or isinstance(R, _MFinField):
+        return R
+    raise _fferr("ChangeRing to a %s is not supported yet" % _type_of(R), "ChangeRing")
+
+
+def _cr_poly(f, R):
+    """ChangeRing(f, R): f's coefficients coerced into R (Z, Q or a finite
+    field), admitted whole first."""
+    R = _cr_base(R)
+    S = _cr_ring(R)
+    budget = [_ffsub.WORK]
+    fail = lambda x=None: _fferr("Polynomial is not coercible", "ChangeRing")
+    # (the polynomial's own coefficient list: nothing is copied, converted
+    # or visited before the work it needs, from its length and the rings,
+    # is charged; daybreak2 LIMIT-F3-2)
+    xs = f.p._c if isinstance(f, _MFFPoly) else f._c
+    k = len(xs)
+    refuse = lambda: _fferr("ChangeRing of a polynomial of degree %d to this field is not supported yet (work)" % (k - 1), "ChangeRing")
+    if isinstance(f, _MFFPoly):
+        W = f.R.F
+        if R is _QQ or (isinstance(R, _MFinField) and R.p != W.p):
+            # (a word each, the test for nonzero)
+            _ffsub.charge(budget, k, refuse)
+            for x in xs:
+                if x:
+                    raise fail()
+            return S([]) if R is _QQ else _MFFPoly(S, S.P([]))
+        if R is _ZZ:
+            _ffsub.charge(budget, k * W.n, refuse)
+            vs = [_ffsub.prime_value(x) for x in xs]
+            if any(v is None for v in vs):
+                raise fail()
+            return S(vs)
+        wn, un = W.n, R.n
+        if k and 1 < wn != un > 1 and (un % wn == 0 or wn % un == 0) and not (
+                _ffsub.embeddable(W.K, R.K) if un % wn == 0 else _ffsub.descendable(W.K, R.K)):
+            # (F1's bound on the larger field, before anything is moved)
+            raise _fferr("ChangeRing between finite fields of more than 2^20 elements is not supported yet", "ChangeRing")
+        return _MFFPoly(S, S.P(_ffsub.change(xs, R.K, budget, refuse, fail, W.K)))
+    if R is _ZZ or R is _QQ:
+        # (a word each: the denominator's test, the copy)
+        _ffsub.charge(budget, k, refuse)
+        if R is _QQ:
+            return S(list(xs))
+        if any(int(c.denominator) != 1 for c in xs):
+            raise fail()
+        return S([int(c) for c in xs])
+    return _MFFPoly(S, S.P(_ffsub.from_rationals(xs, R.K, budget, refuse, fail)))
+
+
+class _MChangeRingMap(MMap):
+    """The map ChangeRing(P, R) returns with its ring: f :-> ChangeRing(f,
+    R), printed as Magma's (its domain and codomain only)."""
+
+    def __init__(self, dom, cod, base):
+        MMap.__init__(self, dom, cod, rule=lambda f: _cr_poly(f, base))
+
+    def __repr__(self):
+        return "Mapping from: %s to %s" % (_struct_name(self.dom), _struct_name(self.cod))
+
+
+def _cr_source_ok(X):
+    """Whether X is a polynomial ring (or a polynomial) over the integers,
+    the rationals or a finite field, the ones ChangeRing takes here."""
+    if isinstance(X, (_MFFPolyRing, _MFFPoly)):
+        return True
+    ring = X if isinstance(X, _sp.PolynomialRing_) else getattr(X, "_ring", None)
+    return type(ring) is _sp.PolynomialRing_ and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
+
+
+@_signature("ChangeRing", "RngUPol", "Rng", ret="RngUPol")
+def _change_ring_ring(P, R):
+    if not _cr_source_ok(P):
+        raise _fferr("ChangeRing of this polynomial ring is not supported yet", "ChangeRing")
+    base = _cr_base(R)
+    S = _cr_ring(base)
+    return _multi([S, _MChangeRingMap(P, S, base)])
+
+
+@_signature("ChangeRing", "RngUPolElt", "Rng", ret="RngUPolElt")
+def _change_ring_poly(f, R):
+    if not _cr_source_ok(f):
+        raise _fferr("ChangeRing of this polynomial is not supported yet", "ChangeRing")
+    return _cr_poly(f, R)
+
+
+_unimplemented_signature("ChangeRing", "Mtrx", "Rng", ret="Mtrx")
 
 
 def _ff_absolute(what, x):
@@ -10832,6 +10996,9 @@ _FF_SIGS = {
     "AssignNames": lambda a: len(a) == 2 and isinstance(a[0], _MFFPolyRing),
     "Determinant": _M1, "Rank": _M1, "Transpose": _M1, "NumberOfRows": _M1, "NumberOfColumns": _M1,
     "Nrows": _M1, "Ncols": _M1, "CharacteristicPolynomial": _M1, "Trace": lambda a: _M1(a) or None,
+    # (of a polynomial or its ring: its signatures check the rest; of a
+    # matrix, Magma has one: refused in words)
+    "ChangeRing": lambda a: (len(a) >= 1 and isinstance(a[0], (_MFFPoly, _MFFPolyRing))) or None,
 }
 for _n in ("Gcd", "GCD", "GreatestCommonDivisor", "Lcm", "LCM", "LeastCommonMultiple"):
     # (of matrices Magma says its ring has no Gcd: refused in words)
@@ -10859,7 +11026,7 @@ def _ff_admit_args(name, args, kw):
     if ok:
         return
     if ok is False:
-        raise _bad_types(name, args)
+        raise _bad_types(name, args, _located(name))
     held = [h for h in (_FF_CUR[0] or []) if h is not None]
     if not any(isinstance(h, _FFALL[2:]) for h in held):
         raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
@@ -11381,12 +11548,12 @@ def _guarded(name, f):
                 _FF_CUR[0] = None
         for i, a in enumerate(args):
             if i in ints and isinstance(a, _Fraction):
-                raise _bad_types(name, args)
+                raise _bad_types(name, args, _located(name))
             if isinstance(a, bool):
                 if bools is not None and i not in bools:
-                    raise _bad_types(name, args)
+                    raise _bad_types(name, args, _located(name))
             elif isinstance(a, str) and strs is not None and i not in strs:
-                raise _bad_types(name, args)
+                raise _bad_types(name, args, _located(name))
         if kw:
             _check_params(name, f, args, kw)
         return f(*args, **kw)

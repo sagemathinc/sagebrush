@@ -3225,6 +3225,16 @@ class PolynomialRing_ff_:
         """
         return self._base.characteristic()
 
+    def change_ring(self, R):
+        """The polynomial ring over R in the same variable.
+
+        EXAMPLES::
+
+            sage: GF(4, 'a')['t'].change_ring(GF(2))
+            Univariate Polynomial Ring in t over Finite Field of size 2 (using GF2X)
+        """
+        return _sa().PolynomialRing(R, self._name)
+
     def variable_name(self):
         """The variable name.
 
@@ -3857,8 +3867,89 @@ class Polynomial_ff:
 
             sage: R.<x> = GF(7)[]; (x + 3).change_ring(GF(7)).parent()
             Univariate Polynomial Ring in x over Finite Field of size 7
+            sage: (x^2 + 3).change_ring(ZZ)
+            x^2 + 3
+            sage: S.<t> = GF(4)[]; (t^2 + t + 1).change_ring(GF(16))
+            t^2 + t + 1
+
+        As Sage's: the integers and the rationals take a prime field's
+        elements (by their lifts), the integers also an element of a larger
+        field lying in its prime field; another finite field takes them as
+        Sage coerces between the two fields (the shared core's embedding and
+        descent, one budget for all the coefficients, admitted before any
+        is moved), else Sage's error.  A zero polynomial goes anywhere.
         """
-        return _sa().PolynomialRing(R, self._ring._name)(self.list())
+        sa, S = _sa(), _ffsub()
+        P = sa.PolynomialRing(R, self._ring._name)
+        # (the polynomial's own coefficient list: not copied, converted or
+        # visited before its work is charged; daybreak2 LIMIT-F3-2)
+        cs, B = self._c, self._ring._base
+        if not cs:
+            return P(0)
+        budget = [S.WORK]
+        refuse = lambda: NotImplementedError("change_ring of a polynomial of degree %d to %r is not supported yet (work)" % (len(cs) - 1, R))
+        if R is sa.ZZ or R is sa.QQ:
+            if isinstance(B, FiniteField_ext):
+                if R is sa.QQ:
+                    raise TypeError("unable to convert %r to a rational" % cs[0])
+                S.charge(budget, len(cs) * B._n, refuse)
+                vs = [S.prime_value(c) for c in cs]
+                if any(v is None for v in vs):
+                    raise TypeError("not in prime subfield")
+                return P(vs)
+            S.charge(budget, len(cs), refuse)
+            return P([int(c) for c in cs])
+        if _is_finite_field(B) and _is_finite_field(R) and (_ff_embeds(B, R) or _ff_embeds(R, B)):
+            fail = lambda x: ValueError("%s is not in the image of (map internal to coercion system -- copy before use)\nRing morphism:\n  From: %r\n  To:   %r" % (x, R, B))
+            return P(S.change(cs, R, budget, _ff_bounded("change_ring", B, R), fail, B))
+        if isinstance(B, FiniteField_ext) and int(R.characteristic()) != _ff_char(B):
+            # (another characteristic: Sage converts an element of the prime
+            # field by its integer, and refuses any other, as a rational)
+            S.charge(budget, len(cs) * B._n, refuse)
+            vs = [S.prime_value(c) for c in cs]
+            for c, v in zip(cs, vs):
+                if v is None:
+                    raise TypeError("unable to convert %r to a rational" % c)
+            return P([R(v) for v in vs])
+        # (other rings: each coefficient converted as Sage converts it, its
+        # errors Sage's; the conversions are by value, a word each)
+        S.charge(budget, len(cs) * max(_ff_degree(B) if _is_finite_field(B) else 1, int(R.degree()) if hasattr(R, "degree") else 1), refuse)
+        return P([R(c) for c in cs])
+
+    def map_coefficients(self, f, new_base_ring=None):
+        """The polynomial with f applied to each nonzero coefficient (as
+        Sage's: a zero stays zero): over f's codomain for a homomorphism of
+        finite fields (by the shared core: its work for all the
+        coefficients admitted before any is mapped), else over
+        new_base_ring, or this base ring.
+
+        EXAMPLES::
+
+            sage: F.<a> = GF(4); K.<b> = GF(16); R.<t> = F[]
+            sage: (t^2 + a*t + 1).map_coefficients(Hom(F, K)[0])
+            t^2 + (b^2 + b)*t + 1
+            sage: (t + a).map_coefficients(lambda c: c^2)
+            t + a + 1
+        """
+        name = self._ring._name
+        if isinstance(f, FiniteFieldHomomorphism):
+            D, U, S = f.domain(), f.codomain(), _ffsub()
+            p, un, _ = S.pnq(U)
+            sn = _ff_degree(D)
+            # (charged from the number of coefficients before any is
+            # converted or mapped; daybreak2 LIMIT-F3-2)
+            each = 1 + (un if sn == 1 else sn * (S.mn(p, un) + un))
+            refuse = _ff_bounded("map_coefficients", D, U)
+            paid = [len(self._c) * each]
+            S.charge([S.WORK], paid[0], refuse)
+            cs = [D(c) for c in self._c]
+            ys = [S.apply(c, U, f._img, paid, refuse) for c in cs]
+            T = U if new_base_ring is None else new_base_ring
+            return _sa().PolynomialRing(T, name)([T(y) for y in ys] if T is not U else ys)
+        T = self._ring._base if new_base_ring is None else new_base_ring
+        # (a function's own work is the caller's; the copy, a word each)
+        _ffsub().charge([_ffsub().WORK], len(self._c), lambda: NotImplementedError("map_coefficients of a polynomial of degree %d is not supported yet (work)" % self.degree()))
+        return _sa().PolynomialRing(T, name)([T(f(c)) if c else T(0) for c in self._c])
 
     def factor(self):
         """The factorization into monic irreducibles (Sage's order: by degree,

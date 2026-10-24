@@ -1,0 +1,48 @@
+
+>> print ChangeRing(x, Rationals()), ChangeRing(x, 5);
+                                               ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> ChangeRing(x, ChangeRing(x, 5));
+                           ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> ChangeRing(ChangeRing(x, Rationals()), 5);
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[FldRat], RngIntElt
+
+
+>> ChangeRing(x,
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> print "ChangeRing(x, 5)", /* ChangeRing( */ ChangeRing(x, 5);
+                                                         ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> print Sym(3), Sym("a");
+                    ^
+Runtime error in 'Sym': Bad argument types
+Argument types given: MonStgElt
+
+
+>> print Trace(GF(4).1), Trace(GF(4).1, GF(8));
+                              ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+
+>> print Root(Root(GF(11)!4, 2), 0);
+             ^
+Runtime error in 'Root': Argument 85 is not positive
+
+end

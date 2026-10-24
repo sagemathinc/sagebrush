@@ -797,3 +797,155 @@ def coordinates(x, F, budget, refuse):
     # (column i m + j is f^j g^i: c_i = sum_j c[i m + j] f^j, an element of F
     # in its own power basis, as F1's Conway embedding sends F.gen() to f)
     return [F._make(c[i * mm:(i + 1) * mm]) for i in range(r)]
+
+
+# A polynomial's coefficients moved into another finite field of the same
+# characteristic (plan-finite-fields F3: Magma's ChangeRing(f, R), Sage's
+# map_coefficients by an embedding), for both front ends: the whole cost,
+# from the number of coefficients and the two fields alone, is charged to
+# the caller's budget before any coefficient is moved; past it, or past
+# F1's bounds, the caller's refuse().  A coefficient that isn't in the
+# target (by Magma's rules of section 2B: the target a subfield and the
+# value outside it, or neither field containing the other) is the caller's
+# fail(x).
+
+def change_cost(W, U, k, refuse):
+    """The cops of moving k elements of the finite field W into the finite
+    field U (one characteristic), and the cached images counted free (for
+    keep()): into W itself, 1 each (a copy); from a prime field, or another
+    presentation of the same Conway field, n each (U(v), or the
+    coefficients); into a prime field, deg W each (prime_value, by its
+    coefficients); into an overfield, F1's embedding (up_cost: Horner, and
+    the generator's image once unless cached); into a subfield, F1's
+    descent (a discrete log each, as into_cost_n); neither containing the
+    other, 1 each (the test for nonzero: a nonzero coefficient fails).
+    refuse() past F1's bounds."""
+    hits = set()
+    p, wn, _ = pnq(W)
+    un = pnq(U)[1]
+    if k <= 0:
+        return 0, hits
+    if W is U:
+        return k, hits
+    if wn == 1 or wn == un:
+        return k * un, hits
+    if un == 1:
+        return k * wn, hits
+    if un % wn == 0 or wn % un == 0:
+        return into_cost_n(U, W, k, set(), hits, refuse), hits
+    return k, hits
+
+
+def change(xs, U, budget, refuse, fail, W=None):
+    """xs, elements of one finite field W (a polynomial's coefficients, the
+    caller's own list, not copied before admission), as elements of the
+    finite field U of W's characteristic, their whole cost (change_cost)
+    charged to budget before any is visited or moved: by value from or into
+    a prime field, by F1's up() into an overfield and down() into a subfield
+    (a discrete log only for the elements outside the prime field: those are
+    counted by a scan of deg W words each, charged before it, daybreak2
+    LIMIT-F3-1; the others by value); fail(x) for the first nonzero element
+    x that isn't in U, as Magma's rules say (section 2B).  An empty xs is []
+    (a zero polynomial goes anywhere).  W, xs's field, is the callers' to
+    give (none of xs is read before admission); else xs[0]'s parent.
+
+        sage: import _sage_ffsub as S
+        sage: F4, F16 = GF(4), GF(16)
+        sage: S.change([F4.gen(), F4(1)], F16, [S.WORK], ValueError, lambda x: KeyError(x))
+        [z4^2 + z4, 1]
+        sage: S.change([F16.gen() ** 5, F16(0)], F4, [S.WORK], ValueError, lambda x: KeyError(x))
+        [z2, 0]
+    """
+    k = len(xs)
+    if not k:
+        return []
+    if W is None:
+        W = xs[0].parent()
+    p, wn, _ = pnq(W)
+    un = pnq(U)[1]
+    if 1 < un < wn and wn % un == 0:
+        # (into a proper subfield: the scan first charged, then done)
+        charge(budget, k * wn, refuse)
+        k = sum(1 for x in xs if prime_value(x) is None)
+    cost, hits = change_cost(W, U, k, refuse)
+    charge(budget, cost, refuse)
+    keep(hits)
+    if W is U:
+        return list(xs)
+    if wn == 1:
+        return [U(int(x)) for x in xs]
+    out = []
+    if un == 1:
+        for x in xs:
+            v = prime_value(x)
+            if v is None:
+                raise fail(x)
+            out.append(U(v))
+        return out
+    if wn == un:
+        # (another presentation of one Conway field: the same coefficients)
+        if not (conway_ok(W) and conway_ok(U)):
+            raise refuse()
+        return [U._make([int(c) for c in x.list()]) for x in xs]
+    if un % wn and wn % un:
+        # (neither containing the other: nothing nonzero goes, as Magma's)
+        for x in xs:
+            if x:
+                raise fail(x)
+        return [U(0) for _ in xs]
+    paid = [cost]
+    for x in xs:
+        if un % wn == 0:
+            out.append(up(x, U, paid, refuse))
+        else:
+            v = prime_value(x)
+            y = U(v) if v is not None else down(x, U, paid, refuse)
+            if y is None:
+                raise fail(x)
+            out.append(y)
+    return out
+
+
+def _num_den(c):
+    """A rational's (an int's, a Fraction's, QQ's) numerator and denominator."""
+    return int(c.numerator), int(c.denominator)
+
+
+def rationals_cost(cs, p, n):
+    """The cops of reducing the rationals (or integers) cs into GF(p^n):
+    a coefficient of b bits (its numerator's or denominator's, the larger)
+    reduced mod p, ceil(b/30) w(p) (with the inverse of its denominator),
+    and made an element of the field, n.  From the sizes alone."""
+    wp = w(p)
+    cost = 0
+    for c in cs:
+        num, den = _num_den(c)
+        cost += -(-max(abs(num).bit_length(), den.bit_length(), 1) // 30) * wp + n
+    return cost
+
+
+def from_rationals(cs, U, budget, refuse, fail):
+    """The rationals (or integers) cs (the caller's own list, not copied or
+    converted before admission) as elements of U, a finite field of
+    characteristic p or the ring Z/pZ (p any modulus): first w(p) + n for
+    each, from their number alone (which pays for reading their sizes),
+    then the rest of rationals_cost, both before any is reduced; fail(c)
+    for the first whose denominator isn't a unit mod p (no element of U).
+
+        sage: import _sage_ffsub as S
+        sage: from fractions import Fraction
+        sage: S.from_rationals([3, Fraction(1, 2)], GF(25), [S.WORK], ValueError, KeyError)
+        [3, 3]
+    """
+    p = int(U.characteristic())
+    n = int(U.degree()) if hasattr(U, "degree") else 1
+    least = len(cs) * (w(p) + n)
+    charge(budget, least, refuse)
+    charge(budget, rationals_cost(cs, p, n) - least, refuse)
+    out = []
+    for c in cs:
+        num, den = _num_den(c)
+        if _math.gcd(den, p) != 1:
+            raise fail(c)
+        out.append(U(num * pow(den, -1, p) % p))
+    return out
