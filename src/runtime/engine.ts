@@ -77,7 +77,12 @@ function engine(): Engine {
   const imports = {
     sagebrush: {
       interrupted: () => {
-        if (frames) P.syncFrames(frames.buffer === E?.memory.buffer ? frames : (frames = frameView(E!)));
+        if (frames !== null) {
+          // (a view of memory that has since grown is detached: length 0; no
+          // buffer getter is read on this path, which every poll takes)
+          if (frames.length === 0) frames = frameView(E!);
+          P.syncFrames(frames);
+        }
         return INTR[0];
       },
     },
