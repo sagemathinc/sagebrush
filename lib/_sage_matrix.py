@@ -71,8 +71,9 @@ class Vector(list):
         list.__init__(self, _bounded_list(entries))
 
     def __eq__(self, o):
-        """Equality; a scalar equals the vector only when it is an integral
-        zero and the vector is zero, as in Sage (_sage_ffmat._vector_scalar_eq).
+        """Equality through coercion, as Sage (_sage_ffmat._coerced_eq): a
+        vector of another ring in the common parent; a scalar only when it
+        is an integral zero and the vector is zero.
 
         EXAMPLES::
 
@@ -80,8 +81,8 @@ class Vector(list):
             (True, True, False, False, False)
         """
         import _sage_ffmat
-        r = _sage_ffmat._vector_scalar_eq(list.__iter__(self), o)
-        return list.__eq__(self, o) if r is None else r
+        r = _sage_ffmat._coerced_eq(self, o)
+        return list.__eq__(self, o) if r is NotImplemented else r
 
     def __ne__(self, o):
         r = self.__eq__(o)
@@ -1170,9 +1171,11 @@ class Matrix:
         return _norm(x)
 
     def __eq__(self, other):
-        """Equality; a scalar is compared as Sage does (c times the
-        identity of a square matrix where the rings meet, only an integral
-        zero for a non-square one: _sage_ffmat._scalar_eq).
+        """Equality through coercion, as Sage: the images in the common
+        parent of the two (MatrixSpace over the pushout of the base rings,
+        where a scalar c is c times the identity of a square matrix; a
+        non-square one equals only an integral zero), unequal where there
+        is none (_sage_ffmat._coerced_eq).
 
         EXAMPLES::
 
@@ -1180,14 +1183,11 @@ class Matrix:
             (True, True, False, False)
             sage: matrix(ZZ, [[2, 0], [0, 2]]) == GF(3)(2), matrix(ZZ, 2, 3) == 0, matrix(ZZ, 2, 3) == QQ(0)
             (True, True, False)
+            sage: matrix(ZZ, [[4]]) == matrix(GF(3), [[1]]), matrix(QQ, [[1/2]]) == matrix(GF(3), [[2]])
+            (True, False)
         """
-        if isinstance(other, Matrix):
-            return other._rows == self._rows
-        if getattr(other, "_is_ffmatrix", False):
-            return False
         import _sage_ffmat
-        r = _sage_ffmat._scalar_eq(self._base, self._rows, self.ncols(), other)
-        return NotImplemented if r is None else r
+        return _sage_ffmat._coerced_eq(self, other)
 
     def set_immutable(self):
         """Make the matrix immutable (then it is hashable).
