@@ -35,7 +35,9 @@ import { FILE_MAX, readBounded } from "./board-check";
 import { oneLine } from "./terminal-text";
 import { limitsHelp, resolveLimits, type Limits } from "./board-edit-limits";
 
-const SENTENCE_OUTSIDE = "Outside edits: if a program changes the file after reading the board's latest save, its change merges in exactly. If it starts from an older copy, the board can't know what that program saw. It handles the change carefully, but can't guarantee an exact result. The board sees changes by reading the file, so it can miss a change that is replaced before it reads it, or one written through a file handle opened before one of its saves. While the board saves, the file is missing for a moment, so a program opening it right then may need to try again.";
+// (William, Oct 24 2026, about 11:27 AM PDT, verbatim: the help's and the page's words; the docs give it with the
+// full statement of plan r7 §0.1 (b) directly under it)
+const SENTENCE_OUTSIDE = "Outside edits (best effort): if another program changes the file starting from the board's last save, the board merges that change exactly. Otherwise it does its best but can't guarantee the result, and a program that opens the file during a save may need to retry.";
 const SENTENCE_DURABLE = "Durability: an edit is safe once the page shows 'Saved'. Anything typed before that can be lost, for example if the tab closes. There's deliberately no recovery store, but Save now and Download are always available.";
 
 const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser] [--edit [--limit NAME=VALUE]...]
