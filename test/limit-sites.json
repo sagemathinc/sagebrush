@@ -1090,8 +1090,21 @@
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
- "lib/_magma.py :: _collect_refusal :: return MagmaError(\"a comprehension of more than %d elements is not supported yet\" % _COLLECT_MAX) #0": {
+ "lib/_magma.py :: _collect_refusal :: (_COLLECT_MAX + 1) * _COLLECT_COST, _COLLECT_MAX * _COLLECT_COST, #0": {
   "class": "1+2",
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_refusal :: allowance _COLLECT_COST bytes for each of _COLLECT_MAX elements.\"\"\" #0": {
+  "class": "1+2",
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_refusal :: return _memory_error(_memguard.memory_guard(\"A collection of more than %d elements\" % _COLLECT_MAX, #0": {
+  "class": "1+2",
+  "explained": true,
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
@@ -1227,6 +1240,10 @@
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
+ },
+ "lib/_magma.py :: _memory_error :: for k in (\"what\", \"need_bytes\", \"limit_bytes\", \"allowance_for\", \"record\", \"partial\", \"checkpoint\"): #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
  },
  "lib/_magma.py :: _own_size :: if depth >= _NEST_MAX: #0": {
   "class": "1+2",
@@ -1675,33 +1692,33 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admit_size :: for an operation's larger working matrix, fits this process's budget #0": {
+ "lib/_sage_ffmat.py :: _admit_size :: anything is built, if not; its allowance is the budget, 1/_HEAP_SHARE #0": {
   "class": "2",
+  "explained": true,
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admit_size :: for one matrix: NotImplementedError, before anything is built, if #0": {
+ "lib/_sage_ffmat.py :: _admit_size :: for an operation's larger working matrix, fits this process's budget #0": {
   "class": "2",
+  "explained": true,
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _admit_size :: if need > limit // _HEAP_SHARE: #0": {
   "class": "2",
+  "explained": true,
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _admit_size :: limit = _heap_limit() #0": {
   "class": "2",
+  "explained": true,
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admit_size :: m, n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+ "lib/_sage_ffmat.py :: _admit_size :: need, limit // _HEAP_SHARE, \"one matrix\") #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
- },
- "lib/_sage_ffmat.py :: _admit_size :: raise NotImplementedError(\"a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
-  "class": "2",
+  "explained": true,
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
@@ -2076,33 +2093,45 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix.py :: _shape :: a lower bound), so that the need exceeds the allowance exactly when the #0": {
+  "class": "2",
+  "explained": true,
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
  "lib/_sage_matrix.py :: _shape :: def _shape(m, n, limit=None): #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
  "lib/_sage_matrix.py :: _shape :: if limit is None: #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
  "lib/_sage_matrix.py :: _shape :: if m > limit or n > limit or m * n > limit: #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
- "lib/_sage_matrix.py :: _shape :: integers, each and their product at most limit (NotImplementedError #0": {
+ "lib/_sage_matrix.py :: _shape :: integers, each and their product at most limit (beyond, the memory #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
  "lib/_sage_matrix.py :: _shape :: limit = _MAX_ENTRIES #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
- "lib/_sage_matrix.py :: _shape :: raise NotImplementedError(\"a %d x %d matrix exceeds sagebrush's limit of %d entries (and rows, columns)\" % (m, n, limit)) #0": {
+ "lib/_sage_matrix.py :: _shape :: raise _memguard.memory_guard(\"A %d x %d matrix\" % (m, n), max(m, n, m * n) * _SLOT_BYTES, limit * _SLOT_BYTES, \"one matrix\") #0": {
   "class": "2",
+  "explained": true,
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
@@ -2461,18 +2490,15 @@
   "owner": "polynomial coercion",
   "row": "inv-14"
  },
- "lib/_sage_poly.py :: PolynomialRing_.__call__ :: NotImplementedError: a polynomial of degree 2000000 exceeds sagebrush's limit of 1048576 coefficients for this conversion #0": {
+ "lib/_sage_poly.py :: PolynomialRing_.__call__ :: (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, \"this conversion\") #0": {
   "class": "2",
+  "explained": true,
   "owner": "univariate polynomials/runtime memory",
   "row": "inv-13"
  },
  "lib/_sage_poly.py :: PolynomialRing_.__call__ :: if cs and max(cs) >= _MAX_DENSE_COEFFS: #0": {
   "class": "2",
-  "owner": "univariate polynomials/runtime memory",
-  "row": "inv-13"
- },
- "lib/_sage_poly.py :: PolynomialRing_.__call__ :: raise NotImplementedError(\"a polynomial of degree %d exceeds sagebrush's limit of %d coefficients for this conversion\" % (max(cs), _MAX_DENSE_COEFFS)) #0": {
-  "class": "2",
+  "explained": true,
   "owner": "univariate polynomials/runtime memory",
   "row": "inv-13"
  },
@@ -3222,6 +3248,14 @@
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-6"
+ },
+ "src/runtime/modules.ts :: memoryGuard :: export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string): never { #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "src/runtime/modules.ts :: norm :: const e = callObj(getattr(importModule(\"_memguard\"), \"memory_guard\"), [what, norm(needBytes), norm(limitBytes), allowanceFor]); #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
  },
  "src/runtime/modules.ts :: permCombBig :: if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf)); #0": {
   "class": "2+3",
