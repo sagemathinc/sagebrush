@@ -960,6 +960,9 @@ def _collect(gen):
     v = []
     for x in gen:
         if len(v) == _COLLECT_MAX:
+            # (the elements let go first: the refusal reads the capacity,
+            # D0, in what is left of the heap, never on top of them)
+            del v[:]
             raise _collect_refusal()
         v.append(x)
     return v
