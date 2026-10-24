@@ -1543,9 +1543,12 @@ async function rebuildInvalidCrash() {
   const c2 = viewClient(w);
   try {
     check(await until(async () => (await outbox(w)) === 0 && (await settled(w, c2)), 20_000), "rebuild invalid crash: restarted, converged, the record decided " + J(c2.status));
-    const log = await ctl("log"), ops = log.sent.filter((m) => m.t === "ops"), reb = log.rebuilt;
+    // (the order the front received them in: log.sent is appended as each message arrives (astra2's CORR-PR111-1: not
+    // their times, which can be equal))
+    const log = await ctl("log"), sent = log.sent.map((m) => m.t);
+    const iReb = sent.indexOf("rebuilt"), iOps = sent.indexOf("ops"), nReb = sent.filter((t) => t === "rebuilt").length;
     const left = await metaGet(w.ws, `sync:${ns}:rebuild`);
-    check(reb.length === 1 && ops.length >= 1 && reb[0].at <= ops[0].at && !left, "rebuild invalid crash: rebuilt announced once, before any ops, and no obligation left " + J({ rebuilt: reb.length, ops: ops.length, rebuiltFirst: reb.length > 0 && ops.length > 0 && reb[0].at <= ops[0].at, left }));
+    check(nReb === 1 && log.rebuilt.length === 1 && iOps >= 0 && iReb >= 0 && iReb < iOps && !left, "rebuild invalid crash: rebuilt announced once, before any ops, and no obligation left " + J({ rebuilt: nReb, rebuiltAt: iReb, firstOpsAt: iOps, left }));
   } finally {
     await stop(c2);
   }
