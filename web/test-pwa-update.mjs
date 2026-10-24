@@ -20,7 +20,7 @@ import { createServer, request } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { devtoolsPort } from "./test-port.mjs";
+import { SERVE_OUT_MAX, devtoolsPort, startServe } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const here = new URL(".", import.meta.url).pathname;
@@ -119,52 +119,9 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
   };
 }
 
-// ---- the site's server: started on a port it picks itself, bounded in time and bytes, never left running
-const SERVE_MS = 30_000, SERVE_OUT_MAX = 4096, READY_MS = 10_000;
-/** Start serve.py (spawnChild() spawns it with port 0) and learn its port: the one line it prints once it is
- * listening. Fails in words if it exits, can't start, says anything else, writes more than SERVE_OUT_MAX bytes
- * before that line (counted in bytes, before anything is kept), or is silent for `ms`; on every failure the child
- * is killed. Its listeners go once settled, and the rest
- * of its stdout is drained; stderr keeps only a 2,000-character tail (PR #103 review: LIMIT-PWA103-1/LIFE-PWA103-2). */
-function startServe(spawnChild, ms = SERVE_MS) {
-  const child = spawnChild();
-  let err = "";
-  child.stderr?.on("data", (d) => { err = (err + d).slice(-2000); });
-  const port = new Promise((resolve, reject) => {
-    const kept = [];
-    let bytes = 0;
-    const settle = (f, v) => {
-      clearTimeout(timer);
-      child.stdout?.off("data", onData);
-      child.off("exit", onExit);
-      child.off("error", onError);
-      child.stdout?.resume();
-      f(v);
-    };
-    const fail = (why) => { try { child.kill("SIGKILL"); } catch {} settle(reject, new Error(why + (err ? " (stderr: " + err.slice(-500) + ")" : ""))); };
-    // (the cap is in bytes and comes first: a chunk that would take what is kept past SERVE_OUT_MAX is refused before
-    // it is kept or parsed, whether or not it holds a newline; PR #103 review, LIMIT-PWA103-1)
-    const onData = (d) => {
-      const chunk = Buffer.isBuffer(d) ? d : Buffer.from(String(d));
-      if (bytes + chunk.length > SERVE_OUT_MAX) return fail(`serve.py wrote more than ${SERVE_OUT_MAX} bytes before its port line`);
-      bytes += chunk.length;
-      kept.push(chunk);
-      const out = Buffer.concat(kept);
-      const nl = out.indexOf(0x0a);
-      if (nl < 0) return;
-      const line = out.subarray(0, nl).toString("utf8").trim();
-      if (/^\d{1,5}$/.test(line) && +line > 0 && +line < 65536) settle(resolve, Number(line));
-      else fail("serve.py said something other than its port: " + JSON.stringify(line.slice(0, 80)));
-    };
-    const onExit = (code, signal) => fail(`serve.py exited before listening (${code ?? signal})`);
-    const onError = (e) => fail(`serve.py couldn't start (${e?.code ?? e})`);
-    const timer = setTimeout(() => fail(`serve.py didn't say its port within ${ms / 1000} s`), ms);
-    child.stdout.on("data", onData);
-    child.on("exit", onExit);
-    child.on("error", onError);
-  });
-  return { child, port };
-}
+// ---- the site's server: started on a port it picks itself (startServe, web/test-port.mjs), bounded in time and
+// bytes, never left running
+const READY_MS = 10_000;
 /** The one cleanup for the test's resources in `h` ({mf, server, front, chrome, profile}, each null until made):
  * it disposes of whichever exist, so it is right on every path, however early the failure. */
 function makeCleanup(h) {
