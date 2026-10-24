@@ -4,14 +4,14 @@
   "bun": "1.4.4"
  },
  "sizes": {
-  "cli/lib.gen.js": 6936995,
+  "cli/lib.gen.js": 6937457,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 27250453,
+  "cli/pyjs.cjs": 27250903,
   "engine/lib/core.pre": 1738852,
   "engine/lib/core.src": 402678,
   "engine/lib/magma-more.src": 145159,
-  "engine/lib/magma.pre": 2762909,
-  "engine/lib/magma.src": 514578,
+  "engine/lib/magma.pre": 2763433,
+  "engine/lib/magma.src": 515040,
   "engine/lib/matlab-more.src": 262337,
   "engine/lib/matlab.pre": 5393067,
   "engine/lib/matlab.src": 1068735,
