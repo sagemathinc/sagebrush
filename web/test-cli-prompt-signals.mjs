@@ -50,14 +50,20 @@ for i, line in enumerate(spec["lines"]):
         read_until(lambda: prompts() > n, 60)
 busy_ok = prompts() == len(spec["lines"]) if spec["busy"] else True
 t0 = time.time()
-os.kill(pid, getattr(signal, spec["signal"]))
+if spec["signal"] == "CLOSE":
+    os.close(fd)  # (the terminal goes away: the kernel hangs up the session's foreground group)
+else:
+    os.kill(pid, getattr(signal, spec["signal"]))  # (straight to the launcher's process)
 status = None
 while time.time() - t0 < spec["wait"]:
     w, s = os.waitpid(pid, os.WNOHANG)
     if w:
         status = s
         break
-    read_until(lambda: False, 0.05)
+    if spec["signal"] == "CLOSE":
+        time.sleep(0.05)  # (nothing left to read)
+    else:
+        read_until(lambda: False, 0.05)
 secs = time.time() - t0
 if status is None:
     os.kill(pid, signal.SIGKILL)
@@ -101,6 +107,14 @@ for (const mode of [[], ["--sage"]]) {
     r = prompt([PLOT, "6 * 7"], sig, { args: mode });
     check(`${sig} at the prompt removes its figures and ends it${m}`, r.how?.[0] === "signal" && r.how[1] === SIGNUM[sig] && r.figures?.length === 0 && /Saved \S+figure-1\.svg/.test(r.out) && /42/.test(r.out), r);
   }
+}
+// the terminal closed under it (its pty's master closed), busy or idle: the
+// kernel's hangup ends it as the direct SIGHUP above does
+{
+  let r = prompt([BUSY], "CLOSE", { busy: true });
+  check("closing its terminal ends a computing prompt", r.busy_ok && r.how !== null && r.secs < 2, r);
+  r = prompt([PLOT], "CLOSE");
+  check("closing its terminal at the prompt ends it and removes its figures", r.how !== null && r.figures?.length === 0, r);
 }
 // SIGINT is the prompt's own, evaluating or not: a computing prompt is not
 // ended by it (the prompt runs user code on its thread, so nothing sees it
