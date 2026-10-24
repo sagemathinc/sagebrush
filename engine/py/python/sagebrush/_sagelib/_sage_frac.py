@@ -444,9 +444,11 @@ class PrincipalIdeal:
 
     def __eq__(self, o):
         """Equality of ideals: their generators are associates (over a
-        field, equal up to a nonzero constant; over ZZ, up to a sign).  An
-        element f of the ring (or a scalar of its base ring) is compared as
-        the ideal (f), as Sage compares it; anything else is unequal.
+        field, equal up to a nonzero constant; over ZZ, up to a sign; over
+        Zmod(n), up to a unit of Zmod(n)[t], decided exactly by
+        _zmod_ideal_eq).  An element f of the ring (or a scalar of its base
+        ring) is compared as the ideal (f), as Sage compares it; anything
+        else is unequal.
 
         EXAMPLES::
 
@@ -455,6 +457,9 @@ class PrincipalIdeal:
             (True, False, True, True)
             sage: P.ideal(2*u) == u, P.ideal(-u) == u, P.ideal(2) == -2, R.ideal(t) == u
             (False, True, True, False)
+            sage: Z.<z> = Zmod(4)[]
+            sage: Z.ideal(z) == z + 1, Z.ideal(z) == 2*z, Z.ideal(1) == 1 + 2*z, Z.ideal(z) == 3*z
+            (False, False, True, True)
         """
         if not isinstance(o, PrincipalIdeal):
             # (built by the ring's own ideal(), as R.ideal(f) is: its
@@ -468,22 +473,27 @@ class PrincipalIdeal:
         g, h = self._g, o._g
         if not g or not h:
             return not g and not h  # (the zero ideal is (0) only)
-        # (associates, compared coefficient by coefficient, without a
-        # division or a new polynomial, stopping at the first difference:
-        # (g) = (h) when lc(h) g = lc(g) h over a field, and h = g or -g
-        # over ZZ, whose polynomials have the units 1 and -1 only)
+        # (over a field and over ZZ: associates, compared coefficient by
+        # coefficient, without a division or a new polynomial, stopping at
+        # the first difference: (g) = (h) when lc(h) g = lc(g) h over a
+        # field, and h = g or -g over ZZ, whose polynomials have the units
+        # 1 and -1 only)
         B = self._R.base_ring()
         gc, hc = g.list(), h.list()
         same = len(gc) == len(hc)
         if B.is_field():
             a, b = hc[-1], gc[-1]
             return same and all(a * x == b * y for x, y in zip(gc, hc))
-        if same and (all(x == y for x, y in zip(gc, hc)) or all(x == -y for x, y in zip(gc, hc))):
-            return True
         if B is _sa().ZZ:
-            return False
-        # (over Zmod(4), 1 + 2t is a unit too: not modelled)
-        raise NotImplementedError("equality of ideals of a polynomial ring over %r (not ZZ or a field) whose generators differ by more than a sign" % (B,))
+            return same and (all(x == y for x, y in zip(gc, hc)) or all(x == -y for x, y in zip(gc, hc)))
+        import _sage_ff
+        if isinstance(B, _sage_ff.IntegerModRing_):
+            # (Zmod(n), n composite: its polynomials have more units, 1 + 2t
+            # over Zmod(4), and zero divisors; decided exactly below)
+            return _zmod_ideal_eq([int(x) for x in gc], [int(x) for x in hc], int(B.order()))
+        # (another base ring: as before item 1, by the remainders, exact
+        # when the divisor's leading coefficient is a unit)
+        return o._g % g == 0 and g % o._g == 0
 
     def __ne__(self, o):
         return not self.__eq__(o)
@@ -493,6 +503,118 @@ class PrincipalIdeal:
         # equal to an element hashes otherwise, as in Sage: (2t) equals
         # both t and 2t, whose hashes differ)
         return hash(repr(self._R))
+
+
+# The largest modulus whose factorization _zmod_ideal_eq computes, in bits,
+# when neither generator has a unit leading coefficient (else it needs none).
+_ZMOD_FACTOR_BITS = 128
+
+
+def _trim(c, n):
+    c = [x % n for x in c]
+    while c and not c[-1]:
+        c.pop()
+    return c
+
+
+def _zmod_ideal_eq(gc, hc, n):
+    """(g) == (h) in Zmod(n)[t], g and h nonzero, by their coefficient
+    lists (integers): exact, not up to a unit of Zmod(n) alone.
+
+    With a unit leading coefficient, g is no zero divisor and dividing by
+    it is exact: (g) = (h) when g divides h and the quotient is a unit
+    (g = h r, h = g q give g (1 - q r) = 0, so q r = 1).  A polynomial
+    over Zmod(n) is a unit when its constant term is a unit and its other
+    coefficients are nilpotent.  Otherwise, prime power by prime power of
+    n (the ring is their product): (g) is p^a (D) for one monic D (modulo
+    p^(e - a)), a the least valuation of g's coefficients; equal ideals have
+    equal (a, D)."""
+    import math
+    gc, hc = _trim(gc, n), _trim(hc, n)
+    if not gc or not hc:
+        return not gc and not hc
+    for a, b in ((gc, hc), (hc, gc)):
+        if math.gcd(a[-1], n) == 1:
+            q, r = _divmod_unit_lc(b, a, n)
+            return not r and _is_unit_poly(q, n)
+    if n.bit_length() > _ZMOD_FACTOR_BITS:
+        raise NotImplementedError("equality of ideals of a polynomial ring over Zmod(%d), neither generator with a unit leading coefficient: the modulus is over %d bits" % (n, _ZMOD_FACTOR_BITS))
+    for p, e in _sa().factor(_sa().ZZ(n)):
+        p, e = int(p), int(e)
+        if _local_generator(gc, p, e) != _local_generator(hc, p, e):
+            return False
+    return True
+
+
+def _divmod_unit_lc(b, a, n):
+    """(q, r), b = q a + r in Zmod(n)[t], deg r < deg a, a's leading
+    coefficient a unit (trimmed lists)."""
+    inv = pow(a[-1], -1, n)
+    r, d = list(b), len(a) - 1
+    q = [0] * max(len(b) - d, 0)
+    for i in range(len(q) - 1, -1, -1):
+        c = r[i + d] * inv % n
+        q[i] = c
+        if c:
+            for j, x in enumerate(a):
+                r[i + j] = (r[i + j] - c * x) % n
+    return _trim(q, n), _trim(r[:d], n)
+
+
+def _is_unit_poly(q, n):
+    """Whether q (a trimmed list) is a unit of Zmod(n)[t]: its constant
+    term a unit, the others nilpotent (c^k = 0 for k the bits of n)."""
+    import math
+    if not q or math.gcd(q[0], n) != 1:
+        return False
+    k = n.bit_length()
+    return all(pow(c, k, n) == 0 for c in q[1:])
+
+
+def _local_generator(c, p, e):
+    """(g)'s canonical generator in Zmod(p^e)[t]: None for the zero ideal,
+    else (a, D): p^a times the monic D (modulo p^(e - a)), a the least
+    valuation of g's coefficients.  D is g / p^a = u D, u a unit, by
+    Hensel lifting from modulo p (where u is a constant)."""
+    pe = p ** e
+    c = _trim(c, pe)
+    if not c:
+        return None
+    a = min(_val(x, p) for x in c if x)
+    f, m = e - a, p ** (e - a)
+    G = _trim([x // p ** a for x in c], m)
+    d = max(i for i, x in enumerate(G) if x % p)
+    u0 = G[d] % p
+    iu = pow(u0, -1, p)
+    D = [x * iu % p for x in G[: d + 1]]
+    u = [u0]
+    for k in range(1, f):
+        pk, pk1 = p ** k, p ** (k + 1)
+        uD = _mul(u, D, pk1)
+        E = [((G[i] if i < len(G) else 0) - (uD[i] if i < len(uD) else 0)) % pk1 // pk for i in range(max(len(G), len(uD)))]
+        # (u0 dD + D dU = E modulo p, deg dD < d: E / u0 = qq D + r)
+        qq, r = _divmod_unit_lc(_trim([x * iu for x in E], p), _trim(D, p), p) if d else (_trim([x * iu for x in E], p), [])
+        D = [(D[i] + pk * (r[i] if i < len(r) else 0)) % pk1 for i in range(d + 1)]
+        du = [x * u0 for x in qq]
+        u = [((u[i] if i < len(u) else 0) + pk * (du[i] if i < len(du) else 0)) % pk1 for i in range(max(len(u), len(du)))]
+    return (a, tuple(x % m for x in D))
+
+
+def _val(x, p):
+    v = 0
+    while x % p == 0:
+        x //= p
+        v += 1
+    return v
+
+
+def _mul(a, b, n):
+    r = [0] * (len(a) + len(b) - 1)
+    for i, x in enumerate(a):
+        if x:
+            for j, y in enumerate(b):
+                r[i + j] = (r[i + j] + x * y) % n
+    return r
 
 
 def _ideal_operand(R, o):
