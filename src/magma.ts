@@ -415,6 +415,11 @@ class Parser {
   private get scopeId() { return this.scopeIds[this.scopeIds.length - 1]; }
 
   globals = new Set<string>();
+  // the names assigned, or bound as parameters, so far (Python names): a
+  // call through one may be an intrinsic's (f := ChangeRing; f(x, 5)), and
+  // is located as CALL_POS's are; a name only defined by function or
+  // procedure is not, as its calls are the user's own
+  private vars = new Set<string>();
 
   statements(ends: string[]) {
     while (!ends.some((e) => this.at(e))) {
@@ -448,6 +453,7 @@ class Parser {
     // (or a rule) an assignment makes the name local, in the order the
     // reads and writes occur (see classify): "w" assigns the name, "p" an
     // element or field of it (x[i] := v), which needs x local already
+    this.vars.add(name);
     if (this.capturing) {
       this.assigned.push(name);
       this.uses.push({ name, bound: false, kind, tok: tok ?? this.peek() });
@@ -1030,6 +1036,7 @@ class Parser {
         // typed parameters: x :: RngIntElt
         if (this.at(":") && this.at(":", 1)) { this.next(); this.next(); this.ident(); }
         py.push(name);
+        this.vars.add(name);
         if (ref) refs.push(name);
       } while (this.eat(","));
     }
@@ -1150,7 +1157,9 @@ class Parser {
       lines.push(`${fw.cell}.set(${def})`);
     }
     for (const l of lines) this.emit(l);
+    const was = this.vars.has(name);
     this.declareGlobal(name, t);
+    if (!was) this.vars.delete(name);
     this.emit(`${name} = ${def}`);
   }
 
@@ -1321,9 +1330,12 @@ class Parser {
   postfix(): string {
     const head = this.peek();
     let e = this.primary();
-    // (a call of an intrinsic that says its errors at its call's "(":
-    // _m._call tells the runtime which call it is, nested or repeated)
-    const located = head.t === "id" && e === head.v && CALL_POS.has(head.v);
+    // (a call of an intrinsic that says its errors at its call's "(", by
+    // its name or through a variable or parameter that may hold one:
+    // _m._call tells the runtime which call it is, nested or repeated; in a
+    // function body the read is a placeholder, resolved later)
+    const located = head.t === "id" && (e === head.v || e === pyName(head.v) || /^\u0000[rs]\d+\u0000$/.test(e)) &&
+      (CALL_POS.has(head.v) || this.vars.has(pyName(head.v)));
     let chainAt = ""; // the first "[" of consecutive indexes
     let links = 0;
     while (true) {
