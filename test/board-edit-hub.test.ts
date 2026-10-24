@@ -556,3 +556,25 @@ test("board open --edit hub: astra's r5 interleaving end to end: FILE changed in
     assert.deepEqual(saved.nodes.map((x: any) => x.id).sort(), ["d", "m", "n"]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("board open --edit hub: at a clean exit, prevs unchanged since read and saved are removed; one changed since is kept", async () => {
+  const { hub, clock, dir, file, cleanup } = await setup(B([{ id: "n", text: "hello" }]));
+  try {
+    hub.connect("t1");
+    for (const [gen, t] of [[1, "a"], [2, "b"]] as const) {
+      const s = snap(B([{ id: "n", text: t }]));
+      hub.submit("t1", gen, hub.H.seq, s, sha(s));
+      clock.advance(hub.limits.SAVE_MAX_DELAY_MS);
+      assert.ok((await hub.save()).saved);
+    }
+    assert.equal(hub.prevs.length, 2);
+    // (a program writes into the older prev after the board's last read of it)
+    fs.writeFileSync(hub.prevs[0].path, text(B([{ id: "n", text: "late" }])));
+    const keptPath = hub.prevs[0].path;
+    assert.deepEqual(hub.closePrevs(), [keptPath]);
+    const left = fs.readdirSync(dir).filter((x) => x !== "b.board.json");
+    assert.deepEqual(left.map((x) => join(dir, x)), [keptPath]);
+    assert.equal(hub.slots.used, 1);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).nodes[0].text, "b");
+  } finally { cleanup(); }
+});

@@ -360,6 +360,8 @@ export async function boardOpen(argv: string[]): Promise<number> {
           if (!r || !r.saved) say("stopped with edits not saved to the file");
         } catch (e: any) { say(`stopped with edits not saved to the file: ${e?.message ?? e}`); }
       }
+      // (the copies kept beside FILE removed, unless one holds a change the board never took in)
+      if (editing) for (const p of editing.hub.closePrevs()) say(`kept ${p}: it changed after the board last read it`);
       unwatchFile(path); clearInterval(beat); clients.close(); editing?.server.close(); server.close(); server.closeAllConnections(); done();
     };
     process.once("SIGINT", stop);
