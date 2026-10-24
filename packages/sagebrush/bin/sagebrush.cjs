@@ -84,7 +84,10 @@ function readLimits(path) {
   }
   return { text, name };
 }
-const limitsPath = limitsFile();
+// (only on the main thread: the bundle's own workers start this file too,
+// #88, and take their limits from their workerData, never from a file again)
+const mainThread = require("node:worker_threads").isMainThread;
+const limitsPath = mainThread ? limitsFile() : null;
 const limits = limitsPath === null ? null : readLimits(limitsPath);
 
 // Whether the arguments run a program, by the rules of src/cli.ts's main().
@@ -116,8 +119,10 @@ function runsProgram(a) {
 
 if (!runsProgram(argv)) {
   // (the arguments without --limits FILE, for the bundle's main())
-  process.argv.splice(2, process.argv.length - 2, ...argv);
-  globalThis.__SAGEBRUSH_LIMITS__ = limits;
+  if (mainThread) {
+    process.argv.splice(2, process.argv.length - 2, ...argv);
+    globalThis.__SAGEBRUSH_LIMITS__ = limits;
+  }
   require(bundle);
 } else {
   const { Worker } = require("node:worker_threads");

@@ -70,6 +70,14 @@ r = run([file("argv.py", "import sys\nprint(sys.argv[1:])\n"), "--limits", "x"])
 ok(r.stdout === "['--limits', 'x']\n", `after a script, too (${r.stdout}${r.stderr})`);
 r = run(["--limits", good, "--limits", good, "-c", "print(1)"]);
 ok(r.status === 2 && r.stderr === "sagebrush: --limits is given more than once\n", `--limits twice: refused (${r.stderr})`);
+// board run's interpreter, a worker the bundle starts (through this launcher
+// since #88), gets the same limits; a SAGEBRUSH_LIMITS that can't be read is
+// never read again there
+const board = file("work.board.json", JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "import _sage_ffsub\nprint('WORK', _sage_ffsub.WORK)" }] }));
+r = run(["--limits", good, "board", "run", board]);
+ok(r.status === 0 && r.stdout.includes("WORK 123456"), `board run's worker: the launcher's limits (${r.status} ${r.stdout.slice(-200)}${r.stderr.slice(-200)})`);
+r = run(["board", "run", board], { SAGEBRUSH_LIMITS: good });
+ok(r.status === 0 && r.stdout.includes("WORK 123456"), `board run's worker: SAGEBRUSH_LIMITS (${r.status} ${r.stdout.slice(-200)}${r.stderr.slice(-200)})`);
 // the commands that start their own workers check the limits before starting any
 const bad = file("bad.json", '{"ff.work": 1}');
 for (const args of [["notebook", "--no-browser"], ["--jupyter-kernel", join(dir, "connection.json")], ["board", "run", file("b.board.json", '{"format": "sagebrush-board", "version": 1, "nodes": [{"id": "c", "code": "print(1)"}]}')]]) {
