@@ -1592,21 +1592,31 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^30000 + x, 29999);\n" +
+    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^30000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build and between runs (29696 or 30720 on CI's Node 24
+  // in late October 2026, 33792 on Node 26) and is never more than 49152:
+  // so the degrees admitted here stay at 20000, under it, and the three
+  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
+  // (each of the three refused itself, before the next statement)
+  for (const input of ["(x+1)^100000", "x^(10^20)", "Evaluate(f, f)"]) {
+    const esc = input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(out, new RegExp(`>> ${esc};[^>]*a polynomial of degree more than \\d+ is not supported yet`), input + r.stdout);
+  }
   assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
   assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
   assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n30000\n\d+\nend\n$/);
+  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
