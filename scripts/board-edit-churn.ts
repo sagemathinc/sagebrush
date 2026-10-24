@@ -7,8 +7,9 @@
 //     [--tabs 256] [--rounds 40] [--board-mib 8] [--memory-mib 1024]
 //
 // The margin (MARGIN_MIB below) is the implementation's own: the runtime, the test's own boards and the
-// patchflow module.  It is a placeholder until measured once on the build VM (the same run with no hub),
-// then stated here with that measurement.  Not in the default suite (minutes, and
+// patchflow module.  Measured once with --no-hub (the same boards and snapshots made and hashed, nothing
+// submitted; the hub holding only P₀): VM2, node 26, Oct 24 2026, 256 tabs, 2 rounds: peak heap 200 MiB
+// at --board-mib 4 and 537 MiB at --board-mib 15.  MARGIN_MIB is 640, the larger with 1.2x headroom.  Not in the default suite (minutes, and
 // gigabytes): run on a build VM, its output reported with the change that needs it.
 import * as fs from "fs";
 import { join } from "path";
@@ -18,8 +19,9 @@ import { EditHub } from "../src/board-edit-hub";
 import { defaultLimits } from "../src/board-edit-limits";
 import { editRecords } from "../web/board/lossless";
 
-export const MARGIN_MIB = 384;
+export const MARGIN_MIB = 640;
 const arg = (name: string, d: number) => { const i = process.argv.indexOf("--" + name); return i > 0 ? Number(process.argv[i + 1]) : d; };
+const NO_HUB = process.argv.includes("--no-hub");
 const TABS = arg("tabs", 256), ROUNDS = arg("rounds", 40), BOARD_MIB = arg("board-mib", 8), MEMORY_MIB = arg("memory-mib", 1024);
 const MiB = 1024 * 1024;
 const { mergeStrings3 } = require("patchflow");
@@ -42,7 +44,7 @@ async function main() {
   const n = nodesFor(BOARD_MIB * MiB);
   fs.writeFileSync(file, JSON.stringify(board(n, 0, "start"), null, 2) + "\n");
   let now = 1_000_000;
-  const limits = { ...defaultLimits(), MEMORY_MAX: MEMORY_MIB * MiB, MAX_CLIENTS: Math.max(TABS, 1), TAB_TOMBSTONES: Math.max(16, Math.floor(TABS / 4)), MERGE_MS: 60_000, BODY_MAX: Math.min(16 * MiB, Math.floor((MEMORY_MIB * MiB) / 36)) };
+  const limits = { ...defaultLimits(), MEMORY_MAX: MEMORY_MIB * MiB, MAX_CLIENTS: Math.max(TABS, 1), TAB_TOMBSTONES: Math.max(16, Math.floor(TABS / 4)), MERGE_MS: 60_000, MERGE_WORK: 1_000_000_000, BODY_MAX: Math.min(16 * MiB, Math.floor((MEMORY_MIB * MiB) / 36)) };
   const hub = new EditHub(file, limits, { mergeStrings3, now: () => now });
   const started = await hub.start(fs.readFileSync(file));
   if (!started.ok) throw new Error(started.why);
@@ -61,10 +63,12 @@ async function main() {
         if (roll < 0.5) { hub.connect(t.id); t.live = true; count("reconnect"); }
         continue;
       }
-      if (roll < 0.05) { hub.release(t.id); t.live = false; count("release"); continue; }
+      if (roll < 0.05 && !NO_HUB) { hub.release(t.id); t.live = false; count("release"); continue; }
       // (a base: the latest, or one some heads back, or (rarely) one long gone)
       const base = roll < 0.7 ? hub.H.seq : roll < 0.95 ? Math.max(1, hub.H.seq - Math.floor(rand() * 20)) : 1;
       const s = snap(board(n, round, t.id));
+      // (--no-hub: the same boards and snapshots made and hashed, nothing submitted: the margin)
+      if (NO_HUB) { sha(s); ++t.gen; sample(); now += 50; continue; }
       const r = hub.submit(t.id, ++t.gen, base, s, sha(s));
       count(Object.keys(r).find((k) => k !== "op" && k !== "seq") ?? "?");
       if ("accepted" in r) { t.base = r.seq; hub.adopted(t.id, r.seq); }
