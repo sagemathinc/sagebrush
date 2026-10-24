@@ -23,7 +23,14 @@ function oldSpaceFlag(): number | null {
   return mib === null ? null : mib * 2 ** 20;
 }
 
+// (read once: the figure is fixed for the isolate, and Bun's
+// getHeapStatistics takes about 12 ms a call, so reading it at every
+// conversion of a big int made micropython's int_big_div time out there)
+let cached = 0;
 export function heapLimit(): number {
+  return (cached ||= readHeapLimit());
+}
+function readHeapLimit(): number {
   const g: any = globalThis;
   const flag = oldSpaceFlag();
   if (flag !== null) return flag;
