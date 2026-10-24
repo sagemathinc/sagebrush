@@ -4,9 +4,9 @@
   "bun": "1.4.4"
  },
  "sizes": {
-  "cli/lib.gen.js": 7033658,
+  "cli/lib.gen.js": 7041573,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 28174292,
+  "cli/pyjs.cjs": 28182636,
   "engine/lib/core.pre": 1747540,
   "engine/lib/core.src": 405156,
   "engine/lib/magma-more.src": 146512,
@@ -45,7 +45,7 @@
   "engine/lib/mod-pyjs-help.src": 8050,
   "engine/lib/mod-pyjs-magic.src": 21074,
   "engine/lib/mod-pyjs-open.src": 8301,
-  "engine/lib/mod-pyjs-pretty.src": 25106,
+  "engine/lib/mod-pyjs-pretty.src": 24565,
   "engine/lib/mod-python-docsearch.src": 11218,
   "engine/lib/mod-python-examples.src": 27977,
   "engine/lib/mod-sb-check.src": 4356,
@@ -65,8 +65,8 @@
   "engine/lib/pkg-scipy-io.pre": 61127,
   "engine/lib/pkg-scipy-io.src": 12835,
   "engine/lib/sage-more.src": 287233,
-  "engine/lib/sage.pre": 12741870,
-  "engine/lib/sage.src": 2670565,
+  "engine/lib/sage.pre": 12772720,
+  "engine/lib/sage.src": 2679021,
   "engine/lib/sci.pre": 1896228,
   "engine/lib/sci.src": 366319,
   "engine/lib/tzdata": 257239,
@@ -77,7 +77,7 @@
   "engine/sagebrush-notebook.js": 207740,
   "engine/sagebrush-raster.wasm": 808830,
   "engine/sagebrush-viewer3d.js": 88151,
-  "engine/sagebrush-worker.js": 1503230,
+  "engine/sagebrush-worker.js": 1503258,
   "registry/packages": 3
  }
 }
