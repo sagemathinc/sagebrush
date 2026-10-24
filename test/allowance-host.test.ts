@@ -140,7 +140,9 @@ test("astra check 2: recognition_s only when the runtime reported it", () => {
   r.host.open("nb", "notebook", null);
   const g = r.host.run("c:a", "cell", al("cell", { steps: 10 }), "nb");
   r.advance(0.5);
-  r.host.steps(g, 10); // latched at 0.5; a stop was requested
+  r.host.steps(g, 10); // exactly the allowance: not yet a stop
+  assert.equal(r.stops.length, 0);
+  r.host.stepRefused(g); // the 11th: latched at 0.5; a stop was requested
   assert.deepEqual(r.stops, [[g, "c:a"]]);
   r.advance(2.5); // grace 2 s for steps: deadline 2.5, timer fires
   assert.deepEqual(r.terminations, [g]);
@@ -152,6 +154,7 @@ test("astra check 2: recognition_s only when the runtime reported it", () => {
   r2.host.open("nb", "notebook", null);
   const g2 = r2.host.run("c:a", "cell", al("cell", { steps: 10 }), "nb");
   r2.host.steps(g2, 10, 0);
+  r2.host.stepRefused(g2, 0);
   r2.host.recognized(g2, 0.25);
   r2.advance(2);
   const out2 = r2.host.terminated(g2, true, 2.1);
@@ -245,6 +248,7 @@ test("a question's scope nests between the notebook and its tests", () => {
   const g = r.host.run("t:q1/0", "test", al("test", { steps: 100 }), "q:q1");
   assert.equal(r.host.stepsRemaining(g), 50, "the least remaining balance");
   r.host.steps(g, 50);
+  r.host.stepRefused(g);
   const out = r.host.finish(g);
   assert.equal(out.latches.length, 1);
   assert.equal(out.latches[0].scope_id, "q:q1");
@@ -252,21 +256,43 @@ test("a question's scope nests between the notebook and its tests", () => {
   assert.throws(() => r.host.open("q:q2", "question", null), /parent is the notebook/);
 });
 
-test("steps: the latch at N, once, with the schedule", () => {
+test("steps: exactly N complete; the (N+1)-th is the stop, latched once, with the schedule", () => {
   const r = rig({ stepsSchedule: "pyjs-1" });
   r.host.open("nb", "notebook", null);
-  const g = r.host.run("c:a", "cell", al("cell", { steps: 10 }), "nb");
+  let g = r.host.run("c:a", "cell", al("cell", { steps: 10 }), "nb");
   r.host.steps(g, 9, 0.1);
   assert.equal(r.host.stepsRemaining(g), 1);
   assert.equal(r.stops.length, 0, "N-1: not exhausted");
   r.host.steps(g, 1, 0.2);
-  assert.equal(r.stops.length, 1, "N: exhausted");
-  r.host.steps(g, 1, 0.3);
-  const out = r.host.finish(g, 0.4);
+  assert.equal(r.host.stepsRemaining(g), 0);
+  assert.equal(r.stops.length, 0, "N: exactly the allowance is success");
+  let out = r.host.finish(g, 0.3);
+  assert.equal(out.status, "complete", "a computation of exactly N steps completes");
+  assert.equal(out.scopes[0].steps.charged, 10);
+
+  g = r.host.run("c:b", "cell", al("cell", { steps: 10 }), "nb");
+  r.host.steps(g, 10, 0.4);
+  r.host.stepRefused(g, 0.5);
+  assert.equal(r.stops.length, 1, "N+1: the stop");
+  r.host.stepRefused(g, 0.6);
+  out = r.host.finish(g, 0.7);
+  assert.equal(out.status, "limit");
   assert.equal(out.latches.length, 1);
-  assert.equal(out.latches[0].first_hit_mono, 0.2, "never overwritten");
+  assert.equal(out.latches[0].first_hit_mono, 0.5, "never overwritten");
   assert.equal(out.latches[0].schedule, "pyjs-1");
-  assert.equal(out.scopes[0].steps.charged, 11);
+  assert.equal(out.scopes[0].steps.charged, 10, "the refused step isn't charged");
+
+  // a builtin's chunk charge overshooting N latches at the report
+  g = r.host.run("c:c", "cell", al("cell", { steps: 10 }), "nb");
+  r.host.steps(g, 8, 0.8);
+  r.host.steps(g, 5, 0.9);
+  out = r.host.finish(g, 1);
+  assert.equal(out.status, "limit");
+  assert.equal(out.latches[0].first_hit_mono, 0.9);
+
+  // refusing a step with steps left is the runtime's error
+  g = r.host.run("c:d", "cell", al("cell", { steps: 10 }), "nb");
+  assert.throws(() => r.host.stepRefused(g), /steps left/);
 });
 
 test("work: reserve against every ledger, refund at completion (§5.1)", () => {
@@ -366,6 +392,7 @@ test("provenance: first by the host's time of request, exact ties in the fixed o
   g = r.host.run("c:a", "cell", al("cell", { steps: 1 }), "nb");
   r.host.stopRequested(g, "call", 1);
   r.host.steps(g, 1, 1);
+  r.host.stepRefused(g, 1);
   r.host.stopRequested(g, "cancel", 1);
   out = r.host.finish(g, 1.5);
   assert.equal(out.primary.cause, "cancel");
@@ -388,6 +415,7 @@ test("the grace default and an instructor's grace_s", () => {
   r.host.open("nb", "notebook", null);
   let g = r.host.run("c:a", "cell", al("cell", { steps: 1 }), "nb");
   r.host.steps(g, 1, 0);
+  r.host.stepRefused(g, 0);
   r.advance(1.99);
   assert.equal(r.terminations.length, 0);
   r.advance(2);
