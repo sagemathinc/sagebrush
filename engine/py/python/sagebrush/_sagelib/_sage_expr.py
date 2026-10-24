@@ -1478,26 +1478,28 @@ def _real_imag(e, k):
 
 
 class Typeset:
-    """What show(expr) displays: typeset math where the page or Jupyter
-    can render LaTeX, the text form elsewhere.  (Values print as text, as
-    in Sage.)
+    """What show(...) displays: typeset math where the page or Jupyter
+    can render LaTeX, the text form elsewhere (several objects separated
+    by spaces).  (Values print as text, as in Sage.)
 
     EXAMPLES::
 
         sage: from _sage_expr import show_typeset  # sagebrush only
         sage: show_typeset(x^2)  # random  # sagebrush only
         x^2
+        sage: from _sage_expr import Typeset  # sagebrush only
+        sage: Typeset(1, 2/3)._repr_mimebundle_()["text/latex"]  # sagebrush only
+        '$$1 \\\\ \\\\frac{2}{3}$$'
     """
 
-    def __init__(self, obj):
-        self._obj = obj
+    def __init__(self, *objs):
+        self._objs = objs
 
     def __repr__(self):
-        return repr(self._obj)
+        return " ".join(repr(o) for o in self._objs)
 
     def _repr_latex_(self):
-        f = getattr(self._obj, "_latex_", None)
-        return "$$" + (f() if f is not None else latex(self._obj)) + "$$"
+        return "$$" + " \\ ".join(latex(o) for o in self._objs) + "$$"
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         # the marker: the notebook typesets what show() asked for, and
@@ -1506,8 +1508,9 @@ class Typeset:
                 "application/vnd.sagebrush.typeset": "1"}
 
 
-def show_typeset(obj):
-    """Show obj typeset with LaTeX.
+def show_typeset(*objs):
+    """Show objs typeset with LaTeX: one display (its text form where the
+    host cannot typeset).
 
     EXAMPLES::
 
@@ -1516,13 +1519,14 @@ def show_typeset(obj):
         1/2*sqrt(x)
     """
     import builtins
+    t = Typeset(*objs)
     d = getattr(builtins, "__pyjs_display__", None)
     if d is not None:
-        d(Typeset(obj))  # (it prints the text form without a notebook)
+        d(t)  # (it prints the text form itself without a notebook)
         return
     from _graphics import host_display
-    if not host_display(Typeset(obj)):
-        print(repr(obj))
+    if not host_display(t):
+        print(repr(t))
 
 
 def _min_order(a, b):
@@ -5496,6 +5500,7 @@ def _real(v):
 # Sage's escapes in latex(a string): {\char`\X} for TeX's special characters
 _TEXT_ESC = {c: "{\\char`\\%s}" % c for c in "^_$%{}\\~#&"}
 _TEXT_ESC[" "] = "{ }"
+_TEXT_ESC["-"] = "{-}"
 
 
 def _latex_text(s):
@@ -5572,7 +5577,17 @@ class _Latex:
         if isinstance(v, (list, tuple)):
             inner = ", ".join(self(t) for t in v)
             return _LatexExpr(("\\left[%s\\right]" if isinstance(v, list) else "\\left(%s\\right)") % inner)
-        return _LatexExpr(str(v))
+        # Python's own values as Sage writes them: None and booleans upright,
+        # numbers as they print, dicts as {k : v}, anything else as its text
+        # (\texttt), never its bare str as math
+        if v is None or isinstance(v, bool):
+            return _LatexExpr("\\mathrm{%s}" % v)
+        if isinstance(v, (int, float)):
+            return _LatexExpr(str(v))
+        if isinstance(v, dict):
+            inner = ", ".join("%s : %s" % (self(k), self(t)) for k, t in v.items())
+            return _LatexExpr("\\left\\{%s\\right\\}" % inner)
+        return _LatexExpr(_latex_text(str(v)))
 
     def __repr__(self):
         return "LaTeX definitions"
