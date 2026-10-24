@@ -28,7 +28,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { createHash } from "crypto";
-import { Worker, parentPort } from "worker_threads";
+import { Worker, parentPort, workerData } from "worker_threads";
+import { sessionLimits } from "./limits";
 import { boardFromText } from "../web/board/mermaid";
 import { canonical, cleanDoc, codeOrder, formatError, isBoard, pageCount, pageView, type BoardDoc, type DocNode, type DocNote } from "../web/board/doc";
 import { PREVIEW_MS, imageSize, makePreview, overCap, type Preview, type Raster } from "../web/board/preview";
@@ -99,6 +100,7 @@ export function boardRunWorker(data: { dir: string }) {
   const session = notebookSession((m: any) => port.postMessage(m), {
     captureStreams: true,
     limit: { item: ITEM_OUTPUT_MAX, run: RUN_OUTPUT_MAX, displays: ITEM_DISPLAYS_MAX },
+    limits: workerData?.sagebrushLimits ?? null,
     init: (R: any) => R.importModule("os").chdir(data.dir),
   });
   port.on("message", (m: any) => session.handle(m));
@@ -291,7 +293,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
   const workerErr: string[] = [];
   try {
     if (items.length) {
-      worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir } }, stdout: true, stderr: true });
+      worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
       // (its stdout and stderr: none under Bun, whose Worker has no `stdout: true`)
       worker.stdout?.resume();
       worker.stderr?.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
@@ -450,7 +452,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
     if (after) {
       if (!worker && !dead) {
         // (a board with no code items: an interpreter for its checks all the same)
-        worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir } }, stdout: true, stderr: true });
+        worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
         worker.stdout?.resume();
         worker.stderr?.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
         await new Promise<void>((resolve, reject) => {

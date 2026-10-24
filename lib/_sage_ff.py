@@ -1357,8 +1357,11 @@ def _conway_charge(budget, cops, p, n):
 # that GF admits (all 555 with n >= 2), the most is C_max = 594,117,177, for
 # GF(11^6); the bound is ceil(1.1 C_max) (daybreak2's ruling), so every
 # field admitted before is admitted still.  A common field made inside an
-# embedding (_sage_ffsub) has that operation's budget instead.
-CONWAY_WORK = 653528895
+# embedding (_sage_ffsub) has that operation's budget instead.  It is the
+# session's ff.conway_work (lib/_limits.py), this bound by default, which a
+# deployment may lower, never raise.
+import _limits
+CONWAY_WORK = _limits.finalize()["ff.conway_work"]
 
 
 def _conway(p, n, budget=None):
@@ -2549,7 +2552,7 @@ def _ff_over(self, base=None, names=None, **kwds):
         return ent[2]
     m = S.pnq(F)[1]
     if 1 < m < S.pnq(self)[1] and not S.descendable(self, F):
-        raise NotImplementedError("%r over %r is not supported yet (relative extensions are computed here only in fields of at most 2^20 elements)" % (self, F))
+        raise NotImplementedError("%r over %r is not supported yet (relative extensions are computed here only in fields of at most %s elements)" % (self, F, S.embed_max_text()))
     L = RingExtension_ff(self, F, name)
     if name is None or len(name) <= _OVER_NAME:
         _OVER[key] = (self, F, L)
@@ -2819,7 +2822,7 @@ def _ff_embeds(S, K):
 
 def _ff_bounded(what, A, B):
     """The refusal (a function making it) past the shared core's bounds."""
-    return lambda: NotImplementedError("%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)" % (what, A, B))
+    return lambda: NotImplementedError("%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements, within a bounded amount of work)" % (what, A, B, _ffsub().embed_max_text()))
 
 
 def _ff_convert(x, K):
@@ -3075,7 +3078,7 @@ def _ff_subfields(self, degree=0, name=None):
             names[m] = None if given is None else _ff_var_name(given)
     if not degrees:
         return []
-    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most 2^20 elements, within a bounded amount of work)" % self)
+    refuse = lambda: NotImplementedError("subfields of %r are not supported yet (computed here only for fields of at most %s elements, within a bounded amount of work)" % (self, S.embed_max_text()))
     budget = S.subfields_admit(self, degrees, [S.WORK], refuse)
     out = []
     for m in degrees:
@@ -3991,7 +3994,10 @@ class Polynomial_ff:
             sage: R.<x> = GF(7)[]; (x^2 - 1).roots(), (x^2 - 1).roots(multiplicities=False)
             ([(6, 1), (1, 1)], [6, 1])
         """
-        if ring is not None and ring is not self._ring._base:
+        B = self._ring._base
+        if ring is not None and ring is not B and _is_finite_field(ring) and _is_finite_field(B) and _ff_embeds(B, ring):
+            return self._roots_in(ring, multiplicities)
+        if ring is not None and ring is not B:
             return Polynomial_ff(PolynomialRing_ff(ring, self._ring._name), [ring(c) for c in self._c]).roots(multiplicities=multiplicities)
         out = []
         for g, e in self.factor():
@@ -4002,17 +4008,73 @@ class Polynomial_ff:
             return out
         return [r for r, e in out]
 
-    def splitting_field(self, names):
-        """Not available yet.
+    def _roots_in(self, L, multiplicities):
+        """The roots in L, a finite field this base field coerces into (its
+        overfield), by the shared core (plan-finite-fields F3, Magma's
+        RootsInSplittingField): the factorization's work charged first,
+        then the roots' (split_cost: each irreducible factor whose degree
+        divides [L : K] gives one root by equal-degree splitting over L and
+        its conjugates), before any root is found; in Sage's order (by
+        multiplicity, then the integer representation of -r, as its
+        factors x - r are ordered)."""
+        S, B = _ffsub(), self._ring._base
+        if not self._c:
+            raise ArithmeticError("factorization of 0 is not defined")
+        n = self.degree()
+        if n < 1:
+            return []
+        p, kn, _ = S.pnq(B)
+        ln = S.pnq(L)[1]
+        refuse = lambda: NotImplementedError("roots of a polynomial of degree %d in %r are not supported yet (work)" % (n, L))
+        budget = [S.WORK]
+        S.charge(budget, S.factor_cost(n, B), refuse)
+        factors = [(g, int(e)) for g, e in self.factor() if (ln // kn) % g.degree() == 0]
+        cost, hits = S.split_cost(B, ln, [(g.degree(), e) for g, e in factors], False)
+        S.charge(budget, cost, refuse)
+        S.keep(hits)
+        rs = S.split_roots([(list(g._c), e) for g, e in factors], B, L, [cost], refuse, False)
+        rs.sort(key=lambda t: (t[1], _sort_key(-t[0])))
+        return [(r, e) for r, e, _ in rs] if multiplicities else [r for r, e, _ in rs]
+
+    def splitting_field(self, names, map=False):
+        """The splitting field over the base field K, GF(p^n) named names,
+        n = deg K times the lcm of the degrees of the irreducible factors
+        (K itself when they are linear), and with map=True the embedding of
+        K (Conway's: its generator to g^((q_L - 1)/(q_K - 1))), by the
+        shared core: the factorization's work charged first, the field of at
+        most EMBED_MAX elements (ff.embed_max, 2^20 by default) checked on
+        the degrees, its Conway search within
+        the budget left (plan-finite-fields F3).
 
         EXAMPLES::
 
-            sage: R.<x> = GF(7)[]; (x^2 + 1).splitting_field('b')  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: splitting fields over finite fields
+            sage: R.<x> = GF(5)[]; (x^2 + 2).splitting_field('b')
+            Finite Field in b of size 5^2
+            sage: K.<b> = (x^2 + 2).splitting_field(); (x^2 + 2).roots(K)
+            [(3*b + 1, 1), (2*b + 4, 1)]
         """
-        raise NotImplementedError("splitting fields over finite fields")
+        S, B = _ffsub(), self._ring._base
+        if not self._c:
+            # (Sage 10.9 crashes here; a ValueError in words instead)
+            raise ValueError("the splitting field of the zero polynomial is not defined")
+        n = self.degree()
+        refuse = lambda: NotImplementedError("splitting_field of a polynomial of degree %d over %r is not supported yet (splitting field or work)" % (n, B))
+        budget = [S.WORK]
+        nl = S.pnq(B)[1]
+        if n >= 1:
+            S.charge(budget, S.factor_cost(n, B), refuse)
+            nl = S.split_degree([g.degree() for g, _ in self.factor()], B, refuse)
+        name = names[0] if isinstance(names, (list, tuple)) else names
+        L = S.split_field(B, nl, budget, refuse, name)
+        if not map:
+            return L
+        if L is B:
+            return L, FiniteFieldHomomorphism(B, B, B.gen() if _ff_degree(B) > 1 else B(1), identity=True)
+        p, ln, _ = S.pnq(L)
+        if _ff_degree(B) == 1:
+            return L, FiniteFieldHomomorphism(B, L, L(1))
+        S.charge(budget, S.degree_cost(_ff_degree(B), p, ln, set()), refuse)
+        return L, FiniteFieldHomomorphism(B, L, S.image(B, L))
 
     def subs(self, x=None, **kwds):
         """Substitute for the variable.

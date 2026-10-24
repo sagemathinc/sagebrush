@@ -185,6 +185,7 @@ TABLE = {
     "PrimeField": (["finite fields"], "The prime field GF(p) of a finite field."),
     "Generator": (["finite fields"], "The generator F.1 of a finite field over its prime field (1 for GF(p) itself)."),
     "ChangeRing": (["polynomials", "finite fields"], "A univariate polynomial ring, or one of its polynomials, over another ring: the integers, the rationals or a finite field."),
+    "RootsInSplittingField": (["finite fields", "polynomials"], "The roots of a polynomial over a finite field in its splitting field, with multiplicities, and that field."),
     "DefiningPolynomial": (["finite fields"], "The defining (Conway) polynomial of a finite field, or the minimal polynomial of F.1 over a subfield."),
     "IsSubfield": (["finite fields"], "Whether one finite field is a subfield of another."),
     "Embed": (["finite fields"], "Checks that one finite field embeds in another (Sagebrush's finite fields are already embedded)."),
@@ -324,6 +325,11 @@ a
 > P<x> := PolynomialRing(Integers());
 > ChangeRing(3*x^2 - x + 7, GF(5));
 3*$.1^2 + 4*$.1 + 2""",
+    "RootsInSplittingField": """\
+> P<x> := PolynomialRing(GF(5));
+> RootsInSplittingField(x^2 + 2);
+[ <$.1^9, 1>, <$.1^21, 1> ]
+Finite field of size 5^2""",
     "DefiningPolynomial": """\
 > DefiningPolynomial(GF(16));
 $.1^4 + $.1 + 1
