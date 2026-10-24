@@ -173,3 +173,108 @@ out of range, then a triple error: ValueError too many values to unpack (expecte
 in range, then out of range error: IndexError invalid row index 9
 bare, negative, then a float error: IndexError invalid row index -1
 bare, a float, then negative error: TypeError 'sage.rings.real_mpfr.RealLiteral' object cannot be interpreted as an integer
+GF(5), bare
+[2]
+(1, 1) Finite Field of size 5
+GF(5), 2 x 2
+[0 3]
+[0 0]
+(2, 2) Finite Field of size 5
+GF(5), 2 rows
+[0 0]
+[0 3]
+(2, 2) Finite Field of size 5
+GF(5) and an integer
+[2 3]
+(1, 2) Finite Field of size 5
+GF(5), 2 x 2, sparse=False
+[2 0]
+[0 0]
+(2, 2) Finite Field of size 5
+GF(4), bare
+[a 0]
+[0 1]
+(2, 2) Finite Field in a of size 2^2
+GF(4), 2 x 3
+[    0     0 a + 1]
+[    0     0     0]
+(2, 3) Finite Field in a of size 2^2
+overwritten rational
+[0 0]
+[5 0]
+(2, 2) Rational Field
+overwritten rational, sparse=False
+[0 0]
+[5 0]
+(2, 2) Rational Field
+overwritten rational, sparse=True
+[0 0]
+[5 0]
+(2, 2) Rational Field
+overwritten rational, and another entry
+[1 0]
+[5 0]
+(2, 2) Rational Field
+overwritten GF(5) value
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
+overwritten GF(5) value, sparse=False
+[0 0]
+[0 0]
+(2, 2) Finite Field of size 5
+ZZ, an overwritten string error: TypeError
+ZZ, an overwritten string, sparse=False
+[0 0]
+[5 0]
+(2, 2) Integer Ring
+ZZ, an overwritten rational error: TypeError
+ZZ, an overwritten rational, sparse=True error: TypeError
+ZZ, an overwritten rational, sparse=False
+[0 0]
+[5 0]
+(2, 2) Integer Ring
+ZZ, a rational last error: TypeError
+ZZ, a rational last, sparse=False error: TypeError
+a zero does not overwrite
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+a zero overwrites, sparse=False
+[0 0]
+[0 0]
+(2, 2) Integer Ring
+a zero first
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+a zero last
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+GF(5): 5 is zero
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
+GF(5): 5 is zero, sparse=False
+[0 0]
+[0 0]
+(2, 2) Finite Field of size 5
+QQ, a zero, sparse=True
+[0 0]
+[3 0]
+(2, 2) Rational Field
+two positions twice
+[0 0]
+[3 7]
+(2, 2) Integer Ring
+a sequence key
+[0 3]
+[0 0]
+(2, 2) Integer Ring
+a sequence key, bare
+[0 3]
+(1, 2) Integer Ring
+a sequence key of three error: ValueError too many values to unpack (expected 2)
+a sequence key of one error: ValueError need more than 1 value to unpack
+a sequence key of none error: ValueError need more than 0 values to unpack

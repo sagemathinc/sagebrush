@@ -84,3 +84,68 @@ show("out of range, then a triple", lambda: matrix(ZZ, 2, 2, {(9, 0): 1, (0, 0, 
 show("in range, then out of range", lambda: matrix(ZZ, 2, 2, {(0, 0): 1, (9, 0): 2}))
 show("bare, negative, then a float", lambda: matrix({(-1, 0): 1, (0, 0.5): 1}))
 show("bare, a float, then negative", lambda: matrix({(0, 0.5): 1, (-1, 0): 1}))
+
+# the ring inferred from finite-field values, bare and with dimensions
+# (astra2's CORR-PR107-1: they gave a matrix over the Symbolic Ring)
+F5 = GF(5)
+show("GF(5), bare", lambda: matrix({(0, 0): F5(2)}))
+show("GF(5), 2 x 2", lambda: matrix(2, 2, {(0, 1): F5(3)}))
+show("GF(5), 2 rows", lambda: matrix(2, {(1, 1): F5(3)}))
+show("GF(5) and an integer", lambda: matrix({(0, 0): F5(2), (0, 1): 3}))
+show("GF(5), 2 x 2, sparse=False", lambda: matrix(2, 2, {(0, 0): F5(2)}, sparse=False))
+show("GF(4), bare", lambda: matrix({(0, 0): a, (1, 1): 1}))
+show("GF(4), 2 x 3", lambda: matrix(2, 3, {(0, 2): a + 1}))
+
+# a position given twice (a negative index and its positive one): the ring
+# is inferred from every value, the overwritten one too; the default
+# (sparse) constructor converts every value, and a zero does not
+# overwrite; sparse=False keeps the last value as given (astra2's
+# CORR-PR107-2)
+def show_type(label, f):
+    # (the error's type only: Sagebrush's wording for a value ZZ refuses
+    # is its own)
+    try:
+        M = f()
+        print(label)
+        print(M)
+        print(M.dimensions(), M.base_ring())
+    except Exception as e:
+        print(label, "error:", type(e).__name__)
+d = {(-1, 0): 1/2, (1, 0): 5}
+show("overwritten rational", lambda: matrix(2, 2, d))
+show("overwritten rational, sparse=False", lambda: matrix(2, 2, d, sparse=False))
+show("overwritten rational, sparse=True", lambda: matrix(2, 2, d, sparse=True))
+show("overwritten rational, and another entry", lambda: matrix(2, 2, {(-1, 0): 1/2, (1, 0): 5, (0, 0): 1}))
+show("overwritten GF(5) value", lambda: matrix(2, 2, {(-1, 0): F5(1), (1, 0): 5}))
+show("overwritten GF(5) value, sparse=False", lambda: matrix(2, 2, {(-1, 0): F5(1), (1, 0): 5}, sparse=False))
+show_type("ZZ, an overwritten string", lambda: matrix(ZZ, 2, 2, {(-1, 0): 'bad', (1, 0): 5}))
+show("ZZ, an overwritten string, sparse=False", lambda: matrix(ZZ, 2, 2, {(-1, 0): 'bad', (1, 0): 5}, sparse=False))
+show_type("ZZ, an overwritten rational", lambda: matrix(ZZ, 2, 2, {(-1, 0): 1/2, (1, 0): 5}))
+show_type("ZZ, an overwritten rational, sparse=True", lambda: matrix(ZZ, 2, 2, {(-1, 0): 1/2, (1, 0): 5}, sparse=True))
+show("ZZ, an overwritten rational, sparse=False", lambda: matrix(ZZ, 2, 2, {(-1, 0): 1/2, (1, 0): 5}, sparse=False))
+show_type("ZZ, a rational last", lambda: matrix(ZZ, 2, 2, {(1, 0): 5, (-1, 0): 1/2}))
+show_type("ZZ, a rational last, sparse=False", lambda: matrix(ZZ, 2, 2, {(1, 0): 5, (-1, 0): 1/2}, sparse=False))
+show("a zero does not overwrite", lambda: matrix(2, 2, {(-1, 0): 3, (1, 0): 0}))
+show("a zero overwrites, sparse=False", lambda: matrix(2, 2, {(-1, 0): 3, (1, 0): 0}, sparse=False))
+show("a zero first", lambda: matrix(2, 2, {(1, 0): 0, (-1, 0): 3}))
+show("a zero last", lambda: matrix(2, 2, {(1, 0): 3, (-1, 0): 0}))
+show("GF(5): 5 is zero", lambda: matrix(GF(5), 2, 2, {(-1, 0): 1, (1, 0): 5}))
+show("GF(5): 5 is zero, sparse=False", lambda: matrix(GF(5), 2, 2, {(-1, 0): 1, (1, 0): 5}, sparse=False))
+show("QQ, a zero, sparse=True", lambda: matrix(QQ, 2, 2, {(-1, 0): 3, (1, 0): 0}, sparse=True))
+show("two positions twice", lambda: matrix(2, 2, {(-1, 0): 3, (1, 0): 0, (-1, -1): 4, (1, 1): 7}))
+
+# keys iterable by the sequence protocol (__getitem__ only), as Sage reads
+# them (astra2's CORR-PR107-3), with the same errors for too few or too
+# many items
+class Seq:
+    def __init__(self, n, v):
+        self.n, self.v = n, v
+    def __getitem__(self, i):
+        if i < self.n:
+            return self.v[i]
+        raise IndexError
+show("a sequence key", lambda: matrix(ZZ, 2, 2, {Seq(2, [0, 1]): 3}))
+show("a sequence key, bare", lambda: matrix({Seq(2, [0, 1]): 3}))
+show("a sequence key of three", lambda: matrix(ZZ, 2, 2, {Seq(3, [0, 0, 0]): 3}))
+show("a sequence key of one", lambda: matrix(ZZ, 2, 2, {Seq(1, [0]): 3}))
+show("a sequence key of none", lambda: matrix(ZZ, 2, 2, {Seq(0, []): 3}))
