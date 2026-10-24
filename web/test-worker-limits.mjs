@@ -109,7 +109,7 @@ try {
   r = await sbw([init("{" + '"ff.work": "' + "é".repeat(2049) + '"}'), MARK]);
   ok(r.said.includes("initFailed: limits: the limits are larger than 4096 bytes"), `counted in UTF-8 bytes, not characters (${JSON.stringify(r).slice(0, 200)})`);
   r = await sbw([{ init: { limits: 5 } }, MARK]);
-  ok(r.said.includes("initFailed: limits: the limits must be a JSON text") && !r.out.includes("MARKER"), `limits that aren't text: refused (${JSON.stringify(r)})`);
+  ok(r.said.includes("initFailed: limits: the limits must be a JSON text, not a number") && !r.out.includes("MARKER"), `limits that aren't text: refused (${JSON.stringify(r)})`);
   r = await sbw([init('{"ff.wrok": 5}'), MARK]);
   ok(r.said.some((s) => s.startsWith("initFailed: limits: ff.wrok is not a limit of this engine")) && !r.out.includes("MARKER"), `the validator's refusal, in its words (${JSON.stringify(r)})`);
   // envelopes that aren't {limits: text | null}, and limits that aren't text:
