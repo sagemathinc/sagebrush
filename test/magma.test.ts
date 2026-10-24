@@ -2536,3 +2536,38 @@ test("top-level GF's cold Conway search is bounded by ceil(1.1 C_max), C_max mea
     "exact admitted True [1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1] [(2, 1), (2, 2), (2, 3), (2, 4), (2, 6), (2, 12)]",
   ], r.stdout + r.stderr);
 });
+
+test("an intrinsic's errors are said at the \"(\" of a call through a parameter, and in a function body, as Magma 2.18 says them", () => {
+  // (Magma also prints the frame, "p(\n    h: Intrinsic 'ChangeRing' \n)",
+  // first: Sagebrush doesn't yet; magma-tests/test_stdin_alias_carets.m has
+  // the top-level calls through a variable)
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const src = [
+    "P<x> := PolynomialRing(Integers());",
+    "procedure p(h) a := h(x, 5); end procedure;",
+    "p(ChangeRing);",
+    "function q(h) return h(x, 5); end function;",
+    "b := q(ChangeRing);",
+    "function r() return ChangeRing(x, 5); end function;",
+    "b := r();",
+    "function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;",
+    "fib(10);",
+    "",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  const carets = r.stdout.split("\n").filter((l: string) => l.startsWith(">> ") || /^ *\^$/.test(l));
+  assert.deepEqual(carets, [
+    ">> procedure p(h) a := h(x, 5); end procedure;",
+    "                        ^",
+    ">> function q(h) return h(x, 5); end function;",
+    "                         ^",
+    ">> function r() return ChangeRing(x, 5); end function;",
+    "                                 ^",
+  ], r.stdout + r.stderr);
+  assert.equal(r.stdout.match(/Runtime error in 'ChangeRing': Bad argument types/g)?.length, 3);
+  assert.ok(r.stdout.trimEnd().endsWith("55"), r.stdout);
+  // a function defined by name is the user's own: its calls are not wrapped
+  assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
+  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
+});
