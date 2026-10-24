@@ -380,6 +380,8 @@ let pics: PictureChannel | null = null;
 let editShowing: Promise<void> = Promise.resolve();
 const editSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
 type EditingState = { allowed: boolean; hidden?: boolean; why?: string };
+// (`sagebrush board open`'s page: why it has no Edit)
+const LOCAL_READ_ONLY = "Read only: this page follows the board's file and shows each version of it as it is saved. To change the board, change the file (in your editor, or have your agent rewrite it); to edit it in the browser instead, open the file at https://sagebrush.space/board/ (its menu's Open…).";
 let editingNow: EditingState = { allowed: false, hidden: true };
 const editingSubs = new Set<(s: EditingState) => void>();
 const setEditing = (s: EditingState) => { editingNow = s; for (const f of editingSubs) f(s); };
@@ -929,7 +931,8 @@ const host: BoardHost = {
           },
         });
       },
-      editing(f: (s: EditingState) => void) { f({ allowed: false, hidden: true }); return () => {}; },
+      // (read only: the file is the board, and nothing here writes it; Edit is shown, not allowed, with how to change it)
+      editing(f: (s: EditingState) => void) { f({ allowed: false, why: LOCAL_READ_ONLY }); return () => {}; },
     } : {}),
     // (whether it was written here, a new board: kept beside it, never in it)
     writtenHere(set) {

@@ -41,7 +41,7 @@ const USAGE = `usage: sagebrush board open FILE [--port N] [--no-browser]
   check it (sagebrush board check FILE), and watch it here.  Its code runs in
   the page; nothing of the board is uploaded.  A version that isn't a board
   (half written, or wrong) leaves the last good one shown, with what is wrong.
-  The page shows the file; edits made in it aren't saved to it.
+  The page is a read-only view of FILE: to change the board, change the file.
   --port N        the first port to try (default 8890)
   --no-browser    print the URL, don't open a browser
 `;
@@ -290,7 +290,7 @@ export async function boardOpen(argv: string[]): Promise<number> {
   const made = localPage(frame.toString("utf8"), { key, name, engineSite: served ? `http://127.0.0.1:${port}/` : ENGINE_SITE });
   page = made === null ? null : Buffer.from(made, "utf8");
   const open = `http://127.0.0.1:${port}/?token=${token}`;
-  process.stdout.write(`Sagebrush board: showing ${path}, following its changes\n  ${open}\n(Ctrl-C stops it)\n`);
+  process.stdout.write(`Sagebrush board: showing ${path} (a read-only view: it follows changes to the file)\n  ${open}\n(Ctrl-C stops it)\n`);
   if (browser) openBrowser(open);
   await new Promise<void>((done) => {
     const stop = () => { unwatchFile(path); clearInterval(beat); clients.close(); server.close(); server.closeAllConnections(); done(); };
