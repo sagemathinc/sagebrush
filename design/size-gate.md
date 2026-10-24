@@ -1,6 +1,6 @@
 # The core's growth gate
 
-The design is `plan-growth-budget-r6`: r5 was approved (astra CLEAR on r5, daybreak2 CLEAR on r4), and r6 changes only the bootstrap cross-check (§1.2), pending astra. This page is the working summary. Where the two differ, the plan wins.
+The design is `plan-growth-budget-r6`: r5 was approved (astra CLEAR on r5, daybreak2 CLEAR on r4), and r6 changes only the bootstrap cross-check (§1.2); astra CLEAR on r6. This page is the working summary. Where the two differ, the plan wins.
 
 ## What it guards
 
