@@ -460,5 +460,31 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
   check("size-gate: an absolute run doesn't download base records", /name: size-base-\$\{\{ github\.sha \}\}/.test(sg) && /needs\.size-base\.outputs\.mode != 'absolute'/.test(sg));
 }
 
+// ---- jitter (William, Oct 23: 64 B / 1 KiB for cli/pyjs.cjs only; plan r6 §1.3 rules 2, 3, 5)
+{
+  const committed = strictParse(readFileSync(new URL("../budgets.json", import.meta.url), "utf8"));
+  const jitter = Object.entries(committed.bundles).filter(([, e]) => !e.exact && (e.noise_bytes || e.noise_total));
+  check("budgets.json: only cli/pyjs.cjs has jitter, at exactly 64 B / 1024 B", jitter.length === 1 && jitter[0][0] === "cli/pyjs.cjs" && jitter[0][1].noise_bytes === 64 && jitter[0][1].noise_total === 1024, jcs(jitter));
+  check("budgets.json is valid", budgetsProblems(committed).length === 0, jcs(budgetsProblems(committed)));
+  // the reset's exception, written out (daybreak2's r4 note): charge <= noise_bytes needs no growth entry;
+  // otherwise charge <= growth <= charge + marker_slack
+  const jb = (b) => {
+    b.bundles["cli/pyjs.cjs"].noise_bytes = 64;
+    b.bundles["cli/pyjs.cjs"].noise_total = 1024;
+    return b;
+  };
+  const baseB = jb(budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 } }));
+  passes("a reset with charge = noise_bytes (64) needs no growth entry", resetCase({ O: R(100000), N: R(100064), M: R(100064), baseB, B: clone(baseB) }));
+  fails("a reset with charge = noise_bytes + 1 (65) needs one", resetCase({ O: R(100000), N: R(100065), M: R(100065), baseB, B: clone(baseB) }), /needs epoch\.reset\.growth/);
+  passes("a reset with charge 65 and a tight entry", resetCase({ O: R(100000), N: R(100065), M: R(100065), baseB, B: clone(baseB), growth: { "cli/pyjs.cjs": 65 } }));
+  // and the ordinary rules at the committed values
+  const B = jb(budgets());
+  passes("Δ = 64 on cli/pyjs.cjs, no marker", transition({ n: S(100000), m: S(100064), B, baseB: B }));
+  fails("Δ = 65 on cli/pyjs.cjs, no marker", transition({ n: S(100000), m: S(100065), B, baseB: B }), /needs a marker/);
+  passes("drift up to epoch + noise_total (1024)", transition({ n: S(100990), m: S(101024), B, baseB: B }));
+  fails("drift one past noise_total", transition({ n: S(100990), m: S(101025), B, baseB: B }), /rule 3/);
+  fails("jitter on another bundle stays zero (engine/w.js +1)", transition({ n: S(100000, 5000), m: S(100000, 5001), B, baseB: B }), /engine\/w\.js.*needs a marker/);
+}
+
 console.log(`test-size-measure: ${passed} passed, ${failures} failed`);
 if (failures) process.exit(1);
