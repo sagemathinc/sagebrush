@@ -278,3 +278,54 @@ a sequence key, bare
 a sequence key of three error: ValueError too many values to unpack (expected 2)
 a sequence key of one error: ValueError need more than 1 value to unpack
 a sequence key of none error: ValueError need more than 0 values to unpack
+sparse=True: a zero last
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+sparse=True: ZZ, an overwritten rational error: TypeError
+sparse=True: GF(5), 5 is zero
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
+sparse=False: a zero last
+[0 0]
+[0 0]
+(2, 2) Integer Ring
+sparse=False: ZZ, an overwritten rational
+[0 0]
+[5 0]
+(2, 2) Integer Ring
+sparse=False: GF(5), 5 is zero
+[0 0]
+[0 0]
+(2, 2) Finite Field of size 5
+sparse=None: a zero last
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+sparse=None: ZZ, an overwritten rational error: TypeError
+sparse=None: GF(5), 5 is zero
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
+sparse=0: a zero last
+[0 0]
+[0 0]
+(2, 2) Integer Ring
+sparse=0: ZZ, an overwritten rational
+[0 0]
+[5 0]
+(2, 2) Integer Ring
+sparse=0: GF(5), 5 is zero
+[0 0]
+[0 0]
+(2, 2) Finite Field of size 5
+sparse=1: a zero last
+[0 0]
+[3 0]
+(2, 2) Integer Ring
+sparse=1: ZZ, an overwritten rational error: TypeError
+sparse=1: GF(5), 5 is zero
+[0 0]
+[1 0]
+(2, 2) Finite Field of size 5
