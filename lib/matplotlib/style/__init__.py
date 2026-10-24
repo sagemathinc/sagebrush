@@ -22,14 +22,36 @@ STYLE_BLACKLIST = frozenset({
     "webagg.address", "webagg.open_in_browser", "webagg.port", "webagg.port_retries",
 })
 
-# name -> rc settings of each style Sagebrush has (none yet: they come with
-# their data, matplotlib's .mplstyle files)
+# name -> rc settings of each style Sagebrush has: matplotlib's style files
+# (_library: bmh, classic, fivethirtyeight, ggplot and the seaborn-v0_8
+# family), as matplotlib reads them
 library = {}
 available = []
+
+# The names matplotlib 3.6 and 3.7 still accepted for its seaborn styles,
+# deprecated, and removed in 3.8 (16: 'seaborn' and 'seaborn-<style>').
+# Sagebrush keeps accepting them, with a warning that names the new style:
+# project policy keeps a name upstream removed for no functional reason.
+# They are not in available or library.
+ALIASES = {"seaborn": "seaborn-v0_8"}
+ALIASES.update({"seaborn-" + s: "seaborn-v0_8-" + s for s in (
+    "bright", "colorblind", "dark", "dark-palette", "darkgrid", "deep", "muted", "notebook", "paper", "pastel",
+    "poster", "talk", "ticks", "white", "whitegrid")})
+
+
+def _settings(raw):
+    """a style's rc settings from _library's data (a cycler as a Cycler)"""
+    return {k: (_mpl.Cycler("color", v[1]) if isinstance(v, list) and len(v) == 2 and v[0] == "__cycler__" else v)
+            for k, v in raw.items()}
 
 
 def reload_library():
     """the library as it ships"""
+    import json
+    from matplotlib.style import _library
+    LIBRARY = json.loads(_library.LIBRARY_JSON)
+    library.clear()
+    library.update({name: _settings(raw) for name, raw in LIBRARY.items()})
     available[:] = sorted(k for k in library if not k.startswith("_"))
 
 
@@ -47,6 +69,12 @@ def _resolve(name):
         return {k: v for k, v in _mpl.rcParamsDefault.items() if k not in STYLE_BLACKLIST}
     if name in library:
         return library[name]
+    if name in ALIASES:
+        new = ALIASES[name]
+        _warn("%r: use %r (matplotlib renamed it in 3.6 and removed the old name in 3.8; Sagebrush still"
+              " accepts it for older teaching material)" % (name, new),
+              _mpl.MatplotlibDeprecationWarning, stacklevel=4)
+        return library[new]
     if (_os.sep in name or name.endswith(".mplstyle")) and _os.path.exists(name):
         raise NotImplementedError("style.use(%r): Sagebrush reads no style files yet" % (name,))
     raise _not_found(name)

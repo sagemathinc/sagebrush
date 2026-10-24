@@ -267,6 +267,22 @@ default value of each of its 339 rc parameters, as
 `matplotlib.rcParamsDefault` gives them (from matplotlib's
 `lib/matplotlib/mpl-data/matplotlibrc` and `lib/matplotlib/rcsetup.py`),
 written by `test/mpl_rckeys_gen.py`; no code is copied.
+`lib/matplotlib/style/_library.py` is data from matplotlib 3.11.1: the rc
+settings of its style files, as `matplotlib.style.library` reads them,
+written by `test/mpl_styles_gen.py`; no code is copied. Each is
+`lib/matplotlib/mpl-data/stylelib/<name>.mplstyle` at matplotlib's tag
+v3.11.1, distributed under the matplotlib License below (matplotlib's
+`LICENSE/` directory has no other licence for these files; its
+`LICENSE_SOLARIZED` covers `Solarize_Light2`, which Sagebrush does not
+ship). Their own attributions, kept in `_library.py` (`HEADERS`):
+`bmh.mplstyle` ("Author: Cameron Davidson-Pilon, original styles from
+Bayesian Methods for Hackers"), `fivethirtyeight.mplstyle` ("Author:
+Cameron Davidson-Pilon, replicated styles from FiveThirtyEight.com"),
+`ggplot.mplstyle` ("from https://everyhue.me/posts/sane-color-scheme-for-matplotlib/"),
+`classic.mplstyle` ("Classic matplotlib plotting style as of v1.5"), and
+the sixteen `seaborn-v0_8*.mplstyle` files ("Seaborn common parameters",
+"Seaborn deep palette", "Seaborn notebook context" and the like: the
+seaborn styles matplotlib ships, which it renamed `seaborn-v0_8-*` in 3.6).
 
 Copyright (c) 2012- Matplotlib Development Team; All Rights Reserved
 
