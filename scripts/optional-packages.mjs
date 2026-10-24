@@ -124,7 +124,7 @@ export function readOptional(rootDir = root, names = null) {
 //   sagebrush.json, README, LICENSE*, NOTICE*, vendor.json files and the
 //   vendor's verify-from-npm.mjs, which aren't bundled)
 const JS_ENTRY = /^[a-z0-9][a-z0-9._-]{0,63}\.js$/;
-const JS_UNBUNDLED = /(^|\/)(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|vendor\.json|verify-from-npm\.mjs)$/;
+const JS_UNBUNDLED = /(^|\/)(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|THIRD-PARTY-NOTICES[^/]*|vendor\.json|verify-from-npm\.mjs)$/;
 function readJsPackage(rootDir, dir, at, m, bad) {
   const known = new Set(["name", "version", "kind", "sagebrush", "js", "files"]);
   for (const k of Object.keys(m)) if (!known.has(k)) bad(`unknown field ${k} (a js package has no Python fields)`);

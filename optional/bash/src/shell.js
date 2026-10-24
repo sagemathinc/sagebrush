@@ -15,6 +15,17 @@ import { Bash, InMemoryFs } from "../vendor/just-bash-3.6.0/browser.js";
 
 export const VERSION = "0.1.0";
 
+// The commands the first release registers (plan-bash-shell r3 §8), and no
+// others: no network command, no python or js-exec, nothing deferred (tee,
+// xargs, tar, gzip, sqlite3, ...).  cd, export and test are the shell's own
+// builtins, always there.
+export const COMMANDS = [
+  "ls", "cat", "head", "tail", "wc", "mkdir", "mv", "cp", "rm", "touch", "stat", "tree", "find",
+  "grep", "sort", "uniq", "cut", "tr", "sed", "awk", "diff",
+  "echo", "printf", "pwd", "basename", "dirname", "env", "true", "false", "seq",
+  "jq",
+];
+
 export function start(port) {
   function hostCall(name, payload) {
     port.postMessage({ name, payload });
@@ -26,7 +37,7 @@ export function start(port) {
     const { id, script, stdin } = m.exec;
     let r;
     try {
-      r = await new Bash({ fs, cwd: "/" }).exec(script, typeof stdin === "string" ? { stdin } : {});
+      r = await new Bash({ fs, cwd: "/", commands: COMMANDS }).exec(script, typeof stdin === "string" ? { stdin } : {});
     } catch (err) {
       r = { exitCode: -1, stdout: "", stderr: String(err && err.message) };
     }

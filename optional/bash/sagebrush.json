@@ -14,7 +14,7 @@
     }
   },
   "files": {
-    "src/shell.js": "75e5dabe85b9bd3b2bb9d69c07bfe016e5ac3ef2daaf6d49414ca9009483ab26",
+    "src/shell.js": "c209cf6f743ba109a5e7437e50aff6b20be92ee034af12952c7ebf5345111620",
     "src/zlib-stub.js": "3ceb61b4b2776141cec40e8073fb6e295fe86b821b84652a90dc063e18606fdc",
     "vendor/diff-8.0.4/diff.js": "e4553a1cd7ac8a2e88bb27580afb8df6018a0c6a028eb2b2f5f3a5a36f40f338",
     "vendor/just-bash-3.6.0/browser.js": "38f1ad1e3283980ecdf68cede8a4eed028c6dff6e8c31793dec1e0af529c446e",
