@@ -116,15 +116,25 @@ def progress_snapshot():
 
 
 def _unavailable(name):
-    def f(*args, **kwds):
-        from . import records
-        raise records.unavailable("sagebrush." + name)
-    f.__name__ = name
-    f.__doc__ = "Not available in this build (sagebrush.capabilities())."
-    return f
+    from . import records
+    return records.unavailable("sagebrush." + name)
 
 
-estimate = _unavailable("estimate")
-run = _unavailable("run")
-request_stop = _unavailable("request_stop")
-resume = _unavailable("resume")
+# (their signatures are the designs': design-estimates-progress r4 §3,
+# design-agent-api-library r3 §5 and §6)
+def estimate(f, *args, **kwds):
+    """The time and memory estimate of f(*args, **kwds): not available in
+    this build (sagebrush.capabilities())."""
+    raise _unavailable("estimate")
+
+
+def run(f, *args, **kwds):
+    """f(*args, **kwds) as an outcome/1 record: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("run")
+
+
+def resume(checkpoint, **kwds):
+    """Resumes a checkpoint: not available in this build
+    (sagebrush.capabilities())."""
+    raise _unavailable("resume")

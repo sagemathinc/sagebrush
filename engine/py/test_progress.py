@@ -9,7 +9,7 @@
 - 4 threads, each with its own slot and its own parent chain, while a
   reader thread takes snapshots (without the GIL) at full rate;
 - every record a valid sagebrush.progress/1 record;
-- capabilities(): progress only; estimate, run, request_stop and resume,
+- capabilities(): progress only; estimate, run and resume (request_stop comes with PR 5a),
   and factor's deadline= work= resume= checkpoint_every= checkpoint_path=,
   refused before running ("not available in this build").
 
@@ -110,13 +110,14 @@ def test_capabilities():
     c = sagebrush.capabilities()
     check(c["progress"] is True and not any(c[k] for k in ("estimate", "deadline", "work", "run", "request_stop", "checkpoints", "resume")), c)
     check(sagebrush.stop_points("factor") == [], "no stop points yet")
-    for name in ("estimate", "run", "request_stop", "resume"):
+    for name in ("estimate", "run", "resume"):
         try:
             getattr(sagebrush, name)(1)
         except TypeError as e:
             check(str(e) == "sagebrush.%s is not available in this build" % name, e)
         else:
             raise AssertionError(name)
+    check(not hasattr(sagebrush, "request_stop"), "request_stop comes with PR 5a")
     from sagebrush.sage import factor
     for opt in records.LATER_OPTIONS:
         try:

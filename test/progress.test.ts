@@ -239,7 +239,7 @@ test("Python routines report through _progress; the engine's self-test call show
   assert.equal(r.status, 0, r.stderr);
   assert.equal(
     r.stdout,
-    "[('groebner (python)', 'pairs', {'done': 3, 'unit': 'pairs', 'label': 'counted'})]\n[]\n{'ok': {'steps': 2000, 'calls': 3}}\n[]\n",
+    "[('groebner (python)', 'pairs', {'done': 3, 'unit': 'pairs', 'label': 'counted'})]\n[]\n{'ok': {'calls': 3, 'steps': 2000}}\n[]\n",
   );
 });
 
@@ -250,7 +250,7 @@ test("capabilities(): progress only in this build; the later pieces refuse befor
     "c = sagebrush.capabilities()",
     "print(c['progress'], sorted(k for k, v in c.items() if v is False))",
     "print(sagebrush.stop_points('factor'))",
-    "for name in ('estimate', 'run', 'request_stop', 'resume'):",
+    "for name in ('estimate', 'run', 'resume'):",
     "    try:",
     "        getattr(sagebrush, name)(1)",
     "    except TypeError as e:",
@@ -271,7 +271,6 @@ test("capabilities(): progress only in this build; the later pieces refuse befor
       "[]",
       "sagebrush.estimate is not available in this build",
       "sagebrush.run is not available in this build",
-      "sagebrush.request_stop is not available in this build",
       "sagebrush.resume is not available in this build",
       "factor(): deadline= is not available in this build",
       "factor(): work= is not available in this build",
