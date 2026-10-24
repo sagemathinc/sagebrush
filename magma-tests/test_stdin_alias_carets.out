@@ -1,0 +1,44 @@
+
+>> y := f(x, 5);
+         ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> z := 1 + f(x, 5);
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> print [h(x, Rationals()), h(x, 5)];
+                              ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> h(x, h(x, 5));
+         ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> h(h(x, Rationals()), 5);
+    ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[FldRat], RngIntElt
+
+x
+
+>> print f(GF(4).1), f(GF(4).1, GF(8));
+                      ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+
+>> print "f(x)", f(GF(4).1, GF(8));
+                  ^
+Runtime error in 'Trace': Argument 2 is not a subfield of the parent of argument
+1
+
+end

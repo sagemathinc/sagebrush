@@ -415,6 +415,27 @@ class Parser {
   private get scopeId() { return this.scopeIds[this.scopeIds.length - 1]; }
 
   globals = new Set<string>();
+  // What each name is bound to so far, by lexical scope (Python names;
+  // innermost last): "var", assigned or a parameter (optional ones too), or
+  // "fn", defined by function or procedure.  A call through a "var" may be
+  // an intrinsic's (f := ChangeRing; f(x, 5)) and is located as CALL_POS's
+  // are; a call of a named function is the user's own and is emitted as
+  // before.  The binding in scope at the call decides (astra's
+  // CORR-ALIAS105-1/2): a parameter or local of another function, or an
+  // optional parameter's absence, says nothing here.
+  private bindings: Map<string, "var" | "fn">[] = [new Map()];
+
+  private bind(name: string, kind: "var" | "fn") {
+    this.bindings[this.bindings.length - 1].set(name, kind);
+  }
+
+  private boundVar(name: string): boolean {
+    for (let k = this.bindings.length - 1; k >= 0; k--) {
+      const b = this.bindings[k].get(name);
+      if (b) return b === "var";
+    }
+    return false;
+  }
 
   statements(ends: string[]) {
     while (!ends.some((e) => this.at(e))) {
@@ -448,6 +469,7 @@ class Parser {
     // (or a rule) an assignment makes the name local, in the order the
     // reads and writes occur (see classify): "w" assigns the name, "p" an
     // element or field of it (x[i] := v), which needs x local already
+    this.bind(name, "var");
     if (this.capturing) {
       this.assigned.push(name);
       this.uses.push({ name, bound: false, kind, tok: tok ?? this.peek() });
@@ -1072,6 +1094,7 @@ class Parser {
     this.fns.push(fn);
     this.capturing++;
     this.scopeIds.push(++this.scopeCount);
+    this.bindings.push(new Map([...p.py, ...p.optNames].map((v) => [v, "var"])));
     const saveForwards = new Map(this.forwards), saveLocals = this.localsOpen;
     this.localsOpen = true;
     try {
@@ -1085,6 +1108,7 @@ class Parser {
       this.capturing--;
       this.fns.pop();
       this.scopeIds.pop();
+      this.bindings.pop();
       this.forwards = saveForwards;
       this.localsOpen = saveLocals;
       this.out = saveOut;
@@ -1134,6 +1158,8 @@ class Parser {
     // a def name of its own, so that a later function of the same name
     // doesn't change what this one calls recursively
     const def = this.fresh("_mf");
+    // (its own name, read in its body, is the function: a call not wrapped)
+    this.bind(name, "fn");
     const lines = this.functionBody(kind, def, name);
     this.expect(";");
     lines.push(`_m._named(${def}, ${JSON.stringify(name)})`);
@@ -1151,6 +1177,7 @@ class Parser {
     }
     for (const l of lines) this.emit(l);
     this.declareGlobal(name, t);
+    this.bind(name, "fn");
     this.emit(`${name} = ${def}`);
   }
 
@@ -1321,9 +1348,12 @@ class Parser {
   postfix(): string {
     const head = this.peek();
     let e = this.primary();
-    // (a call of an intrinsic that says its errors at its call's "(":
-    // _m._call tells the runtime which call it is, nested or repeated)
-    const located = head.t === "id" && e === head.v && CALL_POS.has(head.v);
+    // (a call of an intrinsic that says its errors at its call's "(", by
+    // its name or through a variable or parameter that may hold one:
+    // _m._call tells the runtime which call it is, nested or repeated; in a
+    // function body the read is a placeholder, resolved later)
+    const located = head.t === "id" && (e === head.v || e === pyName(head.v) || /^\u0000[rs]\d+\u0000$/.test(e)) &&
+      (CALL_POS.has(head.v) || this.boundVar(pyName(head.v)));
     let chainAt = ""; // the first "[" of consecutive indexes
     let links = 0;
     while (true) {
@@ -1451,12 +1481,14 @@ class Parser {
       if (kind === "func") {
         // its free names are captured when it is made, as a function's
         this.capturing++;
+        this.bindings.push(new Map([...p.py, ...p.optNames].map((v) => [v, "var"])));
         const b0 = this.uses.length;
         let body: string;
         try {
           body = this.expr();
         } finally {
           this.capturing--;
+          this.bindings.pop();
         }
         const b1 = this.uses.length;
         const free = this.classify(b0, b1, [...p.py, ...p.optNames], "fn");
