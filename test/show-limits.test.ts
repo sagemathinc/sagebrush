@@ -34,23 +34,60 @@ test("show() and latex() stay within the display's budget; the session goes on",
   const run = await session();
   await run("import _display_budget as B\nSAVED = dict(B.LIMITS)\nB.LIMITS['steps'] = 2000\nB.LIMITS['chars'] = 1 << 16");
 
-  // a _latex_ that adds to its list: walked to the length the list had
-  let r = await run("class Grow:\n    def _latex_(self):\n        V.append(Grow())\n        return 'g'\nV = [Grow()]\nshow(V)\nprint(len(V))");
+  // a _latex_ that adds to its list: followed, as before (CORR-SHOW87-1):
+  // a finite addition is rendered whole, as Sage renders it; endless
+  // growth meets the budget and is refused, never a partial rendering
+  let r = await run("class Once:\n    def _latex_(self):\n        if len(V) == 1:\n            V.append(2)\n        return 'g'\nV = [Once()]\nprint(latex(V))");
   assert.equal(r.err, "");
-  assert.equal(r.displays, 1);
-  assert.equal(r.out, "2\n");
+  assert.equal(r.out, "\\left[g, 2\\right]\n");
+  r = await run("class Grow:\n    def _latex_(self):\n        W.append(Grow())\n        return 'g'\nW = [Grow()]\nshow(W)");
+  assert.match(r.err, LIMIT);
+  assert.equal(r.displays, 0);
+
+  // a _latex_ that returns a number, and list subclasses with their own
+  // __iter__ or __getitem__: as before (CORR-SHOW87-2/3)
+  r = await run([
+    "class Seven:\n    def _latex_(self):\n        return 7",
+    "class IterList(list):\n    def __iter__(self):\n        return iter([7, 8])",
+    "class IndexList(list):\n    def __getitem__(self, i):\n        return 99",
+    "print(latex(Seven()), latex([Seven()]), latex(IterList([1])), latex(IndexList([1, 2])))",
+  ].join("\n"));
+  assert.equal(r.err, "");
+  assert.equal(r.out, "7 \\left[7\\right] \\left[7, 8\\right] \\left[1, 2\\right]\n");
 
   // one past the step budget (2 steps an entry, 1 the list), and the characters'
-  // (31 charged beside the string's own, for the brackets, a separator and
-  // \text{\texttt{}}: 2 more than the 29 they take, a conservative charge)
+  // (32 charged beside the string's own, for the brackets, a separator and
+  // \\text{\\texttt{}}: 3 more than the 29 they take, a conservative charge)
   r = await run("print(len(latex(list(range(999)))))");
   assert.equal(r.err, "");
   r = await run("latex(list(range(1000)))");
   assert.match(r.err, LIMIT);
-  r = await run("print(len(latex(['x' * 65505])))");
-  assert.equal(r.out, "65534\n");
-  r = await run("latex(['x' * 65506])");
+  r = await run("print(len(latex(['x' * 65504])))");
+  assert.equal(r.out, "65533\n");
+  r = await run("latex(['x' * 65505])");
   assert.match(r.err, LIMIT);
+
+  // a string of several lines, charged whole at its exact length before any
+  // line of it is made (LIMIT-SHOW87-3): lines of 100 characters cost 119
+  // each and the array 26 (550 lines: 65476, at the limit; 551 over); many
+  // short lines one step each (2000 at the limit, 2001 over); a string of
+  // newlines only (1999 newlines: 2000 lines)
+  r = await run("s = '\\n'.join(['y' * 100] * 550)\nprint(len(latex(s)))");
+  assert.equal(r.err, "");
+  assert.equal(r.out, "65476\n");
+  r = await run("latex('\\n'.join(['y' * 100] * 551))");
+  assert.match(r.err, LIMIT);
+  r = await run("print(len(latex('\\n'.join(['a'] * 2000))))");
+  assert.equal(r.out, String(20 * 2000 + 26) + "\n");
+  r = await run("latex('\\n'.join(['a'] * 2001))");
+  assert.match(r.err, LIMIT);
+  r = await run("print(len(latex('\\n' * 1999)))");
+  assert.equal(r.out, String(29 + 3 * 1999) + "\n");
+  r = await run("latex('\\n' * 2000)");
+  assert.match(r.err, LIMIT);
+  r = await run("show('\\n' * 2000)");
+  assert.match(r.err, LIMIT);
+  assert.equal(r.displays, 0);
 
   // show() past the budget: refused before its display exists; at the budget, shown
   r = await run("class Big:\n    def __repr__(self):\n        return 'b' * 100\nshow([Big()] * 1000)");
