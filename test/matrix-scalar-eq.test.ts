@@ -53,6 +53,33 @@ test("Sage mode: an immutable c times the identity hashes as c (dict lookups agr
   assert.equal(r.stdout, "True three True False\nTrue\n");
 });
 
+test("zero matrices of any shape hash as 0, in one pass over the entries; vectors compare symmetrically (#89 review)", () => {
+  const r = run("--sage", [
+    // CORR-EQ89-2: rectangular, empty and square zero matrices are found under 0, as in Sage
+    "d = {0: 'zero', 3: 'three'}",
+    "for M in [matrix(ZZ, 2, 3), matrix(ZZ, 0, 0), matrix(QQ, 3, 1), matrix(ZZ, 2, 2), matrix(ZZ, [[3, 0], [0, 3]])]:",
+    "    M.set_immutable()",
+    "    print(d.get(M), end=' ')",
+    "print()",
+    // LIMIT-EQ89-1: one streaming pass, each row iterated once, no copy of the rows
+    "from _sage_ffmat import _matrix_hash",
+    "class Row(list):",
+    "    n = 0",
+    "    def __iter__(self):",
+    "        Row.n += 1",
+    "        return list.__iter__(self)",
+    "print(_matrix_hash([Row([3, 0]), Row([0, 3])], 2) == hash(3), Row.n)",
+    "Row.n = 0",
+    "print(_matrix_hash([Row([1, 2]), Row([3, 4])], 2) == _matrix_hash([[1, 2], [3, 4]], 2), Row.n)",
+    // CORR-EQ89-1: both orders for vectors of rings with no common parent, and with one
+    "a, b = vector(SR, [1]), vector(GF(3), [1])",
+    "print(a == b, b == a, a != b, b != a)",
+    "print(vector(ZZ, [4]) == vector(GF(3), [1]), vector(GF(3), [1]) == vector(ZZ, [4]))",
+  ].join("\n") + "\n");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "zero zero zero zero three \nTrue 2\nTrue 2\nFalse False True True\nTrue True\n");
+});
+
 test("Magma mode keeps Magma's rules: a square matrix eq an integer, a non-square one or a vector is an error", () => {
   const ok = run("--magma", [
     "A := Matrix(Integers(), 2, 2, [1,0,0,1]); A eq 1; 1 eq A; A ne 1; A eq 2;",
