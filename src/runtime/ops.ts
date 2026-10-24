@@ -576,6 +576,23 @@ export function bitLength(x: bigint, max?: number): number {
   return hi;
 }
 
+// The bit length of x with no copy of more than about 1/64 of it, for an x
+// of any size up to V8's largest BigInt (2^30 bits): shifts from that size
+// down by 1/64 at a time, a shift past x's bits being 0 at once, until one is
+// not; its result has fewer bits than the step, and x's length is the shift
+// plus that result's.
+export function bitLengthSmallCopies(x: bigint): number {
+  x = absBig(x);
+  if (x < BIG) return x === 0n ? 0 : x.toString(2).length;
+  for (let s = 2 ** 30; s > 1024; ) {
+    const t = s - Math.max(1, s >> 6);
+    const r = x >> BigInt(t);
+    if (r !== 0n) return t + bitLength(r);
+    s = t;
+  }
+  return bitLength(x);
+}
+
 // Correctly rounded int / int, subnormal results included, following the
 // scheme of CPython's long_true_divide (Objects/longobject.c; see
 // NOTICE.md): the quotient is formed with at least two bits beyond
