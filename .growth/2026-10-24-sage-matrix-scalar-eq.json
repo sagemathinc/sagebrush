@@ -1,0 +1,1 @@
+{"v":1, "reason":"#89 Sage mode: matrix/vector == scalar through the coercion model (_coerced_eq, _matrix_hash, MatrixSpace.one) in lib/_sage_ffmat.py and lib/_sage_matrix.py", "bytes":{"cli/lib.gen.js": 9702, "cli/pyjs.cjs": 10088, "engine/lib/sage.pre": 26291, "engine/lib/sage.src": 9702}}
