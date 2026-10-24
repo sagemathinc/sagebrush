@@ -508,3 +508,51 @@ test("board open --edit hub: an outside version without memory now waits, and is
     assert.ok(hub.ledger.peak <= hub.ledger.max);
   } finally { cleanup(); }
 });
+
+test("board open --edit hub: astra's r5 interleaving end to end: FILE changed in place to C after W3, then replaced by D; neither lost", async () => {
+  const { realFs } = require("../src/board-edit-write");
+  let file = "", once = true;
+  const fsx = {
+    ...realFs,
+    link: (a: string, b: string) => {
+      realFs.link(a, b);
+      // (W3 has just linked prev: another program writes C in place, then replaces FILE with D)
+      if (once && a === file && /sagebrush-prev/.test(b)) {
+        once = false;
+        fs.writeFileSync(file, text(B([{ id: "n", text: "hello", x: 1 }, { id: "m", text: "C" }])));
+        const tmp = file + ".other-program";
+        fs.writeFileSync(tmp, text(B([{ id: "n", text: "hello", x: 1 }, { id: "m", text: "C" }, { id: "d", text: "D" }])));
+        fs.renameSync(tmp, file);
+      }
+    },
+  };
+  const dir = fs.mkdtempSync(join(tmpdir(), "sb-edit-hub-"));
+  try {
+    file = join(dir, "b.board.json");
+    fs.writeFileSync(file, text(B([{ id: "n", text: "hello", x: 0 }, { id: "m", text: "m" }])));
+    let now = 1_000_000;
+    const hub = new EditHub(file, defaultLimits(), { mergeStrings3, now: () => now, fs: fsx });
+    assert.ok((await hub.start(fs.readFileSync(file))).ok);
+    hub.connect("t1");
+    const s1 = snap(B([{ id: "n", text: "hello tab", x: 0 }, { id: "m", text: "m" }]));
+    assert.ok("accepted" in hub.submit("t1", 1, hub.H.seq, s1, sha(s1)));
+    now += hub.limits.SAVE_MAX_DELAY_MS;
+    const r = await hub.save();
+    assert.ok(!r.saved && r.why === "classified", JSON.stringify({ ...r, bytes: undefined }));
+    // (C ingested: its changes in H, with the tab's; prev, which holds C, retained)
+    assert.equal(node(hub, "m").text, "C");
+    assert.equal(node(hub, "n").x, 1);
+    assert.equal(node(hub, "n").text, "hello tab");
+    assert.ok(hub.prevs.some((p) => fs.existsSync(p.path)));
+    // (D, at FILE now, is a separate change, seen by the next read)
+    await hub.observe(fs.readFileSync(file));
+    assert.equal(node(hub, "d").text, "D");
+    assert.equal(node(hub, "m").text, "C");
+    assert.equal(node(hub, "n").text, "hello tab");
+    now += hub.limits.SAVE_MAX_DELAY_MS;
+    const r2 = await hub.save();
+    assert.ok(r2.saved, JSON.stringify({ ...r2, bytes: undefined, state: hub.state }));
+    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(saved.nodes.map((x: any) => x.id).sort(), ["d", "m", "n"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
