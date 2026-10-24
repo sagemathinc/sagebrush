@@ -9,7 +9,10 @@ import { spawnSync } from "node:child_process";
 // 96 MiB: daybreak2's HARD-F4E-1), and the default heap keeps it.
 
 const CLI = __dirname + "/../src/cli.js";
-const run = (heap: string[], src: string) => spawnSync(process.execPath, [...heap, CLI, "--sage", "-c", src], { encoding: "utf8", timeout: 240000 });
+// (each child's wall-clock bound, scaled by SAGEBRUSH_TIME_SCALE where the
+// machine is slower or shared, as test/magma.test.ts's WALL; ci.yml sets 2)
+const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
+const run = (heap: string[], src: string) => spawnSync(process.execPath, [...heap, CLI, "--sage", "-c", src], { encoding: "utf8", timeout: WALL(240000) });
 
 const CASES = [
   "zero_matrix(AA, 181) + 1.0",
@@ -47,11 +50,15 @@ test("a matrix over a field too big for a 96 MiB heap is refused before it is bu
   assert.equal(lines[CASES.length + 4], "True");
 });
 
-test("the same matrices are built in the default heap", () => {
-  const src = CASES.map((c) => `print(tuple((${c}).dimensions()))\n`).join("");
-  const r = run([], src);
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "(181, 181)\n(181, 181)\n(512, 512)\n(1024, 1024)\n(300, 300)\n(400, 400)\n(512, 512)\n");
+// (one child per matrix, each with its own bound: the seven together took
+// 36 s alone but were killed at 240 s in a CPU-starved CI shard, #93)
+const BUILT = ["(181, 181)", "(181, 181)", "(512, 512)", "(1024, 1024)", "(300, 300)", "(400, 400)", "(512, 512)"];
+CASES.forEach((c, i) => {
+  test(`the same matrices are built in the default heap: ${c}`, () => {
+    const r = run([], `print(tuple((${c}).dimensions()))\n`);
+    assert.equal(r.status, 0, `${r.signal ?? ""} ${r.stderr}`);
+    assert.equal(r.stdout, BUILT[i] + "\n");
+  });
 });
 
 test("Sage's errors for a malformed matrix come before the heap budget, in either heap (astra's CORR-21A-1)", () => {
