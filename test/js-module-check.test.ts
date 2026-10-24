@@ -82,3 +82,24 @@ test("host_req: the highest level of the literal hostCall names; bad names and s
   assert.match(errors('self["postMessage"](1);'), /postMessage outside the hostCall helper/);
   assert.match(errors("const { postMessage } = self;"), /postMessage outside the hostCall helper/);
 });
+
+test("the notices checks (A1.1a, A1.3): the module's banner, an entry per package, the bundle's own banner", () => {
+  // the banner: the module's first bytes are a /*! comment that points to the notices
+  assert.deepEqual(C.bannerFindings('/*! @sagebrush/bash 0.1.0: just-bash 3.6.0 (Apache-2.0); full notices in this chunk\'s "notices" */\nvar x;'), []);
+  assert.match(C.bannerFindings("var x; /*! notices */").join(), /doesn't begin with a \/\*! legal comment/);
+  assert.match(C.bannerFindings("/* notices */ var x;").join(), /doesn't begin with a \/\*! legal comment/);
+  assert.match(C.bannerFindings("/*! just-bash */ var x;").join(), /doesn't point to the chunk's notices/);
+  // an entry per package: a header line "<name> <version> (", the exact version
+  const notices = "Third-party notices\n\n=====\njust-bash 3.6.0 (Apache-2.0; its LICENSE)\n=====\nre2js 1.3.3 (MIT; its LICENSE)\n@borewit/text-codec 0.2.2 (MIT)\n";
+  assert.deepEqual(C.missingNotices(notices, [{ name: "just-bash", version: "3.6.0" }, { name: "re2js", version: "1.3.3" }, { name: "@borewit/text-codec", version: "0.2.2" }]), []);
+  assert.deepEqual(C.missingNotices(notices, [{ name: "re2js", version: "1.3.2" }, { name: "ieee754", version: "1.2.1" }]), ["re2js 1.3.2", "ieee754 1.2.1"]);
+  // (a version mentioned in passing isn't an entry)
+  assert.deepEqual(C.missingNotices("see papaparse 5.6.0 for details\n", [{ name: "papaparse", version: "5.6.0" }]), ["papaparse 5.6.0"]);
+  // the bundle's own license banner (esbuild's legal comment) against a fixture vendor.json's inlined list
+  const bundle = `var a;\n/*! Bundled license information:\n\nre2js/build/index.esm.js:\n  (*!\n   * re2js\n   * @version v1.3.3\n   *)\n\nieee754/index.js:\n  (*! ieee754. BSD-3-Clause License. *)\n\npapaparse/papaparse.js:\n  (* @license\n  Papa Parse\n  v5.6.0\n  *)\n*/\n`;
+  const inlined = [{ name: "re2js", version: "1.3.3" }, { name: "ieee754", version: "1.2.1" }, { name: "papaparse", version: "5.6.0" }];
+  assert.deepEqual(C.inlinedFindings(bundle, inlined), []);
+  assert.deepEqual(C.inlinedFindings(bundle, [{ ...inlined[0] }, inlined[1], { name: "papaparse", version: "5.7.0" }]), ["papaparse: the bundle's banner says 5.6.0, vendor.json 5.7.0"]);
+  assert.deepEqual(C.inlinedFindings(bundle, [inlined[0], inlined[2]]), ["ieee754 is in the bundle's license banner but not in vendor.json's inlined packages"]);
+  assert.deepEqual(C.inlinedFindings("var x;", inlined), [], "a bundle without a banner says nothing");
+});

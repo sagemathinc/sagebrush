@@ -85,3 +85,50 @@ export function hostRequirement(text, table) {
   for (const name of names) host_req = Math.max(host_req, table[name]);
   return { host_req, names: [...names].sort(), errors };
 }
+
+// ---------------------------------------------------------------------------
+// Notices (r4 addendum A1.1a, A1.3): the chunk carries the license texts of
+// everything its module bundles, and the module says so in its first bytes.
+
+/** Problems with the module's leading banner: it must begin with a /*! … notices … *\/ comment. */
+export function bannerFindings(text) {
+  const m = /^\/\*!([\s\S]*?)\*\//.exec(text);
+  if (!m) return ["the module doesn't begin with a /*! legal comment (its banner)"];
+  if (!/\bnotices\b/.test(m[1])) return ["the module's banner doesn't point to the chunk's notices"];
+  return [];
+}
+
+/**
+ * The entries `notices` lacks: each {name, version} must have a header line
+ * that begins "<name> <version> (" (the notices' format: name, exact version,
+ * then the license in parentheses).
+ */
+export function missingNotices(notices, entries) {
+  const lines = new Set(notices.split("\n").map((l) => l.split(" (")[0]));
+  return entries.filter((e) => !lines.has(`${e.name} ${e.version}`)).map((e) => `${e.name} ${e.version}`);
+}
+
+/**
+ * What a bundled file's own license banner (esbuild's "Bundled license
+ * information:" legal comment) says against `inlined` ({name, version}[]): a
+ * package it names that isn't inlined, or a version it states that differs.
+ */
+export function inlinedFindings(bundleText, inlined) {
+  const banner = /Bundled license information:([\s\S]*?)\*\//.exec(bundleText);
+  if (!banner) return [];
+  const versions = new Map(inlined.map((p) => [p.name, p.version]));
+  const found = [];
+  for (const entry of banner[1].split(/\n\s*\n/)) {
+    const files = [...entry.matchAll(/^((?:@[\w.-]+\/)?[\w.-]+)\/[^\s:]*:\s*$/gm)].map((m) => m[1]);
+    if (!files.length) continue;
+    const name = files[0];
+    if (!versions.has(name)) {
+      found.push(`${name} is in the bundle's license banner but not in vendor.json's inlined packages`);
+      continue;
+    }
+    const stated = /@version v(\d+\.\d+\.\d+)|^\s*v(\d+\.\d+\.\d+)\s*$/m.exec(entry);
+    const v = stated && (stated[1] ?? stated[2]);
+    if (v && v !== versions.get(name)) found.push(`${name}: the bundle's banner says ${v}, vendor.json ${versions.get(name)}`);
+  }
+  return found;
+}

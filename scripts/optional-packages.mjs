@@ -120,11 +120,13 @@ export function readOptional(rootDir = root, names = null) {
 // own worker (the bash shell, plan-bash-shell r3 §1).  sagebrush.json:
 //   name, version, kind "optional", sagebrush (a range),
 //   js {entry: "<name>.js", source: the entry's path, aliases: {bare import:
-//   a path in the package}}, files: every input file -> SHA-256 (all but
-//   sagebrush.json, README, LICENSE*, NOTICE*, vendor.json files and the
-//   vendor's verify-from-npm.mjs, which aren't bundled)
+//   a path in the package}, banner: the module's leading /*! comment,
+//   notices: the file of license texts the chunk carries (A1.1a)},
+//   files: every input file -> SHA-256 (all but sagebrush.json, README,
+//   LICENSE*, NOTICE*, vendor.json files and the vendor's verify-from-npm.mjs,
+//   which aren't bundled)
 const JS_ENTRY = /^[a-z0-9][a-z0-9._-]{0,63}\.js$/;
-const JS_UNBUNDLED = /(^|\/)(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|THIRD-PARTY-NOTICES[^/]*|vendor\.json|verify-from-npm\.mjs)$/;
+const JS_UNBUNDLED = /(^|\/)(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|vendor\.json|verify-from-npm\.mjs)$/;
 function readJsPackage(rootDir, dir, at, m, bad) {
   const known = new Set(["name", "version", "kind", "sagebrush", "js", "files"]);
   for (const k of Object.keys(m)) if (!known.has(k)) bad(`unknown field ${k} (a js package has no Python fields)`);
@@ -134,7 +136,9 @@ function readJsPackage(rootDir, dir, at, m, bad) {
   if (typeof m.sagebrush !== "string" || !m.sagebrush) bad("sagebrush must be a version range");
   const js = m.js;
   if (!js || typeof js !== "object" || Array.isArray(js)) bad("js must be {entry, source, aliases}");
-  for (const k of Object.keys(js)) if (!["entry", "source", "aliases"].includes(k)) bad(`js: unknown field ${k}`);
+  for (const k of Object.keys(js)) if (!["entry", "source", "aliases", "banner", "notices"].includes(k)) bad(`js: unknown field ${k}`);
+  if (typeof js.banner !== "string" || !/^\/\*![^\n]*\*\/$/.test(js.banner)) bad("js.banner must be one /*! … */ line");
+  if (!safePath(js.notices)) bad("js.notices must be a file of the package");
   if (typeof js.entry !== "string" || !JS_ENTRY.test(js.entry)) bad("js.entry is a file name like shell.js");
   if (!safePath(js.source) || !js.source.endsWith(".js")) bad("js.source must be a .js file inside the package");
   const aliases = js.aliases ?? {};
@@ -148,6 +152,7 @@ function readJsPackage(rootDir, dir, at, m, bad) {
     if (sha256(bytes) !== pin) bad(`${f}: its SHA-256 is ${sha256(bytes)}, not ${pin} (update sagebrush.json)`);
   }
   if (!Object.hasOwn(m.files, js.source)) bad(`js.source ${js.source} is not a pinned file`);
+  if (!Object.hasOwn(m.files, js.notices)) bad(`js.notices ${js.notices} is not a pinned file`);
   for (const [spec, f] of Object.entries(aliases)) if (!safePath(f) || !Object.hasOwn(m.files, f)) bad(`js.aliases.${spec}: ${f} is not a pinned file`);
   return { dir, id: `${m.name}@${m.version}`, manifest: m, kind: "js", at };
 }
@@ -174,15 +179,35 @@ export async function buildJsModule(p, rootDir = root) {
     const text = readFileSync(outFile, "utf8");
     const found = C.importFindings(text);
     if (found.length) throw new Error(`${p.id}: its module is not self-contained:\n  ` + found.slice(0, 20).join("\n  "));
+    // the notices (A1.1a, A1.3): the module begins with its banner; the
+    // notices name every vendored package and everything each one inlines
+    // (vendor/*/vendor.json, derived from its own lockfile), at their exact
+    // versions; and what a vendored bundle's own license banner says agrees
+    const banner = C.bannerFindings(text);
+    if (banner.length) throw new Error(`${p.id}: ${banner.join("; ")}`);
+    const notices = readFileSync(join(p.at, p.manifest.js.notices), "utf8");
+    const entries = [], disagree = [];
+    const vdir = join(p.at, "vendor");
+    for (const d of existsSync(vdir) ? readdirSync(vdir).sort() : []) {
+      if (!existsSync(join(vdir, d, "vendor.json"))) continue;
+      const v = JSON.parse(readFileSync(join(vdir, d, "vendor.json"), "utf8"));
+      entries.push({ name: v.package, version: v.version }, ...(v.inlined ?? []));
+      for (const f of Object.keys(v.files)) if (/\.m?js$/.test(f)) disagree.push(...C.inlinedFindings(readFileSync(join(vdir, d, f), "utf8"), v.inlined ?? []).map((x) => `vendor/${d}/${f}: ${x}`));
+    }
+    if (disagree.length) throw new Error(`${p.id}: ${disagree.join("; ")}`);
+    const missing = C.missingNotices(notices, entries);
+    if (missing.length) throw new Error(`${p.id}: its notices (${p.manifest.js.notices}) have no entry for ${missing.join(", ")}`);
     const req = C.hostRequirement(text, hostLevels(rootDir));
     if (req.errors.length) throw new Error(`${p.id}: its host calls:\n  ` + req.errors.slice(0, 20).join("\n  "));
     if (req.host_req < 1) throw new Error(`${p.id}: its module makes no hostCall (a js package talks to its host only through hostCall)`);
     const bytes = Buffer.byteLength(text, "utf8");
     if (bytes > L.jsModuleBytes) throw new Error(`${p.id}: its module is ${bytes} bytes; at most ${L.jsModuleBytes} (r4 addendum A1.2)`);
-    const chunk = { format: "sagebrush-pkg-chunk", v: 1, kind: "js", package: p.id, entry: p.manifest.js.entry, modules: { [p.manifest.js.entry]: text } };
+    const noticeBytes = Buffer.byteLength(notices, "utf8");
+    if (!noticeBytes || noticeBytes > L.jsNoticesBytes) throw new Error(`${p.id}: its notices are ${noticeBytes} bytes; 1 to ${L.jsNoticesBytes} (r4 addendum A1.2)`);
+    const chunk = { format: "sagebrush-pkg-chunk", v: 1, kind: "js", package: p.id, entry: p.manifest.js.entry, modules: { [p.manifest.js.entry]: text }, notices };
     const size = Buffer.byteLength(canonical(chunk), "utf8");
     if (size > L.chunkBytes) throw new Error(`${p.id}: its chunk is ${size} bytes; at most ${L.chunkBytes} (r4 addendum A1.2)`);
-    return { text, chunk, host_req: req.host_req, moduleBytes: bytes, chunkBytes: size };
+    return { text, chunk, host_req: req.host_req, moduleBytes: bytes, chunkBytes: size, noticeBytes };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -548,7 +573,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         if (p.kind === "js") {
           // (bundled and checked as build does, nothing written)
           const m = await buildJsModule(p);
-          console.log(`${p.id}: ok; js module ${m.moduleBytes} bytes, chunk ${m.chunkBytes} bytes, host_req ${m.host_req}`);
+          console.log(`${p.id}: ok; js module ${m.moduleBytes} bytes, notices ${m.noticeBytes} bytes, chunk ${m.chunkBytes} bytes, host_req ${m.host_req}`);
           continue;
         }
         const { findings, level } = lintPackage(p, api);

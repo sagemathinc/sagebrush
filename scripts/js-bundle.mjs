@@ -17,6 +17,8 @@ const result = await Bun.build({
   entrypoints: [resolve(dir, m.js.source)],
   target: "browser",
   format: "esm",
+  // (the module's first bytes: its legal comment, pointing to the chunk's notices, A1.1a)
+  banner: m.js.banner,
   // (identifiers kept: the publisher's AST checks read hostCall and its names in the published bytes)
   minify: { whitespace: true, syntax: true, identifiers: false },
   plugins: [

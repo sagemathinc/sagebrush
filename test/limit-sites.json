@@ -3105,6 +3105,10 @@
   "class": "1",
   "owner": "package runtime"
  },
+ "src/pkgset.ts :: checkJsChunk :: if (utf8Bytes(notices).length > PKGSET_LIMITS.jsNoticesBytes) fail(`${id}: its notices are over ${PKGSET_LIMITS.jsNoticesBytes} bytes`); #0": {
+  "class": "1",
+  "owner": "package runtime"
+ },
  "src/pkgset.ts :: checkJsChunk :: if (utf8Bytes(text).length > PKGSET_LIMITS.jsModuleBytes) fail(`${id}: ${c.entry} is over ${PKGSET_LIMITS.jsModuleBytes} bytes`); #0": {
   "class": "1",
   "owner": "package runtime"

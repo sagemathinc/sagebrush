@@ -61,9 +61,12 @@ export function shellPackage(plan: SetPlan, level = SHELL_HOST_LEVEL) {
 /**
  * Start the shell of set `S`, from the site at `base` (its pkgset/<S>.json,
  * pkg/<sha256>.json and shell/worker-boot.js).  Resolves once the module says
- * shell.ready.
+ * shell.ready, with the shell and its chunk's verified notices (the license
+ * texts of what the module bundles, A1.1a).  The notices are the caller's:
+ * this module keeps no reference to them, and the worker never receives them
+ * (r4 addendum A1 r3; the panel's About view re-reads them, step 4).
  */
-export async function startShell(S: string, at: string | URL = "./"): Promise<Shell> {
+export async function startShell(S: string, at: string | URL = "./"): Promise<{ shell: Shell; notices: string }> {
   if (!/^[0-9a-f]{64}$/.test(S)) throw new PkgsetError("a package set id is 64 lowercase hex digits");
   const base = new URL(at, document.baseURI);
   const index = await boundedFetch(new URL(`pkgset/${S}.json`, base).href, PKGSET_LIMITS.indexBytes);
@@ -71,9 +74,10 @@ export async function startShell(S: string, at: string | URL = "./"): Promise<Sh
   // reserved names: here only its pins and its js packages are used)
   const plan = admitIndex(S, index, "0".repeat(16), { isCoreModule: () => false, bundledDirs: new Set() });
   const j = shellPackage(plan);
-  // (refused before the fetch if the declared size is over the caps: admitIndex did; and again on the bytes)
+  // (the stages of A1.2: the declared size against the caps before the fetch (admitIndex), the body against
+  // it while streaming, then the pin, the parse and the decoded module and notices before anything is kept)
   const bytes = await boundedFetch(new URL(`pkg/${j.js.sha256}.json`, base).href, j.js.size);
-  const { text } = checkJsChunk(plan, j.id, bytes);
+  const { text, notices } = checkJsChunk(plan, j.id, bytes);
   const worker = new Worker(new URL("shell/worker-boot.js", base), { type: "module", name: "sagebrush-shell" });
   const { port1, port2 } = new MessageChannel();
   const pending = new Map<number, (r: ShellResult) => void>();
@@ -93,7 +97,7 @@ export async function startShell(S: string, at: string | URL = "./"): Promise<Sh
   });
   worker.postMessage({ text, port: port2 }, [port2]);
   const version = await ready;
-  return {
+  const shell: Shell = {
     S,
     version,
     exec(script: string, stdin?: string) {
@@ -108,4 +112,5 @@ export async function startShell(S: string, at: string | URL = "./"): Promise<Sh
       port1.close();
     },
   };
+  return { shell, notices };
 }

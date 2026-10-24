@@ -25,7 +25,7 @@ function canon(v: any): string {
 const reserved = { isCoreModule: (n: string) => ["json", "sys"].includes(n), bundledDirs: new Set(["pypi-sortedcontainers"]) };
 const refused = (f: () => unknown, re: RegExp) => assert.throws(f, (e: any) => e.name === "PkgsetError" && re.test(e.message));
 
-type Js = { name: string; version?: string; entry?: string; text: string; host_req?: number };
+type Js = { name: string; version?: string; entry?: string; text: string; host_req?: number; notices?: string };
 // A set (index bytes, its id and the chunks by id) with these js packages and,
 // optionally, one Python package; `mutate` edits the index or a chunk object
 // before it is serialized, so hostile sets still have the right hashes.
@@ -35,7 +35,7 @@ function makeSet(js: Js[], opts: { python?: boolean; v?: number; index?: (ix: an
   for (const j of js) {
     const id = `@sagebrush/${j.name}@${j.version ?? "0.1.0"}`;
     const entry = j.entry ?? "shell.js";
-    const c: any = { format: "sagebrush-pkg-chunk", v: 1, kind: "js", package: id, entry, modules: { [entry]: j.text } };
+    const c: any = { format: "sagebrush-pkg-chunk", v: 1, kind: "js", package: id, entry, modules: { [entry]: j.text }, notices: j.notices ?? "x 1.0.0 (MIT)\n" };
     opts.chunk?.(c);
     const b = enc(canon(c));
     chunks.set(id, b);
@@ -61,7 +61,7 @@ test("a v2 set with a js package is admitted; its chunk gives the one module's t
   assert.deepEqual([...plan.js.keys()], ["@sagebrush/bash@0.1.0"]);
   assert.deepEqual([...plan.packages.keys()], ["@sagebrush/hello@0.1.0"], "the Python package is admitted beside it, as before");
   assert.equal(plan.js.get("@sagebrush/bash@0.1.0").js.host_req, 1);
-  assert.deepEqual(P.checkJsChunk(plan, "@sagebrush/bash@0.1.0", s.chunks.get("@sagebrush/bash@0.1.0")), { kind: "js", entry: "shell.js", text: shell.text });
+  assert.deepEqual(P.checkJsChunk(plan, "@sagebrush/bash@0.1.0", s.chunks.get("@sagebrush/bash@0.1.0")), { kind: "js", entry: "shell.js", text: shell.text, notices: "x 1.0.0 (MIT)\n" });
 });
 
 test("the format: js only in v2, and every v2 set has one (A1.1)", () => {
@@ -144,4 +144,25 @@ test("js bytes aren't in the Python closure or its resident estimate (A1.2)", ()
   const plan = s.admit();
   assert.deepEqual(plan.closure.get("@sagebrush/hello@0.1.0"), ["@sagebrush/hello@0.1.0"]);
   assert.equal(plan.modules.has("bash"), false);
+});
+
+test("the chunk's notices: required plain text, at most 256 KiB, the field set closed (A1.1a, A1.2)", () => {
+  const id = "@sagebrush/bash@0.1.0";
+  const check = (chunk: (c: any) => void) => {
+    const t = makeSet([shell], { chunk });
+    return () => P.checkJsChunk(t.admit(), id, t.chunks.get(id));
+  };
+  refused(check((c) => delete c.notices), /missing notices/);
+  refused(check((c) => (c.notices = "")), /carries its notices/);
+  refused(check((c) => (c.notices = 42)), /carries its notices/);
+  refused(check((c) => (c.notices = "a\u0000b")), /plain text/);
+  refused(check((c) => (c.notices = "a\u001bb")), /plain text/);
+  assert.equal(check((c) => (c.notices = "a\tb\nc"))().notices, "a\tb\nc");
+  refused(check((c) => (c.licence = "x")), /unknown field/);
+  // (256 KiB of UTF-8 exactly, accepted; one byte past, refused; a multibyte character counts its bytes)
+  assert.equal(L.jsNoticesBytes, 256 * 1024);
+  assert.equal(check((c) => (c.notices = "x".repeat(L.jsNoticesBytes)))().notices.length, L.jsNoticesBytes);
+  refused(check((c) => (c.notices = "é" + "x".repeat(L.jsNoticesBytes - 1))), /notices are over 262144 bytes/);
+  // (the notices count in the chunk's own 8 MiB, checked on its declared size before any fetch)
+  refused(() => makeSet([shell], { index: (ix) => (ix.packages[id].js.size = L.chunkBytes + 1) }).admit(), /size must be an integer in 0\.\.8388608/);
 });

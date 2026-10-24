@@ -55,6 +55,17 @@ const NEWER = sha(newer);
 writeFileSync(join(dir, "pkgset", NEWER + ".json"), newer);
 const chunkSha = index.packages["@sagebrush/bash@0.1.0"].js.sha256;
 let tamper = false; // serve the shell's chunk with one byte changed
+let longer = false; // serve it with one byte more than its declared size (stage 2)
+// (stage 3: a chunk within its declared size whose notices are one byte past 256 KiB)
+const chunk = JSON.parse(readFileSync(join(dir, "pkg", chunkSha + ".json"), "utf8"));
+const bigChunk = Buffer.from(canon({ ...chunk, notices: "x".repeat(256 * 1024 + 1) }));
+writeFileSync(join(dir, "pkg", sha(bigChunk) + ".json"), bigChunk);
+const bigIndex = JSON.parse(readFileSync(join(dir, "pkgset", S + ".json"), "utf8"));
+bigIndex.packages["@sagebrush/bash@0.1.0"].js.sha256 = sha(bigChunk);
+bigIndex.packages["@sagebrush/bash@0.1.0"].js.size = bigChunk.length;
+const bigIx = Buffer.from(canon(bigIndex));
+const BIG_NOTICES = sha(bigIx);
+writeFileSync(join(dir, "pkgset", BIG_NOTICES + ".json"), bigIx);
 
 // the page: web/shell/loader.ts, bundled for this test only
 execFileSync("bun", ["build", join(here, "shell", "loader.ts"), "--target=browser", "--format=esm", `--outfile=${join(dir, "loader.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
@@ -63,6 +74,12 @@ const pageJs = `import { startShell } from "/loader.js";
 const made = [];
 const create = URL.createObjectURL;
 URL.createObjectURL = (b) => (made.push(b && b.type), create(b));
+const posted = [];
+let workers = 0;
+const W = window.Worker;
+window.Worker = class extends W { constructor(...a) { super(...a); workers++; } postMessage(m, t) { posted.push(m); return super.postMessage(m, t); } };
+window.workersMade = () => workers;
+window.noticesPosted = (needle) => posted.some((m) => JSON.stringify(Object.fromEntries(Object.entries(m ?? {}).filter(([, v]) => typeof v === "string"))).includes(needle));
 window.startShell = startShell;
 window.blobScripts = () => made.filter((t) => /javascript/.test(String(t))).length;
 window.ready = true;`;
@@ -88,7 +105,7 @@ const server = createServer((req, res) => {
   if (m && existsSync(join(dir, m[1], m[2] + ".json"))) {
     const b = readFileSync(join(dir, m[1], m[2] + ".json"));
     if (tamper && m[2] === chunkSha) b[b.length - 10] ^= 1;
-    return send("application/json", b);
+    return send("application/json", longer && m[2] === chunkSha ? Buffer.concat([b, Buffer.from(" ")]) : b);
   }
   res.writeHead(404, iso).end();
 });
@@ -146,7 +163,7 @@ try {
 
   // the shell, and every registered command under the worker's policy (N3)
   const run = await evaluate(`(async () => {
-    const sh = await startShell(${JSON.stringify(S)}, "/");
+    const { shell: sh, notices } = await startShell(${JSON.stringify(S)}, "/");
     const out = {};
     const cmds = {
       ls: "mkdir -p d && touch d/x && ls d", cat: "echo a > f && cat f", head: "seq 5 | head -2", tail: "seq 5 | tail -1", wc: "printf 'a b\\\\n' | wc -w",
@@ -161,7 +178,7 @@ try {
     for (const [name, script] of Object.entries(cmds)) out[name] = await sh.exec(script);
     const absent = {};
     for (const name of ["curl", "python3", "js-exec", "sqlite3", "tee", "node"]) absent[name] = await sh.exec(name + " --version");
-    return { S: sh.S, version: sh.version, out, absent, blobScripts: blobScripts() };
+    return { S: sh.S, version: sh.version, out, absent, blobScripts: blobScripts(), notices: { length: notices.length, head: notices.slice(0, 80), hasJustBash: notices.includes("just-bash 3.6.0 (Apache-2.0"), onShell: Object.values(sh).some((v) => v === notices) } };
   })()`);
   ok(run && !run.error && run.S === S && run.version === "0.1.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
   const failed = Object.entries(run?.out ?? {}).filter(([, r]) => r.exitCode !== 0 || /Content Security Policy|EvalError|unsafe-eval/.test(r.stderr));
@@ -171,6 +188,8 @@ try {
   const present = Object.entries(run?.absent ?? {}).filter(([, r]) => r.exitCode !== 127 || !/command not found|not available in browser environments/.test(r.stderr));
   ok(run?.absent && !present.length, `commands outside §8 aren't registered (curl, python3, js-exec, sqlite3, tee, node)${present.length ? ": " + JSON.stringify(present).slice(0, 300) : ""}`);
   ok(run?.blobScripts === 0, "the page's realm never makes a script of the module (no blob: script in the page)");
+  ok((await evaluate(`noticesPosted("Third-party notices for @sagebrush/bash")`)) === false, "the shell worker never receives the notices (A1 r3)");
+  ok(run?.notices?.hasJustBash && run.notices.length > 1000 && !run.notices.onShell, `startShell returns the chunk's verified notices, and the shell object holds no reference to them (A1 r3; ${run?.notices?.length} chars)`);
 
   // the worker's policy is the boundary: a module that tries everything, through the same bootstrap
   const probe = await evaluate(`(async () => {
@@ -213,6 +232,12 @@ try {
   tamper = true;
   ok(/not the one the index pins/.test(await refusal(S)), "a chunk that isn't the pinned bytes is refused");
   tamper = false;
+  const before = await evaluate("workersMade()");
+  longer = true;
+  ok(/over \d+ bytes/.test(await refusal(S)), "a body longer than its declared size is refused while streaming (stage 2, A1.2 r3)");
+  longer = false;
+  ok(/its notices are over 262144 bytes/.test(await refusal(BIG_NOTICES)), "notices one byte past 256 KiB, in a chunk within its declared size, are refused after the bounded body (stage 3)");
+  ok((await evaluate("workersMade()")) === before, "and neither refusal starts a worker");
 
   // (N1 needs Chromium's heap figures: CDP and performance.memory)
   if (cdp) {
@@ -228,7 +253,7 @@ try {
     await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     const used = () => evaluate("(gc(), performance.memory.usedJSHeapSize)");
     const before = await used();
-    await evaluate(`(async () => { window.sh2 = await startShell(${JSON.stringify(S)}, "/"); return (await sh2.exec("echo ok")).stdout; })()`);
+    await evaluate(`(async () => { window.sh2 = (await startShell(${JSON.stringify(S)}, "/")).shell; return (await sh2.exec("echo ok")).stdout; })()`);
     const pageAfter = await used();
     await new Promise((r) => setTimeout(r, 300));
     const sid = [...workers].find(([, u]) => /worker-boot\.js$/.test(u))?.[0];
