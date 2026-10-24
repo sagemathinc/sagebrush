@@ -1190,6 +1190,95 @@ def test_worker_threads():
     print("worker threads: ok")
 
 
+def test_late_output_sealed():
+    """astra PR120-SEM-8, on the real worker loop: a run's capture is sealed
+    at its end, with its drain and its reply.  A thread that keeps the run's
+    stream and writes later (after the reply, or racing the end) has that
+    output dropped: the next run never streams or counts it, and each run's
+    streamed bytes equal its reply's counts."""
+    import subprocess
+
+    pkg = os.path.dirname(RN.__file__)
+    harness = (
+        "import os, sys, types\n"
+        "m = types.ModuleType('sagebrush'); m.__path__ = [%r]; sys.modules['sagebrush'] = m\n"
+        "sage = types.ModuleType('sagebrush.sage'); sage.__all__ = []; sys.modules['sagebrush.sage'] = sage\n"
+        "prep = types.ModuleType('sagebrush.preparse'); prep.preparse = lambda s: s; sys.modules['sagebrush.preparse'] = prep\n"
+        "from sagebrush import session as S\n"
+        "S._worker()\n" % pkg)
+    A = ("import threading, sys, time\n"
+         "ev = threading.Event(); out, err = sys.stdout, sys.stderr\n"
+         "def late():\n    ev.wait(); out.write('OLD' * 24000); err.write('ERR' * 1000)\n"
+         "ths = [threading.Thread(target=late, daemon=True) for i in range(3)]\n"
+         "[t.start() for t in ths]\n'A'")
+    B = "ev.set(); [t.join() for t in ths]; print('new')\n'B'"
+    C = ("stop = threading.Event(); o2, e2 = sys.stdout, sys.stderr\n"
+         "def spin(f):\n    while not stop.is_set(): f.write('z' * 100)\n"
+         "sp = [threading.Thread(target=spin, args=(f,), daemon=True) for f in (o2, e2, o2)]\n"
+         "[t.start() for t in sp]\ntime.sleep(0.3)\n'C'")
+    D = "stop.set(); [t.join() for t in sp]; print('d')\n'D'"
+    reqs = "".join(json.dumps({"code": c, "mode": "python"}) + "\n" for c in (A, B, C, D))
+    r = subprocess.run([sys.executable, "-c", harness], input=reqs, capture_output=True, text=True, timeout=120)
+    runs, cur = [], {"stdout": 0, "stderr": 0}
+    for line in r.stdout.splitlines()[1:]:
+        m = json.loads(line)
+        if "out" in m:
+            cur[m["stream"]] += len(m["out"].encode())
+        else:
+            runs.append((m, cur))
+            cur = {"stdout": 0, "stderr": 0}
+    assert [m["result"] for m, _ in runs] == ["'A'", "'B'", "'C'", "'D'"], ([m.get("result") for m, _ in runs], r.stderr[-500:])
+    assert cur == {"stdout": 0, "stderr": 0}, cur  # (nothing after the last reply)
+    for m, streamed in runs:
+        assert streamed == m["output_bytes"], (m["result"], streamed, m["output_bytes"])
+    assert runs[0][1] == {"stdout": 0, "stderr": 0}
+    assert runs[1][1] == {"stdout": 4, "stderr": 0}, runs[1][1]  # (B: only its own 'new\n')
+    assert runs[2][1]["stdout"] > 0 and runs[2][1]["stderr"] > 0  # (C's writers, up to its seal)
+    assert runs[3][1] == {"stdout": 2, "stderr": 0}, runs[3][1]
+    print("late output sealed: ok")
+
+
+def test_session_start_failure():
+    """daybreak2 PR120-FIX4-1: a start that fails before its session exists
+    (its handle; the session's own start, whose child is already running)
+    gives back the slot it took, and only once no worker of it is alive."""
+    import errno
+    from sagebrush import session as S
+
+    root = tempfile.mkdtemp(prefix="sb-runs-")
+    other = runner(fresh(root=root, owner={"pid": os.getpid(), "nonce": "other2"}))
+    other.ceiling = 1
+    # the handle
+    r = runner(fresh(root=root))
+    r.ceiling = 1
+    r.store.new_handle = lambda: (_ for _ in ()).throw(OSError(errno.ENOSPC, "No space left on device"))
+    refused("storage", r.start, "auto:1", "sage", session="s")
+    assert r.store.slots() == {} and other.start("auto:1", "sage", session="o")[1]
+    other.close()
+    # the real Session, whose child never says ready
+    procs = []
+
+    class Stuck(S.Session):
+        WORKER_ARGV = [sys.executable, "-c", "import time; time.sleep(60)"]
+        READY_S = 0.5
+
+        def _start(self):
+            try:
+                super()._start()
+            finally:
+                procs.append(self.proc)
+
+    r = RN.Runner(store=fresh(root=root), session_factory=Stuck)
+    r.ceiling = 1
+    run, done = r.start("1", "python", session="s")
+    rec = r.record(run.record["handle"])
+    assert done and rec["error"]["type"] == "session" and "did not start" in rec["error"]["message"], rec
+    assert procs and procs[0].poll() is not None, "the stuck child is still alive"
+    assert r.store.slots() == {} and other.start("auto:1", "sage", session="o")[1]
+    other.close()
+    print("session start failure: ok")
+
+
 def test_real_session_output():
     """The real session, when the package's engine is built (CI's
     engine-cpython, a VM): a 100 MiB printer streams through Session and
@@ -1349,6 +1438,8 @@ if __name__ == "__main__":
     test_capture_signal_boundaries()
     test_worker_real_signal()
     test_worker_threads()
+    test_late_output_sealed()
+    test_session_start_failure()
     test_real_session_output()
     test_server()
     print("runs: all ok")
