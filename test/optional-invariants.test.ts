@@ -114,6 +114,29 @@ test("requirements come from the call forms used (§6.2–6.3): a new keyword ra
   assert.equal(useLevel(api, { target: "m.nothere", bound: null }), null);
   assert.equal(useLevel(api, { target: "m.f", bound: "any" }), 2, "an escaping reference takes the maximum");
 
+  // level 3 gave g's x and h's k a default (default_since): a call leaving
+  // them out needs level 3, one passing them doesn't
+  const withDefaults = {
+    api: 1, level: 3, prefixes: [],
+    modules: {
+      m: {
+        since: 1,
+        names: {
+          g: { kind: "function", since: 1, params: [{ name: "x", kind: "pos", default: true, since: 1, default_since: 3 }] },
+          h: { kind: "function", since: 1, params: [{ name: "a", kind: "pos", default: false, since: 1 }, { name: "k", kind: "kwonly", default: true, since: 1, default_since: 3 }] },
+        },
+      },
+    },
+  };
+  assert.equal(useLevel(withDefaults, { target: "m.g", bound: { npos: 0, kw: [], unpack: false } }), 3, "g() relies on the new default");
+  assert.equal(useLevel(withDefaults, { target: "m.g", bound: { npos: 1, kw: [], unpack: false } }), 1);
+  assert.equal(useLevel(withDefaults, { target: "m.g", bound: { npos: 0, kw: ["x"], unpack: false } }), 1);
+  assert.equal(useLevel(withDefaults, { target: "m.h", bound: { npos: 1, kw: [], unpack: false } }), 3, "h(1) relies on k's new default");
+  assert.equal(useLevel(withDefaults, { target: "m.h", bound: { npos: 1, kw: ["k"], unpack: false } }), 1);
+  assert.equal(useLevel(withDefaults, { target: "m.h", bound: { npos: 1, kw: [], unpack: true } }), 3, "unpacking takes the maximum");
+  assert.equal(useLevel(withDefaults, { target: "m.g", bound: "any" }), 3, "an escaping reference takes the maximum");
+  assert.equal(useLevel(withDefaults, { target: "m.g", bound: null }), 1, "a bare reference");
+
   // through lintPackage: an alias, a reference passed or stored, and a
   // declared dynamic target with and without its call form (astra's CORR-PR68-2)
   const { lintPackage } = await esm("scripts/optional-packages.mjs");
