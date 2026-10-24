@@ -224,6 +224,18 @@
   "owner": "HMF engine",
   "row": "inv-39"
  },
+ "engine/interrupt/src/lib.rs :: memory_share :: (v != u64::MAX).then_some(v) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/interrupt/src/lib.rs :: poll_host_now :: static MEMORY_SHARE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/interrupt/src/lib.rs :: set_memory_share :: MEMORY_SHARE.store(share.unwrap_or(u64::MAX), Relaxed); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -359,15 +371,90 @@
   "owner": "polynomial factorization",
   "row": "inv-35"
  },
- "engine/poly/src/budget.rs :: default :: Budget::new(DEFAULT_OVERRIDE.with(|o| o.get()).unwrap_or(Limits::DEFAULT)) #0": {
-  "class": "2+3",
-  "owner": "polynomial factorization",
-  "row": "inv-34"
+ "engine/poly/src/budget.rs :: default :: Budget::default_with(sagebrush_interrupt::memory_share()) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "engine/poly/src/budget.rs :: default :: fn default() -> Budget { #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: default :: return Budget::new(l); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert!(Budget::default_with(Some(0)).reserve(Some(1)).is_err()); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert!(e.to_string().contains(\"; the limit, 536870912 bytes, is the default: no memory figure from the host); not factored\"), \"{}\", e); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert!(e.to_string().ends_with(\"; the limit, 3000 bytes, is this factorization's share of the memory observed free); not factored\"), \"{}\", e); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((b.limits().memory, b.memory_source()), (1000, MemorySource::Policy)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((b.limits().memory, b.memory_source()), (3000, MemorySource::HostShare)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((b.limits().memory, b.memory_source()), (512 << 20, MemorySource::NoHostFigure)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((e.memory_limit, e.memory_source), (512 << 20, MemorySource::NoHostFigure)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((e.what, e.need, e.remaining, e.memory_limit), (\"memory\", 3001, 3000, 3000)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!((l.work, l.subsets, l.divisions, l.max_degree), (Limits::DEFAULT.work, Limits::DEFAULT.subsets, Limits::DEFAULT.divisions, Limits::DEFAULT.max_degree)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: assert_eq!(Budget::new(Limits::DEFAULT).memory_source(), MemorySource::Policy); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: let b = Budget::default_with(None); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: let b = Budget::default_with(Some(3000)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: let b = with_default_limits(tight, Budget::default); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: let l = Budget::default_with(Some(3000)).limits().to_owned(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_memory_from_the_host_share :: let tight = Limits { memory: 1000, ..Limits::DEFAULT }; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_with :: None => Budget { memory_source: MemorySource::NoHostFigure, ..Budget::new(Limits::DEFAULT) }, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_with :: Some(share) => Budget { memory_source: MemorySource::HostShare, ..Budget::new(Limits { memory: share, ..Limits::DEFAULT }) }, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: default_with :: fn default_with(share: Option<u64>) -> Budget { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "engine/poly/src/budget.rs :: drop :: impl Budget { #0": {
   "class": "2+3",
@@ -378,6 +465,18 @@
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: \"factor: resource limit exceeded ({} in {}: {} > {}\", #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: fmt :: MemorySource::HostShare => write!(f, \"; the limit, {} bytes, is this factorization's share of the memory observed free\", self.memory_limit)?, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/src/budget.rs :: fmt :: MemorySource::NoHostFigure => write!(f, \"; the limit, {} bytes, is the default: no memory figure from the host\", self.memory_limit)?, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "engine/poly/src/budget.rs :: fmt :: impl Limits { #0": {
   "class": "2+3",
@@ -429,6 +528,10 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
+ "engine/poly/src/budget.rs :: name :: pub memory_limit: u64, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "engine/poly/src/budget.rs :: new :: Budget { #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
@@ -459,6 +562,10 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
+ "engine/poly/src/budget.rs :: refuse :: FactorLimit { phase: self.phase.get(), what, need, remaining, memory_limit: self.limits.memory, memory_source: self.memory_source } #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "engine/poly/src/budget.rs :: unlimited :: pub fn unlimited() -> Budget { #0": {
   "class": "2+3",
   "owner": "polynomial factorization",
@@ -473,6 +580,10 @@
   "class": "2+3",
   "owner": "polynomial factorization",
   "row": "inv-34"
+ },
+ "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Limits, MemorySource, Phase}; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
  },
  "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_COLS: usize = 32; #0": {
   "class": "3",
@@ -538,6 +649,38 @@
   "class": "3",
   "owner": "polynomial factorization",
   "row": "inv-35"
+ },
+ "engine/poly/tests/memory_share.rs ::  :: use sagebrush_poly::{try_factor, try_factor_with, with_default_limits, Budget, Limits, MemorySource}; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: assert!(e.to_string().contains(\"; the limit, 1024 bytes, is this factorization's share of the memory observed free\"), \"{}\", e); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: assert_eq!((e.what, e.memory_limit, e.memory_source), (\"memory\", 1024, MemorySource::HostShare)); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: assert_eq!(b.limits().memory, 1024); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: assert_eq!(try_factor_with(&f, &Budget::new(Limits::DEFAULT)).unwrap().1.len(), 2); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: assert_eq!(with_default_limits(wide, || try_factor(&f)).unwrap().1.len(), 2); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "engine/poly/tests/memory_share.rs :: the_share_reaches_a_default_factorization :: let wide = Limits { memory: 64 << 20, ..Limits::DEFAULT }; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
  },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
@@ -728,6 +871,270 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "lib/_capacity.py ::  :: (cgroup, resource limits, physical memory), from a snapshot at most #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: (sys._sagebrush_heap_limit: the old space the session can grow to), exactly #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: _NO_CEILING = 1 << 62 # (a cgroup v1 \"limit\" this large is none) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: _resource_mod = 0 # (0: not tried yet; None: there is none) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py ::  :: budget of a polynomial factorization, floor(effective_guard_bytes / 2), #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows :: \"\"\"The Windows API through ctypes: physical memory, and the limit of the #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows :: (JobMemoryLimit, against PeakJobMemoryUsed: the API gives no current job #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows :: (ProcessMemoryLimit, against this process's commit) or for the whole job #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows :: job this process is in, if any. A job's limit is set per process #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit :: best = (int(info.ProcessMemoryLimit), self._commit()) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit :: def job_limit(self): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit :: flags = info.BasicLimitInformation.LimitFlags #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit :: j = (int(info.JobMemoryLimit), int(info.PeakJobMemoryUsed)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit.BASIC :: (\"MinimumWorkingSetSize\", c.c_size_t), (\"MaximumWorkingSetSize\", c.c_size_t), (\"ActiveProcessLimit\", c.c_ulong), #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit.BASIC :: _fields_ = [(\"PerProcessUserTimeLimit\", c.c_longlong), (\"PerJobUserTimeLimit\", c.c_longlong), (\"LimitFlags\", c.c_ulong), #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit.EXTENDED :: (\"JobMemoryLimit\", c.c_size_t), (\"PeakProcessMemoryUsed\", c.c_size_t), (\"PeakJobMemoryUsed\", c.c_size_t)] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _CtypesWindows.job_limit.EXTENDED :: _fields_ = [(\"BasicLimitInformation\", BASIC), (\"IoInfo\", IO_COUNTERS), (\"ProcessMemoryLimit\", c.c_size_t), #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _Sources :: others (a fake root for /proc and /sys, fake resource limits, a fake #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _Sources :: rlimits = None # None: the resource module; else name -> (soft, hard) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroup_dirs :: if _read(\"/sys/fs/cgroup\" + path + \"/memory.max\") is not None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroups :: \"\"\"[(source, limit, used)] for this process's memory cgroup, v2 and its #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroups :: if lim is not None and lim.strip() != \"max\": #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroups :: lim = _read(b[0] + \"/memory.max\") #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _cgroups :: n = _int(_read(d + \"/memory.limit_in_bytes\") or \"\") #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: for r in (\"RLIMIT_AS\", \"RLIMIT_DATA\"): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: if not limits: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits = [] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((\"MemTotal\", t)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((\"physical\", total)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((\"windows job\", job)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((name, lim)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: limits.append((r, v)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: m = min(v for _, v in limits) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: return m, [k for k, v in limits if v == m] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _machine_total :: v = _rlimit(r) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: \"\"\"The resource module, imported once (pyjs has none).\"\"\" #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: _resource_mod = r #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: def _resource(): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: global _resource_mod #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: if _resource_mod == 0: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: import resource as r #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _resource :: return _resource_mod #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: \"\"\"The soft limit `name` (RLIMIT_AS, RLIMIT_DATA): None for none, or #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: def _rlimit(name): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: if _src.rlimits is not None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: if resource is None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: inf = resource.RLIM_INFINITY #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: resource = _resource() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: soft = _src.rlimits[name][0] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _rlimit :: soft = resource.getrlimit(getattr(resource, name))[0] #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _runtime_parts :: if not hasattr(_sys, \"_sagebrush_heap_limit\"): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _runtime_parts :: limit, used)]; [] in CPython.\"\"\" #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: \"\"\"The Windows sources: (job_limit or None, job_used, total, available), #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: limit, used = w.job_limit() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: _windows :: return (limit, used, total, available) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity :: for r, field in ((\"RLIMIT_AS\", \"VmSize\"), (\"RLIMIT_DATA\", \"VmData\")): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity :: status = None # (read only when a limit is set) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity :: v = _rlimit(r) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity.add :: basis.append({\"source\": source, \"limit\": int(limit), \"used\": None if used is None else int(used), \"remaining\": rem}) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity.add :: def add(source, limit, used): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity.add :: if limit is None: #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: capacity.add :: rem = None if used is None else max(0, int(limit) - int(used)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: heap_figure :: RLIMIT_DATA, the Windows job limit and physical memory, read now; a #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: heap_figure :: limit, unchanged; in CPython the least of the cgroup limit, RLIMIT_AS, #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: heap_figure :: n = getattr(_sys, \"_sagebrush_heap_limit\", None) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_capacity.py :: poly_share :: cap, not an aggregate one: concurrent native top-level factorizations #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_display_budget.py ::  :: LIMITS = {\"steps\": 1 << 23, \"chars\": 1 << 26} #0": {
   "class": "1",
@@ -1070,15 +1477,9 @@
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
- "lib/_magma.py :: _collect_max :: limit = int(n) if n else 1 << 30 #0": {
-  "class": "1+2",
-  "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
- },
- "lib/_magma.py :: _collect_max :: n = getattr(_sys, \"_sagebrush_heap_limit\", None) #0": {
-  "class": "1+2",
-  "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
+ "lib/_magma.py :: _collect_max :: limit = _capacity.heap_figure() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_magma.py :: _collect_max :: return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST), (None if raw is None else int(raw)) #0": {
   "class": "1+2",
@@ -1090,10 +1491,13 @@
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
- "lib/_magma.py :: _collect_refusal :: return MagmaError(\"a comprehension of more than %d elements is not supported yet\" % _COLLECT_MAX) #0": {
-  "class": "1+2",
-  "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
+ "lib/_magma.py :: _collect_refusal :: e = MagmaError(\"a comprehension of more than %d elements is not supported yet\" % _COLLECT_MAX) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_magma.py :: _collect_refusal :: e.need_bytes, e.limit_bytes, e.capacity = None, _COLLECT_MAX * _COLLECT_COST, _capacity.capacity() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
   "class": "none",
@@ -1665,15 +2069,13 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _AlgCharge.row :: raise NotImplementedError(\"a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts\" % ( #0": {
+ "lib/_sage_ffmat.py :: _AlgCharge.row :: raise _refusal(\"a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts\" % ( #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _AlgCharge.row :: self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib)) #0": {
+ "lib/_sage_ffmat.py :: _AlgCharge.row :: self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib), None, self.limit) #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_sage_ffmat.py :: _admit_size :: for an operation's larger working matrix, fits this process's budget #0": {
   "class": "2",
@@ -1695,15 +2097,13 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admit_size :: m, n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+ "lib/_sage_ffmat.py :: _admit_size :: m, n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), need, limit // _HEAP_SHARE) #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _admit_size :: raise NotImplementedError(\"a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
+ "lib/_sage_ffmat.py :: _admit_size :: raise _refusal(\"a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_sage_ffmat.py :: _admit_vector :: NotImplementedError, before anything is built, if not.\"\"\" #0": {
   "class": "2",
@@ -1725,20 +2125,17 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admit_vector :: n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+ "lib/_sage_ffmat.py :: _admit_vector :: n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), need, limit // _HEAP_SHARE) #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _admit_vector :: raise NotImplementedError(\"a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
+ "lib/_sage_ffmat.py :: _admit_vector :: raise _refusal(\"a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _admitted_entries :: base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+ "lib/_sage_ffmat.py :: _admitted_entries :: base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), None, limit // _HEAP_SHARE) #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_sage_ffmat.py :: _admitted_entries :: cap = _heap_limit() // _HEAP_SHARE // (2 * _entry_cost(base)) #0": {
   "class": "2",
@@ -1775,10 +2172,9 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _admitted_entries :: raise NotImplementedError(\"a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
+ "lib/_sage_ffmat.py :: _admitted_entries :: raise _refusal(\"a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_sage_ffmat.py :: _admitted_entries :: return _bounded_list(entries, cap) #0": {
   "class": "2",
@@ -1795,15 +2191,38 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
+ "lib/_sage_ffmat.py :: _admitted_rows.refuse :: base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib), None, limit // _HEAP_SHARE) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _admitted_rows.refuse :: return _refusal(\"a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/_sage_ffmat.py :: _heap_limit :: def _heap_limit(): #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffmat.py :: _heap_limit :: n = getattr(sys, \"_sagebrush_heap_limit\", None) #0": {
+ "lib/_sage_ffmat.py :: _refusal :: \"\"\"A guard's refusal: its text, with the enforced cap of this operation #0": {
   "class": "2",
-  "owner": "linear algebra/runtime memory",
-  "row": "inv-6"
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _refusal :: (limit_bytes), the need when known (need_bytes, else None) and the #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _refusal :: def _refusal(text, need, cap): #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _refusal :: e = NotImplementedError(text) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _refusal :: e.need_bytes, e.limit_bytes, e.capacity = need, cap, _capacity.capacity() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
@@ -2764,6 +3183,18 @@
   "owner": "continued fractions",
   "row": "inv-16"
  },
+ "lib/sage_all.py :: _admit_prime_sieve :: \"of the end, fit its heap\" % (name, start, stop, cap)) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/sage_all.py :: _admit_prime_sieve :: cap = _prime_cells() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "lib/sage_all.py :: _admit_prime_sieve :: e.need_bytes, e.limit_bytes, e.capacity = (stop - start) + _math.isqrt(max(stop - 1, 0)), cap, _capacity.capacity() #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
  "lib/sage_all.py :: _cf_admit :: if n > _CF_MAX_INDEX: #0": {
   "class": "2+3",
   "owner": "continued fractions",
@@ -3163,6 +3594,22 @@
   "class": "2",
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
+ },
+ "src/runtime/engine.ts ::  :: import { newBuiltinModule, heapLimit } from \"./modules\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: engine :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: mpCall :: parts.push(Obj.tuple([\"js heap\", heapLimit(), typeof used === \"number\" && used >= 0 ? Math.floor(used) : null])); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/engine.ts :: pushShare :: if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
   "class": "none",

@@ -10,7 +10,7 @@
 
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
-import { newBuiltinModule } from "./modules";
+import { newBuiltinModule, heapLimit } from "./modules";
 import { INTR } from "./interrupt";
 
 interface Engine {
@@ -22,6 +22,8 @@ interface Engine {
   sb_mp_call(ptr: number, len: number): number;
   sb_last_error(): number;
   sb_reply_len(): number;
+  // (optional: engines built before item D0 lack it)
+  sb_set_memory_share?(v: number): void;
 }
 
 let E: Engine | null = null;
@@ -70,8 +72,50 @@ function engine(): Engine {
   return E;
 }
 
+// The memory share of a default polynomial factorization (item D0,
+// plan-d0-capacity-r2 §3): lib/_capacity.py's poly_share, pushed into the
+// instance before a dispatch when the last push to it is 250 ms old or more
+// (one clock comparison per call otherwise), so a factorization sees the
+// share of its call's entry, and a long call keeps it.  An instance's
+// dispatches are serialized.  The push is optional both ways: an engine
+// without sb_set_memory_share is left alone, and a share that can't be had
+// is pushed as -1 (none: the factorization keeps its 512 MiB).
+let shareTo: Engine | null = null, shareAt = 0;
+const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32;
+// (the clock, monotonic; replaced by tests)
+let shareClock = () => performance.now();
+export function setShareClock(f: (() => number) | null) {
+  shareClock = f ?? (() => performance.now());
+  shareTo = null;
+}
+export function pushShare(e: Engine) {
+  if (typeof e.sb_set_memory_share !== "function") return;
+  const now = shareClock();
+  if (e === shareTo && now - shareAt < SHARE_MAX_AGE_MS) return;
+  shareTo = e;
+  shareAt = now;
+  e.sb_set_memory_share(memoryShare());
+}
+/** poly_share() as an integer from 0 to 4 GiB, or -1. */
+function memoryShare(): number {
+  try {
+    const m = Obj.hooks.importModule("_capacity");
+    let v: any = Obj.callObj(Obj.getattr(m, "poly_share"), []);
+    if (typeof v === "bigint") v = v <= BigInt(WASM_CEILING) && v >= 0n ? Number(v) : -1;
+    return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= WASM_CEILING ? v : -1;
+  } catch (e) {
+    // (a Ctrl-C seen by the collector's Python code consumed the flag: set
+    // it again, so the call it came before is interrupted, not this push)
+    try {
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) Atomics.or(INTR, 0, 1);
+    } catch {}
+    return -1;
+  }
+}
+
 export function engineCall(request: string): string {
   const e = engine();
+  pushShare(e);
   const req = new TextEncoder().encode(request);
   const p = e.sb_alloc(req.length);
   new Uint8Array(e.memory.buffer, p, req.length).set(req);
@@ -92,6 +136,7 @@ export function engineCall(request: string): string {
  *  band ("err\x1fKind\x1fmessage"), also when they abort the instance. */
 export function symCall(request: string): string {
   const e = engine();
+  pushShare(e);
   const req = new TextEncoder().encode(request);
   const p = e.sb_alloc(req.length);
   new Uint8Array(e.memory.buffer, p, req.length).set(req);
@@ -119,6 +164,7 @@ export function symCall(request: string): string {
  *  (sagebrush_mpoly::call_framed); errors come back in band ("er..."). */
 export function mpCall(req: Uint8Array): Uint8Array {
   const e = engine();
+  pushShare(e);
   const p = e.sb_alloc(req.length);
   new Uint8Array(e.memory.buffer, p, req.length).set(req);
   let r: number;
@@ -168,6 +214,24 @@ newBuiltinModule("_sbengine", (m) => {
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
     }
   }, "call");
+  // The runtime's parts of the memory capacity (lib/_capacity.py, item D0):
+  // (source, limit, used) in bytes, used None when unknown; never guessed in
+  // Python, and nothing here calls the engine.  The engine's instance has at
+  // most 4 GiB (wasm32); the JS heap is V8's (or the browser's) limit and
+  // use, without a collection.
+  m.capacity_parts = Obj.builtin(() => {
+    const parts: any[] = [Obj.tuple(["wasm engine", WASM_CEILING, E ? E.memory.buffer.byteLength : 0])];
+    let used: number | null = null;
+    try {
+      const p = (globalThis as any).process;
+      if (p?.versions?.v8 && !p.versions.bun && !p.versions.deno) used = p.getBuiltinModule?.("node:v8")?.getHeapStatistics?.().used_heap_size ?? null;
+      else used = (globalThis as any).performance?.memory?.usedJSHeapSize ?? null;
+    } catch {
+      used = null;
+    }
+    parts.push(Obj.tuple(["js heap", heapLimit(), typeof used === "number" && used >= 0 ? Math.floor(used) : null]));
+    return Obj.tuple(parts);
+  }, "capacity_parts");
   // Sage mode gives Python ints Sage's Integer methods ((12).factor()), and
   // builtin types refuse new attributes from Python code (as in CPython).
   m.extend_type = Obj.builtin((cls: any, name: any, value: any) => {
