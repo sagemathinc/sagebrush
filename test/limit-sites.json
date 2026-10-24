@@ -1530,6 +1530,82 @@
   "owner": "MATLAB sparse linear algebra",
   "row": "inv-20"
  },
+ "lib/_memguard.py ::  :: \"- give this Sagebrush more memory with NODE_OPTIONS=--max-old-space-size=<MiB>\\n\" #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py ::  :: \"need\": \"%(what)s needs about %(need)s, but Sagebrush allows about %(limit)s for %(allowance_for)s here.\", #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py ::  :: limit_bytes (exact; limit_bytes is the guard's enforced allowance for this #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: SagebrushMemoryError :: (need_bytes), the allowance it exceeded (limit_bytes), and where to run #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: SagebrushMemoryError :: ....: print(type(e).__name__, e.need_bytes, e.limit_bytes) #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: SagebrushMemoryError.__init__ :: def __init__(self, text, what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None): #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: SagebrushMemoryError.__init__ :: self.limit_bytes = limit_bytes #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None): #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: need_bytes, limit_bytes = int(need_bytes), int(limit_bytes) #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for), what, need_bytes, limit_bytes, #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: memory_guard :: sage: e.what, e.need_bytes, e.limit_bytes, e.allowance_for, e.record, e.partial, e.checkpoint #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: message :: def message(what, need_bytes, limit_bytes, allowance_for, host=None): #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: message :: line % {\"what\": what, \"need\": need, \"limit\": limit, \"allowance_for\": allowance_for}, #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: message :: line = TEXT[\"need\" if limit_bytes > 0 else \"need_none\"] #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: message :: need, limit = sizes(need_bytes, limit_bytes) #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: sizes :: def sizes(need_bytes, limit_bytes): #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: sizes :: if n != m or need_bytes <= limit_bytes: #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: sizes :: n, m = _render(need_bytes, True, sig), _render(limit_bytes, False, sig) #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: sizes :: return \"%d bytes\" % need_bytes, \"%d bytes\" % limit_bytes #0": {
+  "class": "none",
+  "owner": "memory guards' message (item D)"
+ },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
