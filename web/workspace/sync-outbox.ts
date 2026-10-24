@@ -23,6 +23,7 @@
 import { TRASH, within, type Kind } from "./paths";
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req } from "./db";
+import { entriesOf } from "./sync-rewrite";
 import { jsonTextSize } from "../notebook/stores.js";
 import { genKey, genPrefix } from "./sync-confirmed";
 import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
@@ -64,6 +65,13 @@ const NONE: Totals = { count: 0, bytes: 0, charged: 0 };
 const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors") => `sync:${ns}:${what}`;
 /** The committed reissue journal draining now (sync-rebuild.ts journalKey). */
 const JOURNAL = (ns: string) => `sync:${ns}:journal`;
+/** The sender's intent revision (D11 r6 §2): incremented by every transaction of the sender's that changes an intent
+ * (an ack, an echo's confirmation with its held and successor bookkeeping, a scan, a journal's drain); a plan's
+ * publication requires it unchanged since its pass began.  Local saves don't (they are fenced). */
+export const intentRevKey = (ns: string) => `sync:${ns}:intentRev`;
+export async function bumpIntents(meta: IDBObjectStore, ns: string) {
+  meta.put((((await req(meta.get(intentRevKey(ns)))) as number | undefined) ?? 0) + 1, intentRevKey(ns));
+}
 const JOURNAL_PAGE = 100;
 type JRec = { ns: string; id: string; parent: string; name: string; kind: Kind; sha256?: string; size?: number; trashed: boolean; gone?: true; sent?: true; from?: string };
 /** A record's size, as the bound counts it: its JSON text, keys and all, as the workspace's inert JSON writer
@@ -182,6 +190,7 @@ export class Outbox {
     const r = await inTx(this.w.ws, ["ops", "outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), out = tx.objectStore("outbox");
       await fence(meta, this.lease);
+      await bumpIntents(meta, this.ns);
       cut(0);
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       cut(1);
@@ -264,7 +273,7 @@ export class Outbox {
         if (full || !caughtUp) { left.push(id); continue; }
         const p = await pendingOf(tx, id), st = stateOf(p, this.ns);
         if (!st.successor) continue;
-        const e = (await req(tx.objectStore("entries").index("byIdent").get(id))) as Entry | undefined;
+        const e = await (await entriesOf(tx)).byIdent(id);
         const lseq = p.latest?.seq ?? 0;
         const next: NsState = { ...st, held: false, cutoff: Math.max(st.cutoff ?? 0, lseq) };
         delete next.successor;
@@ -319,8 +328,9 @@ export class Outbox {
     // (no journal (the usual case, and always without the confirmed index): one read, nothing else)
     if ((await inTx(this.w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(JOURNAL(this.ns))))) === undefined) return { made: 0, full: false, more: false };
     const r = await inTx(this.w.ws, ["outbox", "adoptJournal", "entries", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
-      const meta = tx.objectStore("meta"), out = tx.objectStore("outbox"), j = tx.objectStore("adoptJournal"), ents = tx.objectStore("entries"), ix = tx.objectStore("syncIndex");
+      const meta = tx.objectStore("meta"), out = tx.objectStore("outbox"), j = tx.objectStore("adoptJournal"), ix = tx.objectStore("syncIndex");
       await fence(meta, this.lease);
+      await bumpIntents(meta, this.ns);
       const jp = (await req(meta.get(JOURNAL(this.ns)))) as string | undefined;
       if (!jp) return { made: 0, full: false, more: false };
       const posKey = JOURNAL(this.ns) + ":at";
@@ -338,7 +348,7 @@ export class Outbox {
       const now = Date.now();
       const fits = (r: OutboxRecord) => t.count + 1 <= OUTBOX.maxRecords && t.charged + chargeOf(r) <= OUTBOX.maxBytes;
       // (a folder's path, here or in the index: where a record's own path is derived from; its `parent` decides)
-      const pathOf = async (fid: string): Promise<string | undefined> => (((await req(ents.index("byIdent").get(fid))) as Entry | undefined)?.path) ?? (((await req(ix.get([gp, fid]))) as { path?: string } | undefined)?.path);
+      const pathOf = async (fid: string): Promise<string | undefined> => ((await (await entriesOf(tx)).byIdent(fid))?.path) ?? (((await req(ix.get([gp, fid]))) as { path?: string } | undefined)?.path);
       for (const jr of recs) {
         const before = pos.key;
         pos.key = jr.id;
@@ -401,7 +411,7 @@ export class Outbox {
               r.pin = pin.seq;
               tx.objectStore("pins").put({ ...pin, owner: { ns: this.ns, dseq: r.dseq } } satisfies Pin);
             } else {
-              const e = (await req(ents.index("byIdent").get(jr.id))) as Entry | undefined;
+              const e = await (await entriesOf(tx)).byIdent(jr.id);
               if (e?.kind === "file" && e.migrated && e.sha256 === r.op.sha256 && !e.remote) {
                 const np = await pinPresent(tx, jr.id, scanned ?? 0, e.path, e.sha256, e.size ?? 0, jr.id, { ns: this.ns, dseq: r.dseq });
                 r.pin = np.seq;
@@ -474,6 +484,7 @@ export class Outbox {
     await inTx(this.w.ws, ["outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
+      await bumpIntents(meta, this.ns);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       let refused = false, cuts = 100;
@@ -518,6 +529,7 @@ export class Outbox {
     await inTx(this.w.ws, ["outbox", "syncIndex", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
+      await bumpIntents(meta, this.ns);
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       for (const dseq of dseqs) {

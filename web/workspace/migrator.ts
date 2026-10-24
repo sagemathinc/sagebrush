@@ -35,6 +35,7 @@ import { COPIES, LEGACY_MAX, WorkspaceError, identOf, needsHash } from "./api";
 import { inTx, req } from "./db";
 import { reserve } from "./reserve";
 import { scheduleClean } from "./sync-pins";
+import { rewriting } from "./sync-rewrite";
 
 export const MIGRATE = {
   /** entries looked at per batch */
@@ -129,7 +130,8 @@ async function resume(w: Workspace, opening = false): Promise<void> {
       // (old copies first, whatever the migration's state: their marks are durable, and "done" covers only the
       // passes over the index (astra's CORR-6B7-1: a tab closed between an adopt's move and its old copy's
       // deletion leaves a mark that nothing else would ever come back to))
-      await cleanStale(w);
+      // (not while a large move is being applied (D11 r8 N4): the next start cleans them)
+      if (!(await rewriting(w.ws))) await cleanStale(w);
       const s = await readState(w).catch(() => ({}) as MigrationState);
       if (s.done || (s.paused && !opening && !(await room(0)))) return;
       if (s.paused) { delete s.paused; await writeState(w, s); }
@@ -250,6 +252,11 @@ async function migrate(w: Workspace) {
     if (w.closed) return;
     const s = await readState(w);
     if (s.done || s.paused) return;
+    // (a large move being applied (D11 r8 N4): the migrator waits for it, and goes on where it was)
+    if (await rewriting(w.ws)) {
+      await new Promise((ok) => setTimeout(ok, 2000));
+      continue;
+    }
     if (!s.pass) {
       s.pass = { start: await w.generation(), at: "", work: false };
       await writeState(w, s);

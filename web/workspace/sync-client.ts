@@ -33,8 +33,11 @@ import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
-import { cursorOf, applyOps, genPrefix } from "./sync-confirmed";
+import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
+import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
+import { Halt } from "./sync-overlay";
+import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
@@ -169,6 +172,8 @@ type Conn = {
   logMode?: boolean;
   /** the rebuild's driver is running */
   rebuildRunning?: boolean;
+  /** (D11) a large move's view stopped, stable (failed, or late before its plan's publication): pages held, why said */
+  largeHalt?: string;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -487,6 +492,8 @@ export class SyncClient {
     }
     if (this.paused?.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
+    // (D11: a large move's rewrite or view left by a reload, resumed now, not at the next page (quiescence))
+    if (this.opts.onIndex && !c.halted) this.largeKick(c);
     this.armIdle(c);
     this.fetchKick(c);
     this.kick();
@@ -551,7 +558,21 @@ export class SyncClient {
       }
       if (ok.length) await c.ob.confirmed(ok);
     }
-    if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+    if (this.opts.onIndex && ops.length) {
+      try {
+        await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+      } catch (e) {
+        // (D11: a large move's rewrite stuck, or its view's replay stopped: the pages held (nothing past them is
+        // read), sending goes on, the person told; a reload tries once more)
+        if (e instanceof ReplayHalted || e instanceof Halt) {
+          c.largeHalt = e.message;
+          c.target = this.cursor;
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        throw e;
+      }
+    }
     // (the view may have queued fetches; and a page is a moment to look at the queue anyway)
     this.fetchKick(c);
     this.cursor = last;
@@ -570,7 +591,7 @@ export class SyncClient {
   /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
    * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
-    if (this.conn !== c || c.pulling || (this.cursor >= c.target && !c.discover)) return;
+    if (this.conn !== c || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
     // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
     // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
     if (c.pages >= CLIENT.replayPages) {
@@ -748,6 +769,9 @@ export class SyncClient {
 
   private async drain(c: Conn) {
     if (this.conn !== c || !c.welcomed) return;
+    // (D11 r8 N1: a large move's plan being made: nothing sent, scanned or drained until its publication; the replay
+    // runs in this connection's message chain, so acks wait there meanwhile)
+    if (SENDER_HOLD.has(c.ns)) return;
     // (an obligation recorded (a refusal, the server's invalid, a divergence): the rebuild runs before anything is
     // sent (D6); with the confirmed index only, step 3 has none)
     if (this.opts.onIndex && !c.rebuilding && c.halted !== "reset-unsupported") {
@@ -843,6 +867,7 @@ export class SyncClient {
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
     if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
+    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
     this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }) });
@@ -1245,6 +1270,14 @@ export class SyncClient {
       if (this.conn !== c || this.stopped) return;
       let p = await passOf(this.w, c.ns);
       if (!p) {
+        // (D11: a large move's rewrite and its view's replay finished first: `stage` waits for them (r4 §4, N6);
+        // and a local large move's rewrite (its own driver, at most its 300 s))
+        if (!(await this.largeWork(c))) return;
+        for (;;) {
+          const rw = await rewriting(this.w.ws);
+          if (!rw || rw.kind !== "local" || rw.stuck || this.conn !== c) break;
+          await new Promise((ok) => setTimeout(ok, 500));
+        }
         while (await cleanStep(this.w, c.ns)) await yieldNow();
         const r = await stage(this.w, c.ns, c.serverNext ?? 1);
         if (r === "clean") continue;
@@ -1281,6 +1314,8 @@ export class SyncClient {
       if (p.phase === "done") {
         const r = await done(this.w, c.ns);
         if (r === "committed") this.stats.rebuildDoneAt = this.clock.now();
+        // (an entries record pending (a local large move): waited for, then the compare-and-swap again (D11 r4 §4))
+        if (r === "wait") await new Promise((ok) => setTimeout(ok, 500));
         continue;
       }
       if (p.phase === "view") {
@@ -1370,6 +1405,8 @@ export class SyncClient {
       c.halted = undefined;
       c.resync = true;
       c.next = undefined;
+      // (the view's debts, if any, replayed now: no page need arrive for them (D11 r4 §4))
+      this.largeKick(c);
       this.kick();
     } else this.rebuildRun(c);
   }
@@ -1381,6 +1418,32 @@ export class SyncClient {
     c.halted = "reset-unsupported";
     this.stats.resetUnsupported++;
     this.say({ state: "paused", ns: c.ns, waiting: (await c.ob.status()).count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+  }
+
+  // ---- large moves (D11): driven in the connection's message chain, as the pages that wait for them are
+
+  /** This namespace's pending large-move work (its confirmed rewrite, its view's replay) run in the message chain. */
+  private largeKick(c: Conn) {
+    c.chain = c.chain.then(async () => {
+      if (this.conn !== c) return;
+      await this.largeWork(c);
+    }).catch((e) => console.warn("sync: a large move:", e));
+  }
+  /** The pending large-move work run to its end: true; stopped (stuck, failed, late), the pages held and said: false. */
+  private async largeWork(c: Conn): Promise<boolean> {
+    try {
+      const gen = genPrefix(c.ns, (await this.metaGet<number>(`sync:${c.ns}:indexGen`)) ?? 0);
+      await drainConfirmed(this.w, gen);
+      await runReplay(this.w, c.ns);
+      return true;
+    } catch (e) {
+      if (e instanceof ReplayHalted || e instanceof Halt) {
+        c.largeHalt = e.message;
+        this.showWaiting(c, (await c.ob.status()).count);
+        return false;
+      }
+      throw e;
+    }
   }
 
   // ---- the rebuild's obligation

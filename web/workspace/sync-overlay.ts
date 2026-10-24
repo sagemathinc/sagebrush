@@ -10,7 +10,10 @@
 // No IndexedDB here: the base loads through a `Store` (sync-confirmed.ts gives the IndexedDB one; the tests an
 // in-memory one), so the vectors can check it against the in-memory reducer.
 import { SyncIndex, reduce, type Outcome, type SyncEntry, type SyncOp } from "./sync-reduce";
-import { TRASH, parentOf } from "./paths";
+import { TRASH, join, parentOf, within } from "./paths";
+
+/** A partial folder's name probes read at once (D11 r2 §2: a 10,000-probe series in at most 10 more rounds). */
+export const PARTIAL_PROBES = 1000;
 
 /** D10 r3's bounds. */
 export const OVERLAY = {
@@ -41,7 +44,59 @@ export interface Store {
   gone(id: string): Promise<string | undefined>;
   /** every entry directly in the folder whose key is `folderKey` (at most the workspace's 10,000) */
   folder(folderKey: string): Promise<SyncEntry[]>;
+  /** how many entries are under the folder whose key is `folderKey` (its descendants, one count: D11) */
+  count?(folderKey: string): Promise<number>;
+  /** how many entries are directly in the folder (one count): a listing larger than OVERLAY.listing is partial */
+  childCount?(folderKey: string): Promise<number>;
+  /** the entries at these keys, each or undefined (one round of requests: a partial folder's name probes) */
+  keys?(keys: string[]): Promise<(SyncEntry | undefined)[]>;
 }
+
+/**
+ * A folder's listing too large to load (more than OVERLAY.listing, legal on the server: D11 r2 §2): its members
+ * are never held.  It records the reduction's adds and deletes, and knows its size; iterating it throws, so an op
+ * that would walk it (a subtree) can't run on a partial index (such a folder is large: a hidden one, D11).
+ */
+export class PartialSet {
+  constructor(public size: number, readonly added = new Set<string>(), readonly removed = new Set<string>()) {}
+  add(id: string) {
+    if (this.removed.delete(id) || !this.added.has(id)) this.size++;
+    this.added.add(id);
+    return this;
+  }
+  delete(id: string) {
+    this.added.delete(id);
+    this.removed.add(id);
+    this.size = Math.max(0, this.size - 1);
+    return true;
+  }
+  clone() {
+    return new PartialSet(this.size, new Set(this.added), new Set(this.removed));
+  }
+  get units() {
+    return this.added.size + this.removed.size;
+  }
+}
+for (const m of ["has", "keys", "values", "entries", "forEach", Symbol.iterator] as const) {
+  Object.defineProperty(PartialSet.prototype, m, {
+    get() { throw new Error(`sync: a folder's listing too large to hold has no ${String(m)} (a partial listing)`); },
+  });
+}
+/** The next names of a series `base (k).ext`, from the one probed: a partial folder's probes batched (r2 §2). */
+function series(key: string, n: number): string[] {
+  const folder = parentOf(key), name = key.slice(folder === "/" ? 1 : folder.length + 1);
+  const dot = name.lastIndexOf(".");
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+  const m = /^(.*) \((\d+)\)$/.exec(stem);
+  const base = m ? m[1] : stem, from = m ? Number(m[2]) : 1;
+  const out = [key];
+  for (let k = Math.max(2, from + 1); out.length < n; k++) out.push(join(folder, `${base} (${k})${ext}`));
+  return out;
+}
+
+/** A large folder the op may relocate (D11 r2 §3, r8 N2): its subtree hidden from the reduction, its descendants read
+ * through their projection.  `fromPath`/`fromKey`: where it is in the base (physically). */
+export type Hidden = { id: string; fromPath: string; fromKey: string };
 
 /** A read of a key the base doesn't know. */
 export class Miss extends Error {
@@ -62,7 +117,7 @@ export class PartialIndex {
   readonly byId = new Map<string, SyncEntry | typeof ABSENT>();
   readonly byKey = new Map<string, string | typeof ABSENT>();
   /** a folder's listing, only ever whole */
-  readonly children = new Map<string, Set<string> | typeof ABSENT>();
+  readonly children = new Map<string, Set<string> | PartialSet | typeof ABSENT>();
   readonly gone = new Map<string, string | typeof ABSENT>();
   /** rows held (each entry, each gone row): memory units; a folder's listing Set points at rows already counted */
   memory = 0;
@@ -70,6 +125,9 @@ export class PartialIndex {
    * dirty set): a listing is refused before it is read if its rows could pass it */
   limit = Infinity;
   extra = 0;
+  /** (D11) the large folders hidden from this page's op, and the op (its `t` and `seq` are what a relocation sets) */
+  hidden: Hidden[] = [];
+  hiddenOp: SyncOp | null = null;
 
   /** An entry loaded: by identity and by its path's key. */
   putEntry(e: SyncEntry) {
@@ -82,6 +140,16 @@ export class PartialIndex {
     for (const e of entries) this.putEntry(e);
     const s = new Set(entries.map((e) => e.id));
     this.children.set(folderKey, s.size ? s : ABSENT);
+  }
+
+  /** A folder's listing loaded: whole, or partial past OVERLAY.listing (its count first, one request). */
+  async loadFolder(store: Store, folderKey: string) {
+    if (store.childCount && (await store.childCount(folderKey)) > OVERLAY.listing) {
+      this.children.set(folderKey, new PartialSet(await store.childCount(folderKey)));
+      return;
+    }
+    this.room(OVERLAY.listing);
+    this.putFolder(folderKey, await store.folder(folderKey));
   }
 
   /** Room for `n` more rows within the ceiling in force, checked before they are read. */
@@ -116,12 +184,22 @@ export class PartialIndex {
         // are its read set, so name probes never retry), the key absent if it isn't among them)
         const folderKey = m.map === "children" ? m.key : keyOf(parentOf(m.key));
         if (!this.children.has(folderKey)) {
-          this.room(OVERLAY.listing);
-          this.putFolder(folderKey, await store.folder(folderKey));
+          await this.loadFolder(store, folderKey);
           learned++;
         }
         if (m.map === "byKey" && !this.byKey.has(m.key)) {
-          this.byKey.set(m.key, ABSENT);
+          const s = this.children.get(folderKey);
+          if (s instanceof PartialSet && store.keys) {
+            // (a partial folder: the probed name and the next of its series, PARTIAL_PROBES at once, by key)
+            const want = series(m.key, PARTIAL_PROBES).filter((k) => !this.byKey.has(k));
+            this.room(want.length);
+            const got = await store.keys(want);
+            want.forEach((k, i) => {
+              const e = got[i];
+              if (e) this.putEntry(e);
+              else this.byKey.set(k, ABSENT);
+            });
+          } else this.byKey.set(m.key, ABSENT);
           learned++;
         }
       }
@@ -150,6 +228,30 @@ class OverlayMap<V> {
       const v = this.own.get(k)!;
       return v === DELETED ? undefined : v;
     }
+    // (a large folder hidden (D11): a key beneath its present place read where it physically is, its old place
+    // absent once it has moved, its own listing hidden; a descendant's entry answered as its projection)
+    if (this.ov.base.hidden.length && this.name !== "gone") {
+      if (this.name === "byKey" || this.name === "children") {
+        const t = this.ov.translate(k, this.name === "children");
+        if (t === null) return undefined;
+        if (t !== k) {
+          if (!this.base.has(t)) {
+            const m = new Miss(this.name, t);
+            this.ov.missed.push(m);
+            throw m;
+          }
+          const b = this.base.get(t)!;
+          if (b === ABSENT) return undefined;
+          if (!this.clone) return b as V;
+          const n = this.sizeOf(b as V);
+          this.ov.need(n);
+          const c = this.clone(b as V);
+          this.own.set(k, c);
+          this.ov.memory += n;
+          return c;
+        }
+      }
+    }
     if (!this.base.has(k)) {
       const m = new Miss(this.name, k);
       this.ov.missed.push(m);
@@ -157,6 +259,10 @@ class OverlayMap<V> {
     }
     const b = this.base.get(k)!;
     if (b === ABSENT) return undefined;
+    if (this.name === "byId" && this.ov.base.hidden.length) {
+      const v = this.ov.virtual(b as unknown as SyncEntry);
+      if (v) return v as unknown as V;
+    }
     if (!this.clone) return b as V;
     // (its copy admitted before it is made: an entry is one unit, a Set its members)
     const n = this.sizeOf(b as V);
@@ -226,7 +332,7 @@ export class Overlay {
     this.maps = {
       byId: new OverlayMap<SyncEntry>(this, "byId", base.byId, copyEntry, () => 1),
       byKey: new OverlayMap<string>(this, "byKey", base.byKey, null, () => 0),
-      children: new OverlayMap<Set<string>>(this, "children", base.children, (s) => new Set(s), (s) => s.size),
+      children: new OverlayMap<Set<string>>(this, "children", base.children as Map<string, Set<string> | typeof ABSENT>, (s) => (s instanceof PartialSet ? (s.clone() as unknown as Set<string>) : new Set(s)), (s) => (s instanceof PartialSet ? (s as unknown as PartialSet).units : s.size)),
       gone: new OverlayMap<string>(this, "gone", base.gone, null, () => 0),
     };
     // (the reducer receives only this object: its maps are the overlay's)
@@ -236,6 +342,58 @@ export class Overlay {
   }
   get dirty() {
     return this.missed.length > 0;
+  }
+
+  // ---- hidden large folders (D11 r2 §3, r8 N2)
+
+  /** Where hidden folder `h` is now, in this overlay: its own entry if the op has written it, else its base path, or
+   * its projection under an enclosing hidden folder that has moved. */
+  curPath(h: Hidden): string {
+    const own = this.maps.byId.own.get(h.id);
+    if (own !== undefined && own !== DELETED) return (own as SyncEntry).path;
+    return this.projected(h.fromPath, h.id);
+  }
+  /** A base path under a hidden folder that has moved: where it is now (the longest such folder's place, then the
+   * rest); else the path itself. */
+  projected(path: string, self?: string): string {
+    let best: Hidden | undefined;
+    for (const h of this.base.hidden) {
+      if (h.id === self || !path.startsWith(h.fromPath + "/")) continue;
+      if (!best || h.fromPath.length > best.fromPath.length) best = h;
+    }
+    if (!best) return path;
+    const cur = this.curPath(best);
+    return cur === best.fromPath ? path : cur + path.slice(best.fromPath.length);
+  }
+  /** A base entry under a moved hidden folder: a fresh copy at its projected path, with the relocation's `updated` and
+   * `seq`, recomputed at each read (the reducer reads again after each relocation); undefined otherwise. */
+  virtual(e: SyncEntry): SyncEntry | undefined {
+    // (any row under a hidden folder, moved yet or not, is answered afresh at each read and never kept in the
+    // overlay: a copy kept before its folder moved would keep the old path (the reducer reads again after moving))
+    let under = false;
+    for (const h of this.base.hidden) if (h.id !== e.id && e.path.startsWith(h.fromPath + "/")) { under = true; break; }
+    if (!under) return undefined;
+    const p = this.projected(e.path, e.id);
+    this.need(1);
+    if (p === e.path) return copyEntry(e);
+    const op = this.base.hiddenOp!;
+    return { ...copyEntry(e), path: p, updated: op.t, seq: op.seq };
+  }
+  /** A key the reduction reads (a path's, or a folder's listing): the base key it is at physically; null for an old
+   * place of a moved hidden folder, or a hidden folder's own listing. */
+  translate(k: string, listing: boolean): string | null {
+    let best: { h: Hidden; cur: string } | undefined;
+    for (const h of this.base.hidden) {
+      const cur = keyOf(this.curPath(h));
+      if (listing && k === cur) return null;
+      if (cur !== h.fromKey && k.startsWith(cur + "/") && (!best || cur.length > best.cur.length)) best = { h, cur };
+    }
+    if (best) return best.h.fromKey + k.slice(best.cur.length);
+    for (const h of this.base.hidden) {
+      const cur = keyOf(this.curPath(h));
+      if (cur !== h.fromKey && (k === h.fromKey || k.startsWith(h.fromKey + "/"))) return null;
+    }
+    return k;
   }
   /** This (clean) overlay's changes into the base. */
   merge(changed: string[]) {
@@ -248,7 +406,7 @@ export class Overlay {
       }
     }
     for (const [k, v] of this.maps.byKey.own) b.byKey.set(k, v === DELETED ? ABSENT : v);
-    for (const [k, v] of this.maps.children.own) b.children.set(k, v === DELETED || v.size === 0 ? ABSENT : v);
+    for (const [k, v] of this.maps.children.own) b.children.set(k, v === DELETED || v.size === 0 ? ABSENT : (v as Set<string> | PartialSet));
     for (const [k, v] of this.maps.gone.own) b.gone.set(k, v === DELETED ? ABSENT : v);
     return changed;
   }
@@ -272,24 +430,57 @@ async function preload(base: PartialIndex, store: Store, op: SyncOp) {
   misses.push(new Miss("children", keyOf(TRASH)));
   await base.load(store, misses);
   const e = typeof id === "string" ? base.byId.get(id) : undefined;
-  if (e && e !== ABSENT && e.kind === "folder" && op.op !== "write" && op.op !== "create" && op.op !== "mkdir" && op.op !== "adopt") {
+  if (e && e !== ABSENT && e.kind === "folder" && op.op !== "write" && op.op !== "create" && op.op !== "mkdir" && op.op !== "adopt" && !base.hidden.some((h) => h.id === e.id)) {
     const queue = [keyOf(e.path)];
     while (queue.length) {
       const k = queue.shift()!;
-      if (!base.children.has(k)) base.putFolder(k, await store.folder(k));
+      if (!base.children.has(k)) await base.loadFolder(store, k);
       // (and where it lands: each subtree folder's destination listing, for a move with `to`)
       if (typeof op.to === "string" && op.to.startsWith("/")) {
         const dest = keyOf(op.to) + k.slice(keyOf(e.path).length);
-        if (!base.children.has(dest)) base.putFolder(dest, await store.folder(dest));
+        if (!base.children.has(dest)) await base.loadFolder(store, dest);
       }
       const kids = base.children.get(k);
-      if (!kids || kids === ABSENT) continue;
+      if (!kids || kids === ABSENT || kids instanceof PartialSet) continue;
       for (const cid of kids) {
         const c = base.byId.get(cid);
         if (c && c !== ABSENT && c.kind === "folder") queue.push(keyOf(c.path));
       }
     }
   }
+}
+
+/** The ops that may relocate a folder: its own move, or bringing back the Trash top it is in, or the folder it names. */
+const RELOCATING = new Set(["rename", "remove", "restore", "write", "create", "mkdir", "adopt", "forget"]);
+
+/**
+ * The large folders `op` may relocate (D11, r8 N2): its target if a folder, the Trash top its target is in, and the
+ * Trash top of the folder its `parent` names; each kept if it has more than `chunk` descendants (one count each).
+ * Loads what it reads into `base`.
+ */
+export async function largeOf(base: PartialIndex, store: Store, op: SyncOp, chunk: number): Promise<{ id: string; path: string; count: number }[]> {
+  if (!store.count || !RELOCATING.has(op.op)) return [];
+  const id = op.kind === "file" || op.kind === "folder" ? op.fid : op.ref;
+  const ids = [id, op.parent].filter((x): x is string => typeof x === "string");
+  await base.load(store, [...ids.map((x) => new Miss("byId", x)), new Miss("children", keyOf(TRASH))]);
+  const got = (x: string) => { const e = base.byId.get(x); return e && e !== ABSENT ? e : undefined; };
+  const cands = new Map<string, SyncEntry>();
+  const t = id ? got(id) : undefined;
+  if (t?.kind === "folder" && op.op !== "write" && op.op !== "create" && op.op !== "mkdir" && op.op !== "adopt") cands.set(t.id, t);
+  for (const x of [t, op.parent ? got(op.parent) : undefined]) {
+    if (!x || !within(x.path, TRASH) || x.path === TRASH) continue;
+    const topPath = join(TRASH, x.path.slice(TRASH.length + 1).split("/")[0]);
+    await base.load(store, [new Miss("byKey", keyOf(topPath))]);
+    const tid = base.byKey.get(keyOf(topPath));
+    const top = tid && tid !== ABSENT ? got(tid) : undefined;
+    if (top?.trashed && top.kind === "folder") cands.set(top.id, top);
+  }
+  const out: { id: string; path: string; count: number }[] = [];
+  for (const c of cands.values()) {
+    const n = await store.count(keyOf(c.path));
+    if (n > chunk) out.push({ id: c.id, path: c.path, count: n });
+  }
+  return out;
 }
 
 /** What one op did, with what it cost. */
@@ -302,7 +493,7 @@ export type OpResult = { outcome: Outcome; units: number; rounds: number; memory
  * merged (its overlay discarded, no changed identity kept: astra's proviso), and `null` is returned so the page
  * is cut before it.  Throws Halt past the op's own ceilings, or for a reducer fault.
  */
-export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: { carried?: number; budget?: number; alone?: boolean; dirty?: number } = {}): Promise<OpResult | { trial: number }> {
+export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: { carried?: number; budget?: number; alone?: boolean; dirty?: number; check?: (ov: Overlay, outcome: Outcome) => string | undefined } = {}): Promise<OpResult | { trial: number }> {
   let units = opts.carried ?? 0;
   // (the ceiling in force, every live population counted against it before it is allocated (daybreak3's
   // LIMIT-PR65-IMPL-1): alone, the op's own; in a page, the page's, with its dirty set beside the base)
@@ -349,6 +540,10 @@ export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: 
     const memory = ov.total();
     // (a trial past the page's budget: discarded, the page cut before it; its units go with it)
     if (!opts.alone && opts.budget !== undefined && units - (opts.carried ?? 0) > opts.budget) return { trial: units };
+    // (a check the reduction can't make itself (D11: a hidden subtree's bounds): failed, the op skipped whole, nothing
+    // of it merged)
+    const why = !outcome.skipped && opts.check ? opts.check(ov, outcome) : undefined;
+    if (why !== undefined) return { outcome: { changed: [], skipped: why }, units, rounds: round, memory };
     ov.merge(outcome.changed);
     return { outcome, units, rounds: round, memory };
   }
@@ -357,11 +552,31 @@ export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: 
 /** A page of ops run over a fresh base: as many as fit its budgets, at least one.  Returns what was reduced (the ops
  * taken, their changed identities) and the base to write from; `carried` is the next op's units if it was cut as a
  * trial. */
-export async function runPage(store: Store, ops: SyncOp[], carried = 0): Promise<{ base: PartialIndex; taken: number; changed: Set<string>; units: number; carry: number; outcomes: Outcome[] }> {
+/** (D11) a page's large ops: found (each with more than `chunk` descendants to relocate), and the one `ready` (its
+ * preflight done: its hidden folders and its bounds' check) run alone, hidden. */
+export type LargeOpts = { chunk: number; ready?: { seq: number; hidden: Hidden[]; check: (ov: Overlay, outcome: Outcome) => string | undefined } };
+export type PageResult = { base: PartialIndex; taken: number; changed: Set<string>; units: number; carry: number; outcomes: Outcome[]; large?: { cands: { id: string; path: string; count: number }[]; ran?: boolean } };
+
+export async function runPage(store: Store, ops: SyncOp[], carried = 0, large?: LargeOpts): Promise<PageResult> {
   const base = new PartialIndex(), changed = new Set<string>(), outcomes: Outcome[] = [];
   let units = 0, carry = carried;
   for (let i = 0; i < ops.length; i++) {
     const alone = i === 0;
+    if (large) {
+      // (a large op: the page cut before it; first in its page, it waits for its preflight, then runs alone, hidden,
+      // and the page is cut after it (D11 r2 §1, §3))
+      const cands = await largeOf(base, store, ops[i], large.chunk);
+      if (cands.length) {
+        if (i > 0 || !large.ready || large.ready.seq !== ops[i].seq) return { base, taken: i, changed, units, carry: 0, outcomes, large: { cands } };
+        base.hidden = large.ready.hidden;
+        base.hiddenOp = ops[i];
+        const r = await runOp(base, store, ops[i], { carried: carry, alone: true, check: large.ready.check });
+        if ("trial" in r) throw new Halt(`sync: a large op (seq ${ops[i].seq}) as a trial`);
+        for (const id of r.outcome.changed) changed.add(id);
+        outcomes.push({ changed: [], ...(r.outcome.skipped !== undefined ? { skipped: r.outcome.skipped } : {}) });
+        return { base, taken: 1, changed, units: r.units, carry: 0, outcomes, large: { cands, ran: true } };
+      }
+    }
     const r = await runOp(base, store, ops[i], { carried: carry, budget: OVERLAY.pageUnits - units, alone, dirty: changed.size });
     carry = 0;
     if ("trial" in r) return { base, taken: i, changed, units, carry: r.trial, outcomes };

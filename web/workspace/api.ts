@@ -31,6 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { isBoard } from "../board/doc";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
+import { entriesOf, fenceCheck, physicalOf, busyError, dropView, rewriting, under, D11, RW, FENCE_READ, STAGE, type ERecord } from "./sync-rewrite";
 import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
 export type Entry = {
@@ -140,7 +141,7 @@ function newestPast(pr: IDBObjectStore, fid: string, keep: number): Promise<numb
 export const PRUNE_STEP = 1;
 export const LIMITS: Limits = { maxFileBytes: 200 * 2 ** 20, maxBoardBytes: 64 * 2 ** 20, maxEntries: 100_000, maxFolderEntries: 10_000, maxVersions: 20, maxVersionAgeMs: 30 * 864e5, maxVersionBytes: 2 ** 30 };
 
-export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage" | "quarantined";
+export type WorkspaceErrorCode = "invalid" | "exists" | "missing" | "conflict" | "limit" | "storage" | "quarantined" | "busy";
 export class WorkspaceError extends Error {
   constructor(public code: WorkspaceErrorCode, message: string, public current?: unknown) { super(message); }
 }
@@ -527,6 +528,8 @@ export class Workspace {
     // (the witnesses brought up to what IndexedDB holds: IndexedDB ahead of them is harmless; a first visit gets none until its first save)
     if (!this.quarantined && this.durability.state !== "first" && locks) await this.locked(async () => {}, undefined, { internal: true, publish: true }).catch(() => {});
     this.watchHidden();
+    // (a large move left by a closed page: resumed, or abandoned if it wasn't published (D11))
+    if (!this.quarantined && locks) this.resumeRewrite();
   }
   private async decideHere(info: OpenInfo) {
     const { identity, kept, purge, purgeLocal, resetting } = await this.metaState();
@@ -603,7 +606,7 @@ export class Workspace {
     const { seq, entries } = await inTx(this.ws, ["ops", "meta", "entries"], "readonly", async (tx) => {
       const last = await new Promise<number>((ok, no) => { const c = tx.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0); c.onerror = () => no(c.error); });
       const floor = ((await req(tx.objectStore("meta").get("opsFloor"))) as number | undefined) ?? 0;
-      return { seq: Math.max(last, floor), entries: (await req(tx.objectStore("entries").count())) as number };
+      return { seq: Math.max(last, floor), entries: await (await entriesOf(tx)).count() };
     });
     return { v: 1, workspace: this.identity.workspace, generation: this.identity.generation, seq, entries, sampled: this.now() };
   }
@@ -888,7 +891,7 @@ export class Workspace {
     const files = new Map<IDBValidKey, number>(), trash = new Map<IDBValidKey, number>();
     let after: string | undefined;
     for (;;) {
-      const page = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(after === undefined ? null : IDBKeyRange.lowerBound(after, true), RESET_PAGE)))) as Entry[];
+      const page = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(after === undefined ? IDBKeyRange.lowerBound(STAGE) : IDBKeyRange.lowerBound(after, true), RESET_PAGE)))) as Entry[];
       if (!page.length) break;
       for (const e of page) {
         if (e.kind !== "file") continue;
@@ -954,7 +957,11 @@ export class Workspace {
   async list(folder: string = "/", opts: { recursive?: boolean } = {}): Promise<Entry[]> {
     const f = path(folder);
     this.open();
-    const all: Entry[] = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(subtree(f))));
+    // (through the read model: while a large move is being applied, the tree as it is after it, D11)
+    const all: Entry[] = await inTx(this.ws, "entries", "readonly", async (tx) => {
+      const ev = await entriesOf(tx);
+      return opts.recursive ? ev.subtree(f) : ev.list(f);
+    });
     return all.filter((e) => (opts.recursive || parentOf(e.path) === f) && (within(f, TRASH) || !within(e.path, TRASH)));
   }
 
@@ -962,7 +969,7 @@ export class Workspace {
   async stat(p: string): Promise<Entry | undefined> {
     const q = path(p);
     this.open();
-    return inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(q)));
+    return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).get(q));
   }
 
   /** An entry and its contents: a notebook's document, a board's document,
@@ -1003,8 +1010,9 @@ export class Workspace {
     return this.locked(async () => {
       const ops: Op[] = [];
       const e = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        const ev = await fenceCheck(tx, [q]);
         await this.folders(tx, q, ops);
-        return req(tx.objectStore("entries").get(q));
+        return (await ev.get(q))!;
       });
       this.tell({ ops });
       return e;
@@ -1073,6 +1081,7 @@ export class Workspace {
       } else throw new WorkspaceError("invalid", "a folder has no contents to write");
       const ops: Op[] = [];
       const entry = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        await fenceCheck(tx, [e.path]);
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         if (!cur || cur.ref !== e.ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
         const next: Entry = { ...cur, updated: t };
@@ -1122,6 +1131,7 @@ export class Workspace {
     let entry: Entry, collapsed: { ns: string; epoch: number } | null = null;
     try {
       entry = await inTx(this.ws, withSync("entries", "ops", "fileBytes", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...RELEASE_STORES), "readwrite", async (tx) => {
+        await fenceCheck(tx, [e.path]);
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         // (still the file read, at the revision read: CORR-CAP-2's identity at use)
         if (!cur || cur.kind !== "file" || cur.ref !== e.ref || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) throw new WorkspaceError("conflict", `${e.path} changed while it was written`);
@@ -1398,7 +1408,7 @@ export class Workspace {
         fids = [...new Set(files.map((x) => x.fid).filter((x): x is string => !!x))];
       } else if (keep > 0) {
         // (every data file's, Trash's too, by the entries: each file's newest `keep` stay)
-        const all = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll()))) as Entry[];
+        const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
         fids = [...new Set(all.filter((x) => x.kind === "file" && x.fid).map((x) => x.fid!))];
       }
       const stores = ["versions", "versionBytes", "prunable", "meta"];
@@ -1517,7 +1527,7 @@ export class Workspace {
    * notebooks and boards (how many), data files (how many, their bytes),
    * old versions, and Trash (its entries, and its data files' bytes). */
   async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
-    const all = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll())) as Entry[];
+    const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
     // (names that look the same in one folder, made before they were refused: by a cursor over the index
     // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
@@ -1539,7 +1549,9 @@ export class Workspace {
    * how many beyond those weren't listed: `groups`, the groups left out; `members`, every path not listed,
    * whether its group was listed or left out (daybreak2). */
   async lookalikeGroups(groups = LOOKALIKE_GROUPS, members = LOOKALIKE_MEMBERS): Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
-    return inTx(this.ws, "entries", "readonly", (tx) => new Promise((ok, no) => {
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      const ev = await entriesOf(tx);
+      return new Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }>((ok, no) => {
       const out: string[][] = [], more = { groups: 0, members: 0 };
       let key: string | null = null, cur: string[] = [], n = 0;
       const flush = () => {
@@ -1554,11 +1566,12 @@ export class Workspace {
         if (!r) { flush(); return ok({ lookalikes: out, lookalikesMore: more }); }
         if (r.key !== key) { flush(); key = r.key as string; cur = []; n = 0; }
         n++;
-        if (cur.length < members) cur.push(r.primaryKey as string);
+        if (cur.length < members) cur.push(ev.active ? ev.ms.logicalOf(r.primaryKey as string).L : (r.primaryKey as string));
         r.continue();
       };
       c.onerror = () => no(c.error);
-    }));
+      });
+    });
   }
 
   /** (askToKeep, for the person's own writes; never for an agent's, or the migration's, which writes through adopt) */
@@ -1584,6 +1597,7 @@ export class Workspace {
     return this.locked(async () => {
       const ops: Op[] = [];
       const gone: Entry[] = await inTx(this.ws, withSync(...RELEASE_STORES, "entries", "ops", "fileBytes", "trash"), "readwrite", async (tx) => {
+        await fenceCheck(tx, tops);
         const st = tx.objectStore("entries"), out: Entry[] = [];
         const lease = await liveLease(tx.objectStore("meta"));
         for (const t of tops) {
@@ -1698,7 +1712,7 @@ export class Workspace {
 
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
-    return inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getKey([kind, ref]))) as Promise<string | undefined>;
+    return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
   }
 
   /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through. */
@@ -1732,6 +1746,7 @@ export class Workspace {
       }
       const ops: Op[] = [];
       await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        await fenceCheck(tx, [q]);
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(q));
         if (cur && cur.fid === e.fid && cur.created === e.created) st.delete(q);
         await this.log(tx, ops, { op: "discard", path: q, kind: "file" }, null, e);
@@ -1749,6 +1764,7 @@ export class Workspace {
     return this.locked(async () => {
       const ops: Op[] = [];
       await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        await fenceCheck(tx, [q]);
         const st = tx.objectStore("entries"), e: Entry | undefined = await req(st.get(q));
         if (!e) return;
         if (e.kind === "folder" && (await req(st.count(subtree(q)))) > 0) throw new WorkspaceError("invalid", `${q} isn't empty`);
@@ -1976,19 +1992,25 @@ export class Workspace {
     if (await this.oldWayUnder(p)) return LEGACY_MAX * COPIES;
     let q: string;
     try { q = path(p); } catch { return 0; }
-    const top: Entry | undefined = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").get(q)));
+    const top: Entry | undefined = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).get(q));
     return top && needsHash(top) ? (top.size ?? 0) * COPIES : 0;
   }
   /** Whether `p` or anything under it is a data file whose bytes are still kept the old way. */
   private async oldWayUnder(p: string): Promise<boolean> {
     let q: string;
     try { q = path(p); } catch { return false; }
-    const all: Entry[] = await inTx(this.ws, "entries", "readonly", async (tx) => {
-      const st = tx.objectStore("entries"), top: Entry | undefined = await req(st.get(q));
-      if (!top) return [];
-      return top.kind === "folder" ? [top, ...((await req(st.getAll(subtree(q)))) as Entry[])] : [top];
-    });
-    return all.some((e) => e.kind === "file" && !e.migrated && !e.unmoved && e.ref !== null);
+    const old = (e: Entry) => e.kind === "file" && !e.migrated && !e.unmoved && e.ref !== null;
+    const top = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).get(q));
+    if (!top) return false;
+    if (top.kind !== "folder") return old(top);
+    // (a page of rows at a time, never the subtree whole: a folder may hold 100,000 (D11))
+    let after = q + "/";
+    for (let first = true; ; first = false) {
+      const page = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(IDBKeyRange.bound(after, q + "0", !first, true), D11.page)))) as Entry[];
+      if (page.some(old)) return true;
+      if (page.length < D11.page) return false;
+      after = page[page.length - 1].path;
+    }
   }
 
   /** `f` holding the workspace's lock: one change at a time in all of this
@@ -1998,7 +2020,7 @@ export class Workspace {
    * With `signal`: aborted before the lock is held, `f` never runs, now or
    * later, and this rejects (an AbortError); once held, it runs to its end
    * (daybreak2's LIMIT-59D-1). */
-  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean } = {}): Promise<T> {
+  async locked<T>(f: () => Promise<T>, signal?: AbortSignal, how: { internal?: boolean; publish?: boolean; ifAvailable?: boolean; quiet?: boolean } = {}): Promise<T> {
     const locks = (globalThis.navigator as any)?.locks;
     if (!locks || typeof locks.request !== "function") throw new WorkspaceError("storage", "this browser has no Web Locks, which changes to the workspace need: nothing was changed");
     this.open();
@@ -2011,7 +2033,8 @@ export class Workspace {
       }
       const out = await f();
       // (the witness brought up to the commit, in the same hold: design/workspace-durability.md A.1)
-      if (!how.internal || how.publish) await this.publish().catch(() => {});
+      // (`quiet`: a long series of changes (a large move's view, D11) publishes once at its end, not each time)
+      if ((!how.internal && !how.quiet) || how.publish) await this.publish().catch(() => {});
       return out;
     };
     // (ifAvailable: run only if the lock is free now; else nothing runs, and this resolves to undefined)
@@ -2064,6 +2087,8 @@ export class Workspace {
   }
   /** A data file's bytes where they were kept before fileBytes: "sagebrush"/files, or in Trash, trash. */
   private async legacyBytes(e: Entry): Promise<Uint8Array | undefined> {
+    // (a row a large move hasn't rewritten yet: its bytes at its physical key, D11 r3 §4)
+    e = physicalOf(e);
     if (e.ref === null) return undefined;
     if (e.trashed || within(e.path, TRASH)) return inTx(this.ws, "trash", "readonly", (tx) => req(tx.objectStore("trash").get(e.ref!)));
     if (!this.main) return undefined;
@@ -2075,6 +2100,7 @@ export class Workspace {
    * made).  True if anything was given. */
   async fillIdentity(e: Pick<Entry, "path" | "kind" | "created">): Promise<boolean> {
     return inTx(this.ws, "entries", "readwrite", async (tx) => {
+      await fenceCheck(tx, [e.path]);
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
       if (!cur || cur.kind !== e.kind || cur.created !== e.created) return false;
       const fid = cur.kind === "folder" && !cur.fid, nk = cur.nkey !== nkeyOf(cur.path);
@@ -2100,6 +2126,7 @@ export class Workspace {
     if (bytes === undefined) return false;
     const sha256 = await bytesHash(bytes);
     return inTx(this.ws, "entries", "readwrite", async (tx) => {
+      await fenceCheck(tx, [e.path]);
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
       if (!cur || !needsHash(cur) || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) return false;
       st.put({ ...cur, sha256, size: bytes.byteLength });
@@ -2133,6 +2160,7 @@ export class Workspace {
   private async migrateIn(e: Entry, max: number, token: Release): Promise<Entry> {
     const same = (cur: Entry | undefined) => !!cur && cur.kind === "file" && !cur.migrated && cur.ref === e.ref && cur.fid === e.fid && (cur.rev ?? 0) === (e.rev ?? 0);
     const mark = async (size: number) => (await inTx(this.ws, "entries", "readwrite", async (tx) => {
+      await fenceCheck(tx, [e.path]);
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
       if (!same(cur)) return cur;
       const n: Entry = { ...cur!, size, unmoved: "too large to move" };
@@ -2147,13 +2175,14 @@ export class Workspace {
     if (old === undefined) return e;
     if (old.byteLength > max) return mark(old.byteLength);
     const fid = e.fid ?? hex(8), sha256 = await bytesHash(old);
-    const where = e.trashed || within(e.path, TRASH) ? "trash" : "files", key = e.ref;
+    const where = e.trashed || within(e.path, TRASH) ? "trash" : "files", key = e.ref as string, got = old;
     const now: Entry | undefined = await inTx(this.ws, ["entries", "fileBytes", "meta"], "readwrite", async (tx) => {
+      await fenceCheck(tx, [e.path]);
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
       if (!same(cur)) return cur;
-      tx.objectStore("fileBytes").put(old, fid);
-      tx.objectStore("meta").put({ fid, size: old.byteLength, sha256 } satisfies StaleMark, staleKey(where, key));
-      const n: Entry = { ...cur!, fid, ident: fid, migrated: true, size: old.byteLength, sha256 };
+      tx.objectStore("fileBytes").put(got, fid);
+      tx.objectStore("meta").put({ fid, size: got.byteLength, sha256 } satisfies StaleMark, staleKey(where, key));
+      const n: Entry = { ...cur!, fid, ident: fid, migrated: true, size: got.byteLength, sha256 };
       delete n.missing;
       st.put(n);
       return n;
@@ -2234,7 +2263,7 @@ export class Workspace {
   }
   /** Whether an entry names `key` as where its bytes are (a data file not moved: kept the old way, or unmoved). */
   private async storageOf(key: string): Promise<boolean> {
-    const naming: Entry[] = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", key])));
+    const naming: Entry[] = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).byRef("file", key));
     return naming.some((e) => !e.migrated);
   }
   // (bytes written at a stale key since the move: a file of their own, its mark dropped with its entry; in
@@ -2255,7 +2284,7 @@ export class Workspace {
     try {
       return await this.locked(async () => {
         if ((await this.staleCopies(Infinity)).some(([w, k]) => w === "files" && k === a.key)) return undefined;
-        const naming: Entry[] = await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").index("byRef").getAll(["file", a.key])));
+        const naming: Entry[] = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).byRef("file", a.key));
         const mine = naming.filter((e) => !e.migrated && !e.trashed && !within(e.path, TRASH));
         if (a.kind === "free" ? naming.length > 0 : mine.length > 0 || !naming.some((e) => e.migrated)) return undefined;
         const box = { bytes: await this.readOld("files", a.key) };
@@ -2373,6 +2402,7 @@ export class Workspace {
     try {
       const fid = kind === "file" ? hex(8) : undefined;
       const entry = await inTx(this.ws, withSync("entries", "ops", ...(fileBytes ? ["fileBytes"] : [])), "readwrite", async (tx) => {
+        await fenceCheck(tx, [q]);
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
         await this.folders(tx, parentOf(q), ops);
@@ -2442,10 +2472,12 @@ export class Workspace {
       } else if (fields.kind === "file" && !fields.sha256) throw new WorkspaceError("invalid", "a data file is adopted with its SHA-256 (design/sync-client.md §3)");
       const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || move ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : []), ...(move ? ["fileBytes"] : [])];
       const entry = await inTx(this.ws, withSync(...stores), "readwrite", async (tx) => {
+        const ev = await fenceCheck(tx, [folder]);
         const st = tx.objectStore("entries");
-        const taken = new Set((await req(st.getAllKeys(subtree(folder)))) as string[]);
+        const taken = new Set(ev.active ? (await ev.list(folder)).map((x) => x.path) : ((await req(st.getAllKeys(subtree(folder)))) as string[]));
         const p = also.at ?? freePath(folder, base, ext, (x) => taken.has(x));
         if (!p) throw new WorkspaceError("limit", `no free name in ${folder}`);
+        await fenceCheck(tx, [p]);
         if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
         if (also.board) tx.objectStore("boards").put(also.board);
         for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
@@ -2505,8 +2537,8 @@ export class Workspace {
    * lookalike.  A name all ASCII has none, so is let through without looking at its folder. */
   private async lookalike(st: IDBObjectStore, p: string) {
     // (one bounded lookup by the index: at most two keys, whatever the folder holds; every name, ASCII
-    // included, as U+212A KELVIN SIGN is "K" in NFC: CORR-9A3-1, LIMIT-CAP1B-1)
-    const others = ((await req(st.index("byNfc").getAllKeys(IDBKeyRange.only(nkeyOf(p)), 2))) as string[]).filter((k) => k !== p);
+    // included, as U+212A KELVIN SIGN is "K" in NFC: CORR-9A3-1, LIMIT-CAP1B-1; through the read model, D11)
+    const others = (await (await entriesOf(st.transaction)).lookalikes(p, 2)).map((e) => e.path).filter((k) => k !== p);
     if (others.length) throw new WorkspaceError("exists", `"${nameOf(others[0])}" is already in ${parentOf(p)}, and looks the same as "${nameOf(p)}": choose another name`);
   }
 
@@ -2515,14 +2547,21 @@ export class Workspace {
    * own entries are counted only when everything under it comes near the
    * bound, so the usual case costs two counts. */
   private async room(st: IDBObjectStore, p: string) {
-    const total = await req(st.count());
+    // (the logical count: every entry once, staged ones too, no control row (D11 r8 N4))
+    const total = await (await entriesOf(st.transaction)).count();
     if (total + 1 > this.limits.maxEntries) throw new WorkspaceError("limit", `a workspace holds at most ${this.limits.maxEntries} entries`);
     await this.folderRoom(st, parentOf(p), total);
   }
 
   private async folderRoom(st: IDBObjectStore, folder: string, total?: number) {
     const max = this.limits.maxFolderEntries;
-    const under = folder === "/" ? (total ?? (await req(st.count()))) : await req(st.count(subtree(folder)));
+    const ev = await entriesOf(st.transaction);
+    // (while a large move is being applied, the folder's logical children counted: D11)
+    if (ev.active) {
+      if ((await ev.childCount(folder)) + 1 > max) throw new WorkspaceError("limit", `a folder holds at most ${max} entries: ${folder} is full`, { folderFull: folder });
+      return;
+    }
+    const under = folder === "/" ? (total ?? (await ev.count())) : await req(st.count(subtree(folder)));
     if (under + 1 <= max) return;
     const keys = (await req(st.getAllKeys(subtree(folder)))) as string[];
     const direct = keys.filter((k) => k.indexOf("/", folder === "/" ? 1 : folder.length + 1) === -1).length;
@@ -2581,7 +2620,7 @@ export class Workspace {
     let parent: string | null = null;
     if (!e.trashed && folder !== "/" && folder !== TRASH && parentHint !== undefined) parent = parentHint;
     else if (!e.trashed && folder !== "/" && folder !== TRASH) {
-      const f: Entry | undefined = await req(st.get(folder));
+      const f: Entry | undefined = await (await entriesOf(st.transaction)).get(folder);
       if (!f?.fid) return undefined;
       parent = f.fid;
     }
@@ -2595,6 +2634,14 @@ export class Workspace {
    * (design/capabilities.md §2a).  A data file whose bytes aren't there
    * moves alone, as before. */
   private async move(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null): Promise<Entry[]> {
+    // (a folder of more than D11.chunk entries is moved in chunks (D11): published at once, rewritten after)
+    const large = await inTx(this.ws, "entries", "readonly", async (tx) => {
+      const ev = await entriesOf(tx);
+      if (ev.ms.conflicts(a) || ev.ms.conflicts(b)) throw busyError();
+      const st = tx.objectStore("entries"), top: Entry | undefined = await req(st.get(a));
+      return top?.kind === "folder" && ((await req(st.count(under(a)))) as number) > D11.chunk ? top : null;
+    });
+    if (large) return [await this.largeMove(a, b, op, trashed)];
     const t = this.now();
     const read = async () => inTx(this.ws, "entries", "readonly", async (tx) => {
       const st = tx.objectStore("entries"), top: Entry | undefined = await req(st.get(a));
@@ -2626,6 +2673,7 @@ export class Workspace {
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     const ops: Op[] = [];
     const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+      await fenceCheck(tx, [a, b]);
       const st = tx.objectStore("entries");
       if ((await req(st.getKey(b))) !== undefined || (await req(st.count(subtree(b)))) > 0) throw new WorkspaceError("exists", `${b} is there already`);
       for (const e of old) {
@@ -2653,6 +2701,242 @@ export class Workspace {
     });
     this.tell({ ops });
     return moved;
+  }
+
+  // ------------------------------------------------------------ large moves (design/sync-client.md D11)
+
+  /**
+   * `a` (a folder of more than D11.chunk entries) moved to `b` in chunks (D11 r2–r4): holding the workspace's lock,
+   * its data files migrated first, a page at a time; then the record made (the fence in force from it on), the
+   * preflight's pages (every new path checked, as the one-transaction move checks them), and the publication: the
+   * top moved, its op logged, the record published, in one transaction.  From then on every reader sees the moved
+   * tree (sync-rewrite.ts), and the rows under `a` are rewritten a page at a time by the rewrite's driver, whichever
+   * tab holds its lock.  Returns the top as moved.  Refused `busy` while another large move is being applied.
+   */
+  private async largeMove(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null): Promise<Entry> {
+    const t = this.now(), to = (p: string) => b + p.slice(a.length);
+    // (pages of rows from `a`'s subtree, in key order, with `f` for each page)
+    const pages = async (f: (page: Entry[]) => Promise<boolean | void>) => {
+      let after = a + "/", first = true;
+      for (;;) {
+        const page = (await inTx(this.ws, "entries", "readonly", (tx) => req(tx.objectStore("entries").getAll(IDBKeyRange.bound(after, a + "0", !first, true), D11.page)))) as Entry[];
+        first = false;
+        if (page.length && (await f(page)) === false) return;
+        if (page.length < D11.page) return;
+        after = page[page.length - 1].path;
+        await new Promise((ok) => setTimeout(ok, 0));
+      }
+    };
+    // (its data files' bytes in fileBytes first, one at a time, before the fence (r3 §2a))
+    await pages(async (page) => { for (const e of page) if (e.kind === "file" && !e.migrated && !e.unmoved && e.ref !== null) await this.migrateOne(e); });
+    const top0 = await this.stat(a);
+    if (!top0) throw new WorkspaceError("missing", `${a} isn't in this workspace`);
+    if (needsHash(top0)) await this.fillHash(top0);
+    // (the record, in its own transaction: one at a time, the fence in force from it on (r3 §1, r4 §1))
+    const rid = hex(8);
+    await inTx(this.ws, ["entries", "meta"], "readwrite", async (tx) => {
+      FENCE_READ.add(tx);
+      const st = tx.objectStore("entries");
+      if ((await req(st.getKey(RW))) !== undefined) throw busyError("a large move is still being applied here: try again in a moment");
+      // (D11 r4 §4: not while sync's rebuild applies its view or retires: its timed interval holds no entries record)
+      const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
+      const pass = cur?.ns ? ((await req(meta.get(`sync:${cur.ns}:pass`))) as { phase?: string } | undefined) : undefined;
+      if (pass?.phase === "view" || pass?.phase === "retire") throw busyError("sync is finishing a rebuild: try again shortly");
+      if ((await req(st.getKey(b))) !== undefined || ((await req(st.count(under(b)))) as number) > 0) throw new WorkspaceError("exists", `${b} is there already`);
+      const top = (await req(st.get(a))) as Entry | undefined;
+      if (!top || top.fid !== top0.fid) throw new WorkspaceError("conflict", `${a} changed while it was moved`);
+      st.put({ path: RW, rid, kind: "local", published: false, rev: 1, n: 1, maps: [{ i: 0, from: a, to: b, ...(top.ident ? { top: top.ident } : {}) }], fails: 0, at: t, tab: this.tab } satisfies ERecord);
+    });
+    const drop = () => inTx(this.ws, "entries", "readwrite", async (tx) => {
+      FENCE_READ.add(tx);
+      const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
+      if (rec?.rid === rid && !rec.published) st.delete(RW);
+    });
+    try {
+      // (the preflight's pages, read-only, under the fence: every new path one the workspace takes, no file too large
+      // to move, no bytes kept the old way at a new path (CORR-4A0-4); each at most D11.page rows and D11.requests
+      // requests, the old way's lookups counted)
+      await pages(async (page) => {
+        const keys: string[] = [];
+        for (const e of page) {
+          try { normPath(to(e.path)); } catch (err) { throw new WorkspaceError("invalid", `moving ${a} to ${b} would make ${to(e.path).slice(0, 80)}…: ${(err as Error).message}`); }
+          if (e.kind === "file" && e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
+          if (this.main && e.kind === "file" && !within(to(e.path), TRASH) && to(e.path) !== e.ref) keys.push(to(e.path));
+        }
+        // (the page's new paths looked up in the old store at once: one transaction, D11.requests keys at a time)
+        for (let i = 0; i < keys.length; i += D11.requests) {
+          const batch = keys.slice(i, i + D11.requests);
+          const found = await inTx(this.main!, "files", "readonly", async (tx) => {
+            const st = tx.objectStore("files");
+            const got = await Promise.all(batch.map((k) => req(st.getKey(k))));
+            return batch.filter((_, j) => got[j] !== undefined);
+          });
+          for (const key of found) if (!(await this.isStale("files", key))) throw new WorkspaceError("exists", `${key} is there already (as a file not yet listed)`);
+        }
+      });
+      // (the publication: the top moved, its op logged, the record published, one transaction (r4 §1))
+      const ops: Op[] = [];
+      const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        FENCE_READ.add(tx);
+        const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
+        if (!rec || rec.rid !== rid || rec.published) throw new WorkspaceError("conflict", `the move of ${a} was taken over`);
+        const top = (await req(st.get(a))) as Entry | undefined;
+        if (!top || top.fid !== top0.fid || top.ref !== top0.ref) throw new WorkspaceError("conflict", `${a} changed while it was moved`);
+        await this.folders(tx, parentOf(b), ops);
+        await this.lookalike(st, b);
+        if (parentOf(a) !== parentOf(b)) await this.folderRoom(st, parentOf(b));
+        const n: Entry = { ...top, path: b, nkey: nkeyOf(b), updated: t };
+        if (trashed) n.trashed = trashed;
+        else if (trashed === null) delete n.trashed;
+        st.delete(a);
+        st.put(n);
+        st.put({ ...rec, published: true, rev: rec.rev + 1 } satisfies ERecord);
+        dropView(tx);
+        await this.log(tx, ops, { op, path: a, to: b, kind: top.kind }, n);
+        return n;
+      });
+      this.tell({ ops });
+      this.rewriteTold();
+      void this.driveRewrite();
+      return moved;
+    } catch (e) {
+      await drop().catch(() => {});
+      throw e;
+    }
+  }
+
+  private rewriteSubs = new Set<(s: ERecord | undefined) => void>();
+  /** `f(record)` when a local large move's state changes (published, drained, stuck): the pages say it. */
+  onRewrite(f: (s: ERecord | undefined) => void): () => void {
+    this.rewriteSubs.add(f);
+    return () => this.rewriteSubs.delete(f);
+  }
+  private rewriteTold() {
+    void rewriting(this.ws).then((r) => { for (const f of this.rewriteSubs) try { f(r); } catch (e) { console.warn("workspace onRewrite:", e); } }, () => {});
+  }
+  /** The `entries` record, if any: a local large move's, or sync's plan (D11). */
+  rewriteState(): Promise<ERecord | undefined> {
+    return rewriting(this.ws);
+  }
+  /** (tests) resolves once no local large move is being applied (polled). */
+  async rewriteSettled(ms = 600_000): Promise<ERecord | undefined> {
+    const end = Date.now() + ms;
+    for (;;) {
+      const r = await rewriting(this.ws);
+      if (!r || r.kind !== "local" || r.stuck || Date.now() > end) return r;
+      await new Promise((ok) => setTimeout(ok, 50));
+    }
+  }
+  /** (tests) called inside each rewrite page's transaction, after its reads; throwing there aborts it whole */
+  static rewriteCut: ((rec: ERecord) => void) | null = null;
+  private driving = false;
+
+  /** The rewrite's driver (r2 §5): one tab at a time (the Web Lock "sagebrush-workspace-rewrite"; another tab waits
+   * and takes over if this one goes), a page per transaction with a yield between; a failed page retried from
+   * D11.backoffMin doubling to D11.backoffMax; after D11.fails in a row, stuck: the fence and the read model stay,
+   * and the person is told.  Woken at open, after a publication and after its own failures. */
+  async driveRewrite(): Promise<void> {
+    if (this.driving || this.closed) return;
+    const locks = (globalThis.navigator as any)?.locks;
+    if (!locks?.request) return;
+    const rec0 = await rewriting(this.ws);
+    if (!rec0 || rec0.kind !== "local" || !rec0.published || rec0.stuck) return;
+    this.driving = true;
+    try {
+      await locks.request("sagebrush-workspace-rewrite", async () => {
+        for (;;) {
+          if (this.closed) return;
+          let r: "more" | "done" | "none";
+          try {
+            r = await this.rewritePage();
+          } catch (e) {
+            const rec = await this.rewriteFailed(e);
+            if (!rec || rec.stuck) return;
+            await new Promise((ok) => setTimeout(ok, Math.min(D11.backoffMax, D11.backoffMin * 2 ** (rec.fails - 1))));
+            continue;
+          }
+          if (r !== "more") {
+            if (r === "done") this.rewriteTold();
+            return;
+          }
+          await new Promise((ok) => setTimeout(ok, 0));
+        }
+      });
+    } finally {
+      this.driving = false;
+    }
+  }
+
+  /** One rewrite page (r2 §2): the record checked, the next D11.page rows under the source moved to their new paths
+   * (r3 §4's projection), the source range shrinking by them; the record dropped by the page that finds it empty. */
+  private async rewritePage(): Promise<"more" | "done" | "none"> {
+    return inTx(this.ws, "entries", "readwrite", async (tx) => {
+      FENCE_READ.add(tx);
+      const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
+      if (!rec || rec.kind !== "local" || !rec.published || rec.stuck) return "none";
+      const m = rec.maps![0];
+      const rows = (await req(st.getAll(under(m.from), D11.page))) as Entry[];
+      Workspace.rewriteCut?.(rec);
+      let k = 0;
+      // (the page's rows deleted as one key range: getAll gave every row between its first and last)
+      if (rows.length) st.delete(IDBKeyRange.bound(rows[0].path, rows[rows.length - 1].path));
+      for (const row of rows) {
+        const p = m.to + row.path.slice(m.from.length);
+        st.put({ ...row, path: p, nkey: nkeyOf(p), ...(row.kind === "file" && row.ref !== null ? { ref: p } : {}) });
+        // (a read awaited every 200 writes: the task ends there, so a page is many short tasks (D10 r2))
+        if (++k % 200 === 0) await req(st.getKey(RW));
+      }
+      if (rows.length < D11.page && ((await req(st.count(under(m.from)))) as number) === 0) {
+        st.delete(RW);
+        return "done";
+      }
+      if (rec.fails) st.put({ ...rec, fails: 0 });
+      return "more";
+    }, { durability: "relaxed" });
+  }
+
+  /** A failed page counted; stuck after D11.fails in a row, told. */
+  private async rewriteFailed(e: unknown): Promise<ERecord | undefined> {
+    console.warn("workspace: a large move's page:", e);
+    const rec = await inTx(this.ws, "entries", "readwrite", async (tx) => {
+      FENCE_READ.add(tx);
+      const st = tx.objectStore("entries"), r = (await req(st.get(RW))) as ERecord | undefined;
+      if (!r || r.kind !== "local") return undefined;
+      const n: ERecord = { ...r, fails: r.fails + 1 };
+      if (n.fails >= D11.fails) n.stuck = `a large move couldn't be applied here: ${String((e as Error)?.message ?? e).slice(0, 200)} (reload to try again)`;
+      st.put(n);
+      return n;
+    }).catch(() => undefined);
+    if (rec?.stuck) this.rewriteTold();
+    return rec;
+  }
+
+  /** At open (r4 §1): a local move's record not yet published was its caller's, gone with its page (the caller
+   * holds the workspace's lock until it publishes): abandoned, the move not made.  A published one resumes; a stuck
+   * one gets one more try. */
+  private resumeRewrite() {
+    void (async () => {
+      const rec = await rewriting(this.ws);
+      if (!rec || rec.kind !== "local") return;
+      if (!rec.published) {
+        await this.locked(() => inTx(this.ws, "entries", "readwrite", async (tx) => {
+          FENCE_READ.add(tx);
+          const st = tx.objectStore("entries"), r = (await req(st.get(RW))) as ERecord | undefined;
+          if (r?.rid === rec.rid && !r.published) st.delete(RW);
+        }), undefined, { internal: true });
+        return;
+      }
+      if (rec.stuck) await inTx(this.ws, "entries", "readwrite", async (tx) => {
+        FENCE_READ.add(tx);
+        const st = tx.objectStore("entries"), r = (await req(st.get(RW))) as ERecord | undefined;
+        if (r?.rid === rec.rid && r.stuck) {
+          const n = { ...r, fails: D11.fails - 1 };
+          delete n.stuck;
+          st.put(n);
+        }
+      });
+      await this.driveRewrite();
+    })().catch((e) => console.warn("workspace: resuming a large move:", e));
   }
 
   /** A renamed document whose title was its old name: titled with its new one. */

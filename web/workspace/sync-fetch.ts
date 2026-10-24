@@ -6,6 +6,7 @@
 // runs the queue.
 import type { Entry, Workspace } from "./api";
 import { inTx, req } from "./db";
+import { entriesOf, fenceCheck } from "./sync-rewrite";
 
 /** A queue item: what to fetch, for which revision; a signed URL once asked for, kept with its expiry, so a retry or a
  * reload never asks again while it is valid (L1). */
@@ -22,7 +23,7 @@ export const CANONICAL_LENGTH = /^(0|[1-9]\d{0,11})$/;
 /** At most `n` queued files, in the index's order, each with its kept URL if it is still for that fetch. */
 export async function queued(w: Workspace, ns: string, n: number): Promise<FetchItem[]> {
   return inTx(w.ws, ["entries", "meta"], "readonly", async (tx) => {
-    const ents = (await req(tx.objectStore("entries").index("byFetch").getAll(null, n))) as Entry[];
+    const ents = await (await entriesOf(tx)).byFetch(n);
     const out: FetchItem[] = [];
     for (const e of ents) {
       if (e.kind !== "file" || !e.fid || !e.fetch) continue;
@@ -47,6 +48,8 @@ export async function keepUrl(w: Workspace, ns: string, it: FetchItem, url: stri
 /** A file that can't be fetched here, set apart: its `fetch` cleared (it stays `remote`, listed), why recorded. */
 export async function finalize(w: Workspace, ns: string, it: FetchItem, why: string) {
   await w.locked(() => inTx(w.ws, ["entries", "meta"], "readwrite", async (tx) => {
+    // (by identity, the row where it physically is: a large move's rows keep their fetch (D11 r8 N4); nothing moves)
+    await fenceCheck(tx, []);
     const st = tx.objectStore("entries"), meta = tx.objectStore("meta");
     const e = (await req(st.index("byIdent").get(it.fid))) as Entry | undefined;
     if (!e || e.fetch !== it.sha256 || (e.rev ?? 0) !== it.rev) return;
@@ -70,6 +73,7 @@ export async function install(w: Workspace, ns: string, it: FetchItem, bytes: Ui
   if (bytes.byteLength !== it.size) throw new Error("sync: install given bytes of another length than the item's");
   return w.locked(async () =>
     inTx(w.ws, ["entries", "fileBytes", "meta"], "readwrite", async (tx) => {
+      await fenceCheck(tx, []);
       const st = tx.objectStore("entries");
       const e = (await req(st.index("byIdent").get(it.fid))) as Entry | undefined;
       tx.objectStore("meta").delete(urlKey(ns, it.fid));
