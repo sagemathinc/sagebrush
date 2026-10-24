@@ -58,6 +58,9 @@ export const PKGSET_LIMITS = Object.freeze({
   jsPackages: 4,
   jsModuleBytes: 4 * MiB,
   jsBytes: 8 * MiB,
+  // (a js chunk's "notices", the license texts of what its module bundles
+  // (A1.1a): plain text, at most this much UTF-8, inside the chunk's own cap)
+  jsNoticesBytes: 256 * KiB,
 });
 
 export class PkgsetError extends Error {
@@ -583,19 +586,21 @@ export function checkChunk(plan: SetPlan, id: string, kind: "src" | "pre", build
   return { kind: "pre", entries };
 }
 
-/** A js chunk's one module (A1.1). */
+/** A js chunk's one module and its notices (A1.1, A1.1a). */
 export interface JsChunk {
   kind: "js";
   entry: string;
   text: string;
+  notices: string;
 }
 const JS_ENTRY = /^[a-z0-9][a-z0-9._-]{0,63}\.js$/;
 
 /**
- * Check a js package's chunk (addendum A1.1, A1.2): the bytes the index pins,
- * its header naming this package and kind, exactly one module, which is its
- * entry, and that module's text at most jsModuleBytes of UTF-8.  Throws a
- * PkgsetError; returns the module's text.  The host runs it only in its own
+ * Check a js package's chunk (addendum A1.1, A1.1a, A1.2): the bytes the index
+ * pins, its header naming this package and kind, exactly one module, which is
+ * its entry, that module's text at most jsModuleBytes of UTF-8, and its
+ * notices, plain text of at most jsNoticesBytes.  Throws a PkgsetError;
+ * returns the module's text and the notices.  The host runs it only in its own
  * worker (bash plan §6), never in the page's realm.
  */
 export function checkJsChunk(plan: SetPlan, id: string, bytes: Uint8Array): JsChunk {
@@ -605,7 +610,7 @@ export function checkJsChunk(plan: SetPlan, id: string, bytes: Uint8Array): JsCh
   if (sha256Hex(bytes) !== j.js.sha256) fail(`${id}: its js chunk is not the one the index pins`);
   const c = strictJson(utf8(bytes, `${id}'s js chunk`));
   if (!isObj(c)) fail(`${id}: a chunk is an object`);
-  exactKeys(c, ["format", "v", "kind", "package", "entry", "modules"], [], `${id}'s js chunk`);
+  exactKeys(c, ["format", "v", "kind", "package", "entry", "modules", "notices"], [], `${id}'s js chunk`);
   if (c.format !== "sagebrush-pkg-chunk" || c.v !== 1) fail(`${id}: not a v1 package chunk`);
   if (c.kind !== "js" || c.package !== id) fail(`${id}: the chunk says it is ${String(c.package).slice(0, 80)}'s ${String(c.kind).slice(0, 8)}, not ${id}'s js`);
   if (typeof c.entry !== "string" || !JS_ENTRY.test(c.entry)) fail(`${id}: a js chunk's entry is a file name like shell.js`);
@@ -615,7 +620,12 @@ export function checkJsChunk(plan: SetPlan, id: string, bytes: Uint8Array): JsCh
   const text = c.modules[c.entry];
   if (typeof text !== "string") fail(`${id}: ${c.entry} is not text`);
   if (utf8Bytes(text).length > PKGSET_LIMITS.jsModuleBytes) fail(`${id}: ${c.entry} is over ${PKGSET_LIMITS.jsModuleBytes} bytes`);
-  return { kind: "js", entry: c.entry, text };
+  // (the notices: required, plain text: no control characters but \n and \t)
+  const notices = c.notices;
+  if (typeof notices !== "string" || notices === "") fail(`${id}: a js chunk carries its notices (the license texts of what it bundles)`);
+  if (utf8Bytes(notices).length > PKGSET_LIMITS.jsNoticesBytes) fail(`${id}: its notices are over ${PKGSET_LIMITS.jsNoticesBytes} bytes`);
+  if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(notices)) fail(`${id}: its notices are plain text (no control characters but newline and tab)`);
+  return { kind: "js", entry: c.entry, text, notices };
 }
 
 // ---------------------------------------------------------------------------
