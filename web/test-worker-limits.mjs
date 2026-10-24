@@ -92,7 +92,7 @@ try {
   const sbw = (msgs, wait) => ev(`sbw(${JSON.stringify(msgs)}${wait ? ", " + wait : ""})`);
 
   let r = await sbw([init(null), WORK]);
-  ok(r.out === "10000000\n" && r.said.includes("ready"), `init null: the defaults (${JSON.stringify(r)})`);
+  ok(r.out === "inf\n" && r.said.includes("ready"), `init null: the defaults, unlimited (${JSON.stringify(r)})`);
   r = await sbw([init('{"ff.work": 123456}'), WORK]);
   ok(r.out === "123456\n", `init with limits: the session's (${JSON.stringify(r)})`);
   r = await sbw([WORK, init('{"ff.work": 123456}')]);
@@ -103,7 +103,7 @@ try {
   r = await sbw([MARK, init('{"ff.work": 1}')]);
   ok(r.out === bad && r.error && !r.out.includes("MARKER"), `a run queued before an invalid init is refused too (${JSON.stringify(r)})`);
   r = await sbw([init(null), init('{"ff.work": 123456}'), WORK]);
-  ok(r.out === "10000000\n" && r.said.includes("initRefused: this engine's limits are set already"), `a second init is refused; the first stands (${JSON.stringify(r)})`);
+  ok(r.out === "inf\n" && r.said.includes("initRefused: this engine's limits are set already"), `a second init is refused; the first stands (${JSON.stringify(r)})`);
   r = await sbw([init('{"ff.work": 100000' + " ".repeat(5000) + "}"), MARK]);
   ok(r.said.includes("initFailed: limits: the limits are larger than 4096 bytes") && !r.out.includes("MARKER"), `more than 4096 bytes: refused before parsing (${JSON.stringify(r).slice(0, 300)})`);
   r = await sbw([init("{" + '"ff.work": "' + "é".repeat(2049) + '"}'), MARK]);
@@ -170,7 +170,7 @@ try {
     return out;
   })()`);
   for (const [label, got, status] of kr) {
-    if (label === "omitted") ok(got === "MARKER 10000000\n", `WorkerKernel, limits omitted: the defaults (${got})`);
+    if (label === "omitted") ok(got === "MARKER inf\n", `WorkerKernel, limits omitted: the defaults, unlimited (${got})`);
     else ok(!got.includes("MARKER") && got.includes("This engine's settings are invalid: limits: ") && status.startsWith("error: This engine's settings are invalid"), `WorkerKernel, limits ${label}: refused, nothing runs (${JSON.stringify([got, status])})`);
   }
 
@@ -181,8 +181,12 @@ try {
   ok(deg === "79", `ff.work = 10^8 in a Chromium worker: MinimalPolynomial in GF(2^79), 79373117 cops (${JSON.stringify(r)})`);
   console.log(`measurement: Chromium worker, MinimalPolynomial in GF(2^79) at ff.work = 10^8: ${secs} s (the run with Sage's start: ${r.ms} ms)`);
   ok(Number(secs) < 15, `under 15 s (${secs} s)`);
+  // refused at 10^7, the default before plan-c0, set as a policy would set it
+  r = await sbw([init('{"ff.work": 10000000}'), big], 180000);
+  ok(r.out.includes("is not supported yet (work)"), `and refused at ff.work = 10^7 (${r.out.slice(-200)})`);
+  // and admitted by default: every limit is unlimited (plan-c0 r2)
   r = await sbw([init(null), big], 180000);
-  ok(r.out.includes("is not supported yet (work)"), `and refused at the default (${r.out.slice(-200)})`);
+  ok(r.out.trim().split(" ")[0] === "79", `and admitted by default, unlimited (${r.out.slice(-200)})`);
 } finally {
   chrome.kill();
   server.close();

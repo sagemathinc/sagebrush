@@ -44,8 +44,8 @@ test("invalid limits stop the run before its first statement, with status 2 and 
     [file("array.json", "[1]"), "sagebrush: limits: the limits must be a JSON object, not an array"],
     [file("many.json", JSON.stringify(Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])))), "sagebrush: limits: more than 16 entries"],
     [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)"],
-    [file("bool.json", '{"ff.work": true}'), "sagebrush: limits: ff.work must be an integer, not true"],
-    [file("float.json", '{"ff.work": 1e7}'), "sagebrush: limits: ff.work must be an integer, not 10000000.0"],
+    [file("bool.json", '{"ff.work": true}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not true'],
+    [file("float.json", '{"ff.work": 1e7}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not 10000000.0'],
     [file("range.json", '{"ff.work": 5}'), "sagebrush: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"],
     [file("raise.json", '{"ff.embed_max": 2097152}'), "sagebrush: limits: ff.embed_max = 2097152 is outside the range this engine allows, [256, 1048576]"],
   ];
@@ -77,8 +77,10 @@ test("valid limits are the session's, read once and locked before the program ru
     const r = run(args, env);
     assert.equal(r.stdout, "123456 100 1048576 123456\n", r.stderr);
   }
-  // none: the defaults, today's constants
-  assert.equal(run(["-c", show]).stdout, "10000000 1024 1048576 10000000\n");
+  // none: the defaults, every key unlimited (plan-c0 r2), which the core
+  // reads as infinity; with ff.work finite (above), the effective
+  // ff.embed_max is at most 2^20 (the discrete-log accounting's range)
+  assert.equal(run(["-c", show]).stdout, "inf inf inf inf\n");
   // --limits FILE wins over SAGEBRUSH_LIMITS; one that can't be read is never replaced by it
   assert.equal(run(["--limits", ok, "-c", show], { SAGEBRUSH_LIMITS: file("other.json", '{"ff.work": 200000}') }).stdout, "123456 100 1048576 123456\n");
   const r = run(["--limits", join(dir, "nope.json"), "-c", show], { SAGEBRUSH_LIMITS: ok });
@@ -121,4 +123,96 @@ test("the browser init's text is counted in UTF-8 bytes, without a copy", () => 
   assert.equal(utf8Bytes("\u00e9".repeat(2048)), 4096);
   assert.equal(utf8Bytes("\u00e9".repeat(2049)), 4097);
   assert.equal(utf8Bytes("x".repeat(1e6)), 4097); // (stops past the cap)
+});
+
+// The census of limit-like refusal sites (plan-c0 r2 section 4;
+// test/limit_sites.py): a lexical change detector, not a proof that every
+// hidden cap is caught.  A new or changed site matching the census
+// vocabulary needs a reviewed class and owner in test/limit-sites.json; the
+// baseline (the sites at the seed, unclassified, certifying nothing) is
+// pinned, so nothing joins it later.
+const LIMIT_SITES_BASELINE_SHA256 = "b0d463cb97ced28f8d3331c4a1dc3401cfd419d011ab37152227a11e498029e4";
+test("every census-vocabulary refusal site is registered with a class and owner; the baseline is the seed's (test/limit_sites.py)", () => {
+  const r = spawnSync("python3", [TEST + "limit_sites.py", "--check"], { encoding: "utf8", maxBuffer: 64 << 20 });
+  const got = JSON.parse(r.stdout);
+  assert.equal(got.baseline_sha256, LIMIT_SITES_BASELINE_SHA256, "test/limit-sites-baseline.txt changed: only a deliberate, reviewed --seed may change it");
+  assert.deepEqual(
+    got.problems,
+    { unregistered: [], stale: [], invalid: [] },
+    "register each new or changed site with its class (1, 2, 3, ..., coverage, none) and owner: python3 test/limit_sites.py --register CLASS OWNER [--key K ...]; drop stale entries: --prune",
+  );
+  assert.equal(r.status, 0, r.stderr);
+});
+
+// Every limit unlimited by default, finite ones opt-in (plan-c0 r2):
+// mixed settings resolve key by key (an unlimited value is infinity in the
+// core); with ff.work finite the effective ff.embed_max is at most 2^20, the
+// discrete-log accounting's range; computations refused at the old defaults
+// now complete, and refuse as before when a policy sets those values
+// (test/limits-finite.json).
+test("unlimited by default, finite values opt in, mixed settings key by key (plan-c0 r2)", () => {
+  const show = "import sys, _sage_ffsub as S; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)";
+  const cases: [string, string][] = [
+    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})"],
+    ['{"ff.root_bits": 64}', "inf inf 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"],
+    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
+    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf inf inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"],
+  ];
+  for (const [text, want] of cases) {
+    const r = run(["--limits", file("mixed.json", text), "-c", show]);
+    assert.equal(r.stdout, want + "\n", `${text}: ${r.stderr}`);
+  }
+  const prog = [
+    "K = GF(2^22); F = GF(2^11)",
+    "try:",
+    "    print('embed', K(F.gen()) ^ (2^11) == K(F.gen()))",
+    "except NotImplementedError as e:",
+    "    print('embed refused:', str(e)[:60])",
+    "y = GF(7^3).gen(); k = 2^1100 + 1",
+    "try:",
+    "    print('root', y.nth_root(k) ^ k == y)",
+    "except NotImplementedError as e:",
+    "    print('root refused:', e)",
+    "",
+  ].join("\n");
+  const p = file("refused-before.sage", prog);
+  assert.equal(run([p]).stdout, "embed True\nroot True\n");
+  assert.equal(run(["--limits", TEST + "limits-finite.json", p]).stdout,
+    "embed refused: coercion of elements of Finite Field in z11 of size 2^11 and\nroot refused: nth_root of an exponent of more than 1024 bits is not supported yet\n");
+  // the cross-key rule: ff.work finite, ff.embed_max left unlimited, a field
+  // past 2^20 is refused with the text of before
+  const cross = run(["--limits", file("cross.json", '{"ff.work": 10000000}'), p]);
+  assert.ok(cross.stdout.startsWith("embed refused: coercion of elements of Finite Field in z11"), cross.stdout + cross.stderr);
+});
+
+// The descent's discrete-log table after plan-c0 (r2 section 2): the worst
+// reachable case, GF(7^8) down to GF(7^4) (r = 1201), holds at most 35
+// entries; and over every Conway field of composite degree with at most 10^7
+// elements the largest table is 35, recomputed with the engine's factoring.
+test("a descent's discrete-log table stays at most 35 entries with every limit unlimited (plan-c0 r2)", () => {
+  const code = [
+    "import math, _sage_ff as F, _sage_ffsub as S",
+    "sizes = []",
+    "real = F._bsgs",
+    "def spy(g, h, n, mul, one, power):",
+    "    sizes.append(math.isqrt(n) + 1)",
+    "    return real(g, h, n, mul, one, power)",
+    "F._bsgs = spy",
+    "K, L = F.GF(7 ** 8), F.GF(7 ** 4)",
+    "x = K.gen() ** ((7 ** 8 - 1) // (7 ** 4 - 1) * 5)",
+    "y = S.down(x, L, [S.WORK], ValueError)",
+    "print(y is not None, max(sizes))",
+    "best = 0",
+    "for p in range(2, 3163):",
+    "    if any(p % d == 0 for d in range(2, int(p ** 0.5) + 1)):",
+    "        continue",
+    "    n = 4",
+    "    while p ** n <= 10 ** 7:",
+    "        if any(n % d == 0 for d in range(2, n)):",
+    "            best = max(best, math.isqrt(max(r for r, e in F._factor_int(p ** n - 1))) + 1)",
+    "        n += 1",
+    "print(best)",
+  ].join("\n");
+  const r = run(["-c", code]);
+  assert.equal(r.stdout, "True 35\n35\n", r.stderr);
 });

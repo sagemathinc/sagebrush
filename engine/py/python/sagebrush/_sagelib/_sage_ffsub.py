@@ -33,20 +33,41 @@ import math as _math
 import _limits
 import _sage_ff as _sff
 
-# (the session's limits, lib/_limits.py, read once here: the defaults are
-# 10^7, 2^20 and 1024, the constants these were; plan-ff-limits r3)
+# (the session's limits, lib/_limits.py, read once here: unlimited by
+# default, _limits.UNLIMITED, an infinity that every budget and bound below
+# compares and subtracts as a number; a policy's finite values refuse as the
+# constants these were, 10^7, 2^20 and 1024; plan-ff-limits r3, plan-c0 r2)
 _LIMITS = _limits.finalize()
 WORK = _LIMITS["ff.work"]
-EMBED_MAX = _LIMITS["ff.embed_max"]
+# (the discrete-log accounting, D(q, n) of plan-finite-fields 2A, is defined
+# for fields of at most 2^20 elements: while ff.work is finite, so is the
+# effective EMBED_MAX, at most 2^20, so that an opted-in work budget is never
+# undercharged by a larger field; with ff.work unlimited, ff.embed_max
+# unlimited lifts the bound.  An embedding or descent is between Conway
+# fields only (conway_ok: a modulus= field whose modulus is the Conway
+# polynomial passes, any other modulus is refused), so its fields have at
+# most 10^7 elements, _sage_ff's Conway search cutoff, and a descent's
+# discrete-log table at most 35 entries: plan-c0 r2 section 2)
+EMBED_MAX = _LIMITS["ff.embed_max"] if WORK == _limits.UNLIMITED else min(_LIMITS["ff.embed_max"], 2 ** 20)
 # (the bits of EMBED_MAX: L (bits(p) - 1) past it is refused before p^L is
-# formed; 20 at the default, astra CORR-FFLIMIT-1)
-EMBED_BITS = EMBED_MAX.bit_length() - 1
+# formed; 20 at 2^20, astra CORR-FFLIMIT-1; unlimited when it is)
+EMBED_BITS = _limits.UNLIMITED if EMBED_MAX == _limits.UNLIMITED else EMBED_MAX.bit_length() - 1
 
 
 def embed_max_text():
-    """EMBED_MAX in refusals: 2^20 by default, the number when it isn't a
-    power of 2."""
+    """The largest field an embedding or descent takes, in refusals: EMBED_MAX
+    (2^20, or the number when it isn't a power of 2); when it is unlimited,
+    10^7, the Conway search's cutoff, which then bounds the fields (a refusal
+    is then for a field past it or not defined by its Conway polynomial)."""
+    if EMBED_MAX == _limits.UNLIMITED:
+        return "10^7"
     return "2^%d" % EMBED_BITS if EMBED_MAX == 1 << EMBED_BITS else str(EMBED_MAX)
+
+
+def work_clause():
+    """", within a bounded amount of work" in refusals while ff.work is
+    finite (the texts of before); nothing when it is unlimited."""
+    return "" if WORK == _limits.UNLIMITED else ", within a bounded amount of work"
 IMAGES = _collections.OrderedDict()  # (p, m, n) -> image of GF(p^m)'s generator in GF(p^n)
 IMAGES_MAX = 64                      # entries, of at most 20 coefficients each (1280 in all)
 
@@ -447,7 +468,7 @@ def apply(x, U, img, budget, refuse):
 # neutral: prime-field values as ints, polynomials as coefficient lists
 # (constant first), which each front end turns into its own objects.
 
-ROOT_BITS = _LIMITS["ff.root_bits"]  # Root/nth_root exponents of more bits are refused (Magma takes them); 1024 by default
+ROOT_BITS = _LIMITS["ff.root_bits"]  # Root/nth_root exponents of more bits are refused (Magma takes them); unlimited by default, 1024 in a policy as before
 
 
 def w(p):
