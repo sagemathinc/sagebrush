@@ -1,0 +1,1 @@
+{"v":1,"reason":"F4 over GF(p): coarse interrupt checks in the elimination loops (engine/arith spelim, engine/mpoly f4), so a Stop in the browser is noticed within milliseconds","bytes":{"engine/sagebrush-engine.wasm":200}}
