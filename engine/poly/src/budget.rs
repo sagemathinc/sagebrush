@@ -441,14 +441,14 @@ mod tests {
         // default budgets in parallel; item D0)
         let b = Budget::default_with(None);
         assert_eq!((b.limits().memory, b.memory_source()), (512 << 20, MemorySource::NoHostFigure));
-        let e = b.reserve(Some(1 << 40)).unwrap_err();
+        let e = b.reserve(Some(1 << 40)).err().unwrap();
         assert_eq!((e.memory_limit, e.memory_source), (512 << 20, MemorySource::NoHostFigure));
         assert!(e.to_string().contains("; the limit, 536870912 bytes, is the default: no memory figure from the host); not factored"), "{}", e);
         // a share applies, exactly; the budget keeps its copy
         let b = Budget::default_with(Some(3000));
         assert_eq!((b.limits().memory, b.memory_source()), (3000, MemorySource::HostShare));
         assert!(b.reserve(Some(3000)).is_ok());
-        let e = b.reserve(Some(3001)).unwrap_err();
+        let e = b.reserve(Some(3001)).err().unwrap();
         assert_eq!((e.what, e.need, e.remaining, e.memory_limit), ("memory", 3001, 3000, 3000));
         assert!(e.to_string().ends_with("; the limit, 3000 bytes, is this factorization's share of the memory observed free); not factored"), "{}", e);
         // a share of 0 refuses every reservation
@@ -460,7 +460,7 @@ mod tests {
         let tight = Limits { memory: 1000, ..Limits::DEFAULT };
         let b = with_default_limits(tight, Budget::default);
         assert_eq!((b.limits().memory, b.memory_source()), (1000, MemorySource::Policy));
-        let e = b.reserve(Some(1001)).unwrap_err();
+        let e = b.reserve(Some(1001)).err().unwrap();
         assert!(e.to_string().ends_with("(memory in admission: 1001 > 1000); not factored"), "{}", e);
         assert_eq!(Budget::new(Limits::DEFAULT).memory_source(), MemorySource::Policy);
     }
