@@ -8,12 +8,17 @@ where Sagebrush could run with more memory:
 
     raise memory_guard("A 20000 x 20000 matrix over GF(7)", need, allowance, "one matrix")
 
+A guard whose limit is fixed, the same whatever memory there is (a matrix's
+2^22 entries, a dense conversion's 2^20 coefficients), says so instead
+(fixed=True): it names no route to more memory, since none would help
+(astra's PR114-SEM-1).
+
 SagebrushMemoryError is a MemoryError (single inheritance), the one type of
 every guard's refusal, whose attributes stay stable: what, need_bytes and
 limit_bytes (exact; limit_bytes is the guard's enforced allowance for this
 operation, never the process's free memory), allowance_for, and record,
 partial and checkpoint (None unless given; the estimates' memory stops set
-them, PR 5b / GB-6).  A guard computes its need before anything is
+them, PR 5b / GB-6), and fixed (whether the limit is fixed).  A guard computes its need before anything is
 allocated and keeps its own admission predicate: this module only words
 the refusal.
 
@@ -41,7 +46,8 @@ class SagebrushMemoryError(MemoryError):
         SagebrushMemoryError 8000000000 1000000000
     """
 
-    def __init__(self, text, what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None):
+    def __init__(self, text, what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None,
+                 fixed=False):
         MemoryError.__init__(self, text)
         self.what = what
         self.need_bytes = need_bytes
@@ -50,6 +56,7 @@ class SagebrushMemoryError(MemoryError):
         self.record = record
         self.partial = partial
         self.checkpoint = checkpoint
+        self.fixed = fixed
 
 
 # The wording (William, Oct 24 2026; plan-d-memory-message r3 section 1c,
@@ -60,6 +67,11 @@ TEXT = {
     "need": "%(what)s needs about %(need)s, but Sagebrush allows about %(limit)s for %(allowance_for)s here.",
     # (an allowance of nothing: D0's reserve can leave a guard none)
     "need_none": "%(what)s needs about %(need)s, but Sagebrush allows almost no memory for %(allowance_for)s here.",
+    # (a fixed limit, the same with any memory: no route to more memory,
+    # which wouldn't help; astra's PR114-SEM-1)
+    "fixed_title": "This computation is larger than Sagebrush allows.",
+    "fixed_need": "%(what)s needs about %(need)s, but Sagebrush has a fixed limit of about %(limit)s for %(allowance_for)s.",
+    "fixed": "This limit is the same whatever memory there is: more memory or a larger\nmachine won't help.",
     # (the routes' lines are broken under 80 columns, as Magma prints an
     # error, continuations indented two spaces)
     "browser": (
@@ -154,9 +166,10 @@ def sizes(need_bytes, limit_bytes):
     return "%d bytes" % need_bytes, "%d bytes" % limit_bytes
 
 
-def message(what, need_bytes, limit_bytes, allowance_for, host=None):
+def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False):
     """The guard's text (TEXT): the title, what needs how much against the
-    allowance, and the routes to more memory where Sagebrush runs.
+    allowance, and the routes to more memory where Sagebrush runs; for a
+    fixed limit (fixed), that limit, and that more memory won't help.
 
     EXAMPLES::
 
@@ -170,19 +183,26 @@ def message(what, need_bytes, limit_bytes, allowance_for, host=None):
           cocalc.ai.
         sage: print(message("A list", 10**6, 0, "one list", "browser").splitlines()[1])
         A list needs about 1.0 MB, but Sagebrush allows almost no memory for one list here.
+        sage: print(message("A 100000 x 100000 matrix", 8 * 10**10, 2**25, "one matrix", "cli", fixed=True))
+        This computation is larger than Sagebrush allows.
+        A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.
+        This limit is the same whatever memory there is: more memory or a larger
+        machine won't help.
     """
     need, limit = sizes(need_bytes, limit_bytes)
+    fill = {"what": what, "need": need, "limit": limit, "allowance_for": allowance_for}
+    if fixed:
+        return "\n".join([TEXT["fixed_title"], TEXT["fixed_need"] % fill, TEXT["fixed"]])
     line = TEXT["need" if limit_bytes > 0 else "need_none"]
-    return "\n".join([TEXT["title"],
-                      line % {"what": what, "need": need, "limit": limit, "allowance_for": allowance_for},
-                      TEXT[host or where()]])
+    return "\n".join([TEXT["title"], line % fill, TEXT[host or where()]])
 
 
-def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None):
+def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False):
     """The refusal of a memory guard, to raise: a SagebrushMemoryError with
     the message and the exact figures.  what is the operation in the
     user's words (capitalized: "A 20000 x 20000 matrix over GF(7)"),
-    allowance_for what the allowance is for ("one matrix").
+    allowance_for what the allowance is for ("one matrix"); fixed for a
+    limit that is the same whatever memory there is.
 
     EXAMPLES::
 
@@ -196,7 +216,10 @@ def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, part
         ('A 20000 x 20000 matrix over GF(7)', 3200000001, 1000000000, 'one matrix', None, None, None)
         sage: p = [1, 2]; memory_guard("X", 2, 1, "y", record={"k": 1}, partial=p).partial is p
         True
+        sage: e.fixed, memory_guard("X", 2, 1, "y", fixed=True).fixed
+        (False, True)
     """
     need_bytes, limit_bytes = int(need_bytes), int(limit_bytes)
-    return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for), what, need_bytes, limit_bytes,
-                                allowance_for, record, partial, checkpoint)
+    fixed = bool(fixed)
+    return SagebrushMemoryError(message(what, need_bytes, limit_bytes, allowance_for, fixed=fixed), what, need_bytes,
+                                limit_bytes, allowance_for, record, partial, checkpoint, fixed)

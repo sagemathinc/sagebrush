@@ -572,7 +572,7 @@ class PolynomialRing_:
             ....:     ZZ['x'](PolynomialRing(ZZ, 2, 'x,y')({(2000000, 0): 1}))
             ....: except MemoryError as e:
             ....:     print(str(e).splitlines()[1])
-            Converting this polynomial of degree 2000000 to a dense one needs about 17 MB, but Sagebrush allows about 8.3 MB for this conversion here.
+            Converting this polynomial of degree 2000000 to a dense one needs about 17 MB, but Sagebrush has a fixed limit of about 8.3 MB for this conversion.
         """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
@@ -596,7 +596,7 @@ class PolynomialRing_:
                 # against the limit's, at 8 bytes a slot, a lower bound)
                 import _memguard
                 raise _memguard.memory_guard("Converting this polynomial of degree %d to a dense one" % max(cs),
-                                             (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, "this conversion")
+                                             (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, "this conversion", fixed=True)
             return Polynomial(self, [cs.get(i, 0) for i in range(max(cs) + 1)] if cs else [])
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))

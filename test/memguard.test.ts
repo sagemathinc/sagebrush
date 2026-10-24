@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { libDir } from "../src/compile";
 import { R } from "../src/runtime/index";
 import { importModule, memoryGuard } from "../src/runtime/modules";
-import { getattr, callObj, isinstance } from "../src/runtime/object";
+import { getattr, callObj, callKw, isinstance } from "../src/runtime/object";
 
 void R;
 const cli = join(__dirname, "..", "src", "cli.js");
@@ -50,7 +50,18 @@ test("the TypeScript twin raises lib's class with lib's text and exact sizes, a 
     for (const k of ["record", "partial", "checkpoint"]) assert.equal(getattr(caught, k), null);
     const want = callObj(getattr(G, "message"), [what, need, limit, allowance]);
     assert.equal(R.str(caught), want);
+    assert.equal(getattr(caught, "fixed"), false);
   }
+  // (a fixed limit: the same flag, the same text as lib's)
+  let fixed: any = null;
+  try {
+    memoryGuard("A 100000 x 100000 matrix", 8n * 10n ** 10n, 2 ** 25, "one matrix", true);
+  } catch (e) {
+    fixed = e;
+  }
+  assert.ok(fixed && isinstance(fixed, getattr(G, "SagebrushMemoryError")) && getattr(fixed, "fixed") === true);
+  assert.equal(R.str(fixed), callKw(getattr(G, "message"), ["A 100000 x 100000 matrix", 8n * 10n ** 10n, 2 ** 25, "one matrix"], ["fixed"], [true]));
+  assert.match(R.str(fixed), /^This computation is larger than Sagebrush allows\.\n/);
 });
 
 test("each D1 site raises SagebrushMemoryError past its unchanged predicate, before anything is built (limit - 1, limit, limit + 1)", () => {
@@ -64,7 +75,7 @@ test("each D1 site raises SagebrushMemoryError past its unchanged predicate, bef
     "    except MemoryError as e:",
     "        assert type(e) is E and type(e).__bases__ == (MemoryError,)",
     "        assert (e.record, e.partial, e.checkpoint) == (None, None, None)",
-    "        return '%s | %d %d %s' % (str(e).splitlines()[1], e.need_bytes, e.limit_bytes, e.allowance_for)",
+    "        return '%s | %d %d %s %s' % (str(e).splitlines()[1], e.need_bytes, e.limit_bytes, e.allowance_for, e.fixed)",
     // general matrices: the count predicate, at a limit of 100 slots
     "for m, n in [(9, 11), (10, 10), (10, 11), (101, 0)]:",
     "    print(guard(lambda: SM._shape(m, n, 100)))",
@@ -92,27 +103,40 @@ test("each D1 site raises SagebrushMemoryError past its unchanged predicate, bef
   assert.deepEqual(lines.slice(0, 6), [
     "admitted",
     "admitted",
-    "A 10 x 11 matrix needs about 880 bytes, but Sagebrush allows about 800 bytes for one matrix here. | 880 800 one matrix",
-    "A 101 x 0 matrix needs about 808 bytes, but Sagebrush allows about 800 bytes for one matrix here. | 808 800 one matrix",
+    // (a fixed limit: _shape's slots, the same whatever memory there is)
+    "A 10 x 11 matrix needs about 880 bytes, but Sagebrush has a fixed limit of about 800 bytes for one matrix. | 880 800 one matrix True",
+    "A 101 x 0 matrix needs about 808 bytes, but Sagebrush has a fixed limit of about 800 bytes for one matrix. | 808 800 one matrix True",
     "admitted 1",
     "admitted 1",
   ], r.stdout);
   const rest = r.stdout.split("\n").slice(6);
-  assert.match(rest[0], /^A 10 x 101 matrix over Finite Field of size 7 needs about .*, but Sagebrush allows about .* for one matrix here\. \| \d+ \d+ one matrix 0$/);
+  // (the heap share: an allowance that grows with memory)
+  assert.match(rest[0], /^A 10 x 101 matrix over Finite Field of size 7 needs about .*, but Sagebrush allows about .* for one matrix here\. \| \d+ \d+ one matrix False 0$/);
   const [need, limit] = rest[0].split(" | ")[1].split(" ").map(Number);
   assert.ok(need > limit, rest[0]);
   assert.match(rest[1], /^A 10 x 50 matrix over Finite Field of size 7 with its working space needs about /);
   assert.equal(rest[2], "admitted");
-  assert.equal(rest[3], "Converting this polynomial of degree 1048576 to a dense one needs about 8.4 MB, but Sagebrush allows about 8.3 MB for this conversion here. | 8388616 8388608 this conversion");
+  assert.equal(rest[3], "Converting this polynomial of degree 1048576 to a dense one needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for this conversion. | 8388616 8388608 this conversion True");
 });
 
-test("the message names the routes of where Sagebrush runs: the command line here", () => {
-  const r = run("--sage", "import _memguard\nprint(_memguard.where())\ntry:\n    matrix(QQ, 10^5, 10^5)\nexcept MemoryError as e:\n    print(e)\n", ".sage");
+test("a fixed limit names no route to more memory; an allowance that grows with memory names the routes of where Sagebrush runs: the command line here (astra's PR114-SEM-1)", () => {
+  const r = run("--sage", [
+    "import _memguard, _sage_ffmat as FM",
+    "print(_memguard.where())",
+    "try:\n    matrix(QQ, 10^5, 10^5)\nexcept MemoryError as e:\n    print(e)",
+    // (the heap share, made small: a refusal more memory would admit)
+    "FM._heap_limit = lambda: FM._HEAP_SHARE * FM._entry_cost(GF(7)) * 1000",
+    "try:\n    matrix(GF(7), 10, 101)\nexcept MemoryError as e:\n    print(e.fixed)\n    print('\\n'.join(str(e).splitlines()[:1] + str(e).splitlines()[2:]))",
+  ].join("\n") + "\n", ".sage");
   assert.equal(r.stderr, "");
   assert.equal(r.stdout, [
     "cli",
+    "This computation is larger than Sagebrush allows.",
+    "A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix.",
+    "This limit is the same whatever memory there is: more memory or a larger",
+    "machine won't help.",
+    "False",
     "Not enough memory for this computation.",
-    "A 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for one matrix here.",
     "To run it with more memory:",
     "- give this Sagebrush more memory with NODE_OPTIONS=--max-old-space-size=<MiB>",
     "  (the engines keep their 4 GB);",
@@ -130,12 +154,17 @@ test("Magma reports a memory guard's refusal as a runtime error in the guard's w
   assert.equal(r.stderr, "");
   const out = r.stdout;
   assert.doesNotMatch(out, /not supported yet/);
-  assert.match(out, /Runtime error: Not enough memory for this computation\.\nA collection of more than \d+ elements needs about [\d.]+ [kMG]?B, but Sagebrush\s+allows about [\d.]+ [kMG]?B for one collection here\.\nTo run it with more memory:\n- give this Sagebrush more memory with NODE_OPTIONS=--max-old-space-size=<MiB>\n  \(the engines keep their 4 GB\);\n/);
+  // (an ordinary heap: the bound is the 10^6 ceiling, a fixed limit)
+  assert.match(out, /Runtime error: This computation is larger than Sagebrush allows\.\nA collection of more than 1000000 elements needs about 1\.1 GB, but Sagebrush has\s+a\s+fixed\s+limit\s+of\s+about\s+1\.0 GB for one collection\.\nThis limit is the same whatever memory there is: more memory or a larger\nmachine won't help\.\n/);
+  assert.doesNotMatch(out, /To run it with more memory/);
   assert.match(out, /\nend\n$/);
   const f = run("--sage", [
     "import _magma, _memguard",
     "e = _magma._collect_refusal()",
-    "print(type(e).__name__, e.what, e.need_bytes == (_magma._COLLECT_MAX + 1) * 1024, e.limit_bytes == _magma._COLLECT_MAX * 1024, e.allowance_for, e.record, e.partial, e.checkpoint)",
+    "print(type(e).__name__, e.what, e.need_bytes == (_magma._COLLECT_MAX + 1) * 1024, e.limit_bytes == _magma._COLLECT_MAX * 1024, e.allowance_for, e.record, e.partial, e.checkpoint, e.fixed)",
+    // (below the ceiling, a bound the heap sets: the routes to more memory)
+    "_magma._COLLECT_MAX = 37000; e = _magma._collect_refusal()",
+    "print(e.fixed, str(e).splitlines()[0], 'To run it with more memory:' in str(e))",
     "p = object(); g = _magma._memory_error(_memguard.memory_guard('X', 2, 1, 'y', partial=p, checkpoint=p))",
     "print(g.partial is p, g.checkpoint is p)",
     // (a lib guard's own error, reached from Magma code: the guard's words
@@ -144,7 +173,7 @@ test("Magma reports a memory guard's refusal as a runtime error in the guard's w
     "_magma._report(_memguard.memory_guard('A 100000 x 100000 matrix', 8 * 10**10, 2**25, 'one matrix'), 0, 0)",
   ].join("\n") + "\n", ".sage");
   assert.equal(f.stderr, "");
-  assert.match(f.stdout, /^MagmaError A collection of more than \d+ elements True True one collection None None None\nTrue True\n\n>> \n  \^\nRuntime error: Not enough memory for this computation\.\nA 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for\s+one\s+matrix here\.\nTo run it with more memory:\n/);
+  assert.match(f.stdout, /^MagmaError A collection of more than 1000000 elements True True one collection None None None True\nFalse Not enough memory for this computation\. True\nTrue True\n\n>> \n  \^\nRuntime error: Not enough memory for this computation\.\nA 100000 x 100000 matrix needs about 80 GB, but Sagebrush allows about 33 MB for\s+one\s+matrix here\.\nTo run it with more memory:\n/);
   assert.doesNotMatch(f.stdout, /not supported yet/);
 });
 

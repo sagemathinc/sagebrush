@@ -189,7 +189,7 @@ test("another ring's element is unequal before any conversion; a large generator
   assert.equal(r.stderr, "");
   assert.equal(r.stdout, [
     "False",
-    "R(f): Converting this polynomial of degree 1048576 to a dense one needs about 8.4 MB, but Sagebrush allows about 8.3 MB for this conversion here.",
+    "R(f): Converting this polynomial of degree 1048576 to a dense one needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for this conversion.",
     "True False False", "",
   ].join("\n"));
 });
