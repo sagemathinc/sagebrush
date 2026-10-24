@@ -29,6 +29,7 @@ jobs:
       modes: ${{ steps.paths.outputs.modes }}
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
+      size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -122,7 +123,7 @@ jobs:
 
   checks:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true')
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -168,6 +169,7 @@ jobs:
           node scripts/test-core-api-surface.mjs
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
+          node scripts/test-size-measure.mjs
           node --test scripts/test-heap-budget.mjs
           node scripts/heap-budget.mjs --check
           node scripts/pypi-import.mjs --check
@@ -176,6 +178,18 @@ jobs:
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
           node scripts/board-format-schema.mjs --check
+      # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
+      # §1.5): measured from the build above; it builds nothing
+      - name: the size record
+        run: |
+          mkdir -p "$RUNNER_TEMP/size-record"
+          node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-record/sizes.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sizes-${{ github.sha }}
+          path: ${{ runner.temp }}/size-record/sizes.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Mermaid flowcharts against Mermaid's parser
         run: |
           mermaid_src="$(mktemp -d "${RUNNER_TEMP}/sagebrush-mermaid-src.XXXXXX")"
@@ -185,6 +199,152 @@ jobs:
           git -C "$mermaid_src" sparse-checkout set e2e packages/mermaid/src/docs/syntax
           (cd "$mermaid_npm" && npm init -y >/dev/null && npm i --no-audit --no-fund mermaid@12.1.0 >/dev/null)
           MIN_SAME=0.97 CHROME=google-chrome node web/board/test-mermaid.mjs "$mermaid_npm" "$mermaid_src/e2e" "$mermaid_src/packages/mermaid/src/docs/syntax/flowchart.md"
+
+  # The tested base's size record (plan-growth-budget-r5 §1.1, §1.5): the
+  # base's own push record when one is usable, else the base rebuilt once, in
+  # its own worktree, with the same pinned toolchain; and, for an epoch reset
+  # that moves the measurement key, the base under its own key as well.
+  size-base:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (the worst sequential path, resolve 2 + install 5 + build 8 + the
+    # old-key base 10 = 25, plus 15 for checkout, setup, records, cleanup and
+    # upload: scripts/test-size-measure.mjs checks this sum)
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - id: resolve
+        name: the tested base, and its record
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/size-measure.mjs --resolve-base --out-dir "$RUNNER_TEMP/size-records"
+      - name: the base's worktree
+        if: steps.resolve.outputs.need_new == 'true'
+        run: git worktree add --detach "$RUNNER_TEMP/size-base" "${{ steps.resolve.outputs.base }}"
+      - name: install (the base)
+        if: steps.resolve.outputs.need_new == 'true'
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/size-base
+        run: pnpm install --frozen-lockfile
+      - name: build (the base)
+        if: steps.resolve.outputs.need_new == 'true'
+        timeout-minutes: 8
+        working-directory: ${{ runner.temp }}/size-base
+        run: pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
+      - name: record (the base)
+        if: steps.resolve.outputs.need_new == 'true'
+        run: |
+          node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/base-record.json"
+          if [ "${{ steps.resolve.outputs.bootstrap }}" = true ]; then
+            node scripts/size-measure.mjs --legacy --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/legacy.json"
+          fi
+      # (the old-key base, O: the base's own measurement and pins)
+      - uses: oven-sh/setup-bun@v2
+        if: steps.resolve.outputs.need_old == 'true'
+        with:
+          bun-version: ${{ steps.resolve.outputs.old_bun }}
+      - uses: actions/setup-node@v4
+        if: steps.resolve.outputs.need_old == 'true'
+        with:
+          node-version: ${{ steps.resolve.outputs.old_node }}
+      - name: the base under its own key
+        if: steps.resolve.outputs.need_old == 'true'
+        timeout-minutes: 10
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
+          cd "$RUNNER_TEMP/size-old"
+          timeout 4m pnpm install --frozen-lockfile
+          timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
+          node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
+      - name: remove the worktrees
+        if: always()
+        run: |
+          for w in size-base size-old; do
+            [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: size-base-${{ github.sha }}
+          path: ${{ runner.temp }}/size-records/*.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The growth gate (plan-growth-budget-r5 §1.3, §1.4): the single check that
+  # decides core growth.  It fails closed: a skipped, cancelled or failed
+  # record job fails it, except for a change the classifier certifies as
+  # touching no measured input and no gate input.
+  size-gate:
+    needs: [changes, checks, size-base]
+    if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+      - uses: actions/download-artifact@v4
+        if: needs.checks.result == 'success' && needs.size-base.result == 'success'
+        with:
+          name: sizes-${{ github.sha }}
+          path: ${{ runner.temp }}/size-merge
+      # (an absolute run, schedule, dispatch or a first push, has no base, so no base records)
+      - uses: actions/download-artifact@v4
+        if: needs.checks.result == 'success' && needs.size-base.result == 'success' && needs.size-base.outputs.mode != 'absolute'
+        with:
+          name: size-base-${{ github.sha }}
+          path: ${{ runner.temp }}/size-records
+      - name: the gate
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CHECKS: ${{ needs.checks.result }}
+          BASE: ${{ needs.size-base.result }}
+          SIZE_GATE_NODE: ${{ needs.changes.outputs.node }}
+          SIZE_GATE_WEB: ${{ needs.changes.outputs.web }}
+          SIZE_INPUTS: ${{ needs.changes.outputs.size_inputs }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/size-records"
+          if [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
+            node scripts/size-measure.mjs --gate --docs-only --out "$RUNNER_TEMP/size-records/size-gate.json"
+          elif [ "$CHECKS" != success ] || [ "$BASE" != success ]; then
+            echo "size-gate fails closed: changes $CHANGES, checks $CHECKS, size-base $BASE"
+            exit 1
+          else
+            cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
+            node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: size-gate-${{ github.sha }}
+          path: ${{ runner.temp }}/size-records/size-gate.json
+          retention-days: 90
+          if-no-files-found: ignore
 
   web-sync:
     needs: changes
@@ -748,6 +908,7 @@ jobs:
       - node-tests
       - language-node
       - checks
+      - size-gate
       - web-sync
       - web-runner
       - web-browser
@@ -766,7 +927,8 @@ jobs:
           RESULTS: >-
             ${{ needs.changes.result }} ${{ needs.node-tests.result }}
             ${{ needs.language-node.result }}
-            ${{ needs.checks.result }} ${{ needs.web-sync.result }}
+            ${{ needs.checks.result }} ${{ needs.size-gate.result }}
+            ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-browser.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}
             ${{ needs.engine-rust.result }} ${{ needs.engine-wasm.result }}
