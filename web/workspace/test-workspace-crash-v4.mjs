@@ -230,7 +230,7 @@ try {
   await t.ev("window.migrate()");
   for (let i = 0; i < 600 && !(await t.ev("window.migDone === true")); i++) await sleep(100);
   const r = await t.ev("window.check()");
-  check(r.problems.length === 0 && r.moved === 120 && r.version === 6 && r.state.done === true, `finally: the current version (6), done, every file hashed: ${JSON.stringify({ hashed: r.moved, version: r.version, state: r.state, problems: r.problems.slice(0, 5) })}`);
+  check(r.problems.length === 0 && r.moved === 120 && r.version === 7 && r.state.done === true, `finally: the current version (7), done, every file hashed: ${JSON.stringify({ hashed: r.moved, version: r.version, state: r.state, problems: r.problems.slice(0, 5) })}`);
   t.ws.close();
   // (how often Chrome deleted the origin as corrupt, to watch the rate)
   console.log(`Chrome's corrupt-database deletions: ${wipes} of 6 rounds`);

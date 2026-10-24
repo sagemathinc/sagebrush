@@ -31,6 +31,7 @@ import { genKey, genPrefix, cursorKey, idbStore, crecordKey, ledgerNs, againNs }
 import { VIEW_STORES, applyView, type JournalRecord, type ListedWhy } from "./sync-view";
 import { rebuildKey, wireOf, recordBytes, chargeOf, type Obligation, type OutboxRecord } from "./sync-outbox";
 import { RELEASE_STORES, release, pendingOf, stateOf, putPending, capNow, afterReleases, type Pin } from "./sync-pins";
+import { LedgerTx, noteSkip } from "./sync-ledger";
 
 /** A rebuild page's transaction: each writes its own position with its effect, so a page an OS crash loses (relaxed
  * durability: committed to the browser, not yet flushed) is simply done again; a tab's crash loses nothing committed. */
@@ -378,6 +379,9 @@ export async function done(w: Workspace, ns: string): Promise<"committed" | "fai
     meta.put((await req(meta.get(passCursorKey(ns)))) ?? 0, cursorKey(ns));
     const next: Pass = { ...p, phase: "view", at: { key: "" } };
     if (p.captured) {
+      // (the local ops past the old watermark go up through this journal, not as records of their own: their ledger
+      // answer is the rebuild's, task #14 delta 1 r2)
+      if (p.W0 !== undefined && p.W1 !== undefined) await noteSkip(meta, ns, p.W0, p.W1, flag.why);
       meta.put(p.W1, `sync:${ns}:scanned`);
       const active = (await req(meta.get(journalKey(ns)))) as string | undefined;
       if (active) next.oldJournal = active;
@@ -453,9 +457,13 @@ export async function viewStep(w: Workspace, ns: string): Promise<{ done: boolea
  * Returns whether retire is done (the phase then `announce`, with through = server_next - 1).
  */
 export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
-  const r = await inTx(w.ws, ["outbox", "adoptJournal", ...RELEASE_STORES], "readwrite", async (tx) => {
+  const r = await inTx(w.ws, ["outbox", "adoptJournal", "syncLedger", ...RELEASE_STORES], "readwrite", async (tx) => {
     const meta = tx.objectStore(META), out = tx.objectStore("outbox"), j = tx.objectStore("adoptJournal"), pins = tx.objectStore("pins");
     const p = (await req(meta.get(passKey(ns)))) as Pass;
+    // (the ledger (task #14): an echo's record confirms the row it owns; a replaced record's row, and a held write's,
+    // are superseded by this rebuild, only while still local or accepted)
+    const lg = new LedgerTx(tx, ns);
+    const why = (((await req(meta.get(rebuildKey(ns)))) as Obligation | undefined)?.why) ?? "invalid";
     const jp = journalPrefix(ns, p.gen);
     const at = { ...(p.at ?? { step: "echoes", key: "" }) };
     const totalsKey = `sync:${ns}:outbox`;
@@ -467,7 +475,12 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
     const npend = (await req(tx.objectStore("pending").count())) as number;
     const pendKeys = npend <= 2_000 ? new Set((await req(tx.objectStore("pending").getAllKeys())) as string[]) : null;
     /** A record removed: its totals, its pin handed to `to` (a journal record wanting its bytes) or released. */
-    const remove = async (rec: OutboxRecord, keepFor?: JournalRecord) => {
+    const remove = async (rec: OutboxRecord, keepFor?: JournalRecord, echoed = false) => {
+      const own = rec.heldSeq ?? (rec.lseq > 0 ? rec.lseq : undefined);
+      if (own !== undefined) {
+        if (echoed) await lg.decide(own, rec.dseq, "confirmed");
+        else await lg.supersede(own, why);
+      }
       out.delete([ns, rec.dseq]);
       t.count--;
       t.bytes -= recordBytes(rec);
@@ -481,6 +494,8 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
       }
       if (pendKeys && !pendKeys.has(rec.id)) return;
       const pd = await pendingOf(tx, rec.id), st = { ...stateOf(pd, ns) };
+      if (st.heldSeq !== undefined) await lg.supersede(st.heldSeq, why);
+      delete st.heldSeq;
       if (st.allocated?.dseq === rec.dseq) delete st.allocated;
       if (st.acceptedTip?.dseq === rec.dseq) delete st.acceptedTip;
       delete st.held;
@@ -500,7 +515,7 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
         const byDseq = new Map(page.length ? ((await req(out.getAll(IDBKeyRange.bound([ns, page[0].dseq], [ns, page[page.length - 1].dseq])))) as OutboxRecord[]).map((r) => [r.dseq, r]) : []);
         for (const e of page) {
           const rec = byDseq.get(e.dseq);
-          if (rec) await remove(rec);
+          if (rec) await remove(rec, undefined, true);
           j.delete([jp, e.id]);
           at.key = e.id;
         }
@@ -552,6 +567,7 @@ export async function retireStep(w: Workspace, ns: string): Promise<boolean> {
       meta.put({ ...p, phase: "announce", at: undefined, through: p.serverNext - 1 }, passKey(ns));
     } else meta.put({ ...p, at }, passKey(ns));
     meta.put(t, totalsKey);
+    await lg.finish();
     cut("retire");
     return fin;
   }, RELAXED);
