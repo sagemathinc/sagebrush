@@ -6,7 +6,7 @@
  "sizes": {
   "cli/lib.gen.js": 7032882,
   "cli/packages.gen.js": 278428,
-  "cli/pyjs.cjs": 28175326,
+  "cli/pyjs.cjs": 28175387,
   "engine/lib/core.pre": 1797229,
   "engine/lib/core.src": 415801,
   "engine/lib/magma-more.src": 146156,
