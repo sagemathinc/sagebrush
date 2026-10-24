@@ -44,8 +44,10 @@ test("show() and latex() stay within the display's budget; the session goes on",
   assert.match(r.err, LIMIT);
   assert.equal(r.displays, 0);
 
-  // a _latex_ that returns a number, and list subclasses with their own
-  // __iter__ or __getitem__: as before (CORR-SHOW87-2/3)
+  // a _latex_ that returns a number (CORR-SHOW87-2), and list subclasses
+  // with their own __iter__ or __getitem__: their text, list's repr of
+  // what they hold, as Sage 10.10 writes them (only a list of exactly that
+  // type is written as a list, astra's #87 note)
   r = await run([
     "class Seven:\n    def _latex_(self):\n        return 7",
     "class IterList(list):\n    def __iter__(self):\n        return iter([7, 8])",
@@ -53,7 +55,7 @@ test("show() and latex() stay within the display's budget; the session goes on",
     "print(latex(Seven()), latex([Seven()]), latex(IterList([1])), latex(IndexList([1, 2])))",
   ].join("\n"));
   assert.equal(r.err, "");
-  assert.equal(r.out, "7 \\left[7\\right] \\left[7, 8\\right] \\left[1, 2\\right]\n");
+  assert.equal(r.out, "7 \\left[7\\right] \\text{\\texttt{[1]}} \\text{\\texttt{[1,{ }2]}}\n");
 
   // one past the step budget (2 steps an entry, 1 the list), and the characters'
   // (32 charged beside the string's own, for the brackets, a separator and
@@ -65,6 +67,20 @@ test("show() and latex() stay within the display's budget; the session goes on",
   r = await run("print(len(latex(['x' * 65504])))");
   assert.equal(r.out, "65533\n");
   r = await run("latex(['x' * 65505])");
+  assert.match(r.err, LIMIT);
+
+  // a list subclass, written as its text: its repr walked and charged
+  // entry by entry first (2 steps an entry, as a list), then the text's
+  // escapes and \\text{\\texttt{}} (the repr's own characters not twice):
+  // 999 entries and a 65536-character result at the limit, one more over
+  r = await run("class L(list): pass\nprint(len(latex(L(range(999)))))");
+  assert.equal(r.err, "");
+  assert.equal(r.out, "6897\n");
+  r = await run("latex(L(range(1000)))");
+  assert.match(r.err, LIMIT);
+  r = await run("print(len(latex(L(['x' * 65516]))))");
+  assert.equal(r.out, "65536\n");
+  r = await run("latex(L(['x' * 65517]))");
   assert.match(r.err, LIMIT);
 
   // a string of several lines, charged whole at its exact length before any

@@ -4021,6 +4021,7 @@ def _negate(c):
 
 class _SolutionDict(dict):
     """{x: value} with the conditions and integer parameters of its Solution."""
+    _latex_container = True  # (latex() writes it as Sage's plain dict: it stands in for one)
 
     def __init__(self, d, conds=(), params=()):
         dict.__init__(self, d)
@@ -5520,12 +5521,14 @@ _TEXT_ESC[" "] = "{ }"
 _TEXT_ESC["-"] = "{-}"
 
 
-def _latex_text(s):
+def _latex_text(s, prepaid=0):
     """latex() of a string, as Sage writes it: \\text{\\texttt{...}}, one
     line per row of an array when it has several.  The whole result is
     charged to the display's budget at its exact length (escapes, wrappers,
     the array and its separators) by one scan of s, before any of it, or
-    any line of s, is made (LIMIT-SHOW87-2/3)."""
+    any line of s, is made (LIMIT-SHOW87-2/3); less `prepaid` characters
+    when s was itself charged as it was made (a repr walked piece by
+    piece)."""
     if not s:
         _charge(1, 0)
         return ""
@@ -5544,7 +5547,7 @@ def _latex_text(s):
     # an array: \begin{array}{l} and a newline (17), \\ and a newline
     # between lines (3), a newline and \end{array} (12)
     total = chars + 16 * nonempty + (0 if lines == 1 else 29 + 3 * (lines - 1))
-    _charge(lines, total)
+    _charge(lines, max(0, total - prepaid))
     if lines == 1:
         return _texttt(s)
     return "\\begin{array}{l}\n" + "\\\\\n".join(_texttt(l) if l else "" for l in s.split("\n")) + "\n\\end{array}"
@@ -5555,13 +5558,24 @@ def _texttt(s):
     return "\\text{\\texttt{%s}}" % "".join(_TEXT_ESC.get(c, c) for c in s)
 
 
-def _repr_charged(v, path):
-    """repr(v), with a list, tuple or dict (exactly those types) walked here
-    piece by piece, each piece charged to the display's budget before it is
-    added (LIMIT-SHOW87-2); a container inside itself is [...],
-    {...} or (...), as repr writes it."""
+def _plain_repr_base(v):
+    """list, tuple or dict when v is one whose text is that type's own repr
+    (the type itself, or a subclass overriding neither __repr__ nor
+    __str__); else None."""
     t = type(v)
-    if t is not list and t is not tuple and t is not dict:
+    for b in (list, tuple, dict):
+        if isinstance(v, b):
+            return b if t is b or (t.__repr__ is b.__repr__ and t.__str__ is b.__str__) else None
+    return None
+
+
+def _repr_charged(v, path):
+    """repr(v), with a list, tuple or dict (those types, or a subclass that
+    keeps their repr) walked here piece by piece, each piece charged to the
+    display's budget before it is added (LIMIT-SHOW87-2); a container
+    inside itself is [...], {...} or (...), as repr writes it."""
+    t = _plain_repr_base(v)
+    if t is None:
         return _charged(repr(v))
     if id(v) in path:
         return _charged("[...]" if t is list else "{...}" if t is dict else "(...)")
@@ -5570,13 +5584,14 @@ def _repr_charged(v, path):
     path = path + (id(v),)
     parts = []
     if t is dict:
-        for k, x in v.items():
+        for k, x in dict.items(v):
             _charge(1, 4)
             parts.append(_repr_charged(k, path) + ": " + _repr_charged(x, path))
         return "{" + ", ".join(parts) + "}"
     # (by iteration, as repr: a __repr__ that adds to the list is followed,
-    # each entry charged, so endless growth meets the budget)
-    for x in v:
+    # each entry charged, so endless growth meets the budget; a subclass's
+    # entries as its repr reads them, not through an __iter__ of its own)
+    for x in (v if type(v) is t else t.__iter__(v)):
         _charge(1, 2)
         parts.append(_repr_charged(x, path))
     if t is tuple:
@@ -5661,7 +5676,10 @@ class _Latex:
             return _latex_text(v)
         if isinstance(v, _Fraction):
             return _charged(_expr(v)._latex_())
-        if isinstance(v, (list, tuple, dict)):
+        # (a list, tuple or dict of exactly that type, as Sage dispatches,
+        # or a sagebrush stand-in for one of Sage's (_latex_container); a
+        # subclass of the user's is its text, below)
+        if type(v) in (list, tuple, dict) or (isinstance(v, (list, tuple, dict)) and getattr(type(v), "_latex_container", False)):
             if id(v) in path or len(path) > _sys.getrecursionlimit() // 4:
                 raise RecursionError("maximum recursion depth exceeded")
             path = path + (id(v),)
@@ -5690,6 +5708,11 @@ class _Latex:
             return _charged("\\mathrm{%s}" % v)
         if isinstance(v, (int, float)):
             return _charged(str(v))
+        if _plain_repr_base(v) is not None:
+            # (a subclass keeping list's, tuple's or dict's repr: that text,
+            # walked and charged piece by piece first, then as text)
+            s = _repr_charged(v, path)
+            return _latex_text(s, len(s))
         return _latex_text(str(v))
 
     def __repr__(self):
