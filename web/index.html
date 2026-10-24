@@ -1442,15 +1442,16 @@ async function copyShareLink() {
 
 // Sharing with files (web/share; design/sharing.md), where the site has it:
 // "Copy share link" becomes "Share…", a dialog with the link and an upload.
+// (none under `sagebrush notebook`, whose server has no share API: not asked)
 let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
-const shareReady = shareStatus().then((s) => {
+const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
   sharing = s;
 });
 $("#sharelink").onclick = async () => { await copyShareLink(); shareDlg.close(); };
 async function openShare() {
   await shareReady;
-  sharing = await shareStatus();
+  if (!LOCAL) sharing = await shareStatus();
   const me = sharing.enabled ? sharing.me : null;
   $("#sharesignin").hidden = !!me;
   $("#shareform").hidden = !me;
@@ -2531,7 +2532,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (LOCAL) {
     const url = `api/file?path=${encodeURIComponent(LOCAL.path)}`;
     const store = new TextFileStore(LOCAL.name,
-      async () => { const r = await fetch(url); if (r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
+      async () => { const r = await fetch(url); if (r.status === 204 || r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
       async (text) => { const r = await fetch(url, { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
       LOCAL.name);
     await open(store, "local:" + LOCAL.path, "local");
