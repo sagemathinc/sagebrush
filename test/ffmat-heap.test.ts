@@ -33,15 +33,15 @@ const CASES = [
 ];
 
 test("a matrix over a field too big for a 96 MiB heap is refused before it is built", () => {
-  const src = CASES.map((c) => `try:\n r = ${c}\n print('built', r.dimensions())\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:60])\n`).join("") +
-    "V = VectorSpace(RDF, 512)\ntry:\n V.subspace([[1.0] * 512] * 512)\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:30])\n" +
+  const src = CASES.map((c) => `try:\n r = ${c}\n print('built', r.dimensions())\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:60])\n`).join("") +
+    "V = VectorSpace(RDF, 512)\ntry:\n V.subspace([[1.0] * 512] * 512)\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:30])\n" +
     // (an endless row iterator: stopped at the budget for the rows read
     // and their conversion, daybreak2's HARD-5B6-1)
-    "import itertools\ntry:\n matrix(RDF, ([0.0] * 512 for i in itertools.count()))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:30])\n" +
+    "import itertools\ntry:\n matrix(RDF, ([0.0] * 512 for i in itertools.count()))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:30])\n" +
     // (one row, a generator past the budget: astra's CORR-03D-1)
-    "try:\n matrix(RDF, ((0.0 for j in range(100000)) for i in range(1)))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:30])\n" +
+    "try:\n matrix(RDF, ((0.0 for j in range(100000)) for i in range(1)))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:30])\n" +
     // (and an endless one: daybreak2's HARD-03D-1)
-    "try:\n matrix(RDF, (iter(itertools.repeat(0.0)) for i in range(1)))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:30])\n" +
+    "try:\n matrix(RDF, (iter(itertools.repeat(0.0)) for i in range(1)))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:30])\n" +
     // (the old generation the flag gives, whatever young generation this
     // Node version adds: 96 MiB, so the budget is the same everywhere)
     "print(sys._sagebrush_heap_limit == 96 * 2^20)\n";
@@ -49,9 +49,14 @@ test("a matrix over a field too big for a 96 MiB heap is refused before it is bu
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.equal(lines.length, CASES.length + 5, r.stdout);
-  // (a memory guard of item D's in its own words, or a budget not yet
-  // migrated to it, D2)
-  for (const l of lines.slice(0, -1)) assert.match(l, REFUSED(""), l);
+  // (the first five by the heap share, _admit_size: a memory guard of item
+  // D's in its own words; the subspace and the rows read from iterators by
+  // the bounded reads, not migrated yet: D2)
+  const kinds = [...Array(5).fill("SagebrushMemoryError"), ...Array(6).fill("NotImplementedError")];
+  lines.slice(0, -1).forEach((l, i) => {
+    assert.match(l, REFUSED(""), l);
+    assert.equal(l.split(" ")[1], kinds[i], l);
+  });
   assert.equal(lines[CASES.length + 4], "True");
 });
 
@@ -103,9 +108,9 @@ const VECTORS = [
 
 test("a vector over a field too big for a 96 MiB heap is refused before it is built, and built in the default heap", () => {
   // (a vector had only the 4M-entry ceiling)
-  const src = VECTORS.map((c) => `try:\n v = ${c}\n print('built', len(v))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:40])\n`).join("") +
+  const src = VECTORS.map((c) => `try:\n v = ${c}\n print('built', len(v))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:40])\n`).join("") +
     // (an endless iterator of entries: stopped at the budget)
-    "import itertools\ntry:\n vector(GF(7), (i for i in itertools.count()))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, str(e)[:40])\n" +
+    "import itertools\ntry:\n vector(GF(7), (i for i in itertools.count()))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__, ' '.join(str(e).split())[:40])\n" +
     // (Sage's error for a wrong length comes first, whatever sized object
     // has it)
     "class L(list): pass\nclass T(tuple): pass\n" +
