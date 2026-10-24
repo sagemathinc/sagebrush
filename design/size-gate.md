@@ -16,6 +16,13 @@ The design is `plan-growth-budget-r6`: r5 was approved (astra CLEAR on r5, daybr
 | `scripts/size-measure.mjs` | The measurement and the rules. Its sha256 is part of every record's comparability key. |
 | `heap-budget.json` | The heap thresholds and the node pin (unchanged). |
 
+`size-measure.mjs`'s `LIMITS` caps the gate's own inputs before they are read in full or parsed:
+- bytes per record, per budgets file and per marker;
+- the number of markers and their total bytes;
+- string and collection sizes.
+
+These are input-envelope limits, not size thresholds.
+
 ## The rules, per integration (a PR's merge commit against its exact first parent)
 
 - **Growth (Δ > `noise_bytes`) needs markers added by this PR,** in its diff against the tested base.
