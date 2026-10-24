@@ -109,13 +109,14 @@ class Runner:
         server sharing it, idle sessions included, and the runs of other
         owners without one (liveness unknown) count against the ceiling, so
         sessions and the active index stay bounded by it.  And the store
-        must have room for the run's records (R.RUN_META_BYTES)."""
+        must have room for the run's records (R.RUN_META_BYTES).  True if the
+        slot was taken now (to be rolled back if no session comes of it)."""
         try:
             self.store.admit(R.RUN_META_BYTES, "meta")
         except R.StorageError as e:
             raise Refused("storage", "no room for another run: %s" % e)
         try:
-            self.store.slot_take(self._slot(name), self.ceiling)
+            return self.store.slot_take(self._slot(name), self.ceiling)
         except R.SlotRefused as e:
             raise Refused("capacity", "%d of the %d session slots this machine allows are held (by sessions of this and other servers%s)"
                           % (e.used, e.ceiling, ", and %d runs of other servers, liveness unknown" % len(e.unknown) if e.unknown else ""),
@@ -165,7 +166,7 @@ class Runner:
                 # (admission, the record and its index entry in one step under
                 # the store lock: another server's admission sees this run)
                 with self.store.lock:
-                    self._admit(name)
+                    took = self._admit(name)
                     handle = self.store.new_handle()
                     self.seq[name] = self.seq.get(name, 0) + 1
                     rec = R.new_record(self.store, handle, "code", mode, {"id": name, "generation": None}, self.seq[name], started_by, label, now=self.clock())
@@ -175,6 +176,8 @@ class Runner:
                         self.store.index_set(handle, {"started_at": rec["started_at"], "started_by": started_by, "owner": self.store.owner, "label": label})
                     except (OSError, R.StorageError) as e:
                         self.store.discard(handle)
+                        if took and sess is None:
+                            self.store.slot_release(self._slot(name))  # (no session came of it)
                         raise Refused("storage", "the run couldn't be recorded: %s" % e)
                 run = _Run(rec, sess, name)
                 self.runs[handle] = run
@@ -188,8 +191,11 @@ class Runner:
                     before = sess.generation
                     gen, q = sess.submit(code, mode=mode)
                 except Exception as e:
-                    # (the session couldn't start: the run settles at once)
+                    # (the session couldn't start: the run settles at once,
+                    # and a slot taken for it goes back, daybreak2 PR120-FIX3-2)
                     q = None
+                    if took and self.sessions.get(name) is None:
+                        self.store.slot_release(self._slot(name))
                     self._settle(run, {"type": "session", "exception": type(e).__name__, "message": "the session couldn't start: %s" % e, "traceback": ""})
                 if q is not None:
                     rec["session"]["generation"] = gen
@@ -545,7 +551,14 @@ class Runner:
                 s.close()
             except Exception:
                 pass
-            self.store.slot_release(self._slot(name))
+            # (the slot goes back only once the worker's exit is confirmed: a
+            # session that couldn't be closed keeps it, astra PR120-SEM-7)
+            try:
+                gone = not s.alive()
+            except Exception:
+                gone = False
+            if gone:
+                self.store.slot_release(self._slot(name))
         with self.lock:
             for run in list(self.runs.values()):
                 if not run.done.is_set() and run.record.get("state") == "running":
