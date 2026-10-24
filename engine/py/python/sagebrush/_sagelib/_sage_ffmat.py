@@ -492,6 +492,180 @@ def _vector_pushout(R, S):
     return qb.QQbar  # (AA and QQbar)
 
 
+# ------------------------------------------------------------------ equality through coercion
+#
+# Sage's x == y (William, who designed it: "it uses the coercion model to
+# find a common parent, and if possible then compares the image under
+# coercion of the two objects"): the common parent of x's and y's parents
+# by coercion (the pushout); where there is one, the images of x and y in
+# it are compared; where there is none, x != y (False, not an error).
+# _coerced_eq does this for Sage-mode matrices and vectors, with the
+# pushout of their base rings (_vector_pushout):
+# - matrix and matrix of the same dimensions: MatrixSpace(pushout(R, S),
+#   n, m); vector and vector of the same degree: likewise; other shapes
+#   have no common parent;
+# - a square matrix (0 x 0 too) and a scalar s: MatrixSpace(pushout(R,
+#   parent(s)), n), where s's image is s times the identity;
+# - a non-square matrix or a vector and a scalar: Sage embeds no scalar
+#   into such a space by coercion, except that an integral zero (a Python
+#   int, bool or float, or an element of ZZ) is converted to its zero:
+#   QQ(0), RR(0) or GF(3)(0) are not equal to the zero vector.  (Sage
+#   10.10's answers, sage-tests/test_matrix_scalar_eq; one more deviation
+#   from the model there: Sage's matrix(GF(p), 0, 0) == SR(0) is True,
+#   though GF(p) and SR have no pushout; here it is False.)
+# Where sagebrush does not model the pushout (a number field with RR or
+# RDF, say), _vector_pushout raises NotImplementedError and so does ==:
+# an unsupported domain is refused, never reported as unequal.  Hashing
+# keeps Sage's own inconsistencies (_matrix_hash).
+# The comparison is entry by entry, with no converted copy of either
+# operand (HARD-F4E-1).  Magma mode has its own rules (lib/_magma.py's eq).
+
+def _scalar_parent(s):
+    """The parent of s as Sage's coercion sees it when s is a scalar (a
+    Python int or bool: ZZ; float: RDF; complex: CDF; a Fraction: QQ; an
+    element: its parent); None for anything else (matrices, vectors,
+    lists, strings, None)."""
+    if s is None or isinstance(s, (list, tuple, str, dict, set)) or getattr(s, "_is_ffmatrix", False) or _vec_base(s) is not None:
+        return None
+    import _sage_matrix
+    if isinstance(s, _sage_matrix.Matrix):
+        return None
+    sa = _sa()
+    par = getattr(s, "parent", None)
+    if callable(par) and not isinstance(s, type):
+        try:
+            return par()
+        except Exception:
+            return None
+    if isinstance(s, (bool, int)):
+        return sa.ZZ
+    import _sage_rdf
+    if isinstance(s, float):
+        return _sage_rdf.RDF
+    if isinstance(s, complex):
+        return _sage_rdf.CDF
+    if isinstance(s, _F):
+        return sa.QQ
+    return None
+
+
+def _integral_zero(s):
+    """Whether s is a zero that a vector or a non-square matrix equals (a
+    Python int, bool or float, or an element of ZZ): see above."""
+    if isinstance(s, bool):
+        return not s
+    if type(s) is float:
+        return s == 0
+    if isinstance(s, int):
+        par = getattr(s, "parent", None)
+        return (not callable(par) or par() is _sa().ZZ) and s == 0
+    par = getattr(s, "parent", None)
+    if callable(par) and not isinstance(s, type):
+        try:
+            return par() is _sa().ZZ and s == 0
+        except Exception:
+            return False
+    return False
+
+
+def _shape(x):
+    """(kind, base ring, rows, ncols) of a value _coerced_eq compares:
+    ("matrix", R, its rows, ncols), ("vector", R, (its entries,), degree)
+    (one row, not copied), ("scalar", parent, None, None); else None."""
+    import _sage_matrix
+    if getattr(x, "_is_ffmatrix", False):
+        return ("matrix", x._base, x._rows, x._ncols)
+    if isinstance(x, _sage_matrix.Matrix):
+        return ("matrix", x._base, x._rows, x.ncols())
+    if isinstance(x, FFVector):
+        return ("vector", x._base, (x._e,), len(x._e))
+    if isinstance(x, _sage_matrix.Vector) and not isinstance(x, _sage_matrix.SeriesVector):
+        return ("vector", x.base_ring(), (x,), list.__len__(x))
+    S = _scalar_parent(x)
+    if S is not None or type(x) is float:
+        return ("scalar", S, None, None)
+    return None
+
+
+def _entries(rows):
+    """The stored entries of rows (lists, or a Vector: its raw entries, an
+    integral one of QQ stored as an int), in order, without a copy."""
+    for r in rows:
+        yield from list.__iter__(r)
+
+
+def _coerced_eq(x, y):
+    """Sage's x == y for a Sage-mode matrix or vector x (see above): True
+    or False, or NotImplemented when y is nothing it compares with.  Entry
+    by entry, without a copy of either operand."""
+    a, b = _shape(x), _shape(y)
+    if a is None or b is None:
+        return NotImplemented
+    kind, R, rows, ncols = a
+    if b[0] == "scalar":
+        if kind == "vector" or len(rows) != ncols:
+            # (no coercion of a scalar into a free module or a non-square
+            # matrix space; an integral zero converts to its zero)
+            return _integral_zero(y) and not any(_entries(rows))
+        P = _vector_pushout(R, b[1])
+        if P is None:
+            return False
+        c, zero = P(y), P(0)  # (the image of the scalar: c times the identity)
+        for i, r in enumerate(rows):
+            for j, e in enumerate(list.__iter__(r)):
+                if not bool(P(e) == (c if i == j else zero)):
+                    return False
+        return True
+    # (a matrix and a vector, or different shapes: no common parent)
+    if kind != b[0] or len(rows) != len(b[2]) or ncols != b[3]:
+        return False
+    if R is b[1] or R == b[1]:
+        return all(bool(u == v) for u, v in zip(_entries(rows), _entries(b[2])))
+    P = _vector_pushout(R, b[1])
+    if P is None:
+        return False
+    return all(bool(P(u) == P(v)) for u, v in zip(_entries(rows), _entries(b[2])))
+
+
+def _matrix_hash(rows, ncols):
+    """The hash of a matrix, in one streaming pass over its stored entries
+    (no copy of them, LIMIT-EQ89-1): as Sage's, a zero matrix of any shape
+    (empty and rectangular too) hashes as 0 and c times the identity as c,
+    which they equal; any other matrix hashes by its shape and entries.
+
+    Equality through coercion cannot always agree with hashing (as in
+    Sage, whose quirks are kept, not hidden): the empty matrix equals every
+    scalar but hashes as 0; matrix(ZZ, [[4]]) == GF(3)(1) holds though the
+    hashes of 4 and GF(3)(1) differ; a zero vector equals 0 but vectors
+    hash by their entries.
+
+    EXAMPLES::
+
+        sage: from _sage_ffmat import _matrix_hash  # sagebrush only
+        sage: _matrix_hash([[0, 0, 0], [0, 0, 0]], 3) == hash(0), _matrix_hash([], 0) == hash(0)  # sagebrush only
+        (True, True)
+        sage: _matrix_hash([[3, 0], [0, 3]], 2) == hash(3), _matrix_hash([[1, 1], [0, 1]], 2) == hash(1)  # sagebrush only
+        (True, False)
+    """
+    n = len(rows)
+    scalar = n > 0 and n == ncols
+    c = rows[0][0] if scalar and ncols else None
+    zero = True
+    h = hash((n, ncols))
+    for i, r in enumerate(rows):
+        for j, x in enumerate(r):
+            h = hash((h, x))
+            if x:
+                zero = False
+            if scalar and (not (x == c) if i == j else bool(x)):
+                scalar = False
+    if zero:
+        return hash(0)
+    if scalar:
+        return hash(c)
+    return h
+
+
 def _vec_base(v):
     """The base ring of a vector (FFVector or a ZZ, QQ or symbolic Vector),
     else None."""
@@ -784,11 +958,19 @@ class FFVector:
         return len(self._e)
 
     def __eq__(self, o):
-        if isinstance(o, FFVector):
-            return self._e == o._e
+        # (through coercion, as Sage: the common parent's images, _coerced_eq;
+        # a Sage vector, also a list, goes there first (CORR-EQ89-1), and a
+        # plain list or tuple is compared entry by entry, as before)
+        r = _coerced_eq(self, o)
+        if r is not NotImplemented:
+            return r
         if isinstance(o, (list, tuple)):
             return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
         return NotImplemented
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
 
     def __hash__(self):
         return hash(tuple(self._e))
@@ -1212,26 +1394,11 @@ class FFMatrix:
         return [x for r in self._rows for x in r]
 
     def __eq__(self, o):
-        if isinstance(o, FFMatrix):
-            return self._rows == o._rows and self._ncols == o._ncols
-        import _sage_matrix
-        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
-            return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
-        # a scalar c is c times the identity (any shape for 0), as in Sage;
-        # it was NotImplemented, so A * A.inverse() == 1 was False
-        c = self._scalar(o)
-        if c is None:
-            r = self._numeric_eq(o)
-            if r is not None:
-                return r
-        if c is not None:
-            zero = self._base.zero()
-            if c == zero:
-                return all(x == zero for r in self._rows for x in r)
-            if len(self._rows) != self._ncols:
-                return False
-            return all(x == (c if i == j else zero) for i, r in enumerate(self._rows) for j, x in enumerate(r))
-        return NotImplemented
+        # through coercion, as Sage: the images in the common parent
+        # (_coerced_eq: c times the identity for a scalar c and a square
+        # matrix); it was NotImplemented for a scalar, so A * A.inverse()
+        # == 1 was False
+        return _coerced_eq(self, o)
 
     def __ne__(self, o):
         r = self.__eq__(o)
@@ -1258,7 +1425,9 @@ class FFMatrix:
         return FFMatrix(self._base, [[c if i == j else zero for j in range(n)] for i in range(n)], n)
 
     def __hash__(self):
-        return hash(tuple(tuple(r) for r in self._rows))
+        # (a zero matrix hashes as 0 and c times the identity as c, which
+        # they equal, as in Sage; one pass, no copy: _matrix_hash)
+        return _matrix_hash(self._rows, self._ncols)
 
     def __copy__(self):
         return FFMatrix(self._base, self._rows, self._ncols)
