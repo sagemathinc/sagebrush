@@ -55,7 +55,7 @@ export function decodeEntities(s: string): string {
       const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
       return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "";
     }
-    return NAMED[e.toLowerCase()] ?? m;
+    return Object.hasOwn(NAMED, e.toLowerCase()) ? NAMED[e.toLowerCase()] : m;
   });
 }
 
@@ -196,7 +196,8 @@ export function safeHtml(html: string, o: SafeOptions = {}): string {
       if (!close && !m[4]) dropping = name;
       continue;
     }
-    const allowed = TAGS[name];
+    // (its own entries only: not "constructor", "__proto__" or the like)
+    const allowed = Object.hasOwn(TAGS, name) ? TAGS[name] : undefined;
     if (!allowed) continue;
     if (close) {
       if (!VOID.has(name)) out += `</${name}>`;

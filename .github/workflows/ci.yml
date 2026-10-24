@@ -259,6 +259,7 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
+          CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
