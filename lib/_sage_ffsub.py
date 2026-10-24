@@ -949,3 +949,149 @@ def from_rationals(cs, U, budget, refuse, fail):
             raise fail(c)
         out.append(U(num * pow(den, -1, p) % p))
     return out
+
+
+# Splitting fields of polynomials over finite fields and their roots there
+# (plan-finite-fields F3: Magma's RootsInSplittingField, Sage's
+# splitting_field and roots(ring)), for both front ends.  The polynomial is
+# factored first (its work, factor_cost, charged before), so that the
+# splitting field's degree is known: deg K times the lcm of the factors'
+# degrees (split_degree), refused past EMBED_MAX elements on the small
+# integers before anything else; then the roots' whole work (split_cost)
+# is reserved before the field is made (its cold Conway search with what
+# is left) and before any root is found.
+
+def factor_cost(n, K):
+    """The cops admitted for factoring a polynomial of degree n over K: the
+    existing finite-field factorization's formula, n^3 bits(q) products,
+    each M(deg K) cops."""
+    p, kn, q = pnq(K)
+    return n ** 3 * q.bit_length() * mn(p, kn)
+
+
+def split_degree(degrees, K, refuse):
+    """The degree over the prime field of the splitting field of a
+    polynomial over K whose irreducible factors have these degrees: deg K
+    times their lcm; K itself (any size) when every factor is linear, else
+    refuse() when the field would have more than EMBED_MAX elements
+    (checked on n log2 p before p^n is formed)."""
+    p, kn, _ = pnq(K)
+    d = 1
+    for k in degrees:
+        d = d * k // _math.gcd(d, k)
+    n = kn * d
+    if d > 1 and (n * (p.bit_length() - 1) > 20 or p ** n > EMBED_MAX):
+        raise refuse()
+    return n
+
+
+def split_cost(K, n, factors, by_log):
+    """The cops of the roots in L = GF(p^n) of a polynomial over K whose
+    factors are [(degree, multiplicity)], and the cached images counted
+    free: for each irreducible factor of degree k > 1, its k + 1
+    coefficients put into L (up_cost), one root found by equal-degree
+    splitting over L (k^3 bits(q_L) M(n), the existing finder's formula),
+    its k - 1 conjugates (a power x^(q_K) each, 2 bits(q_K) M(n)) and, by
+    log, one discrete log in L (dlog_cost); for a linear factor, its root
+    (an inverse in K, 2 bits(q_K) M(deg K)), put into L, and by log a
+    discrete log in K (with, for a prime field K, its generator found once
+    as a power of L's); every root's copy, n words."""
+    p, kn, qk = pnq(K)
+    ql = p ** n
+    M = mn(p, n)
+    seen, hits, cost = set(), set(), 0
+    dl = None
+    for k, _ in factors:
+        if k > 1:
+            cost += (k + 1) * degree_cost(kn, p, n, seen, hits)
+            cost += k ** 3 * ql.bit_length() * M + (k - 1) * 2 * qk.bit_length() * M + k * n
+            if by_log:
+                if dl is None:
+                    dl = _dlog_cost_pn(p, n)
+                cost += dl
+        else:
+            cost += 2 * qk.bit_length() * mn(p, kn) + degree_cost(kn, p, n, seen, hits) + n
+            if by_log:
+                cost += _dlog_cost_pn(p, kn)
+    if by_log and kn == 1 and any(k == 1 for k, _ in factors):
+        # (the prime field's generator as a power of L's, once)
+        cost += 2 * ((ql - 1) // (qk - 1)).bit_length() * M
+    return cost, hits
+
+
+def _dlog_cost_pn(p, n):
+    """dlog_cost of GF(p^n), from p and n alone (q <= EMBED_MAX)."""
+    N = p ** n - 1
+    b = N.bit_length()
+    s = 2 * b
+    for r, e in _sff._factor_int(N):
+        s += 6 * b + e * (8 * b + 2 * (_math.isqrt(r - 1) + 2))
+    return mn(p, n) * s + 2 ** 11
+
+
+def split_field(K, n, budget, refuse, name=None):
+    """The splitting field GF(p^n) (K itself when n = deg K), its cold
+    Conway search within what budget has left: the prefix field, or the
+    field with that name."""
+    p, kn, _ = pnq(K)
+    if n == kn:
+        return K
+    try:
+        _sff._conway(p, n, budget)
+    except _sff.ConwayBudgetExceeded:
+        raise refuse()
+    return _sff.GF(p ** n) if name is None else _sff.GF(p ** n, name)
+
+
+def split_roots(factors, K, L, paid, refuse, by_log):
+    """The roots in L (the splitting field, over K) of a polynomial whose
+    factors over K are [(g, e)] (g monic, as coefficient lists in K,
+    constant first), with their multiplicities: [(root, e, log)], log the
+    root's discrete log to L's generator when by_log (None for 0), else
+    None.  Their cost (split_cost) was reserved by the caller in paid; a
+    factor's roots are one root found by equal-degree splitting over L and
+    its conjugates under x -> x^(q_K) (their logs times q_K mod q_L - 1).
+
+        sage: import _sage_ffsub as S
+        sage: K = GF(5); L = GF(25)
+        sage: [(r, e) for r, e, _ in S.split_roots([([K(2), K(0), K(1)], 1)], K, L, [S.WORK], ValueError, False)]
+        [(3*z2 + 1, 1), (2*z2 + 4, 1)]
+    """
+    p, kn, qk = pnq(K)
+    _, n, ql = pnq(L)
+    one, mul = L.one(), (lambda u, v: u * v)
+    e_kl = (ql - 1) // (qk - 1)
+    base = None
+    out = []
+    for g, e in factors:
+        k = len(g) - 1
+        if k == 1:
+            r = -g[0] / g[1]
+            log = None
+            if by_log and r:
+                if base is None:
+                    # (K's generator as L's power: Conway-compatible, so
+                    # g_L^((q_L - 1)/(q_K - 1)) is K's generator, a prime
+                    # field's by its value; one power)
+                    base = K.gen() if kn > 1 else K(prime_value(L.gen() ** e_kl))
+                log = _sff._dlog(r, base, None, qk - 1, lambda u, v: u * v, K.one()) * e_kl
+            out.append((up(r, L, paid, refuse) if L is not K else r, e, log))
+            continue
+        P = _sff.PolynomialRing_ff(L, "x")
+        gl = P([up(c, L, paid, refuse) for c in g])
+        r = -_sff._edf(gl, 1, ql)[0]._c[0]
+        lr = _sff._dlog(r, L.gen(), None, ql - 1, mul, one) if by_log else None
+        for i in range(k):
+            out.append((r, e, None if lr is None else lr * pow(qk, i, ql - 1) % (ql - 1)))
+            # (the k - 1 conjugates split_cost charges, and no more: none
+            # after the last, whose power would never be read; daybreak2
+            # LIMIT-SPLIT92-1)
+            if i + 1 < k:
+                r = frobenius(r, qk)
+    return out
+
+
+def frobenius(x, q):
+    """x^q, the next conjugate of a root (split_roots's step, charged by
+    split_cost as 2 bits(q) M(n) each)."""
+    return x ** q
