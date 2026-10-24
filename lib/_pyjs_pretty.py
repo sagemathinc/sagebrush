@@ -576,20 +576,9 @@ class _Native(Exception):
 
 
 # (the work of one display, its nested displays included, once user code
-# can change the value while it is walked (a __repr__ that adds to its list
-# at every step would keep the walk going): walk steps (a piece of the
-# line or the repr) and characters of repr, at most these; past them, MemoryError. Counted
-# from the outermost display; LIMIT-PR57-1)
-LIMITS = {"steps": 1 << 23, "chars": 1 << 26}
-_spent = [0, 0]
-_depth = [0]
-
-
-def _charge(steps, chars):
-    _spent[0] += steps
-    _spent[1] += chars
-    if _spent[0] > LIMITS["steps"] or _spent[1] > LIMITS["chars"]:
-        raise MemoryError("displaying this value takes more than Sagebrush's limit of %d steps or %d characters (a __repr__ may be changing it as it is shown)" % (LIMITS["steps"], LIMITS["chars"]))
+# can change the value while it is walked: _display_budget, shared with
+# the LaTeX of show() and latex(); LIMIT-PR57-1)
+from _display_budget import LIMITS, _spent, _depth, _charge
 
 
 class _Walk:
