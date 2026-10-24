@@ -177,11 +177,11 @@ test("another ring's element is unequal before any conversion; a large generator
   const r = sage([
     "R.<t> = QQ[]; S = PolynomialRing(QQ, 't,w')",
     // (R(f) of this one, an element of QQ[t,w] in R's variable, is refused
-    // by the dense-conversion limit, 2^20 coefficients; I == f does not
+    // by the dense-conversion memory guard, 2^20 coefficients; I == f does not
     // convert it: unequal, as in Sage)
     "f = S.gen(0)^(2^20)",
     "print(R.ideal(t) == f)",
-    "try:\n    R(f)\nexcept NotImplementedError as e:\n    print('R(f):', e)",
+    "try:\n    R(f)\nexcept MemoryError as e:\n    print('R(f):', str(e).splitlines()[1])",
     // (associates of degree 4000: one pass over the coefficients, no division)
     "g = R([QQ(k + 1) / (k + 2) for k in range(4001)])",
     "print(R.ideal(3*g) == g, R.ideal(3*g) == g + 1, R.ideal(g) == t*g)",
@@ -189,7 +189,7 @@ test("another ring's element is unequal before any conversion; a large generator
   assert.equal(r.stderr, "");
   assert.equal(r.stdout, [
     "False",
-    "R(f): a polynomial of degree 1048576 exceeds sagebrush's limit of 1048576 coefficients for this conversion",
+    "R(f): Converting this polynomial of degree 1048576 to a dense one needs about 8.4 MB, but Sagebrush allows about 8.3 MB for this conversion here.",
     "True False False", "",
   ].join("\n"));
 });
