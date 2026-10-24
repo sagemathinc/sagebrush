@@ -27,8 +27,8 @@ const USAGE = `usage: sagebrush board render FILE [--svg] [-o OUT] [--page N]
   try its questions with given answers, as a reader would: each checked,
   its hints shown; a report for an evaluator (sagebrush board try --help)
        sagebrush board open FILE [--port N] [--no-browser]
-  show it in your browser, as sagebrush.space/board does, and again each
-  time the file changes (sagebrush board open --help)
+  show it in your browser, read only, as sagebrush.space/board does, and
+  again each time the file changes (sagebrush board open --help)
 `;
 /** The board commands this sagebrush has. */
 const COMMANDS = ["render", "run", "check", "answers", "try", "open"];
