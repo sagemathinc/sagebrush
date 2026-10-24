@@ -27,6 +27,117 @@ const here = new URL(".", import.meta.url).pathname;
 let failures = 0;
 const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
 
+// ---- failure diagnostics: bounded in time and bytes, and never able to turn a failure into a pass
+const NOTE_MAX = 40, NOTE_CHARS = 300, ID_CHARS = 64, URL_MAX = 2000, DIAG_MS = 5000;
+const clip = (x, n = NOTE_CHARS) => String(x).slice(0, n);
+const note = (list, line) => { list.push(clip(line)); if (list.length > NOTE_MAX) list.shift(); };
+/** A CDP session: send() with an optional deadline, after which it answers {timedOut} and forgets the
+ * request, so a reply after it (or to an id never sent) is inert (PWA-DIAG-1). */
+function cdpSession(post) {
+  let n = 0;
+  const waiting = new Map();
+  const send = (method, params = {}, ms = Infinity) => new Promise((resolve) => {
+    const id = ++n;
+    const timer = Number.isFinite(ms) ? setTimeout(() => { waiting.delete(id); resolve({ timedOut: true }); }, ms) : null;
+    waiting.set(id, (v) => { if (timer) clearTimeout(timer); waiting.delete(id); resolve(v); });
+    post(JSON.stringify({ id, method, params }));
+  });
+  const reply = (m) => { const w = waiting.get(m.id); if (!w) return false; w(m.result ?? m.error); return true; };
+  return { send, reply, pending: () => waiting.size };
+}
+/** p's result, or `late` once ms have passed (one hard wall around a best-effort pass). */
+const within = (ms, p, late) => { let t; return Promise.race([p, new Promise((r) => (t = setTimeout(() => r(late), ms)))]).finally(() => clearTimeout(t)); };
+/** A CDP event kept for the diagnostics, each value cut before it is joined or stored (PWA-DIAG-2). */
+function recordEvent(m, notes, urls) {
+  const p = m.params ?? {};
+  if (m.method === "Runtime.consoleAPICalled" && (p.type === "error" || p.type === "warning")) note(notes.console, `${p.type}: ${(p.args ?? []).slice(0, 8).map((a) => clip(a.value ?? a.description ?? a.type, 120)).join(" ")}`);
+  else if (m.method === "Runtime.exceptionThrown") note(notes.console, `exception: ${clip(p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text)}`);
+  else if (m.method === "Log.entryAdded" && p.entry?.level === "error") note(notes.console, `log: ${clip(p.entry.text, 200)} ${clip(p.entry.url ?? "", 100)}`);
+  else if (m.method === "Network.requestWillBeSent") { urls.set(clip(p.requestId, ID_CHARS), clip(p.request?.url)); if (urls.size > URL_MAX) urls.delete(urls.keys().next().value); }
+  else if (m.method === "Network.loadingFailed") note(notes.network, `failed: ${urls.get(clip(p.requestId, ID_CHARS)) ?? clip(p.requestId, ID_CHARS)} ${clip(p.errorText ?? "", 100)} ${clip(p.blockedReason ?? "", 60)}`);
+  else if (m.method === "Network.responseReceived" && p.response?.status >= 400) note(notes.network, `${p.response.status}: ${clip(p.response.url)}`);
+}
+/** The diagnostics' pass: the page's and its service worker's state, then the notes, all within one hard
+ * wall of ms; an unanswered page shows as a diagnostic timeout (PWA-DIAG-1). */
+function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
+  const expression = `(async () => {
+    const reg = await navigator.serviceWorker?.getRegistration?.().catch((e) => String(e));
+    const sw = (w) => w ? w.state + " " + w.scriptURL : null;
+    return JSON.stringify({
+      href: location.href, readyState: document.readyState, isolated: globalThis.crossOriginIsolated,
+      status: document.querySelector('#status')?.textContent ?? null,
+      controller: sw(navigator.serviceWorker?.controller),
+      registration: reg && typeof reg === "object" ? { installing: sw(reg.installing), waiting: sw(reg.waiting), active: sw(reg.active) } : reg ?? null,
+      caches: await caches.keys().catch((e) => String(e)),
+    });
+  })()`;
+  return async (why) => {
+    const r = await within(ms, send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms), { timedOut: true });
+    const state = r?.timedOut ? "unavailable (diagnostic timeout)" : r?.result?.value ?? "unavailable: " + clip(JSON.stringify(r?.exceptionDetails?.text ?? r));
+    log(`  diagnostics (${why}):`);
+    log("    page: " + String(state).slice(0, 2000));
+    for (const [k, list] of Object.entries(notes)) for (const line of list) log(`    ${k}: ${line}`);
+    if (!Object.values(notes).some((l) => l.length)) log("    (no failed requests, console errors or failed loads recorded)");
+  };
+}
+/** What a cell that didn't finish by its deadline returns: no check accepts it. */
+const TIMED_OUT = "(timed out: the cell didn't finish, so its output isn't read)";
+/** A cell's run. If it doesn't finish by its deadline, the failure is recorded at once, before the
+ * diagnostics (which take time, while the cell may still finish), and its output is never read, so a
+ * late finish can't pass (CORR-PWA98-1). */
+function cellRunner({ start, finished, output, diagnose, fail }) {
+  return async (code) => {
+    await start(code);
+    if (!(await finished())) {
+      fail("a cell didn't finish in 90 s: " + clip(JSON.stringify(code), 80));
+      await diagnose("a cell didn't finish in 90 s");
+      return TIMED_OUT;
+    }
+    // (always a string, so a check of it fails in words, never with a TypeError)
+    return (await output()) ?? "(no output: the cell didn't run)";
+  };
+}
+
+// ---- self-checks of the diagnostics, without a browser (they run first, and count like any check)
+{
+  // CORR-PWA98-1: a cell that finishes only during the diagnostics still fails, once, before them
+  const order = [];
+  let out = "";
+  const run = cellRunner({
+    start: async () => {}, finished: async () => false, output: async () => out,
+    diagnose: async () => { order.push("diagnose"); out = "42 [1, 2] 274177 * 67280421310721"; },
+    fail: (why) => order.push("fail: " + why),
+  });
+  const got = await run("print(6 * 7)");
+  ok(got === TIMED_OUT && !got.includes("42") && order.length === 2 && order[0].startsWith("fail: ") && order[1] === "diagnose",
+    "(self-check) a cell past its deadline fails before the diagnostics, and output that appears during them isn't accepted: " + JSON.stringify({ got, order }));
+  const fine = cellRunner({ start: async () => {}, finished: async () => true, output: async () => "42", diagnose: async () => order.push("x"), fail: () => order.push("y") });
+  ok((await fine("print(6 * 7)")) === "42" && order.length === 2, "(self-check) a cell that finishes in time returns its output, with no failure or diagnostics");
+  // PWA-DIAG-1: an unanswered request ends at its deadline, forgotten; a late reply is inert; the pass is walled
+  const posted = [];
+  const cdp = cdpSession((m) => posted.push(JSON.parse(m)));
+  let t0 = Date.now();
+  const r = await cdp.send("Runtime.evaluate", {}, 200);
+  const took = Date.now() - t0;
+  ok(r?.timedOut === true && took >= 150 && took < 1500 && cdp.pending() === 0, `(self-check) an unanswered request ends at its 200 ms deadline (${took} ms), forgotten`);
+  ok(cdp.reply({ id: posted[0].id, result: { result: { value: "late" } } }) === false && cdp.reply({ id: 999, result: {} }) === false && cdp.pending() === 0, "(self-check) a reply after the deadline, or to an id never sent, is inert");
+  const lines = [];
+  const quiet = { front: [], console: [], network: [] };
+  const diag = makeDiagnose({ send: (method, params, ms) => cdpSession(() => {}).send(method, params, Infinity), notes: quiet, log: (l) => lines.push(l), ms: 300 });
+  t0 = Date.now();
+  await diag("a wedged page");
+  const took2 = Date.now() - t0;
+  ok(took2 < 1500 && lines.some((l) => l.includes("unavailable (diagnostic timeout)")), `(self-check) the diagnostics end within their hard wall even if the page never answers (${took2} ms): ` + JSON.stringify(lines.slice(0, 2)));
+  // PWA-DIAG-2: what is kept is bounded in characters as well as entries
+  const ns = { front: [], console: [], network: [] }, us = new Map();
+  const big = "x".repeat(1 << 20);
+  for (let i = 0; i < URL_MAX + 500; i++) recordEvent({ method: "Network.requestWillBeSent", params: { requestId: i + big.slice(0, 10_000), request: { url: "https://h/" + big } } }, ns, us);
+  recordEvent({ method: "Runtime.consoleAPICalled", params: { type: "error", args: Array.from({ length: 50 }, () => ({ description: big })) } }, ns, us);
+  recordEvent({ method: "Network.loadingFailed", params: { requestId: "r" + big, errorText: big, blockedReason: big } }, ns, us);
+  ok(us.size === URL_MAX && [...us.keys()].every((k) => k.length <= ID_CHARS) && [...us.values()].every((v) => v.length <= NOTE_CHARS), "(self-check) request URLs and ids are kept cut, at most " + URL_MAX);
+  ok([...ns.console, ...ns.network].every((l) => l.length <= NOTE_CHARS) && ns.console.length === 1 && ns.network.length === 1, "(self-check) console and network notes are cut to " + NOTE_CHARS + " characters");
+}
+
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
 const require = createRequire(join(here, "test-workers/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
@@ -45,9 +156,7 @@ const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { st
 let deployed = false;
 const seen = { site: [], r2: [] };
 // (what the diagnostics print if the page doesn't load: the front's failed requests, the page's console, its failed loads)
-const NOTE_MAX = 40;
 const notes = { front: [], console: [], network: [] };
-const note = (list, line) => { list.push(String(line).slice(0, 300)); if (list.length > NOTE_MAX) list.shift(); };
 const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
 const front = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
@@ -88,52 +197,28 @@ try {
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
-  let n = 0;
-  const waiting = new Map();
+  const cdp = cdpSession((m) => ws.send(m));
   const urls = new Map();
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); return; }
-    // (events, kept for the diagnostics)
-    const p = m.params ?? {};
-    if (m.method === "Runtime.consoleAPICalled" && (p.type === "error" || p.type === "warning")) note(notes.console, `${p.type}: ${(p.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" ")}`);
-    else if (m.method === "Runtime.exceptionThrown") note(notes.console, `exception: ${p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text}`);
-    else if (m.method === "Log.entryAdded" && p.entry?.level === "error") note(notes.console, `log: ${p.entry.text} ${p.entry.url ?? ""}`);
-    else if (m.method === "Network.requestWillBeSent") { urls.set(p.requestId, p.request?.url); if (urls.size > 2000) urls.delete(urls.keys().next().value); }
-    else if (m.method === "Network.loadingFailed") note(notes.network, `failed: ${urls.get(p.requestId) ?? p.requestId} ${p.errorText ?? ""} ${p.blockedReason ?? ""}`);
-    else if (m.method === "Network.responseReceived" && p.response?.status >= 400) note(notes.network, `${p.response.status}: ${p.response.url}`);
+    if (m.id !== undefined) { cdp.reply(m); return; }
+    recordEvent(m, notes, urls); // (events, kept for the diagnostics)
   };
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  const send = cdp.send;
   const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
   const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
-  const runCode = async (code) => {
-    await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
-    const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
-    const ran = await until(`(() => /\\[\\d+\\]/.test(${last}.querySelector('.n').textContent))()`, 90000);
-    if (!ran) await diagnose("a cell didn't finish in 90 s");
-    // (always a string, so a check of it fails in words, never with a TypeError)
-    return (await ev(`${last}.querySelector('.out').textContent`)) ?? "(no output: the cell didn't run)";
-  };
+  const diagnose = makeDiagnose({ send, notes, log: (l) => console.log(l) });
+  const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
+  const runCode = cellRunner({
+    start: (code) => ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`),
+    finished: () => until(`(() => /\\[\\d+\\]/.test(${last}.querySelector('.n').textContent))()`, 90000),
+    output: () => ev(`${last}.querySelector('.out').textContent`),
+    diagnose,
+    fail: (why) => ok(false, why),
+  });
   const versions = () => ev(`caches.keys().then((ks) => ks.filter((k) => k.startsWith("sagebrush-")))`);
-  // (if the page doesn't load: what it and its service worker were doing, so a CI flake leaves its evidence)
-  const diagnose = async (why) => {
-    const state = await ev(`(async () => {
-      const reg = await navigator.serviceWorker?.getRegistration?.().catch((e) => String(e));
-      const sw = (w) => w ? w.state + " " + w.scriptURL : null;
-      return JSON.stringify({
-        href: location.href, readyState: document.readyState, isolated: globalThis.crossOriginIsolated,
-        status: document.querySelector('#status')?.textContent ?? null,
-        controller: sw(navigator.serviceWorker?.controller),
-        registration: reg && typeof reg === "object" ? { installing: sw(reg.installing), waiting: sw(reg.waiting), active: sw(reg.active) } : reg ?? null,
-        caches: await caches.keys().catch((e) => String(e)),
-      });
-    })()`).catch((e) => "unavailable: " + e);
-    console.log(`  diagnostics (${why}):`);
-    console.log("    page: " + String(state).slice(0, 2000));
-    for (const [k, list] of Object.entries(notes)) for (const line of list) console.log(`    ${k}: ${line}`);
-    if (!Object.values(notes).some((l) => l.length)) console.log("    (no failed requests, console errors or failed loads recorded)");
-  };
-  for (const domain of ["Runtime", "Log", "Network"]) await send(domain + ".enable");
+  // (the events the diagnostics keep; bounded like them, so a wedged session can't hang the start)
+  for (const domain of ["Runtime", "Log", "Network"]) await send(domain + ".enable", {}, DIAG_MS);
 
   await send("Page.navigate", { url });
   const loaded = await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
