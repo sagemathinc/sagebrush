@@ -27,7 +27,7 @@ import importlib.util as _util
 import os as _os
 import sys as _sys
 
-__all__ = ["ap", "linalg", "mf", "modsym", "nf", "poly", "set_limits"]
+__all__ = ["ap", "capabilities", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]
 
 
 def _limits_module():
@@ -89,3 +89,42 @@ def _limits_from_environment():
 _limits_from_environment()
 
 from . import ap, linalg, mf, modsym, nf, poly  # noqa: E402
+
+
+# ---- the agent API (estimates plan r3 §1.1): what this build provides,
+# live progress, and the entry points of the pieces still to come, which
+# refuse before running.
+
+def capabilities():
+    """What this build of the agent API provides: {"progress": True,
+    "estimate": False, ...} (sagebrush.records.capabilities)."""
+    from . import records
+    return records.capabilities()
+
+
+def stop_points(op):
+    """The clean stop points implemented for op ([] in this build)."""
+    from . import records
+    return records.stop_points(op)
+
+
+def progress_snapshot():
+    """Every call in progress now, as sagebrush.progress/1 records
+    (sagebrush.progress.snapshot)."""
+    from . import progress
+    return progress.snapshot()
+
+
+def _unavailable(name):
+    def f(*args, **kwds):
+        from . import records
+        raise records.unavailable("sagebrush." + name)
+    f.__name__ = name
+    f.__doc__ = "Not available in this build (sagebrush.capabilities())."
+    return f
+
+
+estimate = _unavailable("estimate")
+run = _unavailable("run")
+request_stop = _unavailable("request_stop")
+resume = _unavailable("resume")
