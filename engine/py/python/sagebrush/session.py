@@ -73,25 +73,70 @@ _INT_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGBREAK") if hasat
 _commit_hook = None          # (tests: called just after a message is written, before interrupts resume)
 
 
+class _Hold:
+    """Ctrl-C held while the worker's main thread changes the output state
+    or writes a protocol message (astra PR120-SEM-6).  Python runs signal
+    handlers only in the main thread, so the handler is installed once, by
+    the main thread (install()), and is never touched again: a Ctrl-C that
+    arrives while the main thread is inside a hold is recorded, and raised
+    as KeyboardInterrupt when the outermost hold ends; otherwise it raises
+    at once, as Python's own handler does.  Other threads never hold: a
+    Ctrl-C interrupts the main thread, not them, so their writes need only
+    the capture's lock."""
+
+    def __init__(self):
+        import threading
+
+        self.depth = 0
+        self.pending = False
+        self.main = threading.main_thread()
+        self.current = threading.current_thread
+
+    def install(self):
+        for sig in _INT_SIGNALS:
+            signal.signal(sig, self._handler)
+
+    def _handler(self, signum, frame):
+        if self.depth:
+            self.pending = True
+        else:
+            raise KeyboardInterrupt
+
+    def __enter__(self):
+        if self.current() is self.main:
+            self.depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        if self.current() is self.main:
+            self.depth -= 1
+            if not self.depth and self.pending:
+                self.pending = False
+                if exc[0] is None:
+                    raise KeyboardInterrupt
+        return False
+
+
+_HOLD = _Hold()
+
+
 class _Sender:
-    """The worker's protocol: one JSON message per line, written whole.  A
-    Ctrl-C (SIGINT; SIGBREAK on Windows) that arrives while a message is
-    framed or written is held, then raised as KeyboardInterrupt only after
-    the message has been written and `committed()` has recorded that: a
-    message is never cut, never written twice, and an interrupt is never
-    lost (astra PR120-SEM-4, daybreak2 PR120-FIX-3)."""
+    """The worker's protocol: one JSON message per line, written whole, one
+    at a time (a lock: any thread may send).  The main thread holds Ctrl-C
+    from before a message is framed until after it is written and
+    `committed()` has recorded that, then raises it: a message is never cut,
+    never written twice, and an interrupt is never lost (astra
+    PR120-SEM-4/6, daybreak2 PR120-FIX-3)."""
 
     def __init__(self, proto):
         import json
+        import threading
 
         self.proto, self.dumps = proto, json.dumps
+        self.lock = threading.RLock()
 
     def send(self, msg, committed=None):
-        held = []
-        prev = {}
-        try:
-            for sig in _INT_SIGNALS:
-                prev[sig] = signal.signal(sig, lambda signum, frame: held.append(signum))
+        with _HOLD, self.lock:
             line = self.dumps(msg) + "\n"  # (ASCII: \\u escapes, a lone surrogate included)
             self.proto.write(line)
             self.proto.flush()
@@ -99,11 +144,6 @@ class _Sender:
                 committed()
             if _commit_hook is not None:
                 _commit_hook(msg)
-        finally:
-            for sig, h in prev.items():
-                signal.signal(sig, h)
-        if held:
-            raise KeyboardInterrupt
 
 
 class _Capture:
@@ -111,9 +151,11 @@ class _Capture:
     the parent as it is written, in {"out": text, "stream": "stdout" or
     "stderr"} messages whose JSON line is at most WIRE_MAX bytes; a chunk
     leaves the buffer only once its message was written, so an interrupt at
-    any point loses or repeats none of it.  The reply keeps the first
-    REPLY_HEAD and last REPLY_TAIL characters (both streams, as printed),
-    with exact per-stream counts in characters and UTF-8 bytes."""
+    any point loses or repeats none of it.  Any thread may write: the state
+    changes under the sender's lock (and, in the main thread, within a
+    Ctrl-C hold).  The reply keeps the first REPLY_HEAD and last REPLY_TAIL
+    characters (both streams, as printed), with exact per-stream counts in
+    characters and UTF-8 bytes."""
 
     def __init__(self, sender):
         self.sender = sender
@@ -135,27 +177,28 @@ class _Capture:
             raise TypeError("write() argument must be str, not %s" % type(text).__name__)
         if not text:
             return 0
-        n = len(text.encode("utf-8", "surrogatepass"))
-        self.chars[stream] += len(text)
-        self.bytes[stream] += n
-        rest = text
-        if len(self.head) < REPLY_HEAD:
-            room = REPLY_HEAD - len(self.head)
-            self.head += text[:room]
-            rest = text[room:]
-        if rest:
-            self.tail.append(rest)
-            self.tail_n += len(rest)
-            if self.tail_n > 2 * REPLY_TAIL:
-                t = "".join(self.tail)[-REPLY_TAIL:]
-                self.tail, self.tail_n = [t], len(t)
-        if self.buf and self.buf[-1][0] == stream:
-            self.buf[-1][1].append(text)
-        else:
-            self.buf.append([stream, [text]])
-        self.pending += n
-        if self.pending >= WIRE_MAX:
-            self.flush()
+        with _HOLD, self.sender.lock:
+            n = len(text.encode("utf-8", "surrogatepass"))
+            self.chars[stream] += len(text)
+            self.bytes[stream] += n
+            rest = text
+            if len(self.head) < REPLY_HEAD:
+                room = REPLY_HEAD - len(self.head)
+                self.head += text[:room]
+                rest = text[room:]
+            if rest:
+                self.tail.append(rest)
+                self.tail_n += len(rest)
+                if self.tail_n > 2 * REPLY_TAIL:
+                    t = "".join(self.tail)[-REPLY_TAIL:]
+                    self.tail, self.tail_n = [t], len(t)
+            if self.buf and self.buf[-1][0] == stream:
+                self.buf[-1][1].append(text)
+            else:
+                self.buf.append([stream, [text]])
+            self.pending += n
+            if self.pending >= WIRE_MAX:
+                self._flush()
         return len(text)
 
     def _piece(self, stream, text):
@@ -168,6 +211,10 @@ class _Capture:
             k = max(1, min(k - 1, k * (WIRE_MAX - 64) // size))
 
     def flush(self):
+        with _HOLD, self.sender.lock:
+            self._flush()
+
+    def _flush(self):
         while self.buf:
             seg = self.buf[0]
             stream, text = seg[0], "".join(seg[1])
@@ -251,6 +298,7 @@ def _worker():
     builtins.__pyjs_display__ = display
     from sagebrush.preparse import preparse
 
+    _HOLD.install()  # (the main thread: the only one that handles signals)
     sender = _Sender(proto)
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
