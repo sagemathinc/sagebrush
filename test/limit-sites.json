@@ -224,6 +224,26 @@
   "owner": "HMF engine",
   "row": "inv-39"
  },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_ns :: MAX_POLL_GAP_NS.load(Relaxed) #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_ns :: pub fn max_poll_gap_ns() -> u64 { #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: trace :: MAX_POLL_GAP_NS.store(0, Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -348,6 +368,14 @@
   "class": "2+3",
   "owner": "multivariate engine",
   "row": "inv-36"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let poll = hooks::max_poll_gap_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
  },
  "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
   "class": "3",
@@ -2849,6 +2877,96 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
+ "src/allowance-host.ts ::  :: budget: number; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: export type LimitKind = \"wall\" | \"steps\" | \"work\"; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: for (const [f, n] of Object.entries(allowance.work ?? {})) this.work.set(f, { budget: n, charged: 0, measured: 0 }); #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: if (allowance.steps !== undefined) this.steps = { budget: allowance.steps, charged: 0, measured: 0 }; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: if (allowance.wall_s !== undefined) this.wall = { budget: allowance.wall_s, charged: 0, measured: 0 }; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: kind: LimitKind; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts ::  :: status: \"complete\" | \"limit\" | \"stopped\" | \"unattempted\" | \"host_error\"; #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: blank :: for (const s of x.leaf.chain()) if (s.wall && !s.latch) out.push({ s, at: x.start + (s.wall.budget - s.wall.charged) }); #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: finish :: status: p === null ? \"complete\" : p.cause === \"allowance\" ? \"limit\" : \"stopped\", #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: latch :: private latch(x: Execution, s: Scope, kind: LimitKind, allowance: number, at: number, family?: string): void { #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: stepRefused :: const spent = x.leaf.chain().filter((s) => s.steps && s.steps.charged >= s.steps.budget); #0": {
+  "class": "3",
+  "owner": "opt-in limits, item G (@sagebrush-grader)",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+ },
+ "src/allowance-host.ts :: stepRefused :: for (const s of spent) this.latch(x, s, \"steps\", s.steps!.budget, at); #0": {
+  "class": "3",
+  "owner": "opt-in limits, item G (@sagebrush-grader)",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+ },
+ "src/allowance-host.ts :: stepRefused :: return l.charged + bound > l.budget; #0": {
+  "class": "3",
+  "owner": "opt-in limits, item G (@sagebrush-grader)",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+ },
+ "src/allowance-host.ts :: stepRefused :: this.latch(x, failing, \"work\", failing.work.get(family)!.budget, now, family); #0": {
+  "class": "3",
+  "owner": "opt-in limits, item G (@sagebrush-grader)",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+ },
+ "src/allowance-host.ts :: steps :: for (const s of x.leaf.chain()) if (s.steps && s.steps.charged > s.steps.budget) this.latch(x, s, \"steps\", s.steps.budget, at); #0": {
+  "class": "3",
+  "owner": "opt-in limits, item G (@sagebrush-grader)",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py"
+ },
+ "src/allowance-host.ts :: stepsRemaining :: for (const s of x.leaf.chain()) if (s.steps) least = Math.min(least ?? Infinity, Math.max(0, s.steps.budget - s.steps.charged)); #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: terminated :: status: p?.cause === \"allowance\" ? \"limit\" : \"stopped\", #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance-host.ts :: wallUpTo :: for (const e of due) if (x.state === \"running\") this.latch(x, e.s, \"wall\", e.s.wall!.budget, e.at); #0": {
+  "class": "3",
+  "note": "opt-in through the host allowance capability (armed only by a trusted context: grading, an instructor's bundle or a server), not lib/_limits.py",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
  "src/allowance.ts ::  :: countMax: Number.MAX_SAFE_INTEGER, // 2^53 - 1, for work and steps #0": {
   "class": "1",
   "owner": "opt-in limits, item G (@sagebrush-grader)"
@@ -2881,7 +2999,7 @@
   "class": "1",
   "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
- "src/allowance.ts :: parseAllowance :: if (text.length > ALLOWANCE_LIMITS.textBytes) fail(`longer than ${ALLOWANCE_LIMITS.textBytes} characters`); #0": {
+ "src/allowance.ts :: parseAllowance :: if (text.length > ALLOWANCE_LIMITS.textBytes || utf8Length(text) > ALLOWANCE_LIMITS.textBytes) fail(`longer than ${ALLOWANCE_LIMITS.textBytes} bytes of UTF-8`); #0": {
   "class": "1",
   "owner": "opt-in limits, item G (@sagebrush-grader)"
  },
