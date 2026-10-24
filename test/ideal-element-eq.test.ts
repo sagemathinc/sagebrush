@@ -52,18 +52,37 @@ test("I == f answers as I == R.ideal(f), univariate and multivariate", () => {
 test("I == f refuses as I == R.ideal(f) does, with the same message", () => {
   const r = sage([
     both,
-    // (Groebner bases over ZZ, and units of Zmod(4)[z] beyond a sign, are
-    // not implemented: an error, never a guess; Sage answers False here)
+    // (Groebner bases over ZZ are not implemented: an error, never a guess;
+    // Sage answers False here)
     "A.<a,b> = ZZ[]; both(A.ideal(2*a), a)",
-    "Z.<z> = Zmod(4)[]; both(Z.ideal(2*z), z); both(Z.ideal(z), (1 + 2*z)*z); both(Z.ideal(z), -z)",
+    // (Zmod(2^130): with no unit leading coefficient, deciding needs the
+    // modulus's factorization, computed up to 128 bits; with one, none)
+    "Z.<z> = Zmod(2^130)[]; both(Z.ideal(2*z), 2*z + 2); both(Z.ideal(z), 3*z)",
   ].join("\n"));
   assert.equal(r.stderr, "");
   const lines = r.stdout.trim().split("\n");
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, 3);
   assert.match(lines[0], /^True NotImplementedError: ideal equality for an ideal over ZZ \(Groebner bases over ZZ are not implemented/);
-  assert.match(lines[1], /^True NotImplementedError: equality of ideals of a polynomial ring over Ring of integers modulo 4/);
-  assert.match(lines[2], /^True NotImplementedError: equality of ideals of a polynomial ring over Ring of integers modulo 4/);
-  assert.equal(lines[3], "True True");
+  assert.match(lines[1], /^True NotImplementedError: equality of ideals of a polynomial ring over Zmod\(1361129467683753853853498429727072845824\), neither generator with a unit leading coefficient: the modulus is over 128 bits$/);
+  assert.equal(lines[2], "True True");
+});
+
+test("Zmod(n)[t]: exact ideal equality, units and zero divisors (CORR-SAGE102-1)", () => {
+  const r = sage([
+    both,
+    // (astra's vectors, as Sage 10.10: sage-tests/test_ideal_zmod_eq has the table)
+    "R.<t> = Zmod(4)[]; both(R.ideal(t), t + 1); both(R.ideal(t), 2*t); both(R.ideal(1), 1 + 2*t)",
+    "S.<s> = Zmod(6)[]; both(S.ideal(s), s + 1); both(S.ideal(2*s), 4*s); both(S.ideal(2), 3)",
+    // (deliberately not as Sage, which says False: t + 2t^2 = t (1 + 2t)
+    // and 1 + 2t is a unit, (1 + 2t)^2 = 1, so the ideals are equal)
+    "both(R.ideal(t), t + 2*t^2); print((t + 2*t^2) * (1 + 2*t) == t, (1 + 2*t)^2 == 1)",
+  ].join("\n"));
+  assert.equal(r.stderr, "");
+  assert.equal(r.stdout, [
+    "True False", "True False", "True True",
+    "True False", "True True", "True False",
+    "True True", "True True", "",
+  ].join("\n"));
 });
 
 test("another ring's element is unequal before any conversion; a large generator compares by its coefficients", () => {
