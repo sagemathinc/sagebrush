@@ -1,5 +1,5 @@
 """End-to-end checks of the MCP server (sagebrush.mcp_server) over stdio:
-the raw protocol, a time limit that interrupts the computation, every
+the raw protocol, runs (a ticket, a run deadline, a cancel), every
 tool's structuredContent checked against its outputSchema (with what each
 result rests on), and, when the official MCP SDK is installed (pip install
 mcp), its client.
@@ -10,7 +10,11 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
+
+# (the runs of these servers: a store of their own)
+os.environ["SAGEBRUSH_RUNS_DIR"] = tempfile.mkdtemp(prefix="sb-mcp-runs-")
 
 
 def start():
@@ -48,12 +52,27 @@ def raw():
     assert "discriminant: -3267" in t and "class number: 2" in t, t
     assert "23.2.a.a" in text(call(9, "newforms", {"level": 23}))
     t0 = time.time()
-    r = call(10, "sage", {"code": "while True: pass", "timeout": 2})
-    assert r["result"]["isError"] and "time limit" in text(r) and time.time() - t0 < 10
+    r = call(10, "sage", {"code": "while True: pass", "wait": 30, "run_deadline": 2})
+    assert r["result"]["isError"] and "interrupted" in text(r) and time.time() - t0 < 10, r
     if os.name == "posix":  # (on Windows the session may be restarted instead)
         assert text(call(11, "sage", {"code": "f.degree()"})) == "4"  # kept after the interrupt
     r = call(12, "sage", {"code": "x = var('x'); plot(sin(x), (x, 0, 3))"})
     assert any(c["type"] == "resource" and c["resource"]["mimeType"] == "image/svg+xml" for c in r["result"]["content"])
+    # a ticket: the call returns, the computation goes on, run_result waits for it
+    r = call(30, "sage", {"code": "import time\ntime.sleep(2)\n7", "wait": 0.2})
+    t = text(r)
+    assert not r["result"]["isError"] and t.startswith("Running as run_") and "[runs: 1 running here" in t, t
+    h = t.split()[2]
+    assert text(call(31, "run_result", {"handle": h, "wait": 30})) == "7"
+    # the old timeout no longer stops anything: a ticket, then a hard cancel
+    r = call(32, "sage", {"code": "while True: pass", "timeout": 1})
+    h = text(r).split()[2]
+    assert text(call(33, "run_status", {"handle": h})).startswith(h + ": running")
+    assert text(call(34, "run_cancel", {"handle": h, "mode": "hard"})).startswith(h + ": delivered")
+    r = call(35, "run_result", {"handle": h, "wait": 30})
+    assert r["result"]["isError"] and "interrupted" in text(r), r
+    if os.name == "posix":
+        assert text(call(36, "sage", {"code": "f.degree()"})) == "4"  # (kept after the cancel)
     assert "Number fields" in rpc(p, 13, "resources/read", {"uri": "sagebrush://guide"})["result"]["contents"][0]["text"]
     assert rpc(p, 14, "nonexistent/method")["error"]["code"] == -32601
     t = text(rpc(p, 15, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent"}}))
@@ -150,8 +169,16 @@ def structured():
     assert call("sage", {"code": "1 +"}, "syntax")["error"]["exception"] == "SyntaxError"
     sc = call("sage", {"code": "is_prime(2^127 - 1, proof=True)"}, "unimplemented")
     assert sc["error"]["exception"] == "NotImplementedError" and "not implemented" in sc["error"]["message"], sc
-    sc = call("sage", {"code": "while True: pass", "timeout": 2}, "timeout")
-    assert "time limit" in sc["error"]["message"], sc
+    sc = call("sage", {"code": "while True: pass", "run_deadline": 2}, "interrupted")
+    assert sc["run"]["ended_by"] == "run_deadline" and sc["run"]["attribution"] == "correlated" and sc["runs"]["running"] == 0, sc
+    sc = call("sage", {"code": "import time; time.sleep(1); 5", "wait": 0})
+    assert sc["run"]["state"] == "running" and sc["result"] is None and sc["runs"]["running"] == 1, sc
+    h = sc["run"]["handle"]
+    sc = call("run_result", {"handle": h, "wait": 30})
+    assert sc["content_of_result"] and sc["result"]["state"] == "finished" and sc["result"]["value"] == {"text": "5"}, sc
+    sc = call("run_list", {})
+    assert any(e["handle"] == h for e in sc["result"]["runs"]) and "collaborators" in sc["result"]["note"], sc
+    assert call("run_status", {"handle": "run_" + "a" * 26}, "not_found")["result"] is None
     sc = call("sage", {"code": "x = var('x'); plot(sin(x), (x, 0, 3))"})
     assert sc["result"] is None and len(sc["plots"]) == 1 and sc["plots"][0] in sc["text"], sc
     assert call("sage", {}, "invalid_arguments")["error"]["exception"] is None

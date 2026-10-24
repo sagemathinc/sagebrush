@@ -7,11 +7,17 @@ Claude Code: `claude mcp add sagebrush -- sagebrush-mcp`.  Other clients:
 {"command": "sagebrush-mcp"} (or "python -m sagebrush.mcp_server").
 
 Tools: `sage` (Sage syntax in a persistent session), `python`, `reset`,
-`guide`, the shortcuts `factor`, `number_field` and `newforms`, and the
+`guide`, the shortcuts `factor`, `number_field` and `newforms`, the runs
+(`run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`), and the
 person's workspace through their paired Sagebrush page, `workspace_list`
-... `workspace_version` (sagebrush/workspace_tools.py).  Each
-computation has a time limit and is interrupted (Ctrl-C) when it is
-exceeded; a session that does not stop is restarted.
+... `workspace_version` (sagebrush/workspace_tools.py).
+
+A `sage` or `python` call is a run (sagebrush/runner.py): the call waits up
+to `wait` seconds (60 by default) and, if the computation hasn't ended,
+returns a ticket, the run's handle, while it keeps running; nothing stops it
+but a `run_deadline` the caller gave or a cancel.  Every result carries
+`runs`, how many runs are running.  (The shortcut tools keep their time
+limits for now.)
 
 Every tool result is text for people and, for clients of protocol
 2025-06-18 or later, structuredContent described by the tool's
@@ -32,6 +38,7 @@ directly, so the server needs nothing beyond this package.
 import json
 import sys
 import threading
+import time
 
 from sagebrush import chat as CH
 from sagebrush import workspace_tools as WS
@@ -160,17 +167,53 @@ def _text(s):
 def _code_tool(name, desc):
     return {
         "name": name,
-        "description": desc,
+        "description": desc + " The call waits up to `wait` seconds; if the computation hasn't ended by then, it returns a ticket "
+        "(the run's handle: run_result waits for it, run_status shows it, run_cancel stops it) and the computation keeps running. "
+        "Nothing stops it otherwise, unless you give run_deadline. " + _runs_note(),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "the code to run"},
-                "timeout": {"type": "number", "description": "seconds before the computation is interrupted (default 60, at most 3600)"},
+                "wait": {"type": "number", "minimum": 0, "maximum": 3600, "description": "seconds to wait for the result before returning a ticket (default 60; 0: return the ticket at once)"},
+                "timeout": {"type": "number", "minimum": 0, "maximum": 3600, "description": "the old name of wait: it no longer stops anything"},
+                "run_deadline": {"type": "number", "exclusiveMinimum": 0, "description": "seconds after which the whole run is interrupted (Ctrl-C); none by default"},
+                "label": {"type": "string", "maxLength": 80, "description": "a short name for the run, shown in listings. It is public text: it may appear in desktop notifications"},
+                "request_id": {"type": "string", "maxLength": 200, "description": "a key of yours: the same key again returns the same run instead of starting another"},
+                "session": {"type": "string", "maxLength": 40, "description": "the session to run in (default \"main\"; \"new\" for a fresh one)"},
             },
             "required": ["code"],
         },
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     }
+
+
+def _runs_note():
+    from sagebrush.runs import SHARED_NOTE
+    return SHARED_NOTE
+
+
+_HANDLE = {"type": "string", "pattern": "^run_[a-z2-7]{26}$", "description": "a run's handle"}
+
+
+def _run_tool(name, title, desc, props, required=()):
+    return {"name": name, "title": title, "description": desc,
+            "inputSchema": {"type": "object", "properties": props, "required": list(required)},
+            "annotations": {"readOnlyHint": name in ("run_status", "run_result", "run_list"), "destructiveHint": False, "openWorldHint": False}}
+
+
+RUN_TOOLS = [
+    _run_tool("run_status", "A run's state", "A run's record (sagebrush.run/1): state, elapsed time, output tail, how it ended. A run whose owning server isn't this one shows liveness \"unknown\".",
+              {"handle": _HANDLE}, ["handle"]),
+    _run_tool("run_result", "Wait for a run", "Wait up to `wait` seconds (default 30, at most 600) for a run, then its record; with the result's content when it has ended. Waiting never stops it.",
+              {"handle": _HANDLE, "wait": {"type": "number", "minimum": 0, "maximum": 600}}, ["handle"]),
+    _run_tool("run_cancel", "Cancel a run", "Cancel a running run. mode \"hard\" interrupts it (KeyboardInterrupt; the session is restarted if it doesn't stop within 10 s); "
+              "\"soft\" (the default) asks for a stop with a partial result, where the operation supports it (not in this build: the answer says so).",
+              {"handle": _HANDLE, "mode": {"type": "string", "enum": ["soft", "hard"]}, "request_id": {"type": "string", "maxLength": 200}}, ["handle"]),
+    _run_tool("run_list", "List the runs", "The runs in the store, running and unknown first, newest first, a page at a time.",
+              {"limit": {"type": "integer", "minimum": 1, "maximum": 500}, "cursor": {"type": "string"}}),
+    _run_tool("run_keep", "Keep a run", "Keep a finished run (exempt from age and count cleanup, not from the store's byte budget), or not.",
+              {"handle": _HANDLE, "keep": {"type": "boolean"}}, ["handle", "keep"]),
+]
 
 
 TOOLS = [
@@ -188,6 +231,7 @@ TOOLS = [
         "Run plain Python (no Sage preparsing) in the same persistent session; the Sage names "
         "(from sagebrush.sage import *) and the engine modules (sagebrush.nf, .linalg, .poly, .mf, .modsym, .ap) are available.",
     ),
+    *RUN_TOOLS,
     {
         "name": "search_docs",
         "description": "Search the documentation of Sagebrush's Sage library: every public function and method "
@@ -257,9 +301,14 @@ ERROR_TYPES = [
     "syntax",  # the code does not parse
     "exception",  # anything else the code raised (exception names the class)
     "interrupted",  # interrupted (a cancelled request)
-    "timeout",  # the time limit was reached
+    "timeout",  # the time limit was reached (the shortcut tools)
     "session",  # the session process died (out of memory, ...) and was restarted
     "invalid_arguments",  # the tool's arguments were missing or malformed
+    "memory",  # a memory guard refused (item D's fields in the run's record)
+    "busy",  # the session is running another run (its handle is in the run field)
+    "capacity",  # the most sessions this machine allows are running
+    "not_found",  # no such run (or it was removed: its tombstone says when)
+    "not_owned",  # the run belongs to another server
 ]
 
 _STRINGS = {"type": "array", "items": {"type": "string"}}
@@ -308,12 +357,17 @@ def _output_schema(result, extra=None):
         "status": {"type": "string", "enum": STATUSES, "description": "what the result rests on: proven; conditional on assumes (a named conjecture such as GRH); heuristic (assumes includes something unproven, such as a probable prime); unknown (the server cannot tell)"},
         "assumes": dict(_STRINGS, description="every hypothesis the result depends on (empty when proven)"),
         "error": {"anyOf": [_ERROR, {"type": "null"}]},
+        "runs": _RUNS,
+        "run": {"type": ["object", "null"], "description": "a run's record (sagebrush.run/1): for a refused request (busy), the run in the way"},
+        "refused": {"type": "object", "description": "a refused run request's details: running (busy), limit and active (capacity)"},
     }
     props.update(extra or {})
     return {"type": "object", "properties": props, "required": ["result", "text", "status", "assumes", "error"]}
 
 
+_RUNS = {"type": "object", "description": "the runs of this store: running (this server's), unknown (another owner's, not verified), oldest_age_s, handles (at most 5)"}
 _CODE_EXTRA = {
+    "run": {"type": ["object", "null"], "description": "the run's record (sagebrush.run/1): state running means a ticket, the computation still going"},
     "stdout": {"type": "string", "description": "what the code printed"},
     "plots": dict(_STRINGS, description="the URIs of the plots shown, each also an SVG resource in the content"),
     "seconds": {"type": "number"},
@@ -324,6 +378,9 @@ _CODE_RESULT = {"type": "string", "description": "repr of the value of the last 
 OUTPUT_SCHEMAS = {
     "sage": _output_schema(_CODE_RESULT, _CODE_EXTRA),
     "python": _output_schema(_CODE_RESULT, _CODE_EXTRA),
+    **{t["name"]: _output_schema({"type": "object", "description": "the run's record, or for run_list {runs, cursor, store, note}, or for run_cancel {result, state}"},
+                                 dict(_CODE_EXTRA, content_of_result={"type": "boolean", "description": "the run had ended: the rest is its reply, as sage and python give it"})
+                                 if t["name"] == "run_result" else None) for t in RUN_TOOLS},
     "search_docs": _output_schema({"type": "string", "description": "the matches, as the text (JSON {entries, omitted} when json is true)"}),
     "reset": _output_schema({"type": "string"}),
     "guide": _output_schema({"type": "string", "description": "the guide (Markdown)"}),
@@ -620,6 +677,7 @@ class Server:
         self.session = None  # the sage and python tools' (user code)
         self.tool_session = None  # the shortcut tools' (no user code ever)
         self.running = {}  # request id -> True from the call until its reply
+        self.waiting = {}  # request id -> the handle of the run its sage/python call is waiting for
         self.calls = 0  # tool calls admitted and not yet answered (at most MAX_CALLS)
         self.work = threading.Lock()  # one computation at a time
         self.state = threading.Lock()  # guards owner and cancelled
@@ -633,6 +691,7 @@ class Server:
         # the chat panel beside the document (sagebrush/chat.py): pushed to
         # Claude Code through its channels, chat_next for any client
         self.chat = CH.Chat(self.notify, lambda: self.link)
+        self._runner = None
 
     # ---- transport
     def send(self, msg):
@@ -665,14 +724,159 @@ class Server:
             self.session = Session()
         return self.session
 
+    def runner(self):
+        """The runs (sagebrush.runner): made on first use."""
+        if self._runner is None:
+            from sagebrush.runner import Runner
+            self._runner = Runner()
+        return self._runner
+
     def cancel(self, rid):
         """notifications/cancelled: interrupt the computation if it is this
-        request's; a request still waiting for the session never starts."""
+        request's; a request still waiting for the session never starts.  A
+        sage/python call cancelled while it waits cancels its run (hard)."""
         with self.state:
-            if self.owner is not None and self.owner[0] == rid:
+            handle = self.waiting.get(rid)
+            if handle is not None:
+                pass
+            elif self.owner is not None and self.owner[0] == rid:
                 self.owner[1].interrupt()
             elif rid in self.running:
                 self.cancelled.add(rid)
+        if handle is not None:
+            self.runner().cancel(handle, "hard")
+
+    def run_code(self, args, mode, rid=None):
+        """sage and python: a run (sagebrush.runner), waited for up to wait."""
+        from sagebrush.runner import Refused
+
+        if not isinstance(args.get("code"), str):
+            raise _Invalid("`code` (a string) is required")
+        who = str(self.client.get("name") or "unknown")[:80]
+        try:
+            run, done = self._start(args, mode, rid, who)
+        except Refused as e:
+            return self.refusal(e)
+        rec = self.runner().record(run.record["handle"])
+        if not done:
+            text = ("Running as %s (started by %s). The computation keeps running: run_result waits for it, run_status shows it, run_cancel stops it."
+                    % (rec["handle"], who))
+            structured = {"result": None, "text": text, "status": "unknown", "assumes": [], "error": None, "run": rec,
+                          "stdout": "", "plots": [], "seconds": rec.get("elapsed_s", 0.0), "restarted": False}
+            return [_text(text)], structured, False
+        return self.reply_content(run, rec)
+
+    def _start(self, args, mode, rid, who):
+        r = self.runner()
+        with self.state:
+            if rid in self.cancelled:
+                raise _Cancelled("the request was cancelled before it started")
+
+        def started(handle):
+            # (from here notifications/cancelled reaches the run while the call
+            # waits; one that came before it was registered cancels it now)
+            with self.state:
+                self.waiting[rid] = handle
+                early = rid in self.cancelled
+            if early:
+                r.cancel(handle, "hard")
+
+        try:
+            return r.start(args["code"], mode, wait=args.get("wait"), run_deadline=args.get("run_deadline"), label=args.get("label"),
+                           request_id=args.get("request_id"), session=args.get("session"), started_by=who, timeout=args.get("timeout"),
+                           on_start=None if rid is None else started)
+        finally:
+            with self.state:
+                self.waiting.pop(rid, None)
+
+    def refusal(self, e):
+        kind = e.kind if e.kind in ERROR_TYPES else "invalid_arguments"
+        message = str(e)
+        structured = {"result": None, "text": message, "status": "unknown", "assumes": [],
+                      "error": {"type": kind, "exception": None, "message": message, "traceback": ""}}
+        if e.extra.get("running"):
+            structured["run"] = self.runner().record(e.extra["running"])
+        if e.extra:
+            structured["refused"] = e.extra
+        return [_text(message)], structured, True
+
+    def reply_content(self, run, rec):
+        """A finished run's reply as the tools have always given it, with the
+        run's record."""
+        r = run.reply or {}
+        content, text, plots = [], [], []
+        if rec.get("session_restarted") and not rec.get("error"):
+            text.append("(The session had stopped and was restarted; earlier variables are gone.)")
+        if rec.get("state") == "killed":
+            text.append("The run was interrupted and didn't stop within 10 s; the session was restarted (its variables were lost).")
+        if r.get("stdout"):
+            text.append(r["stdout"].rstrip("\n"))
+        if r.get("result") is not None:
+            text.append(r["result"])
+        if r.get("error"):
+            text.append(r["error"])
+        if rec.get("error") and not r.get("error"):
+            text.append(rec["error"]["message"])
+        for mime, svg in r.get("displays", []):
+            self.plots += 1
+            uri = "sagebrush://plot/%d.svg" % self.plots
+            plots.append(uri)
+            text.append("[plot: %s (SVG, %d bytes)]" % (uri, len(svg)))
+            content.append({"type": "resource", "resource": {"uri": uri, "mimeType": mime, "text": svg}})
+        if not text:
+            text.append("(no output)")
+        text = "\n".join(text)
+        error = None
+        if rec.get("error"):
+            error = dict(rec["error"])
+            if error.get("type") not in ERROR_TYPES:
+                error["type"] = "exception"
+        structured = {"result": None if error else r.get("result"), "text": text, "status": "unknown", "assumes": [], "error": error, "run": rec,
+                      "stdout": r.get("stdout", ""), "plots": plots, "seconds": float(r.get("seconds", rec.get("elapsed_s", 0.0)) or 0.0),
+                      "restarted": bool(rec.get("restarted") or rec.get("session_restarted"))}
+        return [_text(text)] + content, structured, error is not None
+
+    def run_tool(self, name, args):
+        from sagebrush.runner import Refused
+
+        r = self.runner()
+
+        def ok(result, text):
+            return [_text(text)], {"result": result, "text": text, "status": "unknown", "assumes": [], "error": None}, False
+
+        try:
+            if name == "run_list":
+                lim = args.get("limit", 50)
+                if isinstance(lim, bool) or not isinstance(lim, int) or not 1 <= lim <= 500:
+                    raise Refused("invalid", "`limit` must be an integer from 1 to 500")
+                ls = r.store.listing(lim, args.get("cursor"))
+                lines = ["%s  %s%s  %s  %ss%s" % (e["handle"], e["state"], " (liveness unknown)" if e.get("liveness") == "unknown" else "",
+                                                 e.get("started_by"), e["age_s"], "  " + e["label"] if e.get("label") else "") for e in ls["runs"]]
+                return ok(ls, "\n".join(lines + [ls["note"]]) if lines else "(no runs) " + ls["note"])
+            handle = args.get("handle")
+            if not isinstance(handle, str):
+                raise Refused("invalid", "`handle` (a run's handle) is required")
+            if name == "run_status":
+                rec = r.record(handle)
+                return ok(rec, "%s: %s%s, %ss" % (handle, rec.get("state"), " (liveness unknown)" if rec.get("liveness") == "unknown" else "", rec.get("elapsed_s")))
+            if name == "run_result":
+                rec, reply = r.result(handle, args.get("wait"))
+                run = r.runs.get(handle)
+                if rec.get("state") != "running" and run is not None and run.done.is_set():
+                    content, sc, err = self.reply_content(run, rec)
+                    sc["result"] = rec
+                    sc["content_of_result"] = True
+                    return content, sc, err
+                return ok(rec, "%s: %s%s" % (handle, rec.get("state"), "; still running: wait again, or run_cancel" if rec.get("state") == "running" else ""))
+            if name == "run_cancel":
+                a = r.cancel(handle, args.get("mode", "soft"), args.get("request_id"))
+                return ok(a, "%s: %s" % (handle, a.get("result")))
+            if name == "run_keep":
+                a = r.keep(handle, args.get("keep"))
+                return ok(a, "%s: keep %s" % (handle, a["keep"]))
+        except Refused as e:
+            return self.refusal(e)
+        raise KeyError(name)
 
     def run(self, code, mode="sage", timeout=60, isolated=False, data=False, rid=None):
         """Run code in a session: (content, structured, is_error).  With
@@ -745,13 +949,15 @@ class Server:
         if name in ("chat_next", "chat_reply"):
             return self.chat_tool(name, args)
         if name in ("sage", "python"):
-            if not isinstance(args.get("code"), str):
-                raise _Invalid("`code` (a string) is required")
-            return self.run(args["code"], mode=name, timeout=args.get("timeout", 60), rid=rid)
+            return self.run_code(args, name, rid)
+        if name in ("run_status", "run_result", "run_cancel", "run_list", "run_keep"):
+            return self.run_tool(name, args)
         if name == "reset":
-            if self.session is not None:
-                with self.work:
-                    self.session.restart()
+            from sagebrush.runner import Refused
+            try:
+                self.runner().reset("main")
+            except Refused as e:
+                return self.refusal(e)
             return plain("The session was restarted.")
         if name == "guide":
             return plain(GUIDE)
@@ -853,6 +1059,19 @@ class Server:
             print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
         return [_text(text)], {"result": result, "error": None}, False
 
+    def startup_runs(self):
+        """The running and unknown runs of the store, for the instructions (§9)."""
+        try:
+            idx = self.runner().store.index()
+        except Exception as e:
+            return "\n\n(The run store couldn't be opened: %s.)" % e
+        if not idx:
+            return ""
+        now = time.time()
+        lines = ["%s, started by %s %d min ago%s (liveness unknown: not this server's)" % (h, e.get("started_by"), (now - (e.get("started_at") or now)) // 60,
+                                                                                         ", " + e["label"] if e.get("label") else "") for h, e in sorted(idx.items())[:20]]
+        return "\n\nRuns already in the store (run_list shows them all):\n" + "\n".join(lines)
+
     def structured(self):
         return self.protocol >= STRUCTURED_SINCE
 
@@ -882,6 +1101,18 @@ class Server:
             content, is_error = [_text(message)], True
             structured = {"result": None, "text": message, "status": "unknown", "assumes": [],
                           "error": {"type": kind, "exception": None if ours else type(e).__name__, "message": str(e), "traceback": ""}}
+        # (every result says how many runs are running: §9, from the store's index)
+        try:
+            if self._runner is not None or name in ("sage", "python") or name.startswith("run_"):
+                runs = structured["runs"] = self.runner().summary()
+                if runs["running"] or runs["unknown"]:
+                    # (and a line for clients that don't read structuredContent;
+                    # a run of another owner is never said to be running)
+                    line = "[runs: %d running here%s; run_list shows them]" % (
+                        runs["running"], ", %d of other servers, liveness unknown" % runs["unknown"] if runs["unknown"] else "")
+                    content = list(content) + [_text(line)]
+        except Exception:
+            pass
         out = {"content": content, "isError": is_error}
         if self.structured():
             out["structuredContent"] = structured
@@ -925,7 +1156,7 @@ class Server:
                                  # (Claude Code's channels: the chat panel's messages, and tool approvals relayed to it)
                                  "experimental": {"claude/channel": {}, "claude/channel/permission": {}}},
                 "serverInfo": {"name": "sagebrush", "title": "Sagebrush", "version": _version()},
-                "instructions": INSTRUCTIONS,
+                "instructions": INSTRUCTIONS + self.startup_runs(),
             })
         elif method == "ping":
             self.reply(rid, {})
@@ -994,6 +1225,8 @@ class Server:
         for s in (self.session, self.tool_session):
             if s is not None:
                 s.close()
+        if self._runner is not None:
+            self._runner.close()
         if self.link is not None:
             self.link.close()
 
