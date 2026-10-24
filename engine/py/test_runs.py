@@ -1043,8 +1043,8 @@ def test_capture_signal_boundaries():
         sent = "".join(m["out"] for m in proto.lines)
         assert sent == text, (where, len(sent), len(text))
         assert raised == 1, (where, raised)
-    # an interrupt raised as a flush begins, before its hold: the chunk
-    # wasn't written, so it stays, and goes in the next flush
+    # an interrupt raised as a send begins (at its hold, inside the flush's):
+    # the chunk wasn't written, so it stays, and goes in the next flush
     proto = _Proto()
     c = S._Capture(S._Sender(proto))
     c.write("y" * 1000)
@@ -1053,7 +1053,7 @@ def test_capture_signal_boundaries():
 
     def enter(self):
         calls[0] += 1
-        if calls[0] == 1:
+        if calls[0] == 2:  # (1: the flush's hold; 2: its send's)
             raise KeyboardInterrupt
         return real_enter(self)
 
