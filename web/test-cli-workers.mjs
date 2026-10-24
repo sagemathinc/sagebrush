@@ -19,7 +19,7 @@
 //   scripts/build-cli.mjs puts beside it in dist/)
 import { spawn, spawnSync } from "node:child_process";
 import { request } from "node:http";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -80,6 +80,33 @@ const portFree = (port) => new Promise((resolve) => {
   s.listen(port, "127.0.0.1", () => s.close(() => resolve(true)));
 });
 
+// whether something accepts connections on the port, within ms
+async function listening(port, ms = 5000) {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) {
+    const ok = await new Promise((resolve) => {
+      const c = connect(port, "127.0.0.1");
+      c.once("connect", () => { c.destroy(); resolve(true); });
+      c.once("error", () => resolve(false));
+    });
+    if (ok) return true;
+  }
+  return false;
+}
+// a stand-in for `sagebrush notebook` (node FILE PORT MODE): it says its URL as the real one does, takes the token,
+// and its session's events are, by MODE, `spam` (the stdout "5\n" again and again, never done) or `long` (one
+// complete event longer than KEEP characters)
+const FAKE_NOTEBOOK = `const [port, mode, keep] = process.argv.slice(2);
+require("http").createServer((q, s) => {
+  if (q.url.startsWith("/?token=")) return s.writeHead(302, { "Set-Cookie": "sagebrush_token=t; Path=/", Location: "/" }).end();
+  if (!q.url.endsWith("/events")) return s.writeHead(200).end("ok");
+  s.writeHead(200, { "Content-Type": "text/event-stream" });
+  const event = (text) => "data: " + JSON.stringify({ id: 1, stream: "stdout", text }) + "\\n\\n";
+  if (mode === "long") return void s.write(event("y".repeat(2 * Number(keep))));
+  const t = setInterval(() => s.write(event("5\\n").repeat(100)), 1);
+  q.on("close", () => clearInterval(t));
+}).listen(Number(port), "127.0.0.1", () => console.log("http://127.0.0.1:" + port + "/?token=" + "ab".repeat(24)));
+`;
+
 // ---- `sagebrush notebook` through the launcher, end to end as its page does it: a session's
 // events, then a Sage cell `2+3` sent to it; its output is the stream "5\n", and it is done without an error
 function notebookRuns(r, cmd, args, port, dir, ms = 90_000, stats = {}) {
@@ -113,15 +140,22 @@ function notebookRuns(r, cmd, args, port, dir, ms = 90_000, stats = {}) {
         const events = r.request(`${base}/events`, { headers: { cookie } }, (res) => {
           res.setEncoding("utf8");
           res.on("data", (d) => {
+            if (settled) return; // (decided: nothing more is kept)
             const lines = (line + d).split("\n");
             line = lines.pop();
             if (line.length > KEEP) return done(`an event longer than ${KEEP} characters`);
             for (const l of lines) {
+              if (l.length > KEEP) return done(`an event longer than ${KEEP} characters`);
               if (!l.startsWith("data: ")) continue;
               let msg;
               try { msg = JSON.parse(l.slice(6)); } catch { return done(`an event that isn't JSON: ${l.slice(0, 200)}`); }
               if (msg.id !== 1) continue;
-              if (msg.stream === "stdout") output = (output ?? "") + msg.text;
+              // (the output kept is only ever a prefix of the one expected: at most its 2 characters)
+              if (msg.stream === "stdout") {
+                output = (output ?? "") + msg.text;
+                stats.events = Math.max(stats.events ?? 0, output.length, line.length);
+                if (!"5\n".startsWith(output)) return done(`the cell's output was ${JSON.stringify(output.slice(0, 40))}${output.length > 40 ? "…" : ""}, not "5\\n"`);
+              }
               if (msg.done) done(msg.error ? `the cell failed: ${JSON.stringify(msg).slice(0, 300)}` : output === "5\n" ? true : `the cell's output was ${JSON.stringify(output)}, not "5\\n"`);
             }
           });
@@ -154,21 +188,46 @@ const ready = (r, workerData) => new Promise((resolve) => {
   // out, keeps at most KEEP of what it wrote, and the process is gone (SIGKILL), its port free again
   const port = await freePort();
   const spew = `require("net").createServer().listen(${port}, "127.0.0.1"); process.on("SIGTERM", () => {}); setInterval(() => process.stdout.write("x".repeat(65536)), 1);`;
-  let child = null, dir = null, kept = 0;
+  let child = null, dir = null, kept = 0, up = false;
   const { value } = await scoped(async (r) => {
     dir = r.dir("sb-workers-self-");
     const real = r.spawn;
     r.spawn = (cmd, args, opts) => (child = real(process.execPath, ["-e", spew], opts));
     const stats = {};
-    const out = await notebookRuns(r, "unused", [], port, dir, 2000, stats);
+    const run = notebookRuns(r, "unused", [], port, dir, 2000, stats);
+    up = await listening(port);
+    const out = await run;
     kept = stats.kept ?? 0;
     return out;
   });
-  check(typeof value === "string" && /^no result in 2 s/.test(value), "the harness: a server that never answers times out", String(value));
+  check(up, "the harness: a server that never answers is up (its port takes a connection)");
+  check(typeof value === "string" && /^no result in 2 s/.test(value), "...and the check times out", String(value));
   check(kept > 0 && kept <= 2 * KEEP, `...what is kept of its output is bounded (at most ${kept} characters at once)`);
-  check(!!child && exited(child), "...and it is stopped, though it ignores SIGTERM", child ? `exit ${child.exitCode}, signal ${child.signalCode}` : "never started");
+  check(child?.signalCode === "SIGKILL", "...and it is stopped by SIGKILL, since it ignores SIGTERM", child ? `exit ${child.exitCode}, signal ${child.signalCode}` : "never started");
   check(await portFree(port), "...its port is free again");
   check(!!dir && !existsSync(dir), "...and the directory is removed");
+}
+for (const [mode, what, expect] of [
+  ["spam", "a session whose stdout goes on and on, never done", /not "5\\n"/],
+  ["long", "a session whose event is longer than KEEP", /an event longer than/],
+]) {
+  // the events of a session gone wrong: decided at once, with no more than the expected output kept
+  const port = await freePort();
+  let child = null, stats = {}, ms = 0;
+  const { value } = await scoped(async (r) => {
+    const dir = r.dir("sb-workers-self-");
+    const fake = join(dir, "fake-notebook.cjs");
+    writeFileSync(fake, FAKE_NOTEBOOK);
+    const real = r.spawn;
+    r.spawn = (cmd, args, opts) => (child = real(process.execPath, [fake, String(port), mode, String(KEEP)], opts));
+    const t0 = Date.now();
+    const out = await notebookRuns(r, "unused", [], port, dir, 30_000, stats);
+    ms = Date.now() - t0;
+    return out;
+  });
+  check(typeof value === "string" && expect.test(value) && ms < 10_000, `the harness: ${what} fails at once (${ms} ms)`, String(value).slice(0, 200));
+  check((stats.events ?? 0) <= KEEP, `...and what is kept of its events is bounded (${stats.events ?? 0} characters)`);
+  check(!!child && exited(child) && (await portFree(port)), "...and the stand-in is stopped, its port free");
 }
 {
   // a throw, with a process and a directory live: both ended all the same
