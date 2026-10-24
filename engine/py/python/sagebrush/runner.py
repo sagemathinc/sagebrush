@@ -6,11 +6,14 @@ but the caller: a `run_deadline` it gave, or a cancel.
 
 The run's record (sagebrush.run/1) is kept in the store (sagebrush.runs).
 Its state is the host's: what the session did, never a library outcome
-made up for it.
+made up for it.  A run always settles when its computation ends: a store
+that can't be written (full, ENOSPC) is said in the record (`storage`),
+never left as a run that looks busy forever.
 """
 
 import hashlib
 import json
+import secrets
 import threading
 import time
 
@@ -21,6 +24,7 @@ WAIT_DEFAULT, WAIT_MAX = 60.0, 3600.0
 RESULT_WAIT_DEFAULT, RESULT_WAIT_MAX = 30.0, 600.0
 LABEL_MAX = 80
 IDEMPOTENT_S = 24 * 3600
+TERMINAL = ("finished", "killed", "lost", "gone")
 
 
 class Refused(Exception):
@@ -83,26 +87,34 @@ class Runner:
         self.ceiling = min(cfg, R.session_ceiling())
 
     # ---- sessions and admission (§7)
-    def _session(self, name):
-        """(name, Session) for a request's `session`: "main" by default, an
-        existing named one, or "new"; admitted against the ceiling."""
+    def _pick(self, name):
+        """(name, Session or None if it has to be made) for a request's
+        `session`: "main" by default, an existing named one, or "new"."""
         if name is None:
             name = "main"
         if not isinstance(name, str) or not name or len(name) > 40:
             raise Refused("invalid", "`session` must be a name (at most 40 characters) or \"new\"")
-        fresh = name == "new"
-        if fresh:
+        if name == "new":
             name = "new-%d" % (self.fresh + 1)
-        s = self.sessions.get(name)
-        if s is None:
+        return name, self.sessions.get(name)
+
+    def _admit(self, new_session):
+        """Under the store lock: room for one more run.  A new session needs a
+        slot: this server's live sessions and every run of another owner
+        still in the active index (running or liveness unknown: they keep
+        their slots, design §6, §9) count against the ceiling, so the index
+        stays bounded by it.  And the store must have room for the run's
+        records (R.RUN_META_BYTES)."""
+        if new_session:
             live = sum(1 for x in self.sessions.values() if x.alive())
-            if live >= self.ceiling:
-                raise Refused("capacity", "%d sessions are running, the most this machine allows (%d)" % (live, self.ceiling),
-                              limit=self.ceiling, active=sorted(self.current.values()))
-            s = self.sessions[name] = self.new_session()
-            if fresh:
-                self.fresh += 1
-        return name, s
+            others = sorted(h for h, e in self.store.index().items() if not self.store.mine(e))
+            if live + len(others) >= self.ceiling:
+                raise Refused("capacity", "%d sessions are running here and %d runs of other servers hold slots (liveness unknown): the most this machine allows is %d"
+                              % (live, len(others), self.ceiling), limit=self.ceiling, active=sorted(self.current.values()), unknown=others)
+        try:
+            self.store.admit(R.RUN_META_BYTES, "meta")
+        except R.StorageError as e:
+            raise Refused("storage", "no room for another run: %s" % e)
 
     def _idempotent(self, request_id, key):
         """The earlier answer to request_id if it was for key; a Refused if
@@ -138,30 +150,51 @@ class Runner:
                 if run is None:
                     raise Refused("invalid", "`request_id` %r named a run of an earlier server" % request_id)
             else:
-                name, sess = self._session(session)
+                name, sess = self._pick(session)
                 if name in self.current:
                     raise Refused("busy", "the session %r is running %s" % (name, self.current[name]), running=self.current[name])
                 if name in self.restarting:
                     raise Refused("busy", "the session %r is being restarted; try again in a few seconds" % name)
-                handle = self.store.new_handle()
-                self.seq[name] = self.seq.get(name, 0) + 1
-                before = sess.generation
-                gen, q = sess.submit(code, mode=mode)
-                rec = R.new_record(self.store, handle, "code", mode, {"id": name, "generation": gen}, self.seq[name], started_by, label, now=self.clock())
-                rec["code_sha256"] = key[3]
-                if before and gen != before:
-                    # (the session had ended since its last run: a new process, its variables gone)
-                    rec["session_restarted"] = True
+                # (admission, the record and its index entry in one step under
+                # the store lock: another server's admission sees this run)
+                with self.store.lock:
+                    self._admit(sess is None)
+                    handle = self.store.new_handle()
+                    self.seq[name] = self.seq.get(name, 0) + 1
+                    rec = R.new_record(self.store, handle, "code", mode, {"id": name, "generation": None}, self.seq[name], started_by, label, now=self.clock())
+                    rec["code_sha256"] = key[3]
+                    try:
+                        self.store.save(rec)
+                        self.store.index_set(handle, {"started_at": rec["started_at"], "started_by": started_by, "owner": self.store.owner, "label": label})
+                    except (OSError, R.StorageError) as e:
+                        self.store.discard(handle)
+                        raise Refused("storage", "the run couldn't be recorded: %s" % e)
                 run = _Run(rec, sess, name)
                 self.runs[handle] = run
                 self.current[name] = handle
-                self.store.save(rec)
-                self.store.index_set(handle, {"started_at": rec["started_at"], "started_by": started_by, "owner": self.store.owner, "label": label})
-                threading.Thread(target=self._finish, args=(run, q, gen), daemon=True).start()
-                if deadline is not None:
-                    t = threading.Timer(deadline, self._request, args=(run, "run_deadline", gen, rec["run_seq"]))
-                    t.daemon = True
-                    t.start()
+                try:
+                    if sess is None:
+                        sess = self.sessions[name] = self.new_session()
+                        if name.startswith("new-"):
+                            self.fresh += 1
+                        run.sess = sess
+                    before = sess.generation
+                    gen, q = sess.submit(code, mode=mode)
+                except Exception as e:
+                    # (the session couldn't start: the run settles at once)
+                    q = None
+                    self._settle(run, {"type": "session", "exception": type(e).__name__, "message": "the session couldn't start: %s" % e, "traceback": ""})
+                if q is not None:
+                    rec["session"]["generation"] = gen
+                    if before and gen != before:
+                        # (the session had ended since its last run: a new process, its variables gone)
+                        rec["session_restarted"] = True
+                    self._save(rec)
+                    threading.Thread(target=self._finish, args=(run, q, gen), daemon=True).start()
+                    if deadline is not None:
+                        t = threading.Timer(deadline, self._request, args=(run, "run_deadline", gen, rec["run_seq"]))
+                        t.daemon = True
+                        t.start()
                 if request_id is not None:
                     self.requests[request_id] = (key, handle, self.clock())
         if on_start is not None:
@@ -175,62 +208,124 @@ class Runner:
                     finished = True
                 else:
                     run.record["ticketed"] = True
-                    self.store.save(run.record)
+                    self._save(run.record)
         return run, finished
+
+    # ---- persistence that never strands a run
+    def _save(self, rec, durable=False):
+        """The record to the store; a failure is kept in the record
+        (`storage`), never raised into the run's bookkeeping."""
+        try:
+            self.store.save(rec, durable=durable)
+            return True
+        except (OSError, R.StorageError) as e:
+            rec["storage"] = {"state": "unavailable", "reason": "the run's record couldn't be written: %s" % e}
+            return False
+
+    def _settle(self, run, error=None):
+        """The end of a run's bookkeeping, whatever failed before it: the
+        session is free, the index entry gone (or the failure said), the
+        terminal record published as far as the store allows, and the
+        waiters woken.  Called under self.lock."""
+        rec = run.record
+        if error is not None and rec.get("state") == "running":
+            now = self.clock()
+            rec.update(state="finished", ended_by="error", ended_at=now, elapsed_s=round(now - rec["started_at"], 3), last_seen_at=now, error=error)
+        try:
+            if self.current.get(run.session_name) == rec["handle"]:
+                del self.current[run.session_name]
+            if not self._save(rec, durable=True):
+                pass
+            try:
+                self.store.index_set(rec["handle"], None)
+            except (OSError, R.StorageError) as e:
+                rec.setdefault("storage", {"state": "unavailable", "reason": "the active index couldn't be updated: %s" % e})
+        finally:
+            run.done.set()
 
     # ---- the end of a run (§2.2's mapping)
     def _finish(self, run, q, gen):
-        r = q.get()
-        now = self.clock()
+        out = R.Output(self.store.cfg["SAGEBRUSH_RUNS_OUTPUT_BYTES"])
+        r = None
+        while True:
+            m = q.get()
+            if isinstance(m, dict) and "out" in m:
+                # (output as it is printed, bounded here: head, rolling tail, counters)
+                out.add(m["out"])
+                continue
+            r = m
+            break
         with self.lock:
-            rec = run.record
-            rec["ended_at"] = now
-            rec["elapsed_s"] = round(now - rec["started_at"], 3)
-            rec["last_seen_at"] = now
-            if r is None:
-                restart = [x for x in rec["requests"] if x.get("result") == "restarted"]
-                if restart:
-                    rec["state"], rec["ended_by"] = "killed", "restart"
-                    rec["restart_cause"] = restart[-1]["kind"]
-                    rec["restarted"] = True
-                    for h in rec.get("retained", []):
-                        h["state"] = "invalid"
-                else:
-                    rec["state"], rec["ended_by"] = "finished", "error"
-                    rec["error"] = {"type": "session", "exception": None,
-                                    "message": "the session process ended during the computation (out of memory, or killed)", "traceback": ""}
-            else:
-                run.reply = r
-                info = r.get("error_info")
-                rec["state"] = "finished"
-                out = R.Output(self.store.cfg["SAGEBRUSH_RUNS_OUTPUT_BYTES"])
-                if r.get("stdout"):
-                    out.add(r["stdout"])
-                if out.total["stdout"]:
-                    self.store.write_file(rec["handle"], "output.txt", out.bytes(), durable=True)
-                rec["output"] = out.info(rec["handle"] + "/output.txt" if out.total["stdout"] else None)
-                if info is None:
-                    rec["ended_by"] = "return"
-                    v = r.get("result")
-                    if v is not None:
-                        data = v.encode("utf-8", "replace")
-                        if len(data) <= R.INLINE_VALUE:
-                            rec["value"] = {"text": v}
-                        else:
-                            path, why = self.store.write_value(rec["handle"], json.dumps({"text": v}).encode())
-                            rec["value"] = {"summary": "%d characters" % len(v), "text": v[:1000] + " ...", **({"path": rec["handle"] + "/value.json"} if path else {"unavailable": why})}
-                    if r.get("displays"):
-                        rec["displays"] = len(r["displays"])
-                else:
-                    self._attribute(rec, info)
-            self.current.pop(run.session_name, None)
-            self.store.save(rec, durable=True)
-            self.store.index_set(rec["handle"], None)
-            run.done.set()
+            if run.done.is_set():
+                return  # (already settled: the server's close)
+            try:
+                self._end(run, r, out)
+            except Exception as e:  # (a bug or a disk error: the run still settles)
+                rec = run.record
+                rec.setdefault("storage", {"state": "unavailable", "reason": "the run's end couldn't be recorded: %s: %s" % (type(e).__name__, e)})
+                if rec.get("state") == "running":
+                    rec.update(state="finished", ended_by="error", ended_at=self.clock(),
+                               error={"type": "session", "exception": None, "message": "the run's end couldn't be recorded", "traceback": ""})
+            finally:
+                self._settle(run)
         try:
-            self.store.cleanup()
+            gone = self.store.cleanup()
         except Exception:
-            pass
+            gone = []
+        self.forget(gone)
+
+    def _end(self, run, r, out):
+        rec = run.record
+        now = self.clock()
+        rec["ended_at"] = now
+        rec["elapsed_s"] = round(now - rec["started_at"], 3)
+        rec["last_seen_at"] = now
+        if r is None:
+            restart = [x for x in rec["requests"] if x.get("result") == "restarted"]
+            if restart:
+                rec["state"], rec["ended_by"] = "killed", "restart"
+                rec["restart_cause"] = restart[-1]["kind"]
+                rec["restarted"] = True
+                for h in rec.get("retained", []):
+                    h["state"] = "invalid"
+            else:
+                rec["state"], rec["ended_by"] = "finished", "error"
+                rec["error"] = {"type": "session", "exception": None,
+                                "message": "the session process ended during the computation (out of memory, or killed)", "traceback": ""}
+            rec["output"] = self._output(rec, out)
+            return
+        run.reply = r
+        info = r.get("error_info")
+        rec["state"] = "finished"
+        rec["output"] = self._output(rec, out)
+        if info is None:
+            rec["ended_by"] = "return"
+            v = r.get("result")
+            if v is not None:
+                data = v.encode("utf-8", "replace")
+                if len(data) <= R.INLINE_VALUE:
+                    rec["value"] = {"text": v}
+                else:
+                    path, why = self.store.write_value(rec["handle"], json.dumps({"text": v}).encode())
+                    rec["value"] = {"summary": "%d characters" % len(v), "text": v[:1000] + " ...", **({"path": rec["handle"] + "/value.json"} if path else {"unavailable": why})}
+            if r.get("displays"):
+                rec["displays"] = len(r["displays"])
+        else:
+            self._attribute(rec, info)
+
+    def _output(self, rec, out):
+        """The output's record: counters and tail always; its file when the
+        store admits it, else `unavailable` with the reason (the run is
+        unaffected, design §5)."""
+        if not out.total["stdout"]:
+            return out.info(None)
+        try:
+            self.store.write_file(rec["handle"], "output.txt", out.bytes(), durable=True, kind="data")
+            return out.info(rec["handle"] + "/output.txt")
+        except (OSError, R.StorageError) as e:
+            info = out.info(None)
+            info["unavailable"] = str(e)
+            return info
 
     def _attribute(self, rec, info):
         """ended_by for an error: an interrupt is attributed to the latest host
@@ -271,7 +366,7 @@ class Runner:
             entry["delivered_at"], entry["result"] = self.clock(), "delivered"
             run.sess.interrupt()
             rec["requests"].append(entry)
-            self.store.save(rec)
+            self._save(rec)
             t = threading.Timer(ESCALATE_S, self._escalate, args=(run, gen, seq, entry))
             t.daemon = True
             t.start()
@@ -285,7 +380,7 @@ class Runner:
             if not (self.current.get(run.session_name) == rec["handle"] and run.sess.generation == gen and rec["run_seq"] == seq and rec["state"] == "running"):
                 return
             entry["result"] = "restarted"
-            self.store.save(rec)
+            self._save(rec)
             self.restarting.add(run.session_name)
         # (outside the lock: a restart can take a while; no run starts in
         # the session meanwhile)
@@ -296,9 +391,12 @@ class Runner:
                 self.restarting.discard(run.session_name)
         with self.lock:
             rec["replacement_generation"] = run.sess.generation
-            self.store.save(rec, durable=rec["state"] != "running")
+            self._save(rec, durable=rec["state"] != "running")
 
     def cancel(self, handle, mode="soft", request_id=None):
+        """§3.3: the answer always carries the request's id (the caller's, or
+        one made here, to retry with); a run that has ended, or is gone,
+        answers not_running whatever the mode."""
         if mode not in ("soft", "hard"):
             raise Refused("invalid", "`mode` must be \"soft\" or \"hard\"")
         key = ("cancel", handle, mode)
@@ -306,28 +404,55 @@ class Runner:
             earlier = self._idempotent(request_id, key)
             if earlier is not None:
                 return earlier
+            rid = request_id if request_id is not None else "cancel_" + secrets.token_hex(12)
             run = self.runs.get(handle)
-            if run is None:
-                rec = self.store.load(handle) if isinstance(handle, str) else None
-                if rec is None:
-                    raise Refused("not_found", "no run %r" % (handle,))
-                ans = {"result": "not_running" if rec.get("state") != "running" else "not_owned", "state": rec.get("state")}
+            rec = run.record if run is not None else (self.store.load(handle) if isinstance(handle, str) else None)
+            if run is not None and rec.get("state") != "running":
+                stored = self.store.load(handle)
+                if stored is not None and stored.get("state") == "gone":
+                    rec = stored
+            if rec is None:
+                raise Refused("not_found", "no run %r" % (handle,))
+            if rec.get("state") != "running":
+                ans = {"result": "not_running", "state": rec.get("state")}
+            elif run is None:
+                ans = {"result": "not_owned", "state": "running", "liveness": "unknown"}
             elif mode == "soft":
                 # (a soft stop needs the library's request_stop, PR 5a: not in this build)
-                ans = {"result": "soft_unavailable", "state": run.record["state"],
+                ans = {"result": "soft_unavailable", "state": "running",
                        "reason": "a soft stop with a partial result isn't available in this build; ask for mode \"hard\""}
             else:
-                rec = run.record
-                ans = self._request(run, "cancel_hard", rec["session"]["generation"], rec["run_seq"], {"request_id": request_id, "kind": "cancel_hard"})
-                ans = {"result": ans.get("result"), "state": rec["state"]}
-            if request_id is not None:
-                self.requests[request_id] = (key, ans, self.clock())
+                got = self._request(run, "cancel_hard", rec["session"]["generation"], rec["run_seq"], {"request_id": rid, "kind": "cancel_hard"})
+                ans = {"result": got.get("result"), "state": run.record["state"]}
+            ans = {"request_id": rid, **ans}
+            self.requests[rid] = (key, ans, self.clock())
             return ans
 
-    # ---- reading
+    # ---- reading: a removed run's tombstone wins over what is cached
+    def forget(self, handles):
+        """Runs cleanup removed: dropped from this server's cache."""
+        with self.lock:
+            for h in handles or ():
+                run = self.runs.get(h)
+                if run is not None and run.done.is_set():
+                    del self.runs[h]
+
+    def _owned(self, handle):
+        """This server's run, unless it has ended and the store has removed it
+        since (cleanup here or by another server): then None, and its cache
+        entry dropped."""
+        run = self.runs.get(handle)
+        if run is None or not run.done.is_set():
+            return run
+        stored = self.store.load(handle)
+        if stored is not None and stored.get("state") == "gone":
+            del self.runs[handle]
+            return None
+        return run
+
     def record(self, handle):
         with self.lock:
-            run = self.runs.get(handle)
+            run = self._owned(handle)
             if run is not None:
                 rec = dict(run.record)
                 if rec["state"] == "running":
@@ -340,24 +465,41 @@ class Runner:
 
     def result(self, handle, wait=None):
         wait = seconds(wait, "wait", RESULT_WAIT_DEFAULT, RESULT_WAIT_MAX)
-        run = self.runs.get(handle)
+        with self.lock:
+            run = self._owned(handle)
         if run is not None:
             run.done.wait(wait)
+        with self.lock:
+            run = self._owned(handle)
         return self.record(handle), (run.reply if run is not None and run.done.is_set() else None)
 
     def keep(self, handle, keep):
         if not isinstance(keep, bool):
             raise Refused("invalid", "`keep` must be true or false")
         with self.lock:
-            run = self.runs.get(handle)
-            rec = run.record if run is not None else self.store.load(handle)
-            if rec is None or rec.get("state") == "gone":
+            run = self._owned(handle)
+            rec = run.record if run is not None else (self.store.load(handle) if isinstance(handle, str) else None)
+            if rec is None:
                 raise Refused("not_found", "no run %r" % (handle,))
+            if rec.get("state") == "gone":
+                raise Refused("not_found", "run %s was removed (%s, its tombstone says)" % (handle, rec.get("reason")), tombstone=rec)
             if run is None and rec.get("state") == "running":
                 raise Refused("not_owned", "run %s belongs to another server" % handle)
             rec["keep"] = keep
-            self.store.save(rec)
+            try:
+                self.store.save(rec)
+            except FileNotFoundError:
+                raise Refused("not_found", "run %s was removed" % handle)
+            except (OSError, R.StorageError) as e:
+                raise Refused("storage", "keep couldn't be recorded: %s" % e)
             return {"handle": handle, "keep": keep}
+
+    def summary(self):
+        # (a run that ended here but whose index entry couldn't be removed
+        # isn't counted as running)
+        with self.lock:
+            settled = {h for h, r in self.runs.items() if r.done.is_set()}
+        return self.store.summary(self.clock(), exclude=settled)
 
     def reset(self, name="main"):
         """The reset tool: restart a session that isn't running a run."""
@@ -376,9 +518,24 @@ class Runner:
             with self.lock:
                 self.restarting.discard(name)
 
-    def summary(self):
-        return self.store.summary(self.clock())
-
     def close(self):
-        for s in self.sessions.values():
-            s.close()
+        """The server is exiting: its sessions are closed (their processes
+        ended and waited for), and a run still running in one is settled as
+        killed (ended_by "server_exit"), so that it isn't left holding a slot
+        as an unknown run."""
+        with self.lock:
+            sessions = list(self.sessions.items())
+        for name, s in sessions:
+            try:
+                s.close()
+            except Exception:
+                pass
+        with self.lock:
+            for run in list(self.runs.values()):
+                if not run.done.is_set() and run.record.get("state") == "running":
+                    sess = run.sess
+                    if sess is not None and sess.alive():
+                        continue  # (not confirmed ended: left as it is, unknown to the next server)
+                    now = self.clock()
+                    run.record.update(state="killed", ended_by="server_exit", ended_at=now, elapsed_s=round(now - run.record["started_at"], 3))
+                    self._settle(run)
