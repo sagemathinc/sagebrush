@@ -34,7 +34,7 @@ export const PINS = {
   capBytes: 2 ** 30,
   /** pins released at once by a collapse, in the save's transaction (a few, so that a collapsing save stays
    * within its 64 IndexedDB calls); the rest by cleanPins, begun after the save returns */
-  collapseRelease: 3,
+  collapseRelease: 2,
   /** each cleanup slice, one transaction: at most `examine` records read a step, and at most `requests`
    * IndexedDB requests made (an item is begun only while its costliest outcome still fits); then the next slice,
    * after a timer, until nothing durable is left (daybreak2's LIMIT-E5C-1) */
