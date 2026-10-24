@@ -71,6 +71,10 @@ Differences from Sage that the doctests show and that are not fixed yet:
   compared exactly.  Sage 10.10 says `R.ideal(t) == R.ideal(t + 2*t^2)` is
   False over `Zmod(4)`, while it also says `(t + 2*t^2)*(1 + 2*t) == t` and
   `(1 + 2*t).is_unit()`: the ideals are equal, and sagebrush says True (#102).
+* Ideals of `Zmod(n)[t]`, n composite, whose generators both have content 1
+  and neither a unit leading coefficient (`(2*t + 3)` and `(3*t + 2)` over
+  `Zmod(6)`): NotImplementedError.  Deciding them needs the factorization of
+  n, which waits for a bounded integer-factorization budget (#102).
 
 The local Sage has no Maxima (examples of solve, limit, simplify, desolve,
 ... are listed in the oracle script's `NEEDS`, which Sage then skips) and its GAP interface crashes (segmentation fault) on permutation
