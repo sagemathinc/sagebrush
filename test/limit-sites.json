@@ -1805,11 +1805,11 @@
   "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
- "lib/_sage_ffsub.py ::  :: EMBED_BITS = _limits.UNLIMITED if EMBED_MAX == _limits.UNLIMITED else EMBED_MAX.bit_length() - 1 #0": {
+ "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
   "owner": "finite fields + configuration"
  },
- "lib/_sage_ffsub.py ::  :: EMBED_MAX = _LIMITS[\"ff.embed_max\"] if WORK == _limits.UNLIMITED else min(_LIMITS[\"ff.embed_max\"], 2 ** 20) #0": {
+ "lib/_sage_ffsub.py ::  :: EMBED_MAX = CONWAY_MAX if _EMBED == _limits.UNLIMITED else _EMBED #0": {
   "class": "3",
   "owner": "finite fields + configuration"
  },
@@ -1822,6 +1822,10 @@
   "owner": "finite fields + configuration",
   "row": "inv-2"
  },
+ "lib/_sage_ffsub.py ::  :: _EMBED = _LIMITS[\"ff.embed_max\"] if WORK == _limits.UNLIMITED else min(_LIMITS[\"ff.embed_max\"], 2 ** 20) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
  "lib/_sage_ffsub.py :: cover :: if p ** L > EMBED_MAX: #0": {
   "class": "3",
   "owner": "finite fields",
@@ -1832,16 +1836,16 @@
   "owner": "finite fields",
   "row": "inv-3"
  },
- "lib/_sage_ffsub.py :: embed_max_text :: \"\"\"The largest field an embedding or descent takes, in refusals: EMBED_MAX #0": {
+ "lib/_sage_ffsub.py :: embed_max_text :: \"\"\"EMBED_MAX in refusals: 2^20 (the number when it isn't a power of 2), #0": {
   "class": "none",
   "owner": "finite fields + configuration"
  },
- "lib/_sage_ffsub.py :: embed_max_text :: (2^20, or the number when it isn't a power of 2); when it is unlimited, #0": {
-  "class": "none",
-  "owner": "finite fields + configuration"
- },
- "lib/_sage_ffsub.py :: embed_max_text :: if EMBED_MAX == _limits.UNLIMITED: #0": {
+ "lib/_sage_ffsub.py :: embed_max_text :: if EMBED_MAX == CONWAY_MAX: #0": {
   "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: embed_max_text :: or 10^7, the Conway search's cutoff, when ff.embed_max is unlimited.\"\"\" #0": {
+  "class": "none",
   "owner": "finite fields + configuration"
  },
  "lib/_sage_ffsub.py :: trace :: def trace(x, budget, refuse): #0": {
