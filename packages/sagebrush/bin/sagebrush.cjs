@@ -87,8 +87,14 @@ function readLimits(path) {
 const limitsPath = limitsFile();
 const limits = limitsPath === null ? null : readLimits(limitsPath);
 
-// Whether the arguments run a program, by the rules of src/cli.ts's main()
+// Whether the arguments run a program, by the rules of src/cli.ts's main().
+// Never in a worker thread: the bundle's own workers (board check's and board
+// try's interpreter, the notebook's sessions, the Jupyter kernel's) start this
+// file, require.main's, and are told what to do by their workerData, not by
+// arguments, which a worker has none of (its stdin not a terminal either, so
+// it would otherwise start a program on stdin in a worker of its own).
 function runsProgram(a) {
+  if (!require("node:worker_threads").isMainThread) return false;
   try {
     if (process.env.SAGEBRUSH_NO_WORKER) return false;
   } catch {} // (a Deno without --allow-env)

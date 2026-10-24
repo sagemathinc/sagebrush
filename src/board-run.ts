@@ -294,8 +294,9 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
   try {
     if (items.length) {
       worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
-      worker.stdout.resume();
-      worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
+      // (its stdout and stderr: none under Bun, whose Worker has no `stdout: true`)
+      worker.stdout?.resume();
+      worker.stderr?.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
       await new Promise<void>((resolve, reject) => {
         // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
         const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
@@ -452,8 +453,8 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       if (!worker && !dead) {
         // (a board with no code items: an interpreter for its checks all the same)
         worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
-        worker.stdout.resume();
-        worker.stderr.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
+        worker.stdout?.resume();
+        worker.stderr?.on("data", (b) => { if (workerErr.length < 100) workerErr.push(String(b)); });
         await new Promise<void>((resolve, reject) => {
         // (its start bounded too: one that isn't ready in START_GRACE_MS is stopped, and is dead)
         const late = setTimeout(() => { dead ??= `the interpreter did not start within ${START_GRACE_MS / 1000} s`; void worker?.terminate(); resolve(); }, START_GRACE_MS);
