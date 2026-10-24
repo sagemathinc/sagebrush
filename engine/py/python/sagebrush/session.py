@@ -45,9 +45,21 @@ def _error_info(e, tb):
         kind = "unimplemented"
     elif isinstance(e, SyntaxError):
         kind = "syntax"
+    elif isinstance(e, MemoryError):
+        kind = "memory"
     else:
         kind = "exception"
-    return {"type": kind, "exception": type(e).__name__, "message": str(e), "traceback": _format_exception(e, tb)}
+    info = {"type": kind, "exception": type(e).__name__, "message": str(e), "traceback": _format_exception(e, tb), "at": time.time()}
+    # (a memory guard's refusal: item D's fields, as the error carries them;
+    # D1's record is None until PR 5b / GB-6, its partial and checkpoint too)
+    if kind == "memory" or hasattr(e, "limit_bytes"):
+        def big(n):
+            return n if not isinstance(n, int) or -(1 << 53) <= n <= (1 << 53) else str(n)
+        cap = getattr(e, "capacity", None)
+        info["memory"] = {"what": str(e), "need_bytes": big(getattr(e, "need_bytes", None)), "limit_bytes": big(getattr(e, "limit_bytes", None)),
+                          "record": getattr(e, "record", None), "partial": None, "checkpoint": None,
+                          "capacity": cap if isinstance(cap, dict) else None}
+    return info
 
 
 def _failure(kind, message):
@@ -139,10 +151,12 @@ def _worker():
 
 
 class Session:
-    """A child process holding one namespace (`from sagebrush.sage import *`)."""
+    """A child process holding one namespace (`from sagebrush.sage import *`).
+    generation counts its processes: it changes at each (re)start."""
 
     def __init__(self):
         self.proc = None
+        self.generation = 0
         self._start()
 
     def _start(self):
@@ -157,6 +171,7 @@ class Session:
             stdout=subprocess.PIPE,
             creationflags=flags,
         )
+        self.generation += 1
         self.replies = queue.Queue()
 
         def reader(proc, q):
@@ -194,6 +209,18 @@ class Session:
                 self.proc.send_signal(signal.CTRL_BREAK_EVENT)
             else:
                 self.proc.send_signal(signal.SIGINT)
+
+    def submit(self, code, mode="sage", isolated=False, data=False):
+        """Start code and return at once: (generation, queue), the queue
+        giving the reply, or None if the process ended first.  The caller
+        waits as long as it likes; nothing here stops the computation."""
+        import json
+
+        if not self.alive():
+            self._start()
+        self.proc.stdin.write((json.dumps({"code": code, "mode": mode, "isolated": isolated, "data": data}) + "\n").encode("utf-8"))
+        self.proc.stdin.flush()
+        return self.generation, self.replies
 
     def _get(self, timeout):
         import queue
