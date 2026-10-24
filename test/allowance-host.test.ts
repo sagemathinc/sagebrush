@@ -443,3 +443,115 @@ test("scope bookkeeping is checked", () => {
   assert.equal(r.host.close("nb").scope_id, "nb");
   assert.throws(() => r.host.record("nb"), /no open scope/);
 });
+
+// CORR-PR118-1 (astra2): an earlier wall expiry, due but not yet seen (its callback delayed),
+// is reconciled before a later steps or work event can latch a scope or fix the grace origin.
+test("CORR-PR118-1: a later steps event never hides an earlier wall expiry (same scope)", () => {
+  const r = rig();
+  r.host.open("nb", "notebook", null);
+  const g = r.host.run("c:a", "cell", al("cell", { wall_s: 1, steps: 1 }), "nb");
+  r.late(2);
+  r.host.steps(g, 1, 2);
+  r.host.stepRefused(g, 2);
+  assert.deepEqual(r.terminations, [g], "the wall's grace ended at 1.5: termination, not a cooperative stop");
+  assert.equal(r.host.finish(g, 2.1), "discarded");
+  const out = r.host.terminated(g, true, 2.2);
+  assert.equal(out.status, "limit");
+  assert.equal(out.latches.length, 1);
+  assert.equal(out.latches[0].kind, "wall");
+  assert.equal(out.latches[0].first_hit_mono, 1);
+  assert.equal(out.primary.at, 1);
+  assert.ok(Math.abs(out.terminated_after_s - 1.2) < 1e-9);
+  assert.equal(r.results.length, 1, "exactly one terminal result");
+});
+
+test("CORR-PR118-1: a later steps event never hides an earlier wall expiry (ancestor)", () => {
+  const r = rig();
+  r.host.open("nb", "notebook", al("notebook", { wall_s: 1 }));
+  const g = r.host.run("c:a", "cell", al("cell", { steps: 1 }), "nb");
+  r.late(2);
+  r.host.steps(g, 1, 2);
+  r.host.stepRefused(g, 2);
+  assert.deepEqual(r.terminations, [g]);
+  const out = r.host.terminated(g, true, 2.2);
+  assert.equal(out.latches.length, 1, "the cell's steps never latched once termination was selected");
+  assert.equal(out.latches[0].scope_id, "nb");
+  assert.equal(out.latches[0].first_hit_mono, 1);
+  assert.equal(out.primary.cause, "allowance");
+  assert.equal(out.primary.scope_id, "nb");
+  assert.ok(Math.abs(out.terminated_after_s - 1.2) < 1e-9, "the grace origin is the wall's hit, not the steps event's");
+});
+
+test("CORR-PR118-1: chunk overshoot and a work reservation after a due wall expiry", () => {
+  let r = rig();
+  r.host.open("nb", "notebook", null);
+  let g = r.host.run("c:a", "cell", al("cell", { wall_s: 1, steps: 10 }), "nb");
+  r.late(2);
+  r.host.steps(g, 15, 2);
+  assert.deepEqual(r.terminations, [g], "chunk overshoot: the wall first");
+  let out = r.host.terminated(g, true, 2.1);
+  assert.equal(out.latches.length, 1);
+  assert.equal(out.latches[0].kind, "wall");
+  assert.equal(out.scopes[0].steps.charged, 15, "the steps taken are still charged");
+
+  r = rig();
+  r.host.open("nb", "notebook", al("notebook", { wall_s: 1 }));
+  g = r.host.run("c:a", "cell", al("cell", { work: { factor: 1 } }), "nb");
+  r.late(2);
+  assert.deepEqual(r.host.reserve(g, "factor", 5), { ok: false, cause: "gone" }, "the reservation finds the execution already ending");
+  assert.deepEqual(r.terminations, [g]);
+  out = r.host.terminated(g, true, 2.1);
+  assert.equal(out.latches.length, 1);
+  assert.equal(out.latches[0].scope_id, "nb");
+  assert.equal(out.latches[0].kind, "wall");
+});
+
+test("CORR-PR118-1: before the wall's grace deadline, the wall is still first; at it, termination", () => {
+  // same scope, before the deadline: the wall latches at 1; the later steps event latches nothing more
+  let r = rig();
+  r.host.open("nb", "notebook", null);
+  let g = r.host.run("c:a", "cell", al("cell", { wall_s: 1, steps: 1 }), "nb");
+  r.late(1.2);
+  r.host.steps(g, 1, 1.2);
+  r.host.stepRefused(g, 1.2);
+  assert.equal(r.terminations.length, 0);
+  let out = r.host.finish(g, 1.3);
+  assert.equal(out.status, "limit");
+  assert.equal(out.latches.length, 1);
+  assert.equal(out.latches[0].kind, "wall");
+  assert.equal(out.latches[0].first_hit_mono, 1);
+
+  // ancestor, before the deadline: nb's wall at 1, then the cell's steps at 1.2; grace from 1
+  r = rig();
+  r.host.open("nb", "notebook", al("notebook", { wall_s: 1 }));
+  g = r.host.run("c:a", "cell", al("cell", { steps: 1 }), "nb");
+  r.late(1.2);
+  r.host.steps(g, 1, 1.2);
+  r.host.stepRefused(g, 1.2);
+  out = r.host.finish(g, 1.49);
+  assert.equal(out.status, "limit");
+  assert.deepEqual(out.latches.map((l) => [l.scope_id, l.kind, l.first_hit_mono]), [["nb", "wall", 1], ["c:a", "steps", 1.2]]);
+  assert.equal(out.primary.scope_id, "nb");
+
+  // the work variant, before the deadline: nb's wall at 1, then the cell's refused reservation
+  r = rig();
+  r.host.open("nb", "notebook", al("notebook", { wall_s: 1 }));
+  g = r.host.run("c:a", "cell", al("cell", { work: { factor: 1 } }), "nb");
+  r.late(1.2);
+  assert.deepEqual(r.host.reserve(g, "factor", 5), { ok: false, cause: "allowance", scope_id: "c:a" });
+  out = r.host.finish(g, 1.3);
+  assert.deepEqual(out.latches.map((l) => [l.scope_id, l.kind, l.first_hit_mono]), [["nb", "wall", 1], ["c:a", "work", 1.2]]);
+  assert.equal(out.primary.scope_id, "nb");
+
+  // an event exactly at the wall's grace deadline (1 + 0.5): termination (equality is late)
+  r = rig();
+  r.host.open("nb", "notebook", null);
+  g = r.host.run("c:a", "cell", al("cell", { wall_s: 1, steps: 1 }), "nb");
+  r.late(1.5);
+  r.host.steps(g, 1, 1.5);
+  r.host.stepRefused(g, 1.5);
+  assert.deepEqual(r.terminations, [g]);
+  out = r.host.terminated(g, true, 1.6);
+  assert.equal(out.latches.length, 1);
+  assert.equal(out.latches[0].first_hit_mono, 1);
+});
