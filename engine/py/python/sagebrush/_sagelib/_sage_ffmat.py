@@ -492,6 +492,107 @@ def _vector_pushout(R, S):
     return qb.QQbar  # (AA and QQbar)
 
 
+# ------------------------------------------------------------------ comparison with a scalar
+#
+# Sage's rules, from Sage 10.10 as a black-box oracle (sage-tests/
+# test_matrix_scalar_eq): a square matrix (0 x 0 too) compared with a
+# scalar s is compared with s times the identity in the ring where its
+# base ring and s's parent meet (_vector_pushout); where they do not meet
+# it is not equal.  A non-square matrix or a vector is equal only to an
+# integral zero (a Python int, bool or float, or an element of ZZ) when it
+# is zero: QQ(0), RR(0) or GF(3)(0) are not equal to it.  Shared by every
+# Sage-mode matrix and vector class; Magma mode has its own rules
+# (lib/_magma.py's eq).
+
+def _scalar_parent(s):
+    """The parent of s as Sage's coercion sees it when s is a scalar (a
+    Python int or bool: ZZ; float: RDF; complex: CDF; a Fraction: QQ; an
+    element: its parent); None for anything else (matrices, vectors,
+    lists, strings, None)."""
+    if s is None or isinstance(s, (list, tuple, str, dict, set)) or getattr(s, "_is_ffmatrix", False) or _vec_base(s) is not None:
+        return None
+    import _sage_matrix
+    if isinstance(s, _sage_matrix.Matrix):
+        return None
+    sa = _sa()
+    par = getattr(s, "parent", None)
+    if callable(par) and not isinstance(s, type):
+        try:
+            return par()
+        except Exception:
+            return None
+    if isinstance(s, (bool, int)):
+        return sa.ZZ
+    import _sage_rdf
+    if isinstance(s, float):
+        return _sage_rdf.RDF
+    if isinstance(s, complex):
+        return _sage_rdf.CDF
+    if isinstance(s, _F):
+        return sa.QQ
+    return None
+
+
+def _integral_zero(s):
+    """Whether s is a zero that a vector or a non-square matrix equals (a
+    Python int, bool or float, or an element of ZZ): see above."""
+    if isinstance(s, bool):
+        return not s
+    if type(s) is float:
+        return s == 0
+    if isinstance(s, int):
+        par = getattr(s, "parent", None)
+        return (not callable(par) or par() is _sa().ZZ) and s == 0
+    par = getattr(s, "parent", None)
+    if callable(par) and not isinstance(s, type):
+        try:
+            return par() is _sa().ZZ and s == 0
+        except Exception:
+            return False
+    return False
+
+
+def _scalar_eq(base, rows, ncols, s):
+    """Whether the matrix over base with these rows equals the scalar s, as
+    Sage decides it (see above); None when s is not a scalar (the caller
+    returns NotImplemented).  Entry by entry, with no converted copy of the
+    matrix (HARD-F4E-1)."""
+    S = _scalar_parent(s)
+    if S is None and type(s) is not float:
+        return None
+    if len(rows) != ncols:
+        return _integral_zero(s) and all(not x for r in rows for x in r)
+    P = _vector_pushout(base, S)
+    if P is None:
+        return False
+    c, zero = P(s), P(0)
+    for i, r in enumerate(rows):
+        for j, x in enumerate(r):
+            if not bool(P(x) == (c if i == j else zero)):
+                return False
+    return True
+
+
+def _vector_scalar_eq(entries, s):
+    """Whether a vector with these entries equals the scalar s, as Sage
+    decides it (only an integral zero, see above); None when s is not a
+    scalar."""
+    if _scalar_parent(s) is None and type(s) is not float:
+        return None
+    return _integral_zero(s) and all(not x for x in entries)
+
+
+def _scalar_hash(rows, ncols, default):
+    """The hash of a matrix: the hash of c for c times the identity (n >= 1),
+    as Sage's (it equals c), else `default`."""
+    n = len(rows)
+    if n and n == ncols:
+        c = rows[0][0]
+        if all((x == c) if i == j else (not x) for i, r in enumerate(rows) for j, x in enumerate(r)):
+            return hash(c)
+    return default
+
+
 def _vec_base(v):
     """The base ring of a vector (FFVector or a ZZ, QQ or symbolic Vector),
     else None."""
@@ -788,7 +889,13 @@ class FFVector:
             return self._e == o._e
         if isinstance(o, (list, tuple)):
             return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
-        return NotImplemented
+        # (a scalar: only an integral zero, as in Sage: _vector_scalar_eq)
+        r = _vector_scalar_eq(self._e, o)
+        return NotImplemented if r is None else r
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
 
     def __hash__(self):
         return hash(tuple(self._e))
@@ -1217,21 +1324,12 @@ class FFMatrix:
         import _sage_matrix
         if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
             return o.dimensions() == self.dimensions() and all(a == b for r, t in zip(self._rows, o._rows) for a, b in zip(r, t))
-        # a scalar c is c times the identity (any shape for 0), as in Sage;
-        # it was NotImplemented, so A * A.inverse() == 1 was False
-        c = self._scalar(o)
-        if c is None:
-            r = self._numeric_eq(o)
-            if r is not None:
-                return r
-        if c is not None:
-            zero = self._base.zero()
-            if c == zero:
-                return all(x == zero for r in self._rows for x in r)
-            if len(self._rows) != self._ncols:
-                return False
-            return all(x == (c if i == j else zero) for i, r in enumerate(self._rows) for j, x in enumerate(r))
-        return NotImplemented
+        # a scalar: Sage's rules (_scalar_eq: c times the identity of a
+        # square matrix where the rings meet; only an integral zero for a
+        # non-square one); it was NotImplemented, so A * A.inverse() == 1
+        # was False
+        r = _scalar_eq(self._base, self._rows, self._ncols, o)
+        return NotImplemented if r is None else r
 
     def __ne__(self, o):
         r = self.__eq__(o)
@@ -1258,7 +1356,8 @@ class FFMatrix:
         return FFMatrix(self._base, [[c if i == j else zero for j in range(n)] for i in range(n)], n)
 
     def __hash__(self):
-        return hash(tuple(tuple(r) for r in self._rows))
+        # (c times the identity hashes as c, which it equals, as in Sage)
+        return _scalar_hash(self._rows, self._ncols, hash(tuple(tuple(r) for r in self._rows)))
 
     def __copy__(self):
         return FFMatrix(self._base, self._rows, self._ncols)

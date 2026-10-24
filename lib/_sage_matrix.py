@@ -70,6 +70,25 @@ class Vector(list):
         # (read boundedly: a Vector is built from any iterable)
         list.__init__(self, _bounded_list(entries))
 
+    def __eq__(self, o):
+        """Equality; a scalar equals the vector only when it is an integral
+        zero and the vector is zero, as in Sage (_sage_ffmat._vector_scalar_eq).
+
+        EXAMPLES::
+
+            sage: v = vector(ZZ, [0, 0]); v == 0, 0 == v, v != 0, v == QQ(0), vector([1, 0]) == 1
+            (True, True, False, False, False)
+        """
+        import _sage_ffmat
+        r = _sage_ffmat._vector_scalar_eq(list.__iter__(self), o)
+        return list.__eq__(self, o) if r is None else r
+
+    def __ne__(self, o):
+        r = self.__eq__(o)
+        return r if r is NotImplemented else not r
+
+    __hash__ = list.__hash__
+
     def __getitem__(self, i):
         x = list.__getitem__(self, i)
         if isinstance(i, slice):
@@ -677,8 +696,30 @@ class MatrixSpace_:
             [1 0 0]
             [0 1 0]
             [0 0 1]
+            sage: MatrixSpace(ZZ, 2, 3).identity_matrix()
+            Traceback (most recent call last):
+            ...
+            TypeError: identity matrix must be square
         """
+        if self._nrows != self._ncols:
+            raise TypeError("identity matrix must be square")
         return identity_matrix(self._base, self._nrows)
+
+    def one(self):
+        """The identity matrix, immutable (a square space's one).
+
+        EXAMPLES::
+
+            sage: MS = MatrixSpace(ZZ, 2); MS.one(), MS.one().is_mutable(), MS.one() == 1
+            (
+            [1 0]
+            [0 1], False, True
+            )
+        """
+        m = self.identity_matrix()
+        if hasattr(m, "set_immutable"):  # (GF(p) matrices have none yet)
+            m.set_immutable()
+        return m
 
 
 class _MatrixBasis:
@@ -1129,7 +1170,24 @@ class Matrix:
         return _norm(x)
 
     def __eq__(self, other):
-        return isinstance(other, Matrix) and other._rows == self._rows
+        """Equality; a scalar is compared as Sage does (c times the
+        identity of a square matrix where the rings meet, only an integral
+        zero for a non-square one: _sage_ffmat._scalar_eq).
+
+        EXAMPLES::
+
+            sage: a = matrix(QQ, 1, [1]); a == 1, 1 == a, a != 1, a == 1/2
+            (True, True, False, False)
+            sage: matrix(ZZ, [[2, 0], [0, 2]]) == GF(3)(2), matrix(ZZ, 2, 3) == 0, matrix(ZZ, 2, 3) == QQ(0)
+            (True, True, False)
+        """
+        if isinstance(other, Matrix):
+            return other._rows == self._rows
+        if getattr(other, "_is_ffmatrix", False):
+            return False
+        import _sage_ffmat
+        r = _sage_ffmat._scalar_eq(self._base, self._rows, self.ncols(), other)
+        return NotImplemented if r is None else r
 
     def set_immutable(self):
         """Make the matrix immutable (then it is hashable).
@@ -1166,7 +1224,9 @@ class Matrix:
         # systematic review's API-F4)
         if not getattr(self, "_immutable", False):
             raise TypeError("mutable matrices are unhashable")
-        return hash(tuple(tuple(r) for r in self._rows))
+        # (c times the identity hashes as c, which it equals, as in Sage)
+        import _sage_ffmat
+        return _sage_ffmat._scalar_hash(self._rows, self.ncols(), hash(tuple(tuple(r) for r in self._rows)))
 
     def __repr__(self):
         if self.nrows() > 19 or self.ncols() > 49:
