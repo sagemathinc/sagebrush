@@ -48,17 +48,25 @@ export async function browserPilot() {
     await until(`!${LAST}.classList.contains('running')`);
     result.worker_ids.push(await workers());
     const cases = [
-      { id: "P1", code: (i) => `print('EN' + 'TER ${i}', flush=True)\ntry:\n    k = 0\n    while True:\n        k += 1\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and sum(range(10)) == 45 else 'fail'))`, delay: 1000 },
-      { id: "E2", code: (i) => `n = next_prime(10**22) * next_prime(3 * 10**22)\nprint('EN' + 'TER ${i}', flush=True)\ntry:\n    _r = factor(n)\n    print('R' + 'ET ${i}')\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and len(factor(2**64 + 1)) == 2 else 'fail'))`, delay: 1500 },
+      { id: "P1", mode: "python", code: (i) => `print('EN' + 'TER ${i}', flush=True)\ntry:\n    k = 0\n    while True:\n        k += 1\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and sum(range(10)) == 45 else 'fail'))`, delay: 1000 },
+      { id: "E2", mode: "sage", code: (i) => `n = next_prime(10**22) * next_prime(3 * 10**22)\nprint('EN' + 'TER ${i}', flush=True)\ntry:\n    _r = factor(n)\n    print('R' + 'ET ${i}')\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and len(factor(2**64 + 1)) == 2 else 'fail'))`, delay: 1500 },
     ];
+    // (the Sage cases run in Sage mode: the page's mode selector, then ready again)
+    const setMode = async (mode) => {
+      await ev(`(() => { const m = document.querySelector('#mode'); if (m.value !== ${JSON.stringify(mode)}) { m.value = ${JSON.stringify(mode)}; m.dispatchEvent(new Event('change', {bubbles: true})); } })()`);
+      await until("document.querySelector('#status')?.textContent.startsWith('ready')");
+      await start("keep = 41");
+      await until(`!${LAST}.classList.contains('running')`);
+    };
     for (const c of cases) {
+      await setMode(c.mode);
       const trials = [];
       for (let i = 1; i <= 5; i++) {
         const w0 = await workers();
         await start(c.code(i));
         let enter = null;
         for (const t = now(); now() - t < 30000; ) { if (new RegExp(`(^|\\n)ENTER ${i}\\b`).test((await state()).out)) { enter = now(); break; } await sleep(20); }
-        if (enter == null) { trials.push({ i, outcome: "INVALID", why: "no ENTER seen" }); await until(`!${LAST}.classList.contains('running')`, 130000).catch(() => {}); continue; }
+        if (enter == null) { trials.push({ i, outcome: "INVALID", why: "no ENTER seen", out: (await state()).out.slice(-600) }); await until(`!${LAST}.classList.contains('running')`, 130000).catch(() => {}); continue; }
         await sleep(Math.max(0, c.delay - (now() - enter)));
         const s0 = await state();
         if (/(^|\n)RET /.test(s0.out)) { trials.push({ i, outcome: "INVALID", why: "returned before Stop" }); continue; }
@@ -72,12 +80,12 @@ export async function browserPilot() {
         const sameWorker = JSON.stringify(w0.map((w) => w.id)) === JSON.stringify(w1.map((w) => w.id));
         const probe = (out.match(new RegExp(`PROBE ${i} (\\w+)`)) ?? [])[1];
         let outcome = "FAIL", why = "";
-        if (/(^|\n)RET /.test(out)) { outcome = "INVALID"; why = "returned"; }
+        if (/(^|\n)RET /.test(out)) why = "did not stop (returned after the Stop)";
         else if (t_recog == null) why = /did not stop/.test(out) ? "interpreter restarted" : "no KeyboardInterrupt within the guard";
         else if (!sameWorker) why = "worker replaced";
         else if (probe !== "ok") why = "probe " + probe;
         else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
-        trials.push({ i, outcome, why, latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: await memory() });
+        trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: await memory() });
       }
       result.rows.push({ case: c.id, host: "browser", trials });
       console.log(JSON.stringify(result.rows.at(-1)));

@@ -38,9 +38,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // setup and target are Python source with S for the size; grow(s, ratio) gives the next size.
 const CASES = [
   { id: "P1", mode: "python", calibration: "nonterminating", setup: "k = 0", target: "while True:\n    k += 1", probe: "assert sum(range(10)) == 45" },
-  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 60_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
+  { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 10_000_000, grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
-  { id: "E3a", mode: "sage", s0: 1500, smin: 200, smax: 6000, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
+  { id: "E3a", mode: "sage", s0: 450, smin: 200, smax: 600, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "R2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
@@ -77,7 +77,10 @@ ${indent(c.probe, 8)}
     except Exception as _e:
         _p("PROBE", _i, "fail", repr(_e)[:200])
     _p("DONE", _i)
-    time.sleep(0.3)
+    try:
+        time.sleep(0.3)
+    except KeyboardInterrupt:
+        _p("STRAY", _i, "late", time.monotonic())
 _p("END")
 `;
 }
@@ -90,6 +93,18 @@ function procStatus(pid) {
   } catch {
     return null;
   }
+}
+// the launcher under `script` (the prompt host): the node process among script's children
+function launcherChild(pid) {
+  for (const q of readdirSync("/proc")) {
+    if (!/^\d+$/.test(q)) continue;
+    try {
+      const f = readFileSync(`/proc/${q}/stat`, "utf8");
+      const fields = f.slice(f.lastIndexOf(")") + 2).split(" ");
+      if (Number(fields[1]) === pid && /node/.test(f.slice(f.indexOf("(") + 1, f.lastIndexOf(")")))) return Number(q);
+    } catch {}
+  }
+  return pid;
 }
 // processes still in a process group (the cleanup check)
 function groupMembers(pgid) {
@@ -158,7 +173,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       if (mk === "KI" && guard) { clearTimeout(guard); guard = null; }
       if (mk === "PROBE") t.probe = rest;
       if (mk === "STRAY") t.stray = rest;
-      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : p.pid) ?? {}) });
+      if (mk === "DONE") samples.push({ i: t.i, ...(procStatus(host === "cli" ? p.pid : launcherChild(p.pid)) ?? {}) });
     };
     const feed = (d) => {
       buf += d;
@@ -178,8 +193,10 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
 // classify one trial (plan r3 §1, §6.2): PASS needs KI, no RET, probes ok, no stray
 function classify(t) {
   if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before Stop" : "no Stop sent" };
-  if (t.marks.RET) return { outcome: "INVALID", why: "returned" };
-  if (t.stray) return { outcome: "INVALID", why: "stray " + t.stray };
+  // a return after the Stop was sent, with the target running at the send: the route did not
+  // stop (FAIL); only a return before the send makes the trial INVALID
+  if (t.marks.RET) return t.marks.RET.t > t.t_send ? { outcome: "FAIL", why: "did not stop (returned " + Math.round(t.marks.RET.t - t.t_send) + " ms after the Stop)" } : { outcome: "INVALID", why: "returned before the Stop" };
+  if (t.stray && !t.stray.startsWith("late")) return { outcome: "INVALID", why: "stray " + t.stray };
   if (!t.marks.KI) return { outcome: "FAIL", why: "no KeyboardInterrupt" };
   const latency = t.marks.KI.t - t.t_send;
   if (latency < 0) return { outcome: "FAIL", why: "harness bug: negative latency" };
