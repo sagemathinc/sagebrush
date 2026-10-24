@@ -2841,6 +2841,54 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
+ "src/allowance.ts ::  :: countMax: Number.MAX_SAFE_INTEGER, // 2^53 - 1, for work and steps #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts ::  :: export const ALLOWANCE_LIMITS = Object.freeze({ #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts ::  :: graceMax: 60, #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts ::  :: wallMax: 86_400, #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: checkAllowance :: if (Object.hasOwn(o, \"grace_s\")) out.grace_s = seconds(o.grace_s, \"grace_s\", ALLOWANCE_LIMITS.graceMin, ALLOWANCE_LIMITS.graceMax); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: checkAllowance :: if (Object.hasOwn(o, \"wall_s\")) out.wall_s = seconds(o.wall_s, \"wall_s\", ALLOWANCE_LIMITS.wallMin, ALLOWANCE_LIMITS.wallMax); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: checkAllowance :: if (fams.length > ALLOWANCE_LIMITS.families) fail(`work names more than ${ALLOWANCE_LIMITS.families} families`); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: count :: if ((v as number) < 1 || (v as number) > ALLOWANCE_LIMITS.countMax) fail(`${what} must be from 1 to ${ALLOWANCE_LIMITS.countMax}`); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: parseAllowance :: if (text.length > ALLOWANCE_LIMITS.textBytes) fail(`longer than ${ALLOWANCE_LIMITS.textBytes} characters`); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: parseAllowance :: v = strictJson(text, ALLOWANCE_LIMITS.jsonDepth); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: seconds :: const seconds = (v: unknown, what: string, min: number, max: number): number => { #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
+ "src/allowance.ts :: seconds :: if ((v as number) < min || (v as number) > max) fail(`${what} must be from ${min} to ${max}`); #0": {
+  "class": "1",
+  "owner": "opt-in limits, item G (@sagebrush-grader)"
+ },
  "src/board-check.ts ::  :: export const FILE_MAX = 128 * 2 ** 20; #0": {
   "class": "1",
   "owner": "board",
