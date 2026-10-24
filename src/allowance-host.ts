@@ -30,7 +30,12 @@
 // - a work reservation is checked against every ledger before the substep
 //   starts and taken from all of them or none; a refusal names the innermost
 //   ledger that fails, the call's own work= budget counting as innermost
-//   (§5.1; impl r3 G-4).
+//   (§5.1; impl r3 G-4);
+// - reaching a count limit exactly is success: an allowance of N steps lets
+//   exactly N steps run, and the stop is the next one attempted (the runtime
+//   reports it with stepRefused), as a reservation that fills a work ledger
+//   exactly fits.  A builtin's chunk charge that overshoots N latches too.
+//   Wall time is the exception: completion at the expiry is late (above).
 import { type Allowance, type AllowanceScope, graceSeconds, isScopeId } from "./allowance";
 
 export type StopCause = "memory" | "server" | "cancel" | "allowance" | "call";
@@ -257,7 +262,11 @@ export class ScopeHost {
     return least;
   }
 
-  /** The runtime reports n steps taken since its last report; every steps ledger is debited, and any that runs out latches. */
+  /**
+   * The runtime reports n steps taken since its last report; every steps
+   * ledger is debited.  Taking exactly a ledger's N steps is within it; a
+   * ledger charged past N (a builtin's chunk charge overshooting) latches.
+   */
   steps(generation: number, n: number, at: number = this.o.clock()): void {
     const x = this.live(generation);
     if (!x) return;
@@ -266,8 +275,23 @@ export class ScopeHost {
       if (!s.steps) continue;
       s.steps.charged += n;
       s.steps.measured += n;
-      if (s.steps.charged >= s.steps.budget) this.latch(x, s, "steps", s.steps.budget, at);
     }
+    // innermost first, so a tie names the innermost ledger
+    for (const s of x.leaf.chain()) if (s.steps && s.steps.charged > s.steps.budget) this.latch(x, s, "steps", s.steps.budget, at);
+    this.checkGrace(x, this.o.clock());
+  }
+
+  /**
+   * The runtime's countdown was at zero and it refused the next step (after
+   * reporting the steps it took): every steps ledger with nothing left
+   * latches, innermost first.  It's a runtime error if none is at zero.
+   */
+  stepRefused(generation: number, at: number = this.o.clock()): void {
+    const x = this.live(generation);
+    if (!x) return;
+    const spent = x.leaf.chain().filter((s) => s.steps && s.steps.charged >= s.steps.budget);
+    if (spent.length === 0) fail("a step was refused with steps left in every ledger");
+    for (const s of spent) this.latch(x, s, "steps", s.steps!.budget, at);
     this.checkGrace(x, this.o.clock());
   }
 
