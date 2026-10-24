@@ -560,7 +560,7 @@ async function replayFails(what, f, ranges, d11, re, opts = {}) {
   // (LIMIT-D11-IMPL-1: the failing plan's reads too, as IndexedDB served them, within every budget: no read past one made)
   const most = (k, ph) => Math.max(0, ...txs.filter((t) => t.phase === ph).map((t) => t[k]));
   const sr = W.PLAN_STATE.requests, sw = cfg.large + cfg.small + 6;
-  check(["close", "validate"].every((ph) => most("req", ph) <= cfg.requests + sr && most("rows", ph) <= cfg.page + sw) && sum(txs, "req") <= cfg.closureRequests && sum(txs, "rows") <= cfg.closureRows, `${what}: no transaction's requests, from its first to its last, past ${cfg.requests} + ${sr} or its rows past ${cfg.page} + ${sw}; the closure's past ${cfg.closureRequests} or ${cfg.closureRows} (${J({ txs: txs.length, most: [most("req", "close"), most("rows", "close")], all: [sum(txs, "req"), sum(txs, "rows")] })})`);
+  check(["close", "validate"].every((ph) => most("req", ph) <= cfg.requests + sr && most("rows", ph) <= cfg.page + sw) && sum(txs, "req") + sum(txs, "req", "validate") <= cfg.closureRequests && sum(txs, "rows") + sum(txs, "rows", "validate") <= cfg.closureRows, `${what}: no transaction's requests, from its first to its last, past ${cfg.requests} + ${sr} or its rows past ${cfg.page} + ${sw}; the closure's past ${cfg.closureRequests} or ${cfg.closureRows} (${J({ txs: txs.length, most: [most("req", "close"), most("rows", "close")], all: [sum(txs, "req") + sum(txs, "req", "validate"), sum(txs, "rows") + sum(txs, "rows", "validate")] })})`);
   const m = await W.replayOf(a.w, a.ns), ctl = (await raw(a.w.ws, "entries")).filter((e) => e.path.startsWith(W.MAPS) || e.path.startsWith("\u0001q/"));
   check(err instanceof W.ReplayHalted && re.test(m?.failed ?? "") && ctl.length === 0 && !(await a.w.rewriteState())?.published && !W.SENDER_HOLD.has(a.ns) && J(await tree(a.w)) === J(before), `${what}: the stable failure before publication: said, the plan dropped, nothing visible, the sender released (${J({ err: err?.constructor?.name, failed: m?.failed?.slice(0, 70), ctl: ctl.length })})`);
   W.REPLAY.reload();
@@ -569,9 +569,10 @@ async function replayFails(what, f, ranges, d11, re, opts = {}) {
 async function n8Caps() {
   // (9: each cap at exactly what the plan uses (succeeds) and one under it (that operation would exceed it: fails))
   const v1 = outerInner("/U/F", [["X", "/T/F", "/U/X", "file"]]);
-  const base = (await replayRows("N8 9: the measured plan", v1, ["/U"])).closure;
-  check(base && base.rounds === 2, `…measured: ${J(base)}`);
-  for (const [k, v] of [["closureItems", base.items], ["closureRequests", base.requests], ["closureRows", base.rows], ["closureRounds", base.rounds]]) {
+  const m0 = await replayRows("N8 9: the measured plan", v1, ["/U"]), base = m0.closure, val = m0.validation;
+  check(base && base.rounds === 2 && val, `…measured: ${J({ closure: base, validation: val })}`);
+  // (the plan's reads: its closure's and its validation's (LIMIT-D11-IMPL-4))
+  for (const [k, v] of [["closureItems", base.items], ["closureRequests", base.requests + val.requests], ["closureRows", base.rows + val.rows], ["closureRounds", base.rounds]]) {
     await replayRows(`N8 9: ${k} at exactly ${v}`, v1, ["/U"], { d11: { [k]: v } });
     await replayFails(`N8 9: ${k} at ${v - 1}`, v1, ["/U"], { [k]: v - 1 }, /reload to try again/);
   }
@@ -600,6 +601,7 @@ function metered(what, r, cfg) {
   check(ledger(r.closure, close) && ledger(r.validation, val), `${what}: the closure's and validation's counters are every request, row and write IndexedDB served their transactions, from the first to the last (${J({ ledger: [r.closure, r.validation], idb: [[close.length, sum(close, "req"), sum(close, "rows"), sum(close, "writes"), most(close, "req"), most(close, "rows")], [val.length, sum(val, "req", "validate"), sum(val, "rows", "validate"), sum(val, "writes", "validate"), most(val, "req"), most(val, "rows")]] })})`);
   const within = (ts, L) => L.txReq <= cfg.requests && L.txRows <= cfg.page && ts.every((t) => t.req <= cfg.requests + st.requests && t.rows <= cfg.page + st.rows && t.writes <= st.writes);
   check(val.length > 0 && within(close, r.closure) && within(val, r.validation), `${what}: every closure and validation transaction's work within ${cfg.requests} requests and ${cfg.page} rows, and all of it within that and its state's (${st.requests} requests, ${st.rows} rows; ${st.writes} writes) (${J({ close: [close.length, r.closure.txReq, r.closure.txRows, most(close, "req"), most(close, "rows"), most(close, "writes")], validate: [val.length, r.validation.txReq, r.validation.txRows, most(val, "req"), most(val, "rows"), most(val, "writes")] })})`);
+  check(r.closure.requests + r.validation.requests <= cfg.closureRequests && r.closure.rows + r.validation.rows <= cfg.closureRows, `${what}: the plan's reads (its closure's and its validation's) within ${cfg.closureRequests} requests and ${cfg.closureRows} rows`);
   return { txs: close.length, txReq: r.closure.txReq, txRows: r.closure.txRows, waits: r.closure?.waits ?? 0 };
 }
 /** One transaction's budget: measured with one item a transaction, then each at exactly the largest transaction's
@@ -653,10 +655,14 @@ async function n8Meter() {
   metered("LIMIT: an adversarial closure", r, { ...SMALL, ...P });
   check(r.nmaps === 4 && r.closure.maxReq > 50 && /é \(13\)$/.test(pathOf(r, f.ids.I) ?? ""), `…I beside its twelve claimants (${J({ I: pathOf(r, f.ids.I), maps: r.nmaps, closure: r.closure })})`);
   // (the closure's own ceilings: at exactly what it used (succeeds), one under (the read past it never made: stable))
-  for (const [k, v] of [["closureRequests", r.closure.requests], ["closureRows", r.closure.rows]]) {
-    const at = { ...P, [k]: v };
-    metered(`LIMIT: ${k} at exactly ${v}`, await replayRows(`LIMIT: ${k} at exactly ${v}`, f, ["/U"], { d11: at, seed, probe: true }), { ...SMALL, ...at });
-    await replayFails(`LIMIT: ${k} at ${v - 1}`, f, ["/U"], { ...P, [k]: v - 1 }, /requests or \d+ rows: reload/, { seed });
+  // (the plan's reads, its closure's and its validation's (LIMIT-D11-IMPL-4): at exactly what it used (its last
+  // transaction, the publication, ends at it: succeeds); one under (the read past it never made: stable); at the
+  // closure's own (no room for validation's bootstrap: the settling transaction's reservation fails it); and a little
+  // past it (validation's own reads past it))
+  for (const [k, c, v] of [["closureRequests", r.closure.requests, r.validation.requests], ["closureRows", r.closure.rows, r.validation.rows]]) {
+    const at = { ...P, [k]: c + v };
+    metered(`LIMIT: ${k} at exactly ${c + v}`, await replayRows(`LIMIT: ${k} at exactly ${c + v}`, f, ["/U"], { d11: at, seed, probe: true }), { ...SMALL, ...at });
+    for (const x of [c + v - 1, c, c + 6]) await replayFails(`LIMIT: ${k} at ${x} (the closure's ${c}, validation's ${v})`, f, ["/U"], { ...P, [k]: x }, /requests or \d+ rows: reload/, { seed });
   }
   await txBudget("LIMIT: the adversarial closure", f, ["/U"], P, { seed });
 }
@@ -719,6 +725,14 @@ async function astraConfirmedParent() {
   const r = await bothOrders("CORR-D11-R1-1: a confirmed-only folder for a large move's view", f, ["/dest"], ["/dest/a", "/dest"]);
   check(pathOf(r, f.ids.A) === "/dest/a" && pathOf(r, f.ids.P) === "/dest" && r.cycles >= 2, `…A at /dest/a after its debt's replay (${J({ A: pathOf(r, f.ids.A), P: pathOf(r, f.ids.P), cycles: r.cycles })})`);
   for (const at of ["pass", "place", "close", "close-settled", "validate", "publish", "sweep1", "sweep1to2"]) await replayRows(`CORR-D11-R1-1: a crash at ${at}`, f, ["/dest"], { cut: at });
+}
+async function astraMappedParent() {
+  // (CORR-D11-R2-1: A's view under /new/dest, inside O's target, though O's source has no /old/dest (P is confirmed
+  // only): nothing will be there after the plan, so A's lift is left to placement, as with no mapping at all)
+  const f = rows8([["O", "/old", "/new", "folder", 15], ["P", null, "/new/dest", "folder"], ["A", "/a", "/new/dest/a", "folder", 15]]);
+  const r = await bothOrders("CORR-D11-R2-1: a confirmed-only folder inside a mapping's target", f, ["/new"], ["/new/dest/a", "/new"]);
+  check(pathOf(r, f.ids.A) === "/new/dest/a" && pathOf(r, f.ids.O) === "/new" && r.cycles >= 2, `…A at /new/dest/a after its debt's replay (${J({ A: pathOf(r, f.ids.A), O: pathOf(r, f.ids.O), cycles: r.cycles })})`);
+  for (const at of ["pass", "place", "close", "close-settled", "validate", "publish", "sweep1", "sweep1to2"]) await replayRows(`CORR-D11-R2-1: a crash at ${at}`, f, ["/new"], { cut: at });
 }
 async function astraParentFile() {
   // (X a file: I beside it, and J's view (/U/F/G) under what is then the file X: J stays where I carries it
@@ -1439,7 +1453,7 @@ export async function run(only = "") {
   W.configureD11(SMALL);
   // (WIDE=case:<name>,<name>: those cases alone)
   const pick = String(only).startsWith("case:") ? String(only).slice(5).split(",") : null;
-  for (const t of [astraIndependent, astraNestedSettled, astraParentFile, astraConfirmedParent, n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Meter, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
+  for (const t of [astraIndependent, astraNestedSettled, astraParentFile, astraConfirmedParent, astraMappedParent, n8MovesOn, n8Stays, n8StaysY, n8Nfc, n8Folder, n8Planned, n8Unobstructed, n8Vacate, n8Caps, n8CapsNames, n8CapsTx, n8Meter, n8Crashes, n8Legacy, n8EqualDepth, localLarge, localStuckAndReload, localPreflightAbandoned, fenceParticipation, confirmedRename, confirmedHalfMoved, swap, cycle3, nested, deep, direct1, destNested, siblings, mixed, nestedRestoreRename, disjointRestore, writeInRestored, secondRefused, confirmedReload, frozenRevision, fencedAndUnplanned, deadlines, caps, debtsReplayed, capDuringSweeps, stagedIndexed, localTakeover, persistentFailure, forgetPlain, forgetMovedOut, forgetMovedBetweenPages, forgetProducerComplete, localDuringRebuildView]) {
     if (pick && !pick.includes(t.name)) continue;
     // (each case at most 2 minutes: one that hangs is named, and the rest go on)
     let timer;

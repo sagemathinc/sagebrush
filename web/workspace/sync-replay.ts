@@ -208,31 +208,26 @@ function newMapping(maps: Mapping[], e: Entry, v: SyncEntry, large: boolean, now
   };
 }
 
-/** (CORR-D11-IMPL-2) Whether `p`'s folder is a folder after the plan: brought by the mapping whose target holds it
- * most specifically (that mapping's top, or the row it carries there from its source), else the row there now if
- * nothing moves it away. */
-async function folderAfter(st: IDBObjectStore, maps: Mapping[], p: string): Promise<boolean> {
+/** (CORR-D11-IMPL-2, CORR-D11-R2-1) What is at `p`'s folder after the plan: brought by the mapping whose target holds
+ * it most specifically (that mapping's top, or the row it carries there from its source, if that mapping owns it), else
+ * the row there now if nothing moves it away; resolved to the actual row: a folder, something else, or nothing. */
+async function parentAfter(st: IDBObjectStore, maps: Mapping[], p: string): Promise<"folder" | "other" | "absent"> {
   const pf = parentOf(p);
-  if (pf === "/" || pf === TRASH) return true;
+  if (pf === "/" || pf === TRASH) return "folder";
   let by: Mapping | undefined;
   for (const m of maps) if (holds(pf, m.to) && (!by || m.to.length > by.to.length)) by = m;
-  if (by && pf === by.to) return by.kind === "folder";
+  if (by && pf === by.to) return by.kind === "folder" ? "folder" : "other";
   const at = by ? by.from + pf.slice(by.to.length) : pf;
-  if (by ? srcOwner(maps, at) !== by : !!srcOwner(maps, at)) return false;
-  return ((await req(st.get(at))) as Entry | undefined)?.kind === "folder";
+  if (by ? srcOwner(maps, at) !== by : !!srcOwner(maps, at)) return "absent";
+  const r = (await req(st.get(at))) as Entry | undefined;
+  return !r ? "absent" : r.kind === "folder" ? "folder" : "other";
 }
+/** Whether `p`'s folder is a folder after the plan. */
+const folderAfter = async (st: IDBObjectStore, maps: Mapping[], p: string) => (await parentAfter(st, maps, p)) === "folder";
 
-/** (CORR-D11-R1-1) Whether anything will be at `p`'s folder after the plan (of any kind): there now and not moving
- * away, or brought by a planned mapping.  Nothing there: the view's folder is still to be made (placement makes a
- * confirmed folder this device hasn't), so the lift is left to placement, a debt replayed once its folder is there. */
-async function parentThere(st: IDBObjectStore, maps: Mapping[], p: string): Promise<boolean> {
-  const pf = parentOf(p);
-  if (pf === "/" || pf === TRASH || maps.some((m) => holds(pf, m.to))) return true;
-  return !!(await req(st.get(pf))) && !srcOwner(maps, pf);
-}
-
-/** One identity of the pass: a large lift planned, unless it is carried by a planned folder, or its folder is still to
- * be made (left to placement).  (Whether a folder that is there will be a folder is the closure's: one that won't stays
+/** One identity of the pass: a large lift planned, unless it is carried by a planned folder, or nothing will be at its
+ * view's folder (CORR-D11-R1-1, R2-1: the folder is still to be made, by placement, which makes a confirmed folder this
+ * device hasn't; the lift left to it, a debt replayed once its folder is there).  (Whether a folder that is there will be a folder is the closure's: one that won't stays
  * where it is carried, CORR-D11-IMPL-2.) */
 async function planOne(ctx: PlanCtx, id: string) {
   if (ctx.planned.has(id)) return;
@@ -244,7 +239,7 @@ async function planOne(ctx: PlanCtx, id: string) {
   const up = srcOwner(ctx.maps, parentOf(e.path));
   if (up && up.from !== e.path && (up.want ?? up.to) + e.path.slice(up.from.length) === v.e.path) return;
   if ((await countUnder(ctx.st, e.path)) <= D11.chunk) return;
-  if (!(await parentThere(ctx.st, ctx.maps, v.e.path))) return;
+  if ((await parentAfter(ctx.st, ctx.maps, v.e.path)) === "absent") return;
   const m = newMapping(ctx.maps, e, v.e, true, ctx.now)!;
   ctx.maps.push(m);
   ctx.added.push(m);
@@ -272,10 +267,20 @@ type Claimant = { map: number } | { row: Entry; at: string };
  * publication; its rows bounded by the plan's size (D11.large + D11.small mappings), not by its work's budget.  Its
  * writes, after its work: each mapping row at most once, the control row, the record and the marker. */
 export const PLAN_STATE = {
+  /** (LIMIT-D11-IMPL-4) a transaction's reads before it knows what is left of the plan's: the marker, and (the
+   * closure's) the record and its control row; the transaction before it reserves them */
+  boot: { requests: 5, rows: 4 },
   requests: 8,
   rows: () => D11.large + D11.small + 6,
   writes: () => D11.large + D11.small + 4,
 };
+
+/** (LIMIT-D11-IMPL-4) What is left of the plan's reads after a transaction that leaves another to make must hold that
+ * one's bootstrap (PLAN_STATE.boot, read before it knows what is left): else the plan fails here, stable, nothing read
+ * past its budget. */
+function reserve(reqLeft: number, rowsLeft: number) {
+  if (reqLeft < PLAN_STATE.boot.requests || rowsLeft < PLAN_STATE.boot.rows) throw new Cap(`sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data`);
+}
 
 /** A read the budget doesn't admit, not made: "tx", the transaction's work budget (the item waits for the next one);
  * "plan", the plan's; "state", PLAN_STATE. */
@@ -722,7 +727,9 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       const next: Marker = { ...m, pos };
       if (done) {
         if (ctx.maps.length) {
-          // (the closure next (N8 v3 §3): every mapping due, round 1)
+          // (the closure next (N8 v3 §3): every mapping due, round 1; its first transaction's bootstrap within the plan's
+          // reads)
+          reserve(D11.closureRequests, D11.closureRows);
           st.put({ path: queueKey(rid), round: 1, queue: ctx.maps.map((x) => x.i), added: false, unsettled: false, items: 0, requests: 0, rows: 0 } satisfies Queue);
           Object.assign(next, { phase: "close" });
         }
@@ -830,6 +837,8 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       q.writes = (q.writes ?? 0) + writes;
       q.txWrites = Math.max(q.txWrites ?? 0, writes);
       q.txs = (q.txs ?? 0) + 1;
+      // (another closure or validation transaction follows: its bootstrap reserved)
+      reserve(D11.closureRequests - q.requests, D11.closureRows - q.rows);
       REPLAY.cut?.("close", m);
       if (reset) REPLAY.cut?.("close-round", m);
       if (settled) {
@@ -856,7 +865,7 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       // is the stable failure)
       REPLAY.reads?.("begin", "validate", tx0);
       const M = new Meter(D11.requests, D11.page), tx = M.tx(tx0);
-      const over = (e: Over) => new Cap(e.of === "tx" ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows to check one name: reload to try again, or Delete my synced data` : `sync's plan for a large move is larger than one transaction reads (${PLAN_STATE.requests} requests, ${PLAN_STATE.rows()} rows): reload to try again, or Delete my synced data`);
+      const over = (e: Over) => new Cap(e.of === "tx" ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows to check one name: reload to try again, or Delete my synced data` : e.of === "plan" ? `sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data` : `sync's plan for a large move is larger than one transaction reads (${PLAN_STATE.requests} requests, ${PLAN_STATE.rows()} rows): reload to try again, or Delete my synced data`);
       const metered = async <T>(f: () => Promise<T>) => {
         try {
           return await f();
@@ -866,6 +875,11 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       };
       const m = await metered(() => marker(tx, ns, rid, "validate"));
       if (!m) return "next";
+      // (what is left of the plan's reads (LIMIT-D11-IMPL-4): the settled closure's and validation's so far, from this
+      // transaction's start (the marker's reads, reserved by the transaction before, included))
+      const v0 = m.validation ?? { txs: 0, requests: 0, rows: 0, writes: 0, txReq: 0, txRows: 0, allTxReq: 0, allTxRows: 0 };
+      M.allReq = D11.closureRequests - (m.closure?.requests ?? 0) - v0.requests;
+      M.allRows = D11.closureRows - (m.closure?.rows ?? 0) - v0.rows;
       const meta = tx.objectStore(META), st = tx.objectStore("entries");
       FENCE_READ.add(tx0);
       const { rec, maps } = await metered(() => recordOf(tx));
@@ -893,13 +907,14 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       const rev = last ? (((await metered(() => req(meta.get(intentRevKey(ns))))) as number | undefined) ?? 0) : undefined;
       // (the ledger: every read of this transaction, and its writes next: its checked mappings, the marker (and the
       // record, at publication))
-      const v0 = m.validation ?? { txs: 0, requests: 0, rows: 0, writes: 0, txReq: 0, txRows: 0, allTxReq: 0, allTxRows: 0 };
       const writes = checked.length + (last ? 2 : 1);
       const validation = { txs: v0.txs + 1, requests: v0.requests + M.req, rows: v0.rows + M.rows, writes: v0.writes + writes, txReq: Math.max(v0.txReq, M.workReq), txRows: Math.max(v0.txRows, M.workRows), allTxReq: Math.max(v0.allTxReq, M.req), allTxRows: Math.max(v0.allTxRows, M.rows) };
       // (each one's class, persisted with it, never recomputed from partly drained sources (r8 N7))
       for (const x of checked) st.put({ path: mapKey(rid, x.i), ...x, direct: directOf(maps, x, pix) });
       REPLAY.cut?.("validate", m);
       if (!last) {
+        // (another validation transaction follows: its bootstrap reserved)
+        reserve(M.allReq - M.req, M.allRows - M.rows);
         meta.put({ ...m, vi: vi + checked.length, validation }, markerKey(ns));
         REPLAY.reads?.("end", "validate", tx0);
         return "more";
