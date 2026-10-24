@@ -449,9 +449,13 @@ export function endFrames(trapped: boolean) {
   if (engineCalls.length) {
     for (let i = engineCalls.length - 1; i >= 0; i--) engineCalls[i].call.end();
     engineCalls = [];
+    lastEpoch = -1;
   }
-  lastEpoch = -1;
-  if (trapped) newGeneration();
+  // (a new instance numbers its epochs afresh)
+  if (trapped) {
+    lastEpoch = -1;
+    newGeneration();
+  }
 }
 
 /** Tests only: the copy interval. */
