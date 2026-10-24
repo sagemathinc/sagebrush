@@ -136,6 +136,21 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
   afterReleases(w);
   return lease;
 }
+/** A connection's renewal of its lease (step 5, plan r4 §2.1): a compare-and-set in one transaction.  The lease must
+ * still be `ns`'s, not off, and the lifecycle epoch still `epoch`: then its generation is raised (the new holder's
+ * token, which fences what an older one took), else Fenced and nothing written.  It never clears `off` and never
+ * moves the epoch: only the enable flow (switchTo) does that. */
+export async function renewLease(w: Workspace, ns: string, epoch: number): Promise<Lease> {
+  checkNs(ns);
+  return inTx(w.ws, "meta", "readwrite", async (tx) => {
+    const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
+    const e = ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0;
+    if (!cur || cur.off || cur.ns !== ns || e !== epoch) throw new Fenced({ ns, gen: cur?.gen ?? 0 });
+    const lease = { ns, gen: cur.gen + 1 };
+    metaWrite(meta, CURRENT, lease);
+    return lease;
+  });
+}
 /** The current lease, if any. */
 export async function currentLease(w: Workspace): Promise<Lease | undefined> {
   return inTx(w.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(CURRENT))) as Promise<Lease | undefined>;

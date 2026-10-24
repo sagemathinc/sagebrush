@@ -22,9 +22,9 @@ const { WebSocketServer } = require("ws");
 
 const SITE = "https://sagebrush.test";
 // (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 64 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+const ACCOUNTS = Array.from({ length: 72 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
 // (the limits each has, from the fake CoCalc: most roomy; FULL's storage is small; SMALL's files are)
-const FULL = ACCOUNTS[62], SMALL = ACCOUNTS[63];
+const FULL = ACCOUNTS[70], SMALL = ACCOUNTS[71];
 const limitsOf = (a) => a === FULL ? { storage_bytes: 10_000, max_file_bytes: 50_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : a === SMALL ? { storage_bytes: 1 << 20, max_file_bytes: 5_000, sync: { enabled: true, version_bytes: 1000, read_bytes_per_day: 1 << 20 } }
   : { storage_bytes: 64 << 20, max_file_bytes: 50 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 64 << 20 } };
