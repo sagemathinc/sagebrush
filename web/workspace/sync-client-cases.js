@@ -45,9 +45,12 @@ const bytes = (n, seed) => { const b = new Uint8Array(n); for (let i = 0; i < n;
 /** Everything logged here decided: scanned to the latest op, no record left, the sender idle and saying so. */
 async function settled(w, c) {
   const ns = nsOf(c);
-  if (!ns || c.status.state !== "synced" || (await outbox(w)) !== 0) return false;
+  if (!ns || c.status.state !== "synced") return false;
+  // (the watermark read first: the scan writes it with its records, so an outbox read after it that is empty means
+  // decided, never "not scanned yet" (two reads in two transactions: the other order raced a scan between them))
   const scanned = await metaGet(w.ws, `sync:${ns}:scanned`);
-  return scanned >= (await w.lastSeq()) && c.debug().inflight === 0;
+  if (!(scanned >= (await w.lastSeq()))) return false;
+  return (await outbox(w)) === 0 && c.debug().inflight === 0;
 }
 
 /** The op that made `path` is still to go: an undecided record, or past the scan's watermark. */
@@ -769,8 +772,9 @@ async function accountSwitch() {
 /** As settled(), for one namespace's records only (another namespace's may wait for its own account). */
 async function settledIn(w, c, ns) {
   if (c.status.state !== "synced" || nsOf(c) !== ns) return false;
-  if ((await all(w.ws, "outbox")).some((r) => r.ns === ns)) return false;
-  return (await metaGet(w.ws, `sync:${ns}:scanned`)) >= (await w.lastSeq()) && c.debug().inflight === 0;
+  // (the watermark first, as settled's)
+  if (!((await metaGet(w.ws, `sync:${ns}:scanned`)) >= (await w.lastSeq()))) return false;
+  return !(await all(w.ws, "outbox")).some((r) => r.ns === ns) && c.debug().inflight === 0;
 }
 
 async function restoredCheckTimer() {
@@ -947,7 +951,8 @@ async function cutRead() {
   const f = await w.create("/after-cut.bin", { content: bytes(300, 92) });
   await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").put(bytes(3000, 93), f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
   let cuts = 0;
-  W.PINS.cutAfterRead = () => { cuts++; W.PINS.cutAfterRead = null; throw new Error("cut (test)"); };
+  // (only this file's read: a client of an earlier case still finishing a read never takes the cut)
+  W.PINS.cutAfterRead = (rec) => { if (rec.id !== f.fid) return; cuts++; W.PINS.cutAfterRead = null; throw new Error("cut (test)"); };
   const c = client(w);
   check(await until(() => cuts === 1), "cut read: the read cut after its value was materialized");
   await sleep(300);
@@ -998,10 +1003,922 @@ async function restUnderAcks() {
   }
 }
 
-const CASES = { basics, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks };
+
+// ---- step 4
+
+async function refusalAtomic() {
+  // (D7: a refusal removes its record and records the rebuild's obligation in one transaction: cut at each of
+  // acked's points, a reload finds the record still undecided and no flag, or neither record nor missing flag)
+  const w = await fresh();
+  const NS = "c".repeat(64) + ":1:" + w.device;
+  let points = 0, ok = true;
+  for (let at = 100; at < 110; at++) {
+    const lease = await W.switchTo(w, NS), ob = new W.Outbox(w, lease);
+    if ((await ob.status()).scanned === undefined) await ob.begin(await w.lastSeq());
+    await w.mkdir(`/r${at}`);
+    await ob.scan();
+    const rec = (await ob.records()).find((r) => r.accepted === undefined);
+    await new Promise((res, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").delete(`sync:${NS}:rebuild`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+    let cut = false;
+    W.OUTBOX.cut = (n) => { if (n === at) { cut = true; throw new Error("cut (test)"); } };
+    try { await ob.acked([{ dseq: rec.dseq, code: "forbidden" }]); } catch {}
+    W.OUTBOX.cut = null;
+    const still = (await ob.records()).some((r) => r.dseq === rec.dseq);
+    const flag = await metaGet(w.ws, `sync:${NS}:rebuild`);
+    if (cut) points++;
+    // (cut: nothing of it, the record kept, no flag; not cut (past the last point): both)
+    if (cut ? !(still && flag === undefined) : !(!still && flag?.why === "refused")) ok = false;
+    if (!cut) {
+      // (once more without a cut: removed and flagged together; and the flag isn't lowered from a stronger reason)
+      await new Promise((res, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put({ why: "diverged" }, `sync:${NS}:rebuild`); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+      await w.mkdir(`/r-strong`);
+      await ob.scan();
+      const r2 = (await ob.records()).find((r) => r.accepted === undefined);
+      await ob.acked([{ dseq: r2.dseq, code: "forbidden" }]);
+      if ((await metaGet(w.ws, `sync:${NS}:rebuild`))?.why !== "diverged") ok = false;
+      break;
+    }
+  }
+  check(ok && points >= 2, "refusal atomic (D7): cut at each of acked's " + points + " points, the record stays undecided with no flag; past them, it is removed and the rebuild flagged in one transaction; a stronger reason is kept");
+}
+
+// ---- step 4: the confirmed index and its view, live notices (D8), idle discovery (D8b)
+
+/** A client with the confirmed index (step 4's onIndex). */
+const viewClient = (w, opts = {}) => client(w, { onIndex: W.confirmedIndex(w), ...opts });
+
+async function echoNoCopy() {
+  // (C3's first test: a local create, then its echo: confirmed, applied to the index, and no `x (2)`)
+  await account();
+  const w = await fresh();
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c)), "echo, no copy: synced");
+    const f = await w.create("/x.txt", { content: "x" });
+    check(await until(async () => (await settled(w, c)) && (await W.cursorOf(w, nsOf(c))) > 0), "echo, no copy: decided, and the durable cursor past its echo");
+    const list = await w.list("/");
+    check(list.filter((e) => e.path.startsWith("/x")).length === 1 && (await w.stat("/x.txt"))?.fid === f.fid, "echo, no copy: one /x.txt, the same file: " + J(list.map((e) => e.path)));
+    const conf = await W.confirmedEntry(w, nsOf(c), f.fid);
+    check(conf?.path === "/x.txt" && conf.sha256 === f.sha256, "echo, no copy: in the confirmed index: " + J(conf));
+    check((await w.ops()).filter((o) => o.origin === "server").length === 0, "echo, no copy: nothing logged from the server (the view had it already)");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function liveNotice() {
+  // (D8, plan-sync-index-changed r1 test 7, the notice injected by the front: another device's create appears within
+  // 1 s, with no reconnect and no edit here; without a notice, nothing is pulled)
+  await account();
+  const w = await fresh();
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c)), "live notice: synced");
+    const pulls = c.stats.pulls;
+    const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/theirs", kind: "folder", fid: "00000000000000a1" }] });
+    const head = r.ack.ops[0].seq;
+    await sleep(500);
+    check(!(await w.stat("/theirs")) && c.stats.pulls === pulls, "live notice: no notice, nothing pulled yet");
+    const t0 = Date.now();
+    await ctl("notice", { head });
+    check(await until(async () => (await w.stat("/theirs"))?.fid === "00000000000000a1", 1_000), "live notice: the other device's folder here within 1 s: " + (Date.now() - t0) + " ms");
+    check(c.stats.connects === 1 && c.stats.pulls === pulls + 1, "live notice: by one pull, on the same connection: " + J({ pulls: c.stats.pulls, connects: c.stats.connects }));
+    // (a notice that isn't a safe integer, or isn't past the cursor: nothing)
+    await ctl("notice", { head: "9" });
+    await ctl("notice", { head });
+    await sleep(300);
+    check(c.stats.pulls === pulls + 1, "live notice: a malformed or old head moves nothing");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function noticeFlood() {
+  // (plan-sync-index-changed r1 test 8: 1,000 notices in a second pull only at the bucket's pace, never two at once)
+  await account();
+  const w = await fresh();
+  const keep = { ...W.CLIENT };
+  Object.assign(W.CLIENT, { pullBurst: 1, pullsPerSecond: 0.1 });
+  const clock = fakeClock();
+  const c = viewClient(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "notice flood: synced");
+    await otherOps(5, 0, "f");
+    const head = (await serverOps(w)).all.at(-1).seq;
+    const pulls = c.stats.pulls;
+    await ctl("notice", { head, times: 1000 });
+    await sleep(800);
+    check(c.stats.pulls - pulls <= 1 && c.debug().inflight <= 1, "notice flood: at most one pull for 1,000 notices (a token each 10 s): " + J({ pulls: c.stats.pulls - pulls, inflight: c.debug().inflight }));
+    check(await until(async () => !!(await w.stat("/f4"))), "notice flood: …and that pull brings the ops");
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
+async function idleDiscovery() {
+  // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
+  // page, with no edit and no reconnect, and no pull before it)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const c = viewClient(w, { clock });
+  try {
+    check(await until(() => settled(w, c)), "idle discovery: synced");
+    await otherOps(1500, 0, "i");
+    const pulls = c.stats.pulls;
+    await clock.advance(W.CLIENT.idlePullMs - 1000);
+    await sleep(300);
+    check(c.stats.pulls === pulls && !(await w.stat("/i0")), "idle discovery: nothing pulled before the 5 minutes: " + (c.stats.pulls - pulls));
+    await clock.advance(1000);
+    check(await until(async () => !!(await w.stat("/i1499")), 20_000), "idle discovery: at 5 minutes, every op of a two-page log here");
+    check(c.stats.pulls - pulls === 2 && c.stats.connects === 1, "idle discovery: two pulls (two pages), the same connection: " + J({ pulls: c.stats.pulls - pulls, connects: c.stats.connects }));
+    const listed = (await w.list("/")).filter((e) => /^\/i\d+$/.test(e.path)).length;
+    check(listed === 1500, "idle discovery: all 1,500 folders listed: " + listed);
+    await sleep(300);
+    check(c.stats.pulls - pulls === 2, "idle discovery: …then idle again (no further pull until the next 5 minutes)");
+  } finally {
+    await stop(c);
+  }
+}
+
+// ---- step 4: downloads (C5, L1, L2, D9)
+
+/** Two devices of one account in this page, each with its own workspace and the confirmed index. */
+async function twoDevices(optsB = {}) {
+  await account();
+  const a = await fresh(), b = await fresh();
+  const ca = viewClient(a), cb = viewClient(b, optsB);
+  if (!(await until(() => settled(a, ca))) || !(await until(() => settled(b, cb)))) throw new Error("two devices: not synced");
+  return { a, b, ca, cb };
+}
+const sameBytes = (x, y) => x && y && x.length === y.length && x.every((v, i) => v === y[i]);
+/** B's entry for A's file `p` listed (remote), via a notice (no waiting for the idle pull). */
+async function seen(b, cb, p) {
+  for (let i = 0; i < 50 && !(await b.stat(p)); i++) {
+    const head = (await serverOps(b)).all.at(-1)?.seq ?? 0;
+    await ctl("notice", { head });
+    await sleep(100);
+  }
+  return b.stat(p);
+}
+
+async function downloadBasic() {
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    const data = bytes(70_000, 7);
+    await a.create("/doc.bin", { content: data });
+    check(await until(() => settled(a, ca)), "download: A's file up");
+    const e = await seen(b, cb, "/doc.bin");
+    check(e?.size === 70_000 && e.sha256 === (await a.stat("/doc.bin")).sha256, "download: B lists it (remote until fetched): " + J(e && { remote: e.remote, size: e.size }));
+    check(await until(async () => { const x = await b.stat("/doc.bin"); return x && !x.remote; }), "download: …then has its bytes (installed)");
+    check(sameBytes(await b.contents(await b.stat("/doc.bin")), data), "download: the same bytes as A's");
+    check(cb.stats.urls === 1 && cb.stats.installed === 1, "download: one URL asked for, one install: " + J({ urls: cb.stats.urls, installed: cb.stats.installed }));
+    check((await b.stat("/doc.bin")).fetch === undefined, "download: no longer queued (its fetch cleared)");
+    // (then A writes it again: B's copy follows)
+    const data2 = bytes(5_000, 9);
+    await a.write("/doc.bin", data2);
+    check(await until(() => settled(a, ca)), "download: A's write up");
+    for (let i = 0; i < 50; i++) { const x = await b.stat("/doc.bin"); if (x && x.sha256 !== e.sha256 && !x.remote) break; await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    check(sameBytes(await b.contents(await b.stat("/doc.bin")), data2), "download: a remote write's bytes installed in turn");
+  } finally {
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadChecks() {
+  // (D9: Content-Length missing, malformed, different; a body longer than declared; a size past the cap: each fails
+  // its item under the retry timer and is never installed; then the real answer installs)
+  let mode = null;
+  const real = window.fetch.bind(window);
+  const fakeFetch = async (url, init) => {
+    const r = await real(url, init);
+    const m = mode;
+    if (!m || !r.ok || !String(r.url).includes("/__files/")) return r;
+    mode = null;
+    const body = new Uint8Array(await r.arrayBuffer());
+    const headers = { "content-type": "application/octet-stream" };
+    // (a made Response keeps the real one's url and redirected, as the browser's own would)
+    const as = (x) => Object.defineProperties(x, { url: { value: r.url }, redirected: { value: r.redirected } });
+    if (m === "missing") return as(new Response(body, { headers }));
+    if (m === "malformed") return as(new Response(body, { headers: { ...headers, "content-length": "0" + body.length } }));
+    if (m === "different") return as(new Response(body, { headers: { ...headers, "content-length": String(body.length + 1) } }));
+    if (m === "longer") { const more = new Uint8Array(body.length + 1); more.set(body); return as(new Response(more, { headers: { ...headers, "content-length": String(body.length) } })); }
+    return r;
+  };
+  // (the clock from now: a signed URL's expiry is the server's wall clock, 5 minutes on)
+  const clock = fakeClock(Date.now());
+  const { a, b, ca, cb } = await twoDevices({ fetch: fakeFetch, clock });
+  try {
+    for (const m of ["missing", "malformed", "different", "longer"]) {
+      mode = m;
+      const p = `/c-${m}.bin`;
+      await a.create(p, { content: bytes(3000, m.length) });
+      check(await until(() => settled(a, ca)), `download checks (${m}): up`);
+      const failed = cb.stats.fetchFailed;
+      await seen(b, cb, p);
+      check(await until(() => cb.stats.fetchFailed === failed + 1), `download checks (${m}): the item failed: ` + cb.stats.fetchFailed);
+      check((await b.stat(p))?.remote === true && cb.stats.installed === 0 + (["missing", "malformed", "different", "longer"].indexOf(m)), `download checks (${m}): not installed`);
+      await clock.advance(70_000);
+      check(await until(async () => (await b.stat(p))?.remote === undefined), `download checks (${m}): the retry, after its timer, installs the real bytes`);
+    }
+    check(cb.stats.urls === 4, "download checks: each item's signed URL asked for once, reused for its retry: " + cb.stats.urls);
+    // (a size past the cap: never reserved or asked for; set apart, listed)
+    const ns = nsOf(cb);
+    const big = { fid: "00000000000000b1", sha256: "e".repeat(64), size: 95 * 2 ** 20 + 1, rev: 0 };
+    await new Promise((res, no) => { const tx = b.ws.transaction("entries", "readwrite"); tx.objectStore("entries").put({ path: "/big.bin", kind: "file", ref: "/big.bin", created: 1, updated: 1, size: big.size, rev: 0, fid: big.fid, ident: big.fid, migrated: true, sha256: big.sha256, fetch: big.sha256, remote: true, nkey: "/\u0000big.bin" }); tx.oncomplete = res; tx.onerror = () => no(tx.error); });
+    const urls = cb.stats.urls;
+    await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq + 1 });
+    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchFinal:${big.fid}`))?.why === "too large to sync" && (await b.stat("/big.bin")).fetch === undefined && (await b.stat("/big.bin")).remote), "download checks: a size past 95 MiB set apart, too large to sync (listed, still remote)");
+    check(cb.stats.urls === urls, "download checks: …with no URL asked for");
+  } finally {
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadStale() {
+  // (C5, a GET held open: a local overwrite meanwhile: the fetched bytes are discarded, the local ones kept; a rename
+  // meanwhile: installed at the new path)
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    await ctl("set", { set: { holdGet: true } });
+    await a.create("/s.bin", { content: bytes(2000, 1) });
+    await a.create("/r.bin", { content: bytes(2000, 2) });
+    check(await until(() => settled(a, ca)), "download stale: up");
+    await seen(b, cb, "/r.bin");
+    check(await until(async () => (await ctl("log")).http.filter((h) => h.files).length >= 1), "download stale: a GET held");
+    const mine = bytes(10, 3);
+    await b.write("/s.bin", mine);
+    await b.rename("/r.bin", "/r2.bin");
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    check(await until(async () => cb.stats.installed + cb.stats.stale >= 2, 10_000), "download stale: both fetches answered: " + J({ installed: cb.stats.installed, stale: cb.stats.stale }));
+    check(sameBytes(await b.contents(await b.stat("/s.bin")), mine) && !(await b.stat("/s.bin")).remote, "download stale: the local overwrite kept; the download discarded");
+    check(cb.stats.stale === 1 && sameBytes(await b.contents(await b.stat("/r2.bin")), bytes(2000, 2)), "download stale: the renamed one installed at its new path");
+  } finally {
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadBudget() {
+  // (L1: a 429 on asking for a URL pauses the whole queue, durably, until retry_after; nothing asked meanwhile)
+  const clock = fakeClock();
+  const keep = { ...W.CLIENT };
+  // (one lane: the 429 is the first URL asked for, nothing else in flight beside it)
+  W.CLIENT.downloadsAtOnce = 1;
+  const { a, b, ca, cb } = await twoDevices({ clock });
+  try {
+    await ctl("set", { set: { fakeHttp: [{ method: "GET", path: "/api/sync/v1/blob/", status: 429, body: { error: "rate", retry_after: 600_000 }, times: 1 }] } });
+    await a.create("/q1.bin", { content: bytes(1000, 1) });
+    await a.create("/q2.bin", { content: bytes(1000, 2) });
+    check(await until(() => settled(a, ca)), "download budget: up");
+    await seen(b, cb, "/q2.bin");
+    const ns = nsOf(cb);
+    check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchPause`))?.until > clock.now()), "download budget: the queue paused, durably");
+    const asked = cb.stats.urls;
+    await clock.advance(300_000);
+    await sleep(300);
+    check(cb.stats.urls === asked && (await b.stat("/q1.bin")).remote && (await b.stat("/q2.bin")).remote, "download budget: nothing asked during the pause: " + J({ asked, urls: cb.stats.urls, installed: cb.stats.installed }));
+    await clock.advance(300_001);
+    check(await until(async () => !(await b.stat("/q1.bin")).remote && !(await b.stat("/q2.bin")).remote), "download budget: resumed at its end; both installed: " + J({ urls: cb.stats.urls, installed: cb.stats.installed, failed: cb.stats.fetchFailed, debug: cb.debug() }));
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function downloadStale2() {
+  // (C5, the rest, each with the GET held open: a newer remote write (the older fetch discarded, the newer one
+  // installed); Trash (installed into the trashed entry); a remove and a new file at the same path (the new one's
+  // bytes its own, the removed one's installed in Trash))
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    await ctl("set", { set: { holdGet: true } });
+    await a.create("/n.bin", { content: bytes(1500, 1) });
+    await a.create("/t.bin", { content: bytes(1500, 2) });
+    await a.create("/p.bin", { content: bytes(1500, 3) });
+    check(await until(() => settled(a, ca)), "download stale 2: up");
+    await seen(b, cb, "/p.bin");
+    check(await until(async () => (await ctl("log")).http.filter((h) => h.files).length >= 1), "download stale 2: a GET held");
+    const newest = bytes(1600, 4);
+    await a.write("/n.bin", newest);
+    check(await until(() => settled(a, ca)), "download stale 2: A's newer write up");
+    for (let i = 0; i < 30 && (await b.stat("/n.bin")).sha256 !== (await a.stat("/n.bin")).sha256; i++) { await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    const tb = await b.remove("/t.bin");
+    const pOld = await b.stat("/p.bin");
+    const pTrash = await b.remove("/p.bin");
+    const pNew = await b.create("/p.bin", { content: bytes(10, 5) });
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    check(await until(async () => !(await b.stat("/n.bin")).remote && !(await b.stat(tb.path))?.remote && !(await b.stat(pTrash.path))?.remote, 20_000), "download stale 2: every fetch answered: " + J({ installed: cb.stats.installed, stale: cb.stats.stale }));
+    check(sameBytes(await b.contents(await b.stat("/n.bin")), newest), "download stale 2: a newer remote write meanwhile: the newer bytes installed, never the older");
+    check(sameBytes(await b.contents(await b.stat(tb.path)), bytes(1500, 2)) && (await b.stat(tb.path)).trashed, "download stale 2: put in Trash meanwhile: installed there");
+    check(sameBytes(await b.contents(await b.stat("/p.bin")), bytes(10, 5)) && (await b.stat("/p.bin")).fid === pNew.fid, "download stale 2: a new file at the removed one's path keeps its own bytes");
+    check((await b.stat(pTrash.path))?.fid === pOld.fid && sameBytes(await b.contents(await b.stat(pTrash.path)), bytes(1500, 3)), "download stale 2: the removed one's bytes installed in Trash, by its identity");
+  } finally {
+    await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+// ---- step 4: the rebuild (D6, D7 r2; plan-sync-rebuilt r3 tests 14-19)
+
+/** The live state a failed pass must leave exactly as it was (D6 r4): entries, outbox, pins, pending, and the
+ * namespace's cursor, watermark, active generation, next dseq and outbox totals. */
+async function liveState(w, ns) {
+  const meta = {};
+  for (const k of ["cursor", "scanned", "indexGen", "dseq", "outbox", "journal"]) meta[k] = await metaGet(w.ws, `sync:${ns}:${k}`);
+  return J({ entries: await all(w.ws, "entries"), outbox: await all(w.ws, "outbox"), pins: await all(w.ws, "pins"), pending: await all(w.ws, "pending"), meta });
+}
+/** The prefixes of syncIndex's generations present (at most two, D6 r3). */
+async function generations(w) {
+  return [...new Set((await keys(w.ws, "syncIndex")).map((k) => k[0]))];
+}
+
+async function rebuildAfterRefusal() {
+  // (test 14's shape, on a per-op refusal: the rebuild runs before anything else is sent, announces through =
+  // server_next - 1, and resumes; later ops are accepted)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild: synced");
+  await stop(c0);
+  const f = await w.create("/gone.txt", { content: "bytes gone" });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").delete(f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(() => c.stats.rebuildPasses >= 1 && !c.debug().halted && c.status.state === "synced", 20_000), "rebuild: refused, rebuilt and resumed: " + J({ passes: c.stats.rebuildPasses, phase: c.stats.rebuildPhase, status: c.status }));
+    const ns = nsOf(c);
+    const lg = await ctl("log");
+    const welcome = lg.got.find((m) => m.t === "welcome");
+    check(lg.rebuilt.length === 1 && lg.rebuilt[0].through >= 1, "rebuild: one announce, through = server_next - 1: " + J(lg.rebuilt));
+    check(!(await metaGet(w.ws, `sync:${ns}:rebuild`)) && !(await metaGet(w.ws, `sync:${ns}:pass`)), "rebuild: the flag and the pass cleared");
+    check((await metaGet(w.ws, `sync:${ns}:floor`)) === lg.rebuilt[0].through, "rebuild: the acknowledged floor recorded");
+    check((await generations(w)).length <= 2 && (await metaGet(w.ws, `sync:${ns}:indexGen`)) >= 1, "rebuild: the new generation active, at most two present: " + J(await generations(w)));
+    check(!!(await w.stat("/gone.txt")), "rebuild: the refused file kept here");
+    await w.mkdir("/later");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/later")), "rebuild: sending resumed, a later op accepted");
+    void welcome;
+  } finally {
+    await stop(c);
+  }
+}
+
+async function rebuildRate() {
+  // (test 15: `rate` on rebuilt: halted and said; retried at retry_after; no op sent meanwhile)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild rate: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  await w.mkdir("/r1");
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("set", { set: { rebuilt: [{ code: "rate", detail: { message: "slow down", retry_after: 1500 } }] } });
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(() => (c.status.reason ?? "").includes("wait")), "rebuild rate: halted, the foot says why: " + J(c.status));
+    check(opsMessages(await ctl("log")).length === 0, "rebuild rate: no op sent while halted");
+    check(await until(async () => (await ctl("log")).rebuilt.length === 2 && (await settled(w, c)), 15_000), "rebuild rate: retried after retry_after, acked, resumed: " + J((await ctl("log")).rebuilt));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function rebuildCrashAfterAnnounce() {
+  // (test 16: a crash after announce is recorded, before the ack: the next start sends rebuilt again and converges)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild crash: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("set", { set: { rebuilt: [{ hold: true }] } });
+  await ctl("log", { reset: true });
+  const c1 = viewClient(w);
+  check(await until(async () => (await ctl("log")).rebuilt.length === 1), "rebuild crash: announced, the ack held");
+  const pass = await metaGet(w.ws, `sync:${ns}:pass`);
+  check(pass?.phase === "announce" && pass.through === (await ctl("log")).rebuilt[0].through, "rebuild crash: announce recorded with its through before it was sent: " + J(pass && { phase: pass.phase, through: pass.through }));
+  await stop(c1);
+  const t2 = Date.now();
+  const c2 = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 2 && (await settled(w, c2)), 15_000), "rebuild crash: the next start sends rebuilt again, with the same through, and converges: " + J((await ctl("log")).rebuilt.map((r) => r.through)));
+    // (exactly one more, from the next start, and none after it (r4: no second send while its answer is recorded))
+    await sleep(500);
+    const r = (await ctl("log")).rebuilt;
+    check(r.length === 2 && r[1].at >= t2 && r[0].through === r[1].through, "rebuild crash: …exactly one send after the restart, with the same through " + J(r.map((x) => ({ through: x.through, afterRestart: x.at - t2 }))));
+  } finally {
+    await ctl("release");
+    await stop(c2);
+  }
+}
+
+/** An obligation to rebuild, recorded (as a refusal records it), and the log reset: a client started next rebuilds. */
+async function rebuildReady(what) {
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), `${what}: synced`);
+  const ns = nsOf(c0);
+  await stop(c0);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  return w;
+}
+
+async function rebuildAckWindow() {
+  // (r4: the driver run again (twice) while the announce's answer is being recorded, as a page or a wake can: it finds
+  // the announce still pending and sends nothing; one `rebuilt`, and the pass converges)
+  const w = await rebuildReady("rebuild ack window");
+  let ran = 0;
+  W.REBUILD.before = async (phase, _ns, again) => { if (phase === "rebuilt-ack" && again && !ran++) { again(); again(); await sleep(200); } };
+  const c = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 1 && (await settled(w, c)), 15_000), "rebuild ack window: announced and converged");
+    await sleep(500);
+    const r = (await ctl("log")).rebuilt;
+    check(ran === 1 && r.length === 1 && c.debug().inflight === 0, `rebuild ack window: the driver run twice inside the answer, one rebuilt sent, nothing left pending (${J({ ran, sent: r.length, inflight: c.debug().inflight })})`);
+  } finally {
+    W.REBUILD.before = null;
+    await stop(c);
+  }
+}
+
+async function rebuildAckThrows() {
+  // (r4, no wedge: recording the answer throws; the pending announce is cleared all the same, the connection ends, and
+  // the next connection announces again and converges)
+  const w = await rebuildReady("rebuild ack throws");
+  let thrown = 0;
+  W.REBUILD.before = async (phase) => { if (phase === "rebuilt-ack" && !thrown++) throw new Error("recording the answer fails (test)"); };
+  const c = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 2 && (await settled(w, c)), 20_000), `rebuild ack throws: announced again on the next connection and converged (${J({ thrown, sent: (await ctl("log")).rebuilt.length, connects: c.stats.connects })})`);
+    await sleep(500);
+    const r = (await ctl("log")).rebuilt;
+    check(thrown >= 1 && r.length === 2 && r[0].through === r[1].through && c.stats.connects >= 2 && c.debug().inflight === 0, `rebuild ack throws: two sends (one a connection), the same through, nothing left pending (${J({ thrown, sent: r.length, connects: c.stats.connects, inflight: c.debug().inflight })})`);
+  } finally {
+    W.REBUILD.before = null;
+    await stop(c);
+  }
+}
+
+async function rebuildExclusive() {
+  // (r5, CORR-D11-R4-1: nothing else is sent on the connection while the announce's answer is held: an index_changed
+  // notice, the idle wake (the pulls) and a local change (ops) wait; once it is answered, the waiting pull runs, once)
+  for (const via of ["notice", "idle", "ops"]) {
+    const what = `rebuild exclusive (${via})`;
+    const w = await rebuildReady(what);
+    const clock = via === "idle" ? fakeClock() : undefined;
+    await ctl("set", { set: { rebuilt: [{ hold: true }] } });
+    const c = viewClient(w, clock ? { clock } : {});
+    try {
+      check(await until(async () => (await ctl("log")).rebuilt.length === 1), `${what}: announced, its answer held`);
+      const t1 = (await ctl("log")).rebuilt[0].at, d0 = c.stats.deferred, r0 = c.stats.resumed;
+      if (via === "notice") {
+        const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/theirs", kind: "folder", fid: "00000000000000b1" }] });
+        await ctl("notice", { head: r.ack.ops[0].seq });
+      }
+      if (via === "idle") await clock.advance(W.CLIENT.idlePullMs + 1000);
+      if (via === "ops") await w.mkdir("/mine");
+      await sleep(800);
+      const during = (await ctl("log")).sent.filter((m) => m.at >= t1 && m.t !== "rebuilt").map((m) => m.t);
+      const waited = via === "ops" || c.stats.deferred > d0;
+      check(during.length === 0 && waited, `${what}: nothing else sent while the answer is held (${J({ sent: during, deferred: c.stats.deferred - d0 })})`);
+      await ctl("release");
+      check(await until(async () => settled(w, c), 15_000), `${what}: answered, and converged`);
+      const after = (await ctl("log")).sent.filter((m) => m.at >= t1 && m.t !== "rebuilt").map((m) => m.t);
+      const ran = via === "ops" ? after.includes("ops") && !!(await w.stat("/mine")) : c.stats.resumed - r0 === 1 && after.includes("pull_index");
+      check(ran && (via !== "notice" || !!(await w.stat("/theirs"))), `${what}: what waited ran after the answer${via === "ops" ? "" : ", the pull resumed once"} (${J({ resumed: c.stats.resumed - r0, after })})`);
+    } finally {
+      await ctl("release");
+      await stop(c);
+    }
+  }
+}
+
+async function rebuildCounter() {
+  // (test 19, CORR-REBUILT-1: done services n0; a refusal (n0 + 1) recorded during view, during retire, before the
+  // announce, and during the held ack: the ack records the floor, the flag stays set, another pass runs, and its
+  // announce is acked; n0 + 1 is never cleared unserviced)
+  for (const at of ["view-page", "retire-page", "announce", "ack"]) {
+    await account();
+    const w = await fresh();
+    const c0 = viewClient(w);
+    check(await until(() => settled(w, c0)), `rebuild counter (${at}): synced`);
+    const ns = nsOf(c0);
+    await stop(c0);
+    await w.mkdir("/x");
+    const bump = () => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await bump();
+    const n0 = (await metaGet(w.ws, `sync:${ns}:rebuild`)).n;
+    let fired = false;
+    W.REBUILD.before = async (phase) => { if (!fired && phase === at) { fired = true; await bump(); } };
+    await ctl("set", { set: { rebuilt: at === "ack" ? [{ hold: true }] : [] } });
+    await ctl("log", { reset: true });
+    const c = viewClient(w);
+    try {
+      if (at === "ack") {
+        check(await until(async () => (await ctl("log")).rebuilt.length === 1), `rebuild counter (${at}): announced, ack held`);
+        await bump();
+        fired = true;
+        await ctl("release");
+      }
+      check(await until(async () => (await settled(w, c)) && !(await metaGet(w.ws, `sync:${ns}:rebuild`)), 20_000), `rebuild counter (${at}): converged, the flag cleared only by the pass that serviced it: ` + J({ passes: c.stats.rebuildPasses, phase: c.stats.rebuildPhase, rebuilt: (await ctl("log")).rebuilt.length }));
+      check(fired && c.stats.rebuildPasses >= 2 && (await ctl("log")).rebuilt.length >= 2, `rebuild counter (${at}): n0 = ${n0} serviced, then n0 + 1 by another pass and its own announce: ` + J({ passes: c.stats.rebuildPasses, rebuilt: (await ctl("log")).rebuilt.length }));
+    } finally {
+      W.REBUILD.before = null;
+      await ctl("release");
+      await stop(c);
+    }
+  }
+}
+
+async function rebuildFailedPass() {
+  // (D6 r4: a mismatched n during log and during capture: no live entry, record, pin, watermark or cursor changed,
+  // compared before and after; the pass's generations go to the cleanup list, and the next pass completes)
+  for (const at of ["log", "capture"]) {
+    await account();
+    const w = await fresh();
+    const c0 = viewClient(w);
+    check(await until(() => settled(w, c0)), `failed pass (${at}): synced`);
+    const ns = nsOf(c0);
+    await stop(c0);
+    await w.create("/keep.txt", { content: "k" });
+    await w.mkdir("/kd");
+    // (records made, undecided: the replaced prefix a capture would read)
+    await new W.Outbox(w, await W.currentLease(w)).scan();
+    const bump = () => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await bump();
+    let before = null, after = null, fired = false;
+    W.REBUILD.before = async (phase) => {
+      if (phase === "log" && !before) before = await liveState(w, ns);
+      if (!fired && phase === at) { fired = true; await bump(); }
+      // (the failed pass's done has run, its generations cleaned: the next pass is at its log)
+      if (fired && phase === "log" && before && !after && c.stats.rebuildPasses >= 2) after = await liveState(w, ns);
+    };
+    // (assigned before the hook can run: the client's first phase comes after its connection)
+    let c = null;
+    c = viewClient(w);
+    try {
+      check(await until(() => !!after, 20_000), `failed pass (${at}): the pass failed its compare-and-swap, another began`);
+      check(before === after, `failed pass (${at}): the live state exactly as it was`);
+      check(await until(async () => (await settled(w, c)) && !(await metaGet(w.ws, `sync:${ns}:rebuild`)), 20_000), `failed pass (${at}): the next pass completes`);
+      check((await generations(w)).length <= 2, `failed pass (${at}): at most two generations: ` + J(await generations(w)));
+    } finally {
+      W.REBUILD.before = null;
+      await stop(c);
+    }
+  }
+}
+
+async function rebuildBehind() {
+  // (D6: local behind the server, as a restored older copy: a second workspace with the first one's device, its own
+  // edits at dseqs the server decided for other ops.  welcome's next_dseq is past them: halted, rebuilt; the
+  // replaced records' identities reissued at fresh dseqs from server_next, each once; the server's tree listed here)
+  await account();
+  const w1 = await fresh();
+  const c1 = viewClient(w1);
+  check(await until(() => settled(w1, c1)), "behind: the first copy synced");
+  for (let i = 1; i <= 5; i++) await w1.mkdir(`/a${i}`);
+  check(await until(() => settled(w1, c1)), "behind: its five folders up");
+  const ns = nsOf(c1);
+  await stop(c1);
+  const nm = names();
+  let w2 = await W.Workspace.open(nm);
+  w2.close();
+  await new Promise((ok, no) => { const r = indexedDB.open(nm.name); r.onsuccess = () => { const db = r.result; const tx = db.transaction("meta", "readwrite"); tx.objectStore("meta").put(w1.device, "device"); tx.oncomplete = () => { db.close(); ok(); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); });
+  w2 = await W.Workspace.open(nm);
+  used.push(w2);
+  check(w2.device === w1.device, "behind: the older copy has the same device");
+  const ob = new W.Outbox(w2, await W.switchTo(w2, ns));
+  await ob.begin(await w2.lastSeq());
+  const f = await w2.create("/mine.txt", { content: "mine" });
+  await w2.mkdir("/mine-d");
+  await ob.scan();
+  check((await ob.records()).map((r) => r.dseq).join() === "1,2", "behind: its own records at dseqs 1 and 2 (the server's are other ops)");
+  await ctl("log", { reset: true });
+  const c2 = viewClient(w2);
+  try {
+    check(await until(async () => (await settled(w2, c2)) && c2.stats.rebuildPasses >= 1, 30_000), "behind: halted, rebuilt, resumed: " + J({ passes: c2.stats.rebuildPasses, phase: c2.stats.rebuildPhase, error: c2.stats.rebuildError, status: c2.status }));
+    const { mine } = await serverOps(w2);
+    const adopts = mine.filter((o) => o.fid === f.fid), dirs = mine.filter((o) => o.path === "/mine-d" && o.op === "mkdir");
+    check(adopts.length === 1 && adopts[0].op === "adopt" && adopts[0].dseq >= 6, "behind: the file reissued once, as an adopt from server_next: " + J(adopts.map((o) => [o.op, o.dseq])));
+    check(dirs.length === 1 && dirs[0].dseq >= 6, "behind: the folder reissued once: " + J(dirs.map((o) => o.dseq)));
+    const sent = (await ctl("log")).sent.filter((m) => m.t === "ops").flatMap((m) => m.dseqs);
+    check(sent.every((d) => d >= 6) && new Set(sent).size === sent.length, "behind: nothing sent below server_next, no dseq twice: " + J(sent));
+    const here = (await w2.list("/")).map((e) => e.path).sort();
+    check(["/a1", "/a2", "/a3", "/a4", "/a5", "/mine-d", "/mine.txt"].every((p) => here.includes(p)) && !here.some((p) => / \(2\)/.test(p)), "behind: the server's folders listed here, its own kept, no copies: " + J(here));
+    await w2.mkdir("/after");
+    check(await until(async () => (await settled(w2, c2)) && (await serverOps(w2)).mine.some((o) => o.path === "/after")), "behind: a later edit accepted");
+  } finally {
+    await stop(c2);
+  }
+}
+
+// ---- step 4: the first sync's adoption (C3)
+
+async function firstSync() {
+  // (a tree made before sync: each identity up once, adopted or made; one in Trash as adopt then remove; one inside a
+  // folder in Trash not adopted; the folder before what is in it)
+  await account();
+  const w = await fresh();
+  await w.mkdir("/p");
+  const f = await w.create("/p/f.txt", { content: "ff" });
+  const g = await w.create("/g.txt", { content: "gg" });
+  const nb = await w.create("/n.ipynb");
+  const t = await w.create("/t.txt", { content: "tt" });
+  await w.remove("/t.txt");
+  await w.mkdir("/q");
+  const inq = await w.create("/q/in.txt", { content: "in" });
+  await w.remove("/q");
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync: settled: " + J(c.status));
+    const { mine } = await serverOps(w);
+    const by = (id) => mine.filter((o) => o.fid === id || o.ref === id);
+    const p = await w.stat("/p");
+    check(by(p.fid).length === 1 && by(p.fid)[0].op === "mkdir", "first sync: the folder made once: " + J(by(p.fid).map((o) => o.op)));
+    check(by(f.fid).length === 1 && by(f.fid)[0].op === "adopt" && by(f.fid)[0].parent === p.fid && by(f.fid)[0].dseq > by(p.fid)[0].dseq, "first sync: its file adopted once, into it by identity, after it");
+    check(by(g.fid).length === 1 && by(nb.ref).length === 1, "first sync: a root file and a notebook adopted once each");
+    check(J(by(t.fid).map((o) => o.op)) === J(["adopt", "remove"]), "first sync: one in Trash: adopted where it was, then removed: " + J(by(t.fid).map((o) => o.op)));
+    check(by(inq.fid).length === 0, "first sync: inside a folder in Trash: not adopted");
+    const puts = (await ctl("log")).http.filter((h) => h.method === "PUT" && h.status === 201).length;
+    check(puts >= 3, "first sync: the files' bytes uploaded: " + puts);
+    const ns = nsOf(c);
+    check(!(await metaGet(w.ws, `sync:${ns}:journal`)) && !(await metaGet(w.ws, `sync:${ns}:adopt`)), "first sync: the journal drained and dropped");
+    await w.mkdir("/later");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/later")), "first sync: then the scanner goes on");
+  } finally {
+    await stop(c);
+  }
+}
+
+async function firstSyncRace() {
+  // (C3: a final local write racing the closing transaction: in the journal or sent by the scan, exactly once)
+  await account();
+  const w = await fresh();
+  const f = await w.create("/r.txt", { content: "one" });
+  let wrote = false;
+  W.ADOPT.before = async (step) => { if (step === "close" && !wrote) { wrote = true; await w.write("/r.txt", "two"); } };
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync race: settled");
+    const { mine } = await serverOps(w);
+    const ops = mine.filter((o) => o.fid === f.fid);
+    const last = ops[ops.length - 1], now = (await w.stat("/r.txt")).sha256;
+    check(wrote && last?.sha256 === now, "first sync race: the server ends with the written bytes: " + J(ops.map((o) => [o.op, o.sha256?.slice(0, 6)])));
+    check(ops.filter((o) => o.sha256 === now).length === 1, "first sync race: …sent exactly once");
+  } finally {
+    W.ADOPT.before = null;
+    await stop(c);
+  }
+}
+
+async function firstSyncCollision() {
+  // (C3's last test: the cloud has /x; this device's first sync with its own /x: the cloud's is /x, this one /x (2),
+  // here as on the server)
+  await account();
+  const r = await ctl("probe", { ops: [{ dseq: 1, t: Date.now(), by: "person", op: "mkdir", path: "/x", kind: "folder", fid: "00000000000000c1" }] });
+  check(r.ack?.ops?.[0]?.seq, "first sync collision: the cloud has /x");
+  const w = await fresh();
+  const mine = await w.mkdir("/x");
+  const c = viewClient(w);
+  try {
+    check(await until(() => settled(w, c), 20_000), "first sync collision: settled");
+    const here = await w.stat("/x"), ours = (await w.list("/")).find((e) => e.fid === mine.fid);
+    check(here?.fid === "00000000000000c1" && ours?.path === "/x (2)", "first sync collision: the cloud's /x here, this device's at /x (2): " + J({ x: here?.fid, ours: ours?.path }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function rebuildCapUnsupported() {
+  // (astra's CORR-PR65-IMPL-2: the server's refusal limit (its exact answer, `invalid` "too many refused ops"), then
+  // the rebuild's announce to core's real server, which has no `rebuilt` ("unknown message"): no reset, so a stable,
+  // said halt, never a fabricated ack; nothing sent, no rebuild again, across a reconnect too)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "cap, no reset: synced");
+  await stop(c0);
+  await w.mkdir("/capped");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { rebuiltReal: true, fakeOps: [{ code: "invalid", detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  const c = viewClient(w);
+  try {
+    check(await until(() => (c.status.reason ?? "").includes("can't reset"), 20_000), "cap, no reset: halted, said: " + J(c.status));
+    const ns = nsOf(c);
+    await sleep(3000);
+    const lg = await ctl("log");
+    check(opsMessages(lg).length === 1 && lg.rebuilt.length === 1 && c.stats.rebuildPasses === 1, "cap, no reset: one announce, no op sent after it, no second rebuild (no loop): " + J({ ops: opsMessages(lg).length, rebuilt: lg.rebuilt.length, passes: c.stats.rebuildPasses }));
+    check((await metaGet(w.ws, `sync:${ns}:rebuild`))?.why === "invalid" && (await all(w.ws, "outbox")).length === 1, "cap, no reset: the obligation kept, the record kept (nothing cleared by a made-up ack)");
+    await stop(c);
+    await ctl("log", { reset: true });
+    const c2 = viewClient(w);
+    check(await until(() => (c2.status.reason ?? "").includes("can't reset"), 20_000), "cap, no reset: a reconnect finds it halted");
+    await sleep(2500);
+    const lg2 = await ctl("log");
+    check(opsMessages(lg2).length === 0 && lg2.rebuilt.length === 0 && c2.stats.rebuildPasses === 0, "cap, no reset: …and neither rebuilds nor sends: " + J({ ops: opsMessages(lg2).length, rebuilt: lg2.rebuilt.length, passes: c2.stats.rebuildPasses }));
+    await stop(c2);
+  } finally {
+    await ctl("set", { set: { rebuiltReal: false } });
+  }
+}
+
+async function rebuildRefusalCoreServer() {
+  // (astra: an ordinary local rebuild against core's server (no `rebuilt`): a plain refusal needs no reset, so the
+  // pass completes on "unknown message" and sending resumes, once)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "core rebuild: synced");
+  await stop(c0);
+  const f = await w.create("/gone2.txt", { content: "bytes gone" });
+  await new Promise((ok, no) => { const tx = w.ws.transaction("fileBytes", "readwrite"); tx.objectStore("fileBytes").delete(f.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { rebuiltReal: true } });
+  const c = viewClient(w);
+  try {
+    check(await until(() => c.stats.rebuildPasses >= 1 && c.status.state === "synced", 20_000), "core rebuild: refused, rebuilt, resumed: " + J({ passes: c.stats.rebuildPasses, status: c.status }));
+    await sleep(2000);
+    check(c.stats.rebuildPasses === 1 && (await ctl("log")).rebuilt.length === 1, "core rebuild: one pass, one announce (no loop)");
+    await w.mkdir("/after-core");
+    check(await until(async () => (await settled(w, c)) && (await serverOps(w)).mine.some((o) => o.path === "/after-core")), "core rebuild: a later op accepted");
+  } finally {
+    await ctl("set", { set: { rebuiltReal: false } });
+    await stop(c);
+  }
+}
+
+async function scanAtomic() {
+  // (the scan writes its records and the watermark in one transaction: sampled in ONE transaction throughout a
+  // create-and-send cycle, the watermark never passes an op whose record isn't there, or wasn't there before (decided).
+  // The client's side of the lost-ack diagnosis: only a reader using two transactions could see otherwise)
+  await account();
+  const w = await fresh();
+  const c = client(w);
+  check(await until(() => c.status.state === "synced"), "scan atomic: synced");
+  const ns = nsOf(c), seen = new Set(), bad = [];
+  let samples = 0, halt = false;
+  const sample = () => new Promise((ok, no) => {
+    const tx = w.ws.transaction(["meta", "outbox", "ops"]);
+    const m = tx.objectStore("meta").get(`sync:${ns}:scanned`), o = tx.objectStore("outbox").getAll(), ops = tx.objectStore("ops").getAll();
+    tx.oncomplete = () => {
+      const W = m.result ?? 0;
+      for (const r of o.result) seen.add(r.lseq);
+      for (const op of ops.result) if (op.seq <= W && sendable([op]).length && !seen.has(op.seq)) bad.push([op.seq, op.path, W]);
+      samples++;
+      ok();
+    };
+    tx.onerror = () => no(tx.error);
+  });
+  const sampler = (async () => { while (!halt) { await sample(); await sleep(1); } })();
+  for (let i = 0; i < 5; i++) await w.create(`/atomic${i}.txt`, { content: "a" + i });
+  await w.mkdir("/atomic-folder");
+  const ok = await until(() => settled(w, c), 15_000);
+  halt = true;
+  await sampler;
+  // (an op whose record came and went between two samples is decided: the server has it)
+  const { mine } = await serverOps(w);
+  const decided = new Set(mine.map((o) => o.path));
+  const missed = bad.filter(([, path]) => !decided.has(path));
+  check(ok && samples > 20 && missed.length === 0, `scan atomic: in ${samples} one-transaction samples, the watermark never passed an op without its record (${missed.length}: ${J(missed.slice(0, 3))})`);
+  await stop(c);
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+
+// ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
+
+/** Puts in pages of `n` a transaction (seeding). */
+async function seed(db, store, values, keyOf = null, n = 20_000) {
+  for (let i = 0; i < values.length; i += n) {
+    await new Promise((ok, no) => {
+      const tx = db.transaction(store, "readwrite"), st = tx.objectStore(store);
+      for (const v of values.slice(i, i + n)) keyOf ? st.put(v, keyOf(v)) : st.put(v);
+      tx.oncomplete = ok;
+      tx.onerror = () => no(tx.error);
+    });
+  }
+}
+const metaPutRaw = (db, k, v) => seed(db, "meta", [v], () => k);
+const id16 = (lead, i) => lead + i.toString(16).padStart(15, "0");
+
+/** IndexedDB requests counted per transaction, tagged with the phase running (`window.__phase`), while measuring. */
+function countRequests() {
+  const counts = new WeakMap(), out = [], undo = [];
+  const txOf = (x) => x?.transaction ?? x?.objectStore?.transaction ?? x?.source?.transaction ?? x?.source?.objectStore?.transaction;
+  const note = (self) => {
+    const tx = txOf(self);
+    if (!tx) return;
+    if (!counts.has(tx)) {
+      counts.set(tx, { n: 0, phase: window.__phase ?? "" });
+      tx.addEventListener("complete", () => { const c = counts.get(tx); if (c.phase) out.push(c); });
+    }
+    counts.get(tx).n++;
+  };
+  const wrap = (proto, names) => { for (const name of names) { const f = proto[name]; undo.push(() => (proto[name] = f)); proto[name] = function (...a) { note(this); return f.apply(this, a); }; } };
+  wrap(IDBObjectStore.prototype, ["get", "getAll", "getAllKeys", "getKey", "put", "add", "delete", "count", "openCursor", "openKeyCursor", "clear"]);
+  wrap(IDBIndex.prototype, ["get", "getAll", "getAllKeys", "getKey", "count", "openCursor", "openKeyCursor"]);
+  wrap(IDBCursor.prototype, ["continue", "advance"]);
+  return { out, stop: () => undo.forEach((f) => f()) };
+}
+
+async function scaleRebuild() {
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0), 20_000), "scale: synced");
+  const ns = nsOf(c0);
+  await stop(c0);
+  const t0 = Date.now();
+  const gen = ((await metaGet(w.ws, `sync:${ns}:genNext`)) ?? (await metaGet(w.ws, `sync:${ns}:indexGen`)) ?? 0) + 1;
+  const gp = W.genPrefix(ns, gen), jp = W.journalPrefix(ns, gen), J0 = `${ns}#reissue#old`;
+  const now = Date.now(), SHA_A = "a".repeat(64), SHA_B = "b".repeat(64);
+  // (the staging index: 100,000 identities, 20 folders of 4,999 files)
+  const rows = [];
+  for (let k = 0; k < 20; k++) rows.push({ ns: gp, id: id16("3", k), path: `/S${k}`, key: `/S${k}`, parentKey: "/", kind: "folder", fid: id16("3", k), created: now, updated: now, by: "person", seq: k + 1 });
+  for (let i = 0; i < 99_980; i++) { const k = i % 20, p = `/S${k}/y${i}`; rows.push({ ns: gp, id: id16("1", i), path: p, key: p, parentKey: `/S${k}`, kind: "file", fid: id16("1", i), sha256: SHA_A, size: 1, created: now, updated: now, by: "person", seq: 100 + i }); }
+  await seed(w.ws, "syncIndex", rows);
+  rows.length = 0;
+  // (100,000 other identities here: 20 folders of 4,999 files, disjoint from the index's)
+  const ents = [];
+  for (let k = 0; k < 20; k++) ents.push({ path: `/L${k}`, kind: "folder", ref: null, created: now, updated: now, fid: id16("4", k), ident: id16("4", k), nkey: `/\u0000L${k}` });
+  for (let i = 0; i < 99_980; i++) { const k = i % 20, p = `/L${k}/x${i}`; ents.push({ path: p, kind: "file", ref: p, created: now, updated: now, size: 1, rev: 0, fid: id16("2", i), migrated: true, sha256: SHA_A, ident: id16("2", i), nkey: `/L${k}\u0000x${i}` }); }
+  await seed(w.ws, "entries", ents);
+  // (10,000 records below server_next, half of them with their echoes staged; an earlier committed journal's 100,000
+  // undrained records)
+  const recs = [];
+  for (let d = 1; d <= 10_000; d++) { const e = ents[20 + d]; recs.push({ ns, dseq: d, lseq: 0, id: e.ident, op: { dseq: d, t: now, by: "person", op: "write", path: e.path, kind: "file", fid: e.fid, sha256: SHA_B, size: 1 } }); }
+  await seed(w.ws, "outbox", recs);
+  const jrows = [];
+  for (let d = 1; d <= 5_000; d++) jrows.push({ ns: jp, id: "e:" + String(d).padStart(16, "0"), dseq: d, seq: d });
+  for (const e of ents) jrows.push({ ns: J0, id: e.ident, parent: "", name: e.path.split("/").pop(), kind: e.kind, ...(e.kind === "file" ? { sha256: SHA_A, size: 1 } : {}), trashed: false });
+  await seed(w.ws, "adoptJournal", jrows);
+  ents.length = 0; jrows.length = 0; recs.length = 0;
+  await metaPutRaw(w.ws, `sync:${ns}:dseq`, 10_001);
+  await metaPutRaw(w.ws, `sync:${ns}:outbox`, { count: 10_000, bytes: 0, charged: 0 });
+  await metaPutRaw(w.ws, `sync:${ns}:journal`, J0);
+  await metaPutRaw(w.ws, `sync:${ns}:genNext`, gen);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const n0 = (await metaGet(w.ws, `sync:${ns}:rebuild`)).n;
+  await metaPutRaw(w.ws, `sync:${ns}:pass`, { phase: "log", gen, n0, serverNext: 10_001, pages: { log: 0, capture: 0, view: 0, retire: 0, clean: 0 } });
+  await metaPutRaw(w.ws, `sync:${ns}:pass:cursor`, 1e12);
+  check(true, `scale: seeded in ${Math.round((Date.now() - t0) / 1000)} s`);
+  // (measured: requests per transaction, long tasks and heap, from done's commit to the announce)
+  const reqs = countRequests();
+  const longs = [];
+  const obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) if (window.__phase) longs.push(e.duration); });
+  try { obs.observe({ type: "longtask" }); } catch {}
+  globalThis.gc?.();
+  let heap0 = performance.memory?.usedJSHeapSize ?? 0, heapMax = heap0, pages = null;
+  const at = {};
+  W.REBUILD.before = async (phase) => {
+    at[phase] ??= Date.now();
+    if (phase === "view-page" || phase === "retire-page") { window.__phase = phase; heapMax = Math.max(heapMax, performance.memory?.usedJSHeapSize ?? 0); }
+    else if (phase === "announce") { window.__phase = ""; pages = (await W.passOf(w, ns))?.pages; }
+    else window.__phase = "";
+  };
+  await ctl("log", { reset: true });
+  const c = viewClient(w);
+  try {
+    check(await until(async () => opsMessages(await ctl("log")).length > 0, 900_000), "scale: the pass ran and sending resumed: " + J({ phase: c.stats.rebuildPhase, error: c.stats.rebuildError }));
+    const firstOps = opsMessages(await ctl("log"))[0];
+    const doneToResume = (firstOps.at - c.stats.rebuildDoneAt) / 1000;
+    check(pages?.view === 2000 && pages?.retire === 1100, "scale: exactly 2,000 view pages and 1,100 retire pages: " + J(pages));
+    const byPhase = (ph) => reqs.out.filter((x) => x.phase === ph).map((x) => x.n);
+    const vmax = Math.max(...byPhase("view-page")), rmax = Math.max(...byPhase("retire-page"));
+    check(vmax <= 400 && rmax <= 400, "scale: each transaction within 400 IndexedDB requests: " + J({ view: vmax, retire: rmax }));
+    const longest = Math.max(0, ...longs);
+    check(longest < 50, "scale: every long task under 50 ms: longest " + Math.round(longest) + " ms, " + longs.length + " over 50");
+    check(doneToResume <= 300, `scale: done to resume (the first ops message) ${doneToResume.toFixed(1)} s (at most 300 s)`);
+    const secs = (a, b) => (a && b ? +((b - a) / 1000).toFixed(1) : null);
+    check(true, "scale: figures " + J({ doneToResumeS: +doneToResume.toFixed(1), viewS: secs(at["view-page"], at["retire-page"]), retireS: secs(at["retire-page"], at.announce), announceToOpsS: secs(at.announce, firstOps.at), viewMaxRequests: vmax, retireMaxRequests: rmax, longestTaskMs: Math.round(longest), heapGrowthMiB: +((heapMax - heap0) / 2 ** 20).toFixed(1) }));
+  } finally {
+    W.REBUILD.before = null;
+    window.__phase = "";
+    reqs.stop();
+    obs.disconnect();
+    await stop(c);
+  }
+}
+const SCALE = { scaleRebuild };
 
 export async function run(only = "") {
-  for (const [name, f] of Object.entries(CASES)) {
+  // (the scale cases run only when named)
+  for (const [name, f] of Object.entries({ ...CASES, ...(only ? SCALE : {}) })) {
     if (only && !only.split(",").includes(name)) continue;
     window.progress = { name, checks: results.length };
     try {

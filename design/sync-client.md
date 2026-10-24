@@ -285,7 +285,7 @@ A held write is part of the view (C3). Its bytes are the file's current ones, so
   - If the current state is gone (no entry, or latest.after null: a forget or emptyTrash came first), no write is made and no identity is resurrected. The successor and held clear, its pins are released, and the deletion op goes as usual.
   - A renamed or moved current identity is allocated at its present path and parent.
 - **Collapse** (a save past the cap):
-  - `collapsed` is set to the previous latest seq, and at most PINS.collapseRelease (3) unowned pins with seq ≤ collapsed are released in that save's transaction. cleanPins releases the rest, begun after the save returns.
+  - `collapsed` is set to the previous latest seq, and at most PINS.collapseRelease (2) unowned pins with seq ≤ collapsed are released in that save's transaction. cleanPins releases the rest, begun after the save returns.
   - That cleanup is tagged with the save's namespace and lifecycle epoch (P1). In each slice's transaction it releases only unowned pins of that epoch or older, collapsed in that namespace. A run that starts after a later save, a reconnect, or sync turned off and on never takes an owned pin or one of a newer epoch.
   - If still over, the replaced bytes aren't kept apart: their pin is released (its record unpinned) and `sync:skipped` is noted.
   - A save that then fails for quota refuses the change whole: nothing is half-pinned.
@@ -315,7 +315,7 @@ A held write is part of the view (C3). Its bytes are the file's current ones, so
   - Every release that makes a version prunable (by confirmation, refusal, purge or collapse) marks its file due from its oldest, and the bytes bound to be checked again, in the same transaction, so the cleanup's cursor for that file never passes it by, and a file pushed past its count by releases after its due mark has gone is due again (astra's CORR-FB0-2). The backfill rewinds the cursor of a file already due; a file not due stays so (an idle file's versions are pruned on its next save, as before v5). A released version of a file deleted for good is deleted, never made prunable.
   - dropVersions and emptyTrash's version drops go from the last id they looked at, a key range, at most 400 requests a transaction, so they never read a page again (astra's CORR-E5C-3). One that has reached a finite upper bound (the fence, or a file's newest kept) stops there, before making a range from it (astra's round 2).
 - **CI assertions, not a bench** (decided with @sagebrush):
-  - In the 50,000-op tail, each plain save makes at most 40 IndexedDB calls, counted by an instrumented store, and one that collapses at most 64 (measured exactly: 33 and 59, so a change shows at once; PINS.collapseRelease 3 keeps the collapsing save five under its bound). Each kind's figures are the same as on a workspace with no tail.
+  - In the 50,000-op tail, each plain save makes at most 40 IndexedDB calls, counted by an instrumented store, and one that collapses at most 64 (measured exactly: 38 and 60, so a change shows at once; PINS.collapseRelease 2 keeps the collapsing save four under its bound, with D11's read of the large-move record in each of a save's five transactions on entries). Each kind's figures are the same as on a workspace with no tail.
   - Each slice of the cleanup makes at most 400 requests, with the tail and without. More than 32,000 pins of collapsed writes drain in one cleanup, each slice under 50 ms, with no reload or save, and a newer epoch's pins are kept.
   - The longest task stays under 50 ms, as the browser's long-task observer reports it (the check requires the observer).
   - A cleanup page and a decision on an identity with many pins stay bounded too.
@@ -551,6 +551,361 @@ It holds that reservation until its last large reference is dropped. The same ho
     - A blocked path schedules its own wake-up at its persisted deadline: a check timer, a storage_full pause (cleared durably once past) or the index timer.
     - A pull is asked for, whatever asks for it (a page, an ack, a reconnect), only past the index timer.
   - **Noted for step 4** (astra): a refusal's removal and its rebuild flag are two transactions. Step 4's recovery must persist the obligation with the decision, or rebuild unconditionally on start.
+
+### Step 4 plan delta (D5 to D10, D10 r3)
+
+@sagebrush accepted these before the code (Oct 23). They come from what step 3 and its reviews found. The rest of step 4 is built as C3, L1 and C5 say. r2 answers the design reviews of caa35d94 and 8b164277: daybreak3's CORR-PR65-1 to 3 and LIMIT-PR65-1 and 2, and astra's A1 (the same as daybreak3's CORR-PR65-2), A2, and the note on D8b. r3 ("D6 r3" below, which amends D6 r2 where they differ) answers the reviews of 198826c6: daybreak3's LIMIT-PR65-3 and CORR-PR65-4, and astra's CORR-PR65-A3. r4 ("D6 r4" below, amending D6 r2 and r3 where they differ) answers the reviews of 69ad3af2: daybreak3's CORR-PR65-5 and astra's CORR-PR65-A4. r5 ("D6 r5") answers the reviews of 4772b3a0: daybreak3's LIMIT-PR65-4, and astra's note that echo confirmations must wait for the commit. r6 ("D6 r6") answers daybreak3's narrowed LIMIT-PR65-4 on c8a94c26: the timed fixture and its exact page counts.
+
+**D5 (r2). Two cursors** (daybreak3's CORR-PR65-1).
+- `apply_after` is the durable confirmed cursor (`sync:<ns>:cursor`). Only ops with $\text{seq} > \text{apply\_after}$ are reduced into `syncIndex`, as one contiguous suffix, the suffix and the cursor committed in one transaction (C3).
+- `request_after` is what `hello.index_after` and `pull_index.after` ask from. It may be lower than `apply_after`, to just before the oldest record accepted and awaiting its echo.
+- Ops with $\text{seq} \le \text{apply\_after}$ in an answer are checked for order (strictly increasing) and used only to match this device's echoes (`sameOp`). They are never reduced, and they never move `apply_after`.
+- Test: an old echo below the cursor, with a later rename and write of the same identity above it. The replayed prefix confirms the record and leaves the confirmed state unchanged.
+
+**D6 (r2). The rebuild.** It runs when `sync:<ns>:rebuild` is set, before anything is sent. It is a sequence of phases recorded in `sync:<ns>:rebuild` (`{why, phase, gen, at, ...}`). Every phase is a series of transactions, each writing its own progress with its effect. Sending is halted until `done`.
+
+*Two dseq values, never confused* (daybreak3's CORR-PR65-2), recorded once, in one transaction, at the rebuild's start:
+- `server_next` = `welcome.next_dseq` of the connection that found the divergence: the server's decided prefix. Only records with $\text{dseq} < \text{server\_next}$ can have been decided by the server.
+- `alloc_floor` = $\max(\text{local next dseq}, \text{server\_next})$. The namespace's next dseq is set to it, and only rises.
+- Records with $\text{dseq} \ge \text{server\_next}$ keep their dseq and are sent in order, from `server_next`.
+- If a dseq in $[\text{server\_next}, \text{local next})$ has no local record, the server is waiting for a dseq this device can't produce, because its record was removed on a decision the server no longer has. A client can never skip a dseq, so this is a halt the person is told about ("this device's queue can't continue here; Delete my synced data to start again"). It is never a skip. It can't happen while the server keeps its decisions. It is tested by a rewritten `welcome`.
+- `why: "invalid"` (the server's 10,000-refusal limit) can't be rebuilt away: the server keeps refusing that device. It is the same person-told halt. An open question for the server (@sagebrush-auth): a way to reset a device's refusal count after a rebuild.
+
+*Phases:*
+1. **`stage`**: one transaction draws a fresh index generation `gen`. The staging confirmed index lives in `syncIndex` under the key prefix `[ns + "#" + gen]`, empty by construction because no row has ever had that prefix (daybreak3's LIMIT-PR65-1). Nothing is cleared to begin.
+2. **`log`**: the server's log, from seq 0, in pages (at most 1,000 ops and 1 MiB, L4).
+   - Each page is reduced into the staging index, and the rebuild's own cursor written, in one transaction.
+   - Echoes met on the way are matched to their records by `sameOp`, and a match confirms its record in that page's transaction.
+   - The live index and its cursor are untouched until `done`.
+3. **`capture`** (only when there are records with $\text{dseq} < \text{server\_next}$ still undecided: the replaced prefix) (daybreak3's CORR-PR65-3).
+   - Those records' identities, and each one's ancestors, are written to a **reissue journal**. It reuses `adoptJournal`'s store and `byParent` index under the prefix `[ns + "#reissue"]`, and records each identity's present local state: `{id, parent, name, kind, sha256, size, trashed}` or `gone`.
+   - It is captured as C3's first-sync adoption captures a tree: walk by identity, close at a finite boundary `W1`, replay $(W_0, W_1]$ in pages, so an edit made during the capture is in the journal or after `W1`, exactly once. Ops after `W1` are the scanner's.
+   - The capture also removes, a page at a time, each replaced record, with its pin handed to the journal record (C3: the journal owns its records' pins until they drain).
+   - Pages of at most 100 records, at most 400 IndexedDB requests a transaction (as `PINS.slice`).
+4. **`view`**: the union of the staging index's identities and the workspace entries' identities (`byIdent`), walked in key order, at most 100 identities and 400 requests a transaction, its position in the rebuild state. For each, the four-layer view is recomputed against the staging index and the difference applied to the entries.
+   - An entry the view no longer has is never deleted. It is kept, as a conflict copy if its path is taken, and listed.
+5. **`done`**, one transaction, which is a compare-and-swap on the obligation (astra's A2):
+   - the rebuild flag's `n` must still be the `n0` the rebuild started from. If it isn't, a refusal (or a divergence) was recorded meanwhile: `done` does nothing but start another pass, keeping its phases' results where they still hold. A new pass always starts from `stage`, with a fresh `gen`.
+   - Otherwise: the active index generation (`sync:<ns>:indexGen`) switches to `gen`; the live cursor is set to the rebuild's; the scan watermark is set to `W1` if a capture ran; and the flag is cleared.
+   Sending resumes, sending the records at or above `server_next`, then draining the reissue journal.
+6. **`clean`** (after `done`, not blocking sending): the old generation's rows are deleted from `syncIndex` a page at a time (at most 500 keys a transaction, by `getAllKeys` on its prefix), from a durable position.
+
+*The reissue journal drains* through the outbox as it has room, at fresh dseqs from `alloc_floor` up, diffed against the (now active) confirmed index. For each identity, in this order:
+- (a) top-down through `byParent` (parents before children):
+  - present locally and absent from the index: `mkdir` for a folder; `adopt` for a data file or document, which syncs as a create. Data files go with their bytes, uploaded first.
+  - present in both, but another parent or name: `rename`, its `parent` the folder's identity.
+  - another hash: `write`, its `base` the index's hash.
+  - trashed locally, not in the index's Trash: `remove`;
+- (b) then, deepest first, identities gone locally but present in the index: `forget`, person-only, as emptying Trash already sends.
+Each journal record goes once, retired by its echo or its refusal (C1). A refusal sets the flag again (D7), and the next rebuild starts from the same rules.
+
+*D6's invariants (r2):*
+- **No dseq is ever reused.**
+  - `alloc_floor` is written once, before any record is touched, and the next dseq only rises from it.
+  - Replaced records ($\text{dseq} < \text{server\_next}$) are removed in the transaction that moves their identities' state into the journal.
+  - Records at or above `server_next` keep their dseqs and are sent in order. Nothing is sent before `done`.
+- **No local edit is lost.**
+  - Every replaced record's identity, and its ancestors, are captured in the journal with their present state, at `W1`; ops after `W1` stay past the watermark for the scanner.
+  - Local entries are never deleted by the rebuild.
+  - A capture that can't fit the journal (more than the workspace's 100,000 entries can't occur) still pages, never truncates.
+- **Idempotent across a crash at every step.**
+  - Each transaction writes its effect with its position: a log page with its cursor, a capture page with its walk position or replay position, a view page with its key, a clean page with its key.
+  - The staging generation is never live until `done` switches to it in one transaction. A crash before then leaves the old index whole and the rebuild resumable from its recorded phase and position. A crash after then leaves only `clean` to finish.
+  - `server_next`, `alloc_floor`, `gen` and `W1` are written once and read thereafter.
+- **Bounds:**
+  - each transaction at most 1,000 ops and 1 MiB (log), or 100 records and 400 requests (capture, view), or 500 keys (clean);
+  - no array grows with the tree. The successors list isn't used by the rebuild.
+- **Tests:**
+  - a crash at every phase boundary and inside each phase's transaction (cut seams);
+  - local ahead of the server (server_next < local next);
+  - local behind (a restored older copy);
+  - a reset that kept its device;
+  - a stale prefix containing a folder create and move, a document create, a file write, and an emptied-Trash deletion;
+  - the scale: 100,000 confirmed entries and 10,000 pending records, asserting each transaction's request and record maxima. This runs against the reference server, seeded directly, since a real server's ops rate would take 50 minutes to make that log.
+  Each asserts no dseq sent twice or skipped, every local edit on the server once (or listed), and the local tree intact.
+
+**D6 r3: one lifecycle for a pass's resources** (daybreak3's LIMIT-PR65-3, CORR-PR65-4).
+
+- **A pass's resources are scoped to its generation `gen`:**
+  - its staging confirmed index, under `[ns + "#" + gen]` in `syncIndex`;
+  - its reissue journal, under `[ns + "#reissue#" + gen]` in `adoptJournal`.
+  Nothing a pass writes is visible to the client's view, the scanner or the sender until its `done` succeeds.
+- **`capture` no longer removes anything** (daybreak3's simpler option).
+  - It reads the replaced records: undecided records with $\text{dseq} < \text{server\_next}$, plus every record of a previous committed pass's journal not yet drained (C3: the journal is local intent, so a new rebuild replaces it too).
+  - It writes the pass's journal from the identities' present local state, closing at `W1` as the first-sync capture does.
+  - The replaced records stay where they are, with their pins, until the pass commits. Sending is halted throughout, so they are never sent meanwhile.
+- **`done`** is one transaction with the compare-and-swap (D7 r2):
+  - **Success:**
+    - the active index generation becomes `gen`, and the previous active generation is appended to the cleanup list `sync:<ns>:clean`;
+    - the pass is marked committed, and the scan watermark is set to `W1`;
+    - the live cursor is set to the rebuild's;
+    - the flag is cleared;
+    - the phase becomes `retire`.
+  - **Failure** ($n \ne n_0$): the pass's staging index generation and journal generation are appended to `sync:<ns>:clean`, nothing else changes, and the next pass begins. A failed pass has removed nothing and moved no pin, so discarding it is pure deletion: no undo, no pin to reassign.
+- **`retire`** (after a successful `done`; sending still halted): the replaced records, the undecided outbox records below `server_next` and the previous journal generations' undrained records, are removed in pages of at most 100 records and 400 requests. Each page is one transaction that hands each removed record's pin to the committed journal record of the same identity, or releases it if that record has no bytes to keep (a folder, a document, a gone identity, other bytes). Its position is in the rebuild state. When it ends, sending resumes: first the records at or above `server_next`, then the journal's drain.
+- **Exactly once, at every crash point:**
+  - before `done`, every local edit is represented by the old records (ops up to the old watermark `W0`) or is past `W0` (the scanner's). The pass's journal is invisible.
+  - At `done`, both switch together. Edits up to `W1` are represented by the committed journal (as of `W1`), edits after `W1` by the scanner. The old records below `server_next` are dead (never sent again: sending is halted until `retire` ends) and leave in `retire`.
+  - Each `retire` page is atomic, and a pin moves from the removed record to the journal record in the page's own transaction. So every pin has exactly one owner at every point.
+- **Cleanup, bounded** (LIMIT-PR65-3):
+  - `sync:<ns>:clean` is a list of prefixes: an index generation or a journal generation. Each is deleted a page of at most 500 keys a transaction, from a durable position.
+  - A new pass's `stage` doesn't begin until the list is empty, so a pass waits for the previous one's leftovers to be deleted first.
+  - So at most two index generations exist at once (the active one, and either one staging or one being cleaned), and at most two journal generations (the committed one draining, and either one staging or one being cleaned): at most 2 × 100,000 index rows and 2 × 110,000 journal rows (100,000 journal records plus up to 10,000 staged echo confirmations each, D6 r6), whatever the number of failed passes.
+  - The list itself holds at most 2 entries.
+- **Tests:**
+  - many consecutive $n$ mismatches at the 100,000-row scale, asserting each transaction's limits and never more than two generations of each store;
+  - capture done, then a late refusal increments $n$, then the retry's replaced prefix names different identities, with edits on both sides of the first `W1`. Every edit is represented exactly once, and every pin has exactly one owner, after crashes at the failed CAS, in each cleanup page and in each `retire` page.
+
+- **What the capture covers** (astra's CORR-PR65-A3). `done` moves the global scan watermark, so the capture must represent every intent the watermark moves past, not only the replaced identities:
+  - the capture's `W0` is the current scan watermark `scanned`, not the latest op;
+  - the closing replay reads every op in $(\text{scanned}, W_1]$, in pages of 500 ops a transaction. Each op's identity, whichever it is (replaced or not, present or gone, its `after` or `after: null`), gets its journal record assigned from that op's `after`. A gone identity is recorded as `gone`.
+  - So every op at or below `W1` is either already scanned (below the old watermark, so its record exists, or was decided, or was collapsed by C2's rules) or represented in the committed journal. Moving the watermark to `W1` at `done` skips nothing. Ops after `W1` are the scanner's, which stays idle until the journal has drained (C3, step 5).
+  - Unscanned writes now represented by the journal are covered as C2's `cutoff` covers them: in each `retire` page, the identity's pending `cutoff` is set to its last op at or below `W1`, and their unowned pins (intermediate bytes) are released, as a collapse releases them. The journal record owns the pin of the identity's present bytes.
+  - Test (A3): the trace scanned = 10, an unrelated rename Y logged at 11 and not yet scanned, $W_0 = W_1 = 11$. Y is in the journal and reaches the server once.
+- **Tests asked by astra:** (a) after an $n$-CAS restart, the new pass's journal again holds the replaced identities' pins and their gone rows (nothing lost when the failed pass is discarded); (b) C3's order: the committed journal drains before any record the scanner makes for ops after `W1`.
+
+**D9 (wording, nonblocking):** canonical `Content-Length` is `^(0|[1-9]\d{0,11})$`, with no leading zeroes.
+
+**D6 r4: the view is applied only after a successful `done`** (daybreak3's CORR-PR65-5).
+- The phases run in this order: `stage`, `log`, `capture`, `done` (the compare-and-swap), then `view`, then `retire`, then sending resumes. `clean` runs before the next pass's `stage`.
+- Before `done` succeeds, a pass writes only its own generation-scoped staging index and journal. It touches no live entry, no outbox record, no pin, no watermark and no cursor. So a failed pass (a mismatched $n$) leaves the live workspace exactly as it was, and discarding it is pure deletion (D6 r3).
+- After `done` succeeds, `view` recomputes, against the now-active index, every identity in the union of the active index's identities and the entries' identities. It walks in key order, at most 100 identities and 400 requests a transaction, its position durable, and applies the difference to the live entries (never deleting: kept, or a conflict copy, and listed). Then `retire` runs, as in r3.
+- Sending stays halted through `view` and `retire`, so nothing is sent from a view that is partly applied.
+- A refusal or divergence recorded during `view` or `retire` sets the flag again (D7 r2), and the next pass starts once this one has finished. A committed pass is never undone.
+- Tests:
+  - a mismatched $n$ during `log` and during `capture`: no live entry, record, pin, watermark or cursor changed, compared byte for byte before and after;
+  - a crash inside `view`, then a reload: the view resumes from its position, and every entry ends as one uninterrupted `view` would leave it.
+
+**D6 r4: the closing replay takes only this device's own intents** (astra's CORR-PR65-A4).
+- The replay of $(\text{scanned}, W_1]$ uses C1's rule for what goes up (`wireOf`): an op applied from the server (`origin: "server"`), `dropVersions`, or an op with no `after` (no identity yet) is passed over. The watermark still moves past it, as a scan page does.
+- Every eligible local intent is kept: a create, write, rename, move, remove or restore, from its `after`; a forget, discard or emptied Trash, as `gone` (its `after: null` tombstone).
+- So an identity changed only by the server since `scanned` gets no journal record, and its confirmed state stands. An identity with a local intent gets its local state as of that intent, ordered after the server's ops by the seq its reissued record receives (the reducer's "later wins"), as any queued op is.
+- Named test (astra's trace, from the executable evidence in sagebrush-pr65-69ad3af2-delta-astra.md):
+  - scanned is 10; a remote rename /a to /b of Y is applied locally as seq 11, origin server;
+  - the newer staging log has Y at /c;
+  - $W_0 = 10$, $W_1 = 11$.
+  The replay passes over seq 11, Y has no journal record, and nothing renames /c back to /b. Y ends at /c on both devices.
+
+**D6 r5: how long sending stays halted, and echoes after the commit** (daybreak3's LIMIT-PR65-4; astra's note on r4).
+- **Echo confirmations wait for the commit** (astra). In `log`, an echo matched to a record by `sameOp` is staged with the pass: under the pass's generation, in its journal store, as `{dseq, seq}`. It is not applied to the live outbox. `retire` applies the staged confirmations (removing the confirmed records and releasing their pins) in its own pages, after a successful `done`. A failed pass discards them with the rest of its generation, so a failed pass confirms nothing. Test: a pass that matches echoes and then fails its compare-and-swap leaves every matched record undecided and every pin where it was.
+- **Elapsed time from `done` to sending again** (daybreak3's LIMIT-PR65-4). At the maxima:
+  - `view` walks the union of 100,000 index identities and 100,000 entries: at most 2,000 transactions of 100;
+  - `retire` removes up to 10,000 replaced records, up to 100,000 undrained records of an earlier committed journal, and the staged confirmations: at most 1,100 transactions of 100.
+  So at most about 3,100 sequential transactions, each of at most 400 IndexedDB requests.
+  - **Yielding:** each page is its own transaction. Between pages the work yields to the event loop (a timer), as the pins cleanup does, so no long task spans pages, and the page stays responsive.
+  - **Target:** every transaction's longest task under 50 ms (C2's measured cleanup slices), and done-to-resume at most 300 s at the maxima ($3{,}100 \times 50\ \text{ms} \approx 155$ s, plus the yields). An ordinary workspace takes seconds.
+  - **Measured:** the scale test (100,000 confirmed entries, 10,000 pending records and 100,000 undrained journal records, on the CI VM's Chrome) asserts done-to-resume at most 300 s, every transaction under 400 requests, and every long task under 50 ms, and reports the figures.
+  - **Progress:** the foot says "Rebuilding sync… N%", computed from the phase and its durable position. A reload resumes `view` and `retire` from those positions, never from the start.
+  - **The person isn't stopped:** local edits keep saving (they're past `W1`, the scanner's), and nothing waiting is lost.
+  - **Why sending doesn't resume before `retire` ends** (@sagebrush's question). The replaced records (dseq below `server_next`) are still in the outbox until `retire` removes them. If sending resumed, the sender would resend them, and the server would answer each with its stored decision for a different op at that dseq: a wrong decision applied to the wrong record. A fence ("never send below `server_next`") would stop that. But the journal's drain also needs `retire`'s pin handover: until a page hands a replaced record's pin to the journal record of its identity, the drain could find that identity's bytes owned by a dead record. So sending would have to be fenced per identity as well, a second invariant for a bounded wait of about 155 s once in a rebuild's life. We keep the halt, and the bound above.
+
+**D6 r6: the timed maximum, measured** (daybreak3's narrowed LIMIT-PR65-4).
+- **The fixture is the worst case by construction:**
+  - the active confirmed index holds 100,000 identities;
+  - the workspace's entries hold 100,000 other identities (disjoint from the index's), so `view`'s union is 200,000;
+  - 10,000 records are pending below `server_next`, 100,000 undrained records sit in an earlier committed journal, and the staged echo confirmations are present.
+- **The test asserts the page counts exactly:** 2,000 `view` pages and 1,100 `retire` pages. Each transaction stays within 400 requests, and every long task stays under 50 ms (the observer's figure, for responsiveness only).
+- **Elapsed time is measured, not derived.** The test takes wall-clock time from `done`'s commit to the first `ops` message the sender sends after it, and asserts at most 300 s on the CI VM's Chrome, reporting the figure. ($3{,}100 \times 50$ ms is no bound on that: long-task time isn't a transaction's wall time, which includes IndexedDB's own work off the main thread.) If the measurement passes 300 s, the target is revisited with @sagebrush before the code merges, never silently raised.
+- **A journal generation's exact cap** (daybreak3, nonblocking): 100,000 journal records plus up to 10,000 staged echo confirmations, so at most 110,000 rows per journal generation, and at most two generations at once.
+
+**D7. A refusal and its rebuild obligation are one transaction** (astra's step-4 note). `Outbox.acked`'s refusal branch writes `sync:<ns>:rebuild` (`why: "refused"`, unless a stronger reason is already set) in the transaction that removes the record. The client's separate write goes. Tested with a crash at each of `acked`'s await points: after a reload, either the record is still there and undecided, or the flag is set.
+
+**D7 (r2). The obligation's counter** (astra's A2). Every write of `sync:<ns>:rebuild` (D7's refusal branch, a halt) increments its `n`, in the transaction that records the decision. A rebuild records `n0` when it starts. Acks for messages sent before the halt can still arrive during a rebuild, and only `done`'s compare-and-swap decides whether the flag may be cleared. So a refusal that lands at any point of a rebuild, before or after its identity's view page, is never cleared unrebuilt. Test: a refusal delivered (a held ack, released) during each phase: the rebuild runs again, and the refused identity's view is right after it.
+
+**D8. Live updates** (plan-sync-index-changed-r1).
+- With the confirmed index, the server's `index_changed` raises the target and pulls through the existing pacing.
+- Until the server sends it, a second device sees changes on its own ack-pulls and reconnects.
+- The paced idle poll (at most one `pull_index` a minute) is added only if the notice can't ship by step 6. @sagebrush is told early if so.
+
+**D8b. Bounded idle recovery** (astra, on plan-sync-index-changed-r1; @sagebrush's decision).
+- A notice is advisory, and the last one can be lost on a socket that stays open. Then nothing would pull until the next local edit or reconnect.
+- So while connected and idle, with the confirmed index (`onIndex` given), the client makes one `pull_index` from its cursor every 5 minutes (`CLIENT.idlePullMs`). It goes through the same pacing: the bucket, one in flight, the index retry timer, and the slice cap.
+- The timer is one wake-up of its own kind ("idle"), re-armed after each pull or page, and ended with the connection and on `stop()`.
+- Cost: at most one small request every 5 minutes per idle device. A pull that finds nothing new is one empty page.
+- Test: with a fake clock, the only notice for another device's op is dropped. The op arrives at the 5-minute pull, with no edit and no reconnect, and no other pull happens meanwhile.
+
+**D8b (r2). Idle discovery** (astra's note). The idle pull doesn't know a target (there is no notice to say how far the log goes). So it sets the connection's `discover` flag:
+- while it is set, `pull()` may ask past the target (bypassing the `cursor >= target` return);
+- each page's last seq raises the target;
+- a page with `more: false` clears it.
+Pages still go through the bucket, one in flight, the index timer and the slices. Test: the dropped-notice case reads every page of a log longer than one page at the 5-minute pull.
+
+**D9 (r2). Downloads** (daybreak3's LIMIT-PR65-2).
+- Before any reservation or request, the record's `size` must be a non-negative safe integer with $\text{size} \le \min(\text{maxFileBytes}, \text{MAX\_PUT})$ (95 MiB: nothing larger is ever uploaded). Then $\text{size} \cdot \text{COPIES}$ is computed (at most 190 MiB, safe) and reserved, and the reservation is held across a 303 redirect until the body is installed or dropped.
+- On the final response, of either path, `Content-Length` must be a canonical decimal (`^(0|[1-9]\d{0,11})$`, no leading zeroes) equal to `size` before the body is read. The body goes through a counting reader with a hard cap of `size`: one byte more aborts it. Its SHA-256 is checked before the compare-and-swap install (C5).
+- Any failure fails that item under its retry timer and is never installed.
+- Tests: size at the cap and cap + 1; an unsafe or overflowing size; Content-Length missing, malformed or different; a body longer than declared; a 303 whose final response fails any of these.
+
+**D10. The reducer over the stored index** (found at the start of the code; @sagebrush routed it as a design delta).
+
+The shared reducer (sync-reduce.ts, step 1) is synchronous, and works on a whole in-memory `SyncIndex` with four maps:
+- `byId` (identity to entry);
+- `byKey` (a path's NFC form to identity);
+- `children` (a folder's key to its entries' identities);
+- `gone` (identity to its last path).
+C3 keeps the confirmed index in IndexedDB, and L4 says it is never held whole in memory. D10 runs the reducer, unchanged (no fork; the server and the JSON vectors use it as is), on a partial index loaded for each page.
+
+- **Storage.** `syncIndex` rows are `{ns, id, path, key (NFC), parentKey, ...entry}`, or `{ns, id, gone: true, lastPath}` for an identity forgotten (no `key`, so it holds no path). There are two new indexes, `byKey [ns, key]` and `byParent [ns, parentKey]`. This is a schema-only upgrade to workspace DB v6: index creation over `syncIndex`, which nothing outside dev has written.
+- **One transaction per page, reads and writes together.** A page's reads (the read sets, and any loads after a miss) and its writes (the changed rows and the cursor, C3) are all in the page's one readwrite transaction on `syncIndex` and `meta`. Between IndexedDB requests the work is synchronous (the reducer and its SHA-256 are synchronous), so the transaction stays alive throughout.
+  - Why the same transaction rather than a version check: `syncIndex` is written only by these page transactions, of the one sender holding the lock (C1). IndexedDB serializes readwrite transactions over the same store, so nothing can change a loaded row between its read and the page's write. Local edits write `entries` and `ops`, never `syncIndex`. A version check would add a second failure path for no case that can occur.
+- **The partial index.** For each op, before it runs, the page loads the op's read set into the page's partial `SyncIndex`, if not already there:
+  - its target and `parent` (by identity);
+  - the ancestors of its `path`, of `to`, and of a trashed entry's `from` (by key);
+  - the Trash top;
+  - the target's subtree, for a move (by `byParent`, level by level);
+  - the full listing of each folder an entry may land in: at most 10,000 (the workspace's folder bound), so every "name (k)" probe has its answer.
+  Each loaded key is recorded as *known*: present, or confirmed absent.
+- **The miss recorder, on all four maps.** The partial index's `byId`, `byKey`, `children` and `gone` are `TrackedMap`s.
+  - `get` or `has` of a key not known records a miss and answers "absent". `set` and `delete` mark the key known.
+  - Every other Map member (`size`, iteration, `forEach`, `keys`, `values`, `entries`, `clear`) throws: a partial map can't answer a whole-map question. So a reducer change that starts to use one fails every test at once rather than silently reading a partial index.
+  - `SyncIndex.entries()` and `clone()` are never called on a partial index.
+- **Undo and retry happen in memory only.** If an op misses, it is undone by the reducer's own undo, in memory, before anything of the page is written. Then the missed keys are loaded (in the same transaction) and the op runs again: at most 8 rounds.
+  - Still missing after 8: the page is cut before that op (the ops before it are written with their cursor). The op then runs alone as the next page.
+  - Still failing alone, it halts sync with a person-told error. An op is never applied partially, and a retried op leaves no row written, because rows are written only once the whole page has reduced.
+- **What a page writes.** The rows of every identity in the page's ops' `changed` (as each is now in the partial index: present, moved, or gone), and the cursor, in the page's transaction, at its end.
+- **Bounds:**
+  - a page's partial index holds at most 200,000 rows. Past that, the page is cut at the op that would pass it, and that op runs in a page of its own.
+  - Per op, the rows loaded are at most the target's subtree (at most 100,000) plus at most 10,000 per landing folder. The subtree is the same as the workspace's own folder move, which reads the subtree whole and rewrites it in one transaction (api.ts `move`).
+  - L4 thus reads: never the whole tree in memory, beyond the subtree an op moves.
+  - The 8 rounds and the 200,000 rows are starting numbers, for daybreak3 to judge.
+- **The same for the staging index** (D6), under its generation's prefix.
+- **Tests:**
+  - every vector in sync-vectors.json run through the paged partial-index path, compared to the in-memory reducer: identical entries, identities and hashes;
+  - TrackedMap's throwing members: a test that calls the reducer with a map whose iteration is used must fail;
+  - a folder move with 10,000 descendants;
+  - a collision chain to "name (10000)";
+  - a derived identity colliding with a gone one (a forced miss, then a retry);
+  - a miss on the 9th round (the page cut and the op run alone);
+  - the 100k scale fixture's per-op and per-page rows-loaded maxima.
+
+**D10 r2: an exact overlay per op** (astra's CORR-PR65-D10-1). This supersedes r1's miss handling: "answers absent", the reducer's own undo, and the fixed 8 rounds.
+- r1 was unsound, as astra's probe shows. A miss answered "absent" lets `reduce` succeed against a partial index and change memory, and the reducer's private undo runs only on a caught exception. Some of its mutations (`rawPut`) also happen before a later lookup misses.
+- **Each op runs on a fresh overlay over the page's base.** The base is the page's partial index as left by the ops kept so far.
+  - The overlay presents the four maps (`byId`, `byKey`, `children`, `gone`). Every read looks in the overlay, then the base. Every write (`set`, `delete`, and every change to a `children` Set) goes to the overlay only.
+  - A `children` Set is copied from the base into the overlay the first time the op changes it (copy-on-write).
+  - An entry (`SyncEntry`) read from the base is copied into the overlay the first time it's read. The reducer changes entries in place (a move rewrites `path`, `updated` and `seq` on each), so it only ever holds the overlay's copies, and the base's objects are never touched.
+  - So nothing the op does, by any path in the reducer, reaches the base.
+- **A miss throws, and marks the overlay dirty.** A read of a key that the base doesn't know (neither loaded nor confirmed absent) sets the overlay's `missed` flag and throws.
+  - The reducer may catch the throw and return `skipped`. So the decision is the overlay's flag, never `reduce`'s result: a dirty overlay is discarded whole, whatever `reduce` returned.
+  - The missed keys are then loaded into the base (in the page's transaction), and the op runs again on a new, empty overlay.
+- **An op that ends with no miss** has its overlay merged into the base: each overlay key's value or deletion, and each copied Set and entry, replacing the base's. Its `changed` identities join the page's dirty set.
+- Earlier ops' changes in the same page are in the base, and only an op that completes merges into it. So a discarded overlay can't undo, or be undone by, anything else.
+- Iteration and every whole-map member still throw, as in r1. The overlay is the only object the reducer receives.
+- Test: astra's executable `mkdir` probe, a miss on `gone.get` after `rawPut`. The overlay is discarded, the base is unchanged, and the retry succeeds without "already there". Plus every vector, run with a miss forced at each lookup in turn: the result equals the in-memory reducer's.
+
+**D10 r2: work, long tasks and memory, bounded** (daybreak3's review of 124fa1c2).
+
+- **A work meter, per op and per page** (daybreak3's 1). Every `get`, `has`, `set` and `delete` the reducer makes on the partial index's four maps counts one unit, retries included.
+  - An op is run, and its units counted, before it is kept.
+  - A page stops before the op that would take it past 500,000 units, and its rows and cursor are written then. That op starts the next page.
+  - One op alone is bounded by the reducer's own contracts: at most its subtree (100,000) moved twice, plus at most 10,000 name probes per landing folder, plus at most 1,000 derived-identity candidates. So at most about 220,000 units, and a page always holds at least one op.
+  - So 1,000 ops each probing the same 10,000-name folder are cut into pages of at most about 50 ops, each page bounded, instead of one page of 10,000,000 probes.
+- **Retry rounds, isolated and bounded by the reducer's contracts** (daybreak3's 4). A retry reruns only the op that missed, on a fresh overlay, with the page's earlier ops kept in the base as they are. Each round loads only that round's misses.
+  - Rounds go on while each one loads at least one key not loaded before, up to 1,001 rounds: the reducer's 1,000-candidate series for a derived identity, plus one.
+  - So a valid run of more than 8 derived-identity collisions completes rather than halting. The rounds' units count in the op's work.
+  - An op that misses without loading anything new (impossible by the wrapper's construction) halts sync with a person-told error. The fixed "8 rounds" of r1 is withdrawn.
+- **Long tasks: a narrow, measured exception** (daybreak3's 2). A subtree move is one synchronous reducer call over the subtree; the reducer can't yield inside it without forking it.
+  - For an op that moves at most 1,000 entries, the 50 ms long-task bound holds as everywhere else.
+  - An op that moves more is a stated exception, bounded as the migrator's work is (L2: "the longest task must stay under 1 s"): its one long task stays under 1 s at the maximum, a 100,000-entry subtree, measured and asserted on the CI VM's Chrome.
+  - The workspace's own move of that subtree (api.ts `move`) is a task of the same size, so sync adds none larger than the workspace already does.
+- **Transient memory, counted** (daybreak3's 3).
+  - Each op's `Outcome.changed` is merged into the page's one `dirty` set at once and dropped.
+  - Rows are loaded with cursors, at most 1,000 values a request, each batch inserted into the partial index and dropped before the next request. No unbounded array is held.
+  - The 200,000-row budget counts the partial index's rows, the `dirty` set and the batch in hand together.
+  - The scale test asserts the page's peak JS heap growth (Chrome's `performance.memory`, the test's Chrome started with `--enable-precise-memory-info`) under 256 MiB at the maxima: a 100,000-entry subtree move, and a page of ops cut by the meter.
+- **Tests added:**
+  - 1,000 ops into one 10,000-name folder: the pages cut by the meter, none over 500,000 units;
+  - a derived-identity series with 20 collisions completes (20 rounds);
+  - a 100,000-entry subtree move: one long task under 1 s, and the heap growth asserted;
+  - a 1,000-entry move: no long task over 50 ms.
+
+**D10 r3: the bounds, exact** (daybreak3's review of df626e31).
+- **Retry rounds cost what they replay** (daybreak3's 1). A round reruns the whole op, so a derived-identity series that collides $k$ times costs $\sum_{i=1}^{k} i$ candidate probes, plus $k$ times the op's other work:
+  - the series alone, at the reducer's 1,000-candidate contract: $\sum_{i=1}^{1000} i = 500{,}500$ probes;
+  - in general an op's cumulative units are (rounds) × (its other work) + the series' probes, all counted by the meter.
+- **Per-op ceiling.** An op runs alone (in a page of its own) whenever its trial passes the page budget. Its cumulative units, retries included, are capped at 5,000,000. That covers the full 1,000-collision series on an op with up to about 4,500 units of other work, which every op but a large move has. An op that passes the ceiling halts sync with a person-told error, never applied partially. Only a log crafted to collide derived identities (SHA-256 based, so by accident with probability about $2^{-64}$ per candidate) on a large move can reach it.
+- **The over-budget trial.** The meter runs an op as a trial on its overlay. If the trial would take the page past 500,000 units, its overlay is discarded, the page is written up to the op before it, and the op runs again as the first op of the next page. Its trial units count against the page that ran it, so a page's executed work is at most 500,000 plus one trial's units, and a trial is at most the per-op ceiling.
+- **Memory, every object counted** (daybreak3's 2). The memory budget counts, together:
+  - base rows;
+  - the dirty set;
+  - the batch in hand;
+  - the overlay's cloned entries;
+  - the overlay's copied `children` Sets (one unit per member).
+  - A page holds at most 200,000 units, but a single op may exceed it alone: a maximum move counts its 100,000 base rows plus 100,000 overlay clones plus its landing folder's 10,000, about 210,000 units. That op runs in a page of its own, with a single-op memory ceiling of 250,000 units, past which it halts, person-told.
+  - The heap test's fixture uses maximum-length legal rows: paths of 1,024 characters, names of 255, at depth 32, and a 100,000-entry move. It asserts the JS heap growth under 256 MiB, measured with `performance.memory` (`--enable-precise-memory-info`).
+- **Tests added:**
+  - a 1,000-collision derived series (a test seam makes the first 1,000 candidates collide) on a `mkdir`: it completes, and its probes equal 500,500 plus its other work, as counted;
+  - the same series on a 100,000-entry move: it passes the 5,000,000-unit ceiling and halts, person-told, with no row written;
+  - a page whose next op's trial passes the budget: the page is written without it, and the op starts the next page.
+- **The discard is authoritative** (astra's note on r2). The call to `reduce` is wrapped: whatever escapes it, including an exception thrown by the reducer's own undo, the overlay is discarded whole if it is dirty, and the op retried. An exception escaping with a clean overlay (a reducer bug, not a miss) discards the overlay too, and halts sync with a person-told error. In no case does anything of that op reach the base.
+- **On batching derived-identity misses** (daybreak3's suggestion). A landing folder's names are already loaded whole in the read set (r1), so name probes never retry. Derived identities can't be batched: they are SHA-256 values the overlay can't predict without forking the reducer. So their replay cost is bounded and counted (above) rather than removed.
+
+### As built (step 4)
+
+Modules (web/workspace): `sync-overlay.ts` (D10), `sync-confirmed.ts` (C3's confirmed index, D5), `sync-view.ts` (C3's view), `sync-fetch.ts` (C5, L1, D9), `sync-rebuild.ts` (D6, D7 r2), `sync-adopt.ts` (C3's first sync), `Outbox.drainJournal` (the journals' drain). The client turns them on with `onIndex: confirmedIndex(w)`; without it, step 3's behaviour is unchanged.
+
+Where the code settles what the plan left open, or differs from it:
+- **The view's layers, per identity** (C3). An identity with no local intent takes its confirmed state. An identity with one gets its placement from the reducer, run over the confirmed index with its intents on top: its outbox records, its journal record, and its unscanned op's `after` if that op placed it. Its folders' intents come first, top-down.
+  - Content stays its own until its record is decided; a conflicting write comes down later as the server's conflict copy.
+  - So a local write never moves a file, and a confirmed entry at its path makes it `name (2)`.
+  - `pending.latest.movedAt` (the seq of the last placing op) says whether an unscanned op placed it. It is carried from op to op, so a save makes no extra request (test-workspace-sync-pins' exact counts hold).
+- **Remote entries** carry `remote: true`:
+  - a data file until its bytes are fetched and installed (C5's compare-and-swap);
+  - a document until slice 2. Writing to it is refused with an error, never dropped silently.
+- **Server-applied changes** are logged with `origin: "server"`, under the workspace's ordinary lock, so they are refused while quarantined. They note no local intent and pin nothing.
+- **The rebuild's view never deletes** (D6 r4): an entry the active index names gone is kept and listed, as is one it doesn't name. The ordinary per-page view deletes on an explicit gone row.
+- **`server_next` follows acks:** the server decides in dseq order, so each ack raises it. A rebuild that starts later in the same connection knows its decided prefix; welcome's value alone was stale.
+- **A mismatched own echo** in a rebuild's log confirms nothing and records no divergence. That's the restored-copy case: those records are the replaced prefix, and their identities are reissued.
+- **The announce** (plan-sync-rebuilt r3 §4) is sent for every obligation, not only `invalid`. A server without `rebuilt` (core's) answers `invalid` "unknown message": an obligation that needs no reset there (a refusal, a divergence) then completes by the same compare-and-swap, with no new floor; the refusal limit (`invalid`) can't be lifted without the reset, so it halts, stably and said, recorded against its counter so no reconnect rebuilds or sends again (astra's CORR-PR65-IMPL-2).
+- **The journals' drain** goes in rounds over key order. A record goes once its folder has gone. Gone identities (forget) go after every present one, in key order rather than deepest-first: a forget of a folder already forgotten is a no-op on the server.
+  - Its position is the journal's own: bound to its generation, and cleared in the transaction that installs a journal (rebuild's `done`, the first sync's capture), so a new journal never inherits another's traversal (astra's CORR-PR65-IMPL-1).
+  - A record under a folder in Trash, gone, or not adopted itself is not adopted.
+- **Downloads:** the signed URL is taken from the followed redirect's final URL (`fetch` can't read a 303's Location). A 403 from the files host drops it, and the next attempt asks for a fresh one.
+- **Rebuild pages commit with `durability: "relaxed"`** (clean, capture, view, retire). Each records its own position with its effect, so a page that an OS crash loses (committed to the browser, not yet flushed) is redone from the previous position. A tab's crash loses nothing committed. `done` and the announce's ack keep the default durability.
+- **Requests per transaction:**
+  - a rebuild view page reads its range in five requests;
+  - the confirmed index is memoized for the page, and listings take one request each;
+  - room is counted once a page;
+  - the op's parent folder is passed to the log;
+  - the fetch queue is the entries' sparse index `byFetch` (DB v6, unreleased), so queuing a file costs no write of its own;
+  - retire reads its records by range, and pending states only where they exist.
+- **D10's read set is loaded before an op runs** (r1's list, plus a move's destination listings), so rounds miss only on derived-identity candidates. A derived identity's entry and gone row are one stored row, learned from one miss.
+- **Memory is counted before it is allocated, every live population** (daybreak3's LIMIT-PR65-IMPL-1): base rows; overlay clones and copied `children` Set members; each changed identity twice (the reducer's Set and the array it returns); the page's dirty set; and a folder listing's 10,000 rows, reserved before it is read. An overlay that would pass the ceiling is discarded whole: a lone op halts, a page is cut before it. The single-op ceiling is 520,000 units, from that full sum at a maximum move (D10 r3 said 250,000). Short rows at a 100,000-entry move measure under 256 MiB and 1 s. Maximum-width rows (1,024-character paths at depth 32) don't fit any single-transaction move, the workspace's own included (639 MiB): D11 applies large moves in chunks (below).
+- **Long write loops await a cheap read every 200 writes**, which ends the task while the transaction stays alive. A 100,000-entry move is then many short tasks, apart from the reducer's own synchronous move.
+- **Page counts are exact:** view and retire read one past their page. A retire page takes 100 items across its steps (staged confirmations, replaced records, the old journal's records), so the walks end on their last full page.
+
+Measured on VM 1 (Chrome, the timed fixture of D6 r6; see the PR for the run): the figures are in #65's description.
+
+### As built (D11: large moves and forgets in chunks)
+
+The plan is plan-pr65-d11-chunked-moves r7 with its r8 notes v2 (N1–N5) and N6 v2 with addendum 1 (forget). Modules (web/workspace): `sync-rewrite.ts` (the records, the read model, the fence, the bounds `D11` with `configureD11` under `D11_CEILING`), `sync-replay.ts` (the view's replay), the confirmed side in `sync-confirmed.ts` and `sync-overlay.ts`, the local move in `api.ts`.
+
+Where the code settles what the plan left open:
+- **Readers:** every reader of `entries` goes through `entriesOf(tx)`. With no record, it reads the store as before, so existing request counts change only by the record's one `get` per transaction. The pins' exact per-save counts went from 33 to 38, and from 59 to 64 for a collapsing save: five entries transactions each read the record.
+- **Listings and lookalikes:** under a published record, they go through the index `byNfc` (r7 §1's sources). Unpublished, a folder's listing is the subtree's keys, as before.
+- **Writers:** every writer of `entries` calls `fenceCheck` first. `FENCE_READ` is the participation test's witness. Downloads' installs and finalizations change no path; they mark participation and write by identity.
+- **The confirmed side's hidden folders:** a row under one is answered afresh at every read, its path projected through its folder's present place, and never kept in the overlay unless the op writes it. A copy kept before its folder moved would keep the old path.
+- **Partial listings** (r2 §2): a folder past 10,000 children has a count, adds and removes, and no members. Its name probes load the next 1,000 of their series by key, in one round.
+- **The replay's pass** examines folders only (only a folder can be a large lift) and reads files in bulk. Every replay page prefetches its identities' five sources at once. Replay pages publish the durability witness once, at the end, not each page.
+- **The closure and validation, after the implementation review** (r8 N8 v3; astra's CORR-D11-IMPL-1 to 3, daybreak3's LIMIT-D11-IMPL-1 and 2):
+  - **Reads metered at IndexedDB, from the transaction's first request to its last** (LIMIT-D11-IMPL-3). Every request the closure and validation transactions make goes through one meter per transaction: their own, their viewer's, and their writes, which are counted.
+    - **State first.** The transaction's state is read first: the marker, the record, the closure's control row, every mapping row, and the intent revision at publication. It is bounded by `PLAN_STATE`: 8 requests and `large + small + 6` rows; writes at most `large + small + 4`.
+    - **Then work.** The work's requests are admitted before they are made, against what is left of the transaction's `requests` and `page`.
+    - **The plan's budget.** Every read of the closure and of validation, the state's included, is also admitted against what is left of the plan's `closureRequests` and `closureRows`.
+    - **The bootstrap reserved** (LIMIT-D11-IMPL-4). A transaction can't know what is left of the plan's budget until it has read its marker (and, in the closure, the record and the control row): at most `PLAN_STATE.boot`, 5 requests and 4 rows. So every transaction that leaves another to run reserves those reads, and fails stably if they wouldn't fit: the pass before the first closure transaction, each closure transaction, and each validation transaction but the publication.
+    - So one such transaction reads at most `requests + 8` requests and `page + large + small + 6` rows. A read that could return more rows than are left asks for what is left, then counts the rest (a request, no row): more is over. Over the plan's budget, or over the transaction's in the transaction's first item, the plan fails, stable. Otherwise the item waits for the next transaction, its changes undone. The rows and requests it read are counted. The durable counters are every metered request and row, and tests compare them with IndexedDB's own count.
+  - **A view's folder not there yet** (CORR-D11-R1-1, R2-1): the pass leaves such a large lift to placement. It resolves the folder as the closure does: the row the mapping holding it carries there (if that mapping owns it), else the row there now. Nothing there means the lift is left to placement. Placement makes a confirmed folder this device hasn't yet, and the lift comes back as a debt, replayed once the folder is there.
+  - **A target whose folder won't be a folder.** The closure decides this: the folder must be brought by the mapping whose target holds it most specifically, or be there now, staying, and be a folder. Otherwise the top stays where its source's owner carries it (`t` = -1, listed `no-folder`, no op of its own), and it beats any other claim on that place. Validation checks both outcomes again over the final plan.
+  - **What a settled top carries** at placement: an entry under it whose view is exactly where the top's view would carry it. Any other view is the entry's own move, as in one transaction.
+- **Lateness and failure:** a replay that finishes past its deadline after publication keeps `sync:<ns>:replayLate`. A failed or late-before-publication replay is retried once by the next page load (`REPLAY.reload` in tests).
+- **The client:**
+  - runs pending large-move work in the connection's message chain at welcome, and before a rebuild's `stage`;
+  - holds pages, with the reason said, when the work stops;
+  - pauses sending while a plan is made (`SENDER_HOLD`).
+- **Rebuilds:**
+  - a local large move during a rebuild's `view` or `retire` is refused `busy`;
+  - `stage` waits for a local move's rewrite;
+  - `done` waits for a local or published entries record, and supersedes the replaced generation's replay, debts, unpublished plan and forget ledgers.
 
 ## 4. Who builds what, in order, and the size of each
 
