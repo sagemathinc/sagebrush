@@ -42,3 +42,7 @@ map zero 0 | Univariate Polynomial Ring in t over Finite Field in b of size 2^4
 map into F16 TypeError unable to coerce from a finite field other than the prime subfield
 map ZZ 4*x^2 + 2 | Univariate Polynomial Ring in x over Integer Ring
 map ZZ GF5 3*x^2 + 1 | Univariate Polynomial Ring in x over Integer Ring
+map QQ parent y2 + 1 | Univariate Polynomial Ring in y2 over Rational Field
+map QQ half y2 + 1 | Univariate Polynomial Ring in y2 over Rational Field
+map QQ to ZZ y2 + 6 | Univariate Polynomial Ring in y2 over Integer Ring
+map ZZ parent x + 1 | Univariate Polynomial Ring in x over Integer Ring

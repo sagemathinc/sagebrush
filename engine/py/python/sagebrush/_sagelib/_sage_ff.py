@@ -3881,7 +3881,9 @@ class Polynomial_ff:
         """
         sa, S = _sa(), _ffsub()
         P = sa.PolynomialRing(R, self._ring._name)
-        cs, B = list(self._c), self._ring._base
+        # (the polynomial's own coefficient list: not copied, converted or
+        # visited before its work is charged; daybreak2 LIMIT-F3-2)
+        cs, B = self._c, self._ring._base
         if not cs:
             return P(0)
         budget = [S.WORK]
@@ -3895,10 +3897,11 @@ class Polynomial_ff:
                 if any(v is None for v in vs):
                     raise TypeError("not in prime subfield")
                 return P(vs)
+            S.charge(budget, len(cs), refuse)
             return P([int(c) for c in cs])
         if _is_finite_field(B) and _is_finite_field(R) and (_ff_embeds(B, R) or _ff_embeds(R, B)):
             fail = lambda x: ValueError("%s is not in the image of (map internal to coercion system -- copy before use)\nRing morphism:\n  From: %r\n  To:   %r" % (x, R, B))
-            return P(S.change(cs, R, budget, _ff_bounded("change_ring", B, R), fail))
+            return P(S.change(cs, R, budget, _ff_bounded("change_ring", B, R), fail, B))
         if isinstance(B, FiniteField_ext) and int(R.characteristic()) != _ff_char(B):
             # (another characteristic: Sage converts an element of the prime
             # field by its integer, and refuses any other, as a rational)
@@ -3931,17 +3934,21 @@ class Polynomial_ff:
         name = self._ring._name
         if isinstance(f, FiniteFieldHomomorphism):
             D, U, S = f.domain(), f.codomain(), _ffsub()
-            cs = [D(c) for c in self._c]
             p, un, _ = S.pnq(U)
             sn = _ff_degree(D)
-            each = un if sn == 1 else sn * (S.mn(p, un) + un)
+            # (charged from the number of coefficients before any is
+            # converted or mapped; daybreak2 LIMIT-F3-2)
+            each = 1 + (un if sn == 1 else sn * (S.mn(p, un) + un))
             refuse = _ff_bounded("map_coefficients", D, U)
-            paid = [len(cs) * each]
+            paid = [len(self._c) * each]
             S.charge([S.WORK], paid[0], refuse)
+            cs = [D(c) for c in self._c]
             ys = [S.apply(c, U, f._img, paid, refuse) for c in cs]
             T = U if new_base_ring is None else new_base_ring
             return _sa().PolynomialRing(T, name)([T(y) for y in ys] if T is not U else ys)
         T = self._ring._base if new_base_ring is None else new_base_ring
+        # (a function's own work is the caller's; the copy, a word each)
+        _ffsub().charge([_ffsub().WORK], len(self._c), lambda: NotImplementedError("map_coefficients of a polynomial of degree %d is not supported yet (work)" % self.degree()))
         return _sa().PolynomialRing(T, name)([T(f(c)) if c else T(0) for c in self._c])
 
     def factor(self):

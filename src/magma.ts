@@ -145,6 +145,12 @@ export const PY_BUILTINS = new Set(("ArithmeticError AssertionError AttributeErr
 
 /** A Magma identifier as a Python one. */
 export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.startsWith("_m") || /^__/.test(s) ? s + "_" : s);
+/** The intrinsics whose errors Magma points at the "(" of the failing call
+ * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
+ * are emitted as _m._call((line, col), f, args), so that a repeated or
+ * nested call is told apart. */
+export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield " +
+  "MinimalPolynomial Norm PrimeField Root Solution Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -1313,7 +1319,11 @@ class Parser {
   }
 
   postfix(): string {
+    const head = this.peek();
     let e = this.primary();
+    // (a call of an intrinsic that says its errors at its call's "(":
+    // _m._call tells the runtime which call it is, nested or repeated)
+    const located = head.t === "id" && e === head.v && CALL_POS.has(head.v);
     let chainAt = ""; // the first "[" of consecutive indexes
     let links = 0;
     while (true) {
@@ -1323,7 +1333,7 @@ class Parser {
         this.reject(this.peek(), `a chain of more than ${MAX_CHAIN} calls or indexes is not supported yet`);
       }
       if (this.at("(")) {
-        this.next();
+        const lp = this.next();
         const a = this.args(")");
         this.expect(")");
         if (a.refs.length) {
@@ -1334,7 +1344,7 @@ class Parser {
         // are references (_m._refcall), as AssignNames checks them
         if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
         else {
-          const call = `${e}(${a.code})`;
+          const call = located && links === 1 ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
         }

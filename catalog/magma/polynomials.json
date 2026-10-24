@@ -162,7 +162,7 @@
       }
     ],
     "differs": [
-      "Only polynomial rings over the integers, the rationals and finite fields, to one of these rings: Integers(m), the reals and other rings are refused in words."
+      "Only polynomial rings over the integers, the rationals and finite fields, to one of these rings. Integers(m) is deferred (Magma mode has no polynomial rings over it) and refused in words, as are the reals and other rings."
     ],
     "status": "partial",
     "upstream_version": "Magma 2.18",
@@ -188,7 +188,7 @@
     ],
     "differs": [
       "Work is bounded (prime-field coefficient operations, counted before any coefficient is coerced): past the bound, or between finite fields of more than 2^20 elements, it is refused in words.",
-      "Only polynomials over the integers, the rationals and finite fields, to one of these rings: Integers(m), the reals and other rings are refused in words."
+      "Only polynomials over the integers, the rationals and finite fields, to one of these rings. Integers(m) is deferred (Magma mode has no polynomial rings over it) and refused in words, as are the reals and other rings."
     ],
     "status": "partial",
     "upstream_version": "Magma 2.18",

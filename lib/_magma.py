@@ -7358,11 +7358,42 @@ def Sqrt(x):
 # here only Magma's signatures, words (checked against Magma 2.18) and
 # objects.
 
+# The intrinsics whose errors Magma points at the "(" of the failing call;
+# the translator emits their calls as _call((line, col), f, args) (src/
+# magma.ts CALL_POS, kept equal to this by a test), and _CALLPOS holds the
+# calls being made, innermost last: an argument's call has returned before
+# its caller's is entered, so a nested or repeated call is told apart.
+_CALL_POS_NAMES = frozenset((
+    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield "
+    "MinimalPolynomial Norm PrimeField Root Solution Submatrix Subsets Sym Trace Vector").split())
+_CALLPOS = []
+
+
+def _call(pos, f, *args, **kw):
+    """f(*args, **kw), made at pos (the "(" of the call in the source)."""
+    _CALLPOS.append((pos, getattr(f, "__name__", None)))
+    try:
+        return f(*args, **kw)
+    finally:
+        _CALLPOS.pop()
+
+
+def _located(name):
+    """Where an intrinsic's own argument checks point: at the call, for one
+    that says its errors there (_CALL_POS_NAMES), else the statement."""
+    return _call_pos(name) if name in _CALL_POS_NAMES else None
+
+
 def _call_pos(name):
-    """Where Magma points at an error of the intrinsic `name`: the "(" of its
-    first call at or after the current statement's start (line, col),
-    outside string literals and comments (astra on dae43019: not a "Root("
-    in a string), or None (the statement's start, as before)."""
+    """Where Magma points at an error of the intrinsic `name`: the "(" of the
+    innermost call of it being made (_call); else (a call through another
+    name) the "(" of its first call at or after the current statement's
+    start (line, col), outside string literals and comments (astra on
+    dae43019: not a "Root(" in a string), or None (the statement's start,
+    as before)."""
+    for pos, n in reversed(_CALLPOS):
+        if n == name:
+            return pos
     line, col = _pos[0], _pos[1]
     text = _src[1][line - 1] if 0 < line <= len(_src[1]) else ""
     rx = _re.compile(r"%s\s*\(" % _re.escape(name))
@@ -7470,34 +7501,42 @@ def _cr_poly(f, R):
     S = _cr_ring(R)
     budget = [_ffsub.WORK]
     fail = lambda x=None: _fferr("Polynomial is not coercible", "ChangeRing")
+    # (the polynomial's own coefficient list: nothing is copied, converted
+    # or visited before the work it needs, from its length and the rings,
+    # is charged; daybreak2 LIMIT-F3-2)
+    xs = f.p._c if isinstance(f, _MFFPoly) else f._c
+    k = len(xs)
+    refuse = lambda: _fferr("ChangeRing of a polynomial of degree %d to this field is not supported yet (work)" % (k - 1), "ChangeRing")
     if isinstance(f, _MFFPoly):
-        xs, W = list(f.p._c), f.R.F
-        refuse = lambda: _fferr("ChangeRing of a polynomial of degree %d to this field is not supported yet (work)" % (len(xs) - 1), "ChangeRing")
+        W = f.R.F
         if R is _QQ or (isinstance(R, _MFinField) and R.p != W.p):
-            if any(xs):
-                raise fail()
+            # (a word each, the test for nonzero)
+            _ffsub.charge(budget, k, refuse)
+            for x in xs:
+                if x:
+                    raise fail()
             return S([]) if R is _QQ else _MFFPoly(S, S.P([]))
         if R is _ZZ:
-            _ffsub.charge(budget, len(xs) * W.n, refuse)
+            _ffsub.charge(budget, k * W.n, refuse)
             vs = [_ffsub.prime_value(x) for x in xs]
             if any(v is None for v in vs):
                 raise fail()
             return S(vs)
         wn, un = W.n, R.n
-        if xs and 1 < wn != un > 1 and (un % wn == 0 or wn % un == 0) and not (
+        if k and 1 < wn != un > 1 and (un % wn == 0 or wn % un == 0) and not (
                 _ffsub.embeddable(W.K, R.K) if un % wn == 0 else _ffsub.descendable(W.K, R.K)):
             # (F1's bound on the larger field, before anything is moved)
             raise _fferr("ChangeRing between finite fields of more than 2^20 elements is not supported yet", "ChangeRing")
-        return _MFFPoly(S, S.P(_ffsub.change(xs, R.K, budget, refuse, fail)))
-    cs = [_Fraction(c) for c in f._c]
-    if R is _ZZ:
-        if any(c.denominator != 1 for c in cs):
+        return _MFFPoly(S, S.P(_ffsub.change(xs, R.K, budget, refuse, fail, W.K)))
+    if R is _ZZ or R is _QQ:
+        # (a word each: the denominator's test, the copy)
+        _ffsub.charge(budget, k, refuse)
+        if R is _QQ:
+            return S(list(xs))
+        if any(int(c.denominator) != 1 for c in xs):
             raise fail()
-        return S([int(c) for c in cs])
-    if R is _QQ:
-        return S(cs)
-    refuse = lambda: _fferr("ChangeRing of a polynomial of degree %d to this field is not supported yet (work)" % (len(cs) - 1), "ChangeRing")
-    return _MFFPoly(S, S.P(_ffsub.from_rationals(cs, R.K, budget, refuse, fail)))
+        return S([int(c) for c in xs])
+    return _MFFPoly(S, S.P(_ffsub.from_rationals(xs, R.K, budget, refuse, fail)))
 
 
 class _MChangeRingMap(MMap):
@@ -10981,7 +11020,7 @@ def _ff_admit_args(name, args, kw):
     if ok:
         return
     if ok is False:
-        raise _bad_types(name, args)
+        raise _bad_types(name, args, _located(name))
     held = [h for h in (_FF_CUR[0] or []) if h is not None]
     if not any(isinstance(h, _FFALL[2:]) for h in held):
         raise MagmaError("%s of a polynomial over a finite field (or its ring) is not supported yet" % name, "'%s'" % name)
@@ -11503,12 +11542,12 @@ def _guarded(name, f):
                 _FF_CUR[0] = None
         for i, a in enumerate(args):
             if i in ints and isinstance(a, _Fraction):
-                raise _bad_types(name, args)
+                raise _bad_types(name, args, _located(name))
             if isinstance(a, bool):
                 if bools is not None and i not in bools:
-                    raise _bad_types(name, args)
+                    raise _bad_types(name, args, _located(name))
             elif isinstance(a, str) and strs is not None and i not in strs:
-                raise _bad_types(name, args)
+                raise _bad_types(name, args, _located(name))
         if kw:
             _check_params(name, f, args, kw)
         return f(*args, **kw)
