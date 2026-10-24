@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { rmSync, writeFileSync } from "node:fs";
 
 // The signal-state trials' judges (web/interrupt-signals.mjs, plan-interrupt-harness r5 §7, §8.1),
 // on synthetic session results: what counts as the expected exit, escalation, re-arm and survival.
@@ -46,4 +47,20 @@ test("S4: a press after the window re-arms, never escalates; the KI when the reg
   assert.equal(judge("S4", { ...two, marks: [m("KI 1", 7000), m("END", 7001)], exit: { code: 0, signal: null, t: 7100 } }).outcome, "PASS");
   assert.match(judge("S4", { ...two, exit: { code: null, signal: "SIGINT", t: 4010 } }).why, /after the window, ended/);
   assert.equal(judge("S4", { ...two, marks: [m("RET 1", 7000)], exit: { code: 0, signal: null, t: 7100 } }).outcome, "FAIL");
+});
+
+test("PENDING-READY: a capability expression that is True makes its pending trial PENDING-READY; False stays PENDING", () => {
+  // a fake launcher (SB_LAUNCHER): runs the probe program with python3, so the yes path is exercised without a build
+  const fake = join(__dirname, "fake-launcher.cjs");
+  writeFileSync(fake, `const { spawnSync } = require("node:child_process"); const r = spawnSync("python3", [process.argv.at(-1)], { stdio: "inherit" }); process.exit(r.status ?? 1);`);
+  const src = `import { pendingReady } from ${JSON.stringify(mod)};
+const rows = await pendingReady({ hosts: ["cli"], flags: [], record: () => {}, rowsSoFar: [], baseline: { pending: [
+  { trial: "Y", waits_for: "x", capability: { mode: "python", expr: "1 + 1 == 2" } },
+  { trial: "N", waits_for: "x", capability: { mode: "python", expr: "hasattr(object, 'no_such_attribute')" } },
+  { trial: "E", waits_for: "x", capability: { mode: "python", expr: "1 / 0" } } ] } });
+console.log(JSON.stringify(rows.map((r) => [r.trial, r.outcome])));`;
+  const p = spawnSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8", env: { ...process.env, SB_LAUNCHER: fake } });
+  rmSync(fake, { force: true });
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(JSON.parse(p.stdout.trim().split("\n").at(-1)), [["Y", "PENDING-READY"], ["N", "PENDING"], ["E", "PENDING"]]);
 });
