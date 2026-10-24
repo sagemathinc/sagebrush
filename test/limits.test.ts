@@ -88,7 +88,7 @@ test("valid limits are the session's, read once and locked before the program ru
   assert.equal(r.status, 2);
   assert.equal(r.stdout, "");
   // user code can't set them again: they were locked at startup
-  const again = run(["-c", "import _limits\ntry:\n    _limits.propose(_limits.validate({'ff.work': 100000000, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'poly.work': unlimited}))\nexcept RuntimeError as e:\n    print(e)"]);
+  const again = run(["-c", "import _limits\ntry:\n    _limits.propose(_limits.validate({'ff.work': 100000000}))\nexcept RuntimeError as e:\n    print(e)"]);
   assert.equal(again.stdout, "sagebrush limits are read once, at the first use: set them before it\n");
   // after -c (or a script), --limits is the program's argument
   assert.equal(run(["-c", "import sys; print(sys.argv[1:])", "--limits", "x"]).stdout, "['--limits', 'x']\n");
@@ -204,11 +204,13 @@ test("the class-group and polynomial keys reach the engine only when finite, and
   const cert = file("cert.json", '{"nf.certify_norm_max": 1000000}');
   r = run(["--limits", cert, "--sage", "-c", "x = polygen(QQ, 'x')\ntry:\n    NumberField(x^2 + 3*10^12 + 1, 'a').class_number(proof=True)\nexcept NotImplementedError as e:\n    print(e)\n"]);
   assert.match(r.stdout, /beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000/, r.stderr);
-  // a finite poly.work refuses a factorization that needs more
+  // a finite poly.work refuses a factorization that needs more: x^1001 - 1
+  // (degree 1001, eight cyclotomic factors) needs more than 2^20 limb
+  // operations; the small product of three factors fits
   const pw = file("pw.json", '{"poly.work": 1048576}');
-  const f = "x = polygen(ZZ, 'x')\nf = (x^40 + x^3 + 1) * (x^40 + x^5 - 1) * (x^40 - 2*x^7 + 3)\ntry:\n    print(len(list(factor(f))))\nexcept Exception as e:\n    print(type(e).__name__, 'work' in str(e))\n";
-  assert.equal(run(["--sage", "-c", f]).stdout, "3\n");
-  assert.match(run(["--limits", pw, "--sage", "-c", f]).stdout, /True\n$/);
+  const f = (g: string) => `x = polygen(ZZ, 'x')\ntry:\n    print(len(list(factor(${g}))))\nexcept Exception as e:\n    print(type(e).__name__, 'work' in str(e))\n`;
+  assert.equal(run(["--limits", pw, "--sage", "-c", f("(x^4 + x + 1) * (x^3 - 2) * (x^2 + 3)")]).stdout, "3\n");
+  assert.match(run(["--limits", pw, "--sage", "-c", f("x^1001 - 1")]).stdout, /True\n$/);
 });
 
 test("a descent's discrete-log table stays at most 35 entries with every limit unlimited (plan-c0 r2)", () => {
