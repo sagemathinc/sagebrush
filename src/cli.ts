@@ -57,6 +57,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   notebook [DIR] [--port N] [--no-browser]
            the Sagebrush notebook in your browser, running Python here;
            notebooks are the .ipynb files in DIR
+  board open FILE [--port N] [--no-browser]
+           a board in your browser, shown again each time FILE changes
+           (sagebrush board --help: every board command)
 `;
 
 // A SystemExit's status as the process's exit code, by CPython's rule
@@ -442,7 +445,7 @@ async function main(argv = process.argv.slice(2)) {
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
   // `board` with a command it doesn't have is said so there, R0-3, unless
   // there is a script named board here, to run as before)
-  if (argv[0] === "board" && (["render", "run", "check", "answers", "try", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
+  if (argv[0] === "board" && (["render", "run", "check", "answers", "try", "open", "-h", "--help"].includes(argv[1]) || !existsSync("board"))) {
     const { boardCommand } = await import("./board-cli");
     process.exitCode = await boardCommand(argv.slice(1));
     return;
