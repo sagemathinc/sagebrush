@@ -203,6 +203,14 @@ Supported:
   plot follows a light or dark theme; one set to another value draws in
   exactly that color.  As in matplotlib, an Axes takes its settings when it
   is made: a style in a `with` block stays with the plots made in it.
+- Styles (`plt.style.use`, `plt.style.context`): matplotlib 3.11's `bmh`,
+  `classic`, `fivethirtyeight`, `ggplot` and the `seaborn-v0_8` family,
+  from its style files.  Sagebrush draws the colors, grid and line widths
+  they set; a style's other settings are kept in rcParams and named in one
+  warning.  The old names `seaborn` and `seaborn-<style>` (matplotlib
+  removed them in 3.8) still work, with a warning naming the new style:
+  where upstream removes a name for no functional reason, Sagebrush keeps
+  accepting it, with a warning, so older teaching material runs.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 
