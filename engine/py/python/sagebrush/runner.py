@@ -83,6 +83,7 @@ class Runner:
         self.requests = {}      # request_id -> (key, answer, at)
         self.fresh = 0
         self.restarting = set()  # sessions an escalation is restarting
+        self.closing = False     # the server is exiting: a run ended by that is killed, server_exit
         cfg = self.store.cfg["SAGEBRUSH_RUNS_SESSIONS"]
         self.ceiling = min(cfg, R.session_ceiling())
 
@@ -98,22 +99,28 @@ class Runner:
             name = "new-%d" % (self.fresh + 1)
         return name, self.sessions.get(name)
 
-    def _admit(self, new_session):
-        """Under the store lock: room for one more run.  A new session needs a
-        slot: this server's live sessions and every run of another owner
-        still in the active index (running or liveness unknown: they keep
-        their slots, design §6, §9) count against the ceiling, so the index
-        stays bounded by it.  And the store must have room for the run's
-        records (R.RUN_META_BYTES)."""
-        if new_session:
-            live = sum(1 for x in self.sessions.values() if x.alive())
-            others = sorted(h for h, e in self.store.index().items() if not self.store.mine(e))
-            if live + len(others) >= self.ceiling:
-                raise Refused("capacity", "%d sessions are running here and %d runs of other servers hold slots (liveness unknown): the most this machine allows is %d"
-                              % (live, len(others), self.ceiling), limit=self.ceiling, active=sorted(self.current.values()), unknown=others)
+    def _slot(self, name):
+        return "%s:%s" % (self.store.owner["nonce"], name)
+
+    def _admit(self, name):
+        """Under the store lock: room for one more run in session `name`.  Its
+        session slot is taken, or confirmed still held (a reactivated
+        session passes the same admission): the store's slots, of every
+        server sharing it, idle sessions included, and the runs of other
+        owners without one (liveness unknown) count against the ceiling, so
+        sessions and the active index stay bounded by it.  And the store
+        must have room for the run's records (R.RUN_META_BYTES)."""
         try:
             self.store.admit(R.RUN_META_BYTES, "meta")
         except R.StorageError as e:
+            raise Refused("storage", "no room for another run: %s" % e)
+        try:
+            self.store.slot_take(self._slot(name), self.ceiling)
+        except R.SlotRefused as e:
+            raise Refused("capacity", "%d of the %d session slots this machine allows are held (by sessions of this and other servers%s)"
+                          % (e.used, e.ceiling, ", and %d runs of other servers, liveness unknown" % len(e.unknown) if e.unknown else ""),
+                          limit=self.ceiling, active=sorted(self.current.values()), unknown=e.unknown, slots=len(e.slots))
+        except (OSError, R.StorageError) as e:
             raise Refused("storage", "no room for another run: %s" % e)
 
     def _idempotent(self, request_id, key):
@@ -158,7 +165,7 @@ class Runner:
                 # (admission, the record and its index entry in one step under
                 # the store lock: another server's admission sees this run)
                 with self.store.lock:
-                    self._admit(sess is None)
+                    self._admit(name)
                     handle = self.store.new_handle()
                     self.seq[name] = self.seq.get(name, 0) + 1
                     rec = R.new_record(self.store, handle, "code", mode, {"id": name, "generation": None}, self.seq[name], started_by, label, now=self.clock())
@@ -251,7 +258,7 @@ class Runner:
             m = q.get()
             if isinstance(m, dict) and "out" in m:
                 # (output as it is printed, bounded here: head, rolling tail, counters)
-                out.add(m["out"])
+                out.add(m["out"], m.get("stream", "stdout"))
                 continue
             r = m
             break
@@ -282,7 +289,11 @@ class Runner:
         rec["last_seen_at"] = now
         if r is None:
             restart = [x for x in rec["requests"] if x.get("result") == "restarted"]
-            if restart:
+            if self.closing:
+                # (the session ended because the server is exiting: whichever
+                # thread sees it first, the same answer, astra PR120-SEM-5)
+                rec["state"], rec["ended_by"] = "killed", "server_exit"
+            elif restart:
                 rec["state"], rec["ended_by"] = "killed", "restart"
                 rec["restart_cause"] = restart[-1]["kind"]
                 rec["restarted"] = True
@@ -405,12 +416,8 @@ class Runner:
             if earlier is not None:
                 return earlier
             rid = request_id if request_id is not None else "cancel_" + secrets.token_hex(12)
-            run = self.runs.get(handle)
+            run = self._owned(handle)
             rec = run.record if run is not None else (self.store.load(handle) if isinstance(handle, str) else None)
-            if run is not None and rec.get("state") != "running":
-                stored = self.store.load(handle)
-                if stored is not None and stored.get("state") == "gone":
-                    rec = stored
             if rec is None:
                 raise Refused("not_found", "no run %r" % (handle,))
             if rec.get("state") != "running":
@@ -438,14 +445,20 @@ class Runner:
                     del self.runs[h]
 
     def _owned(self, handle):
-        """This server's run, unless it has ended and the store has removed it
-        since (cleanup here or by another server): then None, and its cache
-        entry dropped."""
+        """This server's run, unless it has ended and the store no longer has
+        it (removed by cleanup, here or by another server; its tombstone
+        perhaps pruned since): then None, and its cache entry dropped.  The
+        store is the authority for an ended run, astra PR120-SEM-2.  The one
+        exception is a run whose own terminal record couldn't be written
+        (`storage`): its directory is still there, and the cache keeps what
+        the store couldn't."""
         run = self.runs.get(handle)
         if run is None or not run.done.is_set():
             return run
         stored = self.store.load(handle)
-        if stored is not None and stored.get("state") == "gone":
+        if stored is None or stored.get("state") == "gone":
+            if stored is None and run.record.get("storage") and self.store.exists(handle):
+                return run
             del self.runs[handle]
             return None
         return run
@@ -524,12 +537,15 @@ class Runner:
         killed (ended_by "server_exit"), so that it isn't left holding a slot
         as an unknown run."""
         with self.lock:
+            # (the intent first, under the lock, before any worker is ended)
+            self.closing = True
             sessions = list(self.sessions.items())
         for name, s in sessions:
             try:
                 s.close()
             except Exception:
                 pass
+            self.store.slot_release(self._slot(name))
         with self.lock:
             for run in list(self.runs.values()):
                 if not run.done.is_set() and run.record.get("state") == "running":
