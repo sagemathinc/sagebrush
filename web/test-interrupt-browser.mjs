@@ -12,7 +12,7 @@ import { devtoolsPort } from "./test-port.mjs";
 const now = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function browserPilot() {
+export async function browserPilot({ record = (r) => console.log(JSON.stringify(r)), overBudget = () => false } = {}) {
   const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
   const profile = mkdtempSync(join(tmpdir(), "sb-intr-browser-"));
   let cdpPort = Number(process.env.CDP_PORT) || 0;
@@ -59,14 +59,25 @@ export async function browserPilot() {
       await until(`!${LAST}.classList.contains('running')`);
     };
     for (const c of cases) {
-      await setMode(c.mode);
+      if (overBudget()) { record({ case: c.id, host: "browser", outcome: "INVALID", why: "run budget spent" }); continue; }
+      try {
+        await setMode(c.mode);
+      } catch (e) {
+        record({ case: c.id, host: "browser", outcome: "INVALID", why: "mode " + c.mode + " not ready: " + String(e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) });
+        continue;
+      }
       const trials = [];
       for (let i = 1; i <= 5; i++) {
         const w0 = await workers();
         await start(c.code(i));
         let enter = null;
         for (const t = now(); now() - t < 30000; ) { if (new RegExp(`(^|\\n)ENTER ${i}\\b`).test((await state()).out)) { enter = now(); break; } await sleep(20); }
-        if (enter == null) { trials.push({ i, outcome: "INVALID", why: "no ENTER seen", out: (await state()).out.slice(-600) }); await until(`!${LAST}.classList.contains('running')`, 130000).catch(() => {}); continue; }
+        if (enter == null) {
+          trials.push({ i, outcome: "INVALID", why: "no ENTER seen", out: (await state()).out.slice(-600) });
+          await ev("document.querySelector('#stop').click()").catch(() => {});
+          await until(`!${LAST}.classList.contains('running')`, 20000).catch(() => {});
+          break; // (the case never starts: its other trials would only repeat this)
+        }
         await sleep(Math.max(0, c.delay - (now() - enter)));
         const s0 = await state();
         if (/(^|\n)RET /.test(s0.out)) { trials.push({ i, outcome: "INVALID", why: "returned before Stop" }); continue; }
@@ -85,10 +96,10 @@ export async function browserPilot() {
         else if (!sameWorker) why = "worker replaced";
         else if (probe !== "ok") why = "probe " + probe;
         else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
-        trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: await memory() });
+        trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: i === 1 || i === 5 ? await memory() : undefined });
       }
       result.rows.push({ case: c.id, host: "browser", trials });
-      console.log(JSON.stringify(result.rows.at(-1)));
+      record(result.rows.at(-1));
     }
     result.worker_ids.push(await workers());
   } finally {

@@ -12,7 +12,7 @@
 // without an end), and writes what it measured as JSON.  This is the plan's pilot (plan-
 // interrupt-harness r3 §8); the full matrix and the CI job follow it.
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classify, rowOutcome } from "./interrupt-classify.mjs";
@@ -27,6 +27,13 @@ const opt = (name, dflt) => {
 const HOSTS = opt("--host", "cli,prompt,browser").split(",");
 const ROWS = opt("--rows", "");
 const OUT = opt("--out", join(tmpdir(), "interrupt-matrix-pilot.json"));
+// (every row is appended to OUT.jsonl as it finishes, so a stopped run keeps what it measured)
+const ROWS_OUT = OUT.replace(/\.json$/, "") + ".jsonl";
+// the whole run's wall budget (test infrastructure): past it, the rows left are INVALID-budget
+const RUN_BUDGET_MS = Number(opt("--budget-ms", String(30 * 60_000)));
+const RUN_T0 = Number(process.hrtime.bigint()) / 1e6;
+const overBudget = () => Number(process.hrtime.bigint()) / 1e6 - RUN_T0 > RUN_BUDGET_MS;
+export const record = (row) => { appendFileSync(ROWS_OUT, JSON.stringify(row) + "\n"); console.log(JSON.stringify(row)); };
 const G_MS = 120_000; // the hang guard after a Stop (test infrastructure, not a computation limit)
 const CAL_CAP_MS = 60_000; // one uninterrupted calibration run at most
 const BAND = { min: 3_000, max: 8_000 }; // the CI band (plan r3 §3)
@@ -214,9 +221,15 @@ async function calibrate(host, c) {
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
+    if (overBudget()) {
+      rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
+      record(rows.at(-1));
+      continue;
+    }
     const cal = await calibrate(host, c);
     if (c.calibration !== "nonterminating" && cal.T == null) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: cal.error, calibration: cal });
+      record(rows.at(-1));
       continue;
     }
     // 5 trials in one session: Stop at 0.5 T (or 1 s after ENTER) — the short leak series too
@@ -226,7 +239,7 @@ async function runHost(host) {
     const outcome = rowOutcome(trials);
     const rss = r.samples.map((x) => x.rss_kb), thr = r.samples.map((x) => x.threads);
     rows.push({ case: c.id, host, mode: c.mode, outcome, s: cal.s, T_ms: cal.T && Math.round(cal.T), calibration: cal, trials, rss_kb: rss, threads: thr, end: r.end, wall_ms: Math.round(r.wall_ms), left_in_group: r.left, ...(trials.some((t) => t.outcome !== "PASS") ? { tail: r.tail } : {}) });
-    console.log(JSON.stringify(rows.at(-1)));
+    record(rows.at(-1));
   }
   return rows;
 }
@@ -236,7 +249,7 @@ const tRun = now();
 for (const h of HOSTS) {
   if (h === "browser") {
     const { browserPilot } = await import("./test-interrupt-browser.mjs");
-    out.hosts[h] = await browserPilot();
+    out.hosts[h] = overBudget() ? { skipped: "run budget spent" } : await browserPilot({ record, overBudget });
   } else out.hosts[h] = await runHost(h);
 }
 out.wall_ms = Math.round(now() - tRun);
