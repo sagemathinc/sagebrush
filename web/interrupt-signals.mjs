@@ -85,10 +85,11 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
       }, 300);
     };
     const onLine = (line) => {
-      const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b ?(\S*)/);
+      // a marker, its trial number if any, and the rest of the line (e.g. "PROBE yes": mk PROBE, rest "yes")
+      const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)\b)? ?(.*)$/);
       if (!m) return;
-      const mk = m[1] + (m[2] && /^\d+$/.test(m[2]) ? " " + m[2] : "");
-      marks.push({ mk, t: now(), rest: line.slice(m[0].length).trim() });
+      const mk = m[1] + (m[2] ? " " + m[2] : "");
+      marks.push({ mk, t: now(), rest: m[3].trim() });
       for (const s of schedule) if (s.after === mk && !s.armed) { s.armed = true; setTimeout(() => !done && act(s.act), s.ms); }
       if (m[1] === "END" || (host === "prompt" && m[1] === "PROBE")) setTimeout(() => finish("end"), host === "cli" ? 2000 : 500);
     };
@@ -230,7 +231,7 @@ export async function runSignals({ hosts = ["cli"], mode = "ci", record = () => 
 //  - "E1 trace": any S session above wrote SAGEBRUSH_SIGNAL_TRACE lines;
 //  - an entry with capability.expr: evaluated in the launcher (mode capability.mode);
 //  - S6: run as an observation (it needs no API).
-async function pendingReady({ hosts, flags, baseline, record, rowsSoFar }) {
+export async function pendingReady({ hosts, flags, baseline, record, rowsSoFar }) {
   const out = [];
   const traced = rowsSoFar.some((r) => (r.cells ?? []).some((c) => c.trace_lines > 0));
   for (const e of baseline.pending ?? []) {

@@ -13,8 +13,8 @@
  "pending": [
   { "trial": "S1-S4 trace assertions", "waits_for": "E1 (SAGEBRUSH_SIGNAL_TRACE emitter)", "owner": "python" },
   { "trial": "S5a", "waits_for": "E1 (frame requests, INTR bit 1)", "owner": "python" },
-  { "trial": "S5b", "waits_for": "PR 5a (soft stop, INTR bit 2)", "owner": "sage2" },
-  { "trial": "S5c", "waits_for": "G (grading allowance scope, INTR bit 3)", "owner": "grader" },
+  { "trial": "S5b", "waits_for": "PR 5a (soft stop, INTR bit 2)", "owner": "sage2", "capability": { "mode": "python", "expr": "getattr(__import__(\"sagebrush\"), \"capabilities\", lambda: {})().get(\"request_stop\") is True", "source": "sage2, /scratch/sagebrush-reviews/interrupt-harness-capability-probes.md (b5ab6cc9): False until PR 5a flips request_stop, also after #124 adds capabilities()" } },
+  { "trial": "S5c", "waits_for": "G-3 (grading allowance scope, INTR bit 3; G-1 and G-2 have no Python surface)", "owner": "grader", "capability": { "mode": "python", "expr": "hasattr(__import__(\"sagebrush\"), \"AllowanceExceeded\")", "source": "grader, /scratch/sagebrush-reviews/interrupt-harness-capability-probes.md (b5ab6cc9): False until G-3, the first runtime surface" } },
   { "trial": "S6 (SIGHUP ends a busy prompt within 2 s)", "waits_for": "python's prompt signal-deferral fix (the PR after H′1a)", "owner": "python" }
  ]
 }
