@@ -8,11 +8,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { againstBaseline, rowOutcome } from "./interrupt-classify.mjs";
 
 const now = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function browserPilot({ record = (r) => console.log(JSON.stringify(r)), overBudget = () => false } = {}) {
+export async function browserPilot({ record = (r) => console.log(JSON.stringify(r)), overBudget = () => false, baseline = { entries: [] } } = {}) {
   const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
   const profile = mkdtempSync(join(tmpdir(), "sb-intr-browser-"));
   let cdpPort = Number(process.env.CDP_PORT) || 0;
@@ -59,11 +60,12 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
       await until(`!${LAST}.classList.contains('running')`);
     };
     for (const c of cases) {
-      if (overBudget()) { record({ case: c.id, host: "browser", outcome: "INVALID", why: "run budget spent" }); continue; }
+      const invalid = (row) => { result.rows.push(row); record(row); };
+      if (overBudget()) { invalid({ case: c.id, host: "browser", outcome: "INVALID", why: "run budget spent" }); continue; }
       try {
         await setMode(c.mode);
       } catch (e) {
-        record({ case: c.id, host: "browser", outcome: "INVALID", why: "mode " + c.mode + " not ready: " + String(e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) });
+        invalid({ case: c.id, host: "browser", outcome: "INVALID", why: "mode " + c.mode + " not ready: " + String(e).slice(0, 200), out: (await state().catch(() => ({ out: "" }))).out.slice(-600) });
         continue;
       }
       const trials = [];
@@ -98,7 +100,11 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
         else outcome = t_recog - t_send > 10000 ? "SLOW" : "PASS";
         trials.push({ i, outcome, why, ...(outcome === "PASS" ? {} : { out: out.slice(-600) }), latency_ms: t_recog && Math.round(t_recog - t_send), poll_ms: 20, same_worker: sameWorker, memory_bytes: i === 1 || i === 5 ? await memory() : undefined });
       }
-      result.rows.push({ case: c.id, host: "browser", trials });
+      // the browser's leak criterion here: the interpreter worker's identity never changes (r4 §6.1)
+      const leak = { ok: trials.length > 0 && trials.every((t) => t.same_worker !== false), check: "worker identity" };
+      const own = rowOutcome(trials, leak.ok);
+      const outcome = againstBaseline({ case: c.id, host: "browser", outcome: own, trials, leak }, baseline);
+      result.rows.push({ case: c.id, host: "browser", outcome, ...(outcome !== own ? { own_outcome: own } : {}), trials, leak });
       record(result.rows.at(-1));
     }
     result.worker_ids.push(await workers());
