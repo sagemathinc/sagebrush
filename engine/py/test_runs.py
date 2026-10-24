@@ -86,7 +86,9 @@ class FakeSession:
         self.q = queue.Queue()
 
     def close(self):
+        # (as Session.close: the worker ended)
         self.closed = True
+        self.live = False
 
 
 def fresh(env=None, owner=None, root=None):
@@ -699,6 +701,75 @@ def test_idle_slots_shared():
     print("idle sessions hold shared slots: ok")
 
 
+def test_slot_lifecycle():
+    """astra PR120-SEM-7, daybreak2 PR120-FIX3-1/2: a slot taken for a start
+    that fails goes back; a pre-existing session's slot stays; a session
+    whose close fails, its worker still alive, keeps its slot (another owner
+    stays refused); and slots.json is in the running total."""
+    import errno
+
+    root = tempfile.mkdtemp(prefix="sb-runs-")
+    other = runner(fresh(root=root, owner={"pid": os.getpid(), "nonce": "other"}))
+    other.ceiling = 1
+
+    def fails_at(what):
+        r = runner(fresh(root=root))
+        r.ceiling = 1
+        if what == "record":
+            real = r.store.save
+            r.store.save = lambda rec, durable=False: (_ for _ in ()).throw(OSError(errno.ENOSPC, "No space left on device"))
+        elif what == "index":
+            real = r.store.index_set
+            r.store.index_set = lambda h, e: (_ for _ in ()).throw(OSError(errno.ENOSPC, "No space left on device")) if e is not None else real(h, e)
+        else:
+            r.new_session = lambda: (_ for _ in ()).throw(RuntimeError("the session did not start"))
+        return r
+
+    for what in ("record", "index", "session"):
+        r = fails_at(what)
+        try:
+            run, done = r.start("auto:1", "sage", session="s")
+            assert what == "session" and done and r.record(run.record["handle"])["error"]["type"] == "session", (what, run.record)
+        except RN.Refused as e:
+            assert what != "session" and e.kind == "storage", (what, e.kind)
+        assert r.store.slots() == {}, (what, r.store.slots())
+        assert r.store.used() == r.store.walk_total(), what
+        assert other.start("auto:1", "sage", session="o")[1], what  # (the ceiling is free again)
+        other.close()
+    # a pre-existing session's slot isn't released by a failed start in it
+    r = runner(fresh(root=root))
+    r.ceiling = 1
+    assert r.start("auto:1", "sage", session="s")[1]
+    real = r.store.save
+    r.store.save = lambda rec, durable=False: (_ for _ in ()).throw(OSError(errno.ENOSPC, "No space left on device"))
+    refused("storage", r.start, "auto:1", "sage", session="s")
+    r.store.save = real
+    assert list(r.store.slots()) == [r._slot("s")]
+    # a close that fails with the worker alive keeps the slot: idle, then busy
+    for busy in (False, True):
+        if busy:
+            run, _ = r.start("slow", "sage", session="s", wait=0)
+        s = r.made[-1]
+        s.close = lambda: (_ for _ in ()).throw(OSError("couldn't stop it"))
+        r.close()
+        assert s.alive() and list(r.store.slots()) == [r._slot("s")], (busy, r.store.slots())
+        e = refused("capacity", other.start, "auto:1", "sage", session="o")
+        assert e.extra["slots"] == 1, e.extra
+        if busy:
+            assert r.store.load(run.record["handle"])["state"] == "running"
+        r.closing = False
+    # (slots.json's rewrites are charged: create, grow, release, no cleanup between)
+    s = fresh()
+    for i in range(40):
+        assert s.slot_take("n%d:%s" % (i, "x" * 200), 100) is True
+        assert s.used() == s.walk_total(), i
+    assert s.slot_take("n0:" + "x" * 200, 100) is False
+    for i in range(40):
+        s.slot_release("n%d:%s" % (i, "x" * 200))
+        assert s.used() == s.walk_total(), i
+    print("slot lifecycle: ok")
+
+
 def test_tombstones_win():
     """astra PR120-SEM-2: a run removed by cleanup (here, or by another
     server) is gone for status, result and keep, whatever this server has
@@ -924,6 +995,7 @@ def test_capture_signal_boundaries():
         os.kill(os.getpid(), SG.SIGINT)
         time.sleep(0.01)  # (delivered while held)
 
+    S._HOLD.install()  # (as the worker does, in its main thread)
     text = "".join("%06d\n" % i for i in range(60000))  # (420,000 characters: several messages)
     for where in ("after", "write", "frame"):
         proto = _Proto()
@@ -971,21 +1043,21 @@ def test_capture_signal_boundaries():
         sent = "".join(m["out"] for m in proto.lines)
         assert sent == text, (where, len(sent), len(text))
         assert raised == 1, (where, raised)
-    # an interrupt pending as a send begins (raised by the first handler
-    # swap): the chunk wasn't written, so it stays, and goes in the next flush
+    # an interrupt raised as a flush begins, before its hold: the chunk
+    # wasn't written, so it stays, and goes in the next flush
     proto = _Proto()
     c = S._Capture(S._Sender(proto))
     c.write("y" * 1000)
-    real_signal = SG.signal
+    real_enter = S._Hold.__enter__
     calls = [0]
 
-    def swap(*a):
+    def enter(self):
         calls[0] += 1
         if calls[0] == 1:
             raise KeyboardInterrupt
-        return real_signal(*a)
+        return real_enter(self)
 
-    SG.signal = swap
+    S._Hold.__enter__ = enter
     try:
         try:
             c.flush()
@@ -993,7 +1065,7 @@ def test_capture_signal_boundaries():
         except KeyboardInterrupt:
             pass
     finally:
-        SG.signal = real_signal
+        S._Hold.__enter__ = real_enter
     c.flush()
     assert "".join(m["out"] for m in proto.lines) == "y" * 1000, len(proto.lines)
     # the reply: written exactly once, even when the interrupt comes as it is written
@@ -1005,6 +1077,7 @@ def test_capture_signal_boundaries():
     finally:
         S._commit_hook = None
     assert proto.lines == [{"result": "1"}], proto.lines
+    SG.signal(SG.SIGINT, SG.default_int_handler)
     print("capture signal boundaries: ok")
 
 
@@ -1053,6 +1126,68 @@ def test_worker_real_signal():
         interrupted = replies[1]["error_info"] is not None
         assert interrupted == (len(outs) == 200000), (nth, replies[1]["error_info"], len(outs))
     print("worker real signal: ok")
+
+
+def test_worker_threads():
+    """astra PR120-SEM-6, on the real worker loop: output from a thread, a
+    thread pool and the main thread at once, large enough to fill chunks,
+    with and without a real Ctrl-C during it: no exception in the threads,
+    every line valid JSON, and per-stream totals that match the reply."""
+    import subprocess
+
+    if os.name == "nt":
+        print("worker threads: skipped (POSIX signals)")
+        return
+    pkg = os.path.dirname(RN.__file__)
+    harness = (
+        "import os, sys, types, signal, time\n"
+        "m = types.ModuleType('sagebrush'); m.__path__ = [%r]; sys.modules['sagebrush'] = m\n"
+        "sage = types.ModuleType('sagebrush.sage'); sage.__all__ = []; sys.modules['sagebrush.sage'] = sage\n"
+        "prep = types.ModuleType('sagebrush.preparse'); prep.preparse = lambda s: s; sys.modules['sagebrush.preparse'] = prep\n"
+        "from sagebrush import session as S\n"
+        "N = int(sys.argv[1]); n = [0]\n"
+        "def hook(msg):\n"
+        "    n[0] += 1\n"
+        "    if n[0] == N:\n"
+        "        os.kill(os.getpid(), signal.SIGINT)\n"
+        "S._commit_hook = hook\n"
+        "S._worker()\n" % pkg)
+    code = (
+        "import sys, threading\n"
+        "from concurrent.futures import ThreadPoolExecutor\n"
+        "errors = []\n"
+        "def big(i):\n"
+        "    try:\n"
+        "        print('t%d' % i + 'x' * 70000)\n"
+        "        sys.stderr.write('e%d' % i + '\u00e9' * 30000 + '\\n')\n"
+        "    except BaseException as e:\n"
+        "        errors.append(repr(e))\n"
+        "t = threading.Thread(target=big, args=(0,)); t.start()\n"
+        "with ThreadPoolExecutor(4) as ex:\n"
+        "    list(ex.map(big, range(1, 5)))\n"
+        "for j in range(200):\n"
+        "    print('m' * 500)\n"
+        "t.join()\n"
+        "errors\n")
+    reqs = json.dumps({"code": code, "mode": "python"}) + "\n" + json.dumps({"code": "7", "mode": "python"}) + "\n"
+    for nth in (0, 3, 9):
+        r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=120)
+        msgs = [json.loads(l) for l in r.stdout.splitlines()]  # (every line valid JSON)
+        replies = [m for m in msgs if "result" in m]
+        assert len(replies) == 2 and replies[1]["result"] == "7", (nth, [x.get("result") for x in replies], r.stderr[-500:])
+        rep = replies[0]
+        got = {"stdout": 0, "stderr": 0}
+        for m in msgs:
+            if "out" in m:
+                got[m["stream"]] += len(m["out"].encode("utf-8", "surrogatepass"))
+                assert len(json.dumps(m)) + 1 <= 64 * 1024
+        assert got == rep["output_bytes"], (nth, got, rep["output_bytes"])
+        if rep["error_info"] is None:
+            assert rep["result"] == "[]", (nth, rep["result"])  # (no thread failed: no ValueError)
+            assert got == {"stdout": 5 * 70003 + 200 * 501, "stderr": 5 * (2 + 60000 + 1)}, (nth, got)
+        else:
+            assert nth and rep["error_info"]["type"] == "interrupted", (nth, rep["error_info"])
+    print("worker threads: ok")
 
 
 def test_real_session_output():
@@ -1204,6 +1339,7 @@ if __name__ == "__main__":
     test_admission_boundaries()
     test_unknown_runs_bounded()
     test_idle_slots_shared()
+    test_slot_lifecycle()
     test_tombstones_win()
     test_pruned_tombstone()
     test_close_attribution()
@@ -1212,6 +1348,7 @@ if __name__ == "__main__":
     test_capture()
     test_capture_signal_boundaries()
     test_worker_real_signal()
+    test_worker_threads()
     test_real_session_output()
     test_server()
     print("runs: all ok")
