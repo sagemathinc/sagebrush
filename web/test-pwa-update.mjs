@@ -82,14 +82,18 @@ function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
     if (!Object.values(notes).some((l) => l.length)) log("    (no failed requests, console errors or failed loads recorded)");
   };
 }
-/** Poll `ev(expr)` until it's truthy: at least ms / 100 polls, 100 ms apart (as always), but never past
- * ms + one call's deadline, so a wedged page can't stretch the wait without bound. */
-function makeUntil(ev, pause, callMs) {
+/** Poll `ev(expr, deadline)` until it's truthy, 100 ms apart, for `ms`: no call starts at or after start + ms
+ * (so a healthy page is polled for its whole time, as before). The wall is start + ms + callMs: each call
+ * is given min(callMs, the time left to the wall), and no sleep runs past it, so the whole wait is at most
+ * ms + callMs (120 s for the 90 s cell wait) however slow the page (PWA-CALL101-1). `now` is the clock. */
+function makeUntil(ev, pause, callMs, now = Date.now) {
   return async (expr, ms = 30000) => {
-    const cap = Date.now() + ms + callMs;
-    for (let i = 0; i < ms / 100 && Date.now() < cap; i++) {
-      if (await ev(expr)) return true;
-      await pause(100);
+    const start = now(), cutoff = start + ms, wall = cutoff + callMs;
+    while (now() < cutoff) {
+      if (await ev(expr, Math.max(1, Math.min(callMs, wall - now())))) return true;
+      const left = wall - now();
+      if (left <= 0) break;
+      await pause(Math.min(100, left));
     }
     return false;
   };
@@ -156,16 +160,49 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
   const rd = await dflt.send("Page.navigate", { url: "about:blank" });
   const took3 = Date.now() - t0;
   ok(rd?.timedOut === true && took3 >= 100 && took3 < 1500 && dflt.pending() === 0, `(self-check) a session's default deadline ends an ordinary call nobody answers (${took3} ms)`);
+  // until's bound is ms + callMs, exactly (PWA-CALL101-1): first on a virtual clock, with no tolerance
+  {
+    let t = 0;
+    const clock = () => t, tick = async (d) => { t += d; };
+    // (astra's probe: every call takes 29 s and answers no; until(x, 90 s) with 30 s calls)
+    const slow = makeUntil(async (_, deadline) => { t += Math.min(29_000, deadline); return undefined; }, tick, 30_000, clock);
+    ok((await slow("x", 90_000)) === false && t <= 90_000 + 30_000, `(self-check) until with 29 s calls ends by its bound of 90 + 30 s (virtual ${t} ms)`);
+    // (the last call starts 1 ms before the cutoff, and nothing answers it: it gets only the time left to the wall)
+    t = 0;
+    let starts = [];
+    // (the 100 ms pause is free here, so the second call starts exactly 1 ms before the cutoff)
+    const late = makeUntil(async (_, deadline) => { starts.push(t); t += starts.length === 1 ? 89_999 : deadline; return undefined; }, async (d) => { t += d === 100 ? 0 : d; }, 30_000, clock);
+    ok((await late("x", 90_000)) === false && starts.at(-1) === 89_999 && t <= 90_000 + 30_000, `(self-check) a last call begun 1 ms before the cutoff still ends by the wall (virtual ${t} ms, starts ${JSON.stringify(starts)})`);
+    // (a call never starts at or after the cutoff)
+    t = 0;
+    starts = [];
+    const busy = makeUntil(async () => { starts.push(t); t += 40; return false; }, tick, 30_000, clock);
+    await busy("x", 1_000);
+    ok(starts.every((s) => s < 1_000) && t <= 1_000 + 30_000, `(self-check) no call starts at or after the cutoff (${starts.length} calls, last at ${starts.at(-1)} ms of 1,000)`);
+  }
+  // ...and in real time, against the same bound with only 50 ms for the scheduler
+  const TOL = 50;
+  const neverAnswers = cdpSession(() => {}); // (a wedged page: each call ends only at the deadline until gives it)
+  const wedgedEv = async (_, deadline) => { const r = await neverAnswers.send("Runtime.evaluate", {}, deadline); return r?.timedOut ? undefined : r; };
   const quick = makeUntil(async () => false, sleep, 200);
   t0 = Date.now();
   const q = await quick("x", 300);
   const took4 = Date.now() - t0;
-  ok(q === false && took4 >= 300 && took4 < 1500, `(self-check) until still waits at least its time when the page answers at once (${took4} ms for 300)`);
-  const wedged = makeUntil(() => sleep(200).then(() => undefined), sleep, 200);
+  ok(q === false && took4 >= 300 && took4 <= 300 + 200 + TOL, `(self-check) until polls a page that answers no at once for its whole time, within its bound (${took4} ms; 300 to 500 + ${TOL})`);
+  const wedged = makeUntil(wedgedEv, sleep, 200);
   t0 = Date.now();
   const w = await wedged("x", 300);
   const took5 = Date.now() - t0;
-  ok(w === false && took5 < 300 + 2 * 200 + 300, `(self-check) until ends within its time + a call's deadline when every call times out (${took5} ms for 300 + 200)`);
+  ok(w === false && took5 <= 300 + 200 + TOL && neverAnswers.pending() === 0, `(self-check) until ends within ms + callMs when the page never answers (${took5} ms; bound 500 + ${TOL})`);
+  // (the first call answers no after 180 ms, so the second starts at about 280 ms, just before the 300 ms
+  // cutoff, and is never answered: the wall alone ends it, at ms + callMs)
+  const lateStarts = [];
+  const lastLate = makeUntil(async (expr, deadline) => { lateStarts.push(Date.now() - t0); if (lateStarts.length === 1) { await sleep(180); return false; } return wedgedEv(expr, deadline); }, sleep, 200);
+  t0 = Date.now();
+  const ll = await lastLate("x", 300);
+  const took6 = Date.now() - t0;
+  ok(ll === false && lateStarts.length === 2 && lateStarts[1] < 300 && took6 >= 500 - TOL && took6 <= 300 + 200 + TOL,
+    `(self-check) a call begun just before the cutoff, never answered, runs to the wall and no further (${took6} ms, calls at ${JSON.stringify(lateStarts)}; bound 500 + ${TOL})`);
   let calls = 0;
   ok((await makeUntil(async () => ++calls >= 3, sleep, 200)("x", 3000)) === true && calls === 3, "(self-check) until returns as soon as the page says yes");
 }
@@ -238,7 +275,7 @@ try {
   };
   const send = cdp.send;
   // (a call past its deadline has no value: a check of it fails, and until polls on)
-  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); return r?.timedOut ? undefined : r?.result?.value; };
+  const ev = async (expression, deadline) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, deadline); return r?.timedOut ? undefined : r?.result?.value; };
   const until = makeUntil(ev, sleep, CALL_MS);
   const diagnose = makeDiagnose({ send, notes, log: (l) => console.log(l) });
   const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
