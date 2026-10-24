@@ -1,0 +1,18 @@
+vZZ list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+vQQ list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+vGF5 list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+vRR list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+vZZ 0 list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+vZZ empty list:0011 tuple:0011 T:0011 []:0011 ():0011 L:01
+v.list() == list True
+list(v) == list True
+tuple(v) == tuple True
+v in [[1, 2]] False
+[1, 2] in [v] False
+v in [v] True
+row == list False
+column == list False
+solve_right == list False
+solve_right list() == list True
+vector == vector (True, True)
+matrix == list False

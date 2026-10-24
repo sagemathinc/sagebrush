@@ -1631,6 +1631,7 @@ class IdealFactorization(list):
         sage: len(F)
         3
     """
+    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
     def __repr__(self):
         if not self:
             return "1"
