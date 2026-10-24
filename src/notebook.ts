@@ -149,14 +149,19 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
       // (a link to a page of it may be followed from anywhere: the URL with the token is opened from a terminal,
       // which may be another site's page; it shows the page, which no other page can read)
       const origin = req.headers.origin, site = req.headers["sec-fetch-site"];
+      // (the path, decoded once: what these checks look at is what the routes below are given.  An encoded slash
+      // or backslash, a malformed escape, or a dot segment left after decoding is no path of this server's)
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      if (/%(2f|5c)/i.test(url.pathname)) { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
+      let path: string;
+      try { path = decodeURIComponent(url.pathname); } catch { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
+      if (/(^|\/)\.\.?(\/|$)/.test(path) || path.includes("\\")) { res.writeHead(400, { "Content-Type": "text/plain" }).end("bad path\n"); return; }
       // (only a top-level navigation to one of its pages, never to its API, nor in another page's frame)
-      const pathOnly = (req.url ?? "/").split("?")[0];
-      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && !/\/api\//.test(pathOnly);
+      const opened = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && !/(^|\/)api(\/|$)/i.test(path);
       if ((origin !== undefined && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) || (!opened && site !== undefined && site !== "same-origin" && site !== "none")) {
         res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden: not this server's own page\n");
         return;
       }
-      const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const cookie = /(?:^|;\s*)sagebrush_token=([0-9a-f]+)/.exec(req.headers.cookie ?? "")?.[1];
       if (url.searchParams.get("token") === token) {
         // trade the token in the URL for a cookie, and drop it from the address bar
@@ -165,8 +170,7 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
         return;
       }
       if (cookie !== token) { res.writeHead(403, { "Content-Type": "text/plain" }).end("Open the URL with the token that `sagebrush notebook` printed.\n"); return; }
-      // (decoded; its routes' patterns match any character, U+2028 and U+2029 too: the "s" flag)
-      const path = decodeURIComponent(url.pathname);
+      // (`path`, decoded above; its routes' patterns match any character, U+2028 and U+2029 too: the "s" flag)
       const method = req.method ?? "GET";
 
       // the API

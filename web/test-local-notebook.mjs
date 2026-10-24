@@ -196,6 +196,17 @@ ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[
   const rawPath = (path, headers, method = "GET") => new Promise((r) => request({ host: "127.0.0.1", port, path, method, headers: { Host: `127.0.0.1:${port}`, Cookie: cookie, ...headers } }, (res) => { res.resume(); r(res.statusCode); }).on("error", () => r(0)).end());
   ok((await rawPath("/api/session/nav/events", { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" })) === 403, "...and a navigation from elsewhere to the API is refused, even top-level");
   ok((await rawPath("/api/session/nav/events", {}, "POST")) === 405, "...and a session's events take GET only");
+  // (the same path as the routes see it: encoded letters, encoded slashes, double encoding and dot segments
+  // are no way around that; none of them starts a session)
+  const nav = { "Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
+  const variants = [["/%61pi/session/enc1/events", "enc1"], ["/api%2Fsession/enc2/events", "enc2"], ["/api%2fsession/enc3/events", "enc3"], ["/%2561pi/session/enc4/events", "enc4"],
+    ["/nb/x.ipynb/%2e%2e/api/session/enc5/events", "enc5"], ["/nb/x.ipynb/%2E/api/session/enc6/events", "enc6"], ["/%41PI/session/enc7/events", "enc7"]];
+  const got = [];
+  for (const [p] of variants) got.push(await rawPath(p, nav));
+  const started = [];
+  for (const [, id] of variants) if ((await rawPath(`/api/session/${id}/stop`, {}, "POST")) !== 404) started.push(id);
+  ok(got.every((c) => c >= 400) && !started.length, `...nor does an encoded path to the API: ${JSON.stringify(got)}, sessions started: ${JSON.stringify(started)}`);
+  ok((await rawPath("/tree/%E0%A4%A", {})) === 400 && (await rawPath("/tree/a%5Cb", {})) === 400, "...and a malformed escape or an encoded backslash is a bad path");
   ok((await hostIs(`127.0.0.1:${aport}`)) === 403 && (await hostIs("127.0.0.1")) === 403 && (await hostIs(`localhost:${port}`)) === 302, "...and the Host must be its own host and port (fetch() can't send another)");
 }
 
