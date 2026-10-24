@@ -557,14 +557,58 @@ def test_admission_boundaries():
     except R.StorageError:
         pass
     assert not os.path.exists(os.path.join(s.run_dir(h), "output.txt"))
-    # the active index too: an entry isn't added into a full store, and one is always removed
-    s.index_set(h, None)
+    # the active index too: its rewrite, whatever it adds or removes, needs room for its temporary file
+    for entry in ({"started_at": 1, "owner": s.owner, "label": "x" * 5000}, None):
+        try:
+            s.index_set(h, entry)
+            raise AssertionError("the index rewritten into the free-space floor")
+        except R.StorageError:
+            pass
+    assert h not in s.index()
+    # an atomic replacement needs room for the whole new file, not its net
+    # growth (daybreak2 PR120-FIX-1): a same-size rewrite at the floor is refused ...
+    free_total[0] = 10 ** 15
+    s.write_file(h, "run.json", b"r" * 3000)
+    free_total[0] = R.GiB + 4095
     try:
-        s.index_set(h, {"started_at": 1, "owner": s.owner, "label": "x" * 5000})
-        raise AssertionError("an index entry written into a full store")
+        s.write_file(h, "run.json", b"q" * 3000)
+        raise AssertionError("a same-size rewrite admitted into the floor")
     except R.StorageError:
         pass
-    assert h not in s.index()
+    assert open(os.path.join(s.run_dir(h), "run.json"), "rb").read() == b"r" * 3000
+    # ... and a growing one whose old file masks most of it, too
+    free_total[0] = R.GiB + 8191
+    try:
+        s.write_file(h, "run.json", b"q" * 7000)
+        raise AssertionError("a growing rewrite admitted for its growth only")
+    except R.StorageError:
+        pass
+    # failed writes, fsyncs and replaces leave no temporary, and the total stays the walk's
+    free_total[0] = 10 ** 15
+    real_write, real_fsync, real_replace = os.write, os.fsync, os.replace
+    for what in ("write", "fsync", "replace"):
+        def boom(*a, **k):
+            raise OSError(28, "No space left on device")
+        if what == "write":
+            os.write = lambda fd, b: real_write(fd, b[:100]) if len(b) > 100 else boom()
+        elif what == "fsync":
+            os.fsync = boom
+        else:
+            os.replace = boom
+        try:
+            s.write_file(h, "output.txt", b"o" * 5000, durable=True, kind="data")
+            raise AssertionError("no failure")
+        except OSError:
+            pass
+        finally:
+            os.write, os.fsync, os.replace = real_write, real_fsync, real_replace
+        assert not [n for n in os.listdir(s.run_dir(h)) if n.endswith(".tmp")], (what, os.listdir(s.run_dir(h)))
+        assert s.used() == s.walk_total(), what
+    # (and a temporary a crash left in a run's directory is removed by cleanup)
+    open(os.path.join(s.run_dir(h), "run.json.abc.tmp"), "wb").write(b"x")
+    s.cleanup()
+    assert not [n for n in os.listdir(s.run_dir(h)) if n.endswith(".tmp")]
+    free_total[0] = R.GiB
     # and a run doesn't start without room for its records
     r = runner(s)
     e = refused("storage", r.start, "auto:1", "sage")
@@ -584,7 +628,8 @@ def test_unknown_runs_bounded():
         try:
             r.start("slow", "sage", wait=0)  # (and the server "crashes": never closed)
         except RN.Refused as e:
-            assert e.kind == "capacity" and len(e.extra["unknown"]) == 2, e.extra
+            # (the crashed owners' sessions hold their slots: their runs are in the index)
+            assert e.kind == "capacity" and e.extra["slots"] + len(e.extra["unknown"]) == 2, e.extra
         assert len(r.store.index()) <= 2, r.store.index()
     assert len(r.store.index()) == 2
     # cleanup repairs: a terminal record whose index entry was left behind ...
@@ -603,6 +648,55 @@ def test_unknown_runs_bounded():
     s.cleanup()
     assert h2 in s.index()
     print("unknown runs bounded, the index repaired: ok")
+
+
+def test_idle_slots_shared():
+    """daybreak2 PR120-FIX-2: every live session of every server sharing the
+    store holds a slot, idle or not.  Two owners with a ceiling of 2: A's
+    two idle named sessions leave B none; B gets one when A closes; an idle
+    slot of an owner that has certainly exited is reclaimed, one whose run is
+    still in the index is not."""
+    import subprocess
+
+    root = tempfile.mkdtemp(prefix="sb-runs-")
+    a = runner(fresh(root=root))
+    b = runner(fresh(root=root, owner={"pid": os.getpid(), "nonce": "b"}))
+    for r in (a, b):
+        r.ceiling = 2
+    assert a.start("auto:1", "sage", session="a1")[1] and a.start("auto:1", "sage", session="a2")[1]
+    assert a.store.index() == {} and len(a.store.slots()) == 2  # (idle, and holding their slots)
+    e = refused("capacity", b.start, "auto:1", "sage", session="b1")
+    assert e.extra["slots"] == 2, e.extra
+    # (A reactivating its own sessions needs no new slot)
+    assert a.start("auto:2", "sage", session="a1")[1]
+    a.close()
+    assert len(b.store.slots()) == 0
+    assert b.start("auto:1", "sage", session="b1")[1] and b.start("auto:1", "sage", session="b2")[1]
+    refused("capacity", b.start, "auto:1", "sage", session="b3")
+    b.close()
+    # a dead owner's idle slot is reclaimed; a dead owner's busy one isn't
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    dead = {"pid": p.pid, "nonce": "dead"}
+    d = runner(fresh(root=root, owner=dead))
+    d.ceiling = 2
+    assert d.start("auto:1", "sage", session="idle")[1]
+    run, _ = d.start("slow", "sage", session="busy", wait=0)
+    with d.store.lock:
+        slots = d.store.slots()
+        for k in slots:
+            slots[k]["owner"]["host"] = R._HOST
+        R._write_atomic(d.store._slots_path(), json.dumps(slots).encode())
+    c = runner(fresh(root=root, owner={"pid": os.getpid(), "nonce": "c"}))
+    c.ceiling = 2
+    # (the dead owner's two slots: "idle" is reclaimed only because its owner has no run in the index; here it has one)
+    refused("capacity", c.start, "auto:1", "sage", session="c1")
+    d.made[1].finish("9")
+    until(run.done.is_set, "the run's end")
+    assert c.start("auto:1", "sage", session="c1")[1]
+    assert sorted(k.split(":")[0] for k in c.store.slots()) == ["c"], c.store.slots()
+    c.close()
+    print("idle sessions hold shared slots: ok")
 
 
 def test_tombstones_win():
@@ -624,6 +718,73 @@ def test_tombstones_win():
         assert r.cancel(h, "hard")["result"] == "not_running"
         assert h not in r.runs
     print("tombstones win over the cache: ok")
+
+
+def test_pruned_tombstone():
+    """astra PR120-SEM-2: another owner removes a finished run, then its
+    tombstone is pruned, all before this server reads it again: the run is
+    not revived from the cache (not_found for status and result; keep and
+    cancel write nothing)."""
+    root = tempfile.mkdtemp(prefix="sb-runs-")
+    r = runner(fresh(root=root, env={"SAGEBRUSH_RUNS_KEEP_DAYS": "7"}))
+    run, done = r.start("auto:1", "sage")
+    h = run.record["handle"]
+    other = fresh(root=root, env={"SAGEBRUSH_RUNS_KEEP_DAYS": "7"}, owner={"pid": 2, "nonce": "other"})
+    now = time.time()
+    assert h in other.cleanup(now=now + 8 * 86400)
+    other.cleanup(now=now + 39 * 86400)  # (the tombstone, 31 days old, pruned)
+    assert other.load(h) is None
+    refused("not_found", r.record, h)
+    refused("not_found", r.result, h, 0)
+    refused("not_found", r.keep, h, True)
+    refused("not_found", r.cancel, h, "hard")
+    assert h not in r.runs and not os.path.exists(os.path.join(root, "runs", h))
+    # (and a run whose terminal record couldn't be written, its directory there, is still this server's)
+    r = runner()
+    run, _ = r.start("slow", "sage", wait=0)
+    h = run.record["handle"]
+    os.unlink(os.path.join(r.store.root, h, "run.json"))
+    real = r.store.save
+    r.store.save = lambda rec, durable=False: (_ for _ in ()).throw(OSError(28, "No space left on device")) if durable else real(rec, durable)
+    r.made[0].finish("5")
+    until(run.done.is_set, "the run's end")
+    r.store.save = real
+    rec = r.record(h)
+    assert rec["state"] == "finished" and rec["storage"]["state"] == "unavailable", rec
+    print("a pruned tombstone doesn't revive the cache: ok")
+
+
+def test_close_attribution():
+    """astra PR120-SEM-5: a server's close ends its sessions; a run they were
+    computing is killed, server_exit, whether the worker's EOF is seen
+    before close returns or after; a run that returned before stays a
+    return."""
+    # the EOF first: the session's close makes the reader see the end
+    r = runner()
+    run, _ = r.start("slow", "sage", wait=0)
+    s = r.made[0]
+    s.close = lambda: (s.die(), until(run.done.is_set, "the reader"))
+    r.close()
+    rec = r.store.load(run.record["handle"])
+    assert rec["state"] == "killed" and rec["ended_by"] == "server_exit", rec
+    # close first, the reader after
+    r = runner()
+    run, _ = r.start("slow", "sage", wait=0)
+    s = r.made[0]
+    s.close = lambda: setattr(s, "live", False)
+    r.close()
+    s.die()  # (the EOF, late)
+    time.sleep(0.2)
+    rec = r.store.load(run.record["handle"])
+    assert rec["state"] == "killed" and rec["ended_by"] == "server_exit", rec
+    # a run that returned before the close
+    r = runner()
+    run, done = r.start("auto:3", "sage")
+    r.made[0].close = lambda: r.made[0].die()
+    r.close()
+    rec = r.store.load(run.record["handle"])
+    assert done and rec["state"] == "finished" and rec["ended_by"] == "return", rec
+    print("close attribution: ok")
 
 
 def test_cancel_contract():
@@ -685,30 +846,213 @@ def test_close_settles():
     print("close settles: ok")
 
 
+class _Proto:
+    """A protocol stream for _Sender: the lines written, whole."""
+
+    def __init__(self):
+        self.lines, self.part = [], ""
+
+    def write(self, s):
+        self.part += s
+        while "\n" in self.part:
+            line, self.part = self.part.split("\n", 1)
+            self.lines.append(json.loads(line))
+
+    def flush(self):
+        pass
+
+
 def test_capture():
-    """The session worker's capture (session._Capture): everything printed
-    goes out in chunks of at most CHUNK, in order; the reply keeps a bounded
-    head and tail with the exact count."""
+    """The session worker's capture (session._Capture, _Sender): everything
+    printed goes out in order, per stream, each message's line at most
+    WIRE_MAX bytes; the reply keeps a bounded head and tail; exact counts in
+    characters and UTF-8 bytes, stdout and stderr apart."""
     from sagebrush import session as S
 
-    sent = []
-    c = S._Capture(sent.append)
-    for i in range(200000):
-        c.write("line %d\n" % i)
+    proto = _Proto()
+    c = S._Capture(S._Sender(proto))
+    out, err = c.stream("stdout"), c.stream("stderr")
+    for i in range(100000):
+        out.write("line %d \u00e9\u4e2d\U0001f600\n" % i)
+        if i % 1000 == 0:
+            err.write("warn %d\n" % i)
     c.flush()
-    whole = "".join("line %d\n" % i for i in range(200000))
-    assert "".join(m["out"] for m in sent) == whole and all(len(m["out"]) <= S.CHUNK for m in sent)
+    whole_out = "".join("line %d \u00e9\u4e2d\U0001f600\n" % i for i in range(100000))
+    whole_err = "".join("warn %d\n" % i for i in range(0, 100000, 1000))
+    got = {"stdout": "", "stderr": ""}
+    for m in proto.lines:
+        got[m["stream"]] += m["out"]
+        assert len(json.dumps(m)) + 1 <= S.WIRE_MAX, len(json.dumps(m))
+    assert got == {"stdout": whole_out, "stderr": whole_err}
+    assert c.chars == {"stdout": len(whole_out), "stderr": len(whole_err)}
+    assert c.bytes == {"stdout": len(whole_out.encode()), "stderr": len(whole_err.encode())}, c.bytes
     t = c.text()
-    assert c.total == len(whole) and t.startswith(whole[:S.REPLY_HEAD]) and t.endswith(whole[-S.REPLY_TAIL:]) and "not shown" in t
-    assert len(t) < S.REPLY_HEAD + S.REPLY_TAIL + 200
-    c = S._Capture(sent.append)
+    assert "not shown" in t and len(t) < S.REPLY_HEAD + S.REPLY_TAIL + 200
+    # (the Runner's Output counts the same bytes from the chunks)
+    o = R.Output(64 * R.MiB)
+    for m in proto.lines:
+        o.add(m["out"], m["stream"])
+    assert o.total == c.bytes, (o.total, c.bytes)
+    # (one long run of escaped, non-ASCII output: split by the wire limit, not by characters)
+    proto = _Proto()
+    c = S._Capture(S._Sender(proto))
+    long = "\u00e9\u4e2d\U0001f600\x01" * 40000
+    c.write(long)
+    c.flush()
+    assert "".join(m["out"] for m in proto.lines) == long and len(proto.lines) > 1
+    assert max(len(json.dumps(m)) + 1 for m in proto.lines) <= S.WIRE_MAX
+    c = S._Capture(S._Sender(_Proto()))
     c.write("hi\n")
     assert c.text() == "hi\n"
-    x = "a" * (S.REPLY_HEAD + 10)
-    c = S._Capture(lambda m: None)
-    c.write(x)
-    assert c.text() == x
     print("capture: ok")
+
+
+def test_capture_signal_boundaries():
+    """astra PR120-SEM-4, daybreak2 PR120-FIX-3, with real signals: a SIGINT
+    sent to this process just after a message is written (as interrupts
+    resume), while it is written, and while it is framed, loses no output,
+    repeats none, and is raised once, after the message."""
+    import signal as SG
+
+    from sagebrush import session as S
+
+    if not hasattr(SG, "SIGINT") or os.name == "nt":
+        print("capture signal boundaries: skipped (POSIX signals)")
+        return
+
+    def kill_self(*a):
+        os.kill(os.getpid(), SG.SIGINT)
+        time.sleep(0.01)  # (delivered while held)
+
+    text = "".join("%06d\n" % i for i in range(60000))  # (420,000 characters: several messages)
+    for where in ("after", "write", "frame"):
+        proto = _Proto()
+        sender = S._Sender(proto)
+        hits = [0]
+        old_hook, old_write, old_dumps = S._commit_hook, proto.write, sender.dumps
+
+        def once(f):
+            def g(*a, **k):
+                hits[0] += 1
+                if hits[0] == 2:  # (the second message: mid-stream)
+                    kill_self()
+                return f(*a, **k)
+            return g
+
+        if where == "after":
+            S._commit_hook = once(lambda msg: None)
+        elif where == "write":
+            def halves(line, f=old_write):
+                # (the signal arrives with half the line written)
+                hits[0] += 1
+                f(line[:len(line) // 2])
+                if hits[0] == 2:
+                    kill_self()
+                f(line[len(line) // 2:])
+            proto.write = halves
+        else:
+            sender.dumps = once(old_dumps)
+        c = S._Capture(sender)
+        raised = 0
+        try:
+            c.write(text)
+            c.flush()
+        except KeyboardInterrupt:
+            raised += 1
+        finally:
+            S._commit_hook = old_hook
+        # (as the worker does: the rest after the interrupt, once)
+        while True:
+            try:
+                c.flush()
+                break
+            except KeyboardInterrupt:
+                raised += 1
+        sent = "".join(m["out"] for m in proto.lines)
+        assert sent == text, (where, len(sent), len(text))
+        assert raised == 1, (where, raised)
+    # an interrupt pending as a send begins (raised by the first handler
+    # swap): the chunk wasn't written, so it stays, and goes in the next flush
+    proto = _Proto()
+    c = S._Capture(S._Sender(proto))
+    c.write("y" * 1000)
+    real_signal = SG.signal
+    calls = [0]
+
+    def swap(*a):
+        calls[0] += 1
+        if calls[0] == 1:
+            raise KeyboardInterrupt
+        return real_signal(*a)
+
+    SG.signal = swap
+    try:
+        try:
+            c.flush()
+            raise AssertionError("no interrupt")
+        except KeyboardInterrupt:
+            pass
+    finally:
+        SG.signal = real_signal
+    c.flush()
+    assert "".join(m["out"] for m in proto.lines) == "y" * 1000, len(proto.lines)
+    # the reply: written exactly once, even when the interrupt comes as it is written
+    proto = _Proto()
+    sender = S._Sender(proto)
+    S._commit_hook = lambda msg: kill_self() if "result" in msg else None
+    try:
+        S._send_until_committed(sender, {"result": "1"})
+    finally:
+        S._commit_hook = None
+    assert proto.lines == [{"result": "1"}], proto.lines
+    print("capture signal boundaries: ok")
+
+
+def test_worker_real_signal():
+    """The real worker loop (session._worker; the Sage namespace and the
+    preparser stubbed, no engine needed), with a real SIGINT at the commit
+    of its Nth message: each request gets exactly one reply, the next
+    request its own, and the output arrives whole (astra's reproduction of
+    PR120-SEM-4)."""
+    import subprocess
+
+    if os.name == "nt":
+        print("worker real signal: skipped (POSIX signals)")
+        return
+    pkg = os.path.dirname(RN.__file__)
+    harness = (
+        "import os, sys, types, signal, time\n"
+        "m = types.ModuleType('sagebrush'); m.__path__ = [%r]; sys.modules['sagebrush'] = m\n"
+        "sage = types.ModuleType('sagebrush.sage'); sage.__all__ = []; sys.modules['sagebrush.sage'] = sage\n"
+        "prep = types.ModuleType('sagebrush.preparse'); prep.preparse = lambda s: s; sys.modules['sagebrush.preparse'] = prep\n"
+        "from sagebrush import session as S\n"
+        "N = int(sys.argv[1]); n = [0]\n"
+        "def hook(msg):\n"
+        "    n[0] += 1\n"
+        "    if n[0] == N:\n"
+        "        os.kill(os.getpid(), signal.SIGINT); time.sleep(0.01)\n"
+        "S._commit_hook = hook\n"
+        "S._worker()\n" % pkg)
+    reqs = "".join(json.dumps({"code": c, "mode": "python"}) + "\n" for c in ("1", "print('x' * 200000)", "2", "import sys\nsys.stderr.write('\u00e9' * 10)\n3"))
+    for nth in range(2, 8):
+        r = subprocess.run([sys.executable, "-c", harness, str(nth)], input=reqs, capture_output=True, text=True, timeout=60)
+        msgs = [json.loads(l) for l in r.stdout.splitlines()]
+        replies = [m for m in msgs if "result" in m]
+        outs = "".join(m["out"] for m in msgs if "out" in m and m.get("stream") == "stdout")
+        assert msgs[0] == {"ready": True} and len(replies) == 4, (nth, [m.get("result", "out" if "out" in m else m) for m in msgs])
+        errs = [m for m in msgs if m.get("stream") == "stderr"]
+        if replies[3]["error_info"] is None:
+            # (stderr is its own stream, counted in bytes: 10 two-byte characters)
+            assert "".join(m["out"] for m in errs) == "\u00e9" * 10 and replies[3]["output_bytes"] == {"stdout": 0, "stderr": 20}, (nth, errs, replies[3])
+        msgs = [m for m in msgs if m.get("stream") != "stderr"]
+        assert replies[0]["result"] == "1" and replies[2]["result"] == "2", (nth, replies)
+        # (an interrupt during the print may stop it before its newline: what
+        # was printed, all of it, matches the reply's exact counts)
+        assert ("x" * 200000 + "\n").startswith(outs) and len(outs) >= 200000, (nth, len(outs))
+        assert replies[1]["stdout_chars"] == len(outs) and replies[1]["output_bytes"]["stdout"] == len(outs), (nth, replies[1]["stdout_chars"], len(outs))
+        interrupted = replies[1]["error_info"] is not None
+        assert interrupted == (len(outs) == 200000), (nth, replies[1]["error_info"], len(outs))
+    print("worker real signal: ok")
 
 
 def test_real_session_output():
@@ -859,10 +1203,15 @@ if __name__ == "__main__":
     test_output_bounded_streaming()
     test_admission_boundaries()
     test_unknown_runs_bounded()
+    test_idle_slots_shared()
     test_tombstones_win()
+    test_pruned_tombstone()
+    test_close_attribution()
     test_cancel_contract()
     test_close_settles()
     test_capture()
+    test_capture_signal_boundaries()
+    test_worker_real_signal()
     test_real_session_output()
     test_server()
     print("runs: all ok")
