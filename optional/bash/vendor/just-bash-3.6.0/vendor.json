@@ -1,0 +1,18 @@
+{
+ "about": "just-bash 3.6.0, vendored unchanged for optional/bash's bundle (plan-bash-shell r3 \u00a71). Each file is the npm tarball's; vendor/verify-from-npm.mjs re-checks them against the tarball, by its integrity.",
+ "package": "just-bash",
+ "version": "3.6.0",
+ "license": "Apache-2.0",
+ "tarball": "https://registry.npmjs.org/just-bash/-/just-bash-3.6.0.tgz",
+ "integrity": "sha512-2COjEgcHdqKXeQSiNfPAHmpwQx4S8wATaIwog83g2t645U5tom6FED4CBBdr3M+0ioX4xZ26eODw3/nD6RQ6xw==",
+ "files": {
+  "browser.js": {
+   "from": "package/dist/bundle/browser.js",
+   "sha256": "38f1ad1e3283980ecdf68cede8a4eed028c6dff6e8c31793dec1e0af529c446e"
+  },
+  "LICENSE": {
+   "from": "package/LICENSE",
+   "sha256": "014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff"
+  }
+ }
+}

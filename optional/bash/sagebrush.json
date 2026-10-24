@@ -1,0 +1,24 @@
+{
+  "name": "@sagebrush/bash",
+  "version": "0.1.0",
+  "kind": "optional",
+  "sagebrush": ">=0.6.1",
+  "js": {
+    "entry": "shell.js",
+    "source": "src/shell.js",
+    "aliases": {
+      "sprintf-js": "vendor/sprintf-js-1.1.3/sprintf.js",
+      "diff": "vendor/diff-8.0.4/diff.js",
+      "turndown": "vendor/turndown-7.2.4/turndown.browser.es.js",
+      "node:zlib": "src/zlib-stub.js"
+    }
+  },
+  "files": {
+    "src/shell.js": "75e5dabe85b9bd3b2bb9d69c07bfe016e5ac3ef2daaf6d49414ca9009483ab26",
+    "src/zlib-stub.js": "3ceb61b4b2776141cec40e8073fb6e295fe86b821b84652a90dc063e18606fdc",
+    "vendor/diff-8.0.4/diff.js": "e4553a1cd7ac8a2e88bb27580afb8df6018a0c6a028eb2b2f5f3a5a36f40f338",
+    "vendor/just-bash-3.6.0/browser.js": "38f1ad1e3283980ecdf68cede8a4eed028c6dff6e8c31793dec1e0af529c446e",
+    "vendor/sprintf-js-1.1.3/sprintf.js": "95add43f116385be221745307fae02d06751b01d4f939df1debb17dbe2ebf4eb",
+    "vendor/turndown-7.2.4/turndown.browser.es.js": "3bcd2dd53d6eb3f7a8ed2363404c8869d92cfcaae7a76dca2d556e7ec4cb1f42"
+  }
+}
