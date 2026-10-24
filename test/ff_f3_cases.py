@@ -88,6 +88,12 @@ def descent_cost(K, F, k):
     return S.into_cost_n(F, K, k, set(), set(), ValueError)
 
 
+def scans_read(label, wn, charged):
+    """The coefficients prime_value read in the last attempt (deg W per
+    call) against the scans' charge (daybreak2 LIMIT-F4PLAN-2)."""
+    print(label, "scans read", calls["scan"] * wn, "charged", charged, "equal" if calls["scan"] * wn == charged else "DIFFER")
+
+
 def main():
     # (in a function: no Magma global names, so rings print with $.1)
     MK, MF, M16 = m.GF(2 ** 20), m.GF(4), m.GF(16)
@@ -96,16 +102,19 @@ def main():
     RK, RF = m.PolynomialRing(MK), m.PolynomialRing(MF)
     poly = lambda R, cs: recorded(m._MFFPoly(R, R.P(cs)))
 
-    # Magma: descent from GF(2^20) to GF(4): a scan of every coefficient
-    # (charged before it: daybreak2 LIMIT-F3-1), then a discrete log for
-    # each one outside the prime field
+    # Magma: descent from GF(2^20) to GF(4): two scans of every coefficient,
+    # the count's and the move's (both charged before either: daybreak2
+    # LIMIT-F3-1, LIMIT-F4PLAN-2), then a discrete log for each one outside
+    # the prime field
     f = poly(RK, [K(1), g, K(1)])
-    at(3 * 20, "Magma descent GF(2^20) -> GF(4), the scan's charge", lambda: m.ChangeRing(f, MF))
-    at(3 * 20 + descent_cost(K, F, 1), "Magma descent GF(2^20) -> GF(4)", lambda: m.ChangeRing(f, MF))
+    at(2 * 3 * 20, "Magma descent GF(2^20) -> GF(4), the scans' charge", lambda: m.ChangeRing(f, MF))
+    at(2 * 3 * 20 + descent_cost(K, F, 1), "Magma descent GF(2^20) -> GF(4)", lambda: m.ChangeRing(f, MF))
+    scans_read("Magma descent GF(2^20) -> GF(4)", 20, 2 * 3 * 20)
     f = poly(RK, [K(1)] + [K(0)] * 99 + [K(1)])
-    at(101 * 20, "Magma descent of x^100 + 1 (scan only)", lambda: m.ChangeRing(f, MF))
+    at(2 * 101 * 20, "Magma descent of x^100 + 1 (scans only)", lambda: m.ChangeRing(f, MF))
+    scans_read("Magma descent of x^100 + 1", 20, 2 * 101 * 20)
     per = descent_cost(K, F, 1)
-    most = (S.WORK - 8 * 20) // per
+    most = S.WORK // (per + 2 * 20)
     print("descents admitted at WORK:", most, "(a polynomial with that many coefficients outside GF(2), after its scan)")
     attempt("Magma %d descents" % most, lambda: m.ChangeRing(poly(RK, [g] * most), MF))
     attempt("Magma %d descents" % (most + 1), lambda: m.ChangeRing(poly(RK, [g] * (most + 1)), MF))
@@ -139,6 +148,7 @@ def main():
     # a finite field's polynomial to the integers: a scan, n words each
     f = poly(RK, [K(1), K(0), K(1)])
     at(3 * 20, "Magma GF(2^20) -> Z", lambda: m.ChangeRing(f, m._ZZ))
+    scans_read("Magma GF(2^20) -> Z", 20, 3 * 20)
     # beyond F1's 2^20: refused in words before anything is moved
     MB = m.GF(2 ** 21)
     attempt("Magma descent from GF(2^21)", lambda: m.ChangeRing(poly(m.PolynomialRing(MB), [MB.K.gen()]), m.GF(2 ** 7)))
@@ -148,8 +158,9 @@ def main():
     sg = SK.gen() ** ((2 ** 20 - 1) // 3)
     Px = s.PolynomialRing_ff(SK, "v")
     sf = recorded(Px([SK(1), sg, SK(1)]))
-    at(3 * 20, "Sage change_ring GF(2^20) -> GF(4), the scan's charge", lambda: sf.change_ring(SF))
-    at(3 * 20 + descent_cost(SK, SF, 1), "Sage change_ring GF(2^20) -> GF(4)", lambda: sf.change_ring(SF))
+    at(2 * 3 * 20, "Sage change_ring GF(2^20) -> GF(4), the scans' charge", lambda: sf.change_ring(SF))
+    at(2 * 3 * 20 + descent_cost(SK, SF, 1), "Sage change_ring GF(2^20) -> GF(4)", lambda: sf.change_ring(SF))
+    scans_read("Sage change_ring GF(2^20) -> GF(4)", 20, 2 * 3 * 20)
     # Sage: a prime field's polynomial to ZZ, a word each
     p7 = recorded(s.PolynomialRing_ff(s.GF(7), "z")([s.GF(7)(3), s.GF(7)(1)]))
     import _sage_poly as sp
