@@ -1,0 +1,79 @@
+
+>> ChangeRing(y/2 + 1, Integers());
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(y/5 + 1, GF(5));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(y/3 + 1, GF(3));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(z^2 + 3, Rationals());
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(z^2 + 3, GF(7));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(u^2 + b*u + 1, F4);
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(t^2 + a*t + 1, GF(8));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(t + a, GF(9));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(t + a, Integers());
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(T!1, GF(8));
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(T!1, Rationals());
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+
+>> ChangeRing(f, 5);
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt], RngIntElt
+
+
+>> ChangeRing(f);
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: RngUPolElt[RngInt]
+
+
+>> ChangeRing(F4, GF(16));
+             ^
+Runtime error in 'ChangeRing': Bad argument types
+Argument types given: FldFin, FldFin
+
+
+>> ChangeRing(v + c, F4);
+             ^
+Runtime error in 'ChangeRing': Polynomial is not coercible
+
+end
