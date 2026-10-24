@@ -188,6 +188,29 @@ Supported:
   size allows, in its default subplot layout), autoscaled limits have 5%
   margins, and lines (`plot`, `hist`, `errorbar`) and patches (`bar`,
   `scatter`, `fill_between`, `pie`) take colors from separate cycles.
+- `plt.axes()`: a new Axes each call, a `[left, bottom, width, height]`
+  rect, or an Axes made current; keywords are Axes properties.
+- `rcParams` (one object for `matplotlib` and `pyplot`, with all of
+  matplotlib 3.11's keys and defaults and its errors for others), `rc`,
+  `rcdefaults`, `rc_context`, and `plt.style` (`use`, `context`,
+  `available`).  Drawn from rcParams: the color cycle (`axes.prop_cycle`,
+  and what `'C0'`..`'C9'` mean), the axes' face and edge colors and line
+  width, the grid (`axes.grid`, `grid.color`/`linestyle`/`linewidth`/
+  `alpha`, `axes.axisbelow`), tick, label, title and text colors,
+  `lines.linewidth`, `figure.figsize` and `figure.facecolor`, and the font
+  sizes; other keys are kept, and a style that sets them says so in one
+  warning.  A setting at its default draws in the page's text color, so a
+  plot follows a light or dark theme; one set to another value draws in
+  exactly that color.  As in matplotlib, an Axes takes its settings when it
+  is made: a style in a `with` block stays with the plots made in it.
+- Styles (`plt.style.use`, `plt.style.context`): matplotlib 3.11's `bmh`,
+  `classic`, `fivethirtyeight`, `ggplot` and the `seaborn-v0_8` family,
+  from its style files.  Sagebrush draws the colors, grid and line widths
+  they set; a style's other settings are kept in rcParams and named in one
+  warning.  The old names `seaborn` and `seaborn-<style>` (matplotlib
+  removed them in 3.8) still work, with a warning naming the new style:
+  where upstream removes a name for no functional reason, Sagebrush keeps
+  accepting it, with a warning, so older teaching material runs.
 
 Pass numpy arrays or lists; numpy is built in (see [NUMPY.md](NUMPY.md)).
 

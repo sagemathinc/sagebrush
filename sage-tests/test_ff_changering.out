@@ -1,0 +1,48 @@
+ZZ->QQ 3*x^2 - x + 7 | Univariate Polynomial Ring in x over Rational Field
+ZZ->GF5 3*x^2 + 4*x + 2 | Univariate Polynomial Ring in x over Finite Field of size 5
+ZZ->GF25 3*x^2 + 4*x + 2 | Univariate Polynomial Ring in x over Finite Field in c of size 5^2
+ZZ->Z6 3*x^2 + 5*x + 1 | Univariate Polynomial Ring in x over Ring of integers modulo 6
+ZZ->GF5 x^5+5 x^5 | Univariate Polynomial Ring in x over Finite Field of size 5
+Univariate Polynomial Ring in x over Finite Field of size 5
+Univariate Polynomial Ring in x over Rational Field
+QQ->ZZ TypeError no conversion of this rational to integer
+QQ->ZZ int 2*y + 1 | Univariate Polynomial Ring in y over Integer Ring
+QQ->GF5 3*y + 1 | Univariate Polynomial Ring in y over Finite Field of size 5
+QQ->GF5 den 5 ZeroDivisionError inverse of Mod(0, 5) does not exist
+QQ->GF5 den 4 4*y + 1 | Univariate Polynomial Ring in y over Finite Field of size 5
+QQ->Z6 5*y + 1 | Univariate Polynomial Ring in y over Ring of integers modulo 6
+QQ->Z6 den 2 ZeroDivisionError inverse of Mod(2, 6) does not exist
+GF5->ZZ z^2 + 3 | Univariate Polynomial Ring in z over Integer Ring
+GF5->QQ z^2 + 3 | Univariate Polynomial Ring in z over Rational Field
+GF5->GF7 z^2 + 3 | Univariate Polynomial Ring in z over Finite Field of size 7
+GF5->GF25 z^2 + 3 | Univariate Polynomial Ring in z over Finite Field in c of size 5^2
+F4->F16 named TypeError unable to coerce from a finite field other than the prime subfield
+F16->F4 named TypeError unable to coerce from a finite field other than the prime subfield
+F16->GF2 u^2 + 1 | Univariate Polynomial Ring in u over Finite Field of size 2 (using GF2X)
+F16->GF2 b ValueError b is not in the image of (map internal to coercion system -- copy before use)
+F16->GF3 u + 1 | Univariate Polynomial Ring in u over Finite Field of size 3
+F4->GF3 a TypeError unable to convert a to a rational
+F4->GF8 TypeError unable to coerce from a finite field other than the prime subfield
+F4->ZZ TypeError not in prime subfield
+F4->ZZ 1 t + 1 | Univariate Polynomial Ring in t over Integer Ring
+F4->QQ TypeError unable to convert 1 to a rational
+zero F4->F16 0 | Univariate Polynomial Ring in t over Finite Field in b of size 2^4
+Univariate Polynomial Ring in t over Finite Field in b of size 2^4
+Univariate Polynomial Ring in t over Finite Field of size 2 (using GF2X)
+Z6->ZZ w + 5 | Univariate Polynomial Ring in w over Integer Ring
+Z6->GF5 w | Univariate Polynomial Ring in w over Finite Field of size 5
+Z6->Z3 w + 2 | Univariate Polynomial Ring in w over Ring of integers modulo 3
+prefix up s^2 + (z4^2 + z4)*s + 1 | Univariate Polynomial Ring in s over Finite Field in z4 of size 2^4
+prefix down v^2 + z2*v + 1 | Univariate Polynomial Ring in v over Finite Field in z2 of size 2^2
+prefix down not in ValueError z4 is not in the image of (map internal to coercion system -- copy before use)
+map phi t^2 + (b^2 + b)*t + 1 | Univariate Polynomial Ring in t over Finite Field in b of size 2^4
+map phi base t^2 + (b^2 + b)*t + 1 | Univariate Polynomial Ring in t over Finite Field in b of size 2^4
+map square t^2 + (a + 1)*t + 1 | Univariate Polynomial Ring in t over Finite Field in a of size 2^2
+map zero 0 | Univariate Polynomial Ring in t over Finite Field in b of size 2^4
+map into F16 TypeError unable to coerce from a finite field other than the prime subfield
+map ZZ 4*x^2 + 2 | Univariate Polynomial Ring in x over Integer Ring
+map ZZ GF5 3*x^2 + 1 | Univariate Polynomial Ring in x over Integer Ring
+map QQ parent y2 + 1 | Univariate Polynomial Ring in y2 over Rational Field
+map QQ half y2 + 1 | Univariate Polynomial Ring in y2 over Rational Field
+map QQ to ZZ y2 + 6 | Univariate Polynomial Ring in y2 over Integer Ring
+map ZZ parent x + 1 | Univariate Polynomial Ring in x over Integer Ring

@@ -297,9 +297,12 @@ function entryFor(api, target) {
 }
 // the highest level anything reachable from an entry can need: its since, its
 // parameters', and its members' (a class's methods), recursively
+// (a parameter's highest level: its since, or the level that gave it a
+// default, which a call leaving it out needs: core-api-surface.mjs's default_since)
+const paramLevel = (p) => Math.max(p.since ?? 1, p.default_since ?? 1);
 function deepLevel(e) {
   let l = e.since ?? 1;
-  for (const p of Array.isArray(e.params) ? e.params : []) l = Math.max(l, p.since ?? 1);
+  for (const p of Array.isArray(e.params) ? e.params : []) l = Math.max(l, paramLevel(p));
   for (const m of Object.values(e.members ?? {})) l = Math.max(l, deepLevel(m));
   return l;
 }
@@ -340,17 +343,20 @@ export function useLevel(api, use) {
     let l = e.since ?? 1;
     const params = e.params;
     if (use.bound && Array.isArray(params)) {
-      if (use.bound === "any" || use.bound.unpack || use.target.startsWith("*.")) for (const p of params) l = Math.max(l, p.since ?? 1);
+      if (use.bound === "any" || use.bound.unpack || use.target.startsWith("*.")) for (const p of params) l = Math.max(l, paramLevel(p));
       else {
         const positional = params.filter((p) => p.kind === "posonly" || p.kind === "pos");
+        const bound = new Set();
         for (let i = 0; i < use.bound.npos; i++) {
           const p = positional[i] ?? params.find((q) => q.kind === "varargs");
-          if (p) l = Math.max(l, p.since ?? 1);
+          if (p) l = Math.max(l, p.since ?? 1), bound.add(p);
         }
         for (const kw of use.bound.kw) {
           const p = params.find((q) => q.name === kw && q.kind !== "posonly" && q.kind !== "varargs" && q.kind !== "varkw") ?? params.find((q) => q.kind === "varkw");
-          if (p) l = Math.max(l, p.since ?? 1);
+          if (p) l = Math.max(l, p.since ?? 1), bound.add(p);
         }
+        // (a parameter the call leaves out relies on its default)
+        for (const p of params) if (!bound.has(p) && p.default_since !== undefined) l = Math.max(l, p.default_since);
       }
     }
     level = Math.max(level, l);

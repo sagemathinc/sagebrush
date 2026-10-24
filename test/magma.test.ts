@@ -1012,8 +1012,10 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   const { join } = require("node:path");
   const t0 = Date.now();
   const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
-    // (many small subsets: their sets are charged with their elements)
-    "U := {1..30000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
+    // (many small subsets: their sets are charged with their elements;
+    // 20000 singletons, so that U itself stays under the set bound, the heap
+    // left over in 96 MiB, 29696 on CI in Oct 2026)
+    "U := {1..20000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
     "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
@@ -1243,13 +1245,14 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..30000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..20000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 30000
-  // rows of 30000, fewer rows than the bound, by their entries)
+  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 20000
+  // rows of 30000, fewer rows than the bound, by their entries: 20000, not
+  // 30000, as the bound is the heap left over in 96 MiB, 29696 in Oct 2026)
   assert.equal((out.match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
@@ -1589,21 +1592,31 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^30000 + x, 29999);\n" +
+    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^30000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build and between runs (29696 or 30720 on CI's Node 24
+  // in late October 2026, 33792 on Node 26) and is never more than 49152:
+  // so the degrees admitted here stay at 20000, under it, and the three
+  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
+  // (each of the three refused itself, before the next statement)
+  for (const input of ["(x+1)^100000", "x^(10^20)", "Evaluate(f, f)"]) {
+    const esc = input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(out, new RegExp(`>> ${esc};[^>]*a polynomial of degree more than \\d+ is not supported yet`), input + r.stdout);
+  }
   assert.match(out, /Factorization of a polynomial over a finite field of degree more than 1000 is not supported yet/);
   assert.match(out, /Factorization of a polynomial of degree 70 over this finite field is not supported yet/);
   assert.match(out, /IsIrreducible of a polynomial of degree 70 over this finite field is not supported yet/);
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n30000\n\d+\nend\n$/);
+  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
@@ -1637,7 +1650,8 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
   // (Magma has these signatures: not Bad argument types)
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a RngUPolElt is not supported yet"), out);
-  assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldFinElt, FldFin is not supported yet"), out);
+  // (Trace(z, GF(3)), relative to a subfield, is implemented now: F2)
+  assert.doesNotMatch(out, /Trace of a FldFinElt, FldFin/);
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldQuadElt, FldRat is not supported yet"), out);
   // (a value whose type the signatures don't know)
   assert.ok(out.includes("Runtime error in 'Trace': Trace with these arguments is not supported yet"), out);
@@ -1658,9 +1672,9 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   const index = JSON.parse(spawnSync(process.execPath, [cli, "-m", "_magma_docsearch", "--index"], { encoding: "utf8" }).stdout);
   const trace = index.filter((e: any) => e.name === "Trace");
   assert.deepEqual(trace.map((e: any) => e.signature),
-    ["(<RngIntElt> x) -> RngIntElt", "(<FldRatElt> x) -> FldRatElt", "(<FldFinElt> x) -> FldFinElt", "(<FldAlgElt> x) -> RngElt", "(<MtrxS> a) -> RngElt"]);
-  assert.equal(new Set(trace.map((e: any) => e.summary)).size, 5);
-  assert.match(trace[4].summary, /square matrix/);
+    ["(<RngIntElt> x) -> RngIntElt", "(<FldRatElt> x) -> FldRatElt", "(<FldFinElt> x) -> FldFinElt", "(<FldFinElt> x, <FldFin> F) -> FldFinElt", "(<FldAlgElt> x) -> RngElt", "(<MtrxS> a) -> RngElt"]);
+  assert.equal(new Set(trace.map((e: any) => e.summary)).size, 6);
+  assert.match(trace[5].summary, /square matrix/);
   assert.match(trace[4].doc, /The signatures of Trace:\n\n[\s\S]*Trace\(<RngUPolElt> x1\) -> RngUPolElt    \(not supported yet\)/);
   // an intrinsic prints as Magma prints one, with Sagebrush's signatures and words
   const shown = spawnSync(process.execPath, [cli, "--magma"], { input: "Trace;\nFactorial;\n#Sprint(Trace) gt 0;\n", encoding: "utf8" }).stdout as string;
