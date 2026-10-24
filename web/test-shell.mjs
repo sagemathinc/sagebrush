@@ -90,13 +90,13 @@ const withModule = (text) => {
   return sha(b);
 };
 const ready = `port.postMessage({ name: "shell.ready", payload: { version: "t" } });`;
-// (the real module, its in-memory file system wrapped to refuse a write to refuse-me with a plain
-// Error, as a refused workspace write will: unwrapped, as step 1 runs scripts, just-bash's exec() rejects)
-const real = chunk.modules["shell.js"], fsAt = "let fs2=new ir;";
-if (real.split(fsAt).length !== 2) throw new Error(`the built shell module no longer has ${fsAt}: update the injected rejection`);
-const refusing = `let fs2=new Proxy(new ir,{get(t,k){let v=t[k];if(typeof v!=="function")return v;if(k!=="writeFile"&&k!=="appendFile")return v.bind(t);return async(p,...a)=>{if(String(p).includes("refuse-me"))throw new Error("refused on purpose: "+p);return v.call(t,p,...a)}}});`;
+// (the real module, unchanged, after a line that makes the worker's TextEncoder throw a plain Error for
+// text holding "refuse-me": just-bash's in-memory file system encodes what a redirection writes, so
+// `echo refuse-me > f` fails there as a refused workspace write will, and unwrapped, as step 1 runs
+// scripts, just-bash's exec() rejects.  Nothing depends on how the module was minified.)
+const refusing = `{ const encode = TextEncoder.prototype.encode; TextEncoder.prototype.encode = function (s) { if (String(s).includes("refuse-me")) throw new Error("refused on purpose"); return encode.call(this, s); }; }\n`;
 const BAD = {
-  reject: withModule(real.replace(fsAt, refusing)),
+  reject: withModule(refusing + chunk.modules["shell.js"]),
   // start() takes the port, then throws: the bootstrap posts boot.failed
   boot: withModule(`export function start(port) { port.onmessage = () => {}; throw new Error("start failed on purpose"); }`),
   // never says ready
@@ -398,7 +398,7 @@ try {
     res.never = await never;
     res.neverLive = workersLive() - live0;
     const { shell: real } = await startShell(BAD.reject, "/");
-    res.rejected = await within(real.exec("echo before; echo x > refuse-me; echo after"));
+    res.rejected = await within(real.exec("echo before; echo refuse-me > f; echo after"));
     res.afterRejected = await within(real.exec("echo still here"));
     real.terminate();
     const { shell: silent } = await startShell(BAD.silent, "/");
