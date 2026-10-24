@@ -1,0 +1,3547 @@
+{
+ "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
+  "class": "2+3",
+  "owner": "ball arithmetic",
+  "row": "inv-45"
+ },
+ "engine/ball/src/funcs.rs :: isqrt_u64 :: pub const PREC_MAX: u64 = 1 << 24; #0": {
+  "class": "2+3",
+  "owner": "ball arithmetic",
+  "row": "inv-45"
+ },
+ "engine/ball/src/special.rs :: e1 :: pub const GAMMA_PREC_MAX: u64 = 1 << 12; #0": {
+  "class": "2+3",
+  "owner": "ball arithmetic",
+  "row": "inv-45"
+ },
+ "engine/bigint/src/ntt.rs ::  :: const MAX_LOG: u32 = 50; #0": {
+  "class": "2",
+  "owner": "bigint",
+  "row": "inv-46"
+ },
+ "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_CERTIFICATE_RETRIES: usize = 2; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_RELATION_ROUNDS: usize = 60; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/bnf.rs ::  :: const MAX_UNIT_ATTEMPTS: usize = 12; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/bnf.rs ::  :: const RESIDUE_WINDOW_MAX: u64 = 1 << 15; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/ecm.rs ::  :: const MAXL: usize = 16; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/proof.rs :: default :: const CHAR_PRIME_MAX: u64 = 1 << 32; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/classgroup/src/nf/proof.rs :: default :: pub const PRIME_MAX: u64 = 1 << 24; #0": {
+  "class": "3",
+  "owner": "class group/number fields",
+  "row": "inv-41"
+ },
+ "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
+  "class": "3",
+  "owner": "Galois groups/data",
+  "row": "inv-43"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: const MAX_CLASSES: usize = 5000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: if lower > 120 * MAX_CLASSES as i128 { #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: if mass.gt(&Rat::new(BigInt::from(MAX_CLASSES as i64), BigInt::one())) { #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: let mut set = ClassSet { budget: Budget::new(MAX_NODES), order: order.clone(), class_group, classes: vec![], mass, primes: vec![] }; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: return Err(format!(\"the class number exceeds {} (the mass is at least {}/120; unsupported)\", MAX_CLASSES, lower)); #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: coprime_to :: return Err(format!(\"the class number exceeds {} (the mass is {}; unsupported)\", MAX_CLASSES, mass)); #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: inverse :: const MAX_GRAM_BITS: u64 = 4096; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: inverse :: const MAX_RESULTS: usize = 100_000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/classes.rs :: inverse :: pub(crate) const MAX_NODES: u64 = 2_500_000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_DIMENSION: usize = 4000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_DIVISORS: u128 = 256; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_HECKE_TERMS: u128 = 1 << 21; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_P1: u64 = 1 << 20; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_POINTS: u64 = 1 << 22; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_TOTAL_P1: u128 = 1 << 21; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/definite.rs ::  :: pub const MAX_TOTAL_POINTS: u128 = 1 << 23; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defnew.rs ::  :: pub const MAX_MODULAR_WORK: u128 = 1 << 33; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defnew.rs :: check_modular :: if self.cube_work.saturating_mul(count) > MAX_MODULAR_WORK { #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defnew.rs :: check_modular :: return Err(format!(\"the characteristic polynomials of the newspaces of this level need about {} operations, above the limit of {} (unsupported)\", self.cube_work.saturating_mul(count), MAX_MODULAR_WORK)); #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defweight.rs ::  :: pub const MAX_DIMENSION: usize = 4000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defweight.rs ::  :: pub const MAX_WORK: u64 = 1 << 32; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defweightnew.rs ::  :: pub const MAX_TOTAL_WORK: u64 = 1 << 34; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/defweightnew.rs :: within_cap :: if w > MAX_TOTAL_WORK as u128 { #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-37"
+ },
+ "engine/hmf/src/field.rs :: factor_u64_steps :: let d = pollard_brent(m, &mut budget).ok_or_else(|| format!(\"could not factor {} within the work limit (unsupported)\", n))?; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/field.rs :: factor_u64_steps :: let mut budget = steps; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-38"
+ },
+ "engine/hmf/src/fpoly.rs :: reconstruct :: pub const MAX_BITS: u64 = 1 << 18; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/newspace.rs :: op_matrix_with :: pub const MAX_OP_BOUND: u128 = 1 << 61; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/p1.rs :: act :: pub const MAX_P1: u64 = 1 << 32; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/qresidue.rs ::  :: pub const MAX_LOCAL: u64 = 1 << 31; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/residue.rs ::  :: pub const MAX_LOCAL: u64 = 1 << 31; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/rqf.rs :: integral :: pub const MAX_NORM: i128 = 1 << 60; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/weight.rs ::  :: pub const MAX_REP_DIM: u64 = 256; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/hmf/src/weightnew.rs ::  :: pub const MAX_DIMENSION: usize = 4000; #0": {
+  "class": "2+3",
+  "owner": "HMF engine",
+  "row": "inv-39"
+ },
+ "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
+  "class": "3",
+  "owner": "modular symbols",
+  "row": "inv-42"
+ },
+ "engine/mpoly/src/f4.rs :: bits_range :: ((crate::bits_for(d) + 2).max(8.min(max)), max) #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: bits_range :: let max = 64 / (n + extra); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: eliminate31 :: let ca: usize = rows.iter().map(|r| r.cols.iter().filter(|&&c| at[c as usize] != u32::MAX).count()).sum(); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: eliminate31 :: let mut at: Vec<u32> = vec![u32::MAX; nc]; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: eliminate31 :: let pa: usize = store.iter().map(|r| r.cols[1..].iter().filter(|&&c| at[c as usize] != u32::MAX).count()).sum(); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: eliminate31 :: let piv = Pivots { p, rows: at.iter().map(|&k| (k != u32::MAX).then(|| &store[k as usize])).collect() }; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: bits = (bits * 2).min(maxb) #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: if bits == maxb { #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: if bits > maxb { #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: let (mut bits, maxb) = bits_range(fs, o); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: return Err(\"exponents too large to pack\".into()); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: groebner_p_opt :: return Err(\"exponents too large to pack\".into()); #1": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: verify_q :: if let Some(b) = crate::certify::certify_spairs(&gz, &pairs, pk, o).map_err(|_| \"exponents too large to pack\".to_string())? { #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: verify_q :: let red = |f: ZT| -> Result<bool, String> { reduces_to_zero_z(f, &gz, &pk, o).map_err(|_| \"exponents too large to pack\".to_string()) }; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: verify_q :: return Err(\"exponents too large to pack\".into()); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/f4.rs :: verify_q :: return spairs_reduce_to_zero(&gz, &pairs, pk, o).map_err(|_| \"exponents too large to pack\".to_string()); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: check_q :: let bits = crate::bits_for(2 * maxe + 2) + 1; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: check_q :: let maxe = g.iter().flat_map(|f| f.iter().flat_map(|t| t.0.iter().copied())).max().unwrap_or(0) as u64; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: fglm_from :: bits = (bits * 2).min(maxb); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: fglm_from :: if bits >= maxb { #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: fglm_from :: let maxb = 64 / n as u32; #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: fglm_from :: let mut bits = (crate::bits_for(2 * d + 2) + 1).min(maxb); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: fglm_from :: return Err(\"exponents too large to pack\".into()); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/mpoly/src/fglm.rs :: groebner_fglm :: let best = groups.iter().max_by_key(|(k, v)| (v.len(), current.as_ref() == Some(*k))).map(|(k, _)| k.clone()); #0": {
+  "class": "2+3",
+  "owner": "multivariate engine",
+  "row": "inv-36"
+ },
+ "engine/poly/src/binomial.rs ::  :: pub(crate) const BINOMIAL_MAX_BITS: u64 = 4096; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/binomial.rs :: factor :: } else if a.bits() <= BINOMIAL_MAX_BITS && c0.bits() <= BINOMIAL_MAX_BITS { #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/budget.rs :: default :: Budget::new(DEFAULT_OVERRIDE.with(|o| o.get()).unwrap_or(Limits::DEFAULT)) #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: default :: fn default() -> Budget { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: drop :: impl Budget { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: drop :: let _r = Restore(DEFAULT_OVERRIDE.with(|o| o.replace(Some(limits)))); #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: impl Limits { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: max_coeff_bits: 1 << 20, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: max_degree: 10_000, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: max_total_bits: 1 << 24, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub const DEFAULT: Limits = Limits { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub const UNLIMITED: Limits = Limits { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub max_coeff_bits: u64, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub max_degree: usize, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub max_total_bits: u64, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: fmt :: pub struct Limits { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: Budget { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: divisions: Cell::new(limits.divisions), #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: limits, #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: pub fn new(limits: Limits) -> Budget { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: subsets: Cell::new(limits.subsets), #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: new :: work: Cell::new(limits.work), #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: unlimited :: pub fn unlimited() -> Budget { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: with_default_limits :: pub fn with_default_limits<T>(limits: Limits, f: impl FnOnce() -> T) -> T { #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/budget.rs :: with_default_limits :: struct Restore(Option<Limits>); #0": {
+  "class": "2+3",
+  "owner": "polynomial factorization",
+  "row": "inv-34"
+ },
+ "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_COLS: usize = 32; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs ::  :: pub const MAX_R: usize = 96; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs ::  :: pub const ZASSENHAUS_MAX: usize = 8; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>]) -> FResult<Option<Vec<Held<'b>>>> { #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: if cols.len() >= MAX_COLS { #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let _modfs = b.reserve(crate::budget::words_bytes(2 * (n as u64 + r as u64 + 1)))?; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let _w = b.reserve(crate::budget::words_bytes((4 * (clog2(r as u64) + 1) + 8) * (n as u64 + 1)))?; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: let a = m.k.checked_mul(1 << level).ok_or_else(|| b.refuse(\"precision\", u64::MAX, m.k as u64))?; #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: lattice :: while want.len() < COLS_PER_PASS && cols.len() + want.len() < MAX_COLS && (used_low + used_high) < n { #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: recombine :: found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found); #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: recombine :: found.extend(zassenhaus(b, &g, rest, &pk, &m.possible, usize::MAX)?.found); #1": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: recombine :: if rest.len() <= ZASSENHAUS_MAX || rest.len() > MAX_R || g[0].is_zero() { #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/poly/src/vanhoeij.rs :: recombine :: let _p = b.enter(if rest.len() <= ZASSENHAUS_MAX { Phase::Zassenhaus } else { Phase::Fallback }); #0": {
+  "class": "3",
+  "owner": "polynomial factorization",
+  "row": "inv-35"
+ },
+ "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "engine/raster/src/lib.rs ::  :: pub const MAX_AXIS: u32 = 16384; #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "engine/raster/src/lib.rs ::  :: pub const MAX_PIXELS: u64 = 1 << 24; #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "engine/raster/src/svg.rs :: solid :: pub const MAX_LIVE_RASTER_BYTES: u64 = 256 << 20; #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "engine/raster/src/svg.rs :: solid :: pub const MAX_NESTED_RASTERS: u32 = 16; #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: has_float :: const MAX_REDUCE_TERMS: u64 = 1024; #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: reduce_product :: \"reduce_trig of a product of {} sine and cosine factors (up to {} terms): past sagebrush's limit of {} terms\", #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: reduce_product :: if projected > MAX_REDUCE_TERMS { #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: reduce_waves :: \"reduce_trig of a product of {} sine and cosine factors: past sagebrush's limit of {} terms\", #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: reduce_waves :: MAX_REDUCE_TERMS #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/rewrite.rs :: reduce_waves :: if d.len() as u64 > MAX_REDUCE_TERMS { #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/sym/src/special.rs ::  :: const EXACT_MAX: i64 = 600; #0": {
+  "class": "2+3",
+  "owner": "symbolic engine",
+  "row": "inv-44"
+ },
+ "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
+  "class": "3",
+  "owner": "HMF/web",
+  "row": "inv-40"
+ },
+ "engine/web/src/hmfq.rs :: bound :: const MAX_SQUAREFREE: u64 = 1 << 62; #0": {
+  "class": "3",
+  "owner": "HMF/web",
+  "row": "inv-40"
+ },
+ "engine/web/src/lib.rs :: nmod_square :: if n > NMOD_MAX_N { #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: nmod_square :: if s.len() > NMOD_MAX_BYTES { #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: nmod_square :: return Err(format!(\"nmod_charpoly: the matrix text has {} bytes, more than {}\", s.len(), NMOD_MAX_BYTES)); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: nmod_square :: return Err(format!(\"nmod_charpoly: {} rows, more than {}\", n, NMOD_MAX_N)); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_N: usize = 512; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_REQUEST: usize = NMOD_MAX_BYTES + 4096; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const DIV_MAX_LEN: usize = 1 << 15; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const DIV_MAX_REQUEST: usize = add(mul(2 * ENTRY_TEXT, DIV_MAX_LEN), FIELDS); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const DIV_PEAK: usize = add(add(DIV_MAX_REQUEST, mul(8, mul(8, DIV_MAX_LEN))), mul(128, NTT_N)); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_DIM: usize = 1024; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_ENTRIES: usize = 400 * 401; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, ECH_MAX_ENTRIES); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, ECH_MAX_ENTRIES)), 33 * 1024); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const ECH_WORK: u64 = 2 * ECH_MAX_ENTRIES as u64 * 400; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_MAX_LEN: usize = 1 << 14; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_MAX_REQUEST: usize = add(mul(2 * ENTRY_TEXT, GCD_MAX_LEN), FIELDS); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_PEAK: usize = add(GCD_MAX_REQUEST, mul(28, 2 * GCD_MAX_LEN)); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_WORK: u64 = (GCD_MAX_LEN as u64) * (2 * GCD_MAX_LEN as u64) + 129 * GCD_MAX_LEN as u64 + 128; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const MUL_MAX_LEN: usize = 1 << 15; #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const MUL_MAX_REQUEST: usize = add(mul(2 * ENTRY_TEXT, MUL_MAX_LEN), FIELDS); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: pub const MUL_PEAK: usize = add(add(MUL_MAX_REQUEST, mul(16, MUL_MAX_LEN)), mul(128, NTT_N)); #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_display_budget.py ::  :: LIMITS = {\"steps\": 1 << 23, \"chars\": 1 << 26} #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_display_budget.py ::  :: goes on. Counted from the outermost display. LIMITS is the one setting #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_display_budget.py :: _charge :: if _spent[0] > LIMITS[\"steps\"] or _spent[1] > LIMITS[\"chars\"]: #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_display_budget.py :: _charge :: raise MemoryError(\"displaying this value takes more than Sagebrush's limit of %d steps or %d characters (%s may be changing it as it is shown)\" % (LIMITS[\"steps\"], LIMITS[\"chars\"], by)) #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_graph_spring.py ::  :: MAX_EDGES = 20000 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_graph_spring.py ::  :: MAX_ITERATIONS = 1000 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_graph_spring.py ::  :: MAX_LENGTH = 1e5 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_graph_spring.py ::  :: MAX_NODES = 1500 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"ff.embed_max\": (UNLIMITED, 2 ** 8, 2 ** 20), #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"ff.root_bits\": (UNLIMITED, 64, 1024), #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"ff.work\": (UNLIMITED, 10 ** 5, 10 ** 8), #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: \"unlimited\" may also be given explicitly. An unlimited value resolves to #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: A context that wants limits (grading, an instructor's notebook, shared #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: CPU, run timeouts), and every finite maximum below keeps the budgets under #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: Every key defaults to unlimited (William, Oct 24: no default work, time or #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: FINITE = {\"ff.conway_work\": 653528895, \"ff.embed_max\": 2 ** 20, \"ff.root_bits\": 1024, \"ff.work\": 10 ** 7} #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: MAX_BYTES = 4096 # the serialized text, in UTF-8 bytes #0": {
+  "class": "1",
+  "owner": "runtime/configuration",
+  "row": "inv-5"
+ },
+ "lib/_limits.py ::  :: MAX_ENTRIES = 16 #0": {
+  "class": "1",
+  "owner": "runtime/configuration",
+  "row": "inv-5"
+ },
+ "lib/_limits.py ::  :: MAX_KEY = 64 # characters of a key (CPython mappings) #0": {
+  "class": "1",
+  "owner": "runtime/configuration",
+  "row": "inv-5"
+ },
+ "lib/_limits.py ::  :: UNLIMITED (float infinity), which the consumers' budgets and bounds compare #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: UNLIMITED = float(\"inf\") #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: UNLIMITED_TEXT = \"unlimited\" #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: and subtract like any number. Memory guards are not limits of this module #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: input-size limit on a user's own computation; interrupting is the control). #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: sage: L.validate('{\"ff.work\": \"unlimited\"}') == L.DEFAULTS #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py ::  :: sage: s[\"ff.work\"], s[\"ff.embed_max\"] is L.UNLIMITED #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: Limits.__repr__ :: return \"Limits({%s})\" % \", \".join(\"%r: %s\" % (k, UNLIMITED_TEXT if v == UNLIMITED else \"%d\" % v) for k, v in self._items) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: _check_entries :: if type(v) is str and v == UNLIMITED_TEXT: #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: _check_entries :: out[k] = UNLIMITED #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: _check_entries :: raise _refuse('%s must be an integer or \"%s\", not %s' % (k, UNLIMITED_TEXT, _shown(v))) #0": {
+  "class": "1",
+  "owner": "runtime/configuration"
+ },
+ "lib/_limits.py :: _from_mapping :: if isinstance(v, str) and str.__str__(v) == UNLIMITED_TEXT: #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: _from_mapping :: pairs.append((str(k), UNLIMITED_TEXT)) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_limits.py :: _from_mapping :: raise _refuse('%s must be an integer or \"%s\", not %s' % (_key_shown(k), UNLIMITED_TEXT, _shown(v))) #0": {
+  "class": "1",
+  "owner": "runtime/configuration"
+ },
+ "lib/_magma.py ::  :: _CYCLO_CLASS_MAX = 12 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py ::  :: _CYCLO_DEGREE_MAX = 24 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py ::  :: _FF_POWERS_MAX = 2 ** 20 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py ::  :: _FUN_CACHE_BYTES_MAX = 4 << 20 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_EXP_MAX = 4096 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_INPUT_COEFFS_MAX = 32768 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_LIVE_MAX = 16 << 20 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_PF_FACTORS_MAX = 1024 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_PF_TERMS_MAX = 4096 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _FUN_WORK_MAX = 1 << 26 #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py ::  :: _LIKE_DEPTH_MAX = 100 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py ::  :: _NEST_MAX = 100 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 5 * 10 ** 4 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py ::  :: _PRINT_DEPTH_MAX = 100 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py ::  :: _RANDOM_ENUM_MAX = 10 ** 6 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py ::  :: _REAL_PREC_MAX = 1000 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py ::  :: _ROOT2_MAX = 3 ** 12 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py ::  :: _SYM_MAX = 10 ** 4 #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: DihedralGroup :: if n > _SYM_MAX: #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: DihedralGroup :: raise MagmaError(\"DihedralGroup(n) for n above %d is not supported yet\" % _SYM_MAX, \"'DihedralGroup'\") #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: PartialFractionDecomposition :: budget = _FunBudget() #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: PartialFractionDecomposition :: if len(out) > _FUN_PF_TERMS_MAX: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: PartialFractionDecomposition :: q, primary = _fun_pf_data(f, budget) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: PartialFractionDecomposition :: raise MagmaError(\"partial-fraction output exceeds the R0a term limit\", #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: RootsInSplittingField :: then L of at most EMBED_MAX elements (ff.embed_max, unlimited by default; #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_magma.py :: SquarefreePartialFractionDecomposition :: budget = _FunBudget() #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: SquarefreePartialFractionDecomposition :: if len(out) > _FUN_PF_TERMS_MAX: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: SquarefreePartialFractionDecomposition :: q, primary = _fun_pf_data(f, budget) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: SquarefreePartialFractionDecomposition :: raise MagmaError(\"partial-fraction output exceeds the R0a term limit\", #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _FunBudget :: class _FunBudget: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _FunBudget.charge :: if work < 0 or live < 0 or self.work + work > _FUN_WORK_MAX or self.live + live > _FUN_LIVE_MAX: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _FunBudget.charge :: raise MagmaError(\"%s exceeds the rational-function R0a work or memory limit\" % what, #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _MDihedralGroup._gens_fit :: \"\"\"Whether both generators print in at most `limit` characters, #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _MDihedralGroup._gens_fit :: at most about `limit` steps whatever n is (LIMIT-714-1).\"\"\" #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _MDihedralGroup._gens_fit :: def _gens_fit(self, limit): #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _MDihedralGroup._gens_fit :: if w + 1 > limit: #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _MDihedralGroup._gens_fit :: if w > limit: #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect :: if len(v) == _COLLECT_MAX: #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_max :: limit = int(n) if n else 1 << 30 #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_max :: n = getattr(_sys, \"_sagebrush_heap_limit\", None) #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_max :: return min(10 ** 6, limit // 2048, max(0, limit - used) // _COLLECT_COST), (None if raw is None else int(raw)) #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_max :: where the host can't say), which scripts/heap-budget.mjs checks.\"\"\" #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _collect_refusal :: return MagmaError(\"a comprehension of more than %d elements is not supported yet\" % _COLLECT_MAX) #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_magma.py :: _ff_refuse :: return lambda: MagmaError(\"%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most %s elements%s)\" % (what, _ff_desc(A), _ff_desc(B), _ffsub.embed_max_text(), _ffsub.work_clause()), where, where != \"'!'\", pos) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: budget.charge(work=8 * (D + 1) ** 3 * _fun_scalar_cost(F, B), what=what + \" normalization\") #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: dd, nd, bd = _fun_admit_poly(F, v.denominator(), result, budget, what + \" denominator\", charge_live) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: def _fun_admit_fraction(F, v, result, budget, what, normalize=True, charge_live=True): #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: dn, nn, bn = _fun_admit_poly(F, v.numerator(), result, budget, what + \" numerator\", charge_live) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: if nn + nd > _FUN_INPUT_COEFFS_MAX: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_fraction :: raise MagmaError(\"%s has more than %d dense coefficients\" % (what, _FUN_INPUT_COEFFS_MAX), #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: budget.charge(live=4 * (64 * n + (total + 7) // 8), what=what) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: cap = (_FUN_Q_RESULT_DEG if result else _FUN_Q_INPUT_DEG) if F._char == 0 else ( #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: def _fun_admit_poly(F, p, result, budget, what, charge_live=True): #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: if d > cap: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: if n > _FUN_INPUT_COEFFS_MAX: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: raise MagmaError(\"%s has more than %d dense coefficients\" % (what, _FUN_INPUT_COEFFS_MAX), #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: raise MagmaError(\"%s has rational coefficients beyond the R0a bit limit\" % what, #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_admit_poly :: raise MagmaError(\"%s of x-degree %d exceeds the rational-function R0a limit of %d\" % (what, d, cap), #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_check_output_bits :: raise MagmaError(\"%s has a rational coefficient envelope beyond the R0a bit limit\" % what, #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_pf_data :: raise MagmaError(\"partial-fraction output exceeds the R0a factor or term limit\", #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_power :: raise MagmaError(\"Argument 2 (%d) exceeds the rational-function exponent limit of %d\" % (n, _FUN_EXP_MAX), \"'^'\", True, pos) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_preflight_result :: budget.charge(work=work, live=live, what=what) #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_preflight_result :: cap = _FUN_Q_RESULT_DEG if F._char == 0 else _FUN_FP_RESULT_DEG #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_preflight_result :: def _fun_preflight_result(F, degree, bits, budget, what, work=0, copies=1, extra_live=0): #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_preflight_result :: if degree > cap: #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _fun_preflight_result :: raise MagmaError(\"%s x-degree envelope %d exceeds the R0a limit of %d\" % (what, degree, cap), #0": {
+  "class": "2+3",
+  "owner": "Magma compatibility/rational functions",
+  "row": "inv-24"
+ },
+ "lib/_magma.py :: _guarded.intrinsic :: \"limit for this run; this call is not supported\" % name, \"'%s'\" % name) #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _guarded.intrinsic :: raise MagmaError(\"%s of a value too large or too deep for Sagebrush to check (for polynomials and matrices over finite \" #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_magma.py :: _like :: host's recursion limit, whatever bounds the caller has (HARD-934-1).\"\"\" #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _own_size :: if depth >= _NEST_MAX: #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _own_size :: memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1) # (in progress: a cycle is too many) #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _own_size :: nested past _NEST_MAX counts as too many.\"\"\" #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _own_size :: part (memo, by identity), capped just past _OWN_CONTAINERS_MAX; one #0": {
+  "class": "1+2",
+  "owner": "Magma compatibility/runtime memory",
+  "row": "inv-26"
+ },
+ "lib/_magma.py :: _squarefree_part :: raise MagmaError(\"QuadraticField: the squarefree part of %d was not found within the limit (its prime factors above %d are not known); this is not supported yet\" % (d, _SQUAREFREE_TRIAL), \"'QuadraticField'\") #0": {
+  "class": "3",
+  "owner": "Magma compatibility",
+  "row": "inv-25"
+ },
+ "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
+  "class": "3",
+  "owner": "MATLAB numeric",
+  "row": "inv-22"
+ },
+ "lib/_matlab_cpow.py :: rescue :: \"Sagebrush (at most %d are recomputed): too much work.\" % (count, _RESCUE_MAX)) #0": {
+  "class": "3",
+  "owner": "MATLAB numeric",
+  "row": "inv-22"
+ },
+ "lib/_matlab_cpow.py :: rescue :: if count > _RESCUE_MAX: #0": {
+  "class": "3",
+  "owner": "MATLAB numeric",
+  "row": "inv-22"
+ },
+ "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: At most 10001 evaluations, the limit of GNU Octave's adaptive Simpson #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: full = count[0] + 2 > _QUAD_MAX_EVALS #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: if count[0] + 2 > _QUAD_MAX_EVALS: #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: otherwise its halves are integrated in turn. There is no limit on the #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: raise _err(\"quad: the limits a and b must be double or single scalars.\") #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: raise _err(\"quad: the limits a and b must be finite.\") #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: raise _err(\"quad: the limits a and b must be real.\") #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_funfun.py :: quad_ :: warn(\"count\", \"quad: the limit of %d function evaluations was reached; the tolerance may not be met.\" % _QUAD_MAX_EVALS) #0": {
+  "class": "3",
+  "owner": "MATLAB numerical methods",
+  "row": "inv-23"
+ },
+ "lib/_matlab_mat.py ::  :: MAX_INFLATED = 1 << 28 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py ::  :: MAX_INFLATED = int(_os.environ.get(\"SAGEBRUSH_MAT_MAX_INFLATED\", MAX_INFLATED)) # (lower for tests) #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py ::  :: MAX_NZMAX = 1 << 27 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py ::  :: MAX_SAVED_PAD = 1 << 20 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: at most budget bytes\"\"\" #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: def _inflate(payload, budget): #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: if hasattr(zlib, \"_decompress_limited\"): #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: if len(out) > budget: #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: out = d.decompress(data, budget + 1) #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: out, end = zlib._decompress_limited(data, budget) #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: raise MatError(\"the file's compressed data expands to more than %d bytes\" % MAX_INFLATED) #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_mat.py :: _inflate :: raise MatError(\"the file's compressed data expands to more than %d bytes\" % MAX_INFLATED) #1": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_matlab_numeric.py ::  :: _CUBIC_SETUP_MAX = 1_000_000 #0": {
+  "class": "3",
+  "owner": "MATLAB interpolation",
+  "row": "inv-21"
+ },
+ "lib/_matlab_numeric.py ::  :: _SPLINE_SETUP_MAX = 200_000 #0": {
+  "class": "3",
+  "owner": "MATLAB interpolation",
+  "row": "inv-21"
+ },
+ "lib/_matlab_numeric.py :: _cubic_admit :: if n * setups > (_SPLINE_SETUP_MAX if name == \"spline\" else _CUBIC_SETUP_MAX): #0": {
+  "class": "3",
+  "owner": "MATLAB interpolation",
+  "row": "inv-21"
+ },
+ "lib/_matlab_plot.py ::  :: _SCENE_MAX_DRAWN = 1000000 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py ::  :: _SCENE_MAX_OBJECTS = 10000 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py ::  :: _SCENE_MAX_VERTICES = 250000 #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: _scene_surface :: budget[0] -= 4 * m * n #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: _scene_surface :: def _scene_surface(c, cmap, clim, objs, budget): #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: _scene_surface :: if 4 * m * n > budget[0]: #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: figure_scene :: axes is 3-D: its surfaces, lines, markers and text in the axes' limits, #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: figure_scene :: budget = [_SCENE_MAX_VERTICES] #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: figure_scene :: if n_vert > _SCENE_MAX_VERTICES or _scene_drawn(objs) > _SCENE_MAX_DRAWN or len(objs) > _SCENE_MAX_OBJECTS: #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_plot.py :: figure_scene :: if not _scene_surface(c, cmap, clim, objs, budget): #0": {
+  "class": "1",
+  "owner": "visualization/display",
+  "row": "inv-30"
+ },
+ "lib/_matlab_sparse.py ::  :: MAX_BAND_WORK = 1 << 29 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py ::  :: MAX_DENSE_SOLVE = 4000 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py ::  :: MAX_FULL = 1 << 28 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py ::  :: MAX_LU_FILL = 1 << 22 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py ::  :: MAX_LU_WORK = 1 << 24 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _condest_b :: if type(A) is Sparse and n > MAX_DENSE_SOLVE: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: amax = float(np.max(np.abs(cv))) if cand.size else 0.0 #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: if amax > 0: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: if fill > MAX_LU_FILL: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: if pinv[j] < 0 and abs(x[j]) >= 0.1 * amax: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: if work > MAX_LU_WORK: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: _sparse_lu :: lval[j] = cv[keep] / x[p] if amax > 0 else cv[keep] #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: mldivide :: if (2 * kl + ku + 1) * A.n <= MAX_FULL and A.n * (kl + 1) * (kl + ku + 1) <= MAX_BAND_WORK: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: mldivide :: if A.m == A.n and A.n > MAX_DENSE_SOLVE and bandwidths(A) == (0, 0): #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_matlab_sparse.py :: mldivide :: if A.m == A.n and A.n > MAX_DENSE_SOLVE: #0": {
+  "class": "2+3",
+  "owner": "MATLAB sparse linear algebra",
+  "row": "inv-20"
+ },
+ "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "lib/_png.py ::  :: MAX_FILE_BYTES = 256 << 20 #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "lib/_png.py ::  :: MAX_PIXELS = 1 << 24 #0": {
+  "class": "1+2",
+  "owner": "raster/image I/O",
+  "row": "inv-31"
+ },
+ "lib/_sage_ec.py :: _quotient_coords :: E(F_q) is too large to enumerate. P -> m P maps E(F_q) onto its Sylow #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: _quotient_coords :: def _quotient_coords(a, q, N, p, pts, limit=3000): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: _quotient_coords :: if pv > limit: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: independent_points :: def independent_points(a, cands, bad, rmax): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: independent_points :: first, at most rmax): each is kept if the height Gram determinant stays #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: independent_points :: if len(chosen) == rmax: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: index_bound :: found = point_search_engine(a, T, limit=limit, R=R) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: index_bound :: if len(found) >= limit: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: index_bound :: limit = 10 ** 6 #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: point_search_engine :: def point_search_engine(a, H, limit=100000, R=None): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: saturated_generators :: def saturated_generators(a, pts, bad, aps, torsion=(), max_prime=None, odd_only=False): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: saturated_generators :: every prime up to the index bound (or max_prime, if given, which then #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: saturated_generators :: if max_prime is None: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: saturated_generators :: raise NotImplementedError(\"no index bound: the search for points of naive height %.1f is too large\" % T) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: two_descent :: pts = independent_points(a, list(gens) + point_search_engine(a, 10.0, limit=20000), bad, sc) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ec.py :: two_descent_cubic :: pts = independent_points(a, point_search_engine(a, H, limit=20000), bad, s) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-1"
+ },
+ "lib/_sage_ff.py ::  :: import _limits #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-1"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ff.py :: _ff_bounded :: return lambda: NotImplementedError(\"%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements%s)\" % (what, A, B, _ffsub().embed_max_text(), _ffsub().work_clause())) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ff.py :: _ff_subfields :: refuse = lambda: NotImplementedError(\"subfields of %r are not supported yet (computed here only for fields of at most %s elements%s)\" % (self, S.embed_max_text(), S.work_clause())) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffmat.py ::  :: _ENGINE_CHARPOLY_MAX_N = 512 #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py ::  :: _ENGINE_ECHELON_MAX_DIM = 1024 #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py ::  :: _ENGINE_ECHELON_MAX_ENTRIES = 400 * 401 #0": {
+  "class": "1+3",
+  "owner": "engine web + finite-field matrices",
+  "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge :: within one row of the budget and nothing is kept.\"\"\" #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge.__init__ :: self.limit = _heap_limit() // _HEAP_SHARE #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge.row :: if self.total > self.limit: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge.row :: raise NotImplementedError(\"a matrix over %r of these algebraic numbers needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap): each entry, and each of their number fields, counts\" % ( #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _AlgCharge.row :: self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib)) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: for an operation's larger working matrix, fits this process's budget #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: for one matrix: NotImplementedError, before anything is built, if #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: if need > limit // _HEAP_SHARE: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: limit = _heap_limit() #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: m, n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_size :: raise NotImplementedError(\"a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: NotImplementedError, before anything is built, if not.\"\"\" #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: for its working space) fits this process's budget for one matrix: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: if need > limit // _HEAP_SHARE: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: limit = _heap_limit() #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: n, base, -(-need // mib), \" with its working space\" if factor > 1 else \"\", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admit_vector :: raise NotImplementedError(\"a vector of %d entries over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: base, cap, limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib)) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: cap = _heap_limit() // _HEAP_SHARE // (2 * _entry_cost(base)) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: from _sage_matrix import _bounded_list, _MAX_ENTRIES #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: if cap >= _MAX_ENTRIES: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: if len(entries) <= _MAX_ENTRIES: #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: if not str(e).startswith(\"more than %d \" % cap): #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: mib, limit = 1 << 20, _heap_limit() #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: more than the budget first.\"\"\" #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: raise NotImplementedError(\"a vector over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix or vector (1/%d of this process's %d MiB heap)\" % ( #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: return _bounded_list(entries, cap) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: the budget allows: a list, tuple, range or vector is admitted by its #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _admitted_entries :: the budget as the limit (the entries as read and the vector converted #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_limit :: def _heap_limit(): #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _heap_limit :: n = getattr(sys, \"_sagebrush_heap_limit\", None) #0": {
+  "class": "2",
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffsub.py ::  :: EMBED_BITS = _limits.UNLIMITED if EMBED_MAX == _limits.UNLIMITED else EMBED_MAX.bit_length() - 1 #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py ::  :: EMBED_MAX = _LIMITS[\"ff.embed_max\"] if WORK == _limits.UNLIMITED else min(_LIMITS[\"ff.embed_max\"], 2 ** 20) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py ::  :: ROOT_BITS = _LIMITS[\"ff.root_bits\"] # Root/nth_root exponents of more bits are refused (Magma takes them); unlimited by default, 1024 in a policy as before #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py ::  :: WORK = _LIMITS[\"ff.work\"] #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_ffsub.py :: cover :: if p ** L > EMBED_MAX: #0": {
+  "class": "3",
+  "owner": "finite fields",
+  "row": "inv-3"
+ },
+ "lib/_sage_ffsub.py :: cover :: than EMBED_MAX elements (L log2 p <= EMBED_BITS before p^L is computed). One #0": {
+  "class": "3",
+  "owner": "finite fields",
+  "row": "inv-3"
+ },
+ "lib/_sage_ffsub.py :: embed_max_text :: \"\"\"The largest field an embedding or descent takes, in refusals: EMBED_MAX #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: embed_max_text :: (2^20, or the number when it isn't a power of 2); when it is unlimited, #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: embed_max_text :: if EMBED_MAX == _limits.UNLIMITED: #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: trace :: def trace(x, budget, refuse): #0": {
+  "class": "3",
+  "owner": "finite fields",
+  "row": "inv-4"
+ },
+ "lib/_sage_ffsub.py :: work_clause :: finite (the texts of before); nothing when it is unlimited.\"\"\" #0": {
+  "class": "none",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: work_clause :: return \"\" if WORK == _limits.UNLIMITED else \", within a bounded amount of work\" #0": {
+  "class": "3",
+  "owner": "finite fields + configuration"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: Every step is charged to one ff.work budget (_sage_ffsub.WORK, the #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: S.charge(budget, w * (3 if lg == lh else 1) * (lg + lh), refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: S.charge(budget, w * (bits + lg + lh), refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: S.charge(budget, w * (lg + lh), refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: S.charge(budget, w * (lq * len(a) + bits + 2 * bits * lq), refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: S.charge(budget, w * bits * (2 * lg + lh + 2), refuse) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: budget = [S.WORK] #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: finite-field core's, admin-set: --limits; one per comparison, shared by #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: if budget is None: #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: raise NotImplementedError(\"equality of ideals of a polynomial ring over Zmod(%d) generated by polynomials of content 1 without a unit leading coefficient is not supported yet\" % ring) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: refuse = lambda: NotImplementedError(\"equality of ideals of a polynomial ring over Zmod(%d) is not supported yet (work)\" % ring) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_frac.py :: _zmod_ideal_eq :: return _zmod_ideal_eq([x // cg for x in gc], [x // cg for x in hc], m, budget, ring) #0": {
+  "class": "3",
+  "owner": "finite fields + configuration",
+  "row": "inv-2"
+ },
+ "lib/_sage_hmf.py ::  :: _MAX_DENSE = 2000 #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: HilbertModularForms.hecke_matrix :: \"is limited to dimension %d (hecke_operator_on_basis_element() gives single rows)\" #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: HilbertModularForms.hecke_matrix :: % (self._dimension, _MAX_DENSE)) #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: HilbertModularForms.hecke_matrix :: Matrices are dense, so their dimension is limited:: #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: HilbertModularForms.hecke_matrix :: ValueError: the space has dimension 25000: Sagebrush's matrices are dense, and hecke_matrix() is limited to dimension 2000 (hecke_operator_on_basis_element() gives single rows) #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: HilbertModularForms.hecke_matrix :: if self._dimension > _MAX_DENSE: #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: QuadraticHilbertModularForms.hecke_matrix :: \"is limited to dimension %d\" % (self._dimension, _MAX_DENSE)) #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_hmf.py :: QuadraticHilbertModularForms.hecke_matrix :: if self._dimension > _MAX_DENSE: #0": {
+  "class": "2",
+  "owner": "HMF Python API",
+  "row": "inv-27"
+ },
+ "lib/_sage_matrix.py ::  :: _MAX_ENTRIES = 1 << 22 #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: \"\"\"list(obj), reading at most limit + 1 items: more than limit is a #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: ValueError (reported as more than total, when limit is what is left #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: def _bounded_list(obj, limit=None, what=\"entries\", total=None): #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: if len(obj) > limit: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: if len(out) > limit: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: if limit is None: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: limit = _MAX_ENTRIES #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: of a budget of total).\"\"\" #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: out = list(itertools.islice(iter(obj), limit + 1)) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_list :: total = limit #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: \"\"\"Rows (each a list), at most limit entries and rows in all.\"\"\" #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: def _bounded_rows(obj, limit=None): #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: if limit is None: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: limit = _MAX_ENTRIES #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: r = _bounded_list(r, limit - used, total=limit) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _bounded_rows :: rows = _bounded_list(obj, limit, \"rows\") #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: \"\"\"The rows of a matrix, each a list: read boundedly (at most limit #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: def _read_rows(rows, limit=None): #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: if limit is None: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: limit = _MAX_ENTRIES #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: r = _bounded_list(r, limit - used, total=limit) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _read_rows :: rows = _bounded_list(rows, limit, \"rows\") #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: def _shape(m, n, limit=None): #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: if limit is None: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: if m > limit or n > limit or m * n > limit: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: integers, each and their product at most limit (NotImplementedError #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: limit = _MAX_ENTRIES #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _shape :: raise NotImplementedError(\"a %d x %d matrix exceeds sagebrush's limit of %d entries (and rows, columns)\" % (m, n, limit)) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _vector_dim :: \"\"\"The degree of a vector space: as _dim, at most the entry limit.\"\"\" #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _vector_dim :: if n > _MAX_ENTRIES: #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: _vector_dim :: raise NotImplementedError(\"a vector space of dimension %d exceeds sagebrush's limit of %d\" % (n, _MAX_ENTRIES)) #0": {
+  "class": "2",
+  "owner": "matrices/runtime memory",
+  "row": "inv-8"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: except NotImplementedError as e: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: gens, index, primes = _ec.saturated_generators(a, pts, bad, aps, tors, max_prime) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: pts = self._independent_points(r, height_limit) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: raise NotImplementedError(\"%s; gens(proof=False) saturates at the primes up to 100 only\" % e) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._independent_points :: cands += _ec.point_search_engine(a, float(height_limit or 9.0), limit=2000) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._independent_points :: def _independent_points(self, r, height_limit=None): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._independent_points :: except NotImplementedError: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._independent_points :: point search), or NotImplementedError.\"\"\" #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field._independent_points :: raise NotImplementedError(\"found only %d independent points of %d (naive height %s); a larger height_limit may help\" % (len(chosen), r, height_limit or 9.0)) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: def gens(self, height_limit=None, proof=None, max_prime=None): #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: except NotImplementedError as e: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: except NotImplementedError: #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: g = _ec.search_generator(m._a, aps, self._bad(), float(height_limit or 9.0)) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: gens, index, primes = _ec.saturated_generators(m._a, [g[0]], bad, aps, tors, max_prime) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: height among the points of naive height at most height_limit (default #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: raise NotImplementedError(\"%s; gens(proof=False) saturates at the primes up to 100 only\" % e) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: raise NotImplementedError(\"gens(): the rank is not known (rank bounds %s); proof=False uses the analytic rank\" % ((lo, hi),)) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: raise NotImplementedError(\"no point of infinite order of naive height <= %s found; descent is needed\" % (height_limit or 9.0)) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: return self._gens_saturated(r, height_limit, max_prime, proof) #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: see lib/_sage_ec.py), or up to max_prime if given (then generators of a #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: subgroup of index prime to the primes up to max_prime). The bound's #0": {
+  "class": "3",
+  "owner": "elliptic curves/modular arithmetic",
+  "row": "inv-29"
+ },
+ "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
+  "class": "2",
+  "owner": "multivariate polynomials",
+  "row": "inv-11"
+ },
+ "lib/_sage_mpoly.py ::  :: _VARIETY_MAX_ELIMINANT = 4096 #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py ::  :: _VARIETY_MAX_POINTS = 100 #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py ::  :: _VARIETY_MAX_TRIES = 32 #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: B = I.normal_basis(_limit=_VARIETY_MAX_POINTS) #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: except NotImplementedError: #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: for c in range(1, min((n - 1) * D * (D - 1) // 2 + 2, _VARIETY_MAX_TRIES + 1)): #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: if (n - 1) * D * (D - 1) // 2 + 1 > _VARIETY_MAX_TRIES: #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: if g.degree(R2.gen(i)) > _VARIETY_MAX_ELIMINANT: #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: if h.degree(R2.gen(i)) > _VARIETY_MAX_POINTS: #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: raise NotImplementedError(\"variety over %r: no separating linear form among the first %d tried\" % (ring, _VARIETY_MAX_TRIES)) #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: raise NotImplementedError(refuse) #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: raise NotImplementedError(refuse) #1": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: raise NotImplementedError(refuse) from None #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal._variety_algebraic :: refuse = \"variety over %r of an ideal with more than %d points is not available in sagebrush yet\" % (ring, _VARIETY_MAX_POINTS) #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal.normal_basis :: def normal_basis(self, _limit=None): #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal.normal_basis.rec :: if _limit is not None and len(out) > _limit: #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: MPolynomialIdeal.normal_basis.rec :: raise NotImplementedError(\"more than %d standard monomials\" % _limit) #0": {
+  "class": "2+3",
+  "owner": "ideals/varieties",
+  "row": "inv-12"
+ },
+ "lib/_sage_mpoly.py :: _admit_conversion :: _MAX_CONVERT_ENTRIES exponent entries (into as many generators or fewer #0": {
+  "class": "2",
+  "owner": "multivariate polynomials",
+  "row": "inv-11"
+ },
+ "lib/_sage_mpoly.py :: _admit_conversion :: if R._n > n0 and nterms * R._n > _MAX_CONVERT_ENTRIES: #0": {
+  "class": "2",
+  "owner": "multivariate polynomials",
+  "row": "inv-11"
+ },
+ "lib/_sage_mpoly.py :: _admit_conversion :: raise NotImplementedError(\"converting %d terms into a ring of %d generators exceeds sagebrush's limit of %d exponent entries\" % (nterms, R._n, _MAX_CONVERT_ENTRIES)) #0": {
+  "class": "2",
+  "owner": "multivariate polynomials",
+  "row": "inv-11"
+ },
+ "lib/_sage_nf.py ::  :: _QUADRATIC_FORMS_CHECK_LIMIT = 10**5 #0": {
+  "class": "3",
+  "owner": "number fields",
+  "row": "inv-28"
+ },
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: It refuses when M or that index bound exceeds 10^6, saying which #0": {
+  "class": "3",
+  "owner": "number fields",
+  "row": "inv-28"
+ },
+ "lib/_sage_nf.py :: NumberField_absolute.class_group :: NotImplementedError: class_group with proof=True: beyond the limits of the unconditional certificate: the Minkowski bound for the norms of ideal class representatives is 2205315, above the limit 1000000 (2.205 times it) #0": {
+  "class": "3",
+  "owner": "number fields",
+  "row": "inv-28"
+ },
+ "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_EXPONENT_BITS = 4096 #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_WORK = 1 << 18 #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: PadicMatrix.__pow__ :: if e.bit_length() > _PADIC_MATRIX_MAX_EXPONENT_BITS: #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: PadicMatrix.__pow__ :: raise NotImplementedError(\"an exponent of %d bits exceeds sagebrush's limit of %d for matrices over the p-adics\" % (e.bit_length(), _PADIC_MATRIX_MAX_EXPONENT_BITS)) #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: _check_entries :: \"\"\"Each dimension and the number of entries at most the limit (a #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: _check_entries :: L = _PADIC_MATRIX_MAX_ENTRIES #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: _check_entries :: raise NotImplementedError(\"a %d x %d matrix over the p-adics exceeds sagebrush's limit of %d entries (and rows, columns)\" % (m, n, L)) #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: _check_work :: if w > _PADIC_MATRIX_MAX_WORK: #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic.py :: _check_work :: raise NotImplementedError(\"%s over the p-adics needs about %d multiplications, beyond sagebrush's limit of %d\" % (what, w, _PADIC_MATRIX_MAX_WORK)) #0": {
+  "class": "2+3",
+  "owner": "p-adic linear algebra",
+  "row": "inv-9"
+ },
+ "lib/_sage_padic_lseries.py ::  :: _KD_MAX_WORK = 1 << 20 #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_cost :: if lower > _KD_MAX_WORK: #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: _kd_cost :: the limit 2^20 a call takes about half a minute at most (and Stop #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 2003 to precision 2 is beyond sagebrush's limit (estimated work 100300225 > 1048576) #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: NotImplementedError: the Frobenius matrix at p = 5 to precision 408 is beyond sagebrush's limit (estimated work 4223025 > 1048576) #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: if _kd_cost(p, prec + 1) > _KD_MAX_WORK: #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: raise NotImplementedError(\"algorithm='approx' (Bernardi and Perrin-Riou) is not available in sagebrush yet\") #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: raise NotImplementedError(\"the Frobenius matrix at p = %d to precision %d is beyond sagebrush's limit (estimated work %d > %d)\" % (p, prec, _kd_cost(p, prec + 1), _KD_MAX_WORK)) #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.frobenius :: raise NotImplementedError(\"the Frobenius matrix at p = 3 is not available in sagebrush yet (Sage refuses it too)\") #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_padic_lseries.py :: pAdicLseriesSupersingular.order_of_vanishing :: raise NotImplementedError(\"the order of vanishing at a supersingular prime is not available\") #0": {
+  "class": "3",
+  "owner": "p-adic/L-series",
+  "row": "inv-10"
+ },
+ "lib/_sage_poly.py ::  :: _MAX_DENSE_COEFFS = 1 << 20 #0": {
+  "class": "2",
+  "owner": "univariate polynomials/runtime memory",
+  "row": "inv-13"
+ },
+ "lib/_sage_poly.py ::  :: _QQ_ALGEBRAIC_MAX_DEGREE = 16 #0": {
+  "class": "3",
+  "owner": "polynomial coercion",
+  "row": "inv-14"
+ },
+ "lib/_sage_poly.py :: PolynomialRing_.__call__ :: NotImplementedError: a polynomial of degree 2000000 exceeds sagebrush's limit of 1048576 coefficients for this conversion #0": {
+  "class": "2",
+  "owner": "univariate polynomials/runtime memory",
+  "row": "inv-13"
+ },
+ "lib/_sage_poly.py :: PolynomialRing_.__call__ :: if cs and max(cs) >= _MAX_DENSE_COEFFS: #0": {
+  "class": "2",
+  "owner": "univariate polynomials/runtime memory",
+  "row": "inv-13"
+ },
+ "lib/_sage_poly.py :: PolynomialRing_.__call__ :: raise NotImplementedError(\"a polynomial of degree %d exceeds sagebrush's limit of %d coefficients for this conversion\" % (max(cs), _MAX_DENSE_COEFFS)) #0": {
+  "class": "2",
+  "owner": "univariate polynomials/runtime memory",
+  "row": "inv-13"
+ },
+ "lib/_sage_qqbar.py ::  :: _ROUND_MAX_DIGITS = 99995 #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._civ_nonzero :: if d > _ROUND_MAX_DIGITS: #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._civ_nonzero :: raise ArithmeticError(\"the approximation did not converge within %d digits\" % _ROUND_MAX_DIGITS) #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._rounded :: d = min(2 * d, _ROUND_MAX_DIGITS) #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._rounded :: if d > _ROUND_MAX_DIGITS: #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._rounded :: if d >= _ROUND_MAX_DIGITS: #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._rounded :: raise ArithmeticError(\"the approximation did not converge within %d digits\" % _ROUND_MAX_DIGITS) #0": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_qqbar.py :: AlgebraicNumber._rounded :: raise ArithmeticError(\"the approximation did not converge within %d digits\" % _ROUND_MAX_DIGITS) #1": {
+  "class": "3",
+  "owner": "algebraic numbers",
+  "row": "inv-18"
+ },
+ "lib/_sage_real.py ::  :: _CPOW_SCALE_MAX = 512 #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py ::  :: _TRIG_MAX_MAG = 1 << 16 #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: RealField :: raise NotImplementedError(\"RealField(%d): a precision past the limit of %d bits is not available in sagebrush yet\" % (prec, _EXACT_BITS)) #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: RealNumberMP.__pow__ :: return _ziv_eval(R, fn, limit=4096, overflow=True, exact=exact) #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: RealNumberMP._trig_W :: if self._m and not self._special and self._mag() > _TRIG_MAX_MAG: #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: RealNumberMP.log :: return _ziv_eval(R, lambda F: F(self).log() / F(base).log(), limit=4096, exact=exact) #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: _real_complex_pow :: if _cpow_scale(a, b) >= _CPOW_SCALE_MAX: #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_sage_real.py :: _real_complex_pow :: raise NotImplementedError(\"a complex power of an infinite number is not available in sagebrush yet\") #0": {
+  "class": "2+3",
+  "owner": "real/complex arithmetic",
+  "row": "inv-17"
+ },
+ "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py ::  :: _ZETA_MAX_T = 1e5 #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py :: _besselj_miller :: if top > _BESSEL_MAX_N: #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py :: _bessely_up :: if k > _BESSEL_MAX_N: #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py :: _hurwitz1 :: if t > _ZETA_MAX_T: #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py :: _zeta1 :: if t > _ZETA_MAX_T: #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_special.py :: _zeta1 :: raise NotCovered(\"zeta: Sagebrush covers |Im s| <= %g\" % _ZETA_MAX_T) #0": {
+  "class": "3",
+  "owner": "special functions",
+  "row": "inv-19"
+ },
+ "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_tzrules.py ::  :: MAX_FILE = 1 << 20 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_tzrules.py ::  :: MAX_FOOTER = 1 << 10 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_tzrules.py ::  :: MAX_PATH = 4096 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_tzrules.py ::  :: MAX_TIMES = 1 << 16 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/_tzrules.py ::  :: MAX_TYPES = 256 #0": {
+  "class": "1",
+  "owner": "file formats/runtime",
+  "row": "inv-32"
+ },
+ "lib/board_checks.py ::  :: MAX_EXPRESSION = 1000 #0": {
+  "class": "1",
+  "owner": "board/MCP/workspace",
+  "row": "inv-33"
+ },
+ "lib/board_checks.py ::  :: MAX_ITEMS = 100000 #0": {
+  "class": "1",
+  "owner": "board/MCP/workspace",
+  "row": "inv-33"
+ },
+ "lib/board_checks.py ::  :: MAX_POWER = 1000 #0": {
+  "class": "1",
+  "owner": "board/MCP/workspace",
+  "row": "inv-33"
+ },
+ "lib/board_checks.py ::  :: MAX_TEXT = 100000 #0": {
+  "class": "1",
+  "owner": "board/MCP/workspace",
+  "row": "inv-33"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_BITS = 10**6 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_DIGITS = 100000 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_DISC_BITS = 20000 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_EXPR_CHARS = 800 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_INDEX = 100000 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_PERIOD = 100000 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_TOTAL_BITS = 10**7 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _CF_MAX_WORK = 10**9 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py ::  :: _SIMPLEST_MAX_PREC = 1 << 14 #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "lib/sage_all.py ::  :: _SQRT_MAX_PREC = 1 << 16 #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "lib/sage_all.py :: Rational._sqrt_prec :: if prec > _SQRT_MAX_PREC: #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "lib/sage_all.py :: Rational._sqrt_prec :: raise NotImplementedError(\"the square root of a rational at %d bits is past sagebrush's limit of %d bits\" % (prec, _SQRT_MAX_PREC)) #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal :: NotImplementedError: convergent 1000000000 of an infinite continued fraction: the limit is 100000 #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal.__getitem__ :: raise NotImplementedError(\"only finite slices of an infinite continued fraction\") #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal._algebraic :: if len(self._x._s) > _CF_MAX_EXPR_CHARS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal._algebraic :: raise NotImplementedError(\"the continued fraction of an expression of more than %d characters\" % _CF_MAX_EXPR_CHARS) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal.convergent :: if work > _CF_MAX_WORK: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _ContinuedFractionReal.convergent :: raise NotImplementedError(\"convergent %d: more than %d bit operations\" % (n, _CF_MAX_WORK)) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _LazyConvergents.__getitem__ :: if total > _CF_MAX_TOTAL_BITS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _LazyConvergents.__getitem__ :: if work > _CF_MAX_WORK: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _LazyConvergents.__getitem__ :: raise NotImplementedError(\"a slice of convergents of more than %d bits in all\" % _CF_MAX_TOTAL_BITS) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _LazyConvergents.__getitem__ :: raise NotImplementedError(\"a slice of convergents: more than %d bit operations\" % _CF_MAX_WORK) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _LazyConvergents.__getitem__ :: raise NotImplementedError(\"only finite slices of an infinite list\") #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_admit :: if n > _CF_MAX_INDEX: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_admit :: raise NotImplementedError(\"%s %d of an infinite continued fraction: the limit is %d\" % (what, n, _CF_MAX_INDEX)) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_bits :: if max(abs(h).bit_length(), abs(k).bit_length()) > _CF_MAX_BITS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_bits :: raise NotImplementedError(\"%s of more than %d bits\" % (what, _CF_MAX_BITS)) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_enclosed :: digits = _CF_MAX_DIGITS + 1 if digits >= _CF_MAX_DIGITS else min(digits * 2, _CF_MAX_DIGITS) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_enclosed :: higher precision); when it no longer narrows, NotImplementedError.\"\"\" #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_enclosed :: if digits > _CF_MAX_DIGITS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_enclosed :: raise NotImplementedError(\"the continued fraction of %s: no certified enclosure precise enough for partial quotient %d\" % (x, emitted)) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_enclosed :: raise NotImplementedError(\"the continued fraction of %s: precision limit (%d digits) reached at partial quotient %d\" % (x, _CF_MAX_DIGITS, emitted)) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: if D.bit_length() > _CF_MAX_DISC_BITS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: if held > _CF_MAX_TOTAL_BITS: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: if len(qs) >= _CF_MAX_PERIOD: #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: raise NotImplementedError(\"a quadratic irrational whose discriminant has more than %d bits\" % _CF_MAX_DISC_BITS) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: raise NotImplementedError(\"a quadratic irrational whose period is longer than %d\" % _CF_MAX_PERIOD) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _cf_quadratic :: raise NotImplementedError(\"a quadratic irrational whose period states exceed %d bits\" % _CF_MAX_TOTAL_BITS) #0": {
+  "class": "2+3",
+  "owner": "continued fractions",
+  "row": "inv-16"
+ },
+ "lib/sage_all.py :: _simplest_rational :: if p > _SIMPLEST_MAX_PREC: #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "lib/sage_all.py :: _simplest_rational :: raise NotImplementedError(\"%s of more than %d bits of precision is not implemented\" % (what, _SIMPLEST_MAX_PREC)) #0": {
+  "class": "3",
+  "owner": "real/rational arithmetic",
+  "row": "inv-15"
+ },
+ "src/board-check.ts ::  :: export const FILE_MAX = 128 * 2 ** 20; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts ::  :: export const MAX_DEPTH = 200; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: boardCheck :: const bytes = readBounded(file, FILE_MAX); #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: boardCheck :: if (bytes === null) { say(`${file}: too large for the board to open (at most ${FILE_MAX / 2 ** 20} MB)`); return 1; } #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: warn :: if (tooDeep(d, MAX_DEPTH)) { err(\"\", `not a board this command checks: objects and lists nest more than ${MAX_DEPTH} deep (a group in a group is two levels)`); return { problems, doc: null }; } #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-math.ts ::  :: export const TEX_MAX = 4000; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-math.ts :: setup :: const tex = new TeX({ packages: [\"base\", \"ams\", \"newcommand\", \"noundefined\", \"boldsymbol\"], maxMacros: 1000, maxBuffer: 5 * 1024 }); #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-math.ts :: texSvg :: if (tex.length > TEX_MAX || !tex.trim()) return null; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-try.ts :: isObj :: export const CASES_MAX = 10_000; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-try.ts :: readCases :: for (const s of sequences) if (isObj(s) && Array.isArray(s.answers) && (total += s.answers.length) > CASES_MAX) return `more than ${CASES_MAX} cases, counting each answer of a sequence`; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-try.ts :: readCases :: if (checks.length + sequences.length > CASES_MAX) return `more than ${CASES_MAX} cases`; #0": {
+  "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/cli.ts ::  :: const STDIN_SOURCE_MAX = 8 << 20; #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/cli.ts ::  :: every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits) #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration"
+ },
+ "src/cli.ts ::  :: is \"unlimited\" by default: set finite values to opt in to work #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration"
+ },
+ "src/cli.ts ::  :: limits (grading, shared compute); memory guards always apply; #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration"
+ },
+ "src/cli.ts :: readStdin :: if (total + n > STDIN_SOURCE_MAX) { #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/cli.ts :: readStdin :: process.stderr.write(`sagebrush: the program on stdin is more than ${STDIN_SOURCE_MAX >> 20} MiB: not supported.\\n`); #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/kernel.ts :: kernelWorker :: const LINE_MAX = 1000; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/kernel.ts :: printed :: if (/^(User|Runtime) error\\b/.test(line)) magmaError = lineLength > LINE_MAX ? line + \"…\" : line; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/kernel.ts :: printed :: if (line.length < LINE_MAX) line = (line + parts[i]).slice(0, LINE_MAX); #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits-file.ts :: readLimitsFile :: export function readLimitsFile(path: string): { text: string; name: string } | { error: string } { #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits-file.ts :: readLimitsFile :: if (n > LIMITS_MAX_BYTES) return { error: `limits: ${name} is larger than ${LIMITS_MAX_BYTES} bytes` }; #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits-file.ts :: readLimitsFile :: return { error: `limits: ${name} is not JSON: it is not UTF-8` }; #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits-file.ts :: readLimitsFile :: return { error: `limits: cannot read ${name}: ${WHY[e?.code] ?? oneLine(String(e?.code ?? e?.message ?? e))}` }; #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits.ts ::  :: export const LIMITS_MAX_BYTES = 4096; #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/limits.ts :: utf8Bytes :: export function utf8Bytes(s: string, max = LIMITS_MAX_BYTES): number { #0": {
+  "class": "1",
+  "owner": "CLI/runtime configuration",
+  "row": "src-16"
+ },
+ "src/magma.ts :: arrow :: const MAX_CHAIN = 64; #0": {
+  "class": "2",
+  "owner": "Magma translator",
+  "row": "src-15"
+ },
+ "src/magma.ts :: postfix :: if ((this.at(\"(\") || this.at(\"[\")) && ++links > MAX_CHAIN) { #0": {
+  "class": "2",
+  "owner": "Magma translator",
+  "row": "src-15"
+ },
+ "src/magma.ts :: postfix :: this.reject(this.peek(), `a chain of more than ${MAX_CHAIN} calls or indexes is not supported yet`); #0": {
+  "class": "2",
+  "owner": "Magma translator",
+  "row": "src-15"
+ },
+ "src/notebook-session.ts ::  :: export const STATUS_MAX = 4096; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: cut :: if (!used.cut && current !== null) post({ id: current, cut: why ?? (opts.limit!.item - used.item <= opts.limit!.run - used.run ? \"item\" : \"run\") }); #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: cut :: if (opts.limit && current !== null) { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: display :: if (n > room() || used.displays >= opts.limit.displays) { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: display :: if (opts.limit) { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: exitStatus :: export class LimitsError extends Error {} #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: exitText :: return t.length > STATUS_MAX ? `${t.slice(0, STATUS_MAX)}… (${t.length - STATUS_MAX} more characters)` : t; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: interact :: if (n > room() || used.displays >= opts.limit.displays) { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: interact :: if (opts.limit) { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText> } = {}): Session { #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/notebook-session.ts :: room :: const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity); #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "row": "src-17"
+ },
+ "src/pkgcache.ts ::  :: export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 }); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: admit :: if (total + size <= cap.bytes && count + 1 <= cap.entries) break; #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: admit :: if (total + size > cap.bytes || count + 1 > cap.entries) return false; #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: ensure :: async function ensure(dir: string, base: string, path: string, h: string, max: number, size: number | null): Promise<Uint8Array> { #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: ensure :: const bytes = await boundedGet(base.replace(/\\/+$/, \"\") + \"/\" + path, size ?? max); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: ensure :: if (existsSync(f)) return ensure(dir, base, path, h, max, size); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: prepareSet :: const index = await ensure(dir, baseUrl, `pkgset/${spec}.json`, spec, PKGSET_LIMITS.indexBytes, null); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgcache.ts :: prepareSet :: for (const ref of [p.src, p.pre[build]].filter(Boolean) as ChunkRef[]) chunks.set(ref.sha256, await ensure(dir, baseUrl, `pkg/${ref.sha256}.json`, ref.sha256, PKGSET_LIMITS.chunkBytes, ref.size)); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgset.ts ::  :: export const PKGSET_LIMITS = Object.freeze({ #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgset.ts :: admitIndex :: const L = PKGSET_LIMITS; #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/pkgset.ts :: constructor :: super(message.length > PKGSET_LIMITS.errorChars ? message.slice(0, PKGSET_LIMITS.errorChars - 1) + \"…\" : message); #0": {
+  "class": "1",
+  "owner": "package runtime",
+  "row": "src-19"
+ },
+ "src/runtime/argconv.ts :: allocStr :: if (n > MAX_STR) raise(T.MemoryError); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/argconv.ts :: cIntArg :: export const MAX_STR = 2 ** 29 - 24; #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/format.ts :: decimalOf :: const m = intDigits.max; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: decimalOf :: if (atLeast > HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: decimalOf :: if (s.length > HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: decompose :: export const HARD_MAX_DIGITS = 4_000_000; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: decompose :: export const intDigits = { max: 4300 }; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: grown :: raise(T.MemoryError, `displaying this value takes more than Sagebrush's limit of ${REPR_GROWTH.steps} steps or ${REPR_GROWTH.chars} characters (a __repr__ may be changing it as it is shown)`); #0": {
+  "class": "1",
+  "owner": "pyjs display/runtime",
+  "row": "src-3"
+ },
+ "src/runtime/format.ts :: hardLimit :: export function hardLimit(digits: number | string): never { #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: hardLimit :: raise(T.ValueError, `Exceeds Sagebrush's limit (${HARD_MAX_DIGITS} digits) for integer string conversion${typeof digits === \"number\" ? `: value has ${digits} digits` : \"\"}; no setting raises this limit`); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/format.ts :: tooManyDigits :: raise(T.ValueError, `Exceeds the limit (${intDigits.max} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/json.ts :: deeper :: if (stack.length >= MAX_DEPTH) raise(T.RecursionError, \"maximum recursion depth exceeded while encoding a JSON object\"); #0": {
+  "class": "2",
+  "owner": "pyjs JSON/runtime memory",
+  "row": "src-8"
+ },
+ "src/runtime/json.ts :: keyAt :: if (stack.length >= MAX_DEPTH) raise(T.RecursionError, \"maximum recursion depth exceeded while decoding a JSON array from a unicode string\"); #0": {
+  "class": "2",
+  "owner": "pyjs JSON/runtime memory",
+  "row": "src-8"
+ },
+ "src/runtime/json.ts :: keyAt :: if (stack.length >= MAX_DEPTH) raise(T.RecursionError, \"maximum recursion depth exceeded while decoding a JSON object from a unicode string\"); #0": {
+  "class": "2",
+  "owner": "pyjs JSON/runtime memory",
+  "row": "src-8"
+ },
+ "src/runtime/json.ts :: withArgs :: export const MAX_DEPTH = 40000; #0": {
+  "class": "2",
+  "owner": "pyjs JSON/runtime memory",
+  "row": "src-8"
+ },
+ "src/runtime/modules.ts :: bad :: const LOG_MAX_BITS = 2 ** 27; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-6"
+ },
+ "src/runtime/modules.ts :: bigOf :: const LLONG_MAX = 9223372036854775807n; #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: bigOf :: const MAX_BITS = 2 ** 30; #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: factorial :: if (n > LLONG_MAX) raise(T.OverflowError, `factorial() argument should not exceed ${LLONG_MAX}`); #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: heapLimit :: fn(m, \"get_int_max_str_digits\", () => intDigits.max); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: heapLimit :: m.flags.int_max_str_digits = intDigits.max; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: log2Big :: for (let s = MAX_BITS; s > 1023; s -= Math.max(1, s >> 6)) if (n >> BigInt(s) !== 0n) return s; #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: logOf :: const s = O.bitLength(b, LOG_MAX_BITS); // (not b.toString(2): HARD-909-1) #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-6"
+ },
+ "src/runtime/modules.ts :: logOf :: if (BigInt.asUintN(LOG_MAX_BITS, b) !== b) { #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-6"
+ },
+ "src/runtime/modules.ts :: logOf :: raise(T.OverflowError, `int too large: Sagebrush takes the logarithm of an int of at most ${LOG_MAX_BITS} bits`); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-6"
+ },
+ "src/runtime/modules.ts :: permCombBig :: if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf)); #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: permCombBig :: if (k > LLONG_MAX) raise(T.OverflowError, `min(n - k, k) must not exceed ${LLONG_MAX}`); #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: permCombBig :: if (n <= LLONG_MAX) { #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: permCombBig :: if (n <= LLONG_MAX) { #1": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: permCombBig :: raise(T.OverflowError, `k must not exceed ${LLONG_MAX}`); #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: permCombBig :: } else if (k > LLONG_MAX) { #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: productOf :: const COMB_SIEVE_MAX = 2 ** 25; #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: setDigits :: const i = O.index(maxdigits); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: const setDigits = (maxdigits: any) => { #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: if (b > 2147483647n || b < -2147483648n) raise(T.OverflowError, \"Python int too large to convert to C int\"); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: if (n !== 0 && n < 640) raise(T.ValueError, \"maxdigits must be >= 640 or 0 for unlimited\"); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: intDigits.max = n; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/modules.ts :: str :: const ZONE_READ_MAX = (1 << 20) + 1; #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: tooBig :: if (bitsAtLeast > MAX_BITS) raise(T.MemoryError); #0": {
+  "class": "2+3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-7"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const ZONE_DIR_CHARS_MAX = 1 << 21; #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const ZONE_DIR_MAX = (1 << 16) + 1; #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const buf = new Uint8Array(max); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const k = fs.readSync(fd, buf, n, max - n, null); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const max = zoneReadLimit(\"_read\", limit); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const max = zoneReadLimit(\"_tzfile\", limit); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const max = zoneReadLimit(\"_zonedir\", limit, ZONE_DIR_MAX); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const maxChars = zoneReadLimit(\"_zonedir\", chars, ZONE_DIR_CHARS_MAX); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const n = typeof limit === \"bigint\" ? limit : BigInt(limit); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: const zoneReadLimit = (fname: string, limit: any, most: number = ZONE_READ_MAX): number => { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: fn(m, \"_read\", (path: any, limit: any) => { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: fn(m, \"_tzfile\", (path: any, limit: any) => { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: fn(m, \"_zonedir\", (path: any, limit: any, chars: any) => { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: if (!O.isPyInt(limit) || typeof limit === \"boolean\") raise(T.TypeError, `_time.${fname}: the limit must be an int, not ${typeName(limit)}`); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: if (n < 0n || n > BigInt(most)) raise(T.ValueError, `_time.${fname}: the limit must be in 0..${most}, not ${n}`); #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: if (used > maxChars) return null; #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: while (n < max) { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/modules.ts :: zoneReadLimit :: while (out.length < max) { #0": {
+  "class": "1",
+  "owner": "runtime file I/O",
+  "row": "src-14"
+ },
+ "src/runtime/numpy.ts :: admitArray :: if (bytes > 2n ** 63n - 1n) raise(T.ValueError, \"array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.\"); #0": {
+  "class": "2",
+  "owner": "NumPy shim/runtime memory",
+  "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: admitArray :: if (n > BigInt(ARRAY_LIMITS.elements) || bytes + BigInt(scratch) > BigInt(ARRAY_LIMITS.bytes)) { #0": {
+  "class": "2",
+  "owner": "NumPy shim/runtime memory",
+  "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
+  "class": "2",
+  "owner": "NumPy shim/runtime memory",
+  "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: admitWork :: raise(T.MemoryError, `${what} needs ${need} of working memory, more than Sagebrush's limit of ${sizeString(BigInt(ARRAY_LIMITS.bytes))}`); #0": {
+  "class": "2",
+  "owner": "NumPy shim/runtime memory",
+  "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
+  "class": "3",
+  "owner": "NumPy shim",
+  "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
+  "class": "2",
+  "owner": "NumPy shim/runtime memory",
+  "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: prodOrder :: raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`); #0": {
+  "class": "3",
+  "owner": "NumPy shim",
+  "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
+  "class": "3",
+  "owner": "NumPy shim",
+  "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: wideRefuse :: return raise(T.NotImplementedError, `${d.name} values beyond 2**53 are not supported yet`); #0": {
+  "class": "3",
+  "owner": "NumPy shim",
+  "row": "src-11"
+ },
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) { #0": {
+  "class": "2",
+  "owner": "pyjs runtime",
+  "row": "src-5"
+ },
+ "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/ops.ts :: lengthHint :: if (b > 9223372036854775807n || b < -9223372036854775808n) raise(T.OverflowError, \"Python int too large to convert to C ssize_t\"); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/ops.ts :: repeatBytes :: if (!(a instanceof PyByteArray) && BigInt(a.n) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, \"repeated bytes are too long\"); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/ops.ts :: strRepeat :: if (BigInt(SP.cpLen(s)) * BigInt(n) > SSIZE_MAX) raise(T.OverflowError, \"repeated string is too long\"); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/re.ts ::  :: const MAXREPEAT = 4294967295; #0": {
+  "class": "coverage",
+  "owner": "pyjs regex",
+  "row": "src-9"
+ },
+ "src/runtime/re.ts :: has :: if (lo >= MAXREPEAT || (hi !== Infinity && hi >= MAXREPEAT)) raise(T.OverflowError, \"the repetition number is too large\"); #0": {
+  "class": "coverage",
+  "owner": "pyjs regex",
+  "row": "src-9"
+ },
+ "src/runtime/re.ts :: jsError :: const sh = Shape.shape(t.src, (msg) => raise(T.NotImplementedError, msg), (msg) => patternError(msg)); #0": {
+  "class": "coverage",
+  "owner": "pyjs regex",
+  "row": "src-9"
+ },
+ "src/runtime/re.ts :: jsError :: raise(T.NotImplementedError, \"this pattern could not be read back after its translation to a JavaScript regular expression (a limit of Sagebrush's re)\"); #0": {
+  "class": "coverage",
+  "owner": "pyjs regex",
+  "row": "src-9"
+ },
+ "src/runtime/types.ts :: flush :: if (size > MAX_STR) raise(T.MemoryError); #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/types.ts :: flush :: if (size > MAX_STR) raise(T.MemoryError); #1": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/types.ts :: intOrStr :: const MAX_STR = 2 ** 29 - 24; #0": {
+  "class": "2",
+  "owner": "pyjs containers/runtime memory",
+  "row": "src-4"
+ },
+ "src/runtime/types.ts :: parseIntLiteral :: const m = intDigits.max; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/types.ts :: parseIntLiteral :: if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/types.ts :: parseIntLiteral :: if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/types.ts :: parseIntLiteral :: raise(T.ValueError, `Exceeds the limit (${m} digits) for integer string conversion: value has ${t.length} digits; use sys.set_int_max_str_digits() to increase the limit`); #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)",
+  "row": "src-1"
+ },
+ "src/runtime/zlib.ts :: compress :: m.MAX_WBITS = 15; #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressLimited :: const [out, end] = inflateRaw(data, 2, limit); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressLimited :: export function decompressLimited(data: Uint8Array, limit: number): [Uint8Array, number] { #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: const [out, end] = decompressLimited(bytesOf(data), Number(limit)); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: fn(\"_decompress_limited\", (data: any, limit: any) => { #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: grow :: if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] { #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1)); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ }
+}

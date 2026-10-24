@@ -21,14 +21,26 @@ budgets from the snapshot; the engine hosts (CLI, browser worker) finalize at
 runtime startup, before the first user statement; the CPython package at the
 first layer use.  sys._sagebrush_limits is the finalized snapshot.
 
+Every key defaults to unlimited (William, Oct 24: no default work, time or
+input-size limit on a user's own computation; interrupting is the control).
+A context that wants limits (grading, an instructor's notebook, shared
+compute) sets finite values explicitly, and those refuse exactly as before;
+"unlimited" may also be given explicitly.  An unlimited value resolves to
+UNLIMITED (float infinity), which the consumers' budgets and bounds compare
+and subtract like any number.  Memory guards are not limits of this module
+and always apply.
+
 These are fail-closed budgets in the user's own interpreter, not a security
 boundary against code running in it: the hard walls are the host's (heap,
-CPU, run timeouts), and every maximum below keeps the budgets under them.
+CPU, run timeouts), and every finite maximum below keeps the budgets under
+them.
 
     sage: import _limits as L
     sage: s = L.validate('{"ff.work": 100000}')
-    sage: s["ff.work"], s["ff.embed_max"]
-    (100000, 1048576)
+    sage: s["ff.work"], s["ff.embed_max"] is L.UNLIMITED
+    (100000, True)
+    sage: L.validate('{"ff.work": "unlimited"}') == L.DEFAULTS
+    True
     sage: L.validate('{"ff.wrok": 1}')
     Traceback (most recent call last):
     ...
@@ -37,18 +49,27 @@ CPU, run timeouts), and every maximum below keeps the budgets under them.
 
 import sys as _sys
 
-# key: (default, min, max).  The defaults are the finite-field core's
-# constants before limits existed, so no limits (or {}) is today's behavior
-# byte for byte.  Only ff.work may be raised: to 10^8, measured at most
-# 0.51 s per 10^7 cops on the reference VM, so about 5 s there (the plan's
-# section 6); the others may only be lowered until each has its own
-# measurements (embed_max past 2^20 changes the discrete-log accounting).
+# An unlimited limit: no refusal in advance (plan-c0 r2).  Infinity, so that
+# a budget's charge (cops > budget) never refuses and stays unlimited, and a
+# bound's comparison (q <= EMBED_MAX) always holds.
+UNLIMITED = float("inf")
+UNLIMITED_TEXT = "unlimited"
+
+# key: (default, min, max).  Every default is unlimited (plan-c0 r2); the
+# ranges are those of an explicit finite value, unchanged from
+# plan-ff-limits r3 (a policy's opt-in limits refuse exactly as the old
+# defaults did): ff.work at most 10^8, measured at most 0.51 s per 10^7 cops
+# on the reference VM; the others no larger than the old defaults
+# (embed_max past 2^20 changes the discrete-log accounting, which is why a
+# finite ff.work caps the effective embed_max at 2^20: _sage_ffsub).
 TABLE = {
-    "ff.conway_work": (653528895, 10 ** 6, 653528895),
-    "ff.embed_max": (2 ** 20, 2 ** 8, 2 ** 20),
-    "ff.root_bits": (1024, 64, 1024),
-    "ff.work": (10 ** 7, 10 ** 5, 10 ** 8),
+    "ff.conway_work": (UNLIMITED, 10 ** 6, 653528895),
+    "ff.embed_max": (UNLIMITED, 2 ** 8, 2 ** 20),
+    "ff.root_bits": (UNLIMITED, 64, 1024),
+    "ff.work": (UNLIMITED, 10 ** 5, 10 ** 8),
 }
+# the defaults before plan-c0 (a policy's finite values, and the tests')
+FINITE = {"ff.conway_work": 653528895, "ff.embed_max": 2 ** 20, "ff.root_bits": 1024, "ff.work": 10 ** 7}
 MAX_BYTES = 4096   # the serialized text, in UTF-8 bytes
 MAX_ENTRIES = 16
 MAX_KEY = 64       # characters of a key (CPython mappings)
@@ -107,7 +128,7 @@ class Limits(object):
         return hash(self._items)
 
     def __repr__(self):
-        return "Limits({%s})" % ", ".join("%r: %d" % kv for kv in self._items)
+        return "Limits({%s})" % ", ".join("%r: %s" % (k, UNLIMITED_TEXT if v == UNLIMITED else "%d" % v) for k, v in self._items)
 
 
 DEFAULTS = Limits({k: v[0] for k, v in TABLE.items()})
@@ -168,8 +189,11 @@ def _check_entries(pairs):
         if k in seen:
             raise _refuse("%s is given more than once" % k)
         seen.add(k)
+        if type(v) is str and v == UNLIMITED_TEXT:
+            out[k] = UNLIMITED
+            continue
         if not isinstance(v, int) or isinstance(v, bool):
-            raise _refuse("%s must be an integer, not %s" % (k, _shown(v)))
+            raise _refuse('%s must be an integer or "%s", not %s' % (k, UNLIMITED_TEXT, _shown(v)))
         lo, hi = TABLE[k][1], TABLE[k][2]
         if not _fits64(v):
             raise _refuse("%s is an integer of more than 64 bits" % k)
@@ -219,11 +243,16 @@ def _from_mapping(m):
         if len(k) > MAX_KEY:
             raise _refuse("a key of more than %d characters" % MAX_KEY)
         v = m[k]
-        if not isinstance(v, int) or isinstance(v, bool):
-            raise _refuse("%s must be an integer, not %s" % (_key_shown(k), _shown(v)))
-        if not _fits64(v):
-            raise _refuse("%s is an integer of more than 64 bits" % _key_shown(k))
-        pairs.append((str(k), int(v)))
+        if isinstance(v, str) and str.__str__(v) == UNLIMITED_TEXT:
+            # (a str subclass is read as its str value, never through its
+            # own methods)
+            pairs.append((str(k), UNLIMITED_TEXT))
+        else:
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise _refuse('%s must be an integer or "%s", not %s' % (_key_shown(k), UNLIMITED_TEXT, _shown(v)))
+            if not _fits64(v):
+                raise _refuse("%s is an integer of more than 64 bits" % _key_shown(k))
+            pairs.append((str(k), int(v)))
         if len(pairs) > MAX_ENTRIES:  # (a mapping whose len() said less)
             raise _refuse("more than %d entries" % MAX_ENTRIES)
     return _check_entries(pairs)
