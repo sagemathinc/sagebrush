@@ -44,6 +44,10 @@ const CASES: [string, string, string][] = [
   ["show({1: 2/3, 'k': 7})", "\\left\\{1 : \\frac{2}{3}, \\text{\\texttt{k}} : 7\\right\\}", "{1: 2/3, 'k': 7}"],
   ["show(None)", "\\mathrm{None}", "None"],
   ["show('hi there')", "\\text{\\texttt{hi{ }there}}", "'hi there'"],
+  // show(a, b): one display of both, separated by a space (Sage's text form: "1 2/3")
+  ["show(1, 2/3)", "1 \\ \\frac{2}{3}", "1 2/3"],
+  ["show(EllipticCurve([1, -1, 0, -79, 289]), 2/3)", "y^2 + x y = x^{3} - x^{2} - 79 x + 289  \\ \\frac{2}{3}",
+   "Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field 2/3"],
 ];
 
 test("show() publishes one typeset display (text/latex, marker, text/plain) and prints nothing", async () => {
@@ -85,7 +89,7 @@ test("Python and Magma modes are unchanged: display() and Magma output", async (
 test("on the command line show() prints the text form once", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-show-"));
   const f = join(dir, "s.sage");
-  writeFileSync(f, "show(EllipticCurve([1, -1, 0, -79, 289]))\nshow('hi')\n");
+  writeFileSync(f, "show(EllipticCurve([1, -1, 0, -79, 289]))\nshow(1, 2/3)\nshow('hi')\n");
   const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--sage", f], { encoding: "utf8" });
-  assert.equal(out, "Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field\n'hi'\n");
+  assert.equal(out, "Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field\n1 2/3\n'hi'\n");
 });
