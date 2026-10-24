@@ -29,14 +29,16 @@ const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if 
 
 // ---- failure diagnostics: bounded in time and bytes, and never able to turn a failure into a pass
 const NOTE_MAX = 40, NOTE_CHARS = 300, ID_CHARS = 64, URL_MAX = 2000, DIAG_MS = 5000;
+/** Every other CDP call's deadline: far more than a healthy page needs, so only a wedged one meets it. */
+const CALL_MS = 30_000;
 const clip = (x, n = NOTE_CHARS) => String(x).slice(0, n);
 const note = (list, line) => { list.push(clip(line)); if (list.length > NOTE_MAX) list.shift(); };
-/** A CDP session: send() with an optional deadline, after which it answers {timedOut} and forgets the
- * request, so a reply after it (or to an id never sent) is inert (PWA-DIAG-1). */
-function cdpSession(post) {
+/** A CDP session: send() with a deadline (`defaultMs` unless given), after which it answers {timedOut} and
+ * forgets the request, so a reply after it (or to an id never sent) is inert (PWA-DIAG-1). */
+function cdpSession(post, defaultMs = Infinity) {
   let n = 0;
   const waiting = new Map();
-  const send = (method, params = {}, ms = Infinity) => new Promise((resolve) => {
+  const send = (method, params = {}, ms = defaultMs) => new Promise((resolve) => {
     const id = ++n;
     const timer = Number.isFinite(ms) ? setTimeout(() => { waiting.delete(id); resolve({ timedOut: true }); }, ms) : null;
     waiting.set(id, (v) => { if (timer) clearTimeout(timer); waiting.delete(id); resolve(v); });
@@ -78,6 +80,18 @@ function makeDiagnose({ send, notes, log, ms = DIAG_MS }) {
     log("    page: " + String(state).slice(0, 2000));
     for (const [k, list] of Object.entries(notes)) for (const line of list) log(`    ${k}: ${line}`);
     if (!Object.values(notes).some((l) => l.length)) log("    (no failed requests, console errors or failed loads recorded)");
+  };
+}
+/** Poll `ev(expr)` until it's truthy: at least ms / 100 polls, 100 ms apart (as always), but never past
+ * ms + one call's deadline, so a wedged page can't stretch the wait without bound. */
+function makeUntil(ev, pause, callMs) {
+  return async (expr, ms = 30000) => {
+    const cap = Date.now() + ms + callMs;
+    for (let i = 0; i < ms / 100 && Date.now() < cap; i++) {
+      if (await ev(expr)) return true;
+      await pause(100);
+    }
+    return false;
   };
 }
 /** What a cell that didn't finish by its deadline returns: no check accepts it. */
@@ -136,6 +150,24 @@ function cellRunner({ start, finished, output, diagnose, fail }) {
   recordEvent({ method: "Network.loadingFailed", params: { requestId: "r" + big, errorText: big, blockedReason: big } }, ns, us);
   ok(us.size === URL_MAX && [...us.keys()].every((k) => k.length <= ID_CHARS) && [...us.values()].every((v) => v.length <= NOTE_CHARS), "(self-check) request URLs and ids are kept cut, at most " + URL_MAX);
   ok([...ns.console, ...ns.network].every((l) => l.length <= NOTE_CHARS) && ns.console.length === 1 && ns.network.length === 1, "(self-check) console and network notes are cut to " + NOTE_CHARS + " characters");
+  // ordinary calls: a session's default deadline applies to every send; until keeps its minimum and has a bound
+  const dflt = cdpSession(() => {}, 150);
+  t0 = Date.now();
+  const rd = await dflt.send("Page.navigate", { url: "about:blank" });
+  const took3 = Date.now() - t0;
+  ok(rd?.timedOut === true && took3 >= 100 && took3 < 1500 && dflt.pending() === 0, `(self-check) a session's default deadline ends an ordinary call nobody answers (${took3} ms)`);
+  const quick = makeUntil(async () => false, sleep, 200);
+  t0 = Date.now();
+  const q = await quick("x", 300);
+  const took4 = Date.now() - t0;
+  ok(q === false && took4 >= 300 && took4 < 1500, `(self-check) until still waits at least its time when the page answers at once (${took4} ms for 300)`);
+  const wedged = makeUntil(() => sleep(200).then(() => undefined), sleep, 200);
+  t0 = Date.now();
+  const w = await wedged("x", 300);
+  const took5 = Date.now() - t0;
+  ok(w === false && took5 < 300 + 2 * 200 + 300, `(self-check) until ends within its time + a call's deadline when every call times out (${took5} ms for 300 + 200)`);
+  let calls = 0;
+  ok((await makeUntil(async () => ++calls >= 3, sleep, 200)("x", 3000)) === true && calls === 3, "(self-check) until returns as soon as the page says yes");
 }
 
 // the site's Worker's chunk route, in Miniflare, with the chunks in R2
@@ -197,7 +229,7 @@ try {
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
-  const cdp = cdpSession((m) => ws.send(m));
+  const cdp = cdpSession((m) => ws.send(m), CALL_MS);
   const urls = new Map();
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
@@ -205,8 +237,9 @@ try {
     recordEvent(m, notes, urls); // (events, kept for the diagnostics)
   };
   const send = cdp.send;
-  const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
-  const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
+  // (a call past its deadline has no value: a check of it fails, and until polls on)
+  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); return r?.timedOut ? undefined : r?.result?.value; };
+  const until = makeUntil(ev, sleep, CALL_MS);
   const diagnose = makeDiagnose({ send, notes, log: (l) => console.log(l) });
   const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
   const runCode = cellRunner({
