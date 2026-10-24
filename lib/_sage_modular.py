@@ -2725,6 +2725,31 @@ class EllipticCurve_rational_field:
         rhs = _poly_repr([a6, a4, a2, 1], "x")
         return "Elliptic Curve defined by %s = %s over Rational Field" % (lhs, rhs)
 
+    def _latex_(self):
+        """The Weierstrass equation, as Sage's latex() writes it (with its
+        trailing space).
+
+        EXAMPLES::
+
+            sage: latex(EllipticCurve([1, -1, 0, -79, 289]))
+            y^2 + x y = x^{3} - x^{2} - 79 x + 289
+            sage: latex(EllipticCurve([3, -2, -1, -5, -8]))
+            y^2 + 3 x y - y = x^{3} - 2 x^{2} - 5 x - 8
+        """
+        a1, a2, a3, a4, a6 = self._a
+
+        def term(c, mono):
+            if c == 0:
+                return ""
+            sign = " + " if c > 0 else " - "
+            if not mono:
+                return sign + str(abs(c))
+            return sign + ("" if abs(c) == 1 else "%d " % abs(c)) + mono
+
+        lhs = "y^2" + term(a1, "x y") + term(a3, "y")
+        rhs = "x^{3}" + term(a2, "x^{2}") + term(a4, "x") + term(a6, "")
+        return "%s = %s " % (lhs, rhs)
+
 
 class _PeriodLattice:
     def __init__(self, E):
