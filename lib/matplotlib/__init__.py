@@ -92,6 +92,32 @@ class RcParams(dict):
 
 
 _CYCLE_MAX = 4096  # (entries a cycler may have: a colour list, not a table)
+_TOO_MANY = "cycler: at most %d colours"
+
+
+def _at_most(values, n):
+    """values as a list, refused with a ValueError when there are more than
+    n: an iterable is read only as far as its item n + 1"""
+    if isinstance(values, (list, tuple)):
+        if len(values) > n:
+            raise ValueError(_TOO_MANY % n)
+        return list(values)
+    import itertools
+    out = list(itertools.islice(iter(values), n + 1))
+    if len(out) > n:
+        raise ValueError(_TOO_MANY % n)
+    return out
+
+
+def _fields(s):
+    """the comma-separated fields of s, one at a time (not a list of all)"""
+    i = 0
+    while True:
+        j = s.find(",", i)
+        yield s[i:] if j < 0 else s[i:j]
+        if j < 0:
+            return
+        i = j + 1
 
 
 class Cycler:
@@ -101,10 +127,7 @@ class Cycler:
     def __init__(self, key, values):
         if key != "color":
             raise NotImplementedError("cycler(%r, ...): Sagebrush cycles colours only ('color')" % (key,))
-        values = list(values)
-        if len(values) > _CYCLE_MAX:
-            raise ValueError("cycler: at most %d colours" % _CYCLE_MAX)
-        self._values = values
+        self._values = _at_most(values, _CYCLE_MAX)
 
     @property
     def keys(self):
@@ -208,17 +231,30 @@ def _v_linestyle(key, v):
 
 
 def _v_cycle(key, v):
+    # (every colour is checked before rcParams changes, as matplotlib's
+    # validator does; a Cycler has at most _CYCLE_MAX)
     if isinstance(v, Cycler):
-        for c in v.by_key()["color"]:
+        for c in v._values:
             if isinstance(c, str) and _re.fullmatch(r"C[0-9]+", c):
                 _bad(key, "Cannot put cycle reference (%r) in prop_cycler" % (c,))
+            _v_color(key, c)
         return v
     if isinstance(v, str):
-        # (matplotlib reads "cycler('color', [...])": the colour list only)
+        # (matplotlib reads "cycler('color', [...])": the colour list only;
+        # the fields are read only as far as the cap)
         m = _re.fullmatch(r"\s*cycler\(\s*(['\"])color\1\s*,\s*\[(.*)\]\s*\)\s*", v, _re.S)
         if m:
-            vals = [s.strip().strip("'\"") for s in m.group(2).split(",") if s.strip()]
-            return _v_cycle(key, Cycler("color", [_v_color(key, c) for c in vals]))
+            vals = (f.strip().strip("'\"") for f in _fields(m.group(2)) if f.strip())
+            try:
+                cyc = Cycler("color", vals)
+                return _v_cycle(key, cyc)
+            except ValueError as e:
+                msg = str(e)
+                if msg == _TOO_MANY % _CYCLE_MAX:
+                    _bad(key, "a cycler string: %s" % msg)  # (not the string itself: it may be any size)
+                if msg.startswith("Key %s: " % key):
+                    msg = msg[len("Key %s: " % key):]
+                _bad(key, "%r is not a valid cycler construction: %s" % (v, msg))
         _bad(key, "Sagebrush reads a cycler string of colours only: %r" % (v,))
     _bad(key, "Object is not a string or Cycler instance: %r" % (v,))
 

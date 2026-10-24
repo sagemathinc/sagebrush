@@ -328,6 +328,10 @@ def _axes_style():
     cyc = g("axes.prop_cycle")
     if cyc is not None:
         st["_cycle"] = [to_color(c) for c in cyc.by_key()["color"]] or list(TAB10)
+    # (font sizes as matplotlib's: an Axes' tick and axis labels take
+    # theirs when it is made, its title when set_title is called)
+    st["_sizes"] = {"tick_size": _rc_size("xtick.labelsize", "medium"), "label_size": _rc_size("axes.labelsize", "medium"),
+                    "title_size": _rc_size("axes.titlesize", "large")}
     return st
 
 
@@ -797,8 +801,7 @@ class Axes:
     def set_title(self, s, fontsize=None, **kw):
         self._opts["title"] = str(s)
         size = kw.get("size", (fontsize or {}).get("fontsize") if isinstance(fontsize, dict) else fontsize)
-        if size is not None:
-            self._opts["title_size"] = _size_px(size, 12)
+        self._opts["title_size"] = _size_px(size, 12) if size is not None else _rc_size("axes.titlesize", "large")
 
     def set_xlabel(self, s, fontsize=None, **kw):
         self._opts["xlabel"] = str(s)
@@ -1075,11 +1078,10 @@ class Axes:
 
     def _panel(self):
         o = {k: v for k, v in self._opts.items() if not k.startswith("_")}
-        # matplotlib's text: sizes from rc (10 pt ticks and labels, a 12 pt
-        # title), titles not bold
-        o.setdefault("tick_size", _rc_size("xtick.labelsize", "medium"))
-        o.setdefault("label_size", _rc_size("axes.labelsize", "medium"))
-        o.setdefault("title_size", _rc_size("axes.titlesize", "large"))
+        # matplotlib's text: sizes from rc as it was when the Axes was made
+        # (10 pt ticks and labels, a 12 pt title), titles not bold
+        for k, v in self._style["_sizes"].items():
+            o.setdefault(k, v)
         o.setdefault("title_weight", "normal")
         o.setdefault("tick_format", "matplotlib")
         o.setdefault("frame", True)
