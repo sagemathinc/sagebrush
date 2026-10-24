@@ -479,6 +479,8 @@ export class EditHub {
     try { return await run; } finally { if (this.saving === run) this.saving = null; }
   }
   private saving: Promise<WriteOutcome> | null = null;
+  /** since when saves have been failing (an error outcome), or null */
+  private failingSince: number | null = null;
 
   /** Whether anything is unsaved that a save could write now (the exit flush's test: no WRITE_MIN_MS, no quiet). */
   unsaved(): boolean {
@@ -492,6 +494,7 @@ export class EditHub {
     const before = this.P;
     const r = writeOnce(this.file, T.bytes, this.O, this.slots, { fs: this.deps.fs });
     if (r.saved) {
+      this.failingSince = null;
       this.P = T;
       this.O = T.hash;
       this.persistedSeq = T.seq;
@@ -522,7 +525,14 @@ export class EditHub {
       case "slots": this.state = { state: "held", why: "slots", detail: "too many copies kept beside FILE, waiting for them to settle" }; break;
       case "stuck": this.state = { state: "held", why: "stuck", detail: `FILE is missing: kept at ${r.kept.join(", ")}` }; break;
       case "eexist": this.state = { state: "held", why: "error", detail: `a new FILE appeared during the save; kept ${r.kept.join(", ")}` }; break;
-      case "error": this.state = { state: "held", why: "error", detail: r.message }; break;
+      case "error": {
+        // (a failing write retried, as the write queue paces it, for WRITE_RETRY_MS (Windows: FILE open in another
+        // program), then reported as not saved; still retried after that)
+        const now = this.deps.now();
+        this.failingSince ??= now;
+        if (now - this.failingSince >= this.limits.WRITE_RETRY_MS) this.state = { state: "held", why: "error", detail: r.message };
+        break;
+      }
     }
     return r;
   }
