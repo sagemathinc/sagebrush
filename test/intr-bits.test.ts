@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
@@ -14,23 +15,17 @@ const ROOT = join(__dirname, "..", "..");
 
 // (a census: nothing in the sources stores to the interrupt word)
 test("no source stores to INTR[0]: producers or, consumers and (the census)", () => {
-  const files: string[] = [];
-  const walk = (d: string) => {
-    for (const f of readdirSync(d)) {
-      const p = join(d, f);
-      if (statSync(p).isDirectory()) { if (!/^(dist|node_modules|vendor)$/.test(f)) walk(p); }
-      else if (/\.(ts|mts|cjs|mjs|js|html)$/.test(f)) files.push(p);
-    }
-  };
-  for (const d of ["src", "packages/sagebrush/bin", "web"]) walk(join(ROOT, d));
+  // (the tracked sources only: a site build's copies, untracked, are not sources)
+  const files = execFileSync("git", ["ls-files", "src", "packages/sagebrush/bin", "web"], { cwd: ROOT, encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|mts|cjs|mjs|js|html)$/.test(f) && !/(^|\/)test-[^/]*$|\.test\.[^/]*$/.test(f)); // (tests produce on purpose)
+  assert.ok(files.length > 100, String(files.length));
   const bad: string[] = [];
   const store = /\b(?:R\.)?(?:INTR|intr|s\.intr|flag)\[0\]\s*=(?!=)|Atomics\.store\(\s*(?:R\.)?(?:INTR|intr|s\.intr|flag)\s*,\s*0\s*,/;
-  for (const f of new Set(files)) {
-    if (/\/(dist|node_modules|vendor)\//.test(f) || /\/test-[^/]*$|\.test\.[^/]*$/.test(f)) continue; // (tests produce on purpose)
-    readFileSync(f, "utf8").split("\n").forEach((line, i) => {
-      if (store.test(line) && !/^\s*\/\//.test(line)) bad.push(`${f.slice(ROOT.length + 1)}:${i + 1}: ${line.trim()}`);
+  for (const f of files)
+    readFileSync(join(ROOT, f), "utf8").split("\n").forEach((line, i) => {
+      if (store.test(line) && !/^\s*\/\//.test(line)) bad.push(`${f}:${i + 1}: ${line.trim().slice(0, 160)}`);
     });
-  }
   assert.deepEqual(bad, []);
 });
 
