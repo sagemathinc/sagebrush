@@ -179,7 +179,13 @@ packages such as mpmath pass their own test suites. It is the front end for
 the engines. Strings are JavaScript strings, so a character past U+FFFF is a
 surrogate pair: they compare and sort by code point as in Python, but two
 lone surrogates that form a pair (`'\ud800\udc00'`) are the same string as
-that character (`'\U00010000'`), where CPython keeps them apart.
+that character (`'\U00010000'`), where CPython keeps them apart. An int's
+decimal conversions have no default limit: `sys.get_int_max_str_digits()` is
+0 in every mode, where CPython's default is 4300, so a large integer prints
+and saves without a setting. A program that calls
+`sys.set_int_max_str_digits(n)` gets CPython's checks and messages; the only
+other bound on a conversion, or on `math.log` of a huge int, is the session's
+memory, refused at once with a `MemoryError` that says how much it needs.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
   console running in the page, and nothing is sent to a server. See

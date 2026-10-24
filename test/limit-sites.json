@@ -3254,50 +3254,76 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/format.ts :: decimalOf :: const m = intDigits.max; #0": {
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
  },
- "src/runtime/format.ts :: decimalOf :: if (atLeast > HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+ "src/runtime/format.ts :: decompose :: const MAX_STR = 2 ** 29 - 24; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
- "src/runtime/format.ts :: decimalOf :: if (s.length > HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
+ "src/runtime/format.ts :: decompose :: export const intDigits = { max: 0 }; #0": {
   "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
- },
- "src/runtime/format.ts :: decompose :: export const HARD_MAX_DIGITS = 4_000_000; #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
- },
- "src/runtime/format.ts :: decompose :: export const intDigits = { max: 4300 }; #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts :: grown :: raise(T.MemoryError, `displaying this value takes more than Sagebrush's limit of ${REPR_GROWTH.steps} steps or ${REPR_GROWTH.chars} characters (a __repr__ may be changing it as it is shown)`); #0": {
   "class": "1",
   "owner": "pyjs display/runtime",
   "row": "src-3"
  },
- "src/runtime/format.ts :: hardLimit :: export function hardLimit(digits: number | string): never { #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+ "src/runtime/format.ts :: mb :: const need = 2 * digits + 4 * valueBytes, limit = heapLimit(); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
- "src/runtime/format.ts :: hardLimit :: raise(T.ValueError, `Exceeds Sagebrush's limit (${HARD_MAX_DIGITS} digits) for integer string conversion${typeof digits === \"number\" ? `: value has ${digits} digits` : \"\"}; no setting raises this limit`); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+ "src/runtime/format.ts :: mb :: if (digits > MAX_STR) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: mb :: if (need > limit) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: mb :: raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: mb :: raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts :: tooManyDigits :: raise(T.ValueError, `Exceeds the limit (${intDigits.max} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`); #0": {
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
+ },
+ "src/runtime/heap.ts :: heapLimit :: export function heapLimit(): number { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: heapLimit :: return (cached ||= readHeapLimit()); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: oldSpaceFlag :: const m = /^--max[-_]old[-_]space[-_]size(?:=(\\d+))?$/.exec(String(args[i])); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: readHeapLimit :: function readHeapLimit(): number { #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: readHeapLimit :: if (!(typeof n === \"number\" && n > 0)) n = g.performance?.memory?.jsHeapSizeLimit; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: readHeapLimit :: n = g.process?.getBuiltinModule?.(\"node:v8\")?.getHeapStatistics?.().heap_size_limit; #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/json.ts :: deeper :: if (stack.length >= MAX_DEPTH) raise(T.RecursionError, \"maximum recursion depth exceeded while encoding a JSON object\"); #0": {
   "class": "2",
@@ -3319,10 +3345,9 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
- "src/runtime/modules.ts :: bad :: const LOG_MAX_BITS = 2 ** 27; #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-6"
+ "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: bigOf :: const LLONG_MAX = 9223372036854775807n; #0": {
   "class": "2+3",
@@ -3339,35 +3364,42 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: heapLimit :: fn(m, \"get_int_max_str_digits\", () => intDigits.max); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+ "src/runtime/modules.ts :: importStar :: export { heapLimit } from \"./heap\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: heapLimit :: m.flags.int_max_str_digits = intDigits.max; #0": {
+ "src/runtime/modules.ts :: importStar :: fn(m, \"get_int_max_str_digits\", () => intDigits.max); #0": {
   "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: importStar :: m._sagebrush_heap_limit = heapLimit(); #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: importStar :: m.flags.int_max_str_digits = intDigits.max; #0": {
+  "class": "3",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: importStar :: m.int_info = Ty.structseq(\"sys.int_info\", [\"bits_per_digit\", \"sizeof_digit\", \"default_max_str_digits\", \"str_digits_check_threshold\"], [30, 4, 0, 640]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: importStar :: m.maxsize = 9223372036854775807n; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: importStar :: m.maxunicode = 0x10ffff; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: log2Big :: for (let s = MAX_BITS; s > 1023; s -= Math.max(1, s >> 6)) if (n >> BigInt(s) !== 0n) return s; #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: logOf :: const s = O.bitLength(b, LOG_MAX_BITS); // (not b.toString(2): HARD-909-1) #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-6"
- },
- "src/runtime/modules.ts :: logOf :: if (BigInt.asUintN(LOG_MAX_BITS, b) !== b) { #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-6"
- },
- "src/runtime/modules.ts :: logOf :: raise(T.OverflowError, `int too large: Sagebrush takes the logarithm of an int of at most ${LOG_MAX_BITS} bits`); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-6"
+ "src/runtime/modules.ts :: logOf :: if (bytes > heapLimit() / 2) #0": {
+  "class": "2",
+  "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: permCombBig :: if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf)); #0": {
   "class": "2+3",
@@ -3635,16 +3667,6 @@
   "row": "src-4"
  },
  "src/runtime/types.ts :: parseIntLiteral :: const m = intDigits.max; #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
- },
- "src/runtime/types.ts :: parseIntLiteral :: if (!pow2 && t.length > 2 * HARD_MAX_DIGITS) hardLimit(\"\"); #0": {
-  "class": "3",
-  "owner": "python (@sagebrush-python)",
-  "row": "src-1"
- },
- "src/runtime/types.ts :: parseIntLiteral :: if (!pow2 && t.length > HARD_MAX_DIGITS) hardLimit(t.length); #0": {
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
