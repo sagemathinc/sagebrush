@@ -184,6 +184,7 @@ TABLE = {
     "PrimitiveElement": (["finite fields"], "A generator of a finite field's multiplicative group."),
     "PrimeField": (["finite fields"], "The prime field GF(p) of a finite field."),
     "Generator": (["finite fields"], "The generator F.1 of a finite field over its prime field (1 for GF(p) itself)."),
+    "ChangeRing": (["polynomials", "finite fields"], "A univariate polynomial ring, or one of its polynomials, over another ring: the integers, the rationals or a finite field."),
     "DefiningPolynomial": (["finite fields"], "The defining (Conway) polynomial of a finite field, or the minimal polynomial of F.1 over a subfield."),
     "IsSubfield": (["finite fields"], "Whether one finite field is a subfield of another."),
     "Embed": (["finite fields"], "Checks that one finite field embeds in another (Sagebrush's finite fields are already embedded)."),
@@ -319,6 +320,10 @@ Finite field of size 2""",
 a
 > Generator(GF(7));
 1""",
+    "ChangeRing": """\
+> P<x> := PolynomialRing(Integers());
+> ChangeRing(3*x^2 - x + 7, GF(5));
+3*$.1^2 + 4*$.1 + 2""",
     "DefiningPolynomial": """\
 > DefiningPolynomial(GF(16));
 $.1^4 + $.1 + 1
@@ -1073,6 +1078,12 @@ SIGNATURES = {
     },
     "Identity": {
         "GrpPerm": ("The identity permutation of a symmetric group.", "> Order(Identity(Sym(5)));\n1"),
+    },
+    "ChangeRing": {
+        "RngUPol, Rng": ("The univariate polynomial ring over R (the integers, the rationals or a finite field), and the map to it.",
+                         "> P<x> := PolynomialRing(Integers());\n> ChangeRing(P, GF(25));\nUnivariate Polynomial Ring over GF(5^2)\nMapping from: RngUPol: P to Univariate Polynomial Ring over GF(5^2)"),
+        "RngUPolElt, Rng": ("The polynomial with each coefficient coerced into R; between finite fields into an overfield or a subfield.",
+                            "> K<b> := GF(16); U<u> := PolynomialRing(K); F<a> := GF(4);\n> ChangeRing(u^2 + b^5*u + 1, F);\n$.1^2 + a*$.1 + 1"),
     },
     "Trace": {
         "RngIntElt": ("An integer is its own trace.", "> Trace(-7);\n-7"),
