@@ -7532,7 +7532,7 @@ def _cr_poly(f, R):
         if k and 1 < wn != un > 1 and (un % wn == 0 or wn % un == 0) and not (
                 _ffsub.embeddable(W.K, R.K) if un % wn == 0 else _ffsub.descendable(W.K, R.K)):
             # (F1's bound on the larger field, before anything is moved)
-            raise _fferr("ChangeRing between finite fields of more than 2^20 elements is not supported yet", "ChangeRing")
+            raise _fferr("ChangeRing between finite fields of more than %s elements is not supported yet" % _ffsub.embed_max_text(), "ChangeRing")
         return _MFFPoly(S, S.P(_ffsub.change(xs, R.K, budget, refuse, fail, W.K)))
     if R is _ZZ or R is _QQ:
         # (a word each: the denominator's test, the copy)
@@ -7592,7 +7592,8 @@ def RootsInSplittingField(*args):
     against Magma 2.18): ordered by their discrete logs to L's generator,
     0 first; a constant has none (and L = K).  By the shared core, under
     one budget of _ffsub.WORK: f's factorization (its work charged first),
-    then L of at most 2^20 elements (checked on the degrees), then the
+    then L of at most EMBED_MAX elements (ff.embed_max, 2^20 by default;
+    checked on the degrees), then the
     roots' whole work reserved before L is made or any root found; past
     any of these, refused in words."""
     name = "RootsInSplittingField"
@@ -8446,8 +8447,8 @@ def _ffwrap(K):
 
 def _ff_refuse(what, A, B, where, pos=None):
     """The refusal (a function making it) for subfield work past F1's
-    bounds: fields of more than 2^20 elements, or the work."""
-    return lambda: MagmaError("%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most 2^20 elements, within a bounded amount of work)" % (what, _ff_desc(A), _ff_desc(B)), where, where != "'!'", pos)
+    bounds: fields of more than EMBED_MAX (2^20) elements, or the work."""
+    return lambda: MagmaError("%s of elements of %s and %s is not supported yet (subfields are computed here only in fields of at most %s elements, within a bounded amount of work)" % (what, _ff_desc(A), _ff_desc(B), _ffsub.embed_max_text()), where, where != "'!'", pos)
 
 
 def _ff_desc(W):

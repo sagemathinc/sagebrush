@@ -30,10 +30,23 @@ generators are kept in ONE bounded LRU cache, IMAGES, for every front end.
 import collections as _collections
 import math as _math
 
+import _limits
 import _sage_ff as _sff
 
-WORK = 10 ** 7
-EMBED_MAX = 2 ** 20
+# (the session's limits, lib/_limits.py, read once here: the defaults are
+# 10^7, 2^20 and 1024, the constants these were; plan-ff-limits r3)
+_LIMITS = _limits.finalize()
+WORK = _LIMITS["ff.work"]
+EMBED_MAX = _LIMITS["ff.embed_max"]
+# (the bits of EMBED_MAX: L (bits(p) - 1) past it is refused before p^L is
+# formed; 20 at the default, astra CORR-FFLIMIT-1)
+EMBED_BITS = EMBED_MAX.bit_length() - 1
+
+
+def embed_max_text():
+    """EMBED_MAX in refusals: 2^20 by default, the number when it isn't a
+    power of 2."""
+    return "2^%d" % EMBED_BITS if EMBED_MAX == 1 << EMBED_BITS else str(EMBED_MAX)
 IMAGES = _collections.OrderedDict()  # (p, m, n) -> image of GF(p^m)'s generator in GF(p^n)
 IMAGES_MAX = 64                      # entries, of at most 20 coefficients each (1280 in all)
 
@@ -91,7 +104,7 @@ def cover(Ks, refuse):
     """The degree L of the smallest field containing the fields Ks (one
     characteristic), checked without making it or anything else: refuse()
     when two of them are not prime fields and that field would have more
-    than EMBED_MAX elements (L log2 p <= 20 before p^L is computed).  One
+    than EMBED_MAX elements (L log2 p <= EMBED_BITS before p^L is computed).  One
     extension with prime fields: its degree, any size."""
     ext = {id(K): K for K in Ks if pnq(K)[1] > 1}
     if len(ext) < 2:
@@ -102,7 +115,7 @@ def cover(Ks, refuse):
     for K in ext.values():
         n = pnq(K)[1]
         L = L * n // _math.gcd(L, n)
-        if L * (p.bit_length() - 1) > 20:
+        if L * (p.bit_length() - 1) > EMBED_BITS:
             raise refuse()
     if p ** L > EMBED_MAX:
         raise refuse()
@@ -434,7 +447,7 @@ def apply(x, U, img, budget, refuse):
 # neutral: prime-field values as ints, polynomials as coefficient lists
 # (constant first), which each front end turns into its own objects.
 
-ROOT_BITS = 1024  # Root/nth_root exponents of more bits are refused (Magma takes them)
+ROOT_BITS = _LIMITS["ff.root_bits"]  # Root/nth_root exponents of more bits are refused (Magma takes them); 1024 by default
 
 
 def w(p):
@@ -974,13 +987,14 @@ def split_degree(degrees, K, refuse):
     polynomial over K whose irreducible factors have these degrees: deg K
     times their lcm; K itself (any size) when every factor is linear, else
     refuse() when the field would have more than EMBED_MAX elements
-    (checked on n log2 p before p^n is formed)."""
+    (checked on n (bits(p) - 1) against EMBED_BITS before p^n is formed,
+    as cover() does)."""
     p, kn, _ = pnq(K)
     d = 1
     for k in degrees:
         d = d * k // _math.gcd(d, k)
     n = kn * d
-    if d > 1 and (n * (p.bit_length() - 1) > 20 or p ** n > EMBED_MAX):
+    if d > 1 and (n * (p.bit_length() - 1) > EMBED_BITS or p ** n > EMBED_MAX):
         raise refuse()
     return n
 

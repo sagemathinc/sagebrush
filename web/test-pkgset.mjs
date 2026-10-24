@@ -91,6 +91,7 @@ try {
   // run `code` in a fresh worker with set `set`: its stdout, and whether it raised
   const run = (set, code) => ev(`new Promise((resolve) => {
     const w = new Worker("sagebrush-worker.js", { type: "module" });
+    w.postMessage({ init: { limits: null } }); // (the worker's first message: web/worker.ts)
     let out = "", note = "";
     w.onmessage = (e) => {
       const m = e.data;
