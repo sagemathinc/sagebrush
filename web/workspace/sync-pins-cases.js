@@ -379,7 +379,10 @@ async function counting(f) {
 // most PINS.collapseRelease pins released, each a few calls, the note); a constant, as the plain save's is)
 // (and the worst of each measured exactly: a change in either shows at once; a collapsing save kept at most 60, four
 // calls under its bound, by PINS.collapseRelease)
-const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 33, COLLAPSE_WORST = 59;
+// (D11: every transaction on entries reads the large-move record first, one get (r2 §4's adapter cost): a save's five
+// transactions on entries make 5 more requests than before it; PINS.collapseRelease 2 (from 3) keeps the collapsing
+// save at most 60, four under its bound: 38 and 60)
+const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 38, COLLAPSE_WORST = 60;
 /** 200 overwrites of `path` at a 1 MiB cap: each save's IndexedDB calls, apart for the saves that collapsed. */
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
@@ -1468,7 +1471,7 @@ async function upgradeV5() {
   delete after.prunable;
   const metaKeys = JSON.parse(after.meta)[0];
   after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL), JSON.parse(after.meta)[1].filter((v) => !(v && typeof v === "object" && "after" in v))]);
-  check(db5.version === 5 && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && marker?.after === 0, "version 4 to 5: every store the same, byte for byte; the pins' index byStorage and the empty store prunable added; the backfill's marker set: " + J({ idx, prunable, marker }));
+  check(db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && marker?.after === 0, "version 4 to 5: every store the same, byte for byte; the pins' index byStorage and the empty store prunable added; the backfill's marker set: " + J({ idx, prunable, marker }));
   db5.close();
 }
 

@@ -31,8 +31,16 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, sender, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, sender, obligate, rebuildKey, type OutboxRecord, type WireOp } from "./sync-outbox";
 import { bytesFor } from "./sync-pins";
+import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
+import { capture as captureAdoption } from "./sync-adopt";
+import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
+import { Halt } from "./sync-overlay";
+import { rewriting } from "./sync-rewrite";
+import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
+import type { SyncOp } from "./sync-reduce";
+import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
 import { accountHash, Bucket } from "../sync-protocol/protocol";
 
@@ -60,6 +68,15 @@ export const CLIENT = {
   /** pulls: at most `pullBurst` at once, then `pullsPerSecond` */
   pullBurst: 4,
   pullsPerSecond: 2,
+  /** with the confirmed index: one pull from the cursor while connected and idle, this often (D8b: a notice lost
+   * on a socket that stays open is found within it) */
+  idlePullMs: 5 * 60_000,
+  /** downloads at once (a secondary cap: the reservation decides, L2) */
+  downloadsAtOnce: 4,
+  /** a signed URL is reused while at least this much of its life is left */
+  urlMarginMs: 10_000,
+  /** the queue's pause on the daily read budget when the server gives no retry_after (L1) */
+  budgetPauseMs: 60 * 60_000,
 };
 
 /** The clock the client's timers and pace use (a fake one in tests). */
@@ -74,7 +91,7 @@ export const realClock: Clock = {
 };
 
 /** The kinds of work with a retry timer each (L3). */
-export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "enable" | "connect";
+export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "enable" | "connect" | "rebuilt";
 type Timer = { at: number; n: number };
 type Paused = { why: "storage_full"; at: number; until?: number; generation: number; state: string };
 /** What the foot shows (step 5). */
@@ -119,7 +136,7 @@ const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as numb
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
 
-type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" };
+type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number };
 type Conn = {
   ns: string;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
@@ -145,6 +162,21 @@ type Conn = {
   target: number;
   /** index pages read in this slice of the connection (hello's and pulls'), at most CLIENT.replayPages */
   pages: number;
+  /** an idle pull's discovery (D8b r2): pulls may go past the target, each page raising it, until one ends the log */
+  discover?: boolean;
+  /** welcome's next_dseq: the server's decided prefix (D6's server_next) */
+  serverNext?: number;
+  /** a rebuild is under way (D6): sending halted, pages read only for it */
+  rebuilding?: boolean;
+  /** the rebuild's `log` phase: pages go to its staging index, from its own cursor */
+  logMode?: boolean;
+  /** the rebuild's driver is running */
+  rebuildRunning?: boolean;
+  /** (D11) a large move's view stopped, stable (failed, or late before its plan's publication): pages held, why said */
+  largeHalt?: string;
+  /** (r5, CORR-D11-R4-1) a pull or an ops run asked for while the announce was pending: run once it is settled */
+  deferPull?: boolean;
+  deferOps?: boolean;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -170,6 +202,7 @@ export class SyncClient {
   private pullBucket: Bucket;
   private conn: Conn | null = null;
   private running = false;
+  private fetching = false;
   private again = false;
   private bucket: Bucket;
   /** the retry timers of `timerNs` ("-": before a namespace is known, in memory only) */
@@ -183,7 +216,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -333,11 +366,18 @@ export class SyncClient {
       throw e;
     }
     const ob = new Outbox(this.w, lease);
-    // (a namespace's scan starts here, at the latest op, until step 4's first sync sends the tree as it was)
-    if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
+    // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
+    // without it (step 3): the scan starts at the latest op)
+    if (this.opts.onIndex) await captureAdoption(this.w, ns);
+    else if ((await ob.status()).scanned === undefined) await ob.begin(await this.w.lastSeq());
     // (where the log is read from, and to: the records accepted and awaiting their echo, LIMIT-PR58-3)
     const awaiting = await this.awaitingEcho(ob);
-    const start = awaiting ? awaiting.lo - 1 : this.cursor;
+    // (with the confirmed index (D5): `request_after` from its durable cursor `apply_after`, lowered to just before
+    // the oldest record awaiting its echo; ops at or below apply_after only match echoes, never reduced again)
+    // (without it (step 3): from just before the oldest awaiting its echo, else this run's cursor, as before)
+    const start = this.opts.onIndex
+      ? Math.min(awaiting ? awaiting.lo - 1 : Infinity, await cursorOf(this.w, ns))
+      : awaiting ? awaiting.lo - 1 : this.cursor;
     // (stopped while this connection was being prepared: no socket is opened)
     if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";
@@ -419,6 +459,8 @@ export class SyncClient {
         return this.ack(c, m);
       case "error":
         return this.error(c, m);
+      case "index_changed":
+        return this.indexChanged(c, m);
       case "revoked":
         this.say({ state: "off", ns: c.ns, reason: "signed out" });
         return c.end("revoked");
@@ -434,6 +476,7 @@ export class SyncClient {
     if (m.generation !== c.generation) return c.end("generation");
     await this.timerOk(c.ns, "connect");
     c.welcomed = true;
+    c.serverNext = m.next_dseq;
     // (step 4's confirmed index reads the whole log as it stood: up to the head welcome gives, no further)
     if (this.opts.onIndex && isNat(m.index_head)) c.target = Math.max(c.target, m.index_head);
     c.writable = m.state === "active";
@@ -452,7 +495,29 @@ export class SyncClient {
     }
     if (this.paused?.until) this.wake(c, "unpause", this.paused.until, () => this.unpause(c));
     if (!c.writable) this.say({ state: "paused", ns: c.ns, reason: m.state === "readonly" ? "read-only" : String(m.state) });
+    // (D11: a large move's rewrite or view left by a reload, resumed now, not at the next page (quiescence))
+    if (this.opts.onIndex && !c.halted) this.largeKick(c);
+    this.armIdle(c);
+    this.fetchKick(c);
     this.kick();
+  }
+
+  /** The server's notice that the log grew (D8, plan-sync-index-changed r1 §4): the target raised to its head, and a
+   * pull through the usual pacing.  Advisory: a head that isn't a non-negative safe integer is ignored, and it moves
+   * nothing but the target, a bound on pulling.  Without the confirmed index (step 3) it is ignored. */
+  private indexChanged(c: Conn, m: Record<string, unknown>) {
+    if (!this.opts.onIndex || !isNat(m.head) || m.head <= this.cursor) return;
+    c.target = Math.max(c.target, m.head);
+    this.pull(c);
+  }
+
+  /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
+  private armIdle(c: Conn) {
+    if (!this.opts.onIndex) return;
+    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => {
+      c.discover = true;
+      this.pull(c);
+    });
   }
 
   private async index(c: Conn, m: Record<string, unknown>) {
@@ -464,6 +529,11 @@ export class SyncClient {
     if (!Array.isArray(m.ops) || typeof m.more !== "boolean") return c.end("closed");
     // (a page that says there is more but moves nothing: refused, rather than asked again for ever)
     if (m.more && m.ops.length === 0) return c.end("closed");
+    // (a rebuild under way: only the pages its log asked for are read; the live index waits for its `done`)
+    if (c.rebuilding) {
+      if (c.logMode && isNat(m.req)) return this.logPage(c, m.ops as Record<string, unknown>[], m.more);
+      return;
+    }
     c.pages++;
     this.stats.pages++;
     const ops: IndexOp[] = [];
@@ -491,18 +561,69 @@ export class SyncClient {
       }
       if (ok.length) await c.ob.confirmed(ok);
     }
-    if (this.opts.onIndex && ops.length) await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+    if (this.opts.onIndex && ops.length) {
+      try {
+        await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+      } catch (e) {
+        // (D11: a large move's rewrite stuck, or its view's replay stopped: the pages held (nothing past them is
+        // read), sending goes on, the person told; a reload tries once more)
+        if (e instanceof ReplayHalted || e instanceof Halt) {
+          c.largeHalt = e.message;
+          c.target = this.cursor;
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        throw e;
+      }
+    }
+    // (the view may have queued fetches; and a page is a moment to look at the queue anyway)
+    this.fetchKick(c);
     this.cursor = last;
+    // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
+    if (c.discover) {
+      c.target = Math.max(c.target, last);
+      if (!m.more) c.discover = false;
+    }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    this.armIdle(c);
     this.pull(c);
     this.kick();
+  }
+
+  /** (r5, CORR-D11-R4-1) Whether the rebuild's announce is pending on `c`: then nothing else is sent on it until it is
+   * answered (its answer or refusal handled: settle()). */
+  private announcing(c: Conn) {
+    for (const p of c.pending.values()) if (p.kind === "rebuilt") return true;
+    return false;
+  }
+  private defer(c: Conn, what: "pull" | "ops") {
+    if (what === "pull") c.deferPull = true;
+    else c.deferOps = true;
+    this.stats.deferred++;
+  }
+  /** The announce settled (answered, refused, or its handling threw): what waited for it runs, once. */
+  private settle(c: Conn) {
+    const pull = c.deferPull, ops = c.deferOps;
+    c.deferPull = c.deferOps = false;
+    if (this.conn !== c || this.announcing(c)) return;
+    if (pull) {
+      this.stats.resumed++;
+      this.pull(c);
+    }
+    if (ops) {
+      this.stats.resumed++;
+      this.kick();
+    }
   }
 
   /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
    * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
-    if (this.conn !== c || c.pulling || this.cursor >= c.target) return;
+    if (this.conn !== c || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
+    // (nothing else is sent on this connection while the announce is pending: the pull waits for its answer, its
+    // target and discovery kept (r5, CORR-D11-R4-1))
+    if (this.announcing(c)) return this.defer(c, "pull");
     // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
     // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
     if (c.pages >= CLIENT.replayPages) {
@@ -523,6 +644,7 @@ export class SyncClient {
     if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.pull(c));
     c.pulling = true;
     this.stats.pulls++;
+    this.armIdle(c);
     this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
   }
 
@@ -545,11 +667,24 @@ export class SyncClient {
   private async ack(c: Conn, m: Record<string, unknown>) {
     if (!isNat(m.req)) return;
     const p = c.pending.get(m.req);
+    if (p?.kind === "rebuilt") {
+      // (the announce stays pending until its answer is recorded: a driver run meanwhile (a page, a wake) finds it
+      // pending and sends nothing, so nothing else is sent until it is answered (r4: no second `rebuilt`))
+      try {
+        return await this.rebuiltAck(c, m);
+      } finally {
+        c.pending.delete(m.req);
+        this.settle(c);
+      }
+    }
     if (!p || p.kind !== "ops") return;
     c.pending.delete(m.req);
     if (!Array.isArray(m.ops)) return c.end("closed");
     const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
     await c.ob.acked(results);
+    // (the server decides in dseq order with no gaps: its decided prefix, D6's server_next, follows each ack, so a
+    // rebuild starting now knows which records it has decided)
+    for (const d of results) if (isNat(d.dseq)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
     await this.timerOk(c.ns, "ops");
     const byDseq = new Map(p.recs.map((r) => [r.dseq, r]));
     const refused = results.filter((d): d is { dseq: number; code: string } => "code" in d);
@@ -559,7 +694,7 @@ export class SyncClient {
       const list = (await this.metaGet<Refusal[]>(key(c.ns, "refused"))) ?? [];
       for (const d of refused) list.push({ dseq: d.dseq, code: String(d.code).slice(0, 64), path: byDseq.get(d.dseq)?.op.path ?? "", at: now });
       await this.metaPut(key(c.ns, "refused"), list.slice(-CLIENT.refusalsKept));
-      await this.flagRebuild(c.ns, "refused");
+      // (the rebuild's obligation was recorded with the refusal itself, in Outbox.acked's transaction: D7)
     }
     // (accepted ones wait for their echo: the log is read on, to the newest of them, and no further)
     for (const d of results) if ("seq" in d && isNat(d.seq)) c.target = Math.max(c.target, d.seq);
@@ -568,11 +703,22 @@ export class SyncClient {
   }
 
   private async error(c: Conn, m: Record<string, unknown>) {
+    const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
+    if (p?.kind !== "rebuilt") return this.errorOf(c, m);
+    try {
+      return await this.errorOf(c, m);
+    } finally {
+      c.pending.delete(m.req as number);
+      this.settle(c);
+    }
+  }
+  private async errorOf(c: Conn, m: Record<string, unknown>) {
     const code = String(m.code ?? "");
     const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number };
     const ra = isNat(detail.retry_after) ? detail.retry_after : undefined;
     const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
-    if (isNat(m.req)) c.pending.delete(m.req);
+    // (an announce's refusal stays pending until it is handled, as its answer does (r4): deleted by error())
+    if (isNat(m.req) && p?.kind !== "rebuilt") c.pending.delete(m.req);
     // (pushed by the server: the plan ended, or a deletion began)
     if (!isNat(m.req)) {
       if (code === "readonly" || code === "deleting") {
@@ -582,6 +728,28 @@ export class SyncClient {
       }
       // (a refused hello: not this account's sync, not now; asked again on the timer)
       if (!c.welcomed) return c.end("closed");
+      return;
+    }
+    if (p?.kind === "rebuilt") {
+      // (rate: halted, retried at retry_after under its own timer; invalid (through >= next_dseq): server_next was
+      // stale, so the pass ends and the next starts from a new connection's welcome (plan-sync-rebuilt r3 §4))
+      // (a server without `rebuilt` answers "unknown message": it can't reset this device's refusals.  An obligation
+      // that needs no reset (a refusal, a divergence) completes, with no new floor; the server's refusal limit
+      // (`invalid`) can't be lifted without one, so it halts, stably and said, recorded against its counter so no
+      // reconnect rebuilds or sends again (astra's CORR-PR65-IMPL-2))
+      if (code === "invalid" && /unknown message/.test(detail.message ?? "")) {
+        const ob = await this.metaGet<{ why: string; n: number }>(key(c.ns, "rebuild"));
+        if (ob?.why !== "invalid") return this.rebuiltAck(c, { rebuilt: { floor: 0, count: 0 } });
+        await this.metaPut(key(c.ns, "resetUnsupported"), { n: ob.n, at: this.clock.now() });
+        return this.haltUnsupported(c);
+      }
+      if (code === "invalid") {
+        await announceInvalid(this.w, c.ns);
+        return c.end("closed");
+      }
+      const at = await this.timerFail(c.ns, "rebuilt", ra);
+      this.say({ state: "paused", ns: c.ns, reason: "rebuilding sync: the server asks to wait", resumesAt: at });
+      this.wake(c, "rebuilt", at, () => this.rebuildRun(c));
       return;
     }
     if (p?.kind === "index") {
@@ -650,11 +818,37 @@ export class SyncClient {
 
   private async drain(c: Conn) {
     if (this.conn !== c || !c.welcomed) return;
+    // (D11 r8 N1: a large move's plan being made: nothing sent, scanned or drained until its publication; the replay
+    // runs in this connection's message chain, so acks wait there meanwhile)
+    if (SENDER_HOLD.has(c.ns)) return;
+    // (an obligation recorded (a refusal, the server's invalid, a divergence): the rebuild runs before anything is
+    // sent (D6); with the confirmed index only, step 3 has none)
+    if (this.opts.onIndex && !c.rebuilding && c.halted !== "reset-unsupported") {
+      const ob = await this.metaGet<{ why: string; n: number }>(rebuildKey(c.ns));
+      if (ob) {
+        // (the refusal limit, already found unliftable on this server for this very obligation: halted, no rebuild)
+        const un = await this.metaGet<{ n: number }>(key(c.ns, "resetUnsupported"));
+        if (ob.why === "invalid" && un?.n === ob.n) return this.haltUnsupported(c);
+        c.rebuilding = true;
+      }
+    }
+    if (c.halted === "reset-unsupported") return;
+    if (c.rebuilding) {
+      this.rebuildRun(c);
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
     const st0 = await c.ob.status();
     if (!c.writable || c.halted) {
       this.showWaiting(c, st0.count);
       return;
     }
+    // (a committed journal first (a rebuild's reissue, C3/D6): drained into records as the outbox has room; the scan
+    // stays idle until it has drained, so what it makes for ops after W1 comes after the journal's)
+    // (one page a run, then what it made is sent: the drain goes on on the next run (kicked again below), so the
+    // first records go up at once rather than after the outbox fills)
+    const d = await c.ob.drainJournal();
+    if (d.more && !d.full) this.again = true;
     // (the scan: local changes made into records, as the outbox has room)
     await c.ob.scan();
     if (c.resync) {
@@ -670,6 +864,7 @@ export class SyncClient {
     }
     for (;;) {
       if (this.conn !== c || c.resync || c.halted || !c.writable) return;
+      if (this.announcing(c)) return this.defer(c, "ops");
       const opsInFlight = [...c.pending.values()].filter((p) => p.kind === "ops").length;
       if (c.pending.size >= CLIENT.inflight) return;
       const recs = await this.undecided(c, c.next ?? 1, CLIENT.opsPerMessage);
@@ -696,6 +891,8 @@ export class SyncClient {
         this.wake(c, "pace", this.clock.now() + wait, () => this.kick());
         return;
       }
+      // (the run awaited since its check: the announce may be pending now (r5))
+      if (this.announcing(c)) return this.defer(c, "ops");
       this.stats.opsMessages++;
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
@@ -719,6 +916,10 @@ export class SyncClient {
 
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
+    if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+    if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
+    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
+    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
     this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }) });
@@ -950,13 +1151,359 @@ export class SyncClient {
     this.kick();
   }
 
-  // ---- the rebuild (step 4 does it; step 3 asks for it)
+  // ---- downloads (C5, L1, L2, D9: sync-fetch.ts)
+
+  /** The fetch queue run, if it isn't running: lanes of at most CLIENT.downloadsAtOnce, each item reserved first. */
+  private fetchKick(c: Conn) {
+    if (!this.opts.onIndex || this.fetching || this.conn !== c) return;
+    this.fetching = true;
+    void (async () => {
+      try {
+        await this.fetchQueue(c);
+      } catch (e) {
+        if (!(e instanceof Fenced)) console.warn("sync: downloads:", e);
+      } finally {
+        this.fetching = false;
+      }
+    })();
+  }
+
+  private async fetchQueue(c: Conn) {
+    for (;;) {
+      if (this.conn !== c || this.stopped) return;
+      // (the daily read budget spent: the whole queue paused, durably, until its end (L1))
+      const pause = await this.metaGet<{ until: number }>(pauseKey(c.ns));
+      if (pause && pause.until > this.clock.now()) return this.wake(c, "fetchPause", pause.until, () => this.fetchKick(c));
+      if (pause) await this.metaPut(pauseKey(c.ns), undefined);
+      const left = this.left(c.ns, "fetch");
+      if (left > 0) return this.wake(c, "fetch", this.clock.now() + left, () => this.fetchKick(c));
+      const items = await queued(this.w, c.ns, CLIENT.downloadsAtOnce * 4);
+      if (!items.length) return;
+      let at = 0, stop = false;
+      const lanes = Array.from({ length: Math.min(CLIENT.downloadsAtOnce, items.length) }, async () => {
+        while (!stop && at < items.length && this.conn === c) if ((await this.fetchOne(c, items[at++])) === "wait") stop = true;
+      });
+      await Promise.all(lanes);
+      if (stop) return;
+    }
+  }
+
+  /** One item: "done" (installed, stale, or set apart for good), or "wait" (a timer or pause set; the queue stops). */
+  private async fetchOne(c: Conn, it: FetchItem): Promise<"done" | "wait"> {
+    // (D9: the size checked before any reservation or request: a non-negative safe integer, at most the workspace's
+    // file limit and the largest PUT (nothing larger is ever uploaded); then size × COPIES, at most 190 MiB)
+    const cap = Math.min(this.w.limits.maxFileBytes, CLIENT.maxPut);
+    if (!Number.isSafeInteger(it.size) || it.size < 0 || it.size > cap) {
+      await finalize(this.w, c.ns, it, "too large to sync");
+      return "done";
+    }
+    const token = await reserve(it.size * COPIES);
+    try {
+      if (this.conn !== c) return "wait";
+      if (token.n < it.size * COPIES) throw new Error("sync: a reservation that doesn't cover a download");
+      this.stats.fetches++;
+      this.stats.fetchesAtOnce++;
+      this.stats.maxFetchesAtOnce = Math.max(this.stats.maxFetchesAtOnce, this.stats.fetchesAtOnce);
+      let res: Response;
+      const cached = it.url && it.exp !== undefined && it.exp - this.clock.now() > CLIENT.urlMarginMs;
+      try {
+        if (cached) res = await this.fetch(it.url!, { credentials: "omit" });
+        else {
+          // (asking for a URL debits the read budget: the 303 followed to the signed URL, which is kept (L1))
+          this.stats.urls++;
+          res = await this.fetch(this.origin + `/api/sync/v1/blob/${it.sha256}`, { credentials: "same-origin", headers: this.binding(c), redirect: "follow" });
+          if (res.redirected && res.url) {
+            const exp = Number(new URL(res.url).searchParams.get("exp"));
+            if (Number.isSafeInteger(exp)) await keepUrl(this.w, c.ns, it, res.url, exp);
+          }
+        }
+      } catch {
+        return this.fetchFail(c, it);
+      } finally {
+        this.stats.fetchesAtOnce--;
+      }
+      if (this.conn !== c) return "wait";
+      if (!res.ok) {
+        const fromSite = !cached && !res.redirected;
+        let body: { error?: unknown; retry_after?: unknown } = {};
+        try { body = await res.json(); } catch {}
+        const h = res.headers.get("retry-after");
+        const ra = isNat(body.retry_after) ? body.retry_after : h && /^\d{1,7}$/.test(h) ? Number(h) * 1000 : undefined;
+        // (the URL's request refused for the budget: the whole queue paused, durably (L1))
+        if (fromSite && (res.status === 429 || body.error === "rate")) {
+          await this.metaPut(pauseKey(c.ns), { until: this.clock.now() + (ra ?? CLIENT.budgetPauseMs) });
+          return "wait";
+        }
+        if (fromSite && (res.status === 401 || (res.status === 409 && body.error === "conflict"))) {
+          c.end("closed");
+          return "wait";
+        }
+        // (a signed URL refused (expired, or not valid): dropped, a fresh one asked for next time)
+        if (!fromSite && res.status === 403) await keepUrl(this.w, c.ns, it, undefined, undefined);
+        return this.fetchFail(c, it, ra);
+      }
+      // (D9: the length declared canonically and equal to the size, before the body is read)
+      const cl = res.headers.get("content-length");
+      if (cl === null || !CANONICAL_LENGTH.test(cl) || Number(cl) !== it.size) {
+        try { await res.body?.cancel(); } catch {}
+        return this.fetchFail(c, it);
+      }
+      const bytes = await this.readCapped(res, it.size);
+      if (!bytes) return this.fetchFail(c, it);
+      const sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)));
+      if (sha !== it.sha256) return this.fetchFail(c, it);
+      const out = await install(this.w, c.ns, it, bytes);
+      if (out === "installed") this.stats.installed++;
+      else this.stats.stale++;
+      await this.timerOk(c.ns, "fetch");
+      return "done";
+    } finally {
+      token();
+    }
+  }
+
+  /** A body read into one buffer of `size` bytes through a counting reader: null if it is longer (aborted at the
+   * first byte past it) or shorter. */
+  private async readCapped(res: Response, size: number): Promise<Uint8Array | null> {
+    const out = new Uint8Array(size);
+    if (!res.body) return size === 0 ? out : null;
+    const r = res.body.getReader();
+    let n = 0;
+    try {
+      for (;;) {
+        const { done, value } = await r.read();
+        if (done) break;
+        if (n + value.byteLength > size) {
+          await r.cancel();
+          return null;
+        }
+        out.set(value, n);
+        n += value.byteLength;
+      }
+    } catch {
+      return null;
+    }
+    return n === size ? out : null;
+  }
+
+  private async fetchFail(c: Conn, _it: FetchItem, ra?: number): Promise<"wait"> {
+    this.stats.fetchFailed++;
+    const at = await this.timerFail(c.ns, "fetch", ra);
+    this.wake(c, "fetch", at, () => this.fetchKick(c));
+    return "wait";
+  }
+
+  // ---- the rebuild (D6; sync-rebuild.ts), driven here
+
+  /** The rebuild's driver: its phases in order, from their durable positions, each page its own transaction with a
+   * yield between; `log` reads pages through the usual pacing; `announce` waits for its ack. */
+  private rebuildRun(c: Conn) {
+    if (c.rebuildRunning || this.conn !== c) return;
+    c.rebuildRunning = true;
+    void (async () => {
+      try {
+        await this.rebuildPhases(c);
+      } catch (e) {
+        if (e instanceof Fenced) c.end("fenced");
+        else {
+          console.warn("sync: rebuild", e);
+          this.stats.rebuildError = String((e as Error)?.stack ?? e).slice(0, 500);
+          c.end("closed");
+        }
+      } finally {
+        c.rebuildRunning = false;
+      }
+    })();
+  }
+
+  private async rebuildPhases(c: Conn) {
+    const yieldNow = () => new Promise<void>((ok) => setTimeout(ok, 0));
+    for (;;) {
+      if (this.conn !== c || this.stopped) return;
+      let p = await passOf(this.w, c.ns);
+      if (!p) {
+        // (D11: a large move's rewrite and its view's replay finished first: `stage` waits for them (r4 §4, N6);
+        // and a local large move's rewrite (its own driver, at most its 300 s))
+        if (!(await this.largeWork(c))) return;
+        for (;;) {
+          const rw = await rewriting(this.w.ws);
+          if (!rw || rw.kind !== "local" || rw.stuck || this.conn !== c) break;
+          await new Promise((ok) => setTimeout(ok, 500));
+        }
+        while (await cleanStep(this.w, c.ns)) await yieldNow();
+        const r = await stage(this.w, c.ns, c.serverNext ?? 1);
+        if (r === "clean") continue;
+        if (r === "none") {
+          c.rebuilding = false;
+          c.halted = undefined;
+          c.resync = true;
+          this.kick();
+          return;
+        }
+        if (r === "halt") {
+          c.halted = "stuck";
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        p = r;
+        this.stats.rebuildPasses++;
+      }
+      this.stats.rebuildPhase = p.phase;
+      if (REBUILD.before) await REBUILD.before(p.phase, c.ns);
+      if (this.conn !== c || this.stopped) return;
+      if (p.phase === "log") {
+        // (the server's log from the pass's own cursor, through the usual pacing, every page to its end (discover))
+        this.cursor = await passCursor(this.w, c.ns);
+        c.logMode = true;
+        c.discover = true;
+        this.pull(c);
+        return;
+      }
+      if (p.phase === "capture") {
+        while (!(await captureStep(this.w, c.ns))) await yieldNow();
+        continue;
+      }
+      if (p.phase === "done") {
+        const r = await done(this.w, c.ns);
+        if (r === "committed") this.stats.rebuildDoneAt = this.clock.now();
+        // (an entries record pending (a local large move): waited for, then the compare-and-swap again (D11 r4 §4))
+        if (r === "wait") await new Promise((ok) => setTimeout(ok, 500));
+        continue;
+      }
+      if (p.phase === "view") {
+        for (;;) {
+          if (REBUILD.before) await REBUILD.before("view-page", c.ns);
+          const v = await viewStep(this.w, c.ns);
+          this.w.tell({ ops: v.ops });
+          if (v.done) break;
+          await yieldNow();
+        }
+        continue;
+      }
+      if (p.phase === "retire") {
+        for (;;) {
+          if (REBUILD.before) await REBUILD.before("retire-page", c.ns);
+          if (await retireStep(this.w, c.ns)) break;
+          await yieldNow();
+        }
+        continue;
+      }
+      if (p.phase === "announce") {
+        // (recorded before it is sent (retire's last page); nothing else is sent on this connection until it is answered)
+        const left = this.left(c.ns, "rebuilt");
+        if (left > 0) return this.wake(c, "rebuilt", this.clock.now() + left, () => this.rebuildRun(c));
+        if ([...c.pending.values()].some((x) => x.kind === "rebuilt")) return;
+        this.ask(c, { t: "rebuilt", through: p.through! }, { kind: "rebuilt", through: p.through! });
+        return;
+      }
+    }
+  }
+
+  /** A log page of the rebuild: this device's echoes matched and staged; the ops reduced into the staging index with
+   * the pass's cursor; the log's end moves the pass on to `capture`. */
+  private async logPage(c: Conn, raw: Record<string, unknown>[], more: boolean) {
+    const p = await passOf(this.w, c.ns);
+    if (!p || p.phase !== "log") return;
+    const ops: IndexOp[] = [];
+    let last = this.cursor;
+    for (const o of raw) {
+      if (!o || typeof o !== "object" || !isNat(o.seq) || o.seq <= last || typeof o.device !== "string" || !isNat(o.dseq)) return c.end("closed");
+      last = o.seq;
+      ops.push(o as unknown as IndexOp);
+    }
+    c.pages++;
+    this.stats.pages++;
+    const mine = ops.filter((o) => o.device === this.w.device);
+    if (mine.length) {
+      const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
+      const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
+      const staged: { dseq: number; seq: number }[] = [];
+      for (const o of mine) {
+        const r = recs.get(o.dseq);
+        if (!r) continue;
+        // (a match confirms its record, at retire; another op at that dseq (a restored older copy, whose records there
+        // aren't the server's) confirms nothing: the record is in the replaced prefix, its identity reissued (D6))
+        if (sameOp(r.op, o as unknown as Record<string, unknown>)) staged.push({ dseq: o.dseq, seq: o.seq });
+      }
+      await stageEchoes(this.w, c.ns, p, staged);
+    }
+    if (ops.length) await applyOps(this.w, c.ns, ops as unknown as SyncOp[], { prefix: genPrefix(c.ns, p.gen), cursorAt: `sync:${c.ns}:pass:cursor` });
+    this.cursor = last;
+    if (!more) {
+      c.logMode = false;
+      c.discover = false;
+      await logDone(this.w, c.ns);
+      this.rebuildRun(c);
+      return;
+    }
+    this.pull(c);
+  }
+
+  /** The announce's ack: the floor recorded, and the flag cleared only if its counter is still the pass's n0. */
+  private async rebuiltAck(c: Conn, m: Record<string, unknown>) {
+    const rb = (m.rebuilt && typeof m.rebuilt === "object" ? m.rebuilt : {}) as { floor?: unknown; count?: unknown };
+    if (!isNat(rb.floor) || !isNat(rb.count)) return c.end("closed");
+    await this.timerOk(c.ns, "rebuilt");
+    if (REBUILD.before) await REBUILD.before("rebuilt-ack", c.ns, () => this.rebuildRun(c));
+    // (a count still at the limit after an idempotent ack: halted, said; it can't follow a fresh reset)
+    if (rb.count >= 10_000) {
+      c.halted = "invalid";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
+    const r = await rebuiltAcked(this.w, c.ns, rb.floor);
+    this.stats.rebuildResumedAt = this.clock.now();
+    if (r === "resumed") {
+      c.rebuilding = false;
+      c.halted = undefined;
+      c.resync = true;
+      c.next = undefined;
+      // (the view's debts, if any, replayed now: no page need arrive for them (D11 r4 §4))
+      this.largeKick(c);
+      this.kick();
+    } else this.rebuildRun(c);
+  }
+
+  /** Halted for good on this server: its refusal limit needs a reset it doesn't support.  Said; nothing is sent and
+   * no rebuild runs until the obligation changes (another reason recorded) or the person deletes the synced data. */
+  private async haltUnsupported(c: Conn) {
+    c.rebuilding = false;
+    c.halted = "reset-unsupported";
+    this.stats.resetUnsupported++;
+    this.say({ state: "paused", ns: c.ns, waiting: (await c.ob.status()).count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+  }
+
+  // ---- large moves (D11): driven in the connection's message chain, as the pages that wait for them are
+
+  /** This namespace's pending large-move work (its confirmed rewrite, its view's replay) run in the message chain. */
+  private largeKick(c: Conn) {
+    c.chain = c.chain.then(async () => {
+      if (this.conn !== c) return;
+      await this.largeWork(c);
+    }).catch((e) => console.warn("sync: a large move:", e));
+  }
+  /** The pending large-move work run to its end: true; stopped (stuck, failed, late), the pages held and said: false. */
+  private async largeWork(c: Conn): Promise<boolean> {
+    try {
+      const gen = genPrefix(c.ns, (await this.metaGet<number>(`sync:${c.ns}:indexGen`)) ?? 0);
+      await drainConfirmed(this.w, gen);
+      await runReplay(this.w, c.ns);
+      return true;
+    } catch (e) {
+      if (e instanceof ReplayHalted || e instanceof Halt) {
+        c.largeHalt = e.message;
+        this.showWaiting(c, (await c.ob.status()).count);
+        return false;
+      }
+      throw e;
+    }
+  }
+
+  // ---- the rebuild's obligation
 
   private async flagRebuild(ns: string, why: "refused" | "invalid" | "diverged", detail?: string) {
-    const cur = await this.metaGet<{ why: string }>(key(ns, "rebuild"));
-    // (a halt is never lowered to a plain refusal's flag)
-    if (cur && cur.why !== "refused" && why === "refused") return;
-    await this.metaPut(key(ns, "rebuild"), { why, at: this.clock.now(), ...(detail ? { detail: detail.slice(0, 300) } : {}) });
+    // (the obligation, its counter incremented in the same transaction (D7 r2); a halt is never lowered to a refusal)
+    await inTx(this.w.ws, META, "readwrite", async (tx) => { await obligate(tx.objectStore(META), ns, why, detail); });
   }
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {
     c.halted = why;
@@ -1097,3 +1644,5 @@ export class SyncClient {
 class Retry extends Error {
   constructor(readonly retryAfter?: number) { super("retry"); }
 }
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
