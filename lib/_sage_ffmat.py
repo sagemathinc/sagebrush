@@ -128,16 +128,17 @@ def _common_field(a, b):
 def _admit_size(base, m, n, factor=1):
     """(m, n) after checking that an m x n matrix over base, times factor
     for an operation's larger working matrix, fits this process's budget
-    for one matrix: NotImplementedError, before anything is built, if
-    not."""
+    for one matrix: the memory guard's SagebrushMemoryError (item D), before
+    anything is built, if not; its allowance is the budget, 1/_HEAP_SHARE
+    of the heap."""
     from _sage_matrix import _shape
     m, n = _shape(m, n)
     need = m * n * factor * _entry_cost(base)
     limit = _heap_limit()
     if need > limit // _HEAP_SHARE:
-        mib = 1 << 20
-        raise NotImplementedError("a %d x %d matrix over %r needs about %d MiB%s, more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)" % (
-            m, n, base, -(-need // mib), " with its working space" if factor > 1 else "", limit // _HEAP_SHARE // mib, _HEAP_SHARE, limit // mib))
+        import _memguard
+        raise _memguard.memory_guard("A %d x %d matrix over %r%s" % (m, n, base, " with its working space" if factor > 1 else ""),
+                                     need, limit // _HEAP_SHARE, "one matrix")
     return m, n
 
 
