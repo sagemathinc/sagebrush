@@ -128,6 +128,30 @@ if (r?.error) console.log("reactive section:", JSON.stringify(r));
 ok(r.reactive && r.first[0] === "c 20" && /NameError: name '_t' is not defined/.test(r.first[3]), "reactive with the native session: graph order, and a cell's _t is its own: " + JSON.stringify(r.first));
 ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[4]), "...editing a cell reruns its dependents, and a removed definition is gone: " + JSON.stringify(r.second));
 
+// file and directory names are shown as text, never run: the listing and the notebook page embed them as
+// HTML-safe JSON (a name with "</script>", "<!--", quotes, U+2028)
+{
+  const names = ["x</script><script>window.auditHit=1</script>", "y<!--<script>window.auditHit=2</script>", "q\"'`${1}", "l\u2028m\u2029n"];
+  for (const n of names) mkdirSync(join(dir, n), { recursive: true });
+  // (a notebook in each, so the notebook page embeds the name too)
+  for (const n of names) writeFileSync(join(dir, n, "t.ipynb"), JSON.stringify({ cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
+  let shown = true, ran = false, opened = true;
+  const misses = [];
+  for (const n of names) {
+    const rel = encodeURIComponent(n).replace(/%2F/g, "/");
+    await go(`${base}/tree/${rel}`);
+    ran ||= await ev("window.auditHit !== undefined");
+    shown &&= await ev(`document.querySelector(".p")?.textContent.endsWith(${JSON.stringify(n)}) && !!document.getElementById("new")`);
+    await go(`${base}/nb/${rel}/t.ipynb/`);
+    ran ||= await ev("window.auditHit !== undefined");
+    const got = await ev("JSON.stringify(window.__SAGEBRUSH_LOCAL__ ?? null)");
+    if (JSON.parse(got ?? "null")?.path !== n + "/t.ipynb") { opened = false; misses.push([n, got]); }
+  }
+  ok(!ran, "a name with </script>, <!--, quotes or U+2028 runs no script, in the listing or the notebook page");
+  ok(shown, "...the listing shows each such path as text, its New notebook button still there");
+  ok(opened, "...and the notebook page has each path exactly" + (misses.length ? ": " + JSON.stringify(misses) : ""));
+}
+
 // another page on this computer (another port: the cookie is the host's, whatever the port) can't use the server
 {
   const http = await import("node:http");
