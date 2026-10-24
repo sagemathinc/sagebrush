@@ -1,0 +1,1905 @@
+{
+ "about": "Seed rows for test/limit_sites.py --seed, from the frozen inventories (plan-c0 r2 section 4); the class and owner of the sites inside each row's lines at the seed revision.",
+ "sources": {
+  "research-compute-limit-inventory-2026-10-24.md": "83a44e71a7dec8919c5722399b65d18c4eb8db8d2304fc768f7555b0e26a7549",
+  "research-compute-limit-inventory-src-addendum-2026-10-24.md": "dab9f9c332ba4f49414f2a2964d3465bf2ca5c102714e9bc355e63419681e02c"
+ },
+ "rows": [
+  {
+   "id": "inv-1",
+   "class": "3",
+   "owner": "finite fields + configuration",
+   "refs": [
+    {
+     "path": "lib/_limits.py",
+     "lines": [
+      [
+       47,
+       47
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_ff.py",
+     "lines": [
+      [
+       1361,
+       1364
+      ]
+     ]
+    }
+   ],
+   "summary": "`ff.conway_work` bounds Conway polynomial construction."
+  },
+  {
+   "id": "inv-2",
+   "class": "3",
+   "owner": "finite fields + configuration",
+   "refs": [
+    {
+     "path": "lib/_limits.py",
+     "lines": [
+      [
+       50,
+       50
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_ffsub.py",
+     "lines": [
+      [
+       39,
+       39
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_frac.py",
+     "lines": [
+      [
+       542,
+       607
+      ]
+     ]
+    }
+   ],
+   "summary": "`ff.work` charges embeddings, discrete logs, roots, and finite-field fraction equality."
+  },
+  {
+   "id": "inv-3",
+   "class": "3",
+   "owner": "finite fields",
+   "refs": [
+    {
+     "path": "lib/_limits.py",
+     "lines": [
+      [
+       48,
+       48
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_ffsub.py",
+     "lines": [
+      [
+       40,
+       40
+      ],
+      [
+       104,
+       124
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_ff.py",
+     "lines": [
+      [
+       4045,
+       4045
+      ]
+     ]
+    }
+   ],
+   "summary": "`ff.embed_max` caps elements inspected while constructing embeddings. It is accounting/search size, not a reservation fo"
+  },
+  {
+   "id": "inv-4",
+   "class": "3",
+   "owner": "finite fields",
+   "refs": [
+    {
+     "path": "lib/_limits.py",
+     "lines": [
+      [
+       49,
+       49
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_ffsub.py",
+     "lines": [
+      [
+       450,
+       450
+      ],
+      [
+       498,
+       505
+      ]
+     ]
+    }
+   ],
+   "summary": "`ff.root_bits` rejects large root/nth-root exponents. It protects search work, not memory."
+  },
+  {
+   "id": "inv-5",
+   "class": "1",
+   "owner": "runtime/configuration",
+   "refs": [
+    {
+     "path": "lib/_limits.py",
+     "lines": [
+      [
+       52,
+       54
+      ]
+     ]
+    }
+   ],
+   "summary": "Limit-document parser bytes, entries and key length."
+  },
+  {
+   "id": "inv-6",
+   "class": "2",
+   "owner": "linear algebra/runtime memory",
+   "refs": [
+    {
+     "path": "lib/_sage_ffmat.py",
+     "lines": [
+      [
+       60,
+       210
+      ]
+     ]
+    }
+   ],
+   "summary": "Heap-aware dense finite-field matrix admission, including working-space factors."
+  },
+  {
+   "id": "inv-7",
+   "class": "1+3",
+   "owner": "engine web + finite-field matrices",
+   "refs": [
+    {
+     "path": "lib/_sage_ffmat.py",
+     "lines": [
+      [
+       2130,
+       2137
+      ]
+     ]
+    },
+    {
+     "path": "engine/web/src/lib.rs",
+     "lines": [
+      [
+       480,
+       496
+      ]
+     ]
+    },
+    {
+     "path": "engine/web/src/nmod_ops.rs",
+     "lines": [
+      [
+       72,
+       109
+      ]
+     ]
+    }
+   ],
+   "summary": "Engine charpoly/echelon/poly request dimensions and lengths. Request-text caps are transport guards; dimension/length ca"
+  },
+  {
+   "id": "inv-8",
+   "class": "2",
+   "owner": "matrices/runtime memory",
+   "refs": [
+    {
+     "path": "lib/_sage_matrix.py",
+     "lines": [
+      [
+       2500,
+       2587
+      ]
+     ]
+    }
+   ],
+   "summary": "General vector/matrix entry cap ($2^{22}$), including zero-width dimensions."
+  },
+  {
+   "id": "inv-9",
+   "class": "2+3",
+   "owner": "p-adic linear algebra",
+   "refs": [
+    {
+     "path": "lib/_sage_padic.py",
+     "lines": [
+      [
+       1268,
+       1297
+      ],
+      [
+       1570,
+       1571
+      ]
+     ]
+    }
+   ],
+   "summary": "p-adic matrix entry cap, multiplication-work cap, exponent-bit cap."
+  },
+  {
+   "id": "inv-10",
+   "class": "3",
+   "owner": "p-adic/L-series",
+   "refs": [
+    {
+     "path": "lib/_sage_padic_lseries.py",
+     "lines": [
+      [
+       934,
+       1000
+      ]
+     ]
+    }
+   ],
+   "summary": "Kedlaya/Frobenius `_KD_MAX_WORK`."
+  },
+  {
+   "id": "inv-11",
+   "class": "2",
+   "owner": "multivariate polynomials",
+   "refs": [
+    {
+     "path": "lib/_sage_mpoly.py",
+     "lines": [
+      [
+       938,
+       947
+      ]
+     ]
+    }
+   ],
+   "summary": "Exponent-vector conversion entries."
+  },
+  {
+   "id": "inv-12",
+   "class": "2+3",
+   "owner": "ideals/varieties",
+   "refs": [
+    {
+     "path": "lib/_sage_mpoly.py",
+     "lines": [
+      [
+       4004,
+       4032
+      ],
+      [
+       4258,
+       4313
+      ],
+      [
+       4388,
+       4392
+      ]
+     ]
+    }
+   ],
+   "summary": "Standard monomials; variety points/eliminant and retry count."
+  },
+  {
+   "id": "inv-13",
+   "class": "2",
+   "owner": "univariate polynomials/runtime memory",
+   "refs": [
+    {
+     "path": "lib/_sage_poly.py",
+     "lines": [
+      [
+       574,
+       627
+      ]
+     ]
+    }
+   ],
+   "summary": "`_MAX_DENSE_COEFFS` refuses dense conversion above $2^{20}$ coefficients."
+  },
+  {
+   "id": "inv-14",
+   "class": "3",
+   "owner": "polynomial coercion",
+   "refs": [
+    {
+     "path": "lib/_sage_poly.py",
+     "lines": [
+      [
+       274,
+       274
+      ]
+     ]
+    }
+   ],
+   "summary": "QQ algebraic conversion degree 16."
+  },
+  {
+   "id": "inv-15",
+   "class": "3",
+   "owner": "real/rational arithmetic",
+   "refs": [
+    {
+     "path": "lib/sage_all.py",
+     "lines": [
+      [
+       1049,
+       1052
+      ],
+      [
+       1198,
+       1198
+      ],
+      [
+       1314,
+       1314
+      ],
+      [
+       1367,
+       1368
+      ]
+     ]
+    }
+   ],
+   "summary": "Rational square-root and simplest-rational precision ceilings."
+  },
+  {
+   "id": "inv-16",
+   "class": "2+3",
+   "owner": "continued fractions",
+   "refs": [
+    {
+     "path": "lib/sage_all.py",
+     "lines": [
+      [
+       3042,
+       3443
+      ]
+     ]
+    }
+   ],
+   "summary": "Continued-fraction index, period, digit, operand-bit, aggregate-bit, discriminant, expression and work ceilings."
+  },
+  {
+   "id": "inv-17",
+   "class": "2+3",
+   "owner": "real/complex arithmetic",
+   "refs": [
+    {
+     "path": "lib/_sage_real.py",
+     "lines": [
+      [
+       737,
+       740
+      ],
+      [
+       949,
+       949
+      ],
+      [
+       1169,
+       1169
+      ],
+      [
+       2083,
+       2083
+      ],
+      [
+       2437,
+       2437
+      ],
+      [
+       2465,
+       2465
+      ],
+      [
+       3181,
+       3222
+      ]
+     ]
+    }
+   ],
+   "summary": "Decimal string/precision, trig magnitude, Ziv iteration and complex-power scaling ceilings."
+  },
+  {
+   "id": "inv-18",
+   "class": "3",
+   "owner": "algebraic numbers",
+   "refs": [
+    {
+     "path": "lib/_sage_qqbar.py",
+     "lines": [
+      [
+       714,
+       714
+      ],
+      [
+       779,
+       888
+      ]
+     ]
+    }
+   ],
+   "summary": "Algebraic rounding digit ceiling."
+  },
+  {
+   "id": "inv-19",
+   "class": "3",
+   "owner": "special functions",
+   "refs": [
+    {
+     "path": "lib/_special.py",
+     "lines": [
+      [
+       758,
+       758
+      ],
+      [
+       837,
+       897
+      ],
+      [
+       2873,
+       2873
+      ],
+      [
+       3036,
+       3036
+      ],
+      [
+       3510,
+       3510
+      ]
+     ]
+    }
+   ],
+   "summary": "Zeta-$t$ and Bessel-order recurrence ceilings."
+  },
+  {
+   "id": "inv-20",
+   "class": "2+3",
+   "owner": "MATLAB sparse linear algebra",
+   "refs": [
+    {
+     "path": "lib/_matlab_sparse.py",
+     "lines": [
+      [
+       31,
+       31
+      ],
+      [
+       1165,
+       1165
+      ],
+      [
+       1228,
+       1233
+      ],
+      [
+       1330,
+       1386
+      ],
+      [
+       1500,
+       1500
+      ]
+     ]
+    }
+   ],
+   "summary": "Dense solve dimension, band/LU work and fill, and full-storage limits."
+  },
+  {
+   "id": "inv-21",
+   "class": "3",
+   "owner": "MATLAB interpolation",
+   "refs": [
+    {
+     "path": "lib/_matlab_numeric.py",
+     "lines": [
+      [
+       576,
+       628
+      ]
+     ]
+    }
+   ],
+   "summary": "Cubic/spline setup work ceilings."
+  },
+  {
+   "id": "inv-22",
+   "class": "3",
+   "owner": "MATLAB numeric",
+   "refs": [
+    {
+     "path": "lib/_matlab_cpow.py",
+     "lines": [
+      [
+       21,
+       21
+      ],
+      [
+       154,
+       156
+      ]
+     ]
+    }
+   ],
+   "summary": "Complex-power rescue iterations."
+  },
+  {
+   "id": "inv-23",
+   "class": "3",
+   "owner": "MATLAB numerical methods",
+   "refs": [
+    {
+     "path": "lib/_matlab_funfun.py",
+     "lines": [
+      [
+       999,
+       1122
+      ]
+     ]
+    }
+   ],
+   "summary": "Quadrature evaluation ceiling; optimizer evaluation/iteration limits are public solver options nearby."
+  },
+  {
+   "id": "inv-24",
+   "class": "2+3",
+   "owner": "Magma compatibility/rational functions",
+   "refs": [
+    {
+     "path": "lib/_magma.py",
+     "lines": [
+      [
+       5636,
+       5805
+      ],
+      [
+       6151,
+       6151
+      ],
+      [
+       8093,
+       8184
+      ]
+     ]
+    }
+   ],
+   "summary": "Rational-function R0a work, exponent, input coefficients, partial-fraction counts and live/cache memory."
+  },
+  {
+   "id": "inv-25",
+   "class": "3",
+   "owner": "Magma compatibility",
+   "refs": [
+    {
+     "path": "lib/_magma.py",
+     "lines": [
+      [
+       7724,
+       7724
+      ],
+      [
+       8293,
+       8293
+      ],
+      [
+       8981,
+       8981
+      ],
+      [
+       9547,
+       9572
+      ],
+      [
+       11337,
+       11589
+      ]
+     ]
+    }
+   ],
+   "summary": "Root search, finite-field powers, random enumeration, quadratic/cyclotomic/symmetric enumeration and comparison/check ce"
+  },
+  {
+   "id": "inv-26",
+   "class": "1+2",
+   "owner": "Magma compatibility/runtime memory",
+   "refs": [
+    {
+     "path": "lib/_magma.py",
+     "lines": [
+      [
+       906,
+       965
+      ],
+      [
+       1059,
+       1089
+      ],
+      [
+       1482,
+       1500
+      ],
+      [
+       4185,
+       4185
+      ],
+      [
+       4505,
+       4505
+      ],
+      [
+       5341,
+       5341
+      ],
+      [
+       6605,
+       6606
+      ],
+      [
+       7466,
+       7466
+      ],
+      [
+       8611,
+       8611
+      ]
+     ]
+    }
+   ],
+   "summary": "Heap-aware collection/container caps; nesting/printing; permutation/repmat/xcorr/text materialization."
+  },
+  {
+   "id": "inv-27",
+   "class": "2",
+   "owner": "HMF Python API",
+   "refs": [
+    {
+     "path": "lib/_sage_hmf.py",
+     "lines": [
+      [
+       422,
+       422
+      ],
+      [
+       610,
+       621
+      ],
+      [
+       1884,
+       1886
+      ]
+     ]
+    }
+   ],
+   "summary": "Dense HMF matrix dimension 2000."
+  },
+  {
+   "id": "inv-28",
+   "class": "3",
+   "owner": "number fields",
+   "refs": [
+    {
+     "path": "lib/_sage_nf.py",
+     "lines": [
+      [
+       18,
+       18
+      ],
+      [
+       699,
+       719
+      ]
+     ]
+    }
+   ],
+   "summary": "Quadratic-form/class-group proof search ceilings."
+  },
+  {
+   "id": "inv-29",
+   "class": "3",
+   "owner": "elliptic curves/modular arithmetic",
+   "refs": [
+    {
+     "path": "lib/_sage_ec.py",
+     "lines": [
+      [
+       1770,
+       1860
+      ],
+      [
+       2032,
+       2041
+      ],
+      [
+       2383,
+       2431
+      ]
+     ]
+    },
+    {
+     "path": "lib/_sage_modular.py",
+     "lines": [
+      [
+       2251,
+       2377
+      ]
+     ]
+    }
+   ],
+   "summary": "EC point/descent/generator searches and quotient/enumeration ceilings."
+  },
+  {
+   "id": "inv-30",
+   "class": "1",
+   "owner": "visualization/display",
+   "refs": [
+    {
+     "path": "lib/_graph_spring.py",
+     "lines": [
+      [
+       21,
+       31
+      ]
+     ]
+    },
+    {
+     "path": "lib/_matlab_plot.py",
+     "lines": [
+      [
+       3614,
+       3825
+      ]
+     ]
+    },
+    {
+     "path": "lib/_display_budget.py",
+     "lines": [
+      [
+       10,
+       25
+      ]
+     ]
+    }
+   ],
+   "summary": "Layout iterations/scene size/display traversal."
+  },
+  {
+   "id": "inv-31",
+   "class": "1+2",
+   "owner": "raster/image I/O",
+   "refs": [
+    {
+     "path": "lib/_png.py",
+     "lines": [
+      [
+       11,
+       13
+      ]
+     ]
+    },
+    {
+     "path": "engine/raster/src/lib.rs",
+     "lines": [
+      [
+       26,
+       27
+      ]
+     ]
+    },
+    {
+     "path": "engine/raster/src/svg.rs",
+     "lines": [
+      [
+       779,
+       781
+      ]
+     ]
+    },
+    {
+     "path": "engine/py/src/lib.rs",
+     "lines": [
+      [
+       446,
+       446
+      ]
+     ]
+    }
+   ],
+   "summary": "Image input axes/pixels/file/live nested raster bytes."
+  },
+  {
+   "id": "inv-32",
+   "class": "1",
+   "owner": "file formats/runtime",
+   "refs": [
+    {
+     "path": "lib/_matlab_mat.py",
+     "lines": [
+      [
+       44,
+       72
+      ]
+     ]
+    },
+    {
+     "path": "lib/_tzrules.py",
+     "lines": [
+      [
+       56,
+       60
+      ],
+      [
+       505,
+       505
+      ]
+     ]
+    },
+    {
+     "path": "lib/zoneinfo/_tzpath.py",
+     "lines": [
+      [
+       202,
+       206
+      ]
+     ]
+    }
+   ],
+   "summary": "File inflate/table/path parser ceilings."
+  },
+  {
+   "id": "inv-33",
+   "class": "1",
+   "owner": "board/MCP/workspace",
+   "refs": [
+    {
+     "path": "lib/board_checks.py",
+     "lines": [
+      [
+       29,
+       29
+      ],
+      [
+       140,
+       140
+      ],
+      [
+       225,
+       226
+      ]
+     ]
+    },
+    {
+     "path": "engine/py/python/sagebrush/mcp_server.py",
+     "lines": [
+      [
+       371,
+       383
+      ]
+     ]
+    },
+    {
+     "path": "engine/py/python/sagebrush/workspace_tools.py",
+     "lines": [
+      [
+       85,
+       93
+      ]
+     ]
+    },
+    {
+     "path": "engine/py/python/sagebrush/pairing.py",
+     "lines": [
+      [
+       61,
+       66
+      ]
+     ]
+    }
+   ],
+   "summary": "Board/MCP/workspace expression, call, payload and protocol bounds."
+  },
+  {
+   "id": "inv-34",
+   "class": "2+3",
+   "owner": "polynomial factorization",
+   "refs": [
+    {
+     "path": "engine/poly/src/budget.rs",
+     "lines": [
+      [
+       91,
+       127
+      ],
+      [
+       157,
+       194
+      ]
+     ]
+    }
+   ],
+   "summary": "Factor default work, subsets, divisions, degree, coefficient/total bits; 512 MiB live memory. This is already active thr"
+  },
+  {
+   "id": "inv-35",
+   "class": "3",
+   "owner": "polynomial factorization",
+   "refs": [
+    {
+     "path": "engine/poly/src/binomial.rs",
+     "lines": [
+      [
+       35,
+       35
+      ],
+      [
+       68,
+       68
+      ]
+     ]
+    },
+    {
+     "path": "engine/poly/src/vanhoeij.rs",
+     "lines": [
+      [
+       29,
+       33
+      ],
+      [
+       50,
+       120
+      ]
+     ]
+    }
+   ],
+   "summary": "Binomial-bit and van Hoeij factor/column algorithm cutovers."
+  },
+  {
+   "id": "inv-36",
+   "class": "2+3",
+   "owner": "multivariate engine",
+   "refs": [
+    {
+     "path": "engine/mpoly/src/f4.rs",
+     "lines": [
+      [
+       229,
+       1146
+      ]
+     ]
+    },
+    {
+     "path": "engine/mpoly/src/f4q.rs",
+     "lines": [
+      [
+       678,
+       678
+      ]
+     ]
+    },
+    {
+     "path": "engine/mpoly/src/fglm.rs",
+     "lines": [
+      [
+       204,
+       518
+      ]
+     ]
+    },
+    {
+     "path": "engine/mpoly/src/sigf4.rs",
+     "lines": [
+      [
+       137,
+       137
+      ]
+     ]
+    },
+    {
+     "path": "engine/mpoly/src/divide.rs",
+     "lines": [
+      [
+       69,
+       142
+      ]
+     ]
+    }
+   ],
+   "summary": "GB/F4/FGLM/division currently lack a unified public work/memory policy; internal allocation failures and finite route ca"
+  },
+  {
+   "id": "inv-37",
+   "class": "2+3",
+   "owner": "HMF engine",
+   "refs": [
+    {
+     "path": "engine/hmf/src/defnew.rs",
+     "lines": [
+      [
+       60,
+       60
+      ],
+      [
+       390,
+       393
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/defweightnew.rs",
+     "lines": [
+      [
+       55,
+       55
+      ],
+      [
+       213,
+       213
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/defweight.rs",
+     "lines": [
+      [
+       109,
+       115
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/definite.rs",
+     "lines": [
+      [
+       56,
+       77
+      ]
+     ]
+    }
+   ],
+   "summary": "HMF modular/total work, dimension, projective-line/point/divisor/Hecke counts."
+  },
+  {
+   "id": "inv-38",
+   "class": "2+3",
+   "owner": "HMF engine",
+   "refs": [
+    {
+     "path": "engine/hmf/src/classes.rs",
+     "lines": [
+      [
+       280,
+       284
+      ],
+      [
+       612,
+       634
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/field.rs",
+     "lines": [
+      [
+       341,
+       374
+      ]
+     ]
+    }
+   ],
+   "summary": "Class enumeration nodes/results/classes/Gram bits and integer-factor step budget."
+  },
+  {
+   "id": "inv-39",
+   "class": "2+3",
+   "owner": "HMF engine",
+   "refs": [
+    {
+     "path": "engine/hmf/src/p1.rs",
+     "lines": [
+      [
+       68,
+       68
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/residue.rs",
+     "lines": [
+      [
+       37,
+       37
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/qresidue.rs",
+     "lines": [
+      [
+       15,
+       15
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/weightnew.rs",
+     "lines": [
+      [
+       61,
+       61
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/weight.rs",
+     "lines": [
+      [
+       75,
+       75
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/newspace.rs",
+     "lines": [
+      [
+       109,
+       109
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/fpoly.rs",
+     "lines": [
+      [
+       210,
+       210
+      ]
+     ]
+    },
+    {
+     "path": "engine/hmf/src/rqf.rs",
+     "lines": [
+      [
+       165,
+       165
+      ]
+     ]
+    }
+   ],
+   "summary": "Finite enumeration/dimension/operator/bits/norm hard ceilings."
+  },
+  {
+   "id": "inv-40",
+   "class": "3",
+   "owner": "HMF/web",
+   "refs": [
+    {
+     "path": "engine/web/src/hmfq.rs",
+     "lines": [
+      [
+       27,
+       27
+      ],
+      [
+       162,
+       162
+      ]
+     ]
+    }
+   ],
+   "summary": "HMF request discriminant and squarefree bounds."
+  },
+  {
+   "id": "inv-41",
+   "class": "3",
+   "owner": "class group/number fields",
+   "refs": [
+    {
+     "path": "engine/classgroup/src/nf/bnf.rs",
+     "lines": [
+      [
+       47,
+       54
+      ]
+     ]
+    },
+    {
+     "path": "engine/classgroup/src/nf/proof.rs",
+     "lines": [
+      [
+       85,
+       88
+      ]
+     ]
+    },
+    {
+     "path": "engine/classgroup/src/nf/ecm.rs",
+     "lines": [
+      [
+       10,
+       10
+      ]
+     ]
+    }
+   ],
+   "summary": "Relation/unit/certificate retry, residue window, proof prime and ECM level ceilings."
+  },
+  {
+   "id": "inv-42",
+   "class": "3",
+   "owner": "modular symbols",
+   "refs": [
+    {
+     "path": "engine/modsym/src/linalg.rs",
+     "lines": [
+      [
+       85,
+       85
+      ]
+     ]
+    }
+   ],
+   "summary": "Maximum Hecke prime."
+  },
+  {
+   "id": "inv-43",
+   "class": "3",
+   "owner": "Galois groups/data",
+   "refs": [
+    {
+     "path": "engine/galois/src/tables.rs",
+     "lines": [
+      [
+       10,
+       10
+      ]
+     ]
+    },
+    {
+     "path": "engine/galois/src/lib.rs",
+     "lines": [
+      [
+       647,
+       647
+      ]
+     ]
+    }
+   ],
+   "summary": "Transitive-group table degree 23."
+  },
+  {
+   "id": "inv-44",
+   "class": "2+3",
+   "owner": "symbolic engine",
+   "refs": [
+    {
+     "path": "engine/sym/src/num.rs",
+     "lines": [
+      [
+       18,
+       18
+      ]
+     ]
+    },
+    {
+     "path": "engine/sym/src/rewrite.rs",
+     "lines": [
+      [
+       219,
+       334
+      ]
+     ]
+    },
+    {
+     "path": "engine/sym/src/special.rs",
+     "lines": [
+      [
+       20,
+       20
+      ]
+     ]
+    }
+   ],
+   "summary": "Symbolic integer bits, trig-rewrite terms and exact-special cutoff."
+  },
+  {
+   "id": "inv-45",
+   "class": "2+3",
+   "owner": "ball arithmetic",
+   "refs": [
+    {
+     "path": "engine/ball/src/funcs.rs",
+     "lines": [
+      [
+       28,
+       28
+      ]
+     ]
+    },
+    {
+     "path": "engine/ball/src/special.rs",
+     "lines": [
+      [
+       197,
+       197
+      ]
+     ]
+    },
+    {
+     "path": "engine/ball/src/ball.rs",
+     "lines": [
+      [
+       12,
+       12
+      ]
+     ]
+    }
+   ],
+   "summary": "Precision/gamma precision/exponent representation bounds."
+  },
+  {
+   "id": "inv-46",
+   "class": "2",
+   "owner": "bigint",
+   "refs": [
+    {
+     "path": "engine/bigint/src/ntt.rs",
+     "lines": [
+      [
+       26,
+       26
+      ]
+     ]
+    }
+   ],
+   "summary": "NTT transform-log implementation maximum."
+  },
+  {
+   "id": "src-1",
+   "class": "3",
+   "owner": "python (@sagebrush-python)",
+   "refs": [
+    {
+     "path": "src/runtime/format.ts",
+     "lines": [
+      [
+       43,
+       55
+      ],
+      [
+       132,
+       149
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/types.ts",
+     "lines": [
+      [
+       1312,
+       1324
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/modules.ts",
+     "lines": [
+      [
+       460,
+       470
+      ]
+     ]
+    }
+   ],
+   "summary": "`intDigits.max = 4300` is CPython's default decimal int conversion limit; `sys.set_int_max_str_digits(0)` already disabl"
+  },
+  {
+   "id": "src-2",
+   "class": "3",
+   "owner": "python (@sagebrush-python)",
+   "refs": [
+    {
+     "path": "src/runtime/format.ts",
+     "lines": [
+      [
+       52,
+       55
+      ],
+      [
+       63,
+       144
+      ]
+     ]
+    }
+   ],
+   "summary": "`HARD_MAX_DIGITS = 4,000,000` is an unliftable “within seconds” ceiling on int-to/from-string; the divide-and-conquer co"
+  },
+  {
+   "id": "src-3",
+   "class": "1",
+   "owner": "pyjs display/runtime",
+   "refs": [
+    {
+     "path": "src/runtime/format.ts",
+     "lines": [
+      [
+       278,
+       287
+      ]
+     ]
+    }
+   ],
+   "summary": "`REPR_GROWTH` bounds a mutating/nonterminating `__repr__` and display characters."
+  },
+  {
+   "id": "src-4",
+   "class": "2",
+   "owner": "pyjs containers/runtime memory",
+   "refs": [
+    {
+     "path": "src/runtime/types.ts",
+     "lines": [
+      [
+       1888,
+       1955
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/argconv.ts",
+     "lines": [
+      [
+       46,
+       51
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/ops.ts",
+     "lines": [
+      [
+       335,
+       341
+      ],
+      [
+       513,
+       528
+      ],
+      [
+       965,
+       972
+      ],
+      [
+       1317,
+       1385
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/strpos.ts",
+     "lines": [
+      [
+       43,
+       52
+      ]
+     ]
+    }
+   ],
+   "summary": "JS string/array/buffer maximums and pre-allocation checks for repeats, builders and code-point indexes."
+  },
+  {
+   "id": "src-5",
+   "class": "2",
+   "owner": "pyjs runtime",
+   "refs": [
+    {
+     "path": "src/runtime/object.ts",
+     "lines": [
+      [
+       1328,
+       1337
+      ]
+     ]
+    }
+   ],
+   "summary": "Host `RangeError` for string/array/buffer/BigInt size is translated to `MemoryError`; call-stack overflow to `RecursionE"
+  },
+  {
+   "id": "src-6",
+   "class": "3",
+   "owner": "python (@sagebrush-python)",
+   "refs": [
+    {
+     "path": "src/runtime/modules.ts",
+     "lines": [
+      [
+       849,
+       865
+      ]
+     ]
+    }
+   ],
+   "summary": "`math.log` rejects integers above $2^{27}$ bits because bit-length extraction copies up to 16 MiB; CPython has no such b"
+  },
+  {
+   "id": "src-7",
+   "class": "2+3",
+   "owner": "python (@sagebrush-python)",
+   "refs": [
+    {
+     "path": "src/runtime/modules.ts",
+     "lines": [
+      [
+       1045,
+       1060
+      ],
+      [
+       1098,
+       1114
+      ],
+      [
+       1206,
+       1289
+      ]
+     ]
+    }
+   ],
+   "summary": "Factorial/comb/perm: $2^{30}$ result-bit memory guard; signed-64-bit argument ceilings; sieve threshold selects an algor"
+  },
+  {
+   "id": "src-8",
+   "class": "2",
+   "owner": "pyjs JSON/runtime memory",
+   "refs": [
+    {
+     "path": "src/runtime/json.ts",
+     "lines": [
+      [
+       103,
+       106
+      ],
+      [
+       238,
+       238
+      ],
+      [
+       448,
+       453
+      ],
+      [
+       667,
+       677
+      ]
+     ]
+    }
+   ],
+   "summary": "JSON nesting depth 40,000 and indentation/string allocation bound."
+  },
+  {
+   "id": "src-9",
+   "class": "coverage",
+   "owner": "pyjs regex",
+   "refs": [
+    {
+     "path": "src/runtime/re.ts",
+     "lines": [
+      [
+       15,
+       16
+      ],
+      [
+       369,
+       369
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/re.ts",
+     "lines": [
+      [
+       570,
+       577
+      ]
+     ]
+    }
+   ],
+   "summary": "Repeat count follows CPython `_sre.MAXREPEAT`; other refusals are unsupported regex translations rather than resource ce"
+  },
+  {
+   "id": "src-10",
+   "class": "2",
+   "owner": "NumPy shim/runtime memory",
+   "refs": [
+    {
+     "path": "src/runtime/numpy.ts",
+     "lines": [
+      [
+       263,
+       293
+      ]
+     ]
+    }
+   ],
+   "summary": "`ARRAY_LIMITS`: $2^{32}$ elements and $2^{32}$ bytes, including operation scratch through `admitWork`."
+  },
+  {
+   "id": "src-11",
+   "class": "3",
+   "owner": "NumPy shim",
+   "refs": [
+    {
+     "path": "src/runtime/numpy.ts",
+     "lines": [
+      [
+       334,
+       334
+      ],
+      [
+       1994,
+       2022
+      ],
+      [
+       2478,
+       2478
+      ]
+     ]
+    }
+   ],
+   "summary": "Values beyond $2^{53}$, multi-axis/non-contiguous products, and formatting-size refusals are implementation/representati"
+  },
+  {
+   "id": "src-12",
+   "class": "none",
+   "owner": "NumPy linalg",
+   "refs": [
+    {
+     "path": "src/runtime/numpy_linalg.ts",
+     "lines": [
+      [
+       407,
+       475
+      ]
+     ]
+    }
+   ],
+   "summary": "`BALANCE_SWEEPS = 100` bounds eigenvalue balancing iterations but continues with a result rather than refusing."
+  },
+  {
+   "id": "src-13",
+   "class": "1+2",
+   "owner": "file formats/raster",
+   "refs": [
+    {
+     "path": "src/runtime/zlib.ts",
+     "lines": [
+      [
+       75,
+       107
+      ],
+      [
+       245,
+       303
+      ]
+     ]
+    },
+    {
+     "path": "src/runtime/raster.ts",
+     "lines": [
+      [
+       1,
+       112
+      ]
+     ]
+    }
+   ],
+   "summary": "Bounded decompression and raster decoding used by file/image readers."
+  },
+  {
+   "id": "src-14",
+   "class": "1",
+   "owner": "runtime file I/O",
+   "refs": [
+    {
+     "path": "src/runtime/modules.ts",
+     "lines": [
+      [
+       563,
+       659
+      ]
+     ]
+    }
+   ],
+   "summary": "Zone-file/directory byte, entry and character bounds."
+  },
+  {
+   "id": "src-15",
+   "class": "2",
+   "owner": "Magma translator",
+   "refs": [
+    {
+     "path": "src/magma.ts",
+     "lines": [
+      [
+       1360,
+       1363
+      ],
+      [
+       1804,
+       1804
+      ]
+     ]
+    }
+   ],
+   "summary": "Magma translation rejects call/index chains deeper than 64 before host recursion failure."
+  },
+  {
+   "id": "src-16",
+   "class": "1",
+   "owner": "CLI/runtime configuration",
+   "refs": [
+    {
+     "path": "src/cli.ts",
+     "lines": [
+      [
+       84,
+       107
+      ]
+     ]
+    },
+    {
+     "path": "src/limits.ts",
+     "lines": [
+      [
+       19,
+       19
+      ],
+      [
+       79,
+       79
+      ]
+     ]
+    },
+    {
+     "path": "src/limits-file.ts",
+     "lines": [
+      [
+       9,
+       37
+      ]
+     ]
+    }
+   ],
+   "summary": "CLI stdin program size and limits-document bytes."
+  },
+  {
+   "id": "src-17",
+   "class": "1",
+   "owner": "notebook/kernel",
+   "refs": [
+    {
+     "path": "src/notebook-session.ts",
+     "lines": [
+      [
+       71,
+       82
+      ],
+      [
+       101,
+       202
+      ]
+     ]
+    },
+    {
+     "path": "src/kernel.ts",
+     "lines": [
+      [
+       434,
+       442
+      ]
+     ]
+    }
+   ],
+   "summary": "Status/output capture/display-count and diagnostic line truncation."
+  },
+  {
+   "id": "src-18",
+   "class": "1",
+   "owner": "board",
+   "refs": [
+    {
+     "path": "src/board-check.ts",
+     "lines": [
+      [
+       45,
+       50
+      ],
+      [
+       93,
+       93
+      ],
+      [
+       306,
+       307
+      ]
+     ]
+    },
+    {
+     "path": "src/board-try.ts",
+     "lines": [
+      [
+       56,
+       70
+      ]
+     ]
+    },
+    {
+     "path": "src/board-math.ts",
+     "lines": [
+      [
+       30,
+       46
+      ]
+     ]
+    }
+   ],
+   "summary": "Board file/depth/case and TeX-render bounds."
+  },
+  {
+   "id": "src-19",
+   "class": "1",
+   "owner": "package runtime",
+   "refs": [
+    {
+     "path": "src/pkgset.ts",
+     "lines": [
+      [
+       27,
+       71
+      ],
+      [
+       309,
+       309
+      ]
+     ]
+    },
+    {
+     "path": "src/pkgcache.ts",
+     "lines": [
+      [
+       21,
+       21
+      ],
+      [
+       192,
+       276
+      ]
+     ]
+    }
+   ],
+   "summary": "Package manifest/archive/cache entry, byte, path and cleanup bounds."
+  }
+ ]
+}

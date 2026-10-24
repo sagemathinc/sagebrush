@@ -51,8 +51,8 @@ def test_environment_invalid_prevents_marker():
         (file("range.json", '{"ff.work": 5}'), "ValueError: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"),
         (file("unknown.json", '{"ff.wrok": 5}'), "ValueError: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work)"),
         (file("array.json", "[1]"), "ValueError: limits: the limits must be a JSON object, not an array"),
-        (file("bool.json", '{"ff.work": true}'), "ValueError: limits: ff.work must be an integer, not true"),
-        (file("float.json", '{"ff.work": 1e7}'), "ValueError: limits: ff.work must be an integer, not 10000000.0"),
+        (file("bool.json", '{"ff.work": true}'), 'ValueError: limits: ff.work must be an integer or "unlimited", not true'),
+        (file("float.json", '{"ff.work": 1e7}'), 'ValueError: limits: ff.work must be an integer or "unlimited", not 10000000.0'),
         (file("bad.json", "{"), "is not JSON: "),
         (big, "ValueError: limits: %s is larger than 4096 bytes" % big),
         (os.path.join(TMP, "missing.json"), "ValueError: limits: cannot read %s: No such file or directory" % os.path.join(TMP, "missing.json")),
@@ -74,7 +74,7 @@ sagebrush.set_limits(d)
 d["ff.work"] = 5
 for bad, want in (({"ff.work": 1}, "limits: ff.work = 1 is outside the range this engine allows, [100000, 100000000]"),
                   ({"ff.work": 100000, 3: 1}, "limits: the key 3 is not a string"),
-                  ({"ff.work": True}, "limits: ff.work must be an integer, not true"),
+                  ({"ff.work": True}, 'limits: ff.work must be an integer or "unlimited", not true'),
                   ([("ff.work", 100000)], "limits: the limits must be a mapping, not an array")):
     try:
         sagebrush.set_limits(bad)
@@ -118,6 +118,49 @@ except Exception as e:
     assert rc == 0 and out == "20\n", (rc, out, err[-500:])
     rc, out, err = run(code % 343619)
     assert rc == 0 and out == "NotImplementedError\n", (rc, out, err[-500:])
+
+
+def test_unlimited_by_default_and_mixed():
+    # every limit unlimited by default (plan-c0 r2), infinity in the core;
+    # finite values opt in key by key; with ff.work finite the effective
+    # ff.embed_max is at most 2^20 (the discrete-log accounting's range);
+    # unlimited, the fields' bound is the Conway search's cutoff, 10^7
+    show = "import _sage_ffsub as S, sys; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)"
+    cases = [
+        ("", "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited})"),
+        ('sagebrush.set_limits({"ff.work": 100000})', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000})"),
+        ('sagebrush.set_limits({"ff.work": "unlimited", "ff.root_bits": 64})', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited})"),
+        ('sagebrush.set_limits({"ff.embed_max": 4096})', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited})"),
+    ]
+    for setup, want in cases:
+        rc, out, err = run("import sagebrush\n%s\nfrom sagebrush.sage import *\n%s" % (setup, show))
+        assert rc == 0 and out == want + "\n", (setup, rc, out, err[-500:])
+
+
+def test_descent_table_memory():
+    # plan-c0 r2 section 2: the worst reachable descent after plan-c0,
+    # GF(7^8) down to GF(7^4) (r = 1201), builds a discrete-log table of at
+    # most 35 entries, well under 64 KiB at its peak (tracemalloc)
+    code = r'''
+import sagebrush, math, tracemalloc
+from sagebrush.sage import *
+import _sage_ff as F, _sage_ffsub as S
+sizes = []
+real = F._bsgs
+def spy(g, h, n, mul, one, power):
+    sizes.append(math.isqrt(n) + 1)
+    return real(g, h, n, mul, one, power)
+F._bsgs = spy
+K, L = F.GF(7 ** 8), F.GF(7 ** 4)
+x = K.gen() ** ((7 ** 8 - 1) // (7 ** 4 - 1) * 5)
+tracemalloc.start()
+y = S.down(x, L, [S.WORK], ValueError)
+peak = tracemalloc.get_traced_memory()[1]
+tracemalloc.stop()
+print(y is not None, max(sizes), peak < 64 * 1024)
+'''
+    rc, out, err = run(code)
+    assert rc == 0 and out == "True 35 True\n", (rc, out, err[-500:])
 
 
 if __name__ == "__main__":
