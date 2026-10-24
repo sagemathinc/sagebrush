@@ -3738,6 +3738,10 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/engine.ts :: reclaimEngine :: parts.push(Obj.tuple([\"js heap\", heapLimit(), typeof used === \"number\" && used >= 0 ? Math.floor(used) : null])); #0": {
+  "class": "2",
+  "owner": "memory guards (D0)"
+ },
  "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
