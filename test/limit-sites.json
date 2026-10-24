@@ -244,6 +244,50 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/interrupt/src/progress.rs :: claim :: if cur == u32::MAX { #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: decode :: fraction: if f & flag::FRACTION != 0 { Some(w[word::FRACTION] as f64 / u32::MAX as f64) } else { None }, #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: encode :: if v > u32::MAX as u64 { #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: encode :: put64(&mut w, word::TOTAL, u64::MAX); #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: encode :: u32::MAX #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: encode :: w[word::FRACTION] = (x * u32::MAX as f64).round() as u32; #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: layout_round_trips_at_every_edge :: (flag::DONE_SATURATED, Slot { done: u64::MAX, stage_count: Some(0), total: Some(0), ..Slot::default() }), #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: layout_round_trips_at_every_edge :: assert_eq!(d.memory_now_kib, u32::MAX as u64); #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: layout_round_trips_at_every_edge :: assert_eq!(get64(&w, word::TOTAL), u64::MAX); #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: layout_round_trips_at_every_edge :: let all = Slot { total: None, stage_count: None, fraction: Some(0.5), beyond_forecast: true, early_part_untracked: true, done: u64::MAX, work: u64::MAX, memory_peak_kib: u64::MAX, stage_index: u64::MAX, ..base }; #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
+ "engine/interrupt/src/progress.rs :: layout_round_trips_at_every_edge :: let s = Slot { done: SAT53 + 1, total: Some(u64::MAX - 1), work: u64::MAX, stage_index: 70000, stage_count: Some(SAT16 + 1), memory_now_kib: 1 << 40, ..base }; #0": {
+  "class": "none",
+  "owner": "estimates and progress (encoding)"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",

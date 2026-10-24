@@ -29,6 +29,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
+pub mod progress;
+
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The panic payload of an interruption.
@@ -56,6 +58,14 @@ pub fn clear() {
 pub fn requested() -> bool {
     poll_host();
     REQUESTED.load(Relaxed)
+}
+
+/// Whether the caller asked the current call to stop at its next clean stop
+/// point (a soft stop, design-agent-api-library r3 §5).  Always false in this
+/// build: soft stops come with the stop protocol (estimates plan r3, PR 5a).
+#[inline]
+pub fn stop_requested() -> bool {
+    false
 }
 
 /// Stop here (by unwinding) if an interrupt has been requested.
@@ -419,11 +429,15 @@ impl Drop for SigintGuard {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Held by every test that touches the process's interrupt flag.
+    pub(crate) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn check_unwinds_and_catch_reports() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         assert_eq!(catch(|| 7), Ok(7));
         let mut dropped = false;
