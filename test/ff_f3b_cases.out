@@ -14,3 +14,7 @@ Sage roots of x^2 + 2 in GF(25) exact admitted [(3*b + 1, 1), (2*b + 4, 1)] | co
 Sage splitting_field, of 2^40 elements refused NotImplementedError conway 0 dlog 0 edf 0 factor 1 up 0 | splitting_field of a polynomial of degree 15 over Finite Field of size 2 is not supported yet (splitting field or work)
 Sage splitting_field of 0 refused ValueError conway 0 dlog 0 edf 0 factor 0 up 0 | the splitting field of the zero polynomial is not defined
 Sage splitting_field y^20 + y^3 + 1 refused NotImplementedError conway 1 dlog 0 edf 0 factor 1 up 0 | splitting_field of a polynomial of degree 20 over Finite Field of size 2 is not supported yet (splitting field or work)
+conjugate powers for the roots of x^2 + 2 in GF(5^6): 1 (want 1), 2 roots
+conjugate powers for the roots of (x^2 + 2)^2 in GF(5^6): 1 (want 1), 2 roots
+conjugate powers for the roots of (x^2 + 2)(x^3 + x + 1) in GF(5^6): 3 (want 3), 5 roots
+conjugate powers for the roots of (x - 1)(x - 2)(x - 3) in GF(5^6): 0 (want 0), 3 roots

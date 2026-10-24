@@ -1083,5 +1083,15 @@ def split_roots(factors, K, L, paid, refuse, by_log):
         lr = _sff._dlog(r, L.gen(), None, ql - 1, mul, one) if by_log else None
         for i in range(k):
             out.append((r, e, None if lr is None else lr * pow(qk, i, ql - 1) % (ql - 1)))
-            r = r ** qk
+            # (the k - 1 conjugates split_cost charges, and no more: none
+            # after the last, whose power would never be read; daybreak2
+            # LIMIT-SPLIT92-1)
+            if i + 1 < k:
+                r = frobenius(r, qk)
     return out
+
+
+def frobenius(x, q):
+    """x^q, the next conjugate of a root (split_roots's step, charged by
+    split_cost as 2 bits(q) M(n) each)."""
+    return x ** q
