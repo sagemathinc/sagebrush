@@ -7371,7 +7371,7 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield "
-    "MinimalPolynomial Norm PrimeField Root Solution Submatrix Subsets Sym Trace Vector").split())
+    "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
 
@@ -7582,6 +7582,54 @@ def _change_ring_poly(f, R):
 
 
 _unimplemented_signature("ChangeRing", "Mtrx", "Rng", ret="Mtrx")
+
+
+def RootsInSplittingField(*args):
+    """RootsInSplittingField(f) (plan-finite-fields F3): the roots of f, a
+    nonzero polynomial over a finite field K, in its splitting field L
+    (deg L = deg K times the lcm of the degrees of f's irreducible
+    factors), with their multiplicities, and L, as Magma's (black-box
+    against Magma 2.18): ordered by their discrete logs to L's generator,
+    0 first; a constant has none (and L = K).  By the shared core, under
+    one budget of _ffsub.WORK: f's factorization (its work charged first),
+    then L of at most 2^20 elements (checked on the degrees), then the
+    roots' whole work reserved before L is made or any root found; past
+    any of these, refused in words."""
+    name = "RootsInSplittingField"
+    if len(args) != 1:
+        raise _bad_types(name, args, _call_pos(name))
+    f = args[0]
+    if isinstance(f, _sp.Polynomial):
+        raise _fferr("Coefficient ring of argument 1 is not a finite field", name)
+    if not isinstance(f, _MFFPoly):
+        raise _bad_types(name, args, _call_pos(name))
+    if not f.p._c:
+        raise _fferr("Argument 1 is not non-zero", name)
+    K = f.R.F.K
+    refuse = lambda: _fferr("RootsInSplittingField of this polynomial is not supported yet (splitting field or work)", name)
+    budget = [_ffsub.WORK]
+    n = f.p.degree()
+    if n < 1:
+        return _multi([MSeq([]), _ffwrap(K)])
+    _ffsub.charge(budget, _ffsub.factor_cost(n, K), refuse)
+    factors = [(g, int(e)) for g, e in f.p.factor()]
+    nl = _ffsub.split_degree([g.degree() for g, _ in factors], K, refuse)
+    count = sum(g.degree() for g, _ in factors)
+    # (in a prime field Magma orders the roots by value; else by logs)
+    by_log = count > 1 and nl > 1
+    if by_log and _ffsub.pnq(K)[0] ** nl > _FF_POWERS_MAX:
+        # (Magma's order of more than 2^20 elements isn't by logs)
+        raise _fferr("RootsInSplittingField over a finite field of more than %d elements is not supported yet" % _FF_POWERS_MAX, name)
+    cost, hits = _ffsub.split_cost(K, nl, [(g.degree(), e) for g, e in factors], by_log)
+    _ffsub.charge(budget, cost, refuse)
+    L = _ffsub.split_field(K, nl, budget, refuse)
+    _ffsub.keep(hits)
+    roots = _ffsub.split_roots([(list(g._c), e) for g, e in factors], K, L, [cost], refuse, by_log)
+    if by_log:
+        roots.sort(key=lambda t: -1 if t[2] is None else t[2])
+    elif nl == 1:
+        roots.sort(key=lambda t: int(t[0]))
+    return _multi([MSeq(MTuple([r, e]) for r, e, _ in roots), _ffwrap(L)])
 
 
 def _ff_absolute(what, x):
@@ -10999,6 +11047,7 @@ _FF_SIGS = {
     # (of a polynomial or its ring: its signatures check the rest; of a
     # matrix, Magma has one: refused in words)
     "ChangeRing": lambda a: (len(a) >= 1 and isinstance(a[0], (_MFFPoly, _MFFPolyRing))) or None,
+    "RootsInSplittingField": lambda a: _P1(a) or (False if any(isinstance(x, _MFFPoly) for x in a) else None),
 }
 for _n in ("Gcd", "GCD", "GreatestCommonDivisor", "Lcm", "LCM", "LeastCommonMultiple"):
     # (of matrices Magma says its ring has no Gcd: refused in words)
