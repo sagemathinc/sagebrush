@@ -1411,14 +1411,66 @@ async function rebuildCrashAfterAnnounce() {
   const pass = await metaGet(w.ws, `sync:${ns}:pass`);
   check(pass?.phase === "announce" && pass.through === (await ctl("log")).rebuilt[0].through, "rebuild crash: announce recorded with its through before it was sent: " + J(pass && { phase: pass.phase, through: pass.through }));
   await stop(c1);
+  const t2 = Date.now();
   const c2 = viewClient(w);
   try {
-    check(await until(async () => (await ctl("log")).rebuilt.length === 2 && (await settled(w, c2)), 15_000), "rebuild crash: the next start sends rebuilt again, with the same through, and converges: " + J((await ctl("log")).rebuilt.map((r) => r.through)));
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 2 && (await settled(w, c2)), 15_000), "rebuild crash: the next start sends rebuilt again, with the same through, and converges: " + J((await ctl("log")).rebuilt.map((r) => r.through)));
+    // (exactly one more, from the next start, and none after it (r4: no second send while its answer is recorded))
+    await sleep(500);
     const r = (await ctl("log")).rebuilt;
-    check(r[0].through === r[1].through, "rebuild crash: …the same through");
+    check(r.length === 2 && r[1].at >= t2 && r[0].through === r[1].through, "rebuild crash: …exactly one send after the restart, with the same through " + J(r.map((x) => ({ through: x.through, afterRestart: x.at - t2 }))));
   } finally {
     await ctl("release");
     await stop(c2);
+  }
+}
+
+/** An obligation to rebuild, recorded (as a refusal records it), and the log reset: a client started next rebuilds. */
+async function rebuildReady(what) {
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), `${what}: synced`);
+  const ns = nsOf(c0);
+  await stop(c0);
+  await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); W.obligate(tx.objectStore("meta"), ns, "refused").then(() => {}, no); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  await ctl("log", { reset: true });
+  return w;
+}
+
+async function rebuildAckWindow() {
+  // (r4: the driver run again (twice) while the announce's answer is being recorded, as a page or a wake can: it finds
+  // the announce still pending and sends nothing; one `rebuilt`, and the pass converges)
+  const w = await rebuildReady("rebuild ack window");
+  let ran = 0;
+  W.REBUILD.before = async (phase, _ns, again) => { if (phase === "rebuilt-ack" && again && !ran++) { again(); again(); await sleep(200); } };
+  const c = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 1 && (await settled(w, c)), 15_000), "rebuild ack window: announced and converged");
+    await sleep(500);
+    const r = (await ctl("log")).rebuilt;
+    check(ran === 1 && r.length === 1 && c.debug().inflight === 0, `rebuild ack window: the driver run twice inside the answer, one rebuilt sent, nothing left pending (${J({ ran, sent: r.length, inflight: c.debug().inflight })})`);
+  } finally {
+    W.REBUILD.before = null;
+    await stop(c);
+  }
+}
+
+async function rebuildAckThrows() {
+  // (r4, no wedge: recording the answer throws; the pending announce is cleared all the same, the connection ends, and
+  // the next connection announces again and converges)
+  const w = await rebuildReady("rebuild ack throws");
+  let thrown = 0;
+  W.REBUILD.before = async (phase) => { if (phase === "rebuilt-ack" && !thrown++) throw new Error("recording the answer fails (test)"); };
+  const c = viewClient(w);
+  try {
+    check(await until(async () => (await ctl("log")).rebuilt.length >= 2 && (await settled(w, c)), 20_000), `rebuild ack throws: announced again on the next connection and converged (${J({ thrown, sent: (await ctl("log")).rebuilt.length, connects: c.stats.connects })})`);
+    await sleep(500);
+    const r = (await ctl("log")).rebuilt;
+    check(thrown >= 1 && r.length === 2 && r[0].through === r[1].through && c.stats.connects >= 2 && c.debug().inflight === 0, `rebuild ack throws: two sends (one a connection), the same through, nothing left pending (${J({ thrown, sent: r.length, connects: c.stats.connects, inflight: c.debug().inflight })})`);
+  } finally {
+    W.REBUILD.before = null;
+    await stop(c);
   }
 }
 
@@ -1712,7 +1764,7 @@ async function scanAtomic() {
   await stop(c);
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

@@ -47,8 +47,9 @@ export const REBUILD = {
   requests: 400,
   /** (tests: called at each named point of a phase's transaction; throwing there aborts it whole) */
   cut: null as null | ((at: string) => void),
-  /** (tests: awaited by the client's driver before each phase it runs, with the phase's name and its page count) */
-  before: null as null | ((phase: string, ns: string) => Promise<void>),
+  /** (tests: awaited by the client's driver before each phase it runs, with the phase's name and its page count; and
+   * at "rebuilt-ack", inside the announce's answer before it is recorded, with `again`, the driver run once more) */
+  before: null as null | ((phase: string, ns: string, again?: () => void) => Promise<void>),
 };
 
 export type Phase = "stage" | "log" | "capture" | "done" | "view" | "retire" | "announce";

@@ -636,8 +636,13 @@ export class SyncClient {
     if (!isNat(m.req)) return;
     const p = c.pending.get(m.req);
     if (p?.kind === "rebuilt") {
-      c.pending.delete(m.req);
-      return this.rebuiltAck(c, m);
+      // (the announce stays pending until its answer is recorded: a driver run meanwhile (a page, a wake) finds it
+      // pending and sends nothing, so nothing else is sent until it is answered (r4: no second `rebuilt`))
+      try {
+        return await this.rebuiltAck(c, m);
+      } finally {
+        c.pending.delete(m.req);
+      }
     }
     if (!p || p.kind !== "ops") return;
     c.pending.delete(m.req);
@@ -665,11 +670,21 @@ export class SyncClient {
   }
 
   private async error(c: Conn, m: Record<string, unknown>) {
+    const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
+    if (p?.kind !== "rebuilt") return this.errorOf(c, m);
+    try {
+      return await this.errorOf(c, m);
+    } finally {
+      c.pending.delete(m.req as number);
+    }
+  }
+  private async errorOf(c: Conn, m: Record<string, unknown>) {
     const code = String(m.code ?? "");
     const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number };
     const ra = isNat(detail.retry_after) ? detail.retry_after : undefined;
     const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
-    if (isNat(m.req)) c.pending.delete(m.req);
+    // (an announce's refusal stays pending until it is handled, as its answer does (r4): deleted by error())
+    if (isNat(m.req) && p?.kind !== "rebuilt") c.pending.delete(m.req);
     // (pushed by the server: the plan ended, or a deletion began)
     if (!isNat(m.req)) {
       if (code === "readonly" || code === "deleting") {
@@ -1392,6 +1407,7 @@ export class SyncClient {
     const rb = (m.rebuilt && typeof m.rebuilt === "object" ? m.rebuilt : {}) as { floor?: unknown; count?: unknown };
     if (!isNat(rb.floor) || !isNat(rb.count)) return c.end("closed");
     await this.timerOk(c.ns, "rebuilt");
+    if (REBUILD.before) await REBUILD.before("rebuilt-ack", c.ns, () => this.rebuildRun(c));
     // (a count still at the limit after an idempotent ack: halted, said; it can't follow a fresh reset)
     if (rb.count >= 10_000) {
       c.halted = "invalid";

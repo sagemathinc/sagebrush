@@ -301,10 +301,10 @@ server.on("upgrade", async (req, socket, head) => {
       if (m.t === "hello") helloAccount = m.account ?? null;
       if (m.t === "ops") log.bindings.push({ session: socketSession, hello: helloAccount, dseqs: m.ops.map((o) => o.dseq) });
       if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
-      if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server" });
+      if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server", at: Date.now() });
       if (m.t === "rebuilt" && !ctl.rebuiltReal) {
         const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
-        log.rebuilt.push({ through: m.through, answer: f });
+        log.rebuilt.push({ through: m.through, answer: f, at: Date.now() });
         const answer = () => client.send(JSON.stringify(f.ack ? { t: "ack", req: m.req, rebuilt: f.ack } : { t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
         if (f.hold) held.push(() => { f.ack = f.ack ?? { floor: m.through, count: 0 }; answer(); });
         else answer();
