@@ -291,6 +291,24 @@ export class EditHub {
    * ingested, and a save including that has completed.  One whose content can't be read as a board is kept and
    * reported, never unlinked.
    */
+  /**
+   * At a clean exit, after the last save: each retained prev unlinked if its content is still the one last
+   * read and that is in a completed save; one that changed since (a write the board can no longer take in)
+   * or isn't saved yet is kept, and its path returned.
+   */
+  closePrevs(): string[] {
+    const f = this.deps.fs ?? realFs, kept: string[] = [];
+    for (const p of [...this.prevs]) {
+      let bytes: Buffer | null = null;
+      try { bytes = f.readFile(p.path); } catch { bytes = null; }
+      if (bytes !== null && (hashOf(bytes) !== p.hash || p.invalid !== undefined || p.ingestedSeq > this.persistedSeq)) { kept.push(p.path); continue; }
+      if (bytes !== null) { try { f.unlink(p.path); } catch { kept.push(p.path); continue; } }
+      this.prevs.splice(this.prevs.indexOf(p), 1);
+      this.slots.release(1);
+    }
+    return kept;
+  }
+
   async tickPrevs(quietMs: number): Promise<void> {
     const f = this.deps.fs ?? realFs;
     for (const p of [...this.prevs]) {
