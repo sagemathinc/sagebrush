@@ -112,6 +112,22 @@ try {
   ok(r.said.includes("initFailed: limits: the limits must be a JSON text") && !r.out.includes("MARKER"), `limits that aren't text: refused (${JSON.stringify(r)})`);
   r = await sbw([init('{"ff.wrok": 5}'), MARK]);
   ok(r.said.some((s) => s.startsWith("initFailed: limits: ff.wrok is not a limit of this engine")) && !r.out.includes("MARKER"), `the validator's refusal, in its words (${JSON.stringify(r)})`);
+  // envelopes that aren't {limits: text | null}, and limits that aren't text:
+  // supplied wrongly, so refused, never the defaults (astra CORR-FF93-1)
+  for (const [msg, want] of [
+    [{ init: {} }, "limits: the init message has no limits (a JSON text, or null for the defaults)"],
+    [{ init: 42 }, "limits: the init message must be {limits: a JSON text or null}, not a number"],
+    [{ init: false }, "limits: the init message must be {limits: a JSON text or null}, not a boolean"],
+    [{ init: null }, "limits: the init message must be {limits: a JSON text or null}, not null"],
+    [{ init: [] }, "limits: the init message must be {limits: a JSON text or null}, not an array"],
+    [{ init: { limits: { "ff.work": 100000 } } }, "limits: the limits must be a JSON text, not an object"],
+    [{ init: { limits: 42 } }, "limits: the limits must be a JSON text, not a number"],
+    [{ init: { limits: false } }, "limits: the limits must be a JSON text, not a boolean"],
+    [{ init: { limits: [1] } }, "limits: the limits must be a JSON text, not an array"],
+  ]) {
+    r = await sbw([msg, MARK]);
+    ok(r.said.includes("initFailed: " + want) && !r.out.includes("MARKER") && r.out.includes(want) && r.error, `${JSON.stringify(msg)}: refused, nothing runs (${JSON.stringify(r)})`);
+  }
   r = await sbw([MARK], 8000);
   ok(r.timeout && r.out === "" && !r.said.includes("ready"), `no init: nothing runs, nothing is ready (${JSON.stringify(r)})`);
 
@@ -131,6 +147,32 @@ try {
     return [a, b];
   })()`);
   ok(JSON.stringify(k) === JSON.stringify(["123456\n", "123456\n"]), `WorkerKernel: its limits, and the same after a restart (${JSON.stringify(k)})`);
+
+  // WorkerKernel given settings that aren't text: the worker refuses them,
+  // every run says why and none runs; omitted, the defaults (astra CORR-FF93-1)
+  const kr = await ev(`(async () => {
+    const { WorkerKernel } = await import("/sagebrush-notebook.js");
+    const out = [];
+    for (const [label, limits] of [["omitted", undefined], ["object", { "ff.work": 100000 }], ["42", 42], ["false", false], ["array", [1]], ["function", () => 1], ["empty text", ""]]) {
+      const o = { createWorker: () => new Worker("/sagebrush-worker.js", { type: "module" }) };
+      if (label !== "omitted") o.limits = limits;
+      const k = new WorkerKernel(o);
+      let status = "";
+      k.on("status", (s) => (status = s));
+      k.start();
+      const got = await new Promise((res) => {
+        let text = "";
+        k.execute("import _sage_ffsub\\nprint('MARKER', _sage_ffsub.WORK)", { mode: "python" }, { start() {}, out(t) { text += t; }, display() {}, interact() {}, clear() {}, done() { res(text); }, stopped(m) { res("stopped: " + m); }, skipped() { res("skipped"); } });
+      });
+      k.close();
+      out.push([label, got, status]);
+    }
+    return out;
+  })()`);
+  for (const [label, got, status] of kr) {
+    if (label === "omitted") ok(got === "MARKER 10000000\n", `WorkerKernel, limits omitted: the defaults (${got})`);
+    else ok(!got.includes("MARKER") && got.includes("This engine's settings are invalid: limits: ") && status.startsWith("error: This engine's settings are invalid"), `WorkerKernel, limits ${label}: refused, nothing runs (${JSON.stringify([got, status])})`);
+  }
 
   // the measurement: the largest call admitted at the ceiling, in this worker
   const big = { id: 2, sage: true, code: 'import time\nR.<x> = GF(2)[]\nK = GF(2^79, "a", modulus=x^79 + x^9 + 1)\nt = time.time()\nf = (K.gen()^3 + K.gen()).minpoly()\nprint(f.degree(), round(time.time() - t, 2))' };

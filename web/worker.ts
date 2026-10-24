@@ -143,10 +143,17 @@ onPkgUse((digests) => postMessage({ pkgUsed: digests }));
 
 /** The init message's limits, or the reason they are refused before any
  * parsing (the validator, lib/_limits.py, checks the rest). */
+// Only {limits: null} means the defaults: an envelope that isn't
+// {limits: text | null}, or limits that aren't text, are settings supplied
+// wrongly, and refused like invalid ones, never taken as the defaults
+// (astra CORR-FF93-1).
+const kind = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "an array" : typeof v === "object" ? "an object" : `a ${typeof v}`);
 function initLimits(init: any): LimitsText | string {
-  const l = init?.limits;
-  if (l === null || l === undefined) return null;
-  if (typeof l !== "string") return "limits: the limits must be a JSON text";
+  if (init === null || typeof init !== "object" || Array.isArray(init)) return `limits: the init message must be {limits: a JSON text or null}, not ${kind(init)}`;
+  if (!Object.prototype.hasOwnProperty.call(init, "limits") || init.limits === undefined) return "limits: the init message has no limits (a JSON text, or null for the defaults)";
+  const l = init.limits;
+  if (l === null) return null;
+  if (typeof l !== "string") return `limits: the limits must be a JSON text, not ${kind(l)}`;
   if (utf8Bytes(l) > LIMITS_MAX_BYTES) return `limits: the limits are larger than ${LIMITS_MAX_BYTES} bytes`;
   return { text: l, name: null };
 }
