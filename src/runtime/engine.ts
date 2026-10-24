@@ -12,6 +12,7 @@ import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { INTR } from "./interrupt";
+import { fullGc } from "./gc";
 
 interface Engine {
   memory: WebAssembly.Memory;
@@ -133,6 +134,18 @@ export function mpCall(req: Uint8Array): Uint8Array {
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
 
+// A Stop traps the engine, the instance is dropped (E = null), and a new one
+// is made on the next call; the old one's memory (tens of MB after an F4
+// matrix) is freed only by V8's next major collection, so a run of Stops
+// could hold several dead instances at once.  Where the host allows it
+// (Node: the CLI, the Jupyter kernel) collect at once: one major collection
+// per Stop, none for other errors.  Called from the builtins' catch, not from
+// the call's own, whose frame still holds the dropped instance.  (A browser
+// worker has no such call: there V8 collects under its own pressure.)
+function reclaimEngine(): void {
+  if (E === null) fullGc();
+}
+
 newBuiltinModule("_sbengine", (m) => {
   m.mp = Obj.builtin((req: any) => {
     try {
@@ -141,6 +154,7 @@ newBuiltinModule("_sbengine", (m) => {
     } catch (err: any) {
       if (INTR[0]) {
         INTR[0] = 0;
+        reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
@@ -152,6 +166,7 @@ newBuiltinModule("_sbengine", (m) => {
     } catch (err: any) {
       if (INTR[0]) {
         INTR[0] = 0;
+        reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);
@@ -163,6 +178,7 @@ newBuiltinModule("_sbengine", (m) => {
     } catch (err: any) {
       if (INTR[0]) {
         INTR[0] = 0;
+        reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
       return Obj.raise(Obj.T.RuntimeError, `Sagebrush engine: ${err?.message ?? err}`);

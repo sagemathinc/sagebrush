@@ -3,9 +3,9 @@
  "packages": [
   {
    "name": "@cocalc/diff-match-patch",
-   "version": "1.0.1",
+   "version": "1.1.1",
    "license": "Apache-2.0",
-   "path": "node_modules/.pnpm/@cocalc+diff-match-patch@1.0.1/node_modules/@cocalc/diff-match-patch",
+   "path": "node_modules/.pnpm/@cocalc+diff-match-patch@1.1.1/node_modules/@cocalc/diff-match-patch",
    "in": [
     "TimeTravel"
    ]
@@ -65,15 +65,6 @@
    ]
   },
   {
-   "name": "immutable",
-   "version": "4.3.9",
-   "license": "MIT",
-   "path": "node_modules/.pnpm/immutable@4.3.9/node_modules/immutable",
-   "in": [
-    "TimeTravel"
-   ]
-  },
-  {
    "name": "katex",
    "version": "0.19.0",
    "license": "MIT",
@@ -117,9 +108,9 @@
   },
   {
    "name": "patchflow",
-   "version": "0.12.0",
+   "version": "0.16.0",
    "license": "MIT",
-   "path": "node_modules/.pnpm/patchflow@0.12.0/node_modules/patchflow",
+   "path": "node_modules/.pnpm/patchflow@0.16.0/node_modules/patchflow",
    "in": [
     "TimeTravel"
    ]

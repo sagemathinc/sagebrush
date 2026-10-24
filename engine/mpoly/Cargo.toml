@@ -12,3 +12,6 @@ sagebrush-poly = { path = "../poly" }
 sagebrush-interrupt = { path = "../interrupt" }
 num-traits = "0.2"
 num-integer = "0.1"
+
+[dev-dependencies]
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
