@@ -164,6 +164,7 @@ class _Capture:
         self.tail, self.tail_n = [], 0
         self.chars = {"stdout": 0, "stderr": 0}
         self.bytes = {"stdout": 0, "stderr": 0}
+        self.sealed = False  # (the run ended: later writes are dropped, the counts frozen)
 
     @property
     def total(self):
@@ -178,6 +179,10 @@ class _Capture:
         if not text:
             return 0
         with _HOLD, self.sender.lock:
+            if self.sealed:
+                # (a thread that outlived its run: its output is dropped,
+                # without an error in that thread)
+                return len(text)
             n = len(text.encode("utf-8", "surrogatepass"))
             self.chars[stream] += len(text)
             self.bytes[stream] += n
@@ -212,7 +217,8 @@ class _Capture:
 
     def flush(self):
         with _HOLD, self.sender.lock:
-            self._flush()
+            if not self.sealed:
+                self._flush()
 
     def _flush(self):
         while self.buf:
@@ -344,21 +350,34 @@ def _worker():
         except BaseException as e:  # SystemExit too: the session survives
             error = _format_exception(e, e.__traceback__)
             info = _error_info(e, e.__traceback__)
-        # (what is left of the output, then the reply: each written once)
-        while True:
+        # (the run's end, in one step under the output lock: what is left of
+        # its output drained, its capture sealed, its counts taken, and the
+        # reply written, once.  A thread that still holds the run's stream
+        # writes into the sealed capture: dropped, astra PR120-SEM-8)
+        done, reply = [], None
+        while not done:
             try:
-                out.flush()
-                break
+                with _HOLD, sender.lock:
+                    if reply is None:
+                        out._flush()
+                        out.sealed = True
+                        reply = {"stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error,
+                                 "error_info": info, "data": data if info is None else None, "displays": list(displays),
+                                 "seconds": time.perf_counter() - t0}
+                    sender.send(reply, lambda: done.append(True))
             except KeyboardInterrupt:
-                continue
-        reply = {"stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error, "error_info": info,
-                 "data": data if info is None else None, "displays": list(displays), "seconds": time.perf_counter() - t0}
-        _send_until_committed(sender, reply)
+                continue  # (an interrupt after the computation: for nothing)
 
 
 class Session:
     """A child process holding one namespace (`from sagebrush.sage import *`).
-    generation counts its processes: it changes at each (re)start."""
+    generation counts its processes: it changes at each (re)start.  A start
+    that fails (no ready message within READY_S) kills and waits for the
+    child it spawned before raising, so a failed start never leaves a live
+    worker behind (daybreak2 PR120-FIX4-1)."""
+
+    WORKER_ARGV = None  # (tests: another command instead of the worker)
+    READY_S = 120
 
     def __init__(self):
         self.proc = None
@@ -372,7 +391,7 @@ class Session:
 
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "sagebrush.session", "--worker"],
+            self.WORKER_ARGV or [sys.executable, "-m", "sagebrush.session", "--worker"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             creationflags=flags,
@@ -391,9 +410,21 @@ class Session:
             q.put(None)  # the process ended
 
         threading.Thread(target=reader, args=(self.proc, self.replies), daemon=True).start()
-        first = self.replies.get(timeout=120)
-        if not first or not first.get("ready"):
-            raise RuntimeError("the Sagebrush session did not start")
+        try:
+            try:
+                first = self.replies.get(timeout=self.READY_S)
+            except queue.Empty:
+                first = None
+            if not first or not first.get("ready"):
+                raise RuntimeError("the Sagebrush session did not start")
+        except BaseException:
+            # (the child is ended and reaped before the failure is reported)
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+            self.proc.wait()
+            raise
 
     def alive(self):
         return self.proc is not None and self.proc.poll() is None
