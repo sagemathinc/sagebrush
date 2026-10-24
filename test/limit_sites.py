@@ -7,7 +7,8 @@ checks the list against a reviewed registry, test/limit-sites.json.  So a new
 or changed site matching the census vocabulary needs a reviewed class and
 owner in the diff; a class-3 site among those registered or matched is to be
 reached only through lib/_limits.py (checked in review, recorded in the
-registry).  It is NOT a proof that every hidden cap is caught: a line outside
+registry; or, for item G's allowance sites, only through the host's allowance
+capability).  It is NOT a proof that every hidden cap is caught: a line outside
 the vocabulary slips past (`if n > 1000: raise ValueError("no")`), and the
 baseline lines are not coverage.  No AST or control-flow analysis is
 attempted; code review remains the backstop.
@@ -25,8 +26,10 @@ doesn't change its key; editing it, its message included, does.
 The registry maps fingerprint -> {"class", "owner"}; class 1 (shared-resource,
 editor, protocol, display or parser protection), 2 (memory guard), 3 (a
 work/time/input-size limit of a user's computation: unlimited by default,
-opt-in through lib/_limits.py), their mixtures as the inventories write them
-("2+3"), "coverage" (an unsupported feature, not a cap), "none" (matched
+opt-in through lib/_limits.py or a trusted host capability, such as an
+allowance armed by grading, an instructor's bundle or a server: item G),
+their mixtures as the inventories write them ("2+3"), "coverage" (an
+unsupported feature, not a cap), "none" (matched
 text that refuses nothing).  The sites present at the seed and not yet
 classified are the baseline: grandfathered, certifying nothing, and kept out
 of the registry, as the first 16 hex digits of each fingerprint's sha256 in
