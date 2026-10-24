@@ -3130,7 +3130,10 @@ def matrix(*args, **kwds):
             vals = [v for _, v in placed]
             base = ring[0] if ring else _dict_base(vals)
             ent = [0] * (r * c)
-            if aliased and kwds.get("sparse", True) is not False:
+            # (Sage's flag by truth value: None, or no flag, is a dict's
+            # default, sparse; 0 is False; astra2's CORR-PR107-2)
+            sparse = kwds.get("sparse")
+            if aliased and (sparse is None or bool(sparse)):
                 # a position given twice: Sage's default constructor for a
                 # dict (sparse) converts every value in the dict's order,
                 # the overwritten ones too (one that doesn't convert is its

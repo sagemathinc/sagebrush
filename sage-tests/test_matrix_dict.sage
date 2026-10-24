@@ -149,3 +149,10 @@ show("a sequence key, bare", lambda: matrix({Seq(2, [0, 1]): 3}))
 show("a sequence key of three", lambda: matrix(ZZ, 2, 2, {Seq(3, [0, 0, 0]): 3}))
 show("a sequence key of one", lambda: matrix(ZZ, 2, 2, {Seq(1, [0]): 3}))
 show("a sequence key of none", lambda: matrix(ZZ, 2, 2, {Seq(0, []): 3}))
+
+# the sparse flag by its truth value, a position given twice: True, 1 and
+# None (no flag) are the dict's default, sparse; False and 0 are dense
+for s in [True, False, None, 0, 1]:
+    show("sparse=%r: a zero last" % (s,), lambda: matrix(2, 2, {(-1, 0): 3, (1, 0): 0}, sparse=s))
+    show_type("sparse=%r: ZZ, an overwritten rational" % (s,), lambda: matrix(ZZ, 2, 2, {(-1, 0): 1/2, (1, 0): 5}, sparse=s))
+    show("sparse=%r: GF(5), 5 is zero" % (s,), lambda: matrix(GF(5), 2, 2, {(-1, 0): 1, (1, 0): 5}, sparse=s))
