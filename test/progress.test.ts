@@ -216,3 +216,44 @@ test("Python routines report through _progress; the engine's self-test call show
     "[('groebner (python)', 'pairs', {'done': 3, 'unit': 'pairs', 'label': 'counted'})]\n[]\n{'ok': {'steps': 2000, 'calls': 3}}\n[]\n",
   );
 });
+
+test("capabilities(): progress only in this build; the later pieces refuse before running", () => {
+  const code = [
+    "import sagebrush",
+    "from sagebrush import records",
+    "c = sagebrush.capabilities()",
+    "print(c['progress'], sorted(k for k, v in c.items() if v is False))",
+    "print(sagebrush.stop_points('factor'))",
+    "for name in ('estimate', 'run', 'request_stop', 'resume'):",
+    "    try:",
+    "        getattr(sagebrush, name)(1)",
+    "    except TypeError as e:",
+    "        print(e)",
+    "for opt in records.LATER_OPTIONS:",
+    "    try:",
+    "        factor(2^64 + 1, **{opt: 1})",
+    "    except TypeError as e:",
+    "        print(e)",
+    "print(len(sagebrush.progress_snapshot()))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [CLI, "--sage", "-c", code], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    [
+      "True ['cancel_with_partial', 'checkpoints', 'deadline', 'estimate', 'request_stop', 'resume', 'run', 'work']",
+      "[]",
+      "sagebrush.estimate is not available in this build",
+      "sagebrush.run is not available in this build",
+      "sagebrush.request_stop is not available in this build",
+      "sagebrush.resume is not available in this build",
+      "factor(): deadline= is not available in this build",
+      "factor(): work= is not available in this build",
+      "factor(): resume= is not available in this build",
+      "factor(): checkpoint_every= is not available in this build",
+      "factor(): checkpoint_path= is not available in this build",
+      "0",
+      "",
+    ].join("\n"),
+  );
+});

@@ -374,6 +374,102 @@ pub fn untracked() -> Vec<(u64, u64, u32, u64)> {
 
 static UNTRACKED: std::sync::Mutex<Vec<(u64, u64, u32, u64)>> = std::sync::Mutex::new(Vec::new());
 
+static HOST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// The index of a host-registered name (a Python routine's op, stage or
+/// unit), registered at first use.
+pub fn name_index(name: &str) -> u32 {
+    let mut h = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let i = match h.iter().position(|n| n == name) {
+        Some(i) => i,
+        None => {
+            h.push(name.to_string());
+            h.len() - 1
+        }
+    };
+    HOST_NAMES + i as u32
+}
+
+fn name_of(table: &[&str], i: u32) -> String {
+    if i >= HOST_NAMES {
+        return HOST.lock().unwrap_or_else(|e| e.into_inner()).get((i - HOST_NAMES) as usize).cloned().unwrap_or_default();
+    }
+    table.get(i as usize).map(|s| s.to_string()).unwrap_or_else(|| format!("#{i}"))
+}
+
+fn json_str(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+fn json_num(x: f64) -> String {
+    // (as JavaScript's JSON.stringify writes it, so both hosts' records read
+    // back alike: 41.5, and 3 for an integral value; never NaN or infinite here)
+    format!("{x}")
+}
+
+/// The progress/1 record of a slot (the same as src/runtime/progress.ts's).
+pub fn record_json(s: &Slot, now_ms: u64) -> String {
+    let mut r = format!(
+        "{{\"schema\":\"sagebrush.progress/1\",\"call_id\":{},\"parent_id\":{},\"op\":{},\"status\":\"running\",\"stage\":{},\"stage_index\":{}",
+        s.call_id, s.parent_id, json_str(&name_of(OPS, s.op)), json_str(&name_of(STAGES, s.stage)), s.stage_index
+    );
+    if let Some(c) = s.stage_count {
+        r += &format!(",\"stage_count\":{c}");
+    }
+    r += &format!(",\"count\":{{\"done\":{}", s.done);
+    if let Some(t) = s.total {
+        r += &format!(",\"total\":{t}");
+    }
+    r += &format!(",\"unit\":{},\"label\":\"counted\"", json_str(&name_of(UNITS, s.unit)));
+    if s.done_saturated || s.total_saturated {
+        r += ",\"saturated\":true";
+    }
+    r += "}";
+    r += &format!(",\"elapsed_s\":{},\"beyond_forecast\":{}", json_num(now_ms.saturating_sub(s.started_ms) as f64 / 1000.0), s.beyond_forecast);
+    if let Some(f) = s.fraction {
+        r += &format!(",\"time_fraction\":{{\"value\":{},\"label\":\"estimated fraction\"}}", json_num(f));
+    }
+    if s.work != 0 {
+        r += &format!(",\"work_spent\":{}", s.work);
+    }
+    if s.memory_now_kib != 0 {
+        r += &format!(",\"memory_now_bytes\":{}", s.memory_now_kib * 1024);
+    }
+    if s.memory_peak_kib != 0 {
+        r += &format!(",\"memory_peak_bytes\":{}", s.memory_peak_kib * 1024);
+    }
+    if s.early_part_untracked {
+        r += ",\"early_part_untracked\":true";
+    }
+    r + "}"
+}
+
+/// Every call in progress now, as a JSON array of progress/1 records: the
+/// tracked ones from the slots, then the untracked ones (no counts).
+pub fn snapshot_json() -> String {
+    let now = now_ms();
+    let mut v: Vec<String> = snapshot().iter().map(|s| record_json(s, now)).collect();
+    for (id, parent, op, started) in untracked() {
+        v.push(format!(
+            "{{\"schema\":\"sagebrush.progress/1\",\"call_id\":{id},\"parent_id\":{parent},\"op\":{},\"status\":\"untracked\",\"reason\":\"all 32 progress slots are in use\",\"elapsed_s\":{}}}",
+            json_str(&name_of(OPS, op)),
+            json_num(now.saturating_sub(started) as f64 / 1000.0)
+        ));
+    }
+    format!("[{}]", v.join(","))
+}
+
 fn now_ms() -> u64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -782,6 +878,20 @@ mod tests {
         release(i);
         assert!(seen > 0);
         assert_eq!(BITMAP.load(Relaxed), 0);
+    }
+
+    #[test]
+    fn records_are_progress_records() {
+        let s = Slot { in_use: true, call_id: 9, parent_id: 2, op: 1, stage: 4, stage_index: 2, stage_count: Some(4), done: 410, total: Some(1800), unit: 3, fraction: Some(0.5), started_ms: 1000, ..Slot::default() };
+        assert_eq!(
+            record_json(&s, 42_500),
+            "{\"schema\":\"sagebrush.progress/1\",\"call_id\":9,\"parent_id\":2,\"op\":\"factor\",\"status\":\"running\",\"stage\":\"ECM\",\"stage_index\":2,\"stage_count\":4,\"count\":{\"done\":410,\"total\":1800,\"unit\":\"curves\",\"label\":\"counted\"},\"elapsed_s\":41.5,\"beyond_forecast\":false,\"time_fraction\":{\"value\":0.5,\"label\":\"estimated fraction\"}}"
+        );
+        let h = name_index("a \"quoted\" stage");
+        assert_eq!(name_index("a \"quoted\" stage"), h);
+        let r = record_json(&Slot { stage: h, total: None, stage_count: None, ..s }, 1000);
+        assert!(r.contains("\"stage\":\"a \\\"quoted\\\" stage\""), "{r}");
+        assert!(r.contains("\"count\":{\"done\":410,\"unit\""), "{r}");
     }
 
     #[test]

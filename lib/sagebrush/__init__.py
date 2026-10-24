@@ -14,4 +14,43 @@ accepted and ignored).
 
 from . import modsym, ap, mf, poly, nf, linalg
 
-__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "stop_points", "progress_snapshot"]
+
+
+# ---- the agent API (estimates plan r3 §1.1): what this build provides,
+# live progress, and the entry points of the pieces still to come, which
+# refuse before running.
+
+def capabilities():
+    """What this build of the agent API provides: {"progress": True,
+    "estimate": False, ...} (sagebrush.records.capabilities)."""
+    from . import records
+    return records.capabilities()
+
+
+def stop_points(op):
+    """The clean stop points implemented for op ([] in this build)."""
+    from . import records
+    return records.stop_points(op)
+
+
+def progress_snapshot():
+    """Every call in progress now, as sagebrush.progress/1 records
+    (sagebrush.progress.snapshot)."""
+    from . import progress
+    return progress.snapshot()
+
+
+def _unavailable(name):
+    def f(*args, **kwds):
+        from . import records
+        raise records.unavailable("sagebrush." + name)
+    f.__name__ = name
+    f.__doc__ = "Not available in this build (sagebrush.capabilities())."
+    return f
+
+
+estimate = _unavailable("estimate")
+run = _unavailable("run")
+request_stop = _unavailable("request_stop")
+resume = _unavailable("resume")

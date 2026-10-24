@@ -445,6 +445,52 @@ def progress_untracked(call_id, parent_id, op, elapsed_s=None):
     return r
 
 
+# ---- what this build provides (estimates plan r3 §1.1)
+
+# Each later piece of the agent API turns its entry on (and extends
+# stop_points) in the change that implements it; until then its options are
+# refused before anything runs.
+_CAPABILITIES = {
+    "records": ["sagebrush.estimate/1", "sagebrush.progress/1", "sagebrush.outcome/1",
+                "sagebrush.partial/1", "sagebrush.checkpoint/1"],
+    "progress": True,
+    "estimate": False,
+    "deadline": False,
+    "work": False,
+    "cancel_with_partial": False,
+    "run": False,
+    "request_stop": False,
+    "checkpoints": False,
+    "resume": False,
+}
+# the call options that later pieces add, refused until then
+LATER_OPTIONS = ("deadline", "work", "resume", "checkpoint_every", "checkpoint_path")
+
+
+def capabilities():
+    """What this build of the agent API provides (a new dict each time)."""
+    return _json.loads(_json.dumps(_CAPABILITIES))
+
+
+def stop_points(op):
+    """The clean stop points implemented for op (none in this build)."""
+    return []
+
+
+def unavailable(name):
+    """TypeError: name is not available in this build."""
+    return TypeError("%s is not available in this build" % name)
+
+
+def refuse_later_options(fn, kwds):
+    """Before anything runs: TypeError if kwds has an option of a later piece
+    of the agent API (deadline=, work=, resume=, checkpoint_every=,
+    checkpoint_path=), naming it."""
+    for k in LATER_OPTIONS:
+        if k in kwds:
+            raise TypeError("%s(): %s= is not available in this build" % (fn, k))
+
+
 # ---- the schema files
 
 def schema_texts():
