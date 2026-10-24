@@ -82,6 +82,8 @@ const check = (name, ok, detail) => {
 const SIGNUM = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
 const PLOT = "import matplotlib.pyplot as plt; plt.plot([1, 2, 3]); plt.show()";
 const BUSY = "while True: pass";
+// (a flush hook that marks it was reached, straight to fd 1, then never returns)
+const HOOK = "import _pyjs_open as f, os; f._flush_all = lambda: (os.write(1, b'HOOK\\n'), exec('while True: pass'))";
 
 for (const mode of [[], ["--sage"]]) {
   const m = mode.length ? " (--sage)" : "";
@@ -90,6 +92,10 @@ for (const mode of [[], ["--sage"]]) {
     // though the computation never returns)
     let r = prompt([BUSY], sig, { busy: true, args: mode });
     check(`${sig} ends a computing prompt${m}`, r.busy_ok && r.how?.[0] === "signal" && r.how[1] === SIGNUM[sig] && r.secs < 2, r);
+    // after the entry, Python's file flush that never returns (it is
+    // Python code too): still busy, still the default action
+    r = prompt([HOOK], sig, { busy: true, args: mode });
+    check(`${sig} ends a prompt whose post-entry flush never returns${m}`, /HOOK/.test(r.out) && r.how?.[0] === "signal" && r.how[1] === SIGNUM[sig] && r.secs < 2, r);
     // waiting for input, after a computation and a figure: the prompt's
     // handler again, which removes the figures, then ends it by the signal
     r = prompt([PLOT, "6 * 7"], sig, { args: mode });

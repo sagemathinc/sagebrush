@@ -450,12 +450,14 @@ function repl(main: any, quiet: boolean): Promise<number> {
           guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
           code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
           guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
+          // (Python's file flushes are Python code too, and may not return:
+          // still busy, astra2 CORR-PR123-1)
+          flushFiles();
+          R.stdout.flush();
+          R.stderr.flush();
         } finally {
           promptSignals(false);
         }
-        flushFiles();
-        R.stdout.flush();
-        R.stderr.flush();
         if (code !== null && code !== 1) return finish(code);
       }
       rl.setPrompt(ps1());
