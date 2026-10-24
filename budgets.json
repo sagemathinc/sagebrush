@@ -1,0 +1,607 @@
+{
+ "format": "sagebrush-budgets",
+ "v": 1,
+ "note": "Every size threshold of the core's growth gate (scripts/size-measure.mjs, plan-growth-budget-r5; design/size-gate.md). Growth beyond the epoch needs a reviewed .growth/ marker; exact bundles never grow without a reviewed raise of max.",
+ "toolchain": {
+  "bun": "1.4.4"
+ },
+ "bundles": {
+  "cli/lib.gen.js": {
+   "exact": false,
+   "ceiling": 7723426,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "cli/packages.gen.js": {
+   "exact": true,
+   "max": 278428
+  },
+  "cli/pyjs.cjs": {
+   "exact": false,
+   "ceiling": 30976162,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/core.pre": {
+   "exact": false,
+   "ceiling": 1922294,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/core.src": {
+   "exact": false,
+   "ceiling": 445671,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/magma-more.src": {
+   "exact": false,
+   "ceiling": 160771,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/magma.pre": {
+   "exact": false,
+   "ceiling": 3099230,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/magma.src": {
+   "exact": false,
+   "ceiling": 582054,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/matlab-more.src": {
+   "exact": false,
+   "ceiling": 288570,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/matlab.pre": {
+   "exact": false,
+   "ceiling": 5932373,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/matlab.src": {
+   "exact": false,
+   "ceiling": 1175608,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-bisect.src": {
+   "exact": false,
+   "ceiling": 1868,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-board-checks.src": {
+   "exact": false,
+   "ceiling": 38760,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-capability-map.src": {
+   "exact": false,
+   "ceiling": 16954,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-catalog.src": {
+   "exact": false,
+   "ceiling": 26697,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-colorsys.src": {
+   "exact": false,
+   "ceiling": 4880,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-compat-pickle.src": {
+   "exact": false,
+   "ceiling": 10225,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-contextlib.src": {
+   "exact": false,
+   "ceiling": 32697,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-copy.src": {
+   "exact": false,
+   "ceiling": 10013,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-copyreg.src": {
+   "exact": false,
+   "ceiling": 9290,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-ctypes.src": {
+   "exact": false,
+   "ceiling": 9101,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-datetime.src": {
+   "exact": false,
+   "ceiling": 1538,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-future.src": {
+   "exact": false,
+   "ceiling": 6217,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-graph-spring.src": {
+   "exact": false,
+   "ceiling": 13720,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-heapq.src": {
+   "exact": false,
+   "ceiling": 26766,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-html.src": {
+   "exact": false,
+   "ceiling": 94176,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-importlib.src": {
+   "exact": false,
+   "ceiling": 3964,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-io.src": {
+   "exact": false,
+   "ceiling": 14870,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-ipython.src": {
+   "exact": false,
+   "ceiling": 7481,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-json.src": {
+   "exact": false,
+   "ceiling": 5423,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-marimo.src": {
+   "exact": false,
+   "ceiling": 7110,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-matplotlib.src": {
+   "exact": false,
+   "ceiling": 26439,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pickle.src": {
+   "exact": false,
+   "ceiling": 81015,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-platform.src": {
+   "exact": false,
+   "ceiling": 628,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-png.src": {
+   "exact": false,
+   "ceiling": 6567,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pprint.src": {
+   "exact": false,
+   "ceiling": 28142,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pydatetime.src": {
+   "exact": false,
+   "ceiling": 116372,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-doctest.src": {
+   "exact": false,
+   "ceiling": 15528,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-help.src": {
+   "exact": false,
+   "ceiling": 8855,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-magic.src": {
+   "exact": false,
+   "ceiling": 23181,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-open.src": {
+   "exact": false,
+   "ceiling": 9131,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-pretty.src": {
+   "exact": false,
+   "ceiling": 27616,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-python-docsearch.src": {
+   "exact": false,
+   "ceiling": 12339,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-python-examples.src": {
+   "exact": false,
+   "ceiling": 30774,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-sb-check.src": {
+   "exact": false,
+   "ceiling": 4791,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-sbx.src": {
+   "exact": false,
+   "ceiling": 52848,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-scipy.src": {
+   "exact": false,
+   "ceiling": 91106,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-string.src": {
+   "exact": false,
+   "ceiling": 21100,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-strptime.src": {
+   "exact": false,
+   "ceiling": 630,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-tempfile.src": {
+   "exact": false,
+   "ceiling": 2581,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-textwrap.src": {
+   "exact": false,
+   "ceiling": 23356,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-tzdata.src": {
+   "exact": false,
+   "ceiling": 882,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-unittest.src": {
+   "exact": false,
+   "ceiling": 15659,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-viewer3d.src": {
+   "exact": false,
+   "ceiling": 104416,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-warnings.src": {
+   "exact": false,
+   "ceiling": 6010,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-zoneinfo.src": {
+   "exact": false,
+   "ceiling": 93446,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/pkg-cremona-small.src": {
+   "exact": false,
+   "ceiling": 151421,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/pkg-pypi-sortedcontainers.src": {
+   "exact": false,
+   "ceiling": 139004,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/pkg-scipy-io.pre": {
+   "exact": false,
+   "ceiling": 67239,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/pkg-scipy-io.src": {
+   "exact": false,
+   "ceiling": 14118,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sage-more.src": {
+   "exact": false,
+   "ceiling": 315956,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sage.pre": {
+   "exact": false,
+   "ceiling": 14001331,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sage.src": {
+   "exact": false,
+   "ceiling": 2933909,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sci.pre": {
+   "exact": false,
+   "ceiling": 2085850,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sci.src": {
+   "exact": false,
+   "ceiling": 402950,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/tzdata": {
+   "exact": false,
+   "ceiling": 282962,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/runner/index.html": {
+   "exact": false,
+   "ceiling": 4702,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-analyze.js": {
+   "exact": false,
+   "ceiling": 391498,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-engine.wasm": {
+   "exact": false,
+   "ceiling": 7855755,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-graphview.js": {
+   "exact": false,
+   "ceiling": 15522,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-notebook.js": {
+   "exact": false,
+   "ceiling": 228514,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-raster.wasm": {
+   "exact": false,
+   "ceiling": 889713,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-viewer3d.js": {
+   "exact": false,
+   "ceiling": 96966,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-worker.js": {
+   "exact": false,
+   "ceiling": 1653540,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "registry/packages": {
+   "exact": true,
+   "max": 3
+  }
+ },
+ "epoch": {
+  "sizes": {
+   "cli/lib.gen.js": 7021297,
+   "cli/pyjs.cjs": 28160148,
+   "engine/lib/core.pre": 1747540,
+   "engine/lib/core.src": 405156,
+   "engine/lib/magma-more.src": 146156,
+   "engine/lib/magma.pre": 2817482,
+   "engine/lib/magma.src": 529140,
+   "engine/lib/matlab-more.src": 262337,
+   "engine/lib/matlab.pre": 5393067,
+   "engine/lib/matlab.src": 1068735,
+   "engine/lib/mod-bisect.src": 1699,
+   "engine/lib/mod-board-checks.src": 35237,
+   "engine/lib/mod-capability-map.src": 15413,
+   "engine/lib/mod-catalog.src": 24270,
+   "engine/lib/mod-colorsys.src": 4437,
+   "engine/lib/mod-compat-pickle.src": 9296,
+   "engine/lib/mod-contextlib.src": 29725,
+   "engine/lib/mod-copy.src": 9103,
+   "engine/lib/mod-copyreg.src": 8446,
+   "engine/lib/mod-ctypes.src": 8274,
+   "engine/lib/mod-datetime.src": 1399,
+   "engine/lib/mod-future.src": 5652,
+   "engine/lib/mod-graph-spring.src": 12473,
+   "engine/lib/mod-heapq.src": 24333,
+   "engine/lib/mod-html.src": 85615,
+   "engine/lib/mod-importlib.src": 3604,
+   "engine/lib/mod-io.src": 13519,
+   "engine/lib/mod-ipython.src": 6801,
+   "engine/lib/mod-json.src": 4930,
+   "engine/lib/mod-marimo.src": 6464,
+   "engine/lib/mod-matplotlib.src": 24036,
+   "engine/lib/mod-pickle.src": 73650,
+   "engine/lib/mod-platform.src": 571,
+   "engine/lib/mod-png.src": 5970,
+   "engine/lib/mod-pprint.src": 25584,
+   "engine/lib/mod-pydatetime.src": 105793,
+   "engine/lib/mod-pyjs-doctest.src": 14117,
+   "engine/lib/mod-pyjs-help.src": 8050,
+   "engine/lib/mod-pyjs-magic.src": 21074,
+   "engine/lib/mod-pyjs-open.src": 8301,
+   "engine/lib/mod-pyjs-pretty.src": 25106,
+   "engine/lib/mod-python-docsearch.src": 11218,
+   "engine/lib/mod-python-examples.src": 27977,
+   "engine/lib/mod-sb-check.src": 4356,
+   "engine/lib/mod-sbx.src": 48044,
+   "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-string.src": 19182,
+   "engine/lib/mod-strptime.src": 573,
+   "engine/lib/mod-tempfile.src": 2347,
+   "engine/lib/mod-textwrap.src": 21233,
+   "engine/lib/mod-tzdata.src": 802,
+   "engine/lib/mod-unittest.src": 14236,
+   "engine/lib/mod-viewer3d.src": 94924,
+   "engine/lib/mod-warnings.src": 5464,
+   "engine/lib/mod-zoneinfo.src": 84951,
+   "engine/lib/pkg-cremona-small.src": 137656,
+   "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
+   "engine/lib/pkg-scipy-io.pre": 61127,
+   "engine/lib/pkg-scipy-io.src": 12835,
+   "engine/lib/sage-more.src": 287233,
+   "engine/lib/sage.pre": 12728483,
+   "engine/lib/sage.src": 2667190,
+   "engine/lib/sci.pre": 1896228,
+   "engine/lib/sci.src": 366319,
+   "engine/lib/tzdata": 257239,
+   "engine/runner/index.html": 4275,
+   "engine/sagebrush-analyze.js": 355908,
+   "engine/sagebrush-engine.wasm": 7141596,
+   "engine/sagebrush-graphview.js": 14111,
+   "engine/sagebrush-notebook.js": 207740,
+   "engine/sagebrush-raster.wasm": 808830,
+   "engine/sagebrush-viewer3d.js": 88151,
+   "engine/sagebrush-worker.js": 1503219
+  },
+  "reset": null
+ }
+}
