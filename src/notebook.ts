@@ -35,6 +35,9 @@ const TYPES: Record<string, string> = {
 };
 const typeOf = (name: string) => TYPES[name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream";
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/** `v` as JSON that is safe inside an inline <script>: no "<", ">" or "&" (so no "</script>" or "<!--" in it),
+ * and no U+2028 or U+2029, each written \uXXXX, which JSON and JavaScript read as the same characters. */
+export const htmlJson = (v: unknown) => JSON.stringify(v).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
 // ---- the worker thread: one notebook's Python
 export function notebookWorker(data: { dir: string }) {
@@ -134,7 +137,7 @@ li.d a{font-weight:600}li.f{color:#888}button{font:inherit;padding:5px 12px;bord
 </style></head><body><h1><span>Sagebrush</span> notebooks</h1><div class="p">${esc(join(dir, rel))}</div>
 <p><button id="new">New notebook</button></p><ul>${up}${rows.join("") || '<li class="f">No notebooks here yet.</li>'}</ul>
 <script>document.getElementById("new").onclick=async()=>{let n=prompt("Name of the new notebook","Untitled.ipynb");if(!n)return;if(!/\\.ipynb$/i.test(n))n+=".ipynb";
-const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb/"+encodeURIComponent(p).replace(/%2F/g,"/");};</script></body></html>`;
+const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURIComponent(p).replace(/%2F/g,"/");};</script></body></html>`;
   };
 
   const server = http.createServer(async (req, res) => {
@@ -162,11 +165,12 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
         return;
       }
       if (cookie !== token) { res.writeHead(403, { "Content-Type": "text/plain" }).end("Open the URL with the token that `sagebrush notebook` printed.\n"); return; }
+      // (decoded; its routes' patterns match any character, U+2028 and U+2029 too: the "s" flag)
       const path = decodeURIComponent(url.pathname);
       const method = req.method ?? "GET";
 
       // the API
-      if (/^\/(?:nb\/.+?\.ipynb\/)?api\/file$/i.test(path)) {
+      if (/^\/(?:nb\/.+?\.ipynb\/)?api\/file$/is.test(path)) {
         const p = inside(url.searchParams.get("path"));
         if (!p) { res.writeHead(400).end("bad path"); return; }
         if (method === "GET") {
@@ -184,13 +188,13 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
         } else res.writeHead(405).end();
         return;
       }
-      const m = /^\/(?:nb\/.*\/)?api\/session\/([\w-]+)\/(events|send|interrupt|stop)$/.exec(path);
+      const m = /^\/(?:nb\/.*\/)?api\/session\/([\w-]+)\/(events|send|interrupt|stop)$/s.exec(path);
       if (m) {
         const [, sid, what] = m;
         if (what === "events") {
           if (method !== "GET") { res.writeHead(405, { Allow: "GET" }).end(); return; }
           // the notebook's directory: from the page's address (…/nb/<path>/api/…)
-          const nb = /^\/nb\/(.*)\/api\//.exec(path)?.[1] ?? "";
+          const nb = /^\/nb\/(.*)\/api\//s.exec(path)?.[1] ?? "";
           const s = sessions.get(sid) ?? startSession(sid, dirname(inside(nb) ?? join(dir, "x")));
           clearTimeout(s.timer);
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
@@ -225,7 +229,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       }
       // a notebook: the page, told where its file is (its scripts load relative
       // to /nb/<path>/, so they are served under any /nb/ prefix)
-      const nbm = /^\/nb\/(.+?\.ipynb)(\/.*)?$/i.exec(path);
+      const nbm = /^\/nb\/(.+?\.ipynb)(\/.*)?$/is.exec(path);
       if (nbm && !nbm[2]) {
         // …/nb/a.ipynb -> …/nb/a.ipynb/ (relative URLs then resolve beneath it)
         res.writeHead(302, { Location: "/nb/" + encodeURIComponent(nbm[1]).replace(/%2F/g, "/") + "/" }).end();
@@ -235,7 +239,7 @@ const p=${JSON.stringify(rel)}?${JSON.stringify(rel)}+"/"+n:n;location.href="/nb
       if (nbm && rest === "") {
         if (!inside(nbm[1])) { res.writeHead(400).end("bad path"); return; }
         const local = { path: nbm[1], name: basename(nbm[1]), dir: relative(dir, dirname(inside(nbm[1])!)) };
-        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${JSON.stringify(local).replace(/</g, "\\u003c")};</script>`);
+        const page = asset("index.html")!.toString("utf8").replace("<head>", `<head><script>window.__SAGEBRUSH_LOCAL__=${htmlJson(local)};</script>`);
         res.writeHead(200, { "Content-Type": TYPES.html, "Cache-Control": "no-store" }).end(page);
         return;
       }
