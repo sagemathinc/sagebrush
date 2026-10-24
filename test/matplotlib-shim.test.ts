@@ -149,6 +149,37 @@ t("3d", lambda: plt.axes(projection="3d"))
   ]);
 });
 
+test("plt.axes(ax) selects ax without reordering fig.axes (the panels' draw order): overlapping Axes draw the same; pyplot then draws on ax; a new Axes is current", () => {
+  const out = run(`
+import matplotlib.pyplot as plt
+import re
+def two(select):
+    fig = plt.figure()
+    a = plt.axes([0.1, 0.1, 0.6, 0.6])
+    b = plt.axes([0.3, 0.3, 0.6, 0.6])
+    a.set_title("A"); b.set_title("B")
+    if select:
+        plt.axes(a)
+    return fig, a, b
+fig0, _, _ = two(False)
+fig, a, b = two(True)
+svg = lambda f: re.sub(r"sbclip[0-9]+", "sbclip", f._repr_svg_())
+print("order kept", fig.axes == [a, b], "current", plt.gca() is a, "same picture", svg(fig) == svg(fig0))
+plt.plot([1, 2, 3])
+print("plot on selected", a.get_ylim() != (0.0, 1.0), b.get_ylim() == (0.0, 1.0))
+plt.axes(b); plt.axes(a)
+print("reselect", fig.axes == [a, b], plt.gca() is a)
+c = plt.axes([0.5, 0.5, 0.2, 0.2])
+print("new is current", plt.gca() is c, fig.axes == [a, b, c])
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "order kept True current True same picture True",
+    "plot on selected True True",
+    "reselect True True",
+    "new is current True True",
+  ]);
+});
+
 test("errorbar: scalar, 1-D and (2, N) errors as matplotlib's (limits, errors); fmt '' a line", () => {
   const out = run(`
 import matplotlib.pyplot as plt

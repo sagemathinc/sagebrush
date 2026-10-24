@@ -1115,6 +1115,7 @@ class Figure:
             _css_color(facecolor)  # (an invalid one is matplotlib's ValueError here)
         self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
+        self._ca = None  # (plt.axes(ax)'s selection, and len(axes) then)
         self._suptitle = None
         self._grid = (1, 1)
 
@@ -1155,6 +1156,11 @@ class Figure:
         return ax
 
     def gca(self):
+        # (the Axes plt.axes(ax) selected stays current until another is
+        # added; fig.axes keeps its order, the order the panels are drawn in)
+        ca = self._ca
+        if ca is not None and ca[1] == len(self.axes) and ca[0] in self.axes:
+            return ca[0]
         return self.axes[-1] if self.axes else self.add_subplot()
 
     def suptitle(self, s, **kw):
@@ -1258,6 +1264,7 @@ class Figure:
 
     def clear(self):
         self.axes = []
+        self._ca = None
         self._gci = None
 
     clf = clear
@@ -1389,9 +1396,9 @@ def axes(arg=None, **kw):
         if fig not in _figs:
             _figs.append(fig)
         _cur[0] = fig
-        if arg in fig.axes:
-            fig.axes.remove(arg)
-        fig.axes.append(arg)
+        if arg not in fig.axes:
+            fig.axes.append(arg)
+        fig._ca = (arg, len(fig.axes))
         ax = arg
     elif arg is None:
         fig = gcf()
