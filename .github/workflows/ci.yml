@@ -162,6 +162,7 @@ jobs:
           node web/test-ipynb.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
+          node scripts/test-core-api-surface.mjs
           node scripts/core-api-surface.mjs --check
           node scripts/size-budget.mjs --check
           node --test scripts/test-heap-budget.mjs
