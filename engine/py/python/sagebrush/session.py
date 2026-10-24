@@ -67,28 +67,77 @@ def _failure(kind, message):
     return {"type": kind, "exception": None, "message": message, "traceback": ""}
 
 
-CHUNK = 64 * 1024            # (output goes to the parent in chunks of at most this)
-REPLY_HEAD = REPLY_TAIL = 512 * 1024  # (and the reply keeps at most this much of it)
+WIRE_MAX = 64 * 1024         # (an output message's whole JSON line is at most this many bytes)
+REPLY_HEAD = REPLY_TAIL = 512 * 1024  # (and the reply keeps at most this many characters of the output)
+_INT_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGBREAK") if hasattr(signal, n))
+_commit_hook = None          # (tests: called just after a message is written, before interrupts resume)
+
+
+class _Sender:
+    """The worker's protocol: one JSON message per line, written whole.  A
+    Ctrl-C (SIGINT; SIGBREAK on Windows) that arrives while a message is
+    framed or written is held, then raised as KeyboardInterrupt only after
+    the message has been written and `committed()` has recorded that: a
+    message is never cut, never written twice, and an interrupt is never
+    lost (astra PR120-SEM-4, daybreak2 PR120-FIX-3)."""
+
+    def __init__(self, proto):
+        import json
+
+        self.proto, self.dumps = proto, json.dumps
+
+    def send(self, msg, committed=None):
+        held = []
+        prev = {}
+        try:
+            for sig in _INT_SIGNALS:
+                prev[sig] = signal.signal(sig, lambda signum, frame: held.append(signum))
+            line = self.dumps(msg) + "\n"  # (ASCII: \\u escapes, a lone surrogate included)
+            self.proto.write(line)
+            self.proto.flush()
+            if committed is not None:
+                committed()
+            if _commit_hook is not None:
+                _commit_hook(msg)
+        finally:
+            for sig, h in prev.items():
+                signal.signal(sig, h)
+        if held:
+            raise KeyboardInterrupt
 
 
 class _Capture:
-    """The computation's printed output, bounded at the source: it goes to
-    the parent as it is written, in {"out": text} messages of at most CHUNK
-    characters (each line sent whole: SIGINT is blocked while one is
-    written), and the reply keeps only its first REPLY_HEAD and last
-    REPLY_TAIL characters, with the exact count."""
+    """The computation's printed output, bounded at the source.  It goes to
+    the parent as it is written, in {"out": text, "stream": "stdout" or
+    "stderr"} messages whose JSON line is at most WIRE_MAX bytes; a chunk
+    leaves the buffer only once its message was written, so an interrupt at
+    any point loses or repeats none of it.  The reply keeps the first
+    REPLY_HEAD and last REPLY_TAIL characters (both streams, as printed),
+    with exact per-stream counts in characters and UTF-8 bytes."""
 
-    def __init__(self, send):
-        self.send = send
-        self.buf, self.pending = [], 0
+    def __init__(self, sender):
+        self.sender = sender
+        self.buf, self.pending = [], 0   # [[stream, [text, ...]]] not yet sent; their bytes
         self.head = ""
         self.tail, self.tail_n = [], 0
-        self.total = 0
+        self.chars = {"stdout": 0, "stderr": 0}
+        self.bytes = {"stdout": 0, "stderr": 0}
 
-    def write(self, text):
+    @property
+    def total(self):
+        return self.chars["stdout"] + self.chars["stderr"]
+
+    def stream(self, name):
+        return _Stream(self, name)
+
+    def write(self, text, stream="stdout"):
         if not isinstance(text, str):
             raise TypeError("write() argument must be str, not %s" % type(text).__name__)
-        self.total += len(text)
+        if not text:
+            return 0
+        n = len(text.encode("utf-8", "surrogatepass"))
+        self.chars[stream] += len(text)
+        self.bytes[stream] += n
         rest = text
         if len(self.head) < REPLY_HEAD:
             room = REPLY_HEAD - len(self.head)
@@ -100,18 +149,41 @@ class _Capture:
             if self.tail_n > 2 * REPLY_TAIL:
                 t = "".join(self.tail)[-REPLY_TAIL:]
                 self.tail, self.tail_n = [t], len(t)
-        self.buf.append(text)
-        self.pending += len(text)
-        if self.pending >= CHUNK:
+        if self.buf and self.buf[-1][0] == stream:
+            self.buf[-1][1].append(text)
+        else:
+            self.buf.append([stream, [text]])
+        self.pending += n
+        if self.pending >= WIRE_MAX:
             self.flush()
         return len(text)
 
+    def _piece(self, stream, text):
+        """The longest prefix of text whose message fits WIRE_MAX bytes."""
+        k = min(len(text), WIRE_MAX)
+        while True:
+            size = len(self.sender.dumps({"out": text[:k], "stream": stream})) + 1  # (ASCII: escaped)
+            if size <= WIRE_MAX or k == 1:
+                return k
+            k = max(1, min(k - 1, k * (WIRE_MAX - 64) // size))
+
     def flush(self):
-        if self.pending:
-            data = "".join(self.buf)
-            self.buf, self.pending = [], 0
-            for i in range(0, len(data), CHUNK):
-                self.send({"out": data[i:i + CHUNK]})
+        while self.buf:
+            seg = self.buf[0]
+            stream, text = seg[0], "".join(seg[1])
+            seg[1] = [text]
+            k = self._piece(stream, text)
+            piece = text[:k]
+
+            def committed(seg=seg, text=text, k=k, piece=piece):
+                # (the chunk leaves the buffer only now that its line is written)
+                if k == len(text):
+                    self.buf.pop(0)
+                else:
+                    seg[1] = [text[k:]]
+                self.pending -= len(piece.encode("utf-8", "surrogatepass"))
+
+            self.sender.send({"out": piece, "stream": stream}, committed)
 
     def text(self):
         tail = "".join(self.tail)[-REPLY_TAIL:]
@@ -120,11 +192,36 @@ class _Capture:
             return self.head + tail
         return self.head + "\n[... %d characters not shown here: the run's output file keeps more ...]\n" % dropped + tail
 
+
+class _Stream:
+    """sys.stdout or sys.stderr of a computation: its writes go to the
+    capture, with their stream."""
+
+    def __init__(self, capture, name):
+        self.capture, self.name = capture, name
+
+    def write(self, text):
+        return self.capture.write(text, self.name)
+
+    def flush(self):
+        pass
+
     def isatty(self):
         return False
 
     def writable(self):
         return True
+
+
+def _send_until_committed(sender, msg):
+    """A message that must reach the parent once (the reply): sent again
+    after an interrupt only if it wasn't written."""
+    done = []
+    while not done:
+        try:
+            sender.send(msg, lambda: done.append(True))
+        except KeyboardInterrupt:
+            continue
 
 
 def _worker():
@@ -154,22 +251,10 @@ def _worker():
     builtins.__pyjs_display__ = display
     from sagebrush.preparse import preparse
 
-    def send(msg):
-        # (one whole line, never cut by a Ctrl-C: SIGINT waits while it is written)
-        data = json.dumps(msg) + "\n"
-        blocked = hasattr(signal, "pthread_sigmask")
-        if blocked:
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
-        try:
-            proto.write(data)
-            proto.flush()
-        finally:
-            if blocked:
-                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
-
+    sender = _Sender(proto)
     shared = {"__name__": "__main__"}
     exec("from sagebrush.sage import *", shared)
-    send({"ready": True})
+    _send_until_committed(sender, {"ready": True})
     inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     while True:
         try:
@@ -185,12 +270,12 @@ def _worker():
         if isolated:
             ns = {"__name__": "__main__"}
             exec("from sagebrush.sage import *", ns)
-        out = _Capture(send)
+        out = _Capture(sender)
         del displays[:]
         result = error = info = data = None
         t0 = time.perf_counter()
         try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            with contextlib.redirect_stdout(out.stream("stdout")), contextlib.redirect_stderr(out.stream("stderr")):
                 src = preparse(code) if mode == "sage" else code
                 tree = ast.parse(src, "<cell>", "exec")
                 last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
@@ -211,20 +296,16 @@ def _worker():
         except BaseException as e:  # SystemExit too: the session survives
             error = _format_exception(e, e.__traceback__)
             info = _error_info(e, e.__traceback__)
+        # (what is left of the output, then the reply: each written once)
         while True:
             try:
                 out.flush()
                 break
             except KeyboardInterrupt:
                 continue
-        reply = {"stdout": out.text(), "stdout_chars": out.total, "result": result, "error": error, "error_info": info, "data": data if info is None else None,
-                 "displays": list(displays), "seconds": time.perf_counter() - t0}
-        while True:
-            try:
-                send(reply)
-                break
-            except KeyboardInterrupt:
-                continue
+        reply = {"stdout": out.text(), "stdout_chars": out.total, "output_bytes": dict(out.bytes), "result": result, "error": error, "error_info": info,
+                 "data": data if info is None else None, "displays": list(displays), "seconds": time.perf_counter() - t0}
+        _send_until_committed(sender, reply)
 
 
 class Session:
