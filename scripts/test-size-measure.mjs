@@ -4,11 +4,11 @@
 // the normalization.  No build: synthetic records and files.
 //   node scripts/test-size-measure.mjs
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  countAssignments, epochHash, evaluate, gateInputs, jcs, measureFiles, parseMarker, recordProblems, resetGroups, safeSum, strictParse, testedTransition, NEUTRAL_WIDTH,
+  budgetsProblems, countAssignments, epochHash, evaluate, gateInputs, jcs, measureFiles, overCap, parseMarker, recordProblems, resetGroups, safeSum, strictParse, testedTransition, LIMITS, MAX_DEPTH, NEUTRAL_WIDTH,
 } from "./size-measure.mjs";
 
 let passed = 0, failures = 0;
@@ -373,6 +373,91 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ---- CORR-GATE95-2 (#95 review): a max change must be a raise
+{
+  const t = (oldMax, newMax) => transition({ n: S(100000, 5000, 100), m: S(100000, 5000, 110), B: budgets({ max: newMax }), baseB: budgets({ max: oldMax }) });
+  fails("an exact bundle 100 → 110 while max is lowered 200 → 150 (a transition)", t(200, 150), /may not grow/);
+  fails("an exact bundle 100 → 110 with max unchanged at 200", t(200, 200), /may not grow/);
+  passes("an exact bundle 100 → 110 with max raised 100 → 150", t(100, 150));
+  const rg = (oldMax, newMax) => evaluate({ mode: "range", merge: { record: rec(MERGE, S(100000, 5000, 110)), budgets: budgets({ max: newMax }), markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, S(100000, 5000, 100)), budgets: budgets({ max: oldMax }), declaredKey: KEY }, markerDiff: [], range: { k: 2, epochChanged: false } });
+  fails("an exact bundle 100 → 110 while max is lowered 200 → 150 (a range)", rg(200, 150), /over the range/);
+  passes("an exact bundle 100 → 110 with max raised 100 → 150 (a range)", rg(100, 150));
+  // through a reset's map: the group's new maxima must sum above the old
+  const exBase = budgets({ sizes: { "engine/w.js": 5000 }, max: 200 });
+  const ren = (newMax) => {
+    const b = budgets({ sizes: { "engine/w.js": 5000 } });
+    delete b.bundles["cli/packages.gen.js"];
+    b.bundles["cli/pkgs.gen.js"] = { exact: true, max: newMax };
+    return b;
+  };
+  const eO = { "engine/w.js": 5000, "cli/packages.gen.js": 100 }, eM = { "engine/w.js": 5000, "cli/pkgs.gen.js": 110 };
+  fails("an exact rename that grows while its max is lowered 200 → 150", resetCase({ O: eO, N: eO, M: eM, baseB: exBase, B: ren(150), map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }), /raise of max/);
+  passes("an exact rename that grows with its max raised 200 → 250", resetCase({ O: eO, N: eO, M: eM, baseB: exBase, B: ren(250), map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }));
+}
+// ---- CORR-GATE95-3: the strict parser keeps every key as an own property
+{
+  const refused = (text, re) => { try { strictParse(text); return false; } catch (e) { return re.test(e.message); } };
+  check("strictParse: duplicate __proto__ refused (top level)", refused('{"__proto__":{},"__proto__":{}}', /duplicate/));
+  check("strictParse: duplicate __proto__ refused (nested)", refused('{"a":{"b":{"__proto__":1,"__proto__":2}}}', /duplicate/));
+  const o = strictParse('{"__proto__":{"x":1}}');
+  check("strictParse: __proto__ is an own data property, not the prototype", Object.hasOwn(o, "__proto__") && Object.getPrototypeOf(o) === null && o.x === undefined);
+  check("a record naming a bundle __proto__ is a bundle budgets.json doesn't list", evaluate({ mode: "absolute", merge: { record: (() => { const r = rec(MERGE, S(100000)); r.sizes = JSON.parse('{"__proto__":1,' + JSON.stringify(r.sizes).slice(1)); r.bundles = Object.keys(r.sizes).sort(); return r; })(), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }).problems.some((p) => /measured but not listed: __proto__/.test(p)));
+  check("strictParse: Object.prototype is untouched", ({}).x === undefined);
+  check("a marker with an extra __proto__ field is refused", parseMarker('{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1},"__proto__":{"extra":1}}', budgets()).problems.some((p) => /exactly/.test(p)));
+  check("a marker's bytes with a __proto__ key are refused", parseMarker('{"v":1,"reason":"x","bytes":{"__proto__":1}}', budgets()).problems.length > 0);
+  const bud = clone(budgets());
+  const text = JSON.stringify(bud).replace('"toolchain":', '"__proto__":{"a":1},"toolchain":');
+  check("budgets.json with a __proto__ key is refused", budgetsProblems(strictParse(text)).some((p) => /unknown key __proto__/.test(p)));
+  check(`strictParse: nesting at ${MAX_DEPTH} admitted`, (() => { try { strictParse("[".repeat(MAX_DEPTH) + "]".repeat(MAX_DEPTH)); return true; } catch { return false; } })());
+  check(`strictParse: nesting at ${MAX_DEPTH + 1} refused`, refused("[".repeat(MAX_DEPTH + 1) + "]".repeat(MAX_DEPTH + 1), /nesting/));
+}
+// ---- LIMIT-GATE95-2: hard caps before parsing
+{
+  check("overCap: at the cap", overCap("x", 10, 10) === null);
+  check("overCap: one over", overCap("x", 11, 10) !== null);
+  const pad = (n) => {
+    const base = marker({ "cli/pyjs.cjs": 1 }, "");
+    const t = marker({ "cli/pyjs.cjs": 1 }, "r".repeat(n - base.length));
+    return t;
+  };
+  check("a marker of exactly marker_bytes is admitted", pad(LIMITS.marker_bytes).length === LIMITS.marker_bytes && parseMarker(pad(LIMITS.marker_bytes), budgets()).problems.every((p) => !/cap/.test(p)));
+  check("a marker of marker_bytes + 1 is refused before parsing", parseMarker(pad(LIMITS.marker_bytes + 1), budgets()).problems.some((p) => /over the cap/.test(p)));
+  check("a reason of string_chars is admitted", parseMarker(marker({ "cli/pyjs.cjs": 1 }, "r".repeat(LIMITS.string_chars)), budgets()).problems.length === 0);
+  check("a reason of string_chars + 1 is refused", parseMarker(marker({ "cli/pyjs.cjs": 1 }, "r".repeat(LIMITS.string_chars + 1)), budgets()).problems.some((p) => /reason is over/.test(p)));
+  const many = (n) => Array.from({ length: n }, (_, i) => ({ path: `.growth/m${i}.json`, text: marker({ "cli/pyjs.cjs": 1 }) }));
+  const withMarkers = (ms) => evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100000)), budgets: budgets(), markers: ms }, declaredNode: "24.21.0" });
+  check("markers: exactly the cap is admitted", !withMarkers(many(LIMITS.markers)).problems.some((p) => /over the cap/.test(p)));
+  fails("markers: one over the cap", withMarkers(many(LIMITS.markers + 1)), /over the cap of 256/);
+  const big = Array.from({ length: 70 }, (_, i) => ({ path: `.growth/b${i}.json`, text: marker({ "cli/pyjs.cjs": 1 }, "r".repeat(1000)) + " ".repeat(3800 - 1000) }));
+  fails("markers: their total over markers_total_bytes", withMarkers(big), /in all/);
+  const b2 = budgets();
+  for (let i = 0; i < LIMITS.entries; i++) b2.bundles[`engine/x${i}.js`] = ne(10), (b2.epoch.sizes[`engine/x${i}.js`] = 1);
+  check("budgets.json: more than the entry cap refused", budgetsProblems(b2).some((p) => /more than 1024 bundles/.test(p)));
+  const r2 = rec(BASE, S(1));
+  r2.bundles = Array.from({ length: LIMITS.entries + 1 }, (_, i) => `b${i}`);
+  check("a record with more than the entry cap refused", recordProblems(r2, BASE).some((p) => /more than 1024/.test(p)));
+  const lgBad = evaluate({ mode: "transition", merge: { record: rec(MERGE, S(100000, 5000, 300)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, S(100000, 5000, 300)), budgets: null, declaredKey: KEY }, legacy: { measured: { "cli/pyjs.cjs": "100000" }, recorded: null }, markerDiff: [] });
+  fails("the cross-check's legacy input must be safe integers", lgBad, /non-negative safe integers/);
+}
+// ---- LIMIT-GATE95-1 and CORR-GATE95-1: the workflow's bounds and inputs
+{
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const job = (name) => {
+    const start = ci.indexOf(`\n  ${name}:\n`);
+    const rest = ci.slice(start + 1);
+    const end = rest.slice(1).search(/\n  [a-z][a-z0-9-]*:\n/);
+    return end < 0 ? rest : rest.slice(0, end + 1);
+  };
+  const sb = job("size-base");
+  const outer = Number(/\n    timeout-minutes: (\d+)/.exec(sb)?.[1]);
+  const steps = [...sb.matchAll(/\n        timeout-minutes: (\d+)/g)].map((m) => Number(m[1]));
+  const OVERHEAD = 15;
+  check(`size-base: the outer timeout ${outer} covers every sequential step (${steps.join(" + ")}) + ${OVERHEAD} of overhead`, outer >= safeSum(steps) + OVERHEAD && steps.length >= 4, `${outer} < ${safeSum(steps)} + ${OVERHEAD}`);
+  check("size-base: its mode is a job output", /outputs:\n      mode: \$\{\{ steps\.resolve\.outputs\.mode \}\}/.test(sb));
+  const sg = job("size-gate");
+  check("size-gate: an absolute run doesn't download base records", /name: size-base-\$\{\{ github\.sha \}\}/.test(sg) && /needs\.size-base\.outputs\.mode != 'absolute'/.test(sg));
 }
 
 console.log(`test-size-measure: ${passed} passed, ${failures} failed`);

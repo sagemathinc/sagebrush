@@ -206,10 +206,15 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (the worst sequential path, resolve 2 + install 5 + build 8 + the
+    # old-key base 10 = 25, plus 15 for checkout, setup, records, cleanup and
+    # upload: scripts/test-size-measure.mjs checks this sum)
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -306,8 +311,9 @@ jobs:
         with:
           name: sizes-${{ github.sha }}
           path: ${{ runner.temp }}/size-merge
+      # (an absolute run, schedule, dispatch or a first push, has no base, so no base records)
       - uses: actions/download-artifact@v4
-        if: needs.checks.result == 'success' && needs.size-base.result == 'success'
+        if: needs.checks.result == 'success' && needs.size-base.result == 'success' && needs.size-base.outputs.mode != 'absolute'
         with:
           name: size-base-${{ github.sha }}
           path: ${{ runner.temp }}/size-records

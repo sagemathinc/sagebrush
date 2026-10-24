@@ -20,7 +20,7 @@
 // It reads builds; it builds nothing.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -34,8 +34,27 @@ export const BUDGETS_FORMAT = "sagebrush-budgets";
 // Strict JSON: duplicate keys refused, and numbers only as integer literals
 // (no "1.0", "1e3", "1.5"); budgets and markers hold no other kind (r5 §1.4).
 
+export const MAX_DEPTH = 16;
+// Hard caps on the gate's inputs, checked before anything is read in full or
+// parsed (LIMIT-GATE95-2): a record, budgets.json and a marker by bytes; the
+// markers by count and total bytes; and, inside them, strings and collections.
+// (Input-envelope limits, versioned with this file; not size thresholds,
+// which budgets.json owns.)
+export const LIMITS = {
+  record_bytes: 256 * 1024,
+  budgets_bytes: 256 * 1024,
+  legacy_bytes: 256 * 1024,
+  marker_bytes: 4096,
+  markers: 256,
+  markers_total_bytes: 256 * 1024,
+  string_chars: 1024,
+  entries: 1024,
+};
+// why `bytes` of `what` can't be admitted under `cap`, or null
+export const overCap = (what, bytes, cap) => (Number.isSafeInteger(bytes) && bytes >= 0 && bytes <= cap ? null : `${what}: ${bytes} bytes, over the cap of ${cap} (size-measure.mjs LIMITS): refused before parsing`);
+const longString = (s) => typeof s === "string" && s.length > LIMITS.string_chars;
 export function strictParse(text) {
-  let i = 0;
+  let i = 0, depth = 0;
   const fail = (what) => {
     throw new Error(`${what} at offset ${i}`);
   };
@@ -45,11 +64,12 @@ export function strictParse(text) {
   const value = () => {
     ws();
     const c = text[i];
+    if (c === "{" || c === "[") if (++depth > MAX_DEPTH) fail(`nesting deeper than ${MAX_DEPTH}`);
     if (c === "{") {
       i++;
-      const out = {};
+      const out = Object.create(null);
       ws();
-      if (text[i] === "}") return i++, out;
+      if (text[i] === "}") return depth--, i++, out;
       for (;;) {
         ws();
         if (text[i] !== '"') fail("expected a string key");
@@ -57,10 +77,11 @@ export function strictParse(text) {
         if (Object.hasOwn(out, k)) fail(`duplicate key ${JSON.stringify(k)}`);
         ws();
         if (text[i++] !== ":") fail("expected ':'");
-        out[k] = value();
+        // (an own data property, whatever the name: "__proto__" is kept, never the prototype)
+        Object.defineProperty(out, k, { value: value(), enumerable: true, writable: true, configurable: true });
         ws();
         if (text[i] === ",") i++;
-        else if (text[i] === "}") return i++, out;
+        else if (text[i] === "}") return depth--, i++, out;
         else fail("expected ',' or '}'");
       }
     }
@@ -68,12 +89,12 @@ export function strictParse(text) {
       i++;
       const out = [];
       ws();
-      if (text[i] === "]") return i++, out;
+      if (text[i] === "]") return depth--, i++, out;
       for (;;) {
         out.push(value());
         ws();
         if (text[i] === ",") i++;
-        else if (text[i] === "]") return i++, out;
+        else if (text[i] === "]") return depth--, i++, out;
         else fail("expected ',' or ']'");
       }
     }
@@ -108,6 +129,16 @@ export function jcs(v) {
   if (Array.isArray(v)) return "[" + v.map(jcs).join(",") + "]";
   const keys = Object.keys(v).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return "{" + keys.map((k) => JSON.stringify(k) + ":" + jcs(v[k])).join(",") + "}";
+}
+// A deep copy with null-prototype objects: a key such as "__proto__" or
+// "constructor" is then only ever an own property, never something inherited
+// (CORR-GATE95-3).  The rules look names up in these copies only.
+export function bare(v) {
+  if (Array.isArray(v)) return v.map(bare);
+  if (v === null || typeof v !== "object") return v;
+  const out = Object.create(null);
+  for (const k of Object.keys(v)) out[k] = bare(v[k]);
+  return out;
 }
 export const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 export const epochHash = (epoch) => sha256(jcs(epoch));
@@ -256,6 +287,7 @@ export function recordProblems(rec, commit) {
   if (commit !== undefined && rec.commit !== commit) p.push(`commit ${rec.commit}, not ${commit}`);
   if (!rec.key || typeof rec.key.measure_sha256 !== "string" || typeof rec.key.bun !== "string" || typeof rec.key.node !== "string") p.push("no comparability key");
   if (!Array.isArray(rec.bundles) || !rec.sizes || typeof rec.sizes !== "object") return [...p, "no bundles or sizes"];
+  if (rec.bundles.length > LIMITS.entries || rec.bundles.some(longString)) return [...p, `more than ${LIMITS.entries} bundles, or a name over ${LIMITS.string_chars} characters`];
   const listed = [...rec.bundles].sort(), keys = Object.keys(rec.sizes).sort();
   if (new Set(listed).size !== listed.length) p.push("a bundle is listed twice");
   if (jcs(listed) !== jcs(keys)) p.push("sizes don't have exactly the listed bundles");
@@ -275,6 +307,9 @@ export function budgetsProblems(b) {
   if (b.format !== BUDGETS_FORMAT || b.v !== 1) p.push(`budgets.json: format ${b.format} v${b.v}, not ${BUDGETS_FORMAT} v1`);
   if (!b.toolchain || !nonEmpty(b.toolchain.bun) || Object.keys(b.toolchain).length !== 1) p.push("budgets.json: toolchain must be {bun}");
   if (!b.bundles || typeof b.bundles !== "object" || !Object.keys(b.bundles).length) return [...p, "budgets.json: no bundles"];
+  if (Object.keys(b.bundles).length > LIMITS.entries) return [...p, `budgets.json: more than ${LIMITS.entries} bundles`];
+  for (const k of Object.keys(b.bundles)) if (longString(k)) return [...p, `budgets.json: a bundle name over ${LIMITS.string_chars} characters`];
+  if (longString(b.note) || longString(b.toolchain?.bun)) p.push(`budgets.json: a string over ${LIMITS.string_chars} characters`);
   for (const [k, e] of Object.entries(b.bundles)) {
     if (!e || typeof e !== "object") {
       p.push(`${k}: not an object`);
@@ -305,6 +340,9 @@ function resetShapeProblems(r) {
   if (!r || typeof r !== "object" || Array.isArray(r)) return ["epoch.reset must be null or an object"];
   if (jcs(Object.keys(r).sort()) !== jcs([...RESET_KEYS].sort())) p.push(`epoch.reset has exactly {${RESET_KEYS.join(", ")}}`);
   if (!nonEmpty(r.reason)) p.push("epoch.reset.reason is empty");
+  else if (longString(r.reason)) p.push(`epoch.reset.reason is over ${LIMITS.string_chars} characters`);
+  for (const f of ["map", "added", "removed"]) if (Array.isArray(r[f]) && r[f].length > LIMITS.entries) p.push(`epoch.reset.${f} has more than ${LIMITS.entries} entries`);
+  if (r.growth && typeof r.growth === "object" && Object.keys(r.growth).length > LIMITS.entries) p.push(`epoch.reset.growth has more than ${LIMITS.entries} entries`);
   if (typeof r.prev !== "string" || !/^[0-9a-f]{64}$/.test(r.prev)) p.push("epoch.reset.prev must be a sha256");
   if (!r.growth || typeof r.growth !== "object" || Array.isArray(r.growth)) p.push("epoch.reset.growth must be an object");
   else for (const [g, v] of Object.entries(r.growth)) if (!isPos(v)) p.push(`epoch.reset.growth.${g}: ${v} is not a positive safe integer`);
@@ -318,7 +356,10 @@ function resetShapeProblems(r) {
 }
 
 // A marker's {bytes}, or its problems (r5 §1.4)
-export function parseMarker(text, budgets) {
+export function parseMarker(text, budgetsIn) {
+  const budgets = bare(budgetsIn);
+  const over = overCap("the marker", Buffer.byteLength(text ?? ""), LIMITS.marker_bytes);
+  if (over) return { problems: [over] };
   let m;
   try {
     m = strictParse(text);
@@ -330,6 +371,7 @@ export function parseMarker(text, budgets) {
   if (jcs(Object.keys(m).sort()) !== jcs(["bytes", "reason", "v"])) p.push("a marker has exactly {v, reason, bytes}");
   if (m.v !== 1) p.push("v must be 1");
   if (!nonEmpty(m.reason)) p.push("the reason is empty");
+  else if (longString(m.reason)) p.push(`the reason is over ${LIMITS.string_chars} characters`);
   if (!m.bytes || typeof m.bytes !== "object" || Array.isArray(m.bytes) || !Object.keys(m.bytes).length) p.push("bytes must name at least one bundle");
   else
     for (const [k, v] of Object.entries(m.bytes)) {
@@ -359,7 +401,8 @@ const fmt = (n) => (n > 0 ? `+${n}` : String(n));
  * leaks: the optional-name scan's findings
  * range: {k, epochChanged}: rule 6's inputs
  */
-export function evaluate(input) {
+export function evaluate(inputIn) {
+  const input = bare(inputIn);
   const problems = [], notes = [], rows = [];
   const { mode, merge } = input;
   const B = merge.budgets;
@@ -378,6 +421,10 @@ export function evaluate(input) {
   for (const l of input.leaks ?? []) problems.push(`optional package in the core: ${l}`);
 
   // markers in the merge's tree: all must be well formed; their sum is the ledger's
+  if (merge.markers.length > LIMITS.markers) return { ok: false, problems: [...problems, `.growth/ has ${merge.markers.length} markers, over the cap of ${LIMITS.markers}`], notes, rows };
+  const total = safeSum(merge.markers.map((m) => Buffer.byteLength(m.text ?? "")));
+  const overTotal = overCap(".growth/ in all", total ?? -1, LIMITS.markers_total_bytes);
+  if (overTotal) return { ok: false, problems: [...problems, overTotal], notes, rows };
   const markers = new Map();
   for (const { path, text } of merge.markers) {
     const r = parseMarker(text, B);
@@ -432,7 +479,8 @@ export function evaluate(input) {
       const delta = M.sizes[k] - N.sizes[k];
       rows.push({ bundle: k, base: N.sizes[k], merge: M.sizes[k], delta });
       if (e.exact) {
-        const raised = base.budgets?.bundles?.[k]?.exact && base.budgets.bundles[k].max !== e.max;
+        const old = base.budgets?.bundles?.[k];
+        const raised = old?.exact === true && e.max > old.max;
         if (delta > 0 && !raised) problems.push(`${k}: ${fmt(delta)} over the range (an exact bundle, rule 1)`);
       } else {
         const allowed = safeSum([markerSum(added, k) ?? NaN, transitions * e.noise_bytes]);
@@ -480,8 +528,9 @@ export function evaluate(input) {
     const row = { bundle: k, base: N.sizes[k], merge: m, delta };
     rows.push(row);
     if (e.exact) {
-      const prevMax = base.budgets.bundles[k]?.max;
-      if (delta > 0 && prevMax === e.max) problems.push(`${k}: ${fmt(delta)}: an exact bundle may not grow without a reviewed raise of its max (rule 1)`);
+      const old = base.budgets.bundles[k];
+      const raised = old?.exact === true && e.max > old.max;
+      if (delta > 0 && !raised) problems.push(`${k}: ${fmt(delta)}: an exact bundle may not grow without a reviewed raise of its max (rule 1)`);
       continue;
     }
     const s = markerSum(added, k);
@@ -510,7 +559,9 @@ function bootstrap(input, { problems, notes, rows, M, N, B, added, markerSum }) 
   for (const k of N.bundles) if (!B.bundles[k]) problems.push(`${k}: measured in the base but not in budgets.json`);
   // the cross-check: this measurement agrees with size-budget.mjs's on the same build, but for the neutralization
   const lg = input.legacy;
+  const sizesOk = (o) => !!o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).length <= LIMITS.entries && Object.values(o).every(isNat);
   if (!lg?.measured) problems.push("the bootstrap needs the base measured by its own size-budget.mjs (the cross-check)");
+  else if (!sizesOk(lg.measured) || (lg.recorded !== null && !sizesOk(lg.recorded))) problems.push("the cross-check's legacy measurement or record isn't an object of non-negative safe integers");
   else {
     const keys = Object.keys(lg.measured).sort();
     if (jcs(keys) !== jcs([...N.bundles].sort())) problems.push("the cross-check: size-budget.mjs measured other bundles than size-measure.mjs");
@@ -542,7 +593,8 @@ function bootstrap(input, { problems, notes, rows, M, N, B, added, markerSum }) 
 }
 
 // The groups of an epoch reset: the old→new key identity (r5 §1.3 rule 5)
-export function resetGroups(oldBudgets, newBudgets, r) {
+export function resetGroups(oldIn, newIn, rIn) {
+  const oldBudgets = bare(oldIn), newBudgets = bare(newIn), r = bare(rIn);
   const problems = [];
   const oldKeys = Object.keys(oldBudgets.bundles), newKeys = Object.keys(newBudgets.bundles);
   const seenOld = new Map(), seenNew = new Map();
@@ -618,7 +670,9 @@ function reset(input, { problems, notes, rows, M, N, B, prev, keyChanged }) {
     const row = { bundle: g.name, old: Og, base: Ng, merge: Mg, delta: dI, toolchain: dT };
     rows.push(row);
     if (g.exact) {
-      const raised = g.new.some((k) => base.budgets.bundles[k]?.max !== B.bundles[k].max);
+      // (a raise through the map: the group's new maxima sum above its old ones)
+      const oldMax = safeSum(g.old.map((k) => base.budgets.bundles[k].max)), newMax = safeSum(g.new.map((k) => B.bundles[k].max));
+      const raised = oldMax !== null && newMax !== null && newMax > oldMax;
       if ((dT > 0 || dI > 0) && !raised) problems.push(`group ${g.name}: exact, but ΔT ${fmt(dT)}, ΔI ${fmt(dI)} without a reviewed raise of max (rule 1)`);
       continue;
     }
@@ -704,8 +758,16 @@ export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_N
 }
 
 const show = (commit, path) => gitOr(null, "show", `${commit}:${path}`);
+// a blob's text, after checking its size against `cap` (null: no such blob)
+function blobAt(commit, path, cap) {
+  const size = gitOr(null, "cat-file", "-s", `${commit}:${path}`);
+  if (size === null) return null;
+  const over = overCap(`${path} at ${commit.slice(0, 12)}`, Number(size), cap);
+  if (over) throw new Error(over);
+  return show(commit, path);
+}
 function budgetsAt(commit) {
-  const t = show(commit, "budgets.json");
+  const t = blobAt(commit, "budgets.json", LIMITS.budgets_bytes);
   return t === null ? null : strictParse(t);
 }
 function declaredKeyAt(commit) {
@@ -718,9 +780,23 @@ function declaredKeyAt(commit) {
     measure_sha256: m === null ? null : sha256(execFileSync("git", ["cat-file", "blob", `${commit}:scripts/size-measure.mjs`], { cwd: root })),
   };
 }
+// every marker of a commit, after checking their count and sizes (LIMITS)
 function markersAt(commit) {
-  const ls = gitOr("", "ls-tree", "-r", "--name-only", commit, "--", ".growth/");
-  return ls ? ls.split("\n").filter(Boolean).map((path) => ({ path, text: show(commit, path) })) : [];
+  const ls = gitOr("", "ls-tree", "-r", "-l", commit, "--", ".growth/");
+  const entries = ls.split("\n").filter(Boolean).map((l) => {
+    const [meta, path] = l.split("\t");
+    return { path, size: Number(meta.trim().split(/\s+/)[3]) };
+  });
+  if (entries.length > LIMITS.markers) throw new Error(`.growth/ at ${commit.slice(0, 12)} has ${entries.length} markers, over the cap of ${LIMITS.markers}`);
+  let total = 0;
+  for (const e of entries) {
+    const over = overCap(e.path, e.size, LIMITS.marker_bytes);
+    if (over) throw new Error(over);
+    total += e.size;
+  }
+  const overTotal = overCap(`.growth/ at ${commit.slice(0, 12)} in all`, total, LIMITS.markers_total_bytes);
+  if (overTotal) throw new Error(overTotal);
+  return entries.map(({ path }) => ({ path, text: show(commit, path) }));
 }
 
 function epochChangedInRange(before, after) {
@@ -735,9 +811,13 @@ function epochChangedInRange(before, after) {
   return false;
 }
 
+// a downloaded record (or legacy.json), after checking its size
 function readRecord(dir, name) {
   const f = join(dir, name);
-  return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
+  if (!existsSync(f)) return null;
+  const over = overCap(name, statSync(f).size, name === "legacy.json" ? LIMITS.legacy_bytes : LIMITS.record_bytes);
+  if (over) throw new Error(over);
+  return JSON.parse(readFileSync(f, "utf8"));
 }
 
 function summary(lines) {
@@ -839,20 +919,24 @@ function fetchPushRecord(sha, into) {
     rmSync(into, { recursive: true, force: true });
     const d = gh("run", "download", String(run.id), "-R", REPO, "-n", `sizes-${sha}`, "-D", into);
     if (d.status !== 0) continue;
-    const f = join(into, "sizes.json");
-    if (!existsSync(f)) continue;
     let rec;
     try {
-      rec = JSON.parse(readFileSync(f, "utf8"));
-    } catch {
+      rec = readRecord(into, "sizes.json");
+    } catch (e) {
+      console.log(`run ${run.id}'s record isn't usable: ${e.message}`);
       continue;
     }
+    if (!rec) continue;
     const p = recordProblems(rec, sha);
     if (p.length) {
       console.log(`run ${run.id}'s record isn't usable: ${p.join("; ")}`);
       continue;
     }
-    if (rec.event !== "push" || String(rec.run?.id) !== String(run.id)) continue;
+    // (bound to its producer: this run, this attempt, the checks job, and the commit's own tree)
+    if (rec.event !== "push" || String(rec.run?.id) !== String(run.id) || String(rec.run?.attempt) !== String(run.run_attempt) || rec.run?.job !== "checks" || rec.tree !== gitOr(null, "rev-parse", `${sha}^{tree}`)) {
+      console.log(`run ${run.id}'s record doesn't name its producer (run, attempt, job, tree): not used`);
+      continue;
+    }
     return rec;
   }
   return null;
@@ -902,7 +986,11 @@ async function gateInputsAndEvaluate(recDir) {
   // that job's success)
   const input = {
     mode: t.mode,
-    merge: { record: M, budgets: strictParse(readFileSync(join(root, "budgets.json"), "utf8")), markers: markersAt("HEAD") },
+    merge: { record: M, budgets: (() => {
+      const over = overCap("budgets.json", statSync(join(root, "budgets.json")).size, LIMITS.budgets_bytes);
+      if (over) throw new Error(over);
+      return strictParse(readFileSync(join(root, "budgets.json"), "utf8"));
+    })(), markers: markersAt("HEAD") },
     declaredNode: declaredKeyAt("HEAD").node,
   };
   if (t.mode !== "absolute") {
