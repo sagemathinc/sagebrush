@@ -174,6 +174,9 @@ type Conn = {
   rebuildRunning?: boolean;
   /** (D11) a large move's view stopped, stable (failed, or late before its plan's publication): pages held, why said */
   largeHalt?: string;
+  /** (r5, CORR-D11-R4-1) a pull or an ops run asked for while the announce was pending: run once it is settled */
+  deferPull?: boolean;
+  deferOps?: boolean;
   /** what the server holds, what it doesn't, and what can't go up, by hash (this connection's) */
   have: Set<string>;
   missing: Set<string>;
@@ -213,7 +216,7 @@ export class SyncClient {
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -588,10 +591,39 @@ export class SyncClient {
     this.kick();
   }
 
+  /** (r5, CORR-D11-R4-1) Whether the rebuild's announce is pending on `c`: then nothing else is sent on it until it is
+   * answered (its answer or refusal handled: settle()). */
+  private announcing(c: Conn) {
+    for (const p of c.pending.values()) if (p.kind === "rebuilt") return true;
+    return false;
+  }
+  private defer(c: Conn, what: "pull" | "ops") {
+    if (what === "pull") c.deferPull = true;
+    else c.deferOps = true;
+    this.stats.deferred++;
+  }
+  /** The announce settled (answered, refused, or its handling threw): what waited for it runs, once. */
+  private settle(c: Conn) {
+    const pull = c.deferPull, ops = c.deferOps;
+    c.deferPull = c.deferOps = false;
+    if (this.conn !== c || this.announcing(c)) return;
+    if (pull) {
+      this.stats.resumed++;
+      this.pull(c);
+    }
+    if (ops) {
+      this.stats.resumed++;
+      this.kick();
+    }
+  }
+
   /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
    * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
     if (this.conn !== c || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
+    // (nothing else is sent on this connection while the announce is pending: the pull waits for its answer, its
+    // target and discovery kept (r5, CORR-D11-R4-1))
+    if (this.announcing(c)) return this.defer(c, "pull");
     // (a slice's pages read: the rest of the way after a rest, on this connection (daybreak3's question 2 on
     // LIMIT-PR58-3); at most CLIENT.replayPages pages, 64 MiB, a rest and a slice)
     if (c.pages >= CLIENT.replayPages) {
@@ -642,6 +674,7 @@ export class SyncClient {
         return await this.rebuiltAck(c, m);
       } finally {
         c.pending.delete(m.req);
+        this.settle(c);
       }
     }
     if (!p || p.kind !== "ops") return;
@@ -676,6 +709,7 @@ export class SyncClient {
       return await this.errorOf(c, m);
     } finally {
       c.pending.delete(m.req as number);
+      this.settle(c);
     }
   }
   private async errorOf(c: Conn, m: Record<string, unknown>) {
@@ -830,6 +864,7 @@ export class SyncClient {
     }
     for (;;) {
       if (this.conn !== c || c.resync || c.halted || !c.writable) return;
+      if (this.announcing(c)) return this.defer(c, "ops");
       const opsInFlight = [...c.pending.values()].filter((p) => p.kind === "ops").length;
       if (c.pending.size >= CLIENT.inflight) return;
       const recs = await this.undecided(c, c.next ?? 1, CLIENT.opsPerMessage);
@@ -856,6 +891,8 @@ export class SyncClient {
         this.wake(c, "pace", this.clock.now() + wait, () => this.kick());
         return;
       }
+      // (the run awaited since its check: the announce may be pending now (r5))
+      if (this.announcing(c)) return this.defer(c, "ops");
       this.stats.opsMessages++;
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
