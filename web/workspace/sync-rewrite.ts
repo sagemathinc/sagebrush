@@ -146,7 +146,8 @@ export type Mapping = {
    * identity; null: none) */
   want?: string;
   occ?: string | null;
-  /** (a plan's, r8 N8) the candidate `to` is (0: `want`, k: freePath's (k + 1)th name), and the claimant at `want`
+  /** (a plan's, r8 N8) the candidate `to` is (0: `want`, k: freePath's (k + 1)th name; -1: none, `want`'s folder not a
+   * folder after the plan, `to` where its top is carried, CORR-D11-IMPL-2), and the claimant at `want`
    * that decided it (null at 0): where it was found (carried) and its physical path, its identity or its mapping */
   t?: number;
   wit?: { map?: number; id?: string | null; at: string; src: string } | null;

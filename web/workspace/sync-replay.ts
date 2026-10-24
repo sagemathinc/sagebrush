@@ -62,8 +62,8 @@ export type Marker = {
   vi?: number;
   /** the sender's intent revision when the pass began */
   rev0?: number;
-  /** the tops a plan put beside an occupant that stays, at a free `name (k)`: [identity, path, its view's path]
-   * (at publication) */
+  /** the tops a plan put beside an occupant that stays, at a free `name (k)`, or left where they are carried (their
+   * view's folder not a folder, no-folder): [identity, path, its view's path] (at publication) */
   settled?: [string, string, string?][];
   /** placement's deferred ranges (debts recorded, r4 §4's skip) */
   deferred?: string[];
@@ -77,8 +77,9 @@ export type Marker = {
   /** (r8 N7) rows moved by sweep 1: directly (D, once) and to staging (S, then again): the sweeps' bound is
    * 300 s × (D + 2S) / (D + S) */
   moved?: { D: number; S: number };
-  /** (r8 N8) the settled closure's figures: its rounds, items, requests and rows, and one item's most requests and rows */
-  closure?: { rounds: number; items: number; requests: number; rows: number; maxReq: number; maxRows: number };
+  /** (r8 N8) the settled closure's figures: its rounds, items, requests and rows (every metered read), one item's most
+   * requests and rows, one transaction's, and the items that waited for the next transaction */
+  closure?: { rounds: number; items: number; requests: number; rows: number; maxReq: number; maxRows: number; txReq: number; txRows: number; waits: number };
   /** sweep 2's next mapping (the ones before it drained: a staging range isn't refilled once sweep 2 begins) */
   s2?: number;
   /** placement's pages so far: identities, ops logged, paths listed, debts (the fixtures' figures) */
@@ -94,6 +95,9 @@ export class ReplayHalted extends Error {}
 export const REPLAY = {
   cut: null as null | ((at: string, m: Marker) => void),
   before: null as null | ((phase: string, m: Marker) => Promise<void>),
+  /** (tests) called where a closure or validation transaction's metered reads begin and end (no other read of it
+   * between) */
+  reads: null as null | ((at: "begin" | "end", phase: "close" | "validate") => void),
   /** (tests) as a new page would: the failed replays' one more try available again */
   reload: () => { retried.clear(); validating.clear(); },
 };
@@ -200,15 +204,22 @@ function newMapping(maps: Mapping[], e: Entry, v: SyncEntry, large: boolean, now
   };
 }
 
-/** (its folder there after the plan: there now and not moving away, or brought by a mapping) */
+/** (CORR-D11-IMPL-2) Whether `p`'s folder is a folder after the plan: brought by the mapping whose target holds it
+ * most specifically (that mapping's top, or the row it carries there from its source), else the row there now if
+ * nothing moves it away. */
 async function folderAfter(st: IDBObjectStore, maps: Mapping[], p: string): Promise<boolean> {
   const pf = parentOf(p);
   if (pf === "/" || pf === TRASH) return true;
-  const there = !!(await req(st.get(pf))) && !srcOwner(maps, pf);
-  return there || maps.some((m) => pf === m.to || pf.startsWith(m.to + "/"));
+  let by: Mapping | undefined;
+  for (const m of maps) if (holds(pf, m.to) && (!by || m.to.length > by.to.length)) by = m;
+  if (by && pf === by.to) return by.kind === "folder";
+  const at = by ? by.from + pf.slice(by.to.length) : pf;
+  if (by ? srcOwner(maps, at) !== by : !!srcOwner(maps, at)) return false;
+  return ((await req(st.get(at))) as Entry | undefined)?.kind === "folder";
 }
 
-/** One identity of the pass: a large lift planned, unless it is carried by a planned folder. */
+/** One identity of the pass: a large lift planned, unless it is carried by a planned folder.  (Whether its folder is
+ * there after the plan is the closure's: one that isn't stays where it is carried, CORR-D11-IMPL-2.) */
 async function planOne(ctx: PlanCtx, id: string) {
   if (ctx.planned.has(id)) return;
   const e = await ctx.V.entryOf(id);
@@ -219,7 +230,6 @@ async function planOne(ctx: PlanCtx, id: string) {
   const up = srcOwner(ctx.maps, parentOf(e.path));
   if (up && up.from !== e.path && (up.want ?? up.to) + e.path.slice(up.from.length) === v.e.path) return;
   if ((await countUnder(ctx.st, e.path)) <= D11.chunk) return;
-  if (!(await folderAfter(ctx.st, ctx.maps, v.e.path))) return;
   const m = newMapping(ctx.maps, e, v.e, true, ctx.now)!;
   ctx.maps.push(m);
   ctx.added.push(m);
@@ -229,11 +239,84 @@ async function planOne(ctx: PlanCtx, id: string) {
 // -- the closure (r8 N8 v3): every target settled against what is carried there, before validation
 
 /** An unpublished plan's closure state (its control row): the worklist (mapping indices), the round, whether this
- * round added a mapping or saw a name come free, and the counters of all its rounds. */
-type Queue = { path: string; round: number; queue: number[]; added: boolean; unsettled: boolean; items: number; requests: number; rows: number; maxReq?: number; maxRows?: number };
+ * round added a mapping or saw a name come free, and the counters of all its rounds (every request and row its
+ * transactions' metered reads made, an item that waited for the next transaction included). */
+type Queue = { path: string; round: number; queue: number[]; added: boolean; unsettled: boolean; items: number; requests: number; rows: number; maxReq?: number; maxRows?: number; txReq?: number; txRows?: number; waits?: number };
 /** A claimant of a key: another mapping's top (by its target), or a row carried there (`at`). */
 type Claimant = { map: number } | { row: Entry; at: string };
-type Counts = { req: number; rows: number };
+
+// (LIMIT-D11-IMPL-1/2) The closure's and validation's reads, metered at the IndexedDB boundary: every request they
+// make, theirs and their viewer's, goes through a Meter's stores, each admitted before it is made against what is
+// left of the transaction's D11.requests and D11.page and of the plan's closureRequests and closureRows; no read
+// materializes more rows than are left (one that could is made for what is left, then counted: more is over).
+
+/** A read the budget doesn't admit, not made: `tx`, the transaction's budget (the item waits for the next one); else
+ * the plan's. */
+class Over extends Error {
+  constructor(readonly tx: boolean) {
+    super(tx ? "over the transaction's reads" : "over the plan's reads");
+  }
+}
+/** A request answered by `p`, as `req` waits on one (its onsuccess and result, or its onerror and error). */
+function answered<T>(p: Promise<T>): IDBRequest<T> {
+  const r = { result: undefined as T | undefined, error: null as unknown, onsuccess: null as null | (() => void), onerror: null as null | (() => void) };
+  p.then((v) => { r.result = v; r.onsuccess?.(); }, (e) => { r.error = e; r.onerror?.(); });
+  return r as unknown as IDBRequest<T>;
+}
+type Query = IDBValidKey | IDBKeyRange | null | undefined;
+class Meter {
+  /** requests made and rows read, in this transaction */
+  req = 0;
+  rows = 0;
+  constructor(private txReq: number, private txRows: number, private allReq = Infinity, private allRows = Infinity) {}
+  private admit() {
+    if (this.req + 1 > this.allReq) throw new Over(false);
+    if (this.req + 1 > this.txReq) throw new Over(true);
+    this.req++;
+  }
+  /** a read of at most `max` rows (`get`: one row or none) */
+  private async read(t: IDBObjectStore | IDBIndex, how: "get" | "getAll" | "getAllKeys", q: Query, max: number): Promise<unknown> {
+    const a = this.txRows - this.rows, b = this.allRows - this.rows, left = Math.min(a, b), tx = a < b;
+    const take = Math.min(max, left);
+    let got: unknown = how === "get" ? undefined : [], n = 0;
+    if (take > 0) {
+      this.admit();
+      got = await req(how === "get" ? t.get(q as IDBValidKey) : t[how](q, take === Infinity ? undefined : take));
+      n = how === "get" ? (got === undefined ? 0 : 1) : (got as unknown[]).length;
+      this.rows += n;
+      if (take === max || n < take) return got;
+    }
+    // (as many rows as are left read: whether there are more, counted (a request, no row))
+    this.admit();
+    if (Math.min((await req(t.count(q ?? undefined))) as number, max) > n) throw new Over(tx);
+    return got;
+  }
+  private wrap<T extends IDBObjectStore | IDBIndex>(s: T): T {
+    const self = this;
+    return new Proxy(s, {
+      get(t, k) {
+        if (k === "get") return (q: Query) => answered(self.read(t, "get", q, 1));
+        if (k === "getAll" || k === "getAllKeys") return (q?: Query, n?: number) => answered(self.read(t, k, q, n ? n : Infinity));
+        if (k === "count" || k === "getKey") return (q?: Query) => answered((async () => { self.admit(); return req((k === "count" ? t.count(q ?? undefined) : t.getKey(q as IDBValidKey)) as IDBRequest<unknown>); })());
+        if (k === "index") return (name: string) => self.wrap((t as IDBObjectStore).index(name));
+        if (k === "openCursor" || k === "openKeyCursor") return () => { throw new Error(`sync: a metered read can't ${k}`); };
+        const v = Reflect.get(t, k, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    }) as T;
+  }
+  /** `tx` with its stores' reads metered (its writes as they are) */
+  tx(tx: IDBTransaction): IDBTransaction {
+    const self = this;
+    return new Proxy(tx, {
+      get(t, k) {
+        if (k === "objectStore") return (name: string) => self.wrap(t.objectStore(name));
+        const v = Reflect.get(t, k, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    }) as IDBTransaction;
+  }
+}
 
 const holds = (F: string, t: string) => F === t || F.startsWith(t + "/");
 /** nkeyOf, remembered (the closure asks for the same targets' keys many times; at most 20,000 kept) */
@@ -247,17 +330,30 @@ const nk = (p: string) => {
   return v;
 };
 const depth = (p: string) => p.split("/").length;
+/** A mapping whose view's folder isn't a folder after the plan (CORR-D11-IMPL-2): `t` -1, its top staying where it
+ * is carried, listed no-folder (applyView's outcome for a move whose folder isn't there). */
+const NO_FOLDER = -1;
+const noFolder = (m: Mapping) => m.t === NO_FOLDER;
 /** Precedence among mappings claiming one key: the first view in confirmed key order, then by identity. */
 const before = (a: Mapping, b: Mapping) => {
   const x = keyOf(a.want ?? a.to), y = keyOf(b.want ?? b.to);
   if (x !== y) return x < y;
   return (a.top ?? "") !== (b.top ?? "") ? (a.top ?? "") < (b.top ?? "") : a.i < b.i;
 };
+/** Whether `a`'s claim beats `b`'s: a top staying where it is carried (no-folder) can go nowhere else. */
+const beats = (a: Mapping, b: Mapping) => noFolder(a) || before(a, b);
 /** Candidate `c` of `m`'s target: its view's path, then freePath's names beside it. */
 function candidate(m: Mapping, c: number): string {
   if (c === 0) return m.want ?? m.to;
   const [b, ext] = splitExt(nameOf(m.want!));
   return join(parentOf(m.want!), `${b} (${c + 1})${ext}`);
+}
+/** Where `m`'s top is carried if it doesn't move on its own: by the mapping whose source holds its source most
+ * specifically, else where it is. */
+function carried(maps: Mapping[], m: Mapping): string {
+  let up: Mapping | undefined;
+  for (const x of maps) if (x !== m && m.from.startsWith(x.from + "/") && (!up || x.from.length > up.from.length)) up = x;
+  return up ? up.to + m.from.slice(up.from.length) : m.from;
 }
 function destIndex(maps: Mapping[]): Map<string, number[]> {
   const d = new Map<string, number[]>();
@@ -267,10 +363,8 @@ function destIndex(maps: Mapping[]): Map<string, number[]> {
 
 /** A lookalike group, whole (r8 N8 v3: every name of one NFC form in one folder, legacy groups included), or the
  * stable failure if it has more than D11.lookalikes rows: a truncated group is never an answer. */
-async function group(st: IDBObjectStore, key: string, n: Counts): Promise<Entry[]> {
+async function group(st: IDBObjectStore, key: string): Promise<Entry[]> {
   const rows = (await req(st.index("byNfc").getAll(IDBKeyRange.only(key), D11.lookalikes + 1))) as Entry[];
-  n.req++;
-  n.rows += rows.length;
   if (rows.length > D11.lookalikes) throw new Cap(`more than ${D11.lookalikes} names that look the same as "${key.slice(key.indexOf("\u0000") + 1)}" in one folder: reload to try again, or Delete my synced data`);
   return rows;
 }
@@ -278,11 +372,11 @@ async function group(st: IDBObjectStore, key: string, n: Counts): Promise<Entry[
 /** Who claims the key of `C` besides mapping `k` after the plan (N8 v3 §2): other mappings' tops by their targets,
  * rows no planned source owns (staying put), and rows each target holding C's folder (itself or an ancestor)
  * carries there from its source; ownership after the whole group is read, `k`'s own rows never. */
-async function claim(st: IDBObjectStore, maps: Mapping[], dest: Map<string, number[]>, C: string, k: number, n: Counts): Promise<Claimant[]> {
+async function claim(st: IDBObjectStore, maps: Mapping[], dest: Map<string, number[]>, C: string, k: number): Promise<Claimant[]> {
   const key = nk(C), F = parentOf(C), name = nameOf(C);
   const out: Claimant[] = [], seen = new Set<string>();
   for (const j of dest.get(key) ?? []) if (j !== k) out.push({ map: j });
-  for (const r of await group(st, key, n)) {
+  for (const r of await group(st, key)) {
     if (seen.has(r.path) || srcOwner(maps, r.path)) continue;
     seen.add(r.path);
     out.push({ row: r, at: r.path });
@@ -290,7 +384,7 @@ async function claim(st: IDBObjectStore, maps: Mapping[], dest: Map<string, numb
   for (const j of maps) {
     if (j.i === k || !holds(F, j.to)) continue;
     const P = j.from + F.slice(j.to.length);
-    for (const r of await group(st, nk(join(P, name)), n)) {
+    for (const r of await group(st, nk(join(P, name)))) {
       if (seen.has(r.path) || srcOwner(maps, r.path) !== j) continue;
       seen.add(r.path);
       out.push({ row: r, at: j.to + r.path.slice(j.from.length) });
@@ -300,35 +394,36 @@ async function claim(st: IDBObjectStore, maps: Mapping[], dest: Map<string, numb
 }
 
 /** Where `r`'s own view moves it, if it moves from `at` (where it is carried); undefined: it stays. */
-async function movesTo(V: Viewer, r: Entry, at: string, n: Counts): Promise<SyncEntry | undefined> {
+async function movesTo(V: Viewer, r: Entry, at: string): Promise<SyncEntry | undefined> {
   if (!r.ident) return undefined;
-  n.req++;
   const { v } = await V.viewOf(r.ident, r);
   return v.kind === "entry" && keyOf(v.e.path) !== keyOf(at) ? v.e : undefined;
 }
 
-type CloseCtx = { V: Viewer; st: IDBObjectStore; maps: Mapping[]; dest: Map<string, number[]>; now: number; n: Counts };
+type CloseCtx = { V: Viewer; st: IDBObjectStore; maps: Mapping[]; dest: Map<string, number[]>; now: number };
 type ItemResult = { added: Mapping[]; moved?: { from: string; to: string }; vacate: boolean };
 
 /** One item of the closure (N8 v3 §3): `k`'s first candidate with no winning claimant but itself; at its view's name,
- * a claimant whose own view moves it gets its mapping (an occupant, r5) and is no winner. */
+ * a claimant whose own view moves it gets its mapping (an occupant, r5) and is no winner.  A target whose folder
+ * isn't a folder after the plan has no candidate: its top stays where it is carried (CORR-D11-IMPL-2). */
 async function closeItem(c: CloseCtx, k: number): Promise<ItemResult> {
   const m = c.maps[k], added: Mapping[] = [];
+  if (!(await folderAfter(c.st, c.maps, m.want!))) return stays(c, k);
   let chosen = -1, wit: Mapping["wit"] = null;
   for (let t = 0; t < D11.freeNames && chosen < 0; t++) {
     const C = candidate(m, t);
     let win: Mapping["wit"] = null;
-    for (const x of await claim(c.st, c.maps, c.dest, C, k, c.n)) {
+    for (const x of await claim(c.st, c.maps, c.dest, C, k)) {
       if ("map" in x) {
         const j = c.maps[x.map];
-        if (before(j, m)) { win = { map: j.i, at: j.to, src: j.from }; break; }
+        if (beats(j, m)) { win = { map: j.i, at: j.to, src: j.from }; break; }
         continue;
       }
       const r = x.row;
       if (t === 0) {
-        const v = await movesTo(c.V, r, x.at, c.n);
+        const v = await movesTo(c.V, r, x.at);
         if (v && (await folderAfter(c.st, c.maps, v.path))) {
-          const large = r.kind === "folder" && (c.n.req++, (await countUnder(c.st, r.path)) > D11.chunk);
+          const large = r.kind === "folder" && (await countUnder(c.st, r.path)) > D11.chunk;
           const o = newMapping(c.maps, r, v, large, c.now)!;
           c.maps.push(o);
           c.dest.set(nk(o.to), [...(c.dest.get(nk(o.to)) ?? []), o.i]);
@@ -355,39 +450,59 @@ async function closeItem(c: CloseCtx, k: number): Promise<ItemResult> {
   c.dest = destIndex(c.maps);
   return { added, moved: { from, to }, vacate: false };
 }
+/** `k`'s top staying where it is carried (no-folder): nothing else may claim that place (a mapping there moves on:
+ * this one beats it; a row there, a lookalike in its own folder, is the stable failure). */
+async function stays(c: CloseCtx, k: number): Promise<ItemResult> {
+  const m = c.maps[k], to = carried(c.maps, m), from = m.to;
+  if ((await claim(c.st, c.maps, c.dest, to, k)).some((x) => !("map" in x) || noFolder(c.maps[x.map]))) throw new Cap(`${m.want}'s folder won't be a folder, and ${to} is taken: reload to try again, or Delete my synced data`);
+  m.t = NO_FOLDER;
+  m.wit = null;
+  m.occ = null;
+  if (to === from) return { added: [], vacate: false };
+  m.to = to;
+  c.dest = destIndex(c.maps);
+  return { added: [], moved: { from, to }, vacate: false };
+}
 
 /** The items a change makes due again (N8 v3 §3.3), from the mapping rows alone. */
 function affected(maps: Mapping[], k: number, r: ItemResult): number[] {
   const out = new Set<number>();
   const under = (p: string, t: string) => p === t || p.startsWith(t + "/");
+  // (a target's folder: the one its view names, where a change can make it a folder or not)
+  const folder = (j: Mapping) => parentOf(j.want ?? j.to);
   for (const a of r.added) {
     out.add(a.i);
-    for (const j of maps) if (j.i !== a.i && (under(j.to, a.to) || nk(j.to) === nk(a.to) || (j.wit && under(j.wit.src, a.from)))) out.add(j.i);
+    const was = carried(maps, a);
+    for (const j of maps) if (j.i !== a.i && (under(j.to, a.to) || nk(j.to) === nk(a.to) || (j.wit && under(j.wit.src, a.from)) || under(folder(j), a.to) || under(folder(j), was))) out.add(j.i);
   }
   if (r.moved) {
     const { from, to } = r.moved;
-    for (const j of maps) if (j.i !== k && (j.to.startsWith(from + "/") || j.to.startsWith(to + "/") || nk(j.to) === nk(to) || j.wit?.map === k)) out.add(j.i);
+    // (and what is under its target, where its folder is: whether that is a folder after the plan may change)
+    for (const j of maps) if (j.i !== k && (j.to.startsWith(from + "/") || j.to.startsWith(to + "/") || nk(j.to) === nk(to) || j.wit?.map === k || under(folder(j), from) || under(folder(j), to))) out.add(j.i);
   }
   return [...out];
 }
 
-/** The settled plan's check (validation, N8 v3 §6): source and view as planned; at its target no claimant but itself;
- * beside a claimant, the one that decided it (still staying) still at its view's name.  The same claimant query as
- * the closure's, over the final mappings. */
-async function checkOne(V: Viewer, st: IDBObjectStore, maps: Mapping[], dest: Map<string, number[]>, m: Mapping, n: Counts): Promise<string | undefined> {
+/** The settled plan's check (validation, N8 v3 §6): source and view as planned; its folder a folder after the plan
+ * (else it stays where it is carried); at its target no claimant but itself; beside a claimant, the one that decided
+ * it (still staying) still at its view's name.  The same claimant query as the closure's, over the final mappings. */
+async function checkOne(V: Viewer, st: IDBObjectStore, maps: Mapping[], dest: Map<string, number[]>, m: Mapping): Promise<string | undefined> {
   const e = m.top ? await V.entryOf(m.top) : undefined;
   if (!e || e.path !== m.from) return `${m.from} moved since it was planned`;
   const { v } = await V.viewOf(m.top!, e);
   if (v.kind !== "entry" || v.e.path !== m.want) return `${m.from}'s view changed since it was planned`;
-  if ((await claim(st, maps, dest, m.to, m.i, n)).length) return `what is at ${m.to} changed since it was planned`;
-  if (m.to === m.want) return undefined;
+  if (noFolder(m)) {
+    if (m.to !== carried(maps, m) || (await folderAfter(st, maps, m.want!))) return `the folder of ${m.want} changed since it was planned`;
+  } else if (!(await folderAfter(st, maps, m.to))) return `the folder of ${m.to} won't be a folder after the plan`;
+  if ((await claim(st, maps, dest, m.to, m.i)).length) return `what is at ${m.to} changed since it was planned`;
+  if (m.to === m.want || noFolder(m)) return undefined;
   const w = m.wit;
-  const at = w ? await claim(st, maps, dest, m.want!, m.i, n) : [];
-  const still = w && at.some((x) => ("map" in x ? x.map === w.map && before(maps[x.map], m) : w.map === undefined && x.row.path === w.src));
+  const at = w ? await claim(st, maps, dest, m.want!, m.i) : [];
+  const still = w && at.some((x) => ("map" in x ? x.map === w.map && beats(maps[x.map], m) : w.map === undefined && x.row.path === w.src));
   if (!still) return `what is at ${m.want} changed since it was planned`;
   if (w!.map === undefined) {
     const r = at.find((x) => !("map" in x) && x.row.path === w!.src) as { row: Entry; at: string };
-    if (await movesTo(V, r.row, r.at, n)) return `what is at ${m.want} changed since it was planned`;
+    if (await movesTo(V, r.row, r.at)) return `what is at ${m.want} changed since it was planned`;
   }
   return undefined;
 }
@@ -589,8 +704,19 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       if (!q) throw new Cap("sync's plan for a large move lost its closure: reload to try again");
       const { maps: rows } = await recordOf(tx);
       const maps = rows.map((x) => ({ ...x }));
-      const V = await viewer({ w, tx, ns, store: idbStore(tx, m.gen), cap });
-      const c: CloseCtx = { V, st, maps, dest: destIndex(maps), now: Date.now(), n: { req: 0, rows: 0 } };
+      // (its reads metered (LIMIT-D11-IMPL-1/2): this transaction's D11.requests and D11.page, and what is left of the
+      // plan's closureRequests and closureRows, each request admitted before it is made)
+      const M = new Meter(D11.requests, D11.page, D11.closureRequests - q.requests, D11.closureRows - q.rows), mt = M.tx(tx);
+      const over = (e: Over) => new Cap(e.tx ? `sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows for one name: reload to try again, or Delete my synced data` : `sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data`);
+      REPLAY.reads?.("begin", "close");
+      let V: Viewer;
+      try {
+        V = await viewer({ w, tx: mt, ns, store: idbStore(mt, m.gen), cap });
+      } catch (e) {
+        if (e instanceof Over) throw over(e);
+        throw e;
+      }
+      const c: CloseCtx = { V, st: mt.objectStore("entries"), maps, dest: destIndex(maps), now: Date.now() };
       const dirty = new Set<number>();
       const prio = (i: number) => [depth(maps[i].to), nk(maps[i].to)] as const;
       const order = (a: number, b: number) => {
@@ -603,21 +729,25 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
         const k = q.queue[0];
         // (a cap is a maximum: the item that would exceed it fails the plan, stable (N8 v3 §5))
         if (q.items + 1 > D11.closureItems) throw new Cap(`sync's plan for a large move needs more than ${D11.closureItems} checks: reload to try again, or Delete my synced data`);
-        const len = maps.length, was = { to: maps[k].to, t: maps[k].t, wit: maps[k].wit, occ: maps[k].occ }, n0 = { ...c.n };
-        const r = await closeItem(c, k);
-        if (c.n.req > D11.requests || c.n.rows > D11.page) {
-          if (!done) throw new Cap(`sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows for one name: reload to try again, or Delete my synced data`);
-          // (this item in the next transaction: what it did here undone)
+        const len = maps.length, was = { to: maps[k].to, t: maps[k].t, wit: maps[k].wit, occ: maps[k].occ }, r0 = M.req, w0 = M.rows;
+        let r: ItemResult;
+        try {
+          r = await closeItem(c, k);
+        } catch (e) {
+          if (!(e instanceof Over)) throw e;
+          // (a read the budget doesn't admit isn't made: past the plan's, or one item's own past the transaction's, the
+          // plan fails, stable; else this item waits for the next transaction, what it did here undone (what it read,
+          // within the budget, counted))
+          if (!e.tx || !done) throw over(e);
           maps.length = len;
           Object.assign(maps[k], was);
           c.dest = destIndex(maps);
-          c.n = n0;
+          q.waits = (q.waits ?? 0) + 1;
           break;
         }
-        if (q.requests + c.n.req > D11.closureRequests || q.rows + c.n.rows > D11.closureRows) throw new Cap(`sync's plan for a large move needs more than ${D11.closureRequests} requests or ${D11.closureRows} rows: reload to try again, or Delete my synced data`);
         q.queue.shift();
-        q.maxReq = Math.max(q.maxReq ?? 0, c.n.req - n0.req);
-        q.maxRows = Math.max(q.maxRows ?? 0, c.n.rows - n0.rows);
+        q.maxReq = Math.max(q.maxReq ?? 0, M.req - r0);
+        q.maxRows = Math.max(q.maxRows ?? 0, M.rows - w0);
         for (const j of affected(maps, k, r)) if (!q.queue.includes(j)) q.queue.push(j);
         q.items++;
         if (r.added.length) q.added = true;
@@ -626,8 +756,11 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
         for (const a of r.added) dirty.add(a.i);
         done++;
       }
-      q.requests += c.n.req;
-      q.rows += c.n.rows;
+      REPLAY.reads?.("end", "close");
+      q.requests += M.req;
+      q.rows += M.rows;
+      q.txReq = Math.max(q.txReq ?? 0, M.req);
+      q.txRows = Math.max(q.txRows ?? 0, M.rows);
       REPLAY.cut?.("close", m);
       const next: Marker = { ...m };
       if (!q.queue.length) {
@@ -643,7 +776,7 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
         } else {
           // (settled: validation of the final plan next)
           REPLAY.cut?.("close-settled", m);
-          Object.assign(next, { phase: "validate", vi: 0, closure: { rounds: q.round, items: q.items, requests: q.requests, rows: q.rows, maxReq: q.maxReq ?? 0, maxRows: q.maxRows ?? 0 } });
+          Object.assign(next, { phase: "validate", vi: 0, closure: { rounds: q.round, items: q.items, requests: q.requests, rows: q.rows, maxReq: q.maxReq ?? 0, maxRows: q.maxRows ?? 0, txReq: q.txReq ?? 0, txRows: q.txRows ?? 0, waits: q.waits ?? 0 } });
         }
       }
       // (the closure's state, durable with what it changed: its mappings (fenced from here), the worklist, the counters)
@@ -664,18 +797,37 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       FENCE_READ.add(tx);
       const { rec, maps } = await recordOf(tx);
       if (!rec || rec.rid !== rid) throw new Cap("sync's plan for a large move was taken over: reload to try again");
-      const V = await viewer({ w, tx, ns, store: idbStore(tx, m.gen), cap });
+      // (its reads metered as the closure's (LIMIT-D11-IMPL-1/2): this transaction's D11.requests and D11.page; tops past
+      // them wait for the next transaction, one top's own past them is the stable failure)
+      const M = new Meter(D11.requests, D11.page), mt = M.tx(tx), ms = mt.objectStore("entries");
+      const over = () => new Cap(`sync's plan for a large move needs more than ${D11.requests} requests or ${D11.page} rows to check one name: reload to try again, or Delete my synced data`);
       const vi = m.vi ?? 0;
-      const pix = prefixIndex(maps), dest = destIndex(maps), n: Counts = { req: 0, rows: 0 };
+      const pix = prefixIndex(maps), dest = destIndex(maps);
+      REPLAY.reads?.("begin", "validate");
+      let V: Viewer, done = 0;
+      try {
+        V = await viewer({ w, tx: mt, ns, store: idbStore(mt, m.gen), cap });
+      } catch (e) {
+        throw e instanceof Over ? over() : e;
+      }
       for (const x of maps.slice(vi, vi + D11.validatePage)) {
-        const why = await checkOne(V, st, maps, dest, x, n);
+        let why: string | undefined;
+        try {
+          why = await checkOne(V, ms, maps, dest, x);
+        } catch (e) {
+          if (!(e instanceof Over)) throw e;
+          if (!done) throw over();
+          break;
+        }
         if (why) throw new Cap(`sync's plan for a large move no longer holds (${why}): reload to try again`);
         // (its class, persisted with it, never recomputed from partly drained sources (r8 N7))
         st.put({ path: mapKey(rid, x.i), ...x, direct: directOf(maps, x, pix) });
+        done++;
       }
+      REPLAY.reads?.("end", "validate");
       REPLAY.cut?.("validate", m);
-      if (vi + D11.validatePage < maps.length) {
-        meta.put({ ...m, vi: vi + D11.validatePage }, markerKey(ns));
+      if (vi + done < maps.length) {
+        meta.put({ ...m, vi: vi + done }, markerKey(ns));
         return "more";
       }
       // (the publication (r6 §2): the sender's intent revision unchanged since the pass began, else a fault: stable)
@@ -772,17 +924,17 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
         for (const row of rows) {
           const rest = row.path.slice(stage.length), L = x.to + rest;
           const n: Entry = { ...row, path: L, nkey: nkeyOf(L), ...(row.kind === "file" && row.ref !== null ? { ref: L } : {}) };
-          if (rest === "") {
+          // (a top staying where it is carried (no-folder) is no move of its own: its fields as they were, no op)
+          const own = rest === "" && !noFolder(x);
+          if (own) {
             if (x.updated !== undefined) n.updated = x.updated;
             if (x.trashed) n.trashed = { ...x.trashed };
             else if (x.trashed === null) delete n.trashed;
           }
           await req(st.add(n));
-          if (rest === "") {
-            // (its one server op, with its row: exactly once, never with a staging path (r8 N3))
-            await w.logServer(tx, ops, { op: x.op ?? "rename", path: x.was ?? x.from, to: L, kind: n.kind }, n);
-            if (x.to !== x.want) listed.push([L, "conflict"]);
-          }
+          // (its one server op, with its row: exactly once, never with a staging path (r8 N3))
+          if (own) await w.logServer(tx, ops, { op: x.op ?? "rename", path: x.was ?? x.from, to: L, kind: n.kind }, n);
+          if (rest === "" && x.to !== x.want) listed.push([L, noFolder(x) ? "no-folder" : "conflict"]);
           await breathe();
         }
         moved += rows.length;
@@ -851,9 +1003,14 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
     const { rows, pos, done } = await walk(tx, m, m.pos, D11.planPage, inDeferred);
     const t1 = Date.now();
     const settled = new Map((m.settled ?? []).map(([id, p]) => [id, p]));
-    // (what is in such a top: its view under the top's view path, where the top is (applyView's lift carries it so))
-    const beside = (m.settled ?? []).filter((x) => x[2]).sort((a, b) => b[2]!.length - a[2]!.length) as [string, string, string][];
-    const translate = (p: string) => { for (const [, to, want] of beside) if (p.startsWith(want + "/")) return to + p.slice(want.length); return undefined; };
+    // (what such a top carries (CORR-D11-IMPL-1): an entry under it whose view is where the top's view would carry it
+    // stays where the top is (applyView's lift carries it so); by the nearest such top, as applyView's nearest moved
+    // folder; any other view is its own move, as in one transaction)
+    const beside = (m.settled ?? []).filter((x) => x[2]).sort((a, b) => b[1].length - a[1].length) as [string, string, string][];
+    const translate = (p: string, at: string) => {
+      for (const [, to, want] of beside) if (at.startsWith(to + "/")) return want + at.slice(to.length) === p ? at : undefined;
+      return undefined;
+    };
     const debts: { id: string }[] = [];
     const v = rows.length ? await applyView({
       w, tx, ns, store: idbStore(tx, m.gen), cap, prefetch: { ids: rows.map((x) => x.id), prefix: m.gen, rows: confirmedRows(rows) },
