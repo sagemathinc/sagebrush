@@ -959,13 +959,13 @@ class FFVector:
 
     def __eq__(self, o):
         # (through coercion, as Sage: the common parent's images, _coerced_eq;
-        # a Sage vector, also a list, goes there first (CORR-EQ89-1), and a
-        # plain list or tuple is compared entry by entry, as before)
+        # a Sage vector, also a list, goes there first (CORR-EQ89-1); a list
+        # or tuple, of any subclass, is not a vector and is unequal, as in Sage)
         r = _coerced_eq(self, o)
         if r is not NotImplemented:
             return r
         if isinstance(o, (list, tuple)):
-            return len(o) == len(self._e) and all(a == b for a, b in zip(self._e, o))
+            return False
         return NotImplemented
 
     def __ne__(self, o):
