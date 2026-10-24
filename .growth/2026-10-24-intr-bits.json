@@ -1,0 +1,14 @@
+{
+ "v": 1,
+ "reason": "INTR[0]'s named bits (#129): the compiled loop check tests bit 0 (if (INTR[0] & 1) interrupted();), four bytes at each loop in the precompiled chunks; consumers clear bit 0 with Atomics.and, producers set it with Atomics.or (requestCtrlC, consumeCtrlC)",
+ "bytes": {
+  "cli/pyjs.cjs": 315,
+  "engine/lib/core.pre": 1544,
+  "engine/lib/magma.pre": 2872,
+  "engine/lib/matlab.pre": 6400,
+  "engine/lib/pkg-scipy-io.pre": 76,
+  "engine/lib/sage.pre": 21772,
+  "engine/lib/sci.pre": 1720,
+  "engine/sagebrush-worker.js": 49
+ }
+}
