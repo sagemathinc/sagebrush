@@ -542,7 +542,7 @@ class Store:
 
     def slot_take(self, slot, ceiling):
         """Under the store lock: the session slot `slot` of this server
-        (taken now, or already held), or a SlotRefused.  Every live session
+        (taken now: True; already held: False), or a SlotRefused.  Every live session
         of every server sharing the store holds one, idle or not; a run of
         another owner in the active index without a slot (an unknown run)
         holds one too.  An idle slot is reclaimed only when its owner has
@@ -557,26 +557,37 @@ class Store:
                 o = e.get("owner") or {}
                 if o.get("nonce") not in busy and self._owner_gone(o):
                     del slots[k]
-            if slot not in slots:
+            new = slot not in slots
+            if new:
                 holders = {(e.get("owner") or {}).get("nonce") for e in slots.values()}
                 unslotted = sorted(h for h, e in idx.items() if (e.get("owner") or {}).get("nonce") not in holders and not self.mine(e))
                 used = len(slots) + len(unslotted)
                 if used >= ceiling:
                     raise SlotRefused(used, ceiling, sorted(slots), unslotted)
                 slots[slot] = {"owner": dict(self.owner, host=_HOST), "since": time.time()}
-            if slots == before:
-                return
-            data = json.dumps(slots, separators=(",", ":")).encode()
-            self.admit(self.physical(len(data)), "meta")
-            _write_atomic(self._slots_path(), data)
+            if slots != before:
+                self._write_slots(slots)
+            return new
+
+    def _write_slots(self, slots):
+        """slots.json replaced, admitted for its whole temporary file and
+        charged by its change, as every other file (daybreak2
+        PR120-FIX3-1)."""
+        data = json.dumps(slots, separators=(",", ":")).encode()
+        p = self._slots_path()
+        self.admit(self.physical(len(data)), "meta")
+        before = _charge(p)
+        _write_atomic(p, data)
+        t = self._total()
+        if t is not None:
+            self._set_total(max(0, t - before + _charge(p)))
 
     def slot_release(self, slot):
         with self.lock:
             slots = self.slots()
             if slots.pop(slot, None) is not None:
                 try:
-                    self.admit(self.physical(len(json.dumps(slots))), "meta")
-                    _write_atomic(self._slots_path(), json.dumps(slots, separators=(",", ":")).encode())
+                    self._write_slots(slots)
                 except (OSError, StorageError):
                     pass  # (left: reclaimed once this server has exited)
 
