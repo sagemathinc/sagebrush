@@ -167,7 +167,13 @@ class Runner:
                 # the store lock: another server's admission sees this run)
                 with self.store.lock:
                     took = self._admit(name)
-                    handle = self.store.new_handle()
+                    try:
+                        handle = self.store.new_handle()
+                    except OSError as e:
+                        # (no run, no session: a slot taken for it goes back, daybreak2 PR120-FIX4-1)
+                        if took and sess is None:
+                            self.store.slot_release(self._slot(name))
+                        raise Refused("storage", "the run couldn't be recorded: %s" % e)
                     self.seq[name] = self.seq.get(name, 0) + 1
                     rec = R.new_record(self.store, handle, "code", mode, {"id": name, "generation": None}, self.seq[name], started_by, label, now=self.clock())
                     rec["code_sha256"] = key[3]
