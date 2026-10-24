@@ -165,6 +165,32 @@ test("the engine's frames: copied in its import, nested under the caller, ended 
   }
 });
 
+test("a failing copy is caught: it never replaces a result or an exception, and turns progress off once", () => {
+  const bad = new Proxy(new Uint32Array(P.FRAME_WORDS), {
+    get(t, k) {
+      if (k === "1") throw new Error("a broken reader");
+      return k === "0" ? 1 : (t as any)[k];
+    },
+  }) as unknown as Uint32Array;
+  const errors: unknown[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void errors.push(a.join(" "));
+  try {
+    P.setCopyInterval(0);
+    assert.doesNotThrow(() => P.syncFrames(bad));
+    assert.doesNotThrow(() => P.syncFrames(bad));
+    const c = P.begin(1); // progress is off: nothing written, nothing raised
+    assert.deepEqual(P.snapshot(), []);
+    c.end();
+  } finally {
+    console.error = orig;
+    P.setCopyInterval(250);
+  }
+  assert.equal(errors.length, 1, "logged once");
+  assert.match(String(errors[0]), /progress reporting is off for this session \(Error: a broken reader\)/);
+  assert.equal(P.resetForTests(), true);
+});
+
 test("a reader racing a full-rate writer never sees a torn count (the seqlock retries)", async () => {
   const buf = new Int32Array(new SharedArrayBuffer(4 * (P.SLOTS * P.WORDS + 1)));
   const stop = new Int32Array(new SharedArrayBuffer(4));
