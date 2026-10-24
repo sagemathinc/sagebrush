@@ -414,7 +414,10 @@ export function syncFrames(area: Uint32Array | null) {
   if (!area || failed) return;
   try {
     if (area[0] !== 1) return;
-    const epoch = area[1], now = Date.now();
+    const epoch = area[1];
+    // (the common case: no frame began or ended, and none is running; no clock read)
+    if (epoch === lastEpoch && area[2] === 0) return;
+    const now = Date.now();
     if (epoch === lastEpoch && now - lastCopy < COPY_EVERY_MS) return;
     lastEpoch = epoch;
     lastCopy = now;
