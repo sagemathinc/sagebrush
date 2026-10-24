@@ -96,26 +96,30 @@ from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_
                               plot_vector_field, plot_slope_field)
 
 
-def show(obj, **options):
+def show(obj, *more, **options):
     """Show a picture (2D or 3D), or typeset anything else with LaTeX (in
-    the notebook and Jupyter; its text form elsewhere): one display.
+    the notebook and Jupyter; its text form elsewhere): one display, of
+    every argument (separated by spaces, as Sage's show(a, b) prints them).
 
     EXAMPLES::
 
         sage: show(x^2 + 1)  # random
         sage: show(EllipticCurve([1, -1, 0, -79, 289]))
         Elliptic Curve defined by y^2 + x*y = x^3 - x^2 - 79*x + 289 over Rational Field
+        sage: show(1, 2/3)
+        1 2/3
     """
-    if isinstance(obj, Graphics3d):
-        return obj.show(**options)
-    if isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)):
-        return _show2d(obj, **options)
-    # (a picture-like object without a LaTeX form, a graph or a polyhedron:
-    # its own rich display)
-    if not hasattr(obj, "_latex_") and any(hasattr(obj, m) for m in _RICH_DISPLAY):
-        return _show2d(obj, **options)
+    if not more:
+        if isinstance(obj, Graphics3d):
+            return obj.show(**options)
+        if isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)):
+            return _show2d(obj, **options)
+        # (a picture-like object without a LaTeX form, a graph or a
+        # polyhedron: its own rich display)
+        if not hasattr(obj, "_latex_") and any(hasattr(obj, m) for m in _RICH_DISPLAY):
+            return _show2d(obj, **options)
     from _sage_expr import show_typeset
-    return show_typeset(obj)
+    return show_typeset(obj, *more)
 
 
 _RICH_DISPLAY = ("_repr_svg_", "_repr_png_", "_repr_html_", "_repr_mimebundle_", "_ipython_display_")

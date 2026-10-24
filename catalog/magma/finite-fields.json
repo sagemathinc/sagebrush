@@ -474,5 +474,34 @@
     "tags": [
       "finite fields"
     ]
+  },
+  {
+    "name": "RootsInSplittingField",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> SeqEnum, FldFin",
+    "summary": "The roots of f, over a finite field, in its splitting field, with multiplicities (by their logs, 0 first), and the field.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(GF(5)); RootsInSplittingField(x^2 + 2);",
+        "expected": "[ <$.1^9, 1>, <$.1^21, 1> ]\nFinite field of size 5^2\n"
+      },
+      {
+        "code": "P<x> := PolynomialRing(GF(5)); RootsInSplittingField((x^2 + 2)*(x - 1)^3*(x + 1));",
+        "expected": "[ <1, 3>, <$.1^9, 1>, <4, 1>, <$.1^21, 1> ]\nFinite field of size 5^2\n"
+      }
+    ],
+    "differs": [
+      "Work is bounded (the factorization, then the roots, counted before each starts) and the splitting field has at most 2^20 elements: past these it is refused in words."
+    ],
+    "status": "partial",
+    "see_also": [
+      "Roots",
+      "Factorization"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "finite fields",
+      "polynomials"
+    ]
   }
 ]

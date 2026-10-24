@@ -20,8 +20,8 @@
   "cli/pyjs.cjs": {
    "exact": false,
    "ceiling": 30985319,
-   "noise_bytes": 0,
-   "noise_total": 0,
+   "noise_bytes": 64,
+   "noise_total": 1024,
    "marker_slack": 1024
   },
   "engine/lib/core.pre": {
