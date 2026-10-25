@@ -13,7 +13,12 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.set_outstanding(0);
     s.set_resident(0);
     s.chains = [(0, 0); CHAIN_SLOTS];
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        s.measure = Measure::NONE;
+    }
     drop(s);
+    hooks::set_fake_unreadable(false);
     hooks::set_fake_usage(Some((0, None)));
     set_total(Some(Total { bytes: total_bytes, status: TotalStatus::Observed, joint: false, uncertified: false }));
     g
@@ -279,4 +284,87 @@ fn a_physical_row_among_others_keeps_its_availability_check() {
     assert!(matches!(reserve("big", 700 * MIB), Err(EngineError::Memory(r)) if r.available.is_some()));
     let r = reserve("ok", 600 * MIB).unwrap();
     drop(r);
+}
+
+#[cfg(target_os = "linux")]
+fn fixture(dir: &std::path::Path, name: &str, text: &str) -> String {
+    let p = dir.join(name);
+    std::fs::write(&p, text).unwrap();
+    p.to_str().unwrap().to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("sb-ledger-{}-{}", tag, std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_measure_that_becomes_unreadable_uncertifies_and_refuses() {
+    // astra2's CORR-C2A-1 probe, on a real (cgroup-format) usage file: high
+    // usage refuses; the same opened file made non-numeric must neither
+    // certify nor admit (no residents-only fallback); a valid figure again
+    // recovers
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("unreadable");
+    let path = fixture(&d, "memory.current", "1000000\n");
+    let t = Some(Total { bytes: 1 << 20, status: TotalStatus::Observed, joint: true, uncertified: false });
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 20 }]);
+    assert!(certified());
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if r.measured), "high usage refuses");
+    // the source changes between the certification and the admission
+    std::fs::write(&path, "not a number\n").unwrap();
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if !r.measured), "an unreadable measure must refuse");
+    assert!(!certified(), "an unreadable measure must not certify");
+    assert_eq!(outstanding_bytes(), 0);
+    // recovery
+    std::fs::write(&path, "1000\n").unwrap();
+    assert!(certified());
+    let r = reserve("x", 1024).unwrap();
+    drop(r);
+    // one invalid source among good rows
+    let bad = fixture(&d, "bad.current", "abc\n");
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Physical, figure: 1 << 40 }, Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 20 }, Row { kind: MeasureKind::Cgroup(bad), figure: 1 << 20 }]);
+    assert!(!certified());
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if !r.measured));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn a_fake_unreadable_measure_fails_closed() {
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_unreadable(true);
+    assert!(!certified());
+    assert!(matches!(reserve("x", 8), Err(EngineError::Memory(r)) if !r.measured));
+    hooks::set_fake_unreadable(false);
+    assert!(reserve("x", 8).is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn any_number_of_rows_is_measured_no_cutoff() {
+    // daybreak2's LIMIT-C2A-1: no fixed row table.  16, 17 and a deep chain
+    // of 70 cgroup rows (as _cgroup_dirs can walk) plus the physical row are
+    // all certified, and every row is checked: one high row among 70 refuses
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("rows");
+    let t = Some(Total { bytes: 1 << 20, status: TotalStatus::Observed, joint: true, uncertified: false });
+    for n in [16usize, 17, 70] {
+        let mut rows: Vec<Row> = (0..n).map(|i| Row { kind: MeasureKind::Cgroup(fixture(&d, &format!("g{}", i), "1000\n")), figure: 1 << 20 }).collect();
+        rows.push(Row { kind: MeasureKind::Physical, figure: 1 << 40 });
+        set_total_and_measure(t, &rows);
+        assert!(certified(), "{} cgroup rows + physical must certify", n);
+        let mut seen = 0;
+        assert!(state().measure.read_each(|_| seen += 1));
+        assert_eq!(seen, n + 1, "every row read");
+        let r = reserve("x", 1024).unwrap();
+        drop(r);
+    }
+    std::fs::write(d.join("g42"), "1000000\n").unwrap();
+    assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if r.measured && r.live == 1000000), "the 43rd row refuses");
+    std::fs::remove_dir_all(&d).unwrap();
 }

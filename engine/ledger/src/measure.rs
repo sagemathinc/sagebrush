@@ -68,6 +68,11 @@ pub struct Measure {
     #[cfg(not(target_arch = "wasm32"))]
     cgroups: Vec<File>,
     rows: Vec<(Src, u64)>,
+    /// each check's readings, reused: allocated with one slot per row when
+    /// the rows are set (outside the ledger's lock), filled under it without
+    /// growing (no fixed row table, no cutoff on the number of rows:
+    /// daybreak2's LIMIT-C2A-1)
+    scratch: Vec<(u64, u64, Option<u64>)>,
     /// a row this build cannot measure (fail-closed)
     unmeasured: bool,
     /// no row at all (the nominal total)
@@ -79,6 +84,7 @@ impl Measure {
         #[cfg(not(target_arch = "wasm32"))]
         cgroups: Vec::new(),
         rows: Vec::new(),
+        scratch: Vec::new(),
         unmeasured: false,
         none: true,
     };
@@ -87,7 +93,7 @@ impl Measure {
     /// ledger's lock).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open(rows: &[Row]) -> Measure {
-        let mut m = Measure { cgroups: Vec::new(), rows: Vec::with_capacity(rows.len()), unmeasured: false, none: rows.is_empty() };
+        let mut m = Measure { cgroups: Vec::new(), rows: Vec::with_capacity(rows.len()), scratch: Vec::with_capacity(rows.len()), unmeasured: false, none: rows.is_empty() };
         let mut proc = false;
         for r in rows {
             let src = match &r.kind {
@@ -112,12 +118,15 @@ impl Measure {
             proc |= !matches!(src, Src::Cgroup(_));
             m.rows.push((src, r.figure));
         }
-        if (proc && !proc_files_ready()) || m.rows.len() > ROW_SLOTS {
+        if proc && !proc_files_ready() {
             m.unmeasured = true;
         }
         m
     }
 
+    /// Whether every row has a measure that OPENED (structure only: a
+    /// fresh read can still fail, so certification also needs
+    /// `read_each` to succeed: astra2's CORR-C2A-1).
     pub fn available(&self) -> bool {
         !self.none && !self.unmeasured
     }
@@ -128,8 +137,8 @@ impl Measure {
     /// gate): /proc/self/status is read once and its fields kept, then the
     /// buffer is reused for /proc/meminfo and each cgroup file.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn read_each(&self, mut f: impl FnMut(Reading)) -> bool {
-        if !self.available() || self.rows.len() > ROW_SLOTS {
+    pub fn read_each(&mut self, mut f: impl FnMut(Reading)) -> bool {
+        if !self.available() {
             return false;
         }
         let mut buf = [0u8; 8192];
@@ -145,9 +154,10 @@ impl Measure {
                 mem_available = kb_field(meminfo, b"MemAvailable:");
             }
         }
-        // (read everything first: a row unreadable midway measures nothing)
-        let mut out = [(0u64, 0u64, None::<u64>); ROW_SLOTS];
-        for (i, &(src, figure)) in self.rows.iter().enumerate() {
+        // (read everything first: a row unreadable midway measures nothing;
+        // the scratch has one slot per row, so it never grows here)
+        self.scratch.clear();
+        for &(src, figure) in self.rows.iter() {
             let r = match src {
                 Src::Cgroup(j) => pread(&self.cgroups[j], &mut buf).and_then(parse_uint).map(|u| (u, None)),
                 Src::AddressSpace => vm_size.map(|u| (u, None)),
@@ -155,17 +165,14 @@ impl Measure {
                 Src::Physical => anon.zip(mem_available).map(|(u, a)| (u, Some(a))),
             };
             let Some((usage, available)) = r else { return false };
-            out[i] = (figure, usage, available);
+            self.scratch.push((figure, usage, available));
         }
-        for &(figure, usage, available) in &out[..self.rows.len()] {
+        for &(figure, usage, available) in &self.scratch {
             f(Reading { figure, usage, available });
         }
         true
     }
 }
-
-/// The rows a check can read (more is unmeasured: fail-closed).
-pub const ROW_SLOTS: usize = 16;
 
 #[cfg(not(target_arch = "wasm32"))]
 static PROC: std::sync::OnceLock<Option<(File, File)>> = std::sync::OnceLock::new();
