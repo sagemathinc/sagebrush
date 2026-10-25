@@ -138,7 +138,24 @@ def test_settings():
             assert name in str(e), e
         else:
             raise AssertionError((name, bad))
-    assert R.session_ceiling(cpus=8, total=None) == 1  # (T unknown: one session)
+    # (T from D0's heap_figure: made up here, as the runner's own memory
+    # would make the figure the machine's; unknown, nothing readable, is the
+    # nominal total, and then one session)
+    from sagebrush import _capacity_module
+    C = _capacity_module()
+    d = tempfile.mkdtemp(prefix="sb-runs-")
+    try:
+        C._set_sources(root=d + "/nonexistent", rlimits={}, runtime=lambda: [])
+        assert R.session_ceiling(cpus=8, total=None) == 1  # (T unknown: one session)
+        os.makedirs(d + "/proc")
+        with open(d + "/proc/meminfo", "w") as f:
+            f.write("MemTotal:       %d kB\nMemAvailable:   %d kB\n" % (2 * R.GiB // 1024, R.GiB // 1024))
+        C._set_sources(root=d, rlimits={}, runtime=lambda: [])
+        assert R.session_ceiling(cpus=8, total=None) == 4  # (T = 2 GiB, D0's figure: 4 sessions)
+    finally:
+        C._set_sources()
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
     assert R.session_ceiling(cpus=8, total=2 * R.GiB) == 4 and R.session_ceiling(cpus=1, total=64 * R.GiB) == 2
     assert R.session_ceiling(cpus=4, total=100 * R.MiB) == 1
     print("settings: ok")
