@@ -1,1 +1,1 @@
-{"v":1,"reason":"task #14 (#128): each op's sync state (the ledger, syncState, waitSync, the verbs' collectors) in the CLI bundle's workspace code; size-gate's figure on 321c61ff (with the review fixes of rounds 1 to 6, master 744a55e2)","bytes":{"cli/pyjs.cjs":22824}}
+{"v":1,"reason":"task #14 (#128): each op's sync state (the ledger, syncState, waitSync, the verbs' collectors) in the CLI bundle's workspace code; size-gate's figure on f08a1a12 (with the review fixes of rounds 1 to 7, master 0ef9d178)","bytes":{"cli/pyjs.cjs":22928}}
