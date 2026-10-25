@@ -27,6 +27,7 @@ import type { Entry, Op, OpAfter, Version, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { bytesHash } from "../notebook/stores.js";
 import type { Release } from "./reserve";
+import { hubOf } from "./sync-ledger";
 
 export const PINS = {
   /** the cap on bytes pins keep of their own; less where the browser's quota is smaller: half its estimated
@@ -72,6 +73,8 @@ export type NsState = {
   held?: boolean;
   /** the current state to send once there is room, based on `base` (a held identity's, once its record was decided) */
   successor?: { base?: string };
+  /** (task #14) the newest held write's seq: its ledger row goes to the successor that carries it */
+  heldSeq?: number;
 };
 /** `latest.movedAt`: the seq of the identity's last op that placed it (made, moved, put in Trash or out, removed for
  * good).  Past the scan watermark, the view (C3) takes its placement from `after`; a write alone leaves the placement
@@ -336,13 +339,17 @@ async function releaseUnowned(tx: IDBTransaction, list: Pin[]) {
  * purge of every pin of an older epoch is recorded, which cleanPins does a page at a time.  The namespace's
  * own state is kept: re-enabling (switchTo the same namespace) resumes it. */
 export async function syncOff(w: Workspace): Promise<void> {
-  await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
+  const ended = await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
     const meta = tx.objectStore("meta");
     const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
-    if (!cur || cur.off) return;
+    if (!cur || cur.off) return null;
     metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true });
+    const fromEpoch = await epochOf(meta);
     await newEpoch(meta);
+    return { ns: cur.ns, fromEpoch };
   });
+  // (the waits of that epoch told it ended (task #14): by type, past their epoch filter)
+  if (ended) hubOf(w.ws).post({ t: "lifecycle", ns: ended.ns, fromEpoch: ended.fromEpoch, toEpoch: ended.fromEpoch + 1, kind: "off" });
   afterReleases(w);
 }
 /** The lifecycle epoch moved on (off, sign-out, a namespace switch), in `meta`'s transaction, and the purge of
