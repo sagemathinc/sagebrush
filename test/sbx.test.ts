@@ -26,13 +26,16 @@ function sbxDiagnostics(out: string, gcLog: string): string[] {
   const line = out.split("\n").find((l) => l.startsWith("SBXDIAG "));
   if (!line) return ["sbx diagnostics: no SBXDIAG line"];
   const d = JSON.parse(line.slice(8));
-  let gc: [number, number, number][] = [];
+  let log: { entries: [number, number, number][]; expected: number; complete: boolean };
   try {
-    gc = JSON.parse(readFileSync(gcLog, "utf8"));
+    log = JSON.parse(readFileSync(gcLog, "utf8"));
   } catch {
     return [`sbx ratio ${d.ratio.toFixed(1)} (${d.took_s.toFixed(2)} s over ${d.base_s.toFixed(3)} s); no GC log`];
   }
-  const lines = [`sbx ratio ${d.ratio.toFixed(1)} (${d.took_s.toFixed(2)} s over ${d.base_s.toFixed(3)} s); ${gc.length} GC entries in the run`];
+  const gc = log.entries;
+  // (an incomplete log says so: its windows' GC figures are then lower bounds)
+  const of = log.complete ? "" : ` (INCOMPLETE: ${gc.length} of ${log.expected} delivered)`;
+  const lines = [`sbx ratio ${d.ratio.toFixed(1)} (${d.took_s.toFixed(2)} s over ${d.base_s.toFixed(3)} s); ${gc.length} GC entries in the run${of}`];
   for (const w of d.windows) {
     let n = 0, ms = 0;
     for (const [start, dur] of gc) {
@@ -58,4 +61,18 @@ test("sbx between Python, Sage, Magma and MATLAB: each mode's values in every mo
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The bound's intervals are master's (daybreak2's MEAS-PR151-1): the nested
+// decode alone between its two process_time() calls, flat_decode_time()'s own
+// interval unchanged; the diagnostics' wall and CPU samples are taken outside
+// them, so they can't enter took or base
+test("sbx's 25x CPU-ratio bound times only the decodes: the diagnostics sample outside both intervals", () => {
+  const src = readFileSync(TEST + "sbx_modes_cases.py", "utf8");
+  assert.ok(src.includes('\nt0 = time.process_time()\na = _sbx.decode(data, "magma")\ntook = time.process_time() - t0\n'), "the nested interval");
+  const flat = /\ndef flat_decode_time\(\):\n([\s\S]*?)\n\n\n/.exec(src);
+  assert.ok(flat !== null && !/perf_counter|cpu_times|windows/.test(flat[1]), "the flat interval");
+  assert.ok(/\nm = mark\(\)\nbase = flat_decode_time\(\)\nrecord\("flat before", m\)\n/.test(src), "flat before: sampled outside");
+  assert.ok(/\nm = mark\(\)\nt0 = time\.process_time\(\)\n[^\n]*\n[^\n]*\nrecord\("nested", m\)\n/.test(src), "nested: sampled outside");
+  assert.ok(/\nm = mark\(\)\nbase2 = flat_decode_time\(\)\nrecord\("flat after", m\)\nbase = \(base \+ base2\) \/ 2\n/.test(src), "flat after: sampled outside");
 });
