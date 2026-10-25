@@ -11,7 +11,7 @@
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
-import { INTR } from "./interrupt";
+import { INTR, INTR_CTRL_C, consumeCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
 
 interface Engine {
@@ -68,7 +68,7 @@ function engineBytes(): Uint8Array {
 function engine(): Engine {
   // sagebrush.interrupted: Ctrl-C, polled by the engine's long loops
   // (engine/interrupt); an interrupted call traps and the instance is dropped.
-  const imports = { sagebrush: { interrupted: () => INTR[0] } };
+  const imports = { sagebrush: { interrupted: () => INTR[0] & INTR_CTRL_C } };
   if (E === null) E = new WebAssembly.Instance(new WebAssembly.Module(engineBytes() as any), imports).exports as unknown as Engine;
   return E;
 }
@@ -210,8 +210,7 @@ newBuiltinModule("_sbengine", (m) => {
       const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));
       return new Obj.PyBytes(mpCall(a));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -222,8 +221,7 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return symCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
@@ -234,8 +232,7 @@ newBuiltinModule("_sbengine", (m) => {
     try {
       return engineCall(String(req));
     } catch (err: any) {
-      if (INTR[0]) {
-        INTR[0] = 0;
+      if (consumeCtrlC()) {
         reclaimEngine();
         return Obj.raise(Obj.T.KeyboardInterrupt);
       }
