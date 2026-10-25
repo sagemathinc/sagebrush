@@ -179,16 +179,25 @@ try {
     mkdirSync(join(pkg, "lib"));
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "sagebrush", version: "0.0.1", bin: { sagebrush: "bin/s.js" }, files: ["bin/s.js", "lib/m.js"] }));
     writeFileSync(join(pkg, "lib", "m.js"), "module.exports = 2;\n");
-    writeFileSync(join(pkg, "bin", "s.js"), `#!/usr/bin/env node
+    // (TEST-140-R2-1: the shebang names a wrapper interpreter, found on PATH, that marks the
+    // process and execs node; spawning node with the bin as an argument skips it, so only a
+    // direct exec of the installed executable can print shebang=yes)
+    const shebin = join(tmp, "shebang-bin");
+    mkdirSync(shebin);
+    writeFileSync(join(shebin, "tiny-shebang-node"), `#!/bin/sh\nexport TINY_VIA_SHEBANG=yes\nexec "${process.execPath}" "$@"\n`);
+    chmodSync(join(shebin, "tiny-shebang-node"), 0o755);
+    writeFileSync(join(pkg, "bin", "s.js"), `#!/usr/bin/env tiny-shebang-node
 const two = require("../lib/m.js");
+const via = " shebang=" + (process.env.TINY_VIA_SHEBANG ?? "no");
 const dir = require("node:module").getCompileCacheDir?.() ?? "none";
 const a = process.argv.slice(2);
-if (a[0] === "--version") console.log("sagebrush 0.0.1 " + dir + " entry=" + process.argv[1]);
-else if (a[0] === "-c") console.log(String(two + two) + " " + dir + " worker-env=" + (process.env.SAGEBRUSH_NO_WORKER ?? "absent") + " entry=" + process.argv[1]);
+if (a[0] === "--version") console.log("sagebrush 0.0.1 " + dir + via + " entry=" + process.argv[1]);
+else if (a[0] === "-c") console.log(String(two + two) + " " + dir + " worker-env=" + (process.env.SAGEBRUSH_NO_WORKER ?? "absent") + via + " entry=" + process.argv[1]);
 `);
     const tgz = pack(pkg, join(tmp, "tiny-pack"));
     const work = join(tmp, "tiny-work");
-    const r = hostile(() => measureTree({ tgz, version: "0.0.1" }, { work }));
+    const viaPath = (fn) => withEnv({ PATH: `${shebin}:${process.env.PATH}` }, fn);
+    const r = viaPath(() => hostile(() => measureTree({ tgz, version: "0.0.1" }, { work })));
     const all = JSON.stringify(r.raw);
     check("smoke: every measure has a value", Object.values(r.values).every((x) => typeof x === "number" && x > 0), JSON.stringify(r.values));
     check("smoke: k samples", r.raw.install.length === 3 && r.raw.npx.length === 1 && r.raw.versionWarm.length === 5 && r.raw.evalWarm.length === 5);
@@ -200,6 +209,7 @@ else if (a[0] === "-c") console.log(String(two + two) + " " + dir + " worker-env
     check("smoke: the three cache directories differ", new Set([r.cache.version.dir, r.cache.eval.dir, r.cache.npx.dir]).size === 3);
     check("smoke: SAGEBRUSH_NO_WORKER never reached a child", r.raw.evalColdStdout.includes("worker-env=absent "), r.raw.evalColdStdout);
     // (MEASURE-140-2: the installed executable itself, through its shebang, as a user runs it)
+    check("smoke: every startup sample ran the installed executable through its shebang", ["versionColdStdout", "versionWarmStdout", "evalColdStdout", "evalWarmStdout", "npxStdout"].every((k) => r.raw[k]?.includes(" shebang=yes ")), JSON.stringify([r.raw.versionColdStdout, r.raw.evalWarmStdout]));
     check("smoke: the installed bin is the entry point", typeof r.bin === "string" && r.bin.endsWith(join("bin", "sagebrush")) && r.raw.versionColdStdout.endsWith(`entry=${r.bin}`) && r.raw.evalWarmStdout.endsWith(`entry=${r.bin}`), `${r.bin} / ${r.raw.versionColdStdout}`);
     // (AUDIT-140-3: each measure's environment names are recorded)
     check("smoke: the measured env names are recorded", JSON.stringify(r.env?.version) === JSON.stringify(["HOME", "LANG", "NODE_COMPILE_CACHE", "NODE_V8_COVERAGE", "PATH", "TMPDIR"]) && JSON.stringify(r.env?.eval) === JSON.stringify(r.env?.version) && !!r.env?.install?.includes("npm_config_userconfig") && !!r.env?.install?.includes("npm_config_globalconfig") && !r.env?.install?.includes("NODE_COMPILE_CACHE") && !!r.env?.npx?.includes("NODE_COMPILE_CACHE"), JSON.stringify(r.env));
@@ -218,7 +228,7 @@ else if (a[0] === "-c") console.log(String(two + two) + " " + dir + " worker-env
     writeFileSync(join(fakebin, "npx"), "#!/bin/sh\necho sagebrush 0.0.1\n");
     chmodSync(join(fakebin, "npx"), 0o755);
     const nw = join(tmp, "npx-neg");
-    const n = measureTree({ tgz, version: "0.0.1" }, { work: nw, npx: join(fakebin, "npx") });
+    const n = viaPath(() => measureTree({ tgz, version: "0.0.1" }, { work: nw, npx: join(fakebin, "npx") }));
     check("npx negative control: the cache is not verified", n.cache.npx.verified === false && n.cache.npx.problems.includes("empty after the run"), JSON.stringify(n.cache.npx));
     check("npx negative control: no npx value, raw kept", n.values.npx === null && n.raw.npx.length === 1 && n.raw.npx[0] > 0, JSON.stringify({ v: n.values.npx, raw: n.raw.npx }));
     check("npx negative control: the other measures still stand", typeof n.values.versionWarm === "number" && typeof n.values.install === "number");
@@ -264,13 +274,14 @@ else { console.error("injected failure"); process.exit(3); }
     writeFileSync(join(md2, "tree-B.json"), JSON.stringify({ side: "B", version: "0.0.1", tgz: btgz, tgzSha256: "b" }));
     let mthrown = null;
     try {
-      measure(md2, { rounds: 1 });
+      viaPath(() => measure(md2, { rounds: 1 }));
     } catch (e) {
       mthrown = e;
     }
     const mrec = JSON.parse(readFileSync(join(md2, "install-timing.json"), "utf8"));
     const r1 = mrec.rounds[0];
     check("second side fails: the run fails", !!mthrown && /^measurement: eval \(cold\)/.test(mrec.failed ?? ""), mrec.failed);
+    check("warm-up: through the shebang too", (mrec.warmup?.A ?? "").includes(" shebang=yes "), mrec.warmup?.A);
     check("second side fails: the round is kept, marked incomplete", mrec.rounds.length === 1 && r1.incomplete === true && r1.first === "base");
     check("second side fails: the first side's complete block is kept", r1.A && r1.A.incomplete === false && typeof r1.A.values.versionWarm === "number" && r1.A.raw.evalWarm.length === 5, JSON.stringify(r1.A?.values));
     check("second side fails: the second side's samples are kept", r1.B && r1.B.incomplete === true && r1.B.raw.install.length === 3 && r1.B.raw.versionWarm.length === 5 && /eval \(cold\)/.test(r1.B.failed), JSON.stringify(r1.B?.raw));
