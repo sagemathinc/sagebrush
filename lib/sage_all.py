@@ -1957,8 +1957,6 @@ class Factorization(list):
         sage: F.value()
         360
     """
-    _latex_container = True  # (latex() writes it as a list, as before; not yet as Sage writes it)
-
     def __init__(self, pairs, unit=1):
         super().__init__(pairs)
         self.unit = unit
@@ -1970,6 +1968,20 @@ class Factorization(list):
         return ("-1 * " if self.unit == -1 else "") + s
 
     __str__ = __repr__
+
+    def _latex_(self):
+        """LaTeX, as Sage writes it.
+
+        EXAMPLES::
+
+            sage: latex(factor(2^10*3^15*7)), latex(factor(-12)), latex(factor(-1))
+            (2^{10} \\cdot 3^{15} \\cdot 7, -1 \\cdot 2^{2} \\cdot 3, -1)
+        """
+        from _sage_poly import _latex_factorization
+        if not self:
+            return str(latex(self.unit))
+        return _latex_factorization([(str(latex(p)), e) for p, e in self],
+                                    "-1" if self.unit == -1 else None, bare_unit=True)
 
     def value(self):
         """The product of the factorization.
