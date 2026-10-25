@@ -142,3 +142,42 @@ test("E6a (retained: true) probes the ring, generators and ideal built before th
   const setupEnd = r.stdout.indexOf('_p("ENTER"');
   assert.ok(r.stdout.lastIndexOf("I = R.ideal(", setupEnd) > 0);
 });
+
+test("a Stop dispatch that keeps failing (EPERM): the cells are INVALID with the error kept, the row isn't KNOWN, and --ci fails (astra CORR-168-R2-1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    // a fake that returns: each of the driver's trials prints ENTER, waits 3.3 s (inside the CI band), then RET
+    const f = join(dir, "fake-returning.cjs");
+    writeFileSync(f, `
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv.at(-1), "utf8");
+const n = Number((src.match(/range\\(1, (\\d+) \\+ 1\\)/) ?? [])[1] ?? 1);
+const say = (s) => process.stdout.write(s + "\\n");
+let i = 0;
+const next = () => {
+  if (++i > n) { say("END"); process.exit(0); }
+  say("SETUP " + i); say("ENTER " + i + " 0.1");
+  setTimeout(() => { say("RET " + i); say("PROBE " + i + " ok"); say("DONE " + i); next(); }, 3300);
+};
+next();
+`);
+    // the harness's own SIGINT dispatch fails, as if the target could not be signalled
+    const pre = join(dir, "eperm.mjs");
+    writeFileSync(pre, `const k = process.kill.bind(process);
+process.kill = (pid, sig) => { if (sig === "SIGINT") { const e = new Error("kill EPERM"); e.code = "EPERM"; throw e; } return k(pid, sig); };
+`);
+    const h = spawn(process.execPath, ["--import", pre, matrix, "--ci", "--host", "cli", "--rows", "P2a", "--signals", "none", "--budget-ms", "120000", "--out", join(dir, "out.json")], { env: { ...process.env, SB_LAUNCHER: f }, stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    h.stderr.on("data", (d: Buffer) => (err += d));
+    const code = await exitOf(h);
+    assert.notEqual(code, 0, "--ci must fail when its Stops could not be sent");
+    const rows = readFileSync(join(dir, "out.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const p2a = rows.find((r) => r.case === "P2a");
+    assert.ok(p2a, "P2a's row");
+    assert.notEqual(p2a.outcome, "KNOWN");
+    assert.ok(p2a.cells.length > 0 && p2a.cells.every((c: any) => c.outcome === "INVALID" && c.send_error?.error === "EPERM" && typeof c.send_error.t === "number"), JSON.stringify(p2a.cells).slice(0, 400));
+    assert.match(readFileSync(join(dir, "out.json"), "utf8"), /"send_error"/, "the error is in the final report");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
