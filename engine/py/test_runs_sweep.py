@@ -490,7 +490,10 @@ def t11_reservations_dir_files():
 
 
 def t12a_reservations_subdir():
-    """T12a: a subdirectory in reservations/: its files charged, nothing raised."""
+    """T12a: a subdirectory in reservations/: its files charged, and the
+    directory itself at its own lstat size (an entry that is not a regular
+    file is "unreadable", charged as the entry: 0 on tmpfs, a block on
+    ext4), nothing raised."""
     root = fresh_root()
     s = store(root)
     base = s.walk_total()
@@ -499,7 +502,7 @@ def t12a_reservations_subdir():
     open(os.path.join(sub, "f"), "wb").write(b"s" * 4096)
     s.cleanup()
     assert os.path.exists(os.path.join(sub, "f")), "T12a: kept entries removed"
-    want = base + R._charge(os.path.join(sub, "f"))
+    want = base + R._charge(os.path.join(sub, "f")) + R._charge(sub)
     assert s.used() == s.walk_total() == want, ("T12a", s.used(), s.walk_total(), want)
     admits_one_block(s, want, "T12a")
     print("T12a: ok")
