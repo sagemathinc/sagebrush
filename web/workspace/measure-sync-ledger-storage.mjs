@@ -7,7 +7,7 @@
 // is closed, Chrome exits, a new Chrome process on the same profile opens a new page of the same origin, reopens the
 // database, waits a fixed settling interval, and samples once more: the steady delta, a diagnostic only.
 // Every raw sample is printed, one JSON line a trial, and a summary: P, the largest peak bytes a row, and
-// A = 64 ceil(1.25 P / 64), compared with the candidate allowance (ALLOWANCE, default 1856).
+// A = max(960, 64 ceil(1.25 P / 64)), compared with the committed allowance (ALLOWANCE, default 960).
 //   CHROME=google-chrome TRIALS=5 node web/workspace/measure-sync-ledger-storage.mjs
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,7 @@ import { devtoolsPort } from "../test-port.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 // (the cap's figures; smaller only for a smoke run of the harness itself, never for the measurement)
 const TRIALS = Number(process.env.TRIALS ?? 5), NAMESPACES = Number(process.env.NAMESPACES ?? 3), ROWS = Number(process.env.ROWS ?? 70_000), STEP = Number(process.env.STEP ?? 10_000);
-const SETTLE_MS = Number(process.env.SETTLE_MS ?? 30_000), ALLOWANCE = Number(process.env.ALLOWANCE ?? 1856);
+const SETTLE_MS = Number(process.env.SETTLE_MS ?? 30_000), ALLOWANCE = Number(process.env.ALLOWANCE ?? 960);
 const TRIAL_LIMIT_MS = Number(process.env.TRIAL_LIMIT_S ?? 600) * 1000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -144,7 +144,8 @@ try {
   }
   const ok = trials.filter((r) => !r.error);
   const P = Math.max(...ok.map((r) => r.peakDelta / (NAMESPACES * ROWS)));
-  const A = Math.ceil((1.25 * P) / 64) * 64;
+  // (daybreak3's ruling r3: the floor of 960 applies)
+  const A = Math.max(960, Math.ceil((1.25 * P) / 64) * 64);
   const summary = { trials: TRIALS, namespaces: NAMESPACES, rowsPerNamespace: ROWS, rowsPerCommit: STEP, completed: ok.length, rowsPerTrial: NAMESPACES * ROWS, peakBytesPerRow: ok.map((r) => r.peakBytesPerRow), steadyBytesPerRow: ok.map((r) => r.steadyBytesPerRow), P: +P.toFixed(1), A, perNamespaceMiB: +((A * ROWS) / 2 ** 20).toFixed(1), globalMiB: +((A * NAMESPACES * ROWS) / 2 ** 20).toFixed(1), candidate: ALLOWANCE, peaksExceedingCandidate: ok.filter((r) => r.peakDelta / (NAMESPACES * ROWS) > ALLOWANCE).map((r) => r.trial) };
   console.log("summary " + JSON.stringify(summary));
   if (ok.length !== TRIALS) code = 1;
