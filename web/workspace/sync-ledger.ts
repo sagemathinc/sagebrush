@@ -103,9 +103,13 @@ export class Hub {
   // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.namespaces of them, the least recently used
   // dropped; a newer epoch replaces an older one, and a message of an older epoch is stale)
   private gens = new Map<string, { epoch: number; gen: number }>();
-  /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one) */
-  fence(ns: string, epoch: number, gen: number): boolean {
+  /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one).
+   * Only a durable read (a wait's registration) or a lifecycle change may `advance` the namespace to a newer epoch: a
+   * message claiming one is neither applied here nor allowed to fence the current epoch's messages (waits drop it by
+   * its epoch anyway). */
+  fence(ns: string, epoch: number, gen: number, advance = false): boolean {
     const cur = this.gens.get(ns);
+    if (cur && epoch > cur.epoch && !advance) return false;
     let stale = false, next = cur;
     if (!cur || epoch > cur.epoch) next = { epoch, gen };
     else if (epoch < cur.epoch) stale = true;
@@ -146,7 +150,7 @@ export class Hub {
       queueMicrotask(() => this.post({ t: "inflight", ns: f.ns, epoch: f.epoch, gen: f.gen, nonce: m.nonce, seqs: [...f.seqs] }));
     }
     // (a lifecycle change: the namespace's fence moves to the new epoch, the old one's state dropped)
-    if (m.t === "lifecycle") this.fence(m.ns, m.toEpoch, 0);
+    if (m.t === "lifecycle") this.fence(m.ns, m.toEpoch, 0, true);
     // (the generation fence, once per message, before any wait sees it)
     const stale = "gen" in m && typeof m.gen === "number" && "epoch" in m ? this.fence(m.ns, m.epoch as number, m.gen) : false;
     for (const f of this.subs) try { f(m, stale); } catch (e) { console.warn("sync ledger:", e); }
@@ -506,7 +510,7 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
     };
     set!.add(x);
     // (the lease's generation noted in the shared fence: a sender older than it is stale for every wait)
-    hub.fence(x.ns, x.epoch, v0.gen);
+    hub.fence(x.ns, x.epoch, v0.gen, true);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) return onAbort();
     if (t !== undefined) timer = setTimeout(() => x.settle("reject", Object.assign(new WorkspaceError("busy", "timed out"), { timeout: true })), t);
