@@ -425,6 +425,22 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+/// A PNG call's failure as the browser's _sbraster raises it
+/// (src/runtime/raster.ts): the input refused (a limit, an unsupported
+/// drawing, not a PNG) a ValueError; memory the engine could not allocate a
+/// MemoryError (args: the message, the bytes, what they were for); the
+/// engine failing a RuntimeError.
+fn raster_fail(e: sagebrush_raster::Fail) -> PyErr {
+    use sagebrush_raster::Fail;
+    match e {
+        Fail::Input(s) => pyo3::exceptions::PyValueError::new_err(s),
+        Fail::Memory { bytes, what } => {
+            pyo3::exceptions::PyMemoryError::new_err((Fail::Memory { bytes, what }.to_string(), bytes, what))
+        }
+        Fail::Backend(s) => pyo3::exceptions::PyRuntimeError::new_err(format!("Sagebrush's PNG module: {}", s)),
+    }
+}
+
 /// Sagebrush's PNG module (engine/raster), as the browser's _sbraster
 /// (src/runtime/raster.ts): `svg` drawn at `scale` pixels per SVG unit on
 /// a `width` x `height` picture (0 x 0: the drawing's size), on
@@ -437,8 +453,7 @@ fn raster_render<'py>(py: Python<'py>, svg: String, scale: f32, width: u32, heig
     let r = py.detach(|| sagebrush_raster::render_png(&svg, scale, size, &background, dpi, &text));
     match r {
         Ok((png, missing)) => Ok((pyo3::types::PyBytes::new(py, &png), missing)),
-        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
-        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+        Err(e) => Err(raster_fail(e)),
     }
 }
 
@@ -458,14 +473,17 @@ fn raster_decode<'py>(py: Python<'py>, png: &[u8]) -> PyResult<(u32, u32, u32, B
     let r = py.detach(|| sagebrush_raster::decode_png(png));
     match r {
         Ok((w, h, ch, v)) => {
-            let mut b = Vec::with_capacity(4 * v.len());
+            let mut b = Vec::new();
+            let n = v.len().saturating_mul(4);
+            if b.try_reserve_exact(n).is_err() {
+                return Err(raster_fail(sagebrush_raster::Fail::Memory { bytes: n as u64, what: "the decoded image's values" }));
+            }
             for x in v {
                 b.extend_from_slice(&x.to_le_bytes());
             }
             Ok((w, h, ch, pyo3::types::PyBytes::new(py, &b)))
         }
-        // (a refusal: a limit, an unsupported drawing, not a PNG, as in the browser)
-        Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+        Err(e) => Err(raster_fail(e)),
     }
 }
 
