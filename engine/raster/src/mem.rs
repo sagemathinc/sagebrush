@@ -18,11 +18,25 @@ pub fn vec_with_capacity<T>(n: usize, what: &'static str) -> Result<Vec<T>, Fail
     Ok(v)
 }
 
-/// n zero bytes.
+/// n zero bytes, from the allocator's zeroed allocation (as vec![0; n] has
+/// them: memory fresh from the system is already zero, so nothing is
+/// written), refused rather than aborting.
 pub fn zeroed(n: usize, what: &'static str) -> Result<Vec<u8>, Fail> {
-    let mut v = vec_with_capacity(n, what)?;
-    v.resize(n, 0);
-    Ok(v)
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let refused = || Fail::Memory { bytes: n as u64, what };
+    let layout = std::alloc::Layout::array::<u8>(n).map_err(|_| refused())?;
+    // SAFETY: a nonzero size; the pointer, allocated by the global allocator
+    // with this layout (align 1, n bytes, all zero), becomes a Vec of length
+    // and capacity n, which frees it with the same layout
+    unsafe {
+        let p = std::alloc::alloc_zeroed(layout);
+        if p.is_null() {
+            return Err(refused());
+        }
+        Ok(Vec::from_raw_parts(p, n, n))
+    }
 }
 
 /// The bytes of a w x h raster of `per_pixel` bytes a pixel, or the input's
@@ -62,17 +76,20 @@ impl TryVec {
     pub fn new() -> TryVec {
         TryVec { buf: Vec::new(), refused: None }
     }
+
+    #[cold]
+    fn refuse(&mut self, more: usize) -> std::io::Error {
+        self.refused = Some((self.buf.len() as u64).saturating_add(more as u64));
+        std::io::Error::new(std::io::ErrorKind::OutOfMemory, "the PNG output")
+    }
 }
 
 impl std::io::Write for TryVec {
+    #[inline]
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        if self.buf.capacity() - self.buf.len() < data.len() {
-            // (doubling, as Vec would, but asked for fallibly)
-            let want = (self.buf.len() + data.len()).max(2 * self.buf.capacity()).max(64);
-            if self.buf.try_reserve_exact(want - self.buf.len()).is_err() {
-                self.refused = Some(want as u64);
-                return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "the PNG output"));
-            }
+        // (Vec's own amortized growth, asked for fallibly)
+        if self.buf.try_reserve(data.len()).is_err() {
+            return Err(self.refuse(data.len()));
         }
         self.buf.extend_from_slice(data);
         Ok(data.len())
