@@ -2367,8 +2367,10 @@ async function t14Review2() {
     hub.post({ t: "lifecycle", ns, fromEpoch: 100 + i, toEpoch: 101 + i, kind: "off" });
   }
   check(hub.fences <= W.HUB.namespaces, `review2: 50 namespaces and 50 epochs cycled: the fence holds ${hub.fences} (at most ${W.HUB.namespaces})`);
-  // (still a fence: the current epoch's holder 10 seen, a delayed sent from 9 is stale)
+  // (still a fence: the namespace moved to epoch 200 by a lifecycle change; its holder 10 seen, a delayed sent from 9
+  // is stale)
   const epoch = 200;
+  hub.post({ t: "lifecycle", ns, fromEpoch: epoch - 1, toEpoch: epoch, kind: "off" });
   hub.post({ t: "holder", ns, epoch, gen: 10, rev: 0 });
   let staleSeen = null;
   const off = hub.on((m, stale) => { if (m.t === "sent" && m.gen === 9) staleSeen = stale; });
@@ -2381,6 +2383,14 @@ async function t14Review2() {
   hub.post({ t: "sent", ns, epoch: epoch - 1, gen: 99, seqs: [] });
   off2();
   check(olderStale === true, "review2: a message of an older epoch is stale whatever its generation");
+  // (a message claiming a newer epoch moves nothing: the current epoch's messages are not fenced by it (the hang found
+  // in the full suite at 61872ea7))
+  let fut = null, cur = null;
+  const off3 = hub.on((m, stale) => { if (m.t === "sent" && m.epoch === epoch + 5) fut = stale; if (m.t === "sent" && m.epoch === epoch && m.gen === 10) cur = stale; });
+  hub.post({ t: "sent", ns, epoch: epoch + 5, gen: 999, seqs: [] });
+  hub.post({ t: "sent", ns, epoch, gen: 10, seqs: [] });
+  off3();
+  check(fut === false && cur === false, "review2: a future epoch's message neither applies nor fences the current epoch: " + J({ fut, cur }));
 }
 
 const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2 };
