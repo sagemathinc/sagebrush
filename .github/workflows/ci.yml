@@ -152,6 +152,7 @@ jobs:
           SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node web/test-cli-sigint.mjs
+          node web/test-cli-prompt-signals.mjs
           node web/test-cli-limits.mjs
           node scripts/bench-ff-limits.mjs
           bun web/build.ts
@@ -529,6 +530,8 @@ jobs:
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs
+              # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
+              bun web/test-shell.mjs
               node web/test-worker-limits.mjs
               ;;
             board-a)
@@ -899,6 +902,7 @@ jobs:
           python3 engine/py/test_certify.py
           python3 engine/py/test_bench.py
           python3 engine/py/test_mcp.py
+          python3 engine/py/test_runs.py
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
