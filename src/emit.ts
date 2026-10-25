@@ -505,8 +505,9 @@ export class Emitter {
   // program's (plan-pyjs-file-visibility r7 and addendum 1;
   // runtime/file-once.ts).  In order:
   // - a global operand's namespace and the builtins must be ones whose reads
-  //   run no user code (fileOnceEnv), decided before any read; else today's
-  //   code, with today's lookups;
+  //   run no user code (fileOnceEnv), decided once at the module's start,
+  //   before any read; else, as for a failed prefix, today's lookups and
+  //   today's continuation;
   // - open, F and M are read once each, as today; unless open is the
   //   builtin, F an exact str and M one of w, a, wb, ab (no Python call
   //   checks it), today's continuation runs with those values, reading S
@@ -536,7 +537,6 @@ export class Emitter {
       else if (r.kind !== "local" && r.kind !== "free") return null;
     }
     const sx = e.args[0];
-    const today = this.plainCall(e);
     const s = this.site("siteCall", "write", 1);
     const [to, tf, tm, ts] = [this.temp(), this.temp(), this.temp(), this.temp()];
     // (S peeked into ts alone, which the paths below clear: no other
@@ -547,17 +547,28 @@ export class Emitter {
       return `(${ts} = ${this.gns(sx.id) === "$G" ? "$GL" : "$g"}${prop(sx.id)}) === undefined && (${ts} = R.fileOncePeekBuiltin(${q(sx.id)})) === undefined`;
     })();
     const cont = (): string => `${s}((typeof ${to} === "function" ? ${to}(${tf}, ${tm}) : callObj(${to}, [${tf}, ${tm}])), ${this.ex(sx)})`;
-    const env = [...nss].map((ns) => `R.fileOnceEnv(${ns}, $B)`).join(" && ");
+    // (the environment can't change while the module runs, $g, $GL and $B
+    // being its constants, so it is decided once, at the module's start; and
+    // the canonical open is a module constant too: a declined site then pays
+    // one comparison before today's continuation, daybreak2's replaced-open
+    // gate)
+    const env = [...nss].map((ns) => this.hoist(`R.fileOnceEnv(${ns}, $B)`)).join(" && ");
+    const canon = this.hoist("R.fileOnceOpen()");
+    // (an unsafe environment takes the same path as a failed prefix: open, F
+    // and M read by today's loads in today's order, then today's
+    // continuation, S never peeked; no second copy of today's code, whose
+    // size cost the declined sites 20%)
+    const prefix = `${env === "" ? "" : env + " && "}${to} === ${canon} && typeof ${tf} === "string" && (${tm} === "w" || ${tm} === "a" || ${tm} === "wb" || ${tm} === "ab")`;
     // (the eligible path hands the peek over in R.fileOnceS, clearing the
     // temporary first: an argument would stay in the module frame's
     // registers, which never return, until the site ran again)
     const site =
       `(${to} = ${this.ex(o.func)}, ${tf} = ${this.ex(o.args[0])}, ${tm} = ${this.ex(o.args[1])}, ` +
-      `!R.fileOncePrefix(${to}, ${tf}, ${tm}) ? ${cont()} : ` +
+      `!(${prefix}) ? ${cont()} : ` +
       `${unbound} ? (R.fileOnceTouch(${tf}, ${tm}), R.fileOnceNever(${this.ex(sx)})) : ` +
       `R.fileOnceFits(${ts}, ${tm}) ? (R.fileOnceS.v = ${ts}, ${ts} = undefined, R.fileOnceWrite(${tf}, ${tm})) : ` +
       `(${ts} = undefined, ${cont()}))`;
-    return env === "" ? site : `(${env} ? ${site} : ${today})`;
+    return site;
   }
   // A call of e.func, or of `callee`, the JavaScript holding it
   plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {
