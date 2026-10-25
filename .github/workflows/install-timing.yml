@@ -1,0 +1,92 @@
+# Install time and startup time of the npm package (plan-install-timing-r2):
+# the head against a base, both built, packed, installed and run here on one
+# runner, in 7 alternating rounds.  Report-only: no number fails it, it is
+# never a required check, and it runs only on dispatch and weekly.
+#
+#   - weekly: master against the highest stable release tag that is an
+#     ancestor of it, rebuilt here (an A/A when master is still that commit)
+#   - dispatch: head (default master), base (default: that rule), aa (the
+#     head against itself, for the runner's noise)
+#
+# scripts/install-timing.mjs does the work; scripts/test-install-timing.mjs
+# (in ci.yml's checks) tests it and this file's contract.
+name: install-timing
+
+on:
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "head ref (default master)"
+        type: string
+        default: master
+      base:
+        description: "base ref (empty: the highest stable release tag that is an ancestor of the head)"
+        type: string
+        default: ""
+      aa:
+        description: "the head against itself (noise)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 7 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-timing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  timing:
+    if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (prepare 10 + 10 + measure 15 = 35, plus setup and the summary)
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      # (the same pins as ci.yml's checks job; npm is the one bundled with this Node)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - name: the sides
+        env:
+          HEAD_INPUT: ${{ inputs.head }}
+          BASE_INPUT: ${{ inputs.base }}
+          AA_INPUT: ${{ inputs.aa }}
+        run: node scripts/install-timing.mjs --resolve --dir "$RUNNER_TEMP/it"
+      - name: prepare the base
+        timeout-minutes: 10
+        run: node scripts/install-timing.mjs --prepare A --dir "$RUNNER_TEMP/it"
+      - name: prepare the head
+        timeout-minutes: 10
+        run: node scripts/install-timing.mjs --prepare B --dir "$RUNNER_TEMP/it"
+      - name: measure
+        timeout-minutes: 15
+        run: node scripts/install-timing.mjs --measure --dir "$RUNNER_TEMP/it"
+      - name: the summary
+        if: always()
+        run: node scripts/install-timing.mjs --summary --dir "$RUNNER_TEMP/it"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: install-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/it/install-timing.json
+            ${{ runner.temp }}/it/sides.json
+            ${{ runner.temp }}/it/tree-*.json
+          retention-days: 90
+          if-no-files-found: ignore
