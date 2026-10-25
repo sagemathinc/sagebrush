@@ -148,6 +148,19 @@ versions, the load average, and the median and range of each case;
 Results are checked against independent systems: PARI for class groups,
 Sage and Magma for the rest, and LMFDB for modular forms.
 
+## Memory
+
+There are no time limits on a computation. A few operations check, before
+they start, that their memory fits a share of this machine's memory as the
+process sees it: the smallest of the cgroup limit, `RLIMIT_AS` and
+`RLIMIT_DATA`, a Windows job's limit, and physical memory. One matrix may
+use at most a quarter of that figure, for example. When none of these can
+be read, the figure is a nominal 1 GiB. A factorization of a polynomial
+over Z, unless given its own limits, may use half of the memory observed
+free, less a reserve, or a quarter of what is free when that is more.
+These figures are observations, not reservations: another process can
+still take the memory.
+
 ## License
 
 Copyright (c) 2026 SageMath, Inc. Licensed under either of the Apache
