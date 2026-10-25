@@ -857,6 +857,8 @@ window.sagebrush = {
   get consoleKernel() { return consoleKernel; },
   // (tests: the reactive notebook's analyzer and its worker)
   analyzer, get analyzeWorker() { return analyzeWorker; },
+  // (tests: the Share dialog, and its seams)
+  get share() { return shareDialog; }, get shareTest() { return shareTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
 };
@@ -1484,8 +1486,12 @@ async function storedFileMeta() {
   const keys = (await idb(db, "files", "readonly", (st) => st.getAllKeys())) ?? [];
   return keys.map((k) => ({ path: "/" + String(k).replace(/^\/+/, "") }));
 }
+// (tests: the Share dialog's seams, read at the moment they're used: a stand-in worker, shorter
+// fail-safes, and a counter of the files the dialog reads)
+const shareTest = { workspace: () => wsNow() };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 async function storedFileBytes(f) {
+  await shareTest.onRead?.(f.path);
   const w = await wsNow();
   const shown = f.path.replace(/^\/+/, "");
   if (w && !w.closed) {
@@ -1503,7 +1509,7 @@ async function storedFileBytes(f) {
 const shareDialog = createShareDialog({
   dlg: shareDlg,
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
-  listFiles: storedFileMeta,
+  listFiles: () => shareTest.listFiles?.() ?? storedFileMeta(),
   readFile: storedFileBytes,
   readText: async (path) => new TextDecoder().decode(await storedFileBytes({ path })),
   cells: () => nb.snapshot().cells.map((c, index) => ({ index, kind: c.type === "markdown" ? "markdown" : ["sage", "magma", "matlab"].includes(nb.mode) ? nb.mode : "python", source: String(c.code ?? "") })),
@@ -1520,7 +1526,8 @@ const shareDialog = createShareDialog({
     if (!m || !Array.isArray(m.path)) return null;
     return { cwd: String(m.cwd ?? "/"), importPath: m.path.map((dir) => ({ dir: String(dir), workspace: !String(dir).startsWith("/$pyjs") })), builtinModules: m.builtins ?? [], externalModules: m.lib ?? [] };
   },
-  createWorker: () => new Worker("/sagebrush-share-deps.js"),
+  createWorker: () => shareTest.createWorker?.() ?? new Worker("/sagebrush-share-deps.js"),
+  failsafe: () => shareTest.failsafe,
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
     const prev = nb.snapshot().share_id ?? null;

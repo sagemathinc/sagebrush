@@ -25,6 +25,8 @@ export interface ShareDialogHost {
   /** where the notebook's interpreter resolves imports, or null if it can't be asked */
   importInfo: () => Promise<{ cwd: string; importPath: { dir: string; workspace: boolean }[]; builtinModules: string[]; externalModules: string[] } | null>;
   createWorker: () => WorkerLike;
+  /** (tests: shorter fail-safes) */
+  failsafe?: () => { silenceMs: number; sourceBytes: number } | undefined;
   bounds: () => Bounds;
   upload: (o: { files: LazyFile[]; title: string; license: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean }>;
   fmtSize: (n: number) => string;
@@ -46,6 +48,9 @@ export function createShareDialog(h: ShareDialogHost) {
   const btn = $(d, "#shareupload") as HTMLButtonElement, prog = $(d, "#shareprogress"), out = $(d, "#shareresult");
   const closeBtn = d.querySelector("form button") as HTMLButtonElement | null;
   let gen = 0, sel: Selection | null = null, run: { stop(): void; running: boolean } | null = null, busy = false;
+  // (an open's own token: closing the dialog or starting an upload ends it, so an
+  // open still waiting for the file list or the interpreter never starts its analysis)
+  let token = 0, analyzing = false;
   let found = 0, unfollowed = 0, ranPartial = false;
 
   const draw = () => {
@@ -77,11 +82,15 @@ export function createShareDialog(h: ShareDialogHost) {
     });
     box.addEventListener("keydown", (e) => {
       if (e.key !== " " || !sel) return;
-      // (Space and Shift+Space: the range from the keyboard, UI-8)
+      // (Space and Shift+Space: the range from the keyboard, UI-8; the native
+      // toggle, on keyup, is cancelled too)
       e.preventDefault();
-      if (busy) return;
+      if (busy || e.repeat) return;
       sel.toggle(i, e.shiftKey);
       draw();
+    });
+    box.addEventListener("keyup", (e) => {
+      if (e.key === " ") e.preventDefault();
     });
     return el;
   };
@@ -117,8 +126,14 @@ export function createShareDialog(h: ShareDialogHost) {
     if (busy) e.preventDefault();
   });
   d.addEventListener("close", () => {
+    token++;
     run?.stop();
     run = null;
+    analyzing = false;
+    if (!busy) {
+      sel = null;
+      inner.replaceChildren();
+    }
   });
   $(d, "#shareall").addEventListener("click", () => {
     sel?.all(true);
@@ -139,14 +154,15 @@ export function createShareDialog(h: ShareDialogHost) {
   async function open() {
     run?.stop();
     run = null;
-    const my = ++gen;
+    const my = ++gen, mine = ++token;
+    analyzing = true;
     found = 0;
     unfollowed = 0;
     out.textContent = "";
     prog.textContent = "";
     const nb = h.notebook();
     const files = await h.listFiles();
-    if (my !== gen) return;
+    if (mine !== token) return;
     sel = new Selection(my, { path: "/" + nb.path, size: nb.data.length }, files);
     list.scrollTop = 0;
     inner.replaceChildren();
@@ -158,7 +174,7 @@ export function createShareDialog(h: ShareDialogHost) {
     for (const [cell, paths] of reads) for (const p of paths) if (sel.suggest(my, p, { kind: "read", cell })) found++;
     // the code: in the worker, as it goes
     const info = await h.importInfo().catch(() => null);
-    if (my !== gen || !sel) return;
+    if (mine !== token || !sel) return;
     const s = sel;
     run = startDeps({
       gen: my,
@@ -173,6 +189,7 @@ export function createShareDialog(h: ShareDialogHost) {
       },
       readText: h.readText,
       createWorker: h.createWorker,
+      failsafe: h.failsafe?.(),
       handlers: {
         onDep: (path, reason) => {
           if (s.suggest(my, path, reason)) found++;
@@ -184,7 +201,8 @@ export function createShareDialog(h: ShareDialogHost) {
         },
         onProgress: () => say(),
         onDone: (r) => {
-          if (my !== gen) return;
+          if (mine !== token) return;
+          analyzing = false;
           s.state = r.complete ? "done" : "not-analyzed";
           if (!info) s.state = "not-analyzed";
           draw();
@@ -197,7 +215,9 @@ export function createShareDialog(h: ShareDialogHost) {
 
   btn.addEventListener("click", async () => {
     if (!sel || busy) return;
-    const stillRunning = !!run?.running;
+    const stillRunning = analyzing;
+    token++;
+    analyzing = false;
     run?.stop();
     run = null;
     if (stillRunning) sel.state = "not-analyzed";
@@ -229,5 +249,5 @@ export function createShareDialog(h: ShareDialogHost) {
     }
   });
 
-  return { open, get selection() { return sel; }, get running() { return !!run?.running; } };
+  return { open, get selection() { return sel; }, get analyzing() { return analyzing; }, get generation() { return gen; } };
 }
