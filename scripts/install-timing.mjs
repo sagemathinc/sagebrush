@@ -436,6 +436,7 @@ export function measure(dir, { rounds = ROUNDS, npm = "npm", npx = "npx" } = {})
     for (const side of ["A", "B"]) if (trees[side]) {
       const w = join(work, `warmup-${side}`);
       const r = measureTree(trees[side], { work: w, cpu: affinity.cpu, warmup: true, npm, npx });
+      (rec.warmup ??= {})[side] = r.version.slice(0, 300);
       if (!r.version.startsWith(`sagebrush ${trees[side].version}`)) throw new Error(`${side} answers ${r.version.slice(0, 80)}, not ${trees[side].version}`);
       rmSync(w, { recursive: true, force: true });
     }
