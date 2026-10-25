@@ -11,6 +11,7 @@
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
+import { JS_ENGINE, JS_HOST } from "./js-engine";
 import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
 import * as P from "./progress";
@@ -316,6 +317,10 @@ newBuiltinModule("_sbengine", (m) => {
     parts.push(Obj.tuple(["js heap", heapLimit(), typeof used === "number" && used >= 0 ? Math.floor(used) : null]));
     return Obj.tuple(parts);
   }, "capacity_parts");
+  // The JavaScript engine, for the estimates whose object sizes are its own
+  // (./js-engine.ts: decided once, before any user code).
+  m.js_engine = Obj.builtin(() => JS_ENGINE, "js_engine");
+  m.js_host = Obj.builtin(() => JS_HOST, "js_host");
   // Sage mode gives Python ints Sage's Integer methods ((12).factor()), and
   // builtin types refuse new attributes from Python code (as in CPython).
   m.extend_type = Obj.builtin((cls: any, name: any, value: any) => {
