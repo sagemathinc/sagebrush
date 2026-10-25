@@ -4291,7 +4291,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/file-once.ts :: shimOps :: EFBIG: [27, \"File too large\"], #0": {
+ "src/runtime/file-once.ts :: fileOpsFor :: EFBIG: [27, \"File too large\"], #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
