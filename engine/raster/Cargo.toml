@@ -12,3 +12,8 @@ crate-type = ["cdylib", "rlib"]
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 png = "0.18"
 crc32fast = "1"
+
+# The WebAssembly heap: dlmalloc over our own system layer, which bounds the
+# pages the heap may grow by (src/wasm.rs; PNG plan r8 §2.2)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "=0.2.14", default-features = false }
