@@ -1,37 +1,50 @@
 // ShellHost: the page's mediator between the shell worker and the workspace (plan-bash-shell r3 §2–§3,
 // addendum D8 r3).  The worker never holds the Workspace or any handle to it: each file call of an
-// invocation is one fs.request (web/shell/loader.ts), which this answers with at most one workspace verb,
-// checked at use.
+// invocation is one fs.request (web/shell/loader.ts), which this answers with workspace verbs, each checked
+// at use.
 //
 // - **Principals** (r3 §2.1), bound by the page when it opens a run, never named by a request: the person
-//   (the whole workspace), or a grant (folders by fid, write or not, live() re-read at every use: an agent's
-//   pairing grant in step 7, a document's interpreter grants in step 5).
+//   (the whole workspace), or a grant (folders by fid, write or not, live() re-read at every use, and an
+//   explicit actor for the op log: an agent's pairing grant in step 7, a document's interpreter grants in
+//   step 5).
 // - **Every request checked at use** (§2.2): the run's random 64-bit id, the canonical path (Trash refused),
 //   the mode, the grant inside the verb's locked section through the workspace's admit option, on the
-//   resolved entry's identity (api.ts AdmitCheck), revocation at every use.
+//   resolved entry's identity (api.ts AdmitCheck), revocation at every use, the fast paths (the top, what is
+//   pending) included.
 // - **Writes bound to identity** (§3.2): every redirection target is the observation made at its open (a
 //   present file's fid and rev, for `>>` its bytes too, from one readUpTo; or absent), checked under the
-//   lock at commit, never re-observed.
+//   lock at commit, never re-observed within the invocation.
 // - **Redirections** (§3.3 rules 1–9): an open with `>` of an existing file is a pending truncation, of an
-//   absent path a pending creation, both seen as empty by this run and committed at the invocation's
-//   ordinary end (or before another mutation of that path); a non-empty write or append is one commit.
+//   absent path a pending creation, both seen as empty by this invocation and committed at its ordinary end
+//   (or before another mutation of that path); a non-empty write or append is one commit.  Each invocation
+//   ends clean (F9): what it had pending is committed or retired, and its observations go with it, as a
+//   finished `bash -c` keeps nothing open.
 // - **The outcome is the host's** (D8 point 5): when an invocation ends, before anything pending is
 //   committed or anything published, its outcome comes from what this host recorded and did: Stop (row 1),
 //   a lost worker (2), a revoked or expired grant (3), a limit (4, step 3), a fault (5), else ordinary (6).
-//   Rows 1–5 latch the run's terminal state and close its admission in the same step that records them
-//   (the fence); a rejection of the shell's exec() is ordinary only if it names one of this invocation's
-//   own refusals (provenance).
-import { Workspace, WorkspaceError, identOf, type AdmitCheck, type Entry } from "../workspace/api";
-import { normPath, parentOf, nameOf, join, within, TRASH, PathError } from "../workspace/paths";
+//   Rows 1–5 latch the run's terminal state and close its admission in the same step that records them.
+// - **The fence is per workspace verb** (CORR-BASH-S2-2): every verb this host calls is asked `admit`
+//   holding the workspace's lock before it changes anything, and the admit refuses once the run is latched.
+//   That is the linearization point: a verb whose admit passed before the latch finishes (the one allowance
+//   of D8), and every later one, a pending commit, a copy's next duplicate, a waiter on the lock, does
+//   nothing.  A rejection of the shell's exec() is ordinary only if it names one of this invocation's own
+//   refusals (provenance).
+// - **Stop covers startup** (CORR-BASH-S2-1): a Stop while the worker starts never dispatches the script;
+//   it settles at once if the start finishes within the 2 s grace (the worker that started for it is ended),
+//   else at the grace, the start abandoned and its worker ended when it comes.
+import { Workspace, WorkspaceError, OutOfScope, identOf, type AdmitCheck, type Entry } from "../workspace/api";
+import { normPath, parentOf, nameOf, within, TRASH, PathError } from "../workspace/paths";
 import { ShellUnavailableError, type Shell, type ShellOutcome, type FsRequest, type FsAnswer } from "./loader";
+import { boundedJson, TooLarge } from "./bounded-json";
 
-/** Who a run belongs to (r3 §2.1). */
+/** Who a run belongs to (r3 §2.1).  A grant names its actor, always: "person" (a document of the person's,
+ * under its interpreter's grants) or "agent:<name>" (a paired agent); anything else is refused before work. */
 export type Principal =
   | { kind: "person" }
   | {
       kind: "grant";
-      /** the op log's actor for its changes ("agent:<name>"; a document's, as its interpreter's) */
-      actor?: string;
+      /** the op log's actor for its changes */
+      actor: "person" | `agent:${string}`;
       /** the granted folders, by fid (design/capabilities.md §6): each covers what is inside it at the moment of use */
       folders: ReadonlySet<string>;
       write: boolean;
@@ -55,10 +68,15 @@ export type HostOutcome =
 
 /** The pending entries a run may hold at once (r3 §3.3 rule 2): past it, EMFILE. */
 export const MAX_PENDING = 64;
-/** How long Stop waits for the shell to unwind before the worker is ended (r3 §4.3). */
+/** How long Stop waits for the shell (or its start) to unwind before the worker is ended (r3 §4.3). */
 export const STOP_GRACE_MS = 2000;
 /** The bytes one read may return (bash.read_bytes's default, r3 §4.2 B; the key itself is step 3's). */
 export const READ_BYTES = 64 * 2 ** 20;
+/** The host level whose shell reaches files through this mediator (fs.request, web/shell/host-levels.json):
+ * a package that needs less is the in-memory shell of step 1, which a workspace surface never runs (F12). */
+export const MEDIATED_FS_LEVEL = 2;
+/** The actors a grant may name (r3 §2.1). */
+const ACTOR = /^(person|agent:[\w.-]{1,64})$/;
 
 /** A refusal of a request: an errno, what the shell prints, recorded under an id of the run's. */
 class Refusal extends Error {
@@ -66,13 +84,20 @@ class Refusal extends Error {
     super(message);
   }
 }
+/** Outside the grant: the refusal the workspace's list() filters on (and a refusal like any other elsewhere). */
+class ScopeRefusal extends OutOfScope {
+  readonly code = "EACCES";
+}
 /** The grant was revoked or expired at a use (row 3). */
 class Revoked extends Error {}
+/** The run is latched: a verb asked after it does nothing (the fence). */
+class Fenced extends Error {}
 
 // The words the workspace's refusals print with (r3 §3.1's table).
 const REASON: Record<string, string> = { ENOENT: "No such file or directory", EEXIST: "File exists", ECONFLICT: "changed elsewhere", ENOTDIR: "Not a directory", EISDIR: "Is a directory", EACCES: "Permission denied" };
 function refusalOf(err: unknown, p: string): Refusal | null {
   if (err instanceof Refusal) return err;
+  if (err instanceof ScopeRefusal) return new Refusal("EACCES", err.message);
   if (err instanceof PathError) return new Refusal("EINVAL", `${p}: ${err.message}`);
   if (!(err instanceof WorkspaceError)) return null;
   const code = { exists: "EEXIST", missing: "ENOENT", conflict: "ECONFLICT", storage: "ENOSPC", invalid: "EINVAL", quarantined: "EROFS", busy: "EBUSY" }[err.code as string] ?? (err.code === "limit" ? (/at most \d+ bytes|larger than/.test(err.message) ? "EFBIG" : "ENOSPC") : null);
@@ -80,6 +105,8 @@ function refusalOf(err: unknown, p: string): Refusal | null {
   return new Refusal(code, `${p}: ${REASON[code] ?? err.message}`);
 }
 const refuse = (code: string, p: string, why = REASON[code]) => new Refusal(code, `${p}: ${why}`);
+// (the verbs that change something, and so need write: a duplicate's destination, not its source)
+const MUTATES = (c: AdmitCheck) => c.op === "create" || c.op === "write" || c.op === "mkdir" || c.op === "rename" || c.op === "remove" || (c.op === "duplicate" && c.role === "destination");
 
 const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const concat = (a: Uint8Array, b: Uint8Array) => {
@@ -90,12 +117,13 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
 };
 const EMPTY = new Uint8Array(0);
 const expectOf = (e: Entry) => ({ kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 200);
 
-/** A redirection target's observation (§3.2): the file as this run saw it at the open, or after its own commit. */
+/** A redirection target's observation (§3.2): the file as this invocation saw it at the open, or after its own commit. */
 type Obs = { fid: string; rev: number; bytes?: Uint8Array };
 type Terminal = { row: 1 } | { row: 2 | 3 | 5; reason: string } | { row: 4; key: string; value: number };
 
-/** One run (r3 §4.4): one execution request, with its own id, ledger, fence and pending writes. */
+/** One run (r3 §4.4): one execution request, with its own id, ledger and fence, and one or more invocations. */
 export class ShellRun {
   readonly id = hex(8);
   /** the latched terminal condition (D8 point 5's fence): once set, nothing more is admitted */
@@ -109,58 +137,79 @@ export class ShellRun {
   private invocation = 0;
   private stopping: AbortController | null = null;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
+  private onGrace: (() => void) | null = null;
 
-  constructor(private host: ShellHost, readonly principal: Principal) {}
+  constructor(private host: ShellHost, readonly principal: Principal) {
+    if (principal.kind === "grant" && !(typeof principal.actor === "string" && ACTOR.test(principal.actor))) throw new TypeError(`a grant names its actor, "person" or "agent:<name>" (not ${JSON.stringify(principal.actor)})`);
+  }
 
   /** Latch a terminal condition and close admission, in this one step (the fence). */
   latch(t: Terminal) {
     if (!this.terminal) this.terminal = t;
   }
 
-  /** Stop (r3 §4.3, row 1): latched at once; the shell's signal aborted; the worker ended if it hasn't unwound within 2 s. */
+  /** Stop (r3 §4.3, row 1): latched at once; the shell's signal aborted; the worker (or its start) ended if it hasn't unwound within 2 s. */
   stop() {
     this.latch({ row: 1 });
     this.stopping?.abort();
-    if (this.stopping && !this.stopTimer) this.stopTimer = setTimeout(() => this.host.endShell("it didn't stop within 2 s"), STOP_GRACE_MS);
+    if (this.stopping && !this.stopTimer)
+      this.stopTimer = setTimeout(() => {
+        this.host.endShell("it didn't stop within 2 s");
+        this.onGrace?.();
+      }, STOP_GRACE_MS);
   }
 
   /** One invocation of the run: `{ SCRIPT\n}` (D8 point 1) in `cwd`, classified by this host. */
   async invoke(script: string, opts: { stdin?: string; cwd?: string } = {}): Promise<HostOutcome> {
     const n = ++this.invocation;
     if (this.terminal) return this.typed();
-    let shell: Shell;
-    try {
-      shell = await this.host.shellFor();
-    } catch (err) {
-      this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : String((err as Error)?.message ?? err) });
-      return this.typed();
-    }
     const ctl = (this.stopping = new AbortController());
+    const grace = new Promise<null>((res) => (this.onGrace = () => res(null)));
     let o: ShellOutcome | null = null;
     try {
-      o = await shell.exec(`{ ${script}\n}`, { stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r) });
-    } catch (err) {
-      // (the worker was lost, or ended by Stop's grace: row 2 unless Stop came first)
-      this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : String((err as Error)?.message ?? err) });
-    } finally {
-      this.stopping = null;
-      if (this.stopTimer) clearTimeout(this.stopTimer);
-      this.stopTimer = null;
-    }
-    // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
-    await this.queue.catch(() => {});
-    // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
-    if (this.terminal) return this.typed();
-    if (o && "rejected" in o) {
-      const r = o.rejected.refusal;
-      // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
-      if (r === null || this.refusals.get(r) !== n) {
-        this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
+      let shell: Shell | null;
+      try {
+        // (the start is part of the invocation: a Stop during it arms the same grace)
+        shell = await Promise.race([this.host.shellFor(), grace]);
+      } catch (err) {
+        this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : why(err) });
         return this.typed();
       }
-      return this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+      if (this.terminal || !shell) {
+        // (stopped while starting: nothing is dispatched, and the worker that started for it is ended)
+        this.host.endShell("stopped while it started");
+        return this.typed();
+      }
+      try {
+        o = await shell.exec(`{ ${script}\n}`, { stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r) });
+      } catch (err) {
+        // (the worker was lost, or ended by Stop's grace: row 2 unless Stop came first)
+        this.latch({ row: 2, reason: err instanceof ShellUnavailableError ? err.reason : why(err) });
+      }
+      // (everything admitted has finished before the outcome is decided: the last request's answer may still be in the queue)
+      await this.queue.catch(() => {});
+      // (D8 point 5: the host's facts first; the shell's status never decides a typed outcome)
+      if (this.terminal) return this.typed();
+      if (o && "rejected" in o) {
+        const r = o.rejected.refusal;
+        // (provenance: only a refusal this host recorded for this very invocation; never inferred from what came last)
+        if (r === null || this.refusals.get(r) !== n) {
+          this.latch({ row: 5, reason: `internal error: the shell's run failed (${o.rejected.message.slice(0, 200)})` });
+          return this.typed();
+        }
+        return await this.ordinary({ code: 1, stdout: "", stderr: o.rejected.message.endsWith("\n") ? o.rejected.message : o.rejected.message + "\n" });
+      }
+      return await this.ordinary(o!.exit);
+    } finally {
+      // (the lifecycle ends with the outcome: finalization above ran inside it, Stop and its grace included)
+      this.stopping = null;
+      this.onGrace = null;
+      if (this.stopTimer) clearTimeout(this.stopTimer);
+      this.stopTimer = null;
+      // (F9: the invocation ends clean; nothing pending or observed carries into the next)
+      this.pending.clear();
+      this.obs.clear();
     }
-    return this.ordinary(o!.exit);
   }
 
   private typed(): HostOutcome {
@@ -172,28 +221,37 @@ export class ShellRun {
     return { kind: "unavailable", row: t.row, reason: t.reason, ops };
   }
 
-  // An ordinary end (row 6): what is pending committed (D8 point 4), then the shell's final status.  A
-  // pending commit refused now (changed elsewhere meanwhile) is said on stderr, and makes a 0 status 1.
+  // An ordinary end (row 6): what is pending committed (D8 point 4), each commit one fenced verb, then the
+  // shell's final status.  A pending commit refused now (changed elsewhere meanwhile) is said on stderr,
+  // makes a 0 status 1, and is retired, not tried again.  A latch during it (Stop, revocation, a fault) makes
+  // the outcome typed, with only what was already admitted committed.
   private async ordinary(r: { code: number; stdout: string; stderr: string }): Promise<HostOutcome> {
     let { code, stderr } = r;
     for (const p of [...this.pending.keys()].sort()) {
+      if (this.terminal) return this.typed();
       try {
-        await this.flush(p);
+        await this.commit(p, EMPTY);
       } catch (err) {
+        if (err instanceof Fenced) return this.typed();
+        if (err instanceof Revoked) {
+          this.latch({ row: 3, reason: "access was revoked" });
+          return this.typed();
+        }
         const ref = refusalOf(err, p);
         if (!ref) {
-          this.latch({ row: 5, reason: `internal error: ${(err as Error)?.message ?? err}` });
+          this.latch({ row: 5, reason: `internal error: ${why(err)}` });
           return this.typed();
         }
         stderr += `bash: ${ref.message}\n`;
         if (code === 0) code = 1;
       }
     }
+    if (this.terminal) return this.typed();
     return { kind: "exit", code, stdout: r.stdout, stderr, ops: [...this.ops] };
   }
 
-  // Each request in turn: at most one admitted at a time, so after a latch at most the one already
-  // admitted finishes (D8 point 5's one allowance), and the rest are refused without workspace work.
+  // Each request in turn: at most one at a time, so after a latch at most the one workspace verb already
+  // admitted finishes, and the rest are refused without workspace work.
   private admit(n: number, r: FsRequest): Promise<FsAnswer> {
     const next = this.queue.then(() => this.answer(n, r));
     this.queue = next.catch(() => {});
@@ -206,6 +264,7 @@ export class ShellRun {
     try {
       return { ok: await this.verb(op, args) };
     } catch (err) {
+      if (err instanceof Fenced) return { err: { code: "EBADF", message: "this run has ended" } };
       if (err instanceof Revoked) {
         // (row 3: latched before the answer goes back; the refusal is EACCES, but not an ordinary one)
         this.latch({ row: 3, reason: "access was revoked" });
@@ -214,7 +273,7 @@ export class ShellRun {
       const ref = refusalOf(err, p);
       if (!ref) {
         // (row 5: a failure, not a refusal; latched before the answer goes back)
-        this.latch({ row: 5, reason: `internal error: ${String((err as Error)?.message ?? err).slice(0, 200)}` });
+        this.latch({ row: 5, reason: `internal error: ${why(err)}` });
         return { err: { code: "EIO", message: `${p}: internal error` } };
       }
       const id = hex(8);
@@ -234,26 +293,34 @@ export class ShellRun {
     if (within(q, TRASH) && q !== "/") throw refuse("EACCES", q, "Trash is the workspace's: restore or empty it in the file browser");
     return q;
   }
-  // (the grant at use, §2.2 step 4: asked by the workspace inside the verb's locked section)
-  private get check(): ((c: AdmitCheck) => void) | undefined {
-    const pr = this.principal;
-    if (pr.kind === "person") return undefined;
-    return (c: AdmitCheck) => {
-      if (pr.live() !== "ok") throw new Revoked();
-      const covered = c.chain.some((e) => !!e.fid && pr.folders.has(e.fid)) || (c.entry?.kind === "folder" && !!c.entry.fid && pr.folders.has(c.entry.fid));
-      if (!covered) throw refuse("EACCES", c.path, "Permission denied (outside this shell's access)");
-    };
-  }
-  private live() {
-    if (this.principal.kind === "grant" && this.principal.live() !== "ok") throw new Revoked();
-  }
-  // (§2.2 steps 5–6: a mutation needs write, and the grant is re-read now)
-  private mutating(p: string) {
+  /**
+   * The check at use, for every workspace verb this host calls (§2.2 steps 4–6), asked by the workspace holding
+   * its lock, before anything changes: the fence first (the linearization point: latched, nothing more
+   * happens), then the grant's liveness, coverage by folder fid, write for a mutation, and the kinds a shell
+   * may change (data files, folders: never writes into a notebook or board, never copies one).
+   */
+  private readonly check = (c: AdmitCheck): void => {
+    if (this.terminal) throw new Fenced();
     const pr = this.principal;
     if (pr.kind === "grant") {
       if (pr.live() !== "ok") throw new Revoked();
-      if (!pr.write) throw refuse("EROFS", p, "Read-only file system (this shell may only read)");
+      const covered = c.chain.some((e) => !!e.fid && pr.folders.has(e.fid)) || (c.entry?.kind === "folder" && !!c.entry.fid && pr.folders.has(c.entry.fid));
+      if (!covered) throw new ScopeRefusal(`${c.path}: Permission denied (outside this shell's access)`);
+      if (MUTATES(c) && !pr.write) throw refuse("EROFS", c.path, "Read-only file system (this shell may only read)");
     }
+    if (c.op === "write" && c.entry && c.entry.kind !== "file") throw refuse("EACCES", c.path, "a notebook or board: edit it in its editor");
+    if (c.op === "duplicate" && c.role === "source" && c.entry && c.entry.kind === "folder") throw refuse("EISDIR", c.path);
+    if (c.op === "duplicate" && c.role === "source" && c.entry && c.entry.kind !== "file" && c.entry.kind !== "folder") throw refuse("EACCES", c.path, "a notebook or board: copy it in the file browser");
+  };
+  /** The fence and the grant's liveness, for an answer that calls no workspace verb (the top, what is pending). */
+  private gate() {
+    if (this.terminal) throw new Fenced();
+    if (this.principal.kind === "grant" && this.principal.live() !== "ok") throw new Revoked();
+  }
+  // (§2.2 steps 5–6: a mutation needs write, refused before any verb; and again at use, in check)
+  private mutating(p: string) {
+    this.gate();
+    if (this.principal.kind === "grant" && !this.principal.write) throw refuse("EROFS", p, "Read-only file system (this shell may only read)");
   }
   private record(o: OpRecord) {
     this.ops.push(o);
@@ -277,33 +344,41 @@ export class ShellRun {
   }
 
   private async read(p: string): Promise<Uint8Array> {
+    this.gate();
     if (p === "/") throw refuse("EISDIR", p);
     if (this.pending.has(p)) return EMPTY;
     const e = await this.ws.stat(p, { admit: this.check });
     if (!e) throw refuse("ENOENT", p);
     if (e.kind === "folder") throw refuse("EISDIR", p);
-    if (e.kind === "file") return (await this.ws.readUpTo(p, READ_BYTES, { admit: this.check })).content;
-    // (a notebook or board reads as its JSON text: the same document as stat admitted, by its ref)
-    const r = await this.ws.read(p);
-    if (r.entry.ref !== e.ref) throw refuse("ECONFLICT", p);
-    const b = new TextEncoder().encode(JSON.stringify(r.content, null, 1) + "\n");
-    if (b.length > READ_BYTES) throw refuse("EFBIG", p, `larger than ${READ_BYTES} bytes`);
-    return b;
+    if (e.kind === "file") return (await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check })).content;
+    // (a notebook or board reads as its JSON text: admitted, entry and content in one locked read (F10), and
+    // serialized only up to the cap, so one over it is refused before its whole text exists)
+    const r = await this.ws.read(p, { admit: this.check });
+    if (r.entry.kind === "folder") throw refuse("EISDIR", p);
+    if (r.entry.kind === "file") return (await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check })).content;
+    try {
+      return boundedJson(r.content, this.host.readBytes);
+    } catch (err) {
+      if (err instanceof TooLarge) throw refuse("EFBIG", p, `larger than ${this.host.readBytes} bytes`);
+      throw err;
+    }
   }
   private async exists(p: string): Promise<boolean> {
+    this.gate();
     // (the top is always there; no grant names it, and saying so tells nothing)
     if (p === "/" || this.pending.has(p)) return true;
     try {
       return !!(await this.ws.stat(p, { admit: this.check }));
     } catch (err) {
       // (outside the grant is "not there" to a probe: nothing told, nothing refused)
-      if (err instanceof Refusal && err.code === "EACCES") return false;
+      if (err instanceof ScopeRefusal) return false;
       throw err;
     }
   }
   // (`identity`: the entry's own (a data file's or folder's fid, a document's ref), which just-bash's mv and cp
   // compare to tell whether two paths are one file)
   private async statOf(p: string): Promise<{ kind: string; size: number; mtime: number; identity: string }> {
+    this.gate();
     if (p === "/") return { kind: "folder", size: 0, mtime: 0, identity: "top" };
     if (this.pending.has(p)) return { kind: "file", size: 0, mtime: Date.now(), identity: "pending:" + p };
     const e = await this.ws.stat(p, { admit: this.check });
@@ -311,11 +386,12 @@ export class ShellRun {
     return { kind: e.kind === "folder" ? "folder" : "file", size: e.size ?? 0, mtime: e.updated, identity: identOf(e) ?? "path:" + e.path };
   }
   private async list(p: string): Promise<{ name: string; kind: string }[]> {
+    this.gate();
     const e = p === "/" ? undefined : await this.ws.stat(p, { admit: this.check });
     if (p !== "/" && !e) throw refuse("ENOENT", p);
     if (e && e.kind !== "folder") throw refuse("ENOTDIR", p);
     // (the top itself, which no grant names, may be listed: what it shows is only what the grant covers)
-    const check = this.check, top = check && ((c: AdmitCheck) => (c.role === "target" && c.path === "/" ? this.live() : check(c)));
+    const top = (c: AdmitCheck) => (c.role === "target" && c.path === "/" ? this.gate() : this.check(c));
     const out = (await this.ws.list(p, { admit: top })).map((x) => ({ name: nameOf(x.path), kind: x.kind === "folder" ? "folder" : "file" }));
     const have = new Set(out.map((x) => x.name));
     for (const q of this.pending.keys()) if (parentOf(q) === p && !have.has(nameOf(q))) out.push({ name: nameOf(q), kind: "file" });
@@ -337,7 +413,7 @@ export class ShellRun {
     if (!withBytes) return { fid: e.fid!, rev: e.rev ?? 0 };
     // (`>>`: the entry and its bytes from one readUpTo, never a stat and then a separate read)
     // (and it must be the file just stated: changed between the two, it is a conflict, never a mixed observation)
-    const r = await this.ws.readUpTo(p, READ_BYTES, { admit: this.check });
+    const r = await this.ws.readUpTo(p, this.host.readBytes, { admit: this.check });
     if (r.entry.fid !== e.fid || (r.entry.rev ?? 0) !== (e.rev ?? 0)) throw refuse("ECONFLICT", p);
     return { fid: r.entry.fid!, rev: r.entry.rev ?? 0, bytes: r.content };
   }
@@ -346,8 +422,19 @@ export class ShellRun {
     this.pending.set(p, kind);
   }
   // One commit of `b` as `p`'s whole contents, on its observation (rules 3, 4): a write with (base, fid), or an
-  // exclusive create for a pending creation; the observation is then the commit's.
+  // exclusive create for a pending creation; the observation is then the commit's.  Write and kind are checked
+  // again at the commit, in check (permissions at use, not carried from the open).
   private async commit(p: string, b: Uint8Array) {
+    try {
+      await this.commitNow(p, b);
+    } catch (err) {
+      // (a refused or failed commit is retired with its observation: never tried again, at the end or later)
+      this.pending.delete(p);
+      this.obs.delete(p);
+      throw err;
+    }
+  }
+  private async commitNow(p: string, b: Uint8Array) {
     const pend = this.pending.get(p), o = this.obs.get(p);
     if (pend === "create" || (!o && pend === undefined)) {
       let e: Entry;
@@ -369,14 +456,13 @@ export class ShellRun {
       out = await this.ws.write(p, b, { base: o.rev, fid: o.fid, keepEmpty: false, admit: this.check });
     } catch (err) {
       if (err instanceof WorkspaceError && err.code === "missing") throw refuse("ECONFLICT", p);
-      if (err instanceof WorkspaceError && err.code === "invalid" && !/at most|larger/.test(err.message)) throw refuse("EACCES", p, "a notebook or board now: edit it in its editor");
       throw err;
     }
     this.pending.delete(p);
     this.obs.set(p, { fid: out.entry.fid!, rev: out.rev, bytes: b });
     this.record({ verb: "write", path: p, rev: out.rev, committed: "local" });
   }
-  // What is pending at `p` (or under it) committed now: before another mutation of it, and at the end (rule 1).
+  // What is pending at `p` (or under it) committed now: before another mutation of it (rule 1).
   private async flush(p: string) {
     for (const q of [...this.pending.keys()].sort()) if (within(q, p)) await this.commit(q, EMPTY);
   }
@@ -384,7 +470,7 @@ export class ShellRun {
   private async write(p: string, b: Uint8Array) {
     this.mutating(p);
     if (b.length === 0) {
-      // (rules 1 and 2: the open of `>`; an observation this run already holds is kept, never re-made)
+      // (rules 1 and 2: the open of `>`; an observation this invocation already holds is kept, never re-made)
       if (this.pending.has(p)) return;
       if (!this.obs.has(p)) {
         const o = await this.target(p, false);
@@ -471,7 +557,9 @@ export class ShellRun {
     this.record({ verb: "rename", path: a, to: b, committed: "local" });
   }
   // cp (§3.4): a data file, one duplicate; a folder (-r), walked first under admit, every descendant
-  // admitted, or nothing is copied; then exactly F + D ops.  Documents are copied in the file browser.
+  // admitted, or nothing is copied; then exactly F + D ops, each a fenced verb of its own.  Documents are
+  // copied in the file browser: a folder holding one copies nothing (F11), and each duplicate's own admit
+  // checks the kind again, so a source replaced by a document after the walk isn't copied either.
   private async cp(a: string, b: string, recursive: boolean) {
     this.mutating(b);
     await this.flush(a);
@@ -485,15 +573,17 @@ export class ShellRun {
       return;
     }
     if (!recursive) throw refuse("EISDIR", a);
-    let refused: Refusal | null = null;
-    const walk = this.check && ((c: AdmitCheck) => {
+    // (the walk: an entry outside the grant is noted, and refuses the whole copy; a revocation or a fault in
+    // the walk is the walk's error, never a shorter tree)
+    let refused: ScopeRefusal | null = null;
+    const walk = (c: AdmitCheck) => {
       try {
-        this.check!(c);
+        this.check(c);
       } catch (err) {
-        if (err instanceof Refusal) refused ??= err;
+        if (err instanceof ScopeRefusal) refused ??= err;
         throw err;
       }
-    });
+    };
     const all = await this.ws.list(a, { recursive: true, admit: walk });
     if (refused) throw refused;
     const doc = all.find((x) => x.kind !== "file" && x.kind !== "folder");
@@ -527,36 +617,65 @@ export class ShellHost {
   private shell: Shell | null = null;
   private starting: Promise<Shell> | null = null;
   private views = new Map<string, Workspace>();
+  /** the bytes one read may return (READ_BYTES; step 3's bash.read_bytes sets it) */
+  readonly readBytes: number;
 
-  constructor(private ws: Workspace, private start: () => Promise<Shell>) {}
+  constructor(private ws: Workspace, private start: () => Promise<Shell>, opts: { readBytes?: number } = {}) {
+    this.readBytes = opts.readBytes ?? READ_BYTES;
+  }
 
-  /** The shell, started (again) if there is none or it has closed. */
-  async shellFor(): Promise<Shell> {
-    if (this.shell && this.shell.state === "open") return this.shell;
+  /**
+   * The shell, started (again) if there is none or it has closed.  Only a shell whose verified package
+   * reaches files through this mediator is used (F12): an older one is ended and refused, never run on its
+   * own in-memory files in the workspace's name.  A start abandoned by endShell (Stop) ends its worker when it
+   * comes, and is never installed.
+   */
+  shellFor(): Promise<Shell> {
+    if (this.shell && this.shell.state === "open") return Promise.resolve(this.shell);
     this.shell = null;
-    this.starting ??= this.start().then(
-      (s) => ((this.shell = s), (this.starting = null), s),
-      (err) => ((this.starting = null), Promise.reject(err)),
-    );
+    if (!this.starting) {
+      const p: Promise<Shell> = this.start().then(
+        (s) => {
+          if (this.starting !== p) {
+            s.terminate();
+            throw new ShellUnavailableError("its start was abandoned");
+          }
+          this.starting = null;
+          if (!(s.hostReq >= MEDIATED_FS_LEVEL)) {
+            s.terminate();
+            throw new ShellUnavailableError("this document's package set has an older shell; update the set");
+          }
+          this.shell = s;
+          return s;
+        },
+        (err) => {
+          if (this.starting === p) this.starting = null;
+          throw err;
+        },
+      );
+      this.starting = p;
+    }
     return this.starting;
   }
-  /** Ends the shell worker (Stop's grace, r3 §4.3): what it was running fails, and the next run starts a fresh one. */
+  /** Ends the shell worker, or abandons its start (Stop's grace, r3 §4.3): what it was running fails, and the next run starts a fresh one. */
   endShell(_why: string) {
     this.shell?.terminate();
     this.shell = null;
+    this.starting = null;
   }
   /** The workspace as the principal changes it: its actor in the op log (r3 §2.1); never handed out. */
   workspaceFor(p: Principal): Workspace {
-    if (p.kind === "person" || !p.actor) return this.ws;
+    if (p.kind === "person" || p.actor === "person") return this.ws;
     let v = this.views.get(p.actor);
     if (!v) {
-      if (!/^agent:[\w.-]{1,64}$/.test(p.actor)) throw new Error("an actor is agent:<name>");
+      if (!ACTOR.test(p.actor)) throw new TypeError("an actor is agent:<name>");
       v = Object.create(this.ws) as Workspace;
       v.actor = p.actor;
       this.views.set(p.actor, v);
     }
     return v;
   }
+  /** A run of the principal's; a grant without a valid actor is refused here, before any work. */
   run(principal: Principal): ShellRun {
     return new ShellRun(this, principal);
   }

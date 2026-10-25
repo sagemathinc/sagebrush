@@ -1,6 +1,6 @@
 // ShellHost's cases (plan-bash-shell r3 §9 step 2, addendum D8 r3's step-2 tests), run in the page by
 // test-shell-host.mjs: the real shell module in its worker, a real Workspace, and ShellHost between them.
-import { startShell, ShellHost, MAX_PENDING, W } from "/host-bundle.js";
+import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS, boundedJson, TooLarge, W } from "/host-bundle.js";
 
 const enc = (s) => new TextEncoder().encode(s);
 const dec = (b) => new TextDecoder().decode(b);
@@ -19,10 +19,10 @@ let D;
 let nth = 0;
 // A workspace of its own for a group of cases, and a host over it.  `wrap(ws)` lets a case put a view of the
 // workspace between the host and it (a hook before a verb: a concurrent change, a fault).
-async function fresh(name, { start, wrap, limits } = {}) {
+async function fresh(name, { start, wrap, limits, readBytes } = {}) {
   localStorage.clear();
   const ws = await W.Workspace.open({ name: `host-${name}-${++nth}`, mainName: `host-${name}-main-${nth}`, ...(limits ? { limits } : {}) });
-  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? (() => startShell(D.S, "/").then((x) => x.shell)));
+  const host = new ShellHost(wrap ? wrap(ws) : ws, start ?? (() => startShell(D.S, "/").then((x) => x.shell)), readBytes ? { readBytes } : {});
   return { ws, host };
 }
 // A view of `ws` for the host whose verbs first run `hooks[verb](...args)` if one is set: only for the host's
@@ -59,7 +59,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -179,7 +179,7 @@ async function grants(check) {
   const A = await ws.mkdir("/A"), B = await ws.mkdir("/B");
   await ws.create("/A/f", { content: enc("a\n") });
   await ws.create("/B/g", { content: enc("b\n") });
-  const grant = (over = {}) => ({ kind: "grant", folders: new Set([A.fid]), write: true, live: () => "ok", ...over });
+  const grant = (over = {}) => ({ kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "ok", ...over });
   const g = grant();
   const ops0 = (await opsOf(ws)).length;
   const runs = {
@@ -239,7 +239,7 @@ async function classify(check) {
   const { ws, host } = await fresh("classify", { wrap: hookable(hooks) });
   const A = await ws.mkdir("/A");
   let live = "ok";
-  const g = { kind: "grant", folders: new Set([A.fid]), write: true, live: () => live };
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => live };
   const positions = {
     host: "true > /A/pend; echo x > /A/fault; echo later > /A/other",
     subshell: "true > /A/pend; (echo x > /A/fault); echo later > /A/other",
@@ -421,7 +421,285 @@ async function stop(check) {
   t0 = performance.now();
   r = await h2.exec(PERSON, JSON.stringify({ steps: [], report: "hang" }), { signal: ac.signal });
   ms = performance.now() - t0;
-  check(r.kind === "interrupted" && ms >= 2000 && ms < 4000, `a shell that doesn't unwind within 2 s: its worker ended, interrupted (${JSON.stringify(r)}, ${Math.round(ms)} ms)`);
+  check(r.kind === "interrupted" && ms >= STOP_GRACE_MS && ms < STOP_GRACE_MS + 600, `a shell that doesn't unwind within 2 s: its worker ended at the grace, interrupted (${JSON.stringify(r)}, ${Math.round(ms)} ms after a Stop at 300 ms)`);
   r = await h2.exec(PERSON, JSON.stringify({ steps: [], report: "exit" }));
   check(r.kind === "exit" && r.stdout === "[]", `and the next run gets a fresh worker (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: Stop covers startup (CORR-BASH-S2-1, LIMIT-BASH-S2-1)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A start of the real shell after `delay` ms (or never), each shell counted: its exec calls and its end.
+function counted(delay) {
+  const c = { starts: 0, dispatched: 0, ended: 0, shells: [] };
+  c.start = async () => {
+    c.starts++;
+    if (delay === Infinity) await new Promise(() => {});
+    await sleep(delay);
+    const { shell } = await startShell(D.S, "/");
+    const w = {
+      S: shell.S, version: shell.version, hostReq: shell.hostReq,
+      get state() { return shell.state; },
+      exec: (...a) => { c.dispatched++; return shell.exec(...a); },
+      terminate: () => { c.ended++; shell.terminate(); },
+    };
+    c.shells.push(w);
+    return w;
+  };
+  return c;
+}
+async function startup(check) {
+  const stopAt = (ms) => { const ac = new AbortController(); setTimeout(() => ac.abort(), ms); return ac.signal; };
+  // a start that never answers: settled at the grace, nothing dispatched
+  {
+    const c = counted(Infinity);
+    const { host } = await fresh("start-never", { start: c.start });
+    const t0 = performance.now();
+    const r = await host.exec(PERSON, "echo never", { signal: stopAt(300) });
+    const ms = performance.now() - t0;
+    check(r.kind === "interrupted" && c.dispatched === 0 && ms >= 300 + STOP_GRACE_MS - 50 && ms < 300 + STOP_GRACE_MS + 600, `Stop during a start that never answers: interrupted at the grace, nothing dispatched (${JSON.stringify(r)}, ${Math.round(ms)} ms, ${c.dispatched} dispatched)`);
+  }
+  // a start that answers after the grace: settled at the grace; the late worker is ended when it comes, never installed
+  {
+    const c = counted(3000);
+    const { host } = await fresh("start-late", { start: c.start });
+    const t0 = performance.now();
+    let r = await host.exec(PERSON, "echo late", { signal: stopAt(300) });
+    const ms = performance.now() - t0;
+    check(r.kind === "interrupted" && c.dispatched === 0 && ms < 300 + STOP_GRACE_MS + 600, `Stop during a start that comes late: interrupted at the grace (${Math.round(ms)} ms)`);
+    await sleep(3500 - ms);
+    check(c.shells.length === 1 && c.ended === 1 && c.shells[0].state === "closed" && c.dispatched === 0, `the late worker is ended when it comes, and runs nothing (${c.ended} ended, ${c.dispatched} dispatched)`);
+    r = await host.exec(PERSON, "echo next");
+    check(r.kind === "exit" && r.stdout === "next\n" && c.starts === 2, `the next run starts a fresh shell (${c.starts} starts)`);
+  }
+  // a start that answers within the grace: settled as it comes, not dispatched; that worker is ended
+  {
+    const c = counted(800);
+    const { host } = await fresh("start-within", { start: c.start });
+    const t0 = performance.now();
+    const r = await host.exec(PERSON, "echo within", { signal: stopAt(300) });
+    const ms = performance.now() - t0;
+    check(r.kind === "interrupted" && c.dispatched === 0 && c.ended === 1 && ms < 1500, `Stop during a start that answers within the grace: interrupted when it comes, nothing dispatched, its worker ended (${Math.round(ms)} ms)`);
+  }
+  // an already-aborted signal: nothing started at all
+  {
+    const c = counted(0);
+    const { host } = await fresh("start-aborted", { start: c.start });
+    const ac = new AbortController();
+    ac.abort();
+    const r = await host.exec(PERSON, "echo x", { signal: ac.signal });
+    check(r.kind === "interrupted" && c.starts === 0 && c.dispatched === 0, `an already-aborted Stop: interrupted, no start (${c.starts} starts)`);
+  }
+}
+
+// ---------------------------------------------------------------- r2: the fence per workspace verb (CORR-BASH-S2-2)
+// "After its admit": the hook wraps the verb's admit so Stop comes once the verb is admitted, while it runs.
+const afterAdmit = (opts, then) => {
+  const orig = opts.admit;
+  opts.admit = (c) => { orig(c); then(c); };
+};
+async function fence(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("fence", { wrap: hookable(hooks) });
+  let run;
+  // finalization: Stop during the first pending commit: that one finishes, the second is never made
+  hooks.create = (p, o) => { if (p === "/a") { delete hooks.create; afterAdmit(o, () => run.stop()); } };
+  run = host.run(PERSON);
+  let r = await run.invoke("true > a; true > b");
+  check(r.kind === "interrupted" && (await ws.stat("/a")) && !(await ws.stat("/b")) && same(r.ops.map((x) => x.path), ["/a"]), `Stop in the first pending commit: /a (admitted) committed, /b not, typed (${JSON.stringify(r)})`);
+  // cp -r stopped in its mkdir: the mkdir finishes, no duplicate follows
+  await ws.mkdir("/src");
+  await ws.create("/src/x", { content: enc("x") });
+  await ws.create("/src/y", { content: enc("y") });
+  hooks.mkdir = (p, o) => { if (p === "/dst") { delete hooks.mkdir; afterAdmit(o, () => run.stop()); } };
+  run = host.run(PERSON);
+  r = await run.invoke("cp -r src dst; echo after > after");
+  check(r.kind === "interrupted" && (await ws.stat("/dst")) && !(await ws.stat("/dst/x")) && !(await ws.stat("/dst/y")) && !(await ws.stat("/after")), `cp -r stopped in its mkdir: no duplicate after it (${JSON.stringify(r.ops)})`);
+  // the flush before a mv: Stop in it, the mv never happens
+  hooks.create = (p, o) => { if (p === "/f") { delete hooks.create; afterAdmit(o, () => run.stop()); } };
+  run = host.run(PERSON);
+  r = await run.invoke("true > f; mv f g");
+  check(r.kind === "interrupted" && (await ws.stat("/f")) && !(await ws.stat("/g")), `Stop in the flush before mv: the mv never happens (${JSON.stringify(r.ops)})`);
+  // Stop during cp -r's preflight walk: nothing copied
+  hooks.list = (p) => { if (p === "/src") { delete hooks.list; run.stop(); } };
+  run = host.run(PERSON);
+  r = await run.invoke("cp -r src dst2");
+  check(r.kind === "interrupted" && !(await ws.stat("/dst2")), `Stop during cp -r's walk: nothing copied (${JSON.stringify(r)})`);
+  // a request waiting for the workspace's lock when Stop comes does nothing once it gets it
+  let release;
+  const held = ws.locked(() => new Promise((res) => (release = res)));
+  run = host.run(PERSON);
+  const going = run.invoke("echo x > waited");
+  await sleep(400);
+  run.stop();
+  await sleep(100);
+  release();
+  await held;
+  r = await going;
+  check(r.kind === "interrupted" && !(await ws.stat("/waited")), `a verb waiting for the lock when Stop comes changes nothing (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: document reads (F10; CORR-BASH-S2-3, LIMIT-BASH-S2-2, D3-1)
+async function documents(check) {
+  // the serializer: exactly JSON.stringify(v, null, 1) + "\n", and it stops at the cap
+  const docs = [{ cells: [{ cell_type: "code", source: "print('é')", outputs: [] }], metadata: { k: [1, 2.5, null, true, "x\ny"] } }, { title: "b", nodes: [], empty: {}, list: [] }, { a: undefined, b: () => 1, c: [undefined, 1], d: new Date(0) }];
+  for (const d of docs) check(new TextDecoder().decode(boundedJson(d, 1e6)) === JSON.stringify(d, null, 1) + "\n", `boundedJson is JSON.stringify(v, null, 1) + "\\n": ${JSON.stringify(d).slice(0, 60)}`);
+  let reads = 0;
+  const big = { cells: Array.from({ length: 2000 }, (_, i) => ({ cell_type: "code", source: "x".repeat(100) + i })) };
+  const counting = new Proxy(big.cells, { get(t, k) { if (typeof k === "string" && /^\d+$/.test(k)) reads++; return t[k]; } });
+  let err = null;
+  try { boundedJson({ cells: counting }, 2000); } catch (e) { err = e; }
+  check(err instanceof TooLarge && reads > 0 && reads < 50, `over the cap, the walk stops there: ${reads} of 2000 cells read before TooLarge`);
+  // a document over the shell's read cap is refused (EFBIG), never read out whole
+  const { ws, host } = await fresh("documents", { readBytes: 2000 });
+  await ws.create("/nb.ipynb", { content: big });
+  let r = await host.exec(PERSON, "wc -c < nb.ipynb");
+  check(r.kind === "exit" && r.code === 1 && r.stdout === "", `a notebook over the read cap isn't read (${JSON.stringify(r).slice(0, 200)})`);
+  // (just-bash words every input error as missing; the host's own answer, through the stand-in, is EFBIG)
+  const { ws: w1, host: h1 } = await fresh("documents-cap", { readBytes: 2000, start: () => startShell(D.STAND, "/").then((x) => x.shell) });
+  await w1.create("/nb.ipynb", { content: big });
+  r = await h1.run(PERSON).invoke(JSON.stringify({ steps: [{ op: "read", args: ["/nb.ipynb"] }], report: "exit" }));
+  check(r.kind === "exit" && r.stdout === '["EFBIG"]', `the host answers a read of it EFBIG (${JSON.stringify(r)})`);
+  await ws.create("/small.board.json", { content: { title: "s", nodes: [] } });
+  r = await host.exec(PERSON, "cat small.board.json");
+  check(r.code === 0 && r.stdout === JSON.stringify((await ws.read("/small.board.json")).content, null, 1) + "\n", `a board under the cap reads as its JSON text (${JSON.stringify(r).slice(0, 160)})`);
+  // revoked between the host's stat and the document's read: no bytes, row 3
+  const hooks = {};
+  const { ws: w2, host: h2 } = await fresh("documents-race", { wrap: hookable(hooks) });
+  const A = await w2.mkdir("/A");
+  await w2.create("/A/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "SECRET" }] } });
+  let live = "ok";
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => live };
+  hooks.read = (p) => { if (p === "/A/nb.ipynb") { delete hooks.read; live = "revoked"; } };
+  r = await h2.exec(g, "cat /A/nb.ipynb");
+  check(r.kind === "unavailable" && r.row === 3 && !JSON.stringify(r).includes("SECRET"), `revoked between the stat and the read: row 3, no bytes (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: liveness on every path, write and kind at the commit (CORR-BASH-S2-3)
+async function liveness(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("liveness", { wrap: hookable(hooks) });
+  const A = await ws.mkdir("/A");
+  let live = "ok", write = true;
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), get write() { return write; }, live: () => live };
+  // the top's fast path: a revoked grant's `test -d /` is row 3
+  live = "revoked";
+  let r = await host.exec(g, "test -d / && echo y");
+  check(r.kind === "unavailable" && r.row === 3, `stat of the top with a revoked grant: row 3 (${JSON.stringify(r)})`);
+  // a pending path's fast path: revoked after the open, the next probe of it is row 3
+  live = "ok";
+  hooks.stat = (p, o) => { if (p === "/A/p") { delete hooks.stat; afterAdmit(o, () => (live = "revoked")); } };
+  r = await host.exec(g, "true > /A/p; test -e /A/p && echo y");
+  check(r.kind === "unavailable" && r.row === 3 && !(await ws.stat("/A/p")), `a pending path probed after a revocation: row 3, nothing committed (${JSON.stringify(r)})`);
+  // write withdrawn between the open and the commit: refused at the commit
+  live = "ok";
+  hooks.create = (p) => { if (p === "/A/w") { delete hooks.create; write = false; } };
+  r = await host.exec(g, "echo x > /A/w");
+  check(r.kind === "exit" && r.code === 1 && r.stderr === "bash: /A/w: Read-only file system (this shell may only read)\n" && !(await ws.stat("/A/w")), `write withdrawn between the open and the commit: refused at the commit, once (${JSON.stringify(r)})`);
+  write = true;
+  // revoked at the final flush of a pending creation: row 3, not 5
+  hooks.create = (p) => { if (p === "/A/z") { delete hooks.create; live = "revoked"; } };
+  r = await host.exec(g, "true > /A/z");
+  check(r.kind === "unavailable" && r.row === 3 && !(await ws.stat("/A/z")), `revoked at the final commit: row 3 (${JSON.stringify(r)})`);
+  live = "ok";
+  // a copy's source replaced after the walk: the duplicate's own admit refuses it
+  await ws.mkdir("/A/src");
+  await ws.create("/A/src/x", { content: enc("x") });
+  hooks.duplicate = async (p) => { if (p === "/A/src/x") { delete hooks.duplicate; await ws.remove("/A/src/x"); await ws.mkdir("/A/src/x"); } };
+  r = await host.exec(g, "cp -r /A/src /A/dst");
+  check(r.kind === "exit" && r.code === 1 && !(await ws.stat("/A/dst/x")), `a copy's source replaced by a folder after the walk isn't duplicated (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: listing filters only what is out of scope (D3-2, sync-client's note)
+async function listing(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("listing", { wrap: hookable(hooks) });
+  const A = await ws.mkdir("/A");
+  await ws.create("/A/one", { content: enc("1") });
+  await ws.mkdir("/A/sub");
+  await ws.create("/A/sub/two", { content: enc("2") });
+  let live = "ok", fault = false;
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => { if (fault) throw new TypeError("a fault in the check"); return live; } };
+  // revoked during the children's checks: row 3, never a shorter listing
+  hooks.list = (p, o) => { delete hooks.list; afterAdmit(o, (c) => { if (c.role === "target") live = "revoked"; }); };
+  let r = await host.exec(g, "ls /A");
+  check(r.kind === "unavailable" && r.row === 3, `revoked during ls's child checks: row 3 (${JSON.stringify(r)})`);
+  live = "ok";
+  hooks.list = (p, o) => { delete hooks.list; afterAdmit(o, (c) => { if (c.role === "target") fault = true; }); };
+  r = await host.exec(g, "ls /A");
+  fault = false;
+  check(r.kind === "unavailable" && r.row === 5, `a fault in ls's child checks: row 5 (${JSON.stringify(r)})`);
+  // the same in cp -r's walk: and no destination made
+  hooks.list = (p, o) => { delete hooks.list; afterAdmit(o, (c) => { if (c.role === "target") live = "revoked"; }); };
+  r = await host.exec(g, "cp -r /A/sub /A/sub2");
+  check(r.kind === "unavailable" && r.row === 3 && !(await ws.stat("/A/sub2")), `revoked during cp -r's walk: row 3, nothing made (${JSON.stringify(r)})`);
+  live = "ok";
+  hooks.list = (p, o) => { delete hooks.list; afterAdmit(o, (c) => { if (c.role === "target") fault = true; }); };
+  r = await host.exec(g, "cp -r /A/sub /A/sub3");
+  fault = false;
+  check(r.kind === "unavailable" && r.row === 5 && !(await ws.stat("/A/sub3")), `a fault during cp -r's walk: row 5, nothing made (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: attribution is explicit (ID-BASH-STEP2-D3-1)
+async function actors(check) {
+  const { ws, host } = await fresh("actors");
+  const A = await ws.mkdir("/A");
+  const base = { kind: "grant", folders: new Set([A.fid]), write: true, live: () => "ok" };
+  for (const actor of [undefined, "", "bob", "agent:", "agent:a b", "Person"]) {
+    let err = null;
+    try { await host.exec({ ...base, ...(actor === undefined ? {} : { actor }) }, "echo x > /A/never"); } catch (e) { err = e; }
+    check(err instanceof TypeError && !(await ws.stat("/A/never")), `a grant whose actor is ${JSON.stringify(actor)} is refused before any work (${err?.message})`);
+  }
+  const before = (await opsOf(ws)).length;
+  await host.exec({ ...base, actor: "person" }, "echo p > /A/byperson");
+  await host.exec({ ...base, actor: "agent:claude-1" }, "echo a > /A/byagent");
+  const by = (await opsOf(ws)).slice(before).map((o) => `${o.path} ${o.by}`);
+  check(same(by, ["/A/byperson person", "/A/byagent agent:claude-1"]), `the op log's author is the grant's actor, exactly: ${JSON.stringify(by)}`);
+}
+
+// ---------------------------------------------------------------- r2: each invocation ends clean (F9; CORR-BASH-S2-4)
+async function boundary(check) {
+  const hooks = {};
+  const { ws, host } = await fresh("boundary", { wrap: hookable(hooks) });
+  // a pending creation refused at the end (another creator won): the next invocation sees the winner, no retry
+  let creates = 0;
+  hooks.create = async (p) => { if (p === "/a") { creates++; if (creates === 1) await ws.create("/a", { content: enc("theirs\n") }); } };
+  const run = host.run(PERSON);
+  let r = await run.invoke("true > a");
+  check(r.kind === "exit" && r.code === 1 && /\/a: changed elsewhere/.test(r.stderr), `invocation 1: the pending creation is refused at its end (${JSON.stringify(r)})`);
+  r = await run.invoke("cat a");
+  check(r.kind === "exit" && r.code === 0 && r.stdout === "theirs\n" && creates === 1, `invocation 2 reads the winner's bytes, and nothing is tried again (${JSON.stringify(r)}, ${creates} creates)`);
+  delete hooks.create;
+  // a pending truncation refused at the end (changed elsewhere): the next invocation reads the file as it is
+  await ws.create("/f", { content: enc("old\n") });
+  let writes = 0;
+  hooks.write = async (p, b, o) => { if (p === "/f" && o?.admit) { writes++; if (writes === 1) await ws.write("/f", enc("new\n")); } };
+  r = await run.invoke("true > f");
+  check(r.kind === "exit" && r.code === 1 && /\/f: changed elsewhere/.test(r.stderr), `invocation 3: the pending truncation is refused at its end (${JSON.stringify(r)})`);
+  r = await run.invoke("cat f");
+  check(r.code === 0 && r.stdout === "new\n" && writes === 1, `invocation 4 reads the file as it is, and nothing is tried again (${JSON.stringify(r)}, ${writes} writes)`);
+  delete hooks.write;
+  // observations don't carry over: another writer between two invocations isn't a conflict (each is its own bash -c)
+  await ws.create("/g", { content: enc("x\n") });
+  r = await run.invoke("echo a >> g");
+  await ws.write("/g", enc("y\n"));
+  r = await run.invoke("echo b >> g");
+  check(r.code === 0 && (await read(ws, "/g")) === "y\nb\n", `an append in a later invocation opens the file afresh (${JSON.stringify(r)}, g ${JSON.stringify(await read(ws, "/g"))})`);
+  // (F7) a pending creation is visible to the rest of its own invocation
+  r = await run.invoke("touch t; test -e t && echo y; ls t");
+  check(r.code === 0 && r.stdout === "y\nt\n" && (await ws.stat("/t")), `a new touch is seen by later commands of the invocation, and committed at its end (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- r2: an old shell is refused on the workspace (F12; CORR-BASH-S2-5)
+async function oldShell(check) {
+  let dispatched = 0;
+  const { ws, host } = await fresh("old-shell", { start: () => startShell(D.OLD, "/").then(({ shell }) => ({ S: shell.S, version: shell.version, hostReq: shell.hostReq, get state() { return shell.state; }, exec: (...a) => { dispatched++; return shell.exec(...a); }, terminate: () => shell.terminate() })) });
+  const r = await host.exec(PERSON, "echo x > n");
+  check(r.kind === "unavailable" && r.row === 2 && /older shell; update the set/.test(r.reason) && dispatched === 0 && !(await ws.stat("/n")), `a 0.1.0 shell (host_req 1) is refused before dispatch on the workspace (${JSON.stringify(r)})`);
+  // (the loader alone still starts it: the refusal is the workspace surface's, not the loader's)
+  const { shell } = await startShell(D.OLD, "/");
+  check(shell.hostReq === 1 && shell.version === "0.1.0", `the loader still starts it standalone (host_req ${shell.hostReq}, ${shell.version})`);
+  shell.terminate();
+  const { shell: cur } = await startShell(D.S, "/");
+  check(cur.hostReq === 2, `the current shell's verified host_req is 2 (${cur.hostReq})`);
+  cur.terminate();
 }

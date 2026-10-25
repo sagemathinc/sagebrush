@@ -238,6 +238,9 @@ function sinkOf(c: unknown): number[] | undefined {
 export type AdmitCheck = { op: AdmitOp; role: "target" | "source" | "destination" | "child"; path: string; entry: Entry | undefined; chain: Entry[] };
 export type AdmitOp = "stat" | "read" | "list" | "create" | "write" | "mkdir" | "rename" | "duplicate" | "remove";
 type Admitted = { admit?: (c: AdmitCheck) => void };
+/** What an `admit` throws to say "outside the caller's scope": the one refusal list() filters on (an entry it
+ * refuses is left out).  Anything else an admit throws (a revocation, a fault) is the verb's error, list's too. */
+export class OutOfScope extends Error {}
 function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   if (a === undefined) return undefined;
   if (typeof a !== "function") throw new WorkspaceError("invalid", "admit is a function that throws to refuse");
@@ -985,7 +988,8 @@ export class Workspace {
 
   /** The entries in `folder` (with `recursive`, everything under it), by path.  Trash shows only when listed itself. */
   /** `opts.admit` (the host's, AdmitCheck): asked about the folder, in the same read, then about each entry
-   * listed (role "child"); an entry it refuses (throws for) is left out, and a refused folder lists nothing. */
+   * listed (role "child"); an entry it refuses as out of scope (OutOfScope) is left out, a refused folder lists
+   * nothing, and any other error is list's. */
   async list(folder: string = "/", opts: { recursive?: boolean } & Admitted = {}): Promise<Entry[]> {
     const f = path(folder), admit = admitOf(opts.admit);
     this.open();
@@ -1014,8 +1018,10 @@ export class Workspace {
       try {
         admit({ op: "list", role: "child", path: e.path, entry: e, chain });
         return true;
-      } catch {
-        return false;
+      } catch (err) {
+        // (only an entry outside the scope is left out; a revocation or a fault is list's error, never a shorter list)
+        if (err instanceof OutOfScope) return false;
+        throw err;
       }
     });
   }
@@ -1048,9 +1054,19 @@ export class Workspace {
       return { entry: e, content: c };
     });
   }
-  async read(p: string): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, then the entry and its contents read in the
+   * same hold, so what is returned is what was admitted (a document read is one checked operation). */
+  async read(p: string, opts: Admitted = {}): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
+    const admit = admitOf(opts.admit);
+    if (!admit) return this.readNow(p);
+    return this.locked(async () => {
+      await this.admitAt(admit, "read", "target", path(p));
+      return this.readNow(p, admit);
+    });
+  }
+  private async readNow(p: string, admit?: (c: AdmitCheck) => void): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
     const e = await this.mustStat(p);
-    if (e.kind === "folder") return { entry: e, content: await this.list(e.path), rev: 0 };
+    if (e.kind === "folder") return { entry: e, content: await this.list(e.path, admit ? { admit } : {}), rev: 0 };
     const c = await this.contents(e);
     if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
     if (e.kind === "notebook") return { entry: e, content: c, rev: c.rev ?? 0 };
@@ -1880,6 +1896,7 @@ export class Workspace {
     // (nor its admit, the host's check at use: plan-bash-shell r3 §2.3)
     const bare = <O,>(o: O): O => { if (o && typeof o === "object" && ("collect" in o || "admit" in o)) { const { collect: _c, admit: _a, ...rest } = o as Record<string, unknown>; return rest as O; } return o; };
     bound.list = (folder?: string, opts?: { recursive?: boolean }) => as.list(folder, opts?.recursive ? { recursive: true } : {});
+    bound.read = (p: string) => as.read(p);
     bound.stat = (p: string) => as.stat(p);
     bound.mkdir = (p: string) => as.mkdir(p);
     bound.create = (p: string, opts?: Parameters<Workspace["create"]>[1]) => as.create(p, bare(opts));

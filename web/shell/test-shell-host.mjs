@@ -64,16 +64,36 @@ const stand = `export function start(port) {
   port.postMessage({ name: "shell.ready", payload: { version: "stand-in" } });
 }`;
 const STAND = withModule(stand);
+// A real old shell: step 1's module (web/shell/fixtures/bash-shell-0.1.0.js, the 0.1.0 source as pinned then),
+// built by the publisher itself from a copy of the package, so its host_req (1) is computed, not declared
+const OP = await import(join(root, "scripts", "optional-packages.mjs"));
+const oldRoot = mkdtempSync(join(tmpdir(), "sb-test-shell-host-old-"));
+cpSync(join(root, "optional", "bash"), join(oldRoot, "optional", "bash"), { recursive: true });
+const oldSource = readFileSync(join(here, "fixtures", "bash-shell-0.1.0.js"));
+writeFileSync(join(oldRoot, "optional", "bash", "src", "shell.js"), oldSource);
+{
+  const mf = join(oldRoot, "optional", "bash", "sagebrush.json"), m = JSON.parse(readFileSync(mf, "utf8"));
+  m.version = "0.1.0";
+  m.js.banner = m.js.banner.replace(/@sagebrush\/bash [0-9.]+:/, "@sagebrush/bash 0.1.0:");
+  m.files["src/shell.js"] = sha(oldSource);
+  writeFileSync(mf, JSON.stringify(m, null, 2) + "\n");
+}
+const OLD = await OP.buildSet(OP.readOptional(oldRoot, ["bash"]), OP.loadApi(), dir);
+rmSync(oldRoot, { recursive: true, force: true });
+const oldIndex = JSON.parse(readFileSync(join(dir, "pkgset", OLD + ".json"), "utf8"));
+const OLD_REQ = Object.values(oldIndex.packages)[0].js.host_req;
+if (OLD_REQ !== 1) throw new Error(`the old shell's host_req is ${OLD_REQ}, not 1`);
 
 // the page: the loader, the host and the workspace, bundled for this test only
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, `export { startShell } from ${JSON.stringify(join(here, "loader.ts"))};
-export { ShellHost, MAX_PENDING } from ${JSON.stringify(join(here, "host.ts"))};
+export { ShellHost, MAX_PENDING, STOP_GRACE_MS } from ${JSON.stringify(join(here, "host.ts"))};
+export { boundedJson, TooLarge } from ${JSON.stringify(join(here, "bounded-json.ts"))};
 export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};
 `);
 execFileSync("bun", ["build", entry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host-bundle.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
 const data = {
-  S, STAND,
+  S, STAND, OLD,
   cases: JSON.parse(readFileSync(join(root, "test", "bash-oracle-cases.json"), "utf8")),
   oracle: JSON.parse(readFileSync(join(root, "test", "bash-oracle.json"), "utf8")),
   known: JSON.parse(readFileSync(join(root, "test", "bash-known.json"), "utf8")),

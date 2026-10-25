@@ -13,7 +13,8 @@ import { admitIndex, checkJsChunk, PKGSET_LIMITS, PkgsetError, type SetPlan } fr
 import HOST_LEVELS from "./host-levels.json";
 
 export const SHELL_PACKAGE = "@sagebrush/bash";
-export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>));
+// (the highest level of any message, or of any compatible widening of one: host-levels.json's "fields")
+export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>), ...Object.values(((HOST_LEVELS as any).fields ?? {}) as Record<string, number>));
 
 /**
  * What one invocation came to (r3 §7.4, D8 point 5): a real shell exit, whose
@@ -59,6 +60,8 @@ export interface Shell {
   /** the package set this worker runs (one S per shell worker: A1.5) */
   readonly S: string;
   readonly version: string;
+  /** the host level its package needs, as its verified index pins it (host_req: computed at publish, A1.4) */
+  readonly hostReq: number;
   /** "closed" once terminated or failed; it doesn't reopen */
   readonly state: "open" | "closed";
   exec(script: string, opts?: string | ExecOptions): Promise<ShellOutcome>;
@@ -226,6 +229,7 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
   const shell: Shell = {
     S,
     version,
+    hostReq: j.js.host_req,
     get state() {
       return closed ? "closed" : "open";
     },

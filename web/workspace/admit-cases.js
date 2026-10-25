@@ -10,7 +10,8 @@ const dec = (b) => new TextDecoder().decode(b);
 // A folder grant, as ShellHost's principals make one: admitted if the entry, or a folder above it, is one of the
 // granted folders, by fid (design/capabilities.md §6).  `seen` records every check.  The refusal is an object of
 // its own, so a test can tell it is what the verb rejected with.
-class Refused extends Error {}
+// (an OutOfScope: the one refusal list() leaves an entry out for; anything else is list's error)
+class Refused extends W.OutOfScope {}
 function grant(...fids) {
   const g = new Set(fids), seen = [];
   const admit = (c) => {
@@ -75,6 +76,38 @@ async function cases(check) {
     const top = (c) => { if (c.path === "/" && c.role === "target") return; a.admit(c); };
     const all = (await w.list("/", { recursive: true, admit: top })).map((e) => e.path).sort();
     check(all.join() === "/A,/A/f.txt", `a recursive list from the top shows only what the grant covers: ${all}`);
+  }
+
+  // ---- list: only an out-of-scope refusal leaves an entry out; a revocation or a fault in a child's check is list's error
+  {
+    class Revoked extends Error {}
+    let n = 0;
+    const revokeAtChild = (c) => { if (c.role === "child" && ++n === 1) throw new Revoked("revoked at a child"); };
+    let err = null;
+    try { await w.list("/A", { admit: revokeAtChild }); } catch (e) { err = e; }
+    check(err instanceof Revoked, `a child's check that throws anything but OutOfScope fails the list, never hides the entry (${err?.constructor?.name})`);
+    err = null;
+    try { await w.list("/", { recursive: true, admit: (c) => { if (c.role === "child" && c.path === "/A/f.txt") throw new TypeError("a fault"); } }); } catch (e) { err = e; }
+    check(err instanceof TypeError, `and a fault in a recursive list's child check too (${err?.constructor?.name})`);
+  }
+
+  // ---- read: admitted, then the entry and its contents in the same locked hold
+  {
+    const a = grant(A.fid);
+    await w.create("/B/doc.board.json", { content: { title: "b", nodes: [] } });
+    check((await w.read("/A/f.txt", { admit: a.admit })).entry.path === "/A/f.txt", "read in the grant answers");
+    await refused("read of a document outside the grant", () => w.read("/B/doc.board.json", { admit: a.admit }));
+    const s = a.seen.find((x) => x.op === "read" && x.path === "/B/doc.board.json");
+    check(s && s.role === "target" && s.entry === "/B/doc.board.json", `read's admit is given the entry: ${JSON.stringify(s)}`);
+    // (holding the lock: a change waiting for it runs only after the read is done)
+    let order = [];
+    const slow = (c) => { order.push("admit"); };
+    const reading = w.read("/A/f.txt", { admit: slow }).then(() => order.push("read done"));
+    const writing = w.write("/A/f.txt", enc("a3")).then(() => order.push("write done"));
+    await Promise.all([reading, writing]);
+    check(order.join() === "admit,read done,write done", `read with admit holds the lock: a write asked meanwhile waits for it (${order})`);
+    const ag = w.forAgent("agent:test");
+    check((await ag.read("/B/doc.board.json", { admit: () => { throw new Refused("never"); } })).entry.path === "/B/doc.board.json", "an agent's read ignores admit");
   }
 
   // ---- create: the destination, by the folders above it, including a parent that isn't there yet

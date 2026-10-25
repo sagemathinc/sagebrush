@@ -161,6 +161,10 @@ function readJsPackage(rootDir, dir, at, m, bad) {
 export function hostLevels(rootDir = root) {
   return JSON.parse(readFileSync(join(rootDir, "web", "shell", "host-levels.json"), "utf8")).names;
 }
+/** Its compatible widenings: "name.field.path" -> the level that added the field. */
+export function hostFields(rootDir = root) {
+  return JSON.parse(readFileSync(join(rootDir, "web", "shell", "host-levels.json"), "utf8")).fields ?? {};
+}
 
 /**
  * A js package's published module: bundled (scripts/js-bundle.mjs, under
@@ -197,7 +201,7 @@ export async function buildJsModule(p, rootDir = root) {
     if (disagree.length) throw new Error(`${p.id}: ${disagree.join("; ")}`);
     const missing = C.missingNotices(notices, entries);
     if (missing.length) throw new Error(`${p.id}: its notices (${p.manifest.js.notices}) have no entry for ${missing.join(", ")}`);
-    const req = C.hostRequirement(text, hostLevels(rootDir));
+    const req = C.hostRequirement(text, hostLevels(rootDir), hostFields(rootDir));
     if (req.errors.length) throw new Error(`${p.id}: its host calls:\n  ` + req.errors.slice(0, 20).join("\n  "));
     if (req.host_req < 1) throw new Error(`${p.id}: its module makes no hostCall (a js package talks to its host only through hostCall)`);
     const bytes = Buffer.byteLength(text, "utf8");
