@@ -266,6 +266,10 @@ struct State {
     /// bytes ever converted to residents (C r12 section 2's C)
     converted: u64,
     chains: [(u64, u64); CHAIN_SLOTS],
+    /// chains whose operation was entered as certification-dependent
+    /// (`Operation::enter_certified`): their admissions never fall back to
+    /// an unmeasured check (0: an empty slot)
+    certified_chains: [u64; CHAIN_SLOTS],
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -280,6 +284,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     resident: 0,
     converted: 0,
     chains: [(0, 0); CHAIN_SLOTS],
+    certified_chains: [0; CHAIN_SLOTS],
 });
 
 /// Mirrors of O and R_res for the test-only audit allocator, which must not
@@ -322,6 +327,26 @@ impl State {
 
     fn chain_sum(&self, chain: u64) -> u64 {
         self.chains.iter().filter(|s| s.0 == chain).map(|s| s.1).sum()
+    }
+
+    fn is_certified_chain(&self, chain: u64) -> bool {
+        chain != 0 && self.certified_chains.contains(&chain)
+    }
+
+    fn mark_certified_chain(&mut self, chain: u64) -> Result<(), ()> {
+        match self.certified_chains.iter_mut().find(|c| **c == 0) {
+            Some(slot) => {
+                *slot = chain;
+                Ok(())
+            }
+            None => Err(()),
+        }
+    }
+
+    fn unmark_certified_chain(&mut self, chain: u64) {
+        for c in self.certified_chains.iter_mut().filter(|c| **c == chain) {
+            *c = 0;
+        }
     }
 
     fn set_outstanding(&mut self, v: u64) {
@@ -424,17 +449,45 @@ pub struct Operation {
     chain: u64,
     outer: bool,
     done: bool,
+    /// this operation marked its chain certification-dependent (and unmarks
+    /// it when it ends)
+    protected: bool,
 }
 
 impl Operation {
     pub fn enter() -> Operation {
         let cur = current_chain();
         if cur != 0 {
-            return Operation { chain: cur, outer: false, done: false };
+            return Operation { chain: cur, outer: false, done: false, protected: false };
         }
         let chain = NEXT_CHAIN.fetch_add(1, Relaxed);
         CHAIN.with(|c| c.set(chain));
-        Operation { chain, outer: true, done: false }
+        Operation { chain, outer: true, done: false, protected: false }
+    }
+
+    /// Enter an operation that DEPENDS on certification: a caller that
+    /// lifts a cap on the ledger's strength (no-cliffs C r17; astra2's
+    /// CORR-C2A-1 refresh case).  None unless `certified()` holds now; then,
+    /// for as long as it lasts, every admission on its chain needs a fresh
+    /// measured read of every applicable row, and refuses otherwise.  A total
+    /// refresh that leaves a row unmeasured or unknown, or a host source that
+    /// fails, can't silently downgrade it to the unmeasured check.  (None
+    /// also when the chain can't be marked: the caller takes its capped
+    /// route.)
+    pub fn enter_certified() -> Option<Operation> {
+        if !certified() {
+            return None;
+        }
+        let mut op = Operation::enter();
+        let mut s = state();
+        if s.is_certified_chain(op.chain) {
+            return Some(op); // (nested in a certification-dependent chain)
+        }
+        if s.mark_certified_chain(op.chain).is_err() {
+            return None;
+        }
+        op.protected = true;
+        Some(op)
     }
 
     pub fn chain(&self) -> u64 {
@@ -452,6 +505,10 @@ impl Operation {
     }
 
     fn close(&mut self) -> u64 {
+        if self.protected {
+            self.protected = false;
+            state().unmark_certified_chain(self.chain);
+        }
         if !self.outer {
             return 0;
         }
@@ -636,6 +693,8 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     let mut s = state();
     let outstanding = s.outstanding;
     let resident = s.resident;
+    // a certification-dependent chain never takes an unmeasured check
+    let protected = s.is_certified_chain(chain);
     #[cfg(target_arch = "wasm32")]
     let wasm_live = {
         let committed = (core::arch::wasm32::memory_size::<0>() as u64) << 16;
@@ -680,6 +739,13 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
     if !faked {
         on_row(t.bytes, wasm_live, None);
     }
+    // (WebAssembly: a certification-dependent chain needs the total still
+    // certified: observed, every applicable row engine-only)
+    #[cfg(target_arch = "wasm32")]
+    let unmeasurable = protected && !(t.status == TotalStatus::Observed && !t.uncertified);
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(unused_mut)]
+    let mut unmeasurable = false;
     // a measure that opened but can't be read now fails closed at this
     // admission (astra2's CORR-C2A-1): no residents-only fallback that
     // would admit past an unmeasured row
@@ -695,15 +761,21 @@ fn admit(what: &str, x: u64, chain: u64) -> Result<(), EngineError> {
         if s.measure.available() {
             measured = s.measure.read_each(|r| on_row(r.figure, r.usage, r.available));
             unreadable = !measured;
+        } else if protected {
+            // a certification-dependent operation whose rows became
+            // unmeasured or unknown at a refresh (or whose host source
+            // failed): refused, never downgraded
+            measured = false;
+            unmeasurable = true;
         } else {
-            // (a platform or row that was never measurable: not certified,
-            // so no caller has lifted a cap on it; the residents against the
-            // total, as in C-1)
+            // (an operation that never depended on certification, on rows
+            // with no measure: no cap was lifted for it; the residents
+            // against the total, as in C-1)
             measured = false;
             on_row(t.bytes, 0, None);
         }
     }
-    if unreadable && first.is_none() {
+    if (unreadable || unmeasurable) && first.is_none() {
         first = Some((t.bytes, live_seen, allowance(t), None));
     }
     let (first, live_seen) = (first, live_seen);

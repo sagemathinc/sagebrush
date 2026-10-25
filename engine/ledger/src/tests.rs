@@ -13,6 +13,7 @@ fn fresh(total_bytes: u64) -> std::sync::MutexGuard<'static, ()> {
     s.set_outstanding(0);
     s.set_resident(0);
     s.chains = [(0, 0); CHAIN_SLOTS];
+    s.certified_chains = [0; CHAIN_SLOTS];
     #[cfg(not(target_arch = "wasm32"))]
     {
         s.measure = Measure::NONE;
@@ -366,5 +367,71 @@ fn any_number_of_rows_is_measured_no_cutoff() {
     }
     std::fs::write(d.join("g42"), "1000000\n").unwrap();
     assert!(matches!(reserve("x", 1024), Err(EngineError::Memory(r)) if r.measured && r.live == 1000000), "the 43rd row refuses");
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_certified_operation_is_not_downgraded_by_a_refresh() {
+    // astra2's refresh/reopen probe (CORR-C2A-1): an operation entered as
+    // certification-dependent keeps refusing when a total refresh leaves a
+    // row unknown or unmeasured, or the host source fails; an ordinary
+    // operation in the same state keeps C-1's unmeasured check
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("refresh");
+    let path = fixture(&d, "memory.current", "1000\n");
+    let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+    let good = [Row { kind: MeasureKind::Cgroup(path.clone()), figure: 1 << 30 }];
+    set_total_and_measure(t, &good);
+    let op = Operation::enter_certified().expect("certified at entry");
+    let r = reserve("held", 4096).unwrap();
+    // a refresh replaces the measure with an unknown row
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Unknown, figure: 1 << 30 }]);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "an unknown refreshed row must refuse");
+    // a refresh whose host source failed: no total, no rows
+    set_total_and_measure(None, &[]);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "a failed host source must refuse");
+    // a refresh whose file was deleted (it reopens unmeasured)
+    std::fs::remove_file(&path).unwrap();
+    set_total_and_measure(t, &good);
+    assert!(matches!(reserve("next", 1024), Err(EngineError::Memory(e)) if !e.measured), "a failed reopen must refuse");
+    assert_eq!(outstanding_bytes(), 4096, "nothing admitted past the refusals");
+    drop(r);
+    assert_eq!(op.finish(), Ok(()));
+    // an ordinary (not certification-dependent) operation keeps C-1's check
+    let op = Operation::enter();
+    let r = reserve("ordinary", 1024).unwrap();
+    drop(r);
+    assert_eq!(op.finish(), Ok(()));
+    // and the chain mark is gone once the certified operation ended
+    assert!(state().certified_chains.iter().all(|&c| c == 0));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[test]
+fn enter_certified_needs_certification_now() {
+    let _g = fresh(total_for_usable(1000));
+    // (fresh: no measure at all: not certified)
+    assert!(Operation::enter_certified().is_none());
+    assert_eq!(current_chain(), 0);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_nested_certified_entry_keeps_the_outer_mark() {
+    let _g = fresh(total_for_usable(1000));
+    hooks::set_fake_usage(None);
+    let d = scratch_dir("nested");
+    let path = fixture(&d, "memory.current", "1000\n");
+    let t = Some(Total { bytes: 1 << 30, status: TotalStatus::Observed, joint: true, uncertified: false });
+    set_total_and_measure(t, &[Row { kind: MeasureKind::Cgroup(path), figure: 1 << 30 }]);
+    let outer = Operation::enter_certified().unwrap();
+    let inner = Operation::enter_certified().unwrap();
+    assert_eq!(inner.finish(), Ok(()));
+    assert!(state().is_certified_chain(outer.chain()), "the outer mark stays after the nested one ends");
+    let chain = outer.chain();
+    assert_eq!(outer.finish(), Ok(()));
+    assert!(!state().is_certified_chain(chain));
     std::fs::remove_dir_all(&d).unwrap();
 }
