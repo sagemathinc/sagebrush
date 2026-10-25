@@ -534,7 +534,7 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: Playwright's WebKit, pinned (no cache: its apt dependencies dominate the install)
+      - name: "Playwright's WebKit, pinned (no cache: its apt dependencies dominate the install)"
         run: |
           mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && echo '{"private": true}' > package.json
           npm i --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION" && npx playwright install --with-deps webkit
