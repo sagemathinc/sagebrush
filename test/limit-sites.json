@@ -265,6 +265,10 @@
   "owner": "HMF engine",
   "row": "inv-37"
  },
+ "engine/hmf/src/eigen.rs :: orbit_eigenspace_core :: if f.krylov.is_some() && krylov_used(&c) + n * n > budget { #0": {
+  "class": "2",
+  "owner": "HMF engine"
+ },
  "engine/hmf/src/field.rs :: factor_u64_steps :: let d = pollard_brent(m, &mut budget).ok_or_else(|| format!(\"could not factor {} within the work limit (unsupported)\", n))?; #0": {
   "class": "2+3",
   "owner": "HMF engine",
@@ -314,6 +318,10 @@
   "class": "2+3",
   "owner": "HMF engine",
   "row": "inv-39"
+ },
+ "engine/hmf/tests/eigen_stop.rs :: stop_anywhere_in_an_orbit_eigenspace_then_the_same_cache_works :: let k = (0..orbits.orbits.len()).max_by_key(|&k| orbits.orbits[k].len()).unwrap(); #0": {
+  "class": "none",
+  "owner": "HMF engine"
  },
  "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
   "class": "none",
