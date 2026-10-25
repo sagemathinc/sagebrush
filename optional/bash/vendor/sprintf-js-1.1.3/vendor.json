@@ -1,0 +1,18 @@
+{
+ "about": "sprintf-js 1.1.3, vendored unchanged for optional/bash's bundle (plan-bash-shell r3 \u00a71). Each file is the npm tarball's; vendor/verify-from-npm.mjs re-checks them against the tarball, by its integrity.",
+ "package": "sprintf-js",
+ "version": "1.1.3",
+ "license": "BSD-3-Clause",
+ "tarball": "https://registry.npmjs.org/sprintf-js/-/sprintf-js-1.1.3.tgz",
+ "integrity": "sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==",
+ "files": {
+  "sprintf.js": {
+   "from": "package/src/sprintf.js",
+   "sha256": "95add43f116385be221745307fae02d06751b01d4f939df1debb17dbe2ebf4eb"
+  },
+  "LICENSE": {
+   "from": "package/LICENSE",
+   "sha256": "f8287e4dd9480be58c56aca4a55c23b782c43a86e69aabad78fff4df0d29edef"
+  }
+ }
+}
