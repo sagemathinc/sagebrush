@@ -141,17 +141,20 @@ export function recordsAre(rs: unknown[]): { ok: true; doc: any } | { ok: false;
     if (r.type === "item" && typeof r.parent !== "string") return { ok: false, at: `record ${i}: parent` };
     const k = keyOf(r);
     if (sent.has(k)) return { ok: false, at: `record ${i}: key ${k} twice` };
-    sent.set(k, canon(r));
+    // (a value nested too deeply to walk is a wrong record, not an exception: CORR-153-7)
+    try { sent.set(k, canon(r)); } catch { return { ok: false, at: `record ${i}: a value nested too deeply` }; }
   }
   if (docs !== 1) return { ok: false, at: `${docs} doc records` };
   let doc: any, again: Rec[];
   try { doc = fromEditRecords(rs as Rec[]); again = editRecords(doc); } catch { return { ok: false, at: "the records aren't a board" }; }
   if (again.length !== sent.size) return { ok: false, at: `${sent.size} records sent, ${again.length} in the board` };
-  for (const r of again) {
-    const k = keyOf(r), s = sent.get(k);
-    if (s === undefined) return { ok: false, at: `key ${k} not sent as the board has it` };
-    if (s !== canon(r)) return { ok: false, at: `key ${k}: ${firstDifference(JSON.parse(s), r, "") ?? "/"}` };
-  }
+  try {
+    for (const r of again) {
+      const k = keyOf(r), s = sent.get(k);
+      if (s === undefined) return { ok: false, at: `key ${k} not sent as the board has it` };
+      if (s !== canon(r)) return { ok: false, at: `key ${k}: ${firstDifference(JSON.parse(s), r, "") ?? "/"}` };
+    }
+  } catch { return { ok: false, at: "a value nested too deeply" }; }
   return { ok: true, doc };
 }
 

@@ -3,8 +3,12 @@
 // checked the host, the key and the origin.  Loaded only with --edit.
 //
 //   GET  /events?key&tab=T        the tab registers (MAX_CLIENTS); its events:
-//                                 `board` {seq, persistedSeq, includes, persistedGen, state, reports},
+//                                 `board` {seq, persistedSeq, includes, persistedGen, state, changes, more},
+//                                 changes: the heads' reports and alternatives since the last event, each
+//                                 batch bound to its head's seq (the first event: those the hub keeps);
+//                                 more: some weren't sent inline (too large), GET /changes for them;
 //                                 `stale` (compaction released its base: resync)
+//   GET  /changes?key&tab=T&after=S   the kept batches after head S, and whether none since was dropped
 //   GET  /board?key&tab=T[&at=S]  head S (default: the latest), its seq in X-Sagebrush-Seq;
 //                                 at most RESP_CONCURRENCY bodies sent at once, the rest waiting (QUEUE_MAX)
 //   POST /edit?key&tab&gen&base&hash   body: the snapshot, JSON lines (application/x-ndjson)
@@ -17,7 +21,8 @@
 // the ledger, and cut off at BODY_MAX + 1.
 import type * as http from "http";
 import { readBounded } from "./board-check";
-import { EditHub, type SubmitAnswer } from "./board-edit-hub";
+import { EditHub, type SubmitAnswer, type HeadEvent } from "./board-edit-hub";
+import { KEPT_PER_BYTE } from "./board-edit-memory";
 import { Gate } from "./board-edit-gate";
 import type { Limits } from "./board-edit-limits";
 
@@ -35,11 +40,14 @@ function params(url: URL, names: string[], optional: string[] = []): Record<stri
 }
 const int = (s: string | undefined) => (s !== undefined && INT.test(s) && Number(s) <= Number.MAX_SAFE_INTEGER ? Number(s) : null);
 
-interface Stream { writableLength: number; write(s: string): unknown; destroy(): unknown; end(): unknown }
+interface Stream { writableLength: number; write(s: string, cb?: (e?: unknown) => void): unknown; destroy(): unknown; end(): unknown }
+
+/** A tab's event stream, and what of its backlog is charged on the hub's ledger (§8.2: SSE backlogs). */
+interface Open { c: Stream; charged: number; open: boolean }
 
 export class EditServer {
   readonly gate: Gate;
-  private streams = new Map<string, Stream>();
+  private streams = new Map<string, Open>();
   private sending = 0;
   private waiting: (() => void)[] = [];
   private sent = 0; // (hub events already sent)
@@ -72,15 +80,32 @@ export class EditServer {
         return true;
       }
       this.hub.connect(p.tab);
-      this.streams.set(p.tab, res);
+      this.streams.set(p.tab, { c: res, charged: 0, open: true });
+      // (registered before anything is sent: a stream dropped by its first event is released by the one path)
+      req.on("close", () => this.drop(p.tab, res));
       res.writeHead(200, { ...this.api, "Content-Type": "text/event-stream" });
-      this.send(p.tab, `retry: 2000\n\n` + this.boardEvent(p.tab));
-      req.on("close", () => {
-        if (this.streams.get(p.tab) !== res) return;
-        this.streams.delete(p.tab);
-        this.hub.release(p.tab);
-        this.gate.forget(p.tab);
-      });
+      // (the first event: the reports and alternatives the hub keeps, CORR-153-4)
+      this.send(p.tab, `retry: 2000\n\n` + this.boardEvent(p.tab, this.hub.changesAfter(0).changes));
+      return true;
+    }
+    if (url.pathname === "/changes" && url.searchParams.has("tab")) {
+      const p = params(url, ["key", "tab", "after"]);
+      const after = int(p?.after);
+      if (!p || !TAB.test(p.tab) || after === null) { json(400, { error: "bad parameters" }); return true; }
+      const g = this.gate.read();
+      if (!g.ok) { json(503, { busy: "rate" }, { "Retry-After": String(Math.ceil(g.retryMs / 1000)), Connection: "close" }); return true; }
+      const c = this.hub.changesAfter(after);
+      // (its body charged before it is made: the batches' own charge, KEPT_PER_BYTE per byte of their JSON,
+      // bounds its bytes; released when it is sent)
+      const n = Math.ceil(c.charge / KEPT_PER_BYTE) + 256;
+      if (!this.hub.ledger.admit(n)) { json(503, { busy: "memory" }, { "Retry-After": "1", Connection: "close" }); return true; }
+      let done = false;
+      const free = () => { if (!done) { done = true; this.hub.ledger.release(n); } };
+      res.on("close", free);
+      let body: string;
+      try { body = JSON.stringify({ seq: this.hub.H.seq, complete: c.complete, changes: c.changes }); } catch { body = JSON.stringify({ seq: this.hub.H.seq, complete: false, changes: [] }); }
+      res.writeHead(200, { ...this.api, "Content-Type": "application/json" });
+      res.end(body, free);
       return true;
     }
     if (url.pathname === "/board" && url.searchParams.has("tab")) {
@@ -153,34 +178,70 @@ export class EditServer {
       const body = Buffer.concat(chunks, got);
       chunks.length = 0;
       let r: SubmitAnswer;
-      try { r = this.hub.submit(p.tab, gen, base, body, p.hash, charged); } finally { charged = 0; ticket.release(); }
+      // (the hub answers every snapshot; whatever it might throw is a refusal here, never an exception out of
+      // this callback, CORR-153-7)
+      try { r = this.hub.submit(p.tab, gen, base, body, p.hash, charged); }
+      catch { r = { op: `${p.tab}:${gen}`, refused: "the snapshot can't be taken" }; }
+      finally { charged = 0; ticket.release(); }
       json(200, r);
       this.flush();
     });
   }
 
-  /** A tab's board event: the head, what of its own it includes, and its persistedGen (§6.3, §6.5). */
-  private boardEvent(tab: string, reports: unknown[] = []): string {
+  /** A tab's board event: the head, what of its own it includes, and its persistedGen (§6.3, §6.5); the reports
+   * and alternatives of `changes`, inline if they fit in a quarter of PENDING_MAX, else `more` (GET /changes). */
+  private boardEvent(tab: string, changes: HeadEvent[] = []): string {
     const v = this.hub.tabView(tab), s = this.hub.state;
-    const data = { seq: this.hub.H.seq, persistedSeq: this.hub.persistedSeq, includes: v.includes, persistedGen: v.persistedGen, state: s, reports };
-    return `event: board\ndata: ${JSON.stringify(data)}\n\n`;
+    const head = { seq: this.hub.H.seq, persistedSeq: this.hub.persistedSeq, includes: v.includes, persistedGen: v.persistedGen, state: s };
+    const sent = changes.filter((c) => c.reports.length || c.alternatives.length || c.omitted);
+    if (sent.length) {
+      try {
+        const text = `event: board\ndata: ${JSON.stringify({ ...head, changes: sent, more: false })}\n\n`;
+        if (Buffer.byteLength(text) <= this.limits.PENDING_MAX / 4) return text;
+      } catch {}
+      return `event: board\ndata: ${JSON.stringify({ ...head, changes: [], more: true })}\n\n`;
+    }
+    return `event: board\ndata: ${JSON.stringify({ ...head, changes: [], more: false })}\n\n`;
   }
 
+  /**
+   * Text to a tab's stream, its bytes admitted to the ledger first and released as they leave (§8.2); a page that
+   * doesn't take its events, past PENDING_MAX, or the ledger full: closed, and it resyncs when it reconnects.
+   */
   private send(tab: string, text: string) {
-    const c = this.streams.get(tab);
-    if (!c) return;
-    // (a page that doesn't take its events, past PENDING_MAX, is closed: it resyncs when it reconnects)
-    if (c.writableLength + Buffer.byteLength(text) > this.limits.PENDING_MAX) { this.streams.delete(tab); c.destroy(); return; }
-    c.write(text);
+    const s = this.streams.get(tab);
+    if (!s) return;
+    const n = Buffer.byteLength(text);
+    if (Math.max(s.c.writableLength, s.charged) + n > this.limits.PENDING_MAX || !this.hub.ledger.admit(n)) { this.drop(tab, s.c, "destroy"); return; }
+    s.charged += n;
+    s.c.write(text, () => { if (s.open) { s.charged -= n; this.hub.ledger.release(n); } });
   }
+
+  /**
+   * A stream gone, however (closed by the page, dropped as slow, the server closing): the one place its tab is
+   * released, its backlog's charge returned and its rate forgotten (CORR-153-6).  Once per stream: a newer
+   * stream of the same tab is left alone.
+   */
+  private drop(tab: string, c: Stream, how?: "destroy" | "end") {
+    const s = this.streams.get(tab);
+    if (!s || s.c !== c) return;
+    this.streams.delete(tab);
+    s.open = false;
+    this.hub.ledger.release(s.charged);
+    s.charged = 0;
+    this.hub.release(tab);
+    this.gate.forget(tab);
+    if (how === "destroy") c.destroy();
+    else if (how === "end") c.end();
+  }
+
+  /** What the streams' backlogs hold charged on the ledger (for the tests). */
+  get backlog() { let n = 0; for (const s of this.streams.values()) n += s.charged; return n; }
 
   /** The hub's new events and stale tabs, to every tab. */
   flush() {
     const events = this.hub.events.splice(0);
-    if (events.length) {
-      const reports = events.flatMap((e) => e.reports).slice(0, this.limits.CONFLICTS_MAX);
-      for (const tab of [...this.streams.keys()]) this.send(tab, this.boardEvent(tab, reports));
-    }
+    if (events.length) for (const tab of [...this.streams.keys()]) this.send(tab, this.boardEvent(tab, events));
     for (const tab of this.hub.staleTabs) this.send(tab, `event: stale\ndata: ${JSON.stringify({ seq: this.hub.H.seq })}\n\n`);
     this.hub.staleTabs.clear();
   }
@@ -188,7 +249,7 @@ export class EditServer {
   /** A comment to every stream, through any idle timeout. */
   beat() { for (const tab of [...this.streams.keys()]) this.send(tab, ": .\n\n"); }
 
-  close() { for (const c of this.streams.values()) c.end(); this.streams.clear(); }
+  close() { for (const [tab, s] of [...this.streams]) this.drop(tab, s.c, "end"); }
 }
 
 /**
@@ -198,7 +259,8 @@ export class EditServer {
  */
 export class EditWatch {
   private running = false;
-  private last: string | null = null;
+  // (undefined: not stat'ed yet, so a FILE already gone at the first tick is seen as gone)
+  private last: string | null | undefined = undefined;
   constructor(private hub: EditHub, private server: EditServer, private file: string, private fileMax: number, private quietMs: number, private stat: (p: string) => string | null) {}
   async tick(now: number) {
     if (this.running) return;
@@ -209,7 +271,7 @@ export class EditWatch {
         this.last = st;
         let bytes: Buffer | null = null;
         try { bytes = st === null ? null : readBounded(this.file, this.fileMax); } catch { bytes = null; }
-        if (st !== null && bytes === null) this.hub.state = { state: "held", why: "invalid", detail: `FILE is larger than FILE_MAX (${this.fileMax} bytes)` };
+        if (st !== null && bytes === null) this.hub.holdFile("invalid", `FILE is larger than FILE_MAX (${this.fileMax} bytes)`);
         else await this.hub.observe(bytes);
       }
       await this.hub.tickPrevs(this.quietMs);
