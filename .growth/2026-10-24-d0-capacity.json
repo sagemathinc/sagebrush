@@ -6,7 +6,7 @@
   "cli/pyjs.cjs": 34862,
   "engine/lib/magma.pre": 243,
   "engine/lib/magma.src": 427,
-  "engine/lib/sage.pre": 70088,
+  "engine/lib/sage.pre": 70168,
   "engine/lib/sage.src": 20941,
   "engine/sagebrush-engine.wasm": 9679,
   "engine/sagebrush-worker.js": 1164
