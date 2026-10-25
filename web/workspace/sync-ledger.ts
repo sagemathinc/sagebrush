@@ -9,7 +9,7 @@
 // - A row has one owner, the dseq stored in it, and a record writes only the row it owns: a direct record its own
 //   lseq, a successor the held write it carries (`heldSeq`), never its bookkeeping lseq; journal records (lseq 0)
 //   own none (CORR-T14-1).
-// - Decided rows are capped at LEDGER.decided per namespace, exactly: a transaction that decides k rows prunes, in
+// - Decided rows are capped at LEDGER.maxDecided per namespace, exactly: a transaction that decides k rows prunes, in
 //   itself, the oldest decided rows other than its own past the cap (byDecided), and raises `ledgerFloor` to the
 //   highest it pruned.  A seq with no row at or below the floor is `expired`: an honest answer, never a guess.
 // - Events (this page's hub, and a BroadcastChannel to the others) are hints: a wait reads the durable rows once at
@@ -24,15 +24,15 @@ import { req } from "./db";
 
 export const LEDGER = {
   /** decided rows kept at most per namespace (the oldest pruned past it, in the deciding transaction) */
-  decided: 50_000,
+  maxDecided: 50_000,
   /** rebuild watermark jumps remembered per namespace (delta 1, D1); past it, the oldest's range expires */
-  skips: 16,
+  maxSkips: 16,
   /** records read, and rows written, per seeding transaction */
   seedPage: 1000,
 };
 export const WAIT = {
   /** seqs in one wait */
-  seqs: 10_000,
+  maxSeqs: 10_000,
   /** waits at once per Workspace */
   max: 16,
   /** the largest timeoutMs (the platform timer's range) */
@@ -49,9 +49,9 @@ const codeOk = (c: string) => c.length <= CODE.max && /^[a-z0-9_]+$/.test(c);
 /** (LIMIT-PR128-2) namespaces whose sender generation the hub remembers at most: the current one and the two the
  * obsolete queue may hold */
 export const HUB = {
-  namespaces: 3,
+  maxNamespaces: 3,
   /** a namespace's tentative epochs (generations announced before any durable read) kept, at most */
-  tentative: 4,
+  maxTentative: 4,
 };
 export const OBSOLETE = {
   /** namespaces whose ledgers wait to be deleted, at most (a switch waits for room) */
@@ -75,12 +75,12 @@ export const ledgerKeys = (ns: string) => ({
   skips: k(ns, "ledgerSkips"), rev: k(ns, "ledgerRev"), wipe: k(ns, "ledgerWipe"), seedAt: k(ns, "ledgerSeedAt"),
 });
 export const OBSOLETE_KEY = "sync:obsolete";
-// (a rebuild's watermark jump, as kept: [from, to, reasonCode], at most LEDGER.skips of them (delta 1 r2))
+// (a rebuild's watermark jump, as kept: [from, to, reasonCode], at most LEDGER.maxSkips of them (delta 1 r2))
 type Skip = [number, number, number];
 const SKIP_REASONS = ["invalid", "diverged", "refused"];
 /** The skips as kept, validated: anything not of that shape is read as none (the floor kept). */
 function skipsOf(v: unknown): Skip[] {
-  if (!Array.isArray(v) || v.length > LEDGER.skips) return [];
+  if (!Array.isArray(v) || v.length > LEDGER.maxSkips) return [];
   for (const t of v) if (!Array.isArray(t) || t.length !== 3 || !Number.isSafeInteger(t[0]) || !Number.isSafeInteger(t[1]) || !(t[2] === 0 || t[2] === 1 || t[2] === 2)) return [];
   return v as Skip[];
 }
@@ -104,22 +104,30 @@ export class Hub {
   private subs = new Set<(m: Msg, stale: boolean) => void>();
   /** the highest sender generation seen per (namespace, epoch): one fence for every wait of this Workspace's database
    * (CORR-PR128-2), raised by every message that carries a generation and by each wait's durable read */
-  // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.namespaces of them, the least recently used
+  // (LIMIT-PR128-2: one current {epoch, gen} per namespace, at most HUB.maxNamespaces of them, the least recently used
   // dropped; a newer epoch replaces an older one, and a message of an older epoch is stale)
   // (CORR-PR128-6, -R4: before a durable read (a fresh hub, or after eviction) generations are only tentative, kept per
-  // epoch, at most HUB.tentative epochs (the highest, the least trusted, dropped first): a claim of one epoch never
-  // erases or hides another epoch's.  A durable read or a lifecycle change makes the entry sure at its own epoch, with
-  // the generation announced for that same epoch if higher, never one of another epoch; once sure, a newer epoch's
-  // ordinary claim is ignored)
-  private gens = new Map<string, { sure: { epoch: number; gen: number } | null; tent: Map<number, number> }>();
+  // epoch, at most HUB.maxTentative epochs: a claim of one epoch never erases or hides another epoch's.  A durable read
+  // or a lifecycle change makes the entry sure at its own epoch, with the generation announced for that same epoch if
+  // higher, never one of another epoch; once sure, a newer epoch's ordinary claim is ignored)
+  // (CORR-PR128-6-R5, fail closed: no bound may silently forget an announced generation.  An overflowing tentative map
+  // drops its highest epoch and marks the namespace lossy; evicting a namespace marks the hub lost.  A registration then
+  // can't know whether a higher generation of its epoch was announced: its sure entry is `unknown`, and a wait on an
+  // unknown entry takes no sent, reset or holder hint until the live sender's own answer to its hello (an inflight reply
+  // with its nonce) confirms the generation)
+  private gens = new Map<string, { sure: { epoch: number; gen: number; unknown: boolean } | null; tent: Map<number, number>; lossy: boolean }>();
+  /** a namespace was evicted: what it knew is gone, so every entry made from now on starts lossy */
+  private lost = false;
   /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one).
    * Only a durable read (a wait's registration) or a lifecycle change (`advance`) establishes a namespace's epoch.  A
    * message claiming a newer epoch than a sure one is neither applied here nor allowed to fence the current epoch's
    * messages (waits drop it by its epoch anyway); with no sure entry its claim is only tentative, for its own epoch, so
    * it neither holds a later durable registration at an older epoch nor discards that epoch's announced generation
-   * (astra3's CORR-PR128-6 and -R4). */
+   * (astra3's CORR-PR128-6 and -R4); where a bound may have dropped one, the registration is unknown (-R5). */
   fence(ns: string, epoch: number, gen: number, advance = false): boolean {
-    const cur = this.gens.get(ns) ?? { sure: null, tent: new Map<number, number>() };
+    const had = this.gens.get(ns);
+    // (an entry made after the hub lost a namespace starts lossy: what it knew before may be gone)
+    const cur = had ?? { sure: null, tent: new Map<number, number>(), lossy: this.lost };
     let stale = false;
     const sure = cur.sure;
     if (advance) {
@@ -128,8 +136,11 @@ export class Hub {
         stale = gen < sure.gen;
         sure.gen = Math.max(gen, sure.gen);
       } else {
-        // (established at this epoch: its own announced generation kept; tentative epochs up to it no longer needed)
-        cur.sure = { epoch, gen: Math.max(gen, cur.tent.get(epoch) ?? 0) };
+        // (established at this epoch: its own announced generation kept; tentative epochs up to it no longer needed;
+        // unknown if anything this namespace might have heard was dropped (a lifecycle change is authoritative: known))
+        const unknown = !sure && cur.lossy;
+        cur.sure = { epoch, gen: Math.max(gen, cur.tent.get(epoch) ?? 0), unknown };
+        cur.lossy = false;
         for (const e of [...cur.tent.keys()]) if (e <= epoch) cur.tent.delete(e);
       }
     } else if (sure) {
@@ -143,11 +154,17 @@ export class Hub {
       const was = cur.tent.get(epoch);
       stale = was !== undefined && gen < was;
       cur.tent.set(epoch, Math.max(gen, was ?? 0));
-      while (cur.tent.size > HUB.tentative) cur.tent.delete(Math.max(...cur.tent.keys()));
+      if (cur.tent.size > HUB.maxTentative) {
+        cur.tent.delete(Math.max(...cur.tent.keys()));
+        cur.lossy = true;
+      }
     }
     this.gens.delete(ns);
     this.gens.set(ns, cur);
-    while (this.gens.size > HUB.namespaces) this.gens.delete(this.gens.keys().next().value!);
+    while (this.gens.size > HUB.maxNamespaces) {
+      this.gens.delete(this.gens.keys().next().value!);
+      this.lost = true;
+    }
     return stale;
   }
   /** the highest generation seen for (ns, epoch) */
@@ -155,6 +172,19 @@ export class Hub {
     const cur = this.gens.get(ns);
     if (!cur) return 0;
     return cur.sure ? (cur.sure.epoch === epoch ? cur.sure.gen : 0) : cur.tent.get(epoch) ?? 0;
+  }
+  /** Whether (ns, epoch)'s generation is unknown: registered after a bound may have dropped an announcement. */
+  unknown(ns: string, epoch: number): boolean {
+    const s = this.gens.get(ns)?.sure;
+    return !s || s.epoch !== epoch || s.unknown;
+  }
+  /** The live sender's own answer to a wait's hello: (ns, epoch)'s generation known again. */
+  confirm(ns: string, epoch: number, gen: number) {
+    const s = this.gens.get(ns)?.sure;
+    if (s && s.epoch === epoch) {
+      s.gen = Math.max(s.gen, gen);
+      s.unknown = false;
+    }
   }
   /** (tests) how many namespaces the fence holds */
   get fences() { return this.gens.size; }
@@ -190,6 +220,11 @@ export class Hub {
     for (const f of this.subs) try { f(m, stale); } catch (e) { console.warn("sync ledger:", e); }
   }
   // (the sender's side)
+  /** This page holds (ns, epoch) under `gen`: it answers waits' hellos from now on, even before it sends anything
+   * (a wait on an unknown generation is confirmed only by that answer: CORR-PR128-6-R5). */
+  holding(ns: string, epoch: number, gen: number) {
+    if (!this.inflight || this.inflight.ns !== ns || this.inflight.epoch !== epoch || this.inflight.gen !== gen) this.inflight = { ns, epoch, gen, seqs: new Set() };
+  }
   sent(ns: string, epoch: number, gen: number, seqs: number[]) {
     if (!this.inflight || this.inflight.ns !== ns || this.inflight.gen !== gen) this.inflight = { ns, epoch, gen, seqs: new Set() };
     for (const s of seqs) this.inflight.seqs.add(s);
@@ -271,8 +306,8 @@ export class LedgerTx {
     const keys = ledgerKeys(this.ns), meta = this.meta;
     let count = ((await metaGet<number>(meta, keys.count)) ?? 0) + this.decidedHere.size;
     let floor = (await metaGet<number>(meta, keys.floor)) ?? 0;
-    if (count > LEDGER.decided) {
-      const r = await pruneOldest(this.rows, this.ns, count - LEDGER.decided, this.decidedHere);
+    if (count > LEDGER.maxDecided) {
+      const r = await pruneOldest(this.rows, this.ns, count - LEDGER.maxDecided, this.decidedHere);
       count -= r.pruned;
       floor = Math.max(floor, r.highest);
       meta.put(floor, keys.floor);
@@ -308,14 +343,14 @@ function pruneOldest(rows: IDBObjectStore, ns: string, n: number, keep: Set<numb
 }
 
 /** A rebuild's watermark jump (delta 1, D1): local ops in (from, to] went up through its reissue journal, not as
- * records of their own; a seq there with no row answers superseded/<reason>.  At most LEDGER.skips kept: past it,
+ * records of their own; a seq there with no row answers superseded/<reason>.  At most LEDGER.maxSkips kept: past it,
  * the oldest goes and the floor rises over its range (its seqs then honestly `expired`).  In `meta`'s transaction. */
 export async function noteSkip(meta: IDBObjectStore, ns: string, from: number, to: number, reason: string) {
   if (!(to > from)) return;
   const keys = ledgerKeys(ns);
   const code = Math.max(0, SKIP_REASONS.indexOf(reason));
   const list = skipsOf(await metaGet(meta, keys.skips)).concat([[from, to, code]]);
-  while (list.length > LEDGER.skips) {
+  while (list.length > LEDGER.maxSkips) {
     const old = list.shift()!;
     meta.put(Math.max((await metaGet<number>(meta, keys.floor)) ?? 0, old[1]), keys.floor);
   }
@@ -432,10 +467,13 @@ function merge(cur: number, next: number): number {
 }
 
 type Waiter = {
-  ns: string; epoch: number; level: number;
+  ns: string; epoch: number; level: number; hub: Hub;
   seqs: Float64Array; st: Uint8Array; counts: Int32Array;
   maxGen: number; lastRev: number; nonce: string;
   reading: boolean; again: boolean; ready: boolean; done: boolean;
+  /** registered on an unknown generation (CORR-PR128-6-R5): no sent, reset or holder hint counts until the live
+   * sender's answer to this wait's hello confirms it */
+  unknown: boolean;
   settle: (how: "resolve" | "reject", e?: unknown) => void;
 };
 const waiters = new WeakMap<object, Set<Waiter>>();
@@ -492,11 +530,11 @@ function endEpoch(x: Waiter, reason: "sync-off" | "switched") {
   x.settle("resolve");
 }
 
-/** Wait until every one of `seqs` (the ops a call collected: at most WAIT.seqs) has reached `level` or a final state;
+/** Wait until every one of `seqs` (the ops a call collected: at most WAIT.maxSeqs) has reached `level` or a final state;
  * resolves {sync, counts}.  `signal` is required; `timeoutMs` is optional, with no default.  Refusals are immediate
  * and typed: `limit` (too many seqs, {max}), `busy` (WAIT.max waits already), `invalid`. */
 export async function waitSync(w: Workspace, seqs: number[], opts: { level?: SyncLevel; signal: AbortSignal; timeoutMs?: number }): Promise<WaitResult> {
-  const list = checkSeqs(seqs, WAIT.seqs);
+  const list = checkSeqs(seqs, WAIT.maxSeqs);
   const level = opts?.level ?? "accepted";
   if (typeof level !== "string" || !Object.prototype.hasOwnProperty.call(LEVEL, level)) throw new WorkspaceError("invalid", "level is local, sent, accepted or confirmed");
   const signal = opts?.signal;
@@ -526,9 +564,9 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
     let timer: ReturnType<typeof setTimeout> | null = null, unsub: (() => void) | null = null;
     const onAbort = () => x.settle("reject", signal.reason ?? new DOMException("aborted", "AbortError"));
     const x: Waiter = {
-      ns: v0.ns, epoch: v0.epoch, level: LEVEL[level],
+      ns: v0.ns, epoch: v0.epoch, level: LEVEL[level], hub,
       seqs: sorted, st: new Uint8Array(sorted.length), counts: new Int32Array(9),
-      maxGen: Math.max(hub.seen(v0.ns, v0.epoch), v0.gen), lastRev: v0.rev, nonce: Math.random().toString(36).slice(2), reading: false, again: false, ready: false, done: false,
+      maxGen: Math.max(hub.seen(v0.ns, v0.epoch), v0.gen), lastRev: v0.rev, nonce: Math.random().toString(36).slice(2), reading: false, again: false, ready: false, done: false, unknown: false,
       settle: (how, e) => {
         if (x.done) return;
         x.done = true;
@@ -545,6 +583,7 @@ export async function waitSync(w: Workspace, seqs: number[], opts: { level?: Syn
     set!.add(x);
     // (the lease's generation noted in the shared fence: a sender older than it is stale for every wait)
     hub.fence(x.ns, x.epoch, v0.gen, true);
+    x.unknown = hub.unknown(x.ns, x.epoch);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) return onAbort();
     if (t !== undefined) timer = setTimeout(() => x.settle("reject", Object.assign(new WorkspaceError("busy", "timed out"), { timeout: true })), t);
@@ -577,6 +616,12 @@ function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
     case "inflight": {
       if (m.t === "inflight" && m.nonce !== x.nonce) return;
       if (stale || m.gen < x.maxGen) return;
+      // (unknown: only the live sender's own answer to this wait's hello counts, and confirms the generation)
+      if (x.unknown) {
+        if (m.t !== "inflight") return;
+        x.unknown = false;
+        x.hub.confirm(x.ns, x.epoch, m.gen);
+      }
       if (m.gen > x.maxGen) {
         x.maxGen = m.gen;
         clearSent(x);
@@ -588,12 +633,12 @@ function onMsg(x: Waiter, m: Msg, stale: boolean, again: () => void) {
       break;
     }
     case "reset":
-      if (stale || m.gen < x.maxGen) return;
+      if (stale || m.gen < x.maxGen || x.unknown) return;
       x.maxGen = m.gen;
       clearSent(x);
       break;
     case "holder":
-      if (m.gen > x.maxGen) {
+      if (m.gen > x.maxGen && !x.unknown) {
         x.maxGen = m.gen;
         clearSent(x);
       }
@@ -644,6 +689,11 @@ async function reread(w: Workspace, x: Waiter) {
 async function readPage(w: Workspace, x: Waiter, idx: number[]): Promise<{ out: [number, number][]; seeded: boolean } | "ended"> {
   const tx = w.ws.transaction(["syncLedger", "meta", "ops"], "readonly");
   const v = await viewOf(tx.objectStore("meta"), x.ns);
+  // (the durable lease generation, a floor at every read: a holder commits it before it announces it)
+  if (v && v.epoch === x.epoch && v.gen > x.maxGen) {
+    x.maxGen = v.gen;
+    clearSent(x);
+  }
   // (the lifecycle checked in the same transaction as the rows: moved on, the wait ends as it would on the message)
   const cur = (await req(tx.objectStore("meta").get("sync:current"))) as { ns: string; off?: boolean } | undefined;
   if (!v || v.epoch !== x.epoch || !cur || cur.ns !== x.ns || cur.off) {
