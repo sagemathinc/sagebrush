@@ -172,7 +172,7 @@ type TotalHost = Box<dyn Fn() -> Option<Total> + Send + Sync>;
 static TOTAL_HOST: std::sync::OnceLock<TotalHost> = std::sync::OnceLock::new();
 /// (the native host's figure is read again when 100 ms old)
 #[cfg(not(target_arch = "wasm32"))]
-const TOTAL_MAX_AGE: std::time::Duration = std::time::Duration::from_millis(100);
+const TOTAL_REFRESH: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Set the total (the WebAssembly host pushes it before a dispatch; tests).
 pub fn set_total(total: Option<Total>) {
@@ -206,7 +206,7 @@ pub fn total() -> Total {
     if let Some(host) = TOTAL_HOST.get() {
         let stale = {
             let s = state();
-            s.total_at.map_or(true, |t| t.elapsed() >= TOTAL_MAX_AGE)
+            s.total_at.map_or(true, |t| t.elapsed() >= TOTAL_REFRESH)
         };
         if stale {
             // (the host is asked without the lock: it may take the GIL)
