@@ -11,7 +11,7 @@
 import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
-import { INTR, INTR_CTRL_C, consumeCtrlC } from "./interrupt";
+import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC } from "./interrupt";
 import { fullGc } from "./gc";
 import * as P from "./progress";
 
@@ -149,12 +149,10 @@ function memoryShare(): [number, number] {
   } catch (e) {
     // (a Ctrl-C seen by the collector's Python code consumed the flag: set
     // it again, so the call it came before is interrupted, not this push;
-    // notified, as every producer of Ctrl-C is, so a time.sleep wakes: #135)
+    // requestCtrlC also wakes a time.sleep waiting on the word, as every
+    // producer of Ctrl-C does: #135)
     try {
-      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) {
-        Atomics.or(INTR, 0, 1);
-        Atomics.notify(INTR, 0);
-      }
+      if (Obj.typeOf(Obj.toPyExc(e)).$mro.includes(Obj.T.KeyboardInterrupt)) requestCtrlC();
     } catch {}
     return [-1, 0];
   }
