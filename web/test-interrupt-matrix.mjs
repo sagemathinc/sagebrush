@@ -222,7 +222,7 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
             else p.stdin.write("\x03");
           } catch (e) {
             // (the process is already gone: evidence for this trial, never a crash of the harness)
-            trials[id - 1].send_error = String(e?.code ?? e?.message ?? e);
+            trials[id - 1].send_error = { error: String(e?.code ?? e?.message ?? e), t: now() };
             return;
           }
           // (the guard, clipped to the run's deadline: a clipped guard ends the session as "budget")

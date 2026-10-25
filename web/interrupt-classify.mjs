@@ -42,6 +42,9 @@ export function xkRowOutcome(cells, leakOk, xk) {
 }
 
 export function classify(t) {
+  // a Stop that could not be dispatched (the process gone, EPERM...): the cell is uncovered, never a
+  // result, and the error is kept (astra CORR-168-R2-1)
+  if (t.send_error) return { outcome: "INVALID", why: "the Stop could not be sent: " + (t.send_error.error ?? t.send_error), send_error: t.send_error };
   if (t.t_send == null) return { outcome: "INVALID", why: t.marks.RET ? "returned before the Stop" : "no Stop sent" };
   // (a KI from before the send is stale, another trial's or the setup's: never a tiny latency)
   if (t.marks.KI && t.marks.KI.t < t.t_send) return { outcome: "INVALID", why: "stale KI before the Stop" };
@@ -92,7 +95,8 @@ export function leakCheck(samples, full = 20) {
 // is KNOWN if every failing cell matches one of their signatures)
 export function againstBaseline(row, baseline) {
   const bs = (baseline?.entries ?? []).filter((e) => e.case === row.case && e.host === row.host);
-  if (!bs.length || row.leak?.ok === false) return row.outcome;
+  // (a row with a failed Stop dispatch never matches a baseline: its cells say nothing about the route)
+  if (!bs.length || row.leak?.ok === false || (row.trials ?? []).some((t) => t.send_error)) return row.outcome;
   if (row.outcome === "PASS" || row.outcome === "SLOW" || row.outcome === "EXCEPTION") return "FIXED";
   const res = bs.map((b) => new RegExp(b.signature));
   const whys = (row.trials ?? []).filter((t) => t.outcome === "FAIL").map((t) => t.why ?? "");

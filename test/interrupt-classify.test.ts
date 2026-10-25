@@ -170,3 +170,14 @@ test("browser failures: an open dialog or the budget is INVALID and named; no an
   assert.equal(c.outcome, "INVALID");
   assert.match(c.why, /^browser transport/);
 });
+
+test("a Stop that could not be sent: the cell is INVALID with its error kept, and the row never matches a baseline (astra CORR-168-R2-1)", () => {
+  const t = `{ t_send: 1000, marks: { ENTER: { t: 500, rest: "1" }, RET: { t: 4200 } }, probe: "ok", send_error: { error: "EPERM", t: 1000.5 } }`;
+  const r = run(`classify(${t})`);
+  assert.equal(r.outcome, "INVALID");
+  assert.match(r.why, /could not be sent: EPERM/);
+  assert.deepEqual(r.send_error, { error: "EPERM", t: 1000.5 });
+  const b = `{ entries: [{ case: "P2a", host: "cli", signature: "did not stop" }] }`;
+  assert.equal(run(`againstBaseline({ case: "P2a", host: "cli", outcome: "FAIL", trials: [{ outcome: "FAIL", why: "did not stop" }, { outcome: "INVALID", send_error: { error: "EPERM" } }] }, ${b})`), "FAIL");
+  assert.equal(run(`rowOutcome([${t.replace(/^\{/, "{ outcome: \"INVALID\", ")}])`), "INCOMPLETE");
+});
