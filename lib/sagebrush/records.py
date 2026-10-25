@@ -330,7 +330,9 @@ def _typename(v):
     if isinstance(v, int):
         return "integer"
     if isinstance(v, float):
-        return "number"
+        # (as JSON Schema: a number with a zero fractional part, such as 3.0,
+        # is an integer; infinities and NaN are not)
+        return "integer" if v.is_integer() else "number"
     if isinstance(v, str):
         return "string"
     if isinstance(v, list):

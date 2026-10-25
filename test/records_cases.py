@@ -118,6 +118,18 @@ cases = [
     ("checkpoint, version 2", checkpoint, ["version"], 2),
     ("checkpoint, version True", checkpoint, ["version"], True),
     ("checkpoint, no payload_length", checkpoint, ["payload_length"], DEL),
+    # integral JSON numbers are integers (JSON Schema 2020-12); others are not
+    ("running, call_id 3.0", running, ["call_id"], 3.0),
+    ("running, done 410.0", running, ["count", "done"], 410.0),
+    ("running, stage_index 2.0", running, ["stage_index"], 2.0),
+    ("running, stage_index 2.5", running, ["stage_index"], 2.5),
+    ("running, done 410.5", running, ["count", "done"], 410.5),
+    ("running, done inf", running, ["count", "done"], float("inf")),
+    ("checkpoint, version 1.0", checkpoint, ["version"], 1.0),
+    ("checkpoint, version 1.5", checkpoint, ["version"], 1.5),
+    ("checkpoint, state_version 1.0", checkpoint, ["state_version"], 1.0),
+    ("checkpoint, state_version 0.5", checkpoint, ["state_version"], 0.5),
+    ("outcome, peak memory 1024.0", complete, ["peak_memory_bytes"], 1024.0),
 ]
 for label, r, path, value in cases:
     show(label, change(r, path, value))

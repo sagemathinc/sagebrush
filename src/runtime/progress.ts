@@ -271,13 +271,17 @@ export class Call {
   ended = false;
   lastMs = 0;
   readonly s: Slot;
+  /** Why it has no slot, when it never gets one (an engine call nested
+   *  deeper than the engine's frames: it has no counts to show). */
+  readonly fixedReason: string | null;
 
-  constructor(op: number, parentId: number) {
+  constructor(op: number, parentId: number, fixedReason: string | null = null) {
     this.id = nextId++;
     this.parentId = parentId;
     this.startedMs = Date.now();
+    this.fixedReason = fixedReason;
     this.s = { ...emptySlot(), inUse: true, callId: this.id, parentId, generation, op, startedMs: this.startedMs };
-    this.slot = claim();
+    this.slot = fixedReason === null ? claim() : -1;
     if (this.slot < 0) untracked.set(this.id, this);
   }
 
@@ -289,7 +293,7 @@ export class Call {
 
   /** Writes the counts now. */
   flush(t: number = Date.now()) {
-    if (this.ended || failed) return;
+    if (this.ended || failed || this.fixedReason !== null) return;
     this.lastMs = t;
     try {
       if (this.slot < 0) {
@@ -327,8 +331,8 @@ function disable(e: unknown) {
 }
 
 /** Starts a call (its parent: the innermost call running here, or `parentId`). */
-export function begin(op: number, parentId?: number): Call {
-  const c = new Call(op, parentId ?? stack[stack.length - 1]?.id ?? 0);
+export function begin(op: number, parentId?: number, fixedReason: string | null = null): Call {
+  const c = new Call(op, parentId ?? stack[stack.length - 1]?.id ?? 0, fixedReason);
   stack.push(c);
   c.flush();
   return c;
@@ -368,7 +372,7 @@ export function snapshot(buf: Int32Array = PROGRESS): any[] {
     if (s.inUse) out.push(record(s, now));
   }
   for (const c of untracked.values())
-    out.push({ schema: "sagebrush.progress/1", call_id: c.id, parent_id: c.parentId, op: nameOf("ops", c.s.op), status: "untracked", reason: UNTRACKED_REASON, elapsed_s: Math.max(0, (now - c.startedMs) / 1000) });
+    out.push({ schema: "sagebrush.progress/1", call_id: c.id, parent_id: c.parentId, op: nameOf("ops", c.s.op), status: "untracked", reason: c.fixedReason ?? UNTRACKED_REASON, elapsed_s: Math.max(0, (now - c.startedMs) / 1000) });
   return out;
 }
 
@@ -400,10 +404,20 @@ export function record(s: Slot, now: number = Date.now()): any {
 // ---- the engine's frames (engine.ts calls these)
 
 /** The engine's frame area, as the engine laid it out (progress.rs): word 0
- *  the layout version, 1 an epoch, 2 the depth, then 24-word frames. */
+ *  the layout version, 1 an epoch, 2 the depth (every call running, however
+ *  deep), then 32 frames of 24 words, then 96 (serial, op) pairs for the
+ *  calls nested deeper than the frames. */
 const FRAME_HEADER = 4;
-/** The area's length in words: the header and 32 frames (progress.rs FRAMES). */
-export const FRAME_WORDS = FRAME_HEADER + 32 * WORDS;
+const FRAMES = 32;
+const OVERFLOW = 96;
+const OVERFLOW_AT = FRAME_HEADER + FRAMES * WORDS;
+/** The area's length in words. */
+export const FRAME_WORDS = OVERFLOW_AT + 2 * OVERFLOW;
+/** The reason an engine call nested deeper than the frames is untracked. */
+export const DEEP_REASON = "nested deeper than 32 engine calls: no counts";
+/** How many nested engine calls this host lists, one record each; a deeper
+ *  one (a runaway recursion) is not listed. */
+const DEPTH_LISTED = 1024;
 let engineCalls: { serial: number; call: Call }[] = [];
 let lastEpoch = -1;
 let lastCopy = 0;
@@ -421,26 +435,41 @@ export function syncFrames(area: Uint32Array | null) {
     if (epoch === lastEpoch && now - lastCopy < COPY_EVERY_MS) return;
     lastEpoch = epoch;
     lastCopy = now;
-    const depth = Math.min(area[2], (area.length - FRAME_HEADER) / WORDS);
-    // frames that ended, or were replaced at the same depth
+    const depth = Math.min(area[2], DEPTH_LISTED);
+    // a call's serial at depth d (0 below the overflow pairs: no identity)
+    const serialAt = (d: number) => (d < FRAMES ? area[FRAME_HEADER + d * WORDS + 2] : d < FRAMES + OVERFLOW ? area[OVERFLOW_AT + 2 * (d - FRAMES)] : 0);
+    // calls that ended, or were replaced at the same depth
     let keep = 0;
-    while (keep < engineCalls.length && keep < depth && engineCalls[keep].serial === area[FRAME_HEADER + keep * WORDS + 2]) keep++;
+    while (keep < engineCalls.length && keep < depth && engineCalls[keep].serial === serialAt(keep)) keep++;
     for (let i = engineCalls.length - 1; i >= keep; i--) engineCalls[i].call.end();
     engineCalls.length = keep;
     for (let d = 0; d < depth; d++) {
+      const parent = d > 0 ? engineCalls[d - 1].call.id : undefined;
+      if (d >= FRAMES) {
+        // nested deeper than the frames: untracked, under its own id and parent
+        if (d >= engineCalls.length) {
+          const op = d < FRAMES + OVERFLOW ? area[OVERFLOW_AT + 2 * (d - FRAMES) + 1] : 0;
+          engineCalls.push({ serial: serialAt(d), call: begin(op, parent, DEEP_REASON) });
+        }
+        continue;
+      }
       const fw = area.subarray(FRAME_HEADER + d * WORDS, FRAME_HEADER + (d + 1) * WORDS);
       const f = decode(fw);
-      if (d >= engineCalls.length) {
-        const parent = d > 0 ? engineCalls[d - 1].call.id : undefined;
-        engineCalls.push({ serial: fw[2], call: begin(f.op, parent) });
-      }
+      if (d >= engineCalls.length) engineCalls.push({ serial: fw[2], call: begin(f.op, parent) });
       const c = engineCalls[d].call;
       Object.assign(c.s, { stage: f.stage, stageIndex: f.stageIndex, stageIndexSaturated: f.stageIndexSaturated, stageCount: f.stageCount, stageCountSaturated: f.stageCountSaturated, done: f.done, doneSaturated: f.doneSaturated, total: f.total, totalSaturated: f.totalSaturated, work: f.work, workSaturated: f.workSaturated, memoryNowKiB: f.memoryNowKiB, memoryPeakKiB: f.memoryPeakKiB, memorySaturated: f.memorySaturated, unit: f.unit, fraction: f.fraction, beyondForecast: f.beyondForecast });
       c.flush(now);
     }
+    if (syncHook) syncHook();
   } catch (e) {
     disable(e);
   }
+}
+
+let syncHook: (() => void) | null = null;
+/** Tests only: called after each copy of the frames (inside the engine's import). */
+export function setSyncHookForTests(f: (() => void) | null) {
+  syncHook = f;
 }
 
 /** The engine call returned, raised or trapped: its frames' calls end. */

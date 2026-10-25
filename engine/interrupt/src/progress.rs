@@ -481,9 +481,38 @@ fn now_ms() -> u64 {
     }
 }
 
-thread_local! {
-    /// The calls running on this thread, innermost last: a new call's parent.
-    static STACK: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+/// The calls running on each thread, innermost last (a new call's parent),
+/// keyed by the thread that began them: a call ended on another thread (the
+/// CPython wrapper allows that) still leaves its own thread's chain right.
+static STACKS: std::sync::Mutex<Vec<(std::thread::ThreadId, Vec<u64>)>> = std::sync::Mutex::new(Vec::new());
+
+/// Pushes `id` on thread `t`'s chain; the call it nests in (0 at top level).
+fn stack_push(t: std::thread::ThreadId, id: u64) -> u64 {
+    let mut all = STACKS.lock().unwrap_or_else(|e| e.into_inner());
+    let k = match all.iter().position(|e| e.0 == t) {
+        Some(k) => k,
+        None => {
+            all.push((t, Vec::new()));
+            all.len() - 1
+        }
+    };
+    let parent = all[k].1.last().copied().unwrap_or(0);
+    all[k].1.push(id);
+    parent
+}
+
+/// Removes `id` from thread `t`'s chain, wherever it is (and the thread's
+/// entry once its chain is empty).
+fn stack_remove(t: std::thread::ThreadId, id: u64) {
+    let mut all = STACKS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(k) = all.iter().position(|e| e.0 == t) {
+        if let Some(j) = all[k].1.iter().rposition(|&c| c == id) {
+            all[k].1.remove(j);
+        }
+        if all[k].1.is_empty() {
+            all.swap_remove(k);
+        }
+    }
 }
 
 /// One call's progress, from [`begin`] until it drops (on success, error or
@@ -493,6 +522,8 @@ pub struct Call {
     parent_id: u64,
     op: u32,
     started_ms: u64,
+    /// The thread that began it (its parent chain).
+    thread: std::thread::ThreadId,
     slot: Option<usize>,
     early: bool,
     last_ms: u64,
@@ -505,13 +536,14 @@ pub struct Call {
 /// or a host-registered name's index).
 pub fn begin(op: u32) -> Call {
     let call_id = NEXT_ID.fetch_add(1, Relaxed);
-    let parent_id = STACK.with(|s| s.borrow().last().copied().unwrap_or(0));
-    STACK.with(|s| s.borrow_mut().push(call_id));
+    let thread = std::thread::current().id();
+    let parent_id = stack_push(thread, call_id);
     let mut c = Call {
         call_id,
         parent_id,
         op,
         started_ms: now_ms(),
+        thread,
         slot: None,
         early: false,
         last_ms: 0,
@@ -521,7 +553,7 @@ pub fn begin(op: u32) -> Call {
     };
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
-        c.frame = wasm::push();
+        c.frame = Some(wasm::push(op));
     }
     #[cfg(not(all(target_arch = "wasm32", feature = "wasm-host")))]
     {
@@ -614,12 +646,7 @@ impl Call {
 
 impl Drop for Call {
     fn drop(&mut self) {
-        STACK.with(|s| {
-            let mut s = s.borrow_mut();
-            if let Some(k) = s.iter().rposition(|&c| c == self.call_id) {
-                s.remove(k);
-            }
-        });
+        stack_remove(self.thread, self.call_id);
         #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
         {
             if let Some(f) = self.frame {
@@ -640,23 +667,30 @@ impl Drop for Call {
 
 /// The engine's frame area in wasm (the host reads it through
 /// `sb_progress_ptr()`): word 0 the layout version (1); word 1 an epoch,
-/// incremented at every begin and end; word 2 the depth; word 3 zero; then
-/// [`FRAMES`] frames of [`WORDS`] words in the slot layout, the innermost at
-/// `depth - 1`.  In a frame, `call_id` holds the frame's serial number (the
-/// host's own call ids and parents replace it), and `seq` is unused: the host
-/// reads the frames only while the engine waits in its import.
+/// incremented at every begin and end; word 2 the depth (every call running,
+/// however deep); word 3 zero; then [`FRAMES`] frames of [`WORDS`] words in
+/// the slot layout, the innermost at `depth - 1`; then [`OVERFLOW`] pairs
+/// (serial, op) for the calls nested deeper than [`FRAMES`], which have no
+/// counts: the host reports each of them untracked, under its own id.  A
+/// call deeper still is counted in the depth only (the host reports it
+/// untracked with no op).  In a frame, `call_id` holds the frame's serial
+/// number (the host's own call ids and parents replace it), and `seq` is
+/// unused: the host reads the frames only while the engine waits in its
+/// import.
 pub const FRAMES: usize = 32;
+pub const OVERFLOW: usize = 96;
 pub const FRAME_HEADER: usize = 4;
+const AREA_WORDS: usize = FRAME_HEADER + FRAMES * WORDS + 2 * OVERFLOW;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
 mod wasm {
     use super::*;
 
     // (single-threaded: one engine instance per thread in wasm)
-    static mut AREA: [u32; FRAME_HEADER + FRAMES * WORDS] = [0; FRAME_HEADER + FRAMES * WORDS];
+    static mut AREA: [u32; AREA_WORDS] = [0; AREA_WORDS];
     static SERIAL: AtomicU32 = AtomicU32::new(0);
 
-    fn area() -> &'static mut [u32; FRAME_HEADER + FRAMES * WORDS] {
+    fn area() -> &'static mut [u32; AREA_WORDS] {
         unsafe { &mut *std::ptr::addr_of_mut!(AREA) }
     }
 
@@ -666,24 +700,32 @@ mod wasm {
         a.as_ptr()
     }
 
-    /// A new innermost frame, or None beyond [`FRAMES`] deep (that call is
-    /// not reported; its parent's frame stays).
-    pub fn push() -> Option<usize> {
+    /// A new innermost call at depth `d` (returned): a full frame within
+    /// [`FRAMES`], a (serial, op) pair within [`OVERFLOW`] more, and beyond
+    /// that only the depth.
+    pub fn push(op: u32) -> usize {
         let a = area();
         a[0] = 1;
         let d = a[2] as usize;
-        if d >= FRAMES {
-            return None;
+        let serial = SERIAL.fetch_add(1, Relaxed).wrapping_add(1);
+        if d < FRAMES {
+            let base = FRAME_HEADER + d * WORDS;
+            a[base..base + WORDS].fill(0);
+            a[base + word::CALL_ID] = serial;
+        } else if d < FRAMES + OVERFLOW {
+            let o = FRAME_HEADER + FRAMES * WORDS + 2 * (d - FRAMES);
+            a[o] = serial;
+            a[o + 1] = op;
         }
-        let base = FRAME_HEADER + d * WORDS;
-        a[base..base + WORDS].fill(0);
-        a[base + word::CALL_ID] = SERIAL.fetch_add(1, Relaxed).wrapping_add(1);
-        a[2] = d as u32 + 1;
+        a[2] = a[2].saturating_add(1);
         a[1] = a[1].wrapping_add(1);
-        Some(d)
+        d
     }
 
     pub fn write(f: usize, w: &[u32; WORDS]) {
+        if f >= FRAMES {
+            return; // (no counts below the frames)
+        }
         let a = area();
         let base = FRAME_HEADER + f * WORDS;
         let serial = a[base + word::CALL_ID];
@@ -696,8 +738,14 @@ mod wasm {
     pub fn pop(f: usize) {
         let a = area();
         a[2] = a[2].min(f as u32);
-        let base = FRAME_HEADER + f * WORDS;
-        a[base..base + WORDS].fill(0);
+        if f < FRAMES {
+            let base = FRAME_HEADER + f * WORDS;
+            a[base..base + WORDS].fill(0);
+        } else if f < FRAMES + OVERFLOW {
+            let o = FRAME_HEADER + FRAMES * WORDS + 2 * (f - FRAMES);
+            a[o] = 0;
+            a[o + 1] = 0;
+        }
         a[1] = a[1].wrapping_add(1);
     }
 
@@ -841,9 +889,30 @@ mod tests {
         });
         assert!(r.is_err());
         assert_eq!(snapshot().len(), 1);
+        // a call begun on thread A and ended on another thread: A's next call
+        // is top-level again, not a child of the ended one (CORR-PR124-3)
+        let (to_main, from_a) = std::sync::mpsc::channel::<Call>();
+        let (to_a, from_main) = std::sync::mpsc::channel::<()>();
+        let a = std::thread::spawn(move || {
+            to_main.send(begin(1)).unwrap();
+            from_main.recv().unwrap();
+            let next = begin(1);
+            (next.parent_id, next.id())
+        });
+        let c = from_a.recv().unwrap();
+        let ended = c.id();
+        drop(c); // on this thread, not A
+        to_a.send(()).unwrap();
+        let (parent, next) = a.join().unwrap();
+        assert_eq!(parent, 0, "A's next call ({next}) is not a child of the call ended elsewhere ({ended})");
+        // and on this thread the chain is untouched: a new call still nests in outer
+        let inner2 = begin(3);
+        assert_eq!(inner2.parent_id, outer.id());
+        drop(inner2);
         drop(outer);
         assert!(snapshot().is_empty());
         assert_eq!(BITMAP.load(Relaxed), 0);
+        assert!(STACKS.lock().unwrap().iter().all(|e| !e.1.is_empty()), "no empty chains kept");
 
         // a writer at full rate on its own slot; the reader checks that the
         // two halves of every 64-bit count agree (done == total == work)
