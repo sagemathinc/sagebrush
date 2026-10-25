@@ -227,6 +227,28 @@ function sinkOf(c: unknown): number[] | undefined {
   if (!Array.isArray(c)) throw new WorkspaceError("invalid", "collect is a list the call appends its op seqs to");
   return c;
 }
+/** A host's check at use (plan-bash-shell r3 §2.3, design/capabilities.md §2a: nothing checked in one call and
+ * used in another), for a verb's `admit`: what `path` is to the verb (`role`), the entry there now (undefined:
+ * nothing there), and the folders above it that are there, from the top down (`chain`: what a folder grant, by
+ * its fid, covers at the moment of use).  Called holding the workspace's lock (stat and list: in their own read's
+ * transaction), after the path resolves and before anything changes, once for every path the verb's grant check
+ * needs: a rename's or duplicate's source and destination, an absent destination by the folders above it.  It is
+ * synchronous, and throws to refuse: the verb then changes nothing and rejects with what it threw.  The host's
+ * alone: not offered to agents (forAgent), as `collect` isn't. */
+export type AdmitCheck = { op: AdmitOp; role: "target" | "source" | "destination" | "child"; path: string; entry: Entry | undefined; chain: Entry[] };
+export type AdmitOp = "stat" | "read" | "list" | "create" | "write" | "mkdir" | "rename" | "duplicate" | "remove";
+type Admitted = { admit?: (c: AdmitCheck) => void };
+function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
+  if (a === undefined) return undefined;
+  if (typeof a !== "function") throw new WorkspaceError("invalid", "admit is a function that throws to refuse");
+  return a as (c: AdmitCheck) => void;
+}
+/** The folders above `p`, from the top down (not "/", which no grant names, and not `p`). */
+function foldersAbove(p: string): string[] {
+  const out: string[] = [];
+  for (let i = p.indexOf("/", 1); i > 0; i = p.indexOf("/", i + 1)) out.push(p.slice(0, i));
+  return out;
+}
 const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
 const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked"]);
 /** Records deleted per transaction by a reset's cleanup (daybreak2's L2 on 2a4e53a8: never one transaction
@@ -962,22 +984,47 @@ export class Workspace {
   // ------------------------------------------------------------ reading
 
   /** The entries in `folder` (with `recursive`, everything under it), by path.  Trash shows only when listed itself. */
-  async list(folder: string = "/", opts: { recursive?: boolean } = {}): Promise<Entry[]> {
-    const f = path(folder);
+  /** `opts.admit` (the host's, AdmitCheck): asked about the folder, in the same read, then about each entry
+   * listed (role "child"); an entry it refuses (throws for) is left out, and a refused folder lists nothing. */
+  async list(folder: string = "/", opts: { recursive?: boolean } & Admitted = {}): Promise<Entry[]> {
+    const f = path(folder), admit = admitOf(opts.admit);
     this.open();
     // (through the read model: while a large move is being applied, the tree as it is after it, D11)
+    // (with admit, each entry's chain: the folder's own and the folder, then the listed folders between it and
+    // the entry, all from this one read)
+    const top: Entry[] = [];
     const all: Entry[] = await inTx(this.ws, "entries", "readonly", async (tx) => {
       const ev = await entriesOf(tx);
+      if (admit) {
+        const at = await this.admitIn(tx, admit, "list", "target", f);
+        for (const a of foldersAbove(f)) {
+          const e = await ev.get(a);
+          if (!e) break;
+          top.push(e);
+        }
+        if (at) top.push(at);
+      }
       return opts.recursive ? ev.subtree(f) : ev.list(f);
     });
-    return all.filter((e) => (opts.recursive || parentOf(e.path) === f) && (within(f, TRASH) || !within(e.path, TRASH)));
+    const shown = all.filter((e) => (opts.recursive || parentOf(e.path) === f) && (within(f, TRASH) || !within(e.path, TRASH)));
+    if (!admit) return shown;
+    const folders = new Map(shown.filter((e) => e.kind === "folder").map((e) => [e.path, e]));
+    return shown.filter((e) => {
+      const chain = [...top, ...foldersAbove(e.path).filter((a) => a.length > f.length && within(a, f)).map((a) => folders.get(a)).filter((x): x is Entry => !!x)];
+      try {
+        admit({ op: "list", role: "child", path: e.path, entry: e, chain });
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
-  /** One entry, or undefined. */
-  async stat(p: string): Promise<Entry | undefined> {
-    const q = path(p);
+  /** One entry, or undefined.  `opts.admit` (the host's, AdmitCheck): asked in the same read, before it answers. */
+  async stat(p: string, opts: Admitted = {}): Promise<Entry | undefined> {
+    const q = path(p), admit = admitOf(opts.admit);
     this.open();
-    return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).get(q));
+    return inTx(this.ws, "entries", "readonly", async (tx) => (admit ? this.admitIn(tx, admit, "stat", "target", q) : (await entriesOf(tx)).get(q)));
   }
 
   /** An entry and its contents: a notebook's document, a board's document,
@@ -987,8 +1034,11 @@ export class Workspace {
    * holding the lock (a write can't grow it between the check and the
    * read), and by the bytes read; else a WorkspaceError("limit"), with
    * nothing more read than the check needs (a preview, LIMIT-F85-1). */
-  async readUpTo(p: string, max: number): Promise<{ entry: Entry; content: Uint8Array }> {
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read. */
+  async readUpTo(p: string, max: number, opts: Admitted = {}): Promise<{ entry: Entry; content: Uint8Array }> {
+    const admit = admitOf(opts.admit);
     return this.locked(async () => {
+      await this.admitAt(admit, "read", "target", path(p));
       const e = await this.mustStat(p);
       if (e.kind !== "file") throw new WorkspaceError("invalid", `${e.path} isn't a data file`);
       if ((e.size ?? 0) > max) throw new WorkspaceError("limit", `${e.path} is larger than ${max} bytes`);
@@ -1011,11 +1061,12 @@ export class Workspace {
   // ------------------------------------------------------------ changing
 
   /** A folder, and any folders above it that aren't there. */
-  async mkdir(p: string, opts: Collect = {}): Promise<Entry> {
-    const q = path(p), collect = sinkOf(opts?.collect);
+  async mkdir(p: string, opts: Collect & Admitted = {}): Promise<Entry> {
+    const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/") throw new WorkspaceError("invalid", "the top folder is always there");
     if (within(q, TRASH)) throw new WorkspaceError("invalid", "Trash holds only what was deleted");
     return this.locked(async () => {
+      await this.admitAt(admit, "mkdir", "target", q);
       const ops: Op[] = [];
       const e = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         const ev = await fenceCheck(tx, [q]);
@@ -1031,7 +1082,8 @@ export class Workspace {
    * `content` its document or bytes (else a blank one), `mode` a document's
    * language.  A path that's taken is refused, never written over. */
   /** Its provenance: "elsewhere" (`made` given here is not read: only the host's createByPerson says "person"). */
-  async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is made. */
+  async create(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect & Admitted = {}): Promise<Entry> {
     return this.createAs(p, opts, "elsewhere");
   }
   /** create(), made by the person in this site's own UI: provenance "person" (design/capabilities.md §6).
@@ -1044,10 +1096,13 @@ export class Workspace {
   async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, source.made);
   }
-  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect, made: Entry["made"]): Promise<Entry> {
-    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes), collect = sinkOf(opts.collect);
+  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect & Admitted, made: Entry["made"]): Promise<Entry> {
+    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
-    return this.locked(() => this.make(q, kind, content, opts.mode, undefined, made), opts.signal, { collect }).then((e) => { this.askToKeep(); return e; });
+    return this.locked(async () => {
+      await this.admitAt(admit, "create", "target", q);
+      return this.make(q, kind, content, opts.mode, undefined, made);
+    }, opts.signal, { collect }).then((e) => { this.askToKeep(); return e; });
   }
 
   /** New contents for a notebook, board or data file; with `base` (the
@@ -1055,12 +1110,14 @@ export class Workspace {
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")). */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect = {}): Promise<{ entry: Entry; rev: number }> {
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect): Promise<{ entry: Entry; rev: number }> {
-    const collect = sinkOf(opts.collect);
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted): Promise<{ entry: Entry; rev: number }> {
+    const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
+      await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
@@ -1202,10 +1259,12 @@ export class Workspace {
    * (a document's ref, a data file's fid, and when it was made): checked
    * holding the lock, a WorkspaceError("conflict") if what is at `from` now
    * is another (moved away meanwhile, something else put there: CORR-4B2-1). */
-  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect): Promise<Entry>;
-  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect): Promise<Entry | undefined>;
-  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect = {}): Promise<Entry | undefined> {
-    const a = path(from), b = path(to), collect = sinkOf(opts.collect);
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, after `expect` and before anything moves, about
+   * both ends: `from` (role "source") and `to` (role "destination"). */
+  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted = {}): Promise<Entry | undefined> {
+    const a = path(from), b = path(to), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
     if (within(b, a)) throw new WorkspaceError("invalid", "a folder can't go inside itself");
@@ -1215,6 +1274,8 @@ export class Workspace {
         const x = opts.expect, cur = await this.stat(a);
         if (!cur || cur.kind !== x.kind || cur.created !== x.created || cur.fid !== x.fid || (cur.kind !== "file" && cur.ref !== x.ref)) throw new WorkspaceError("conflict", `${a} was moved or replaced meanwhile`);
       }
+      await this.admitAt(admit, "rename", "source", a);
+      await this.admitAt(admit, "rename", "destination", b);
       if (a === b) return this.mustStat(a);
       const moved = await this.move(a, b, "rename");
       if (opts.retitle !== false) await this.retitle(moved[0], a);
@@ -1223,9 +1284,12 @@ export class Workspace {
   }
 
   /** A copy of a notebook, board or data file, at `to` (else the first free `name (2)`, … beside it). */
-  async duplicate(p: string, to?: string, opts: Collect = {}): Promise<Entry> {
-    const collect = sinkOf(opts?.collect);
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is made, about both ends:
+   * `p` (role "source") and the copy's path (role "destination", once it is chosen). */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted = {}): Promise<Entry> {
+    const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     return this.locked(async () => {
+      await this.admitAt(admit, "duplicate", "source", path(p));
       const e = await this.mustStat(p);
       if (e.kind === "folder") throw new WorkspaceError("invalid", "a folder can't be duplicated yet");
       if (e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
@@ -1239,6 +1303,7 @@ export class Workspace {
         if (!dest) throw new WorkspaceError("limit", "no free name for the copy");
       }
       if (within(dest, TRASH) || (e.kind !== "file" && kindOf(dest) !== e.kind)) throw new WorkspaceError("invalid", `a copy of ${e.path} can't be ${dest}`);
+      await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
         return this.make(dest, "notebook", doc, e.mode, undefined, e.made);
@@ -1252,10 +1317,12 @@ export class Workspace {
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
   /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect = {}): Promise<Entry> {
-    const q = path(p), collect = sinkOf(opts?.collect);
+  /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything moves. */
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted = {}): Promise<Entry> {
+    const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
+      await this.admitAt(admit, "remove", "target", q);
       const cur = await this.mustStat(q);
       if (expect && (cur.kind !== expect.kind || cur.created !== expect.created || cur.fid !== expect.fid || (cur.kind !== "file" && cur.ref !== expect.ref))) throw new WorkspaceError("conflict", `${q} was moved or replaced meanwhile`);
       const taken = new Set((await this.list(TRASH)).map((x) => x.path));
@@ -1810,7 +1877,10 @@ export class Workspace {
     // (an agent writes with base only: a board's tag says which page session wrote it, and isn't an agent's to claim)
     bound.write = (p: string, content: unknown, opts: { base?: number } = {}) => as.write(p, content, opts?.base !== undefined ? { base: opts.base } : {});
     // (a call's collector is the host's (task #14): never an agent's)
-    const bare = <O,>(o: O): O => { if (o && typeof o === "object" && "collect" in o) { const { collect: _c, ...rest } = o as Record<string, unknown>; return rest as O; } return o; };
+    // (nor its admit, the host's check at use: plan-bash-shell r3 §2.3)
+    const bare = <O,>(o: O): O => { if (o && typeof o === "object" && ("collect" in o || "admit" in o)) { const { collect: _c, admit: _a, ...rest } = o as Record<string, unknown>; return rest as O; } return o; };
+    bound.list = (folder?: string, opts?: { recursive?: boolean }) => as.list(folder, opts?.recursive ? { recursive: true } : {});
+    bound.stat = (p: string) => as.stat(p);
     bound.mkdir = (p: string) => as.mkdir(p);
     bound.create = (p: string, opts?: Parameters<Workspace["create"]>[1]) => as.create(p, bare(opts));
     bound.rename = (from: string, to: string, opts?: Parameters<Workspace["rename"]>[2]) => as.rename(from, to, bare(opts) as any);
@@ -2101,6 +2171,23 @@ export class Workspace {
       this.adoptQuarantine(kept);
       this.unquarantined();
     }
+  }
+
+  /** `admit` asked about `p` (AdmitCheck), read in `tx`: the entry there, and the folders above it that are there. */
+  private async admitIn(tx: IDBTransaction, admit: (c: AdmitCheck) => void, op: AdmitOp, role: AdmitCheck["role"], p: string): Promise<Entry | undefined> {
+    const ev = await entriesOf(tx), chain: Entry[] = [];
+    for (const f of foldersAbove(p)) {
+      const e = await ev.get(f);
+      if (!e) break;
+      chain.push(e);
+    }
+    const entry = await ev.get(p);
+    admit({ op, role, path: p, entry, chain });
+    return entry;
+  }
+  /** admitIn in a read of its own: for a verb holding the lock, before it changes anything. */
+  private admitAt(admit: ((c: AdmitCheck) => void) | undefined, op: AdmitOp, role: AdmitCheck["role"], p: string): Promise<Entry | undefined> | undefined {
+    return admit && inTx(this.ws, "entries", "readonly", (tx) => this.admitIn(tx, admit, op, role, p));
   }
 
   async mustStat(p: string): Promise<Entry> {
