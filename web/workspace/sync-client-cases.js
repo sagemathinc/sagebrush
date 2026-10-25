@@ -2393,7 +2393,50 @@ async function t14Review2() {
   check(fut === false && cur === false, "review2: a future epoch's message neither applies nor fences the current epoch: " + J({ fut, cur }));
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2 };
+async function t14Review3() {
+  // (astra3's CORR-PR128-6: a message claiming a future epoch can't anchor the fence of a namespace it has no entry for
+  // (a fresh hub, or after eviction), so a real wait registered at the durable epoch still takes that epoch's progress)
+  const w = await fresh();
+  const { ns, lease } = await localNs(w, "e3");
+  const epoch = (await metaGet(w.ws, "sync:epoch")) ?? 0;
+  const hub = W.hubOf(w.ws);
+  check(hub.fences === 0, "review3: a fresh hub: no fence yet");
+  const a = [];
+  await w.mkdir("/fh", { collect: a });
+  hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
+  hub.post({ t: "holder", ns, epoch: epoch + 1, gen: 999, rev: 0 });
+  check(hub.fences === 0, "review3: ordinary messages, of a future epoch, create no fence entry");
+  const pa = w.waitSync(a, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: a });
+  const ra = await caught(pa) ?? await pa;
+  check(ra.sync === "sent", "review3: fresh hub, a future-epoch claim first: a real wait at the durable epoch takes its sent: " + J(ra.sync ?? String(ra)));
+  // (after eviction: three other namespaces moved by lifecycle changes push this one out; a future claim again; a new
+  // real wait re-anchors at the durable epoch and takes its progress)
+  for (const lead of ["b", "c", "d"]) hub.post({ t: "lifecycle", ns: `${lead.repeat(16)}:1:${w.device}`, fromEpoch: 0, toEpoch: 1, kind: "switch" });
+  check(hub.fences === W.HUB.namespaces && hub.seen(ns, epoch) === 0, `review3: three other namespaces evicted this one (the fence holds ${hub.fences})`);
+  hub.post({ t: "sent", ns, epoch: epoch + 1, gen: 999, seqs: [] });
+  const b = [];
+  await w.mkdir("/fe", { collect: b });
+  const pb = w.waitSync(b, { level: "sent", signal: signalOf(), timeoutMs: 5000 });
+  await sleep(50);
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: b });
+  const rb = await caught(pb) ?? await pb;
+  check(rb.sync === "sent", "review3: after eviction, a future-epoch claim first: a real wait at the durable epoch takes its sent: " + J(rb.sync ?? String(rb)));
+  // (and still a fence: re-anchored, an older generation's sent after a newer holder is dropped by a real wait)
+  const c = [];
+  await w.mkdir("/fg", { collect: c });
+  const ab = new AbortController();
+  const pc = w.waitSync(c, { level: "sent", signal: ab.signal });
+  await sleep(50);
+  hub.post({ t: "holder", ns, epoch, gen: lease.gen + 1, rev: 0 });
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen, seqs: c });
+  check(!(await settledYet(pc)) && hub.fences <= W.HUB.namespaces, "review3: re-anchored, an older generation's sent after a newer holder is dropped; the bound kept");
+  hub.post({ t: "sent", ns, epoch, gen: lease.gen + 1, seqs: c });
+  check((await pc).sync === "sent", "review3: …and the newer generation's sent counts");
+}
+
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3 };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

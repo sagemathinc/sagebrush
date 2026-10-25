@@ -106,10 +106,11 @@ export class Hub {
   /** `gen` noted for (ns, epoch); returns whether it is stale (an older epoch, or an older generation of this one).
    * Only a durable read (a wait's registration) or a lifecycle change may `advance` the namespace to a newer epoch: a
    * message claiming one is neither applied here nor allowed to fence the current epoch's messages (waits drop it by
-   * its epoch anyway). */
+   * its epoch anyway).  Nor may it create the namespace's entry (a fresh hub, or after eviction: astra3's
+   * CORR-PR128-6): an unanchored claim is not fenced here, and each wait still fences by its own generation. */
   fence(ns: string, epoch: number, gen: number, advance = false): boolean {
     const cur = this.gens.get(ns);
-    if (cur && epoch > cur.epoch && !advance) return false;
+    if (!advance && (!cur || epoch > cur.epoch)) return false;
     let stale = false, next = cur;
     if (!cur || epoch > cur.epoch) next = { epoch, gen };
     else if (epoch < cur.epoch) stale = true;
