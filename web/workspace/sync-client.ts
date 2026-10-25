@@ -813,6 +813,9 @@ export class SyncClient {
     c.resync = true;
     if (code === "invalid" && /rebuild/.test(detail.message ?? "")) {
       await this.halt(c, "invalid", detail.message ?? "rebuild");
+      // (the rebuild starts from drain()'s obligation check: kicked here, so it starts now even when nothing else wakes
+      // the sender (a refusal answered after the drain went idle waited for a reconnect: web-sync's "cap, no reset" flake))
+      this.kick();
       return;
     }
     if (code === "readonly" || code === "deleting") {

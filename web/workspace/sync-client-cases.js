@@ -1750,6 +1750,54 @@ async function firstSyncCollision() {
   }
 }
 
+async function rebuildKickAfterHalt() {
+  // (web-sync's "cap, no reset" flake: the server's invalid "rebuild" refusal answered after the sender went idle, so
+  // nothing but that answer can start the rebuild: it must start by itself, at once, not wait for a reconnect)
+  await account();
+  const w = await fresh();
+  const c0 = viewClient(w);
+  check(await until(() => settled(w, c0)), "rebuild after an idle refusal: synced");
+  await stop(c0);
+  await w.mkdir("/kicked");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "invalid", hold: true, detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  const c = viewClient(w);
+  const prev = W.REBUILD.before, atHalt = [];
+  try {
+    // (the handshake, not a timing: the server holds the refusal; the test releases it only once it observes, all at
+    // once, (1) the server's log holding exactly that one ops message, (2) the client's current connection still the
+    // one that sent it, with that ops request pending (unanswered: the held refusal), and (3) the sender idle: its loop
+    // not running and no further run queued (running and again both false).  The log is read first; then the client's
+    // state is read synchronously, with no await between those reads and the release's request (astra3's snapshot
+    // hole: state read before an await is stale after it).  No sleep gates the release: the polling only waits for
+    // that state, and then the state itself is the condition)
+    const conn = await (async () => { for (let i = 0; i < 400; i++) { const k = c.conn; if (k && [...k.pending.values()].some((p) => p.kind === "ops")) return k; await sleep(25); } return null; })();
+    // (and at the refusal's handling itself, the halt, synchronously at its entry: the same connection, the sender
+    // still idle; that covers the gap between the release and the answer's delivery)
+    W.REBUILD.before = async (phase, ...rest) => {
+      if (phase === "halt") atHalt.push({ same: c.conn === conn, running: c.running, again: c.again });
+      if (prev) return prev(phase, ...rest);
+    };
+    let seen = null, idleSeen = false;
+    for (let i = 0; i < 400; i++) {
+      const lg = await ctl("log");
+      seen = { conn: !!conn, same: c.conn === conn, pending: !!conn && [...conn.pending.values()].some((p) => p.kind === "ops"), running: c.running, again: c.again, ops: opsMessages(lg).length };
+      idleSeen = seen.conn && seen.same && seen.pending && !seen.running && !seen.again && seen.ops === 1;
+      if (idleSeen) break;
+      await sleep(25);
+    }
+    check(idleSeen, "rebuild after an idle refusal: before the refusal, its ops request pending on the connection that sent it and the sender idle (not running, nothing queued): " + J(seen));
+    const connects = c.stats.connects, wakes = c.stats.wakesFired, passes = c.stats.rebuildPasses;
+    check((await ctl("release")).released === 1 && passes === 0, "rebuild after an idle refusal: the held refusal released, no rebuild before it");
+    check(await until(() => c.stats.rebuildPasses >= 1, 6000) && c.conn === conn && c.stats.connects === connects && c.stats.wakesFired === wakes, "rebuild after an idle refusal: the rebuild starts by itself, on the same connection, with no timer's wake: " + J({ passes: c.stats.rebuildPasses, same: c.conn === conn, connects: [connects, c.stats.connects], wakes: [wakes, c.stats.wakesFired], status: c.status }));
+    check(atHalt.length === 1 && atHalt[0].same && !atHalt[0].running && !atHalt[0].again, "rebuild after an idle refusal: at the refusal's handling (the halt), the same connection and the sender idle: " + J(atHalt));
+    check(await until(() => settled(w, c), 20_000), "rebuild after an idle refusal: …and completes, synced: " + J(c.status));
+  } finally {
+    W.REBUILD.before = prev;
+    await stop(c);
+  }
+}
+
 async function rebuildCapUnsupported() {
   // (astra's CORR-PR65-IMPL-2: the server's refusal limit (its exact answer, `invalid` "too many refused ops"), then
   // the rebuild's announce to core's real server, which has no `rebuilt` ("unknown message"): no reset, so a stable,
@@ -3266,7 +3314,7 @@ async function t14Review3() {
     }
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Wire, s5Account, s5Echo, s5Verified };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
