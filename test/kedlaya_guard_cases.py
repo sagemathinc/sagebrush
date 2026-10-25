@@ -48,8 +48,16 @@ def attempt(p, N, Qc=Q27):
     del calls[:]
     try:
         r = "admitted %s" % (L._kd_preflight(p, N, N - 1, Qc),)
+    except MemoryError as e:
+        # D1's memory error: its type, exact fields and wording (the routes'
+        # lines, which depend on where it runs, only counted)
+        lines = str(e).splitlines()
+        r = "refused %s: %s [need %d, limit %d, for %r, fixed %s, capacity %s, routes %s]" % (
+            type(e).__name__, lines[1], e.need_bytes, e.limit_bytes, e.allowance_for, e.fixed,
+            isinstance(getattr(e, "capacity", None), dict), len(lines) > 3 and lines[0] == "Not enough memory for this computation.")
+        assert e.what in lines[1] and (e.record, e.partial, e.checkpoint) == (None, None, None)
     except NotImplementedError as e:
-        r = "refused: %s [need %s, cap %s]" % (e, e.need_bytes, e.limit_bytes) if hasattr(e, "need_bytes") else "refused: %s" % e
+        r = "refused %s: %s [memory fields %s]" % (type(e).__name__, e, [a for a in ("need_bytes", "limit_bytes") if hasattr(e, a)])
     return r + ("" if not calls else " RAN %s" % calls)
 
 
@@ -69,7 +77,7 @@ def minimum():
     t = time.time()
     r = attempt(5, 10 ** 100 + 1)
     dt = time.time() - t
-    print("min: N = 10^100: %s; step 1: %s; under 10 ms: %s" % (r[:52], "just for its working modulus" in r and "RAN" not in r, dt < 0.01))
+    print("min: N = 10^100: %s; step 1: %s; under 10 ms: %s" % (r[:52], "just its working modulus" in r and "RAN" not in r, dt < 0.01))
     if sys.implementation.name == "cpython":
         ok = all(L._kd_min_bytes(p, N) <= sys.getsizeof(p ** L._kd_plan_fast(p, N)[1])
                  for p in (5, 97, 1009) for N in range(1, 31))
@@ -87,8 +95,8 @@ def minimum():
     finally:
         L._kd_min_bytes = real_min
     print("min: real bound %d < heap %d < J figure %d" % (real, (real + j_fig) // 2, j_fig))
-    print("min: real: %s" % ("not impossible" if "just for its working modulus" not in good else good))
-    print("min: mutant: %s" % ("impossible" if "just for its working modulus" in bad else bad))
+    print("min: real: %s" % ("not impossible" if "just its working modulus" not in good else good))
+    print("min: mutant: %s" % ("impossible" if "just its working modulus" in bad else bad))
 
 
 real_min = L._kd_min_bytes
@@ -125,4 +133,17 @@ def engines():
         print("label %s on %s: %s" % (e, h, L._kd_label(e, h)))
 
 
-{"finite": finite, "min": minimum, "budget": budget, "engines": engines}[sys.argv[1]]()
+def tiny():
+    """D1's wording at the smallest totals: none (the modulus's lower bound
+    against an allowance of 0), a nonzero total below the modulus, and
+    quarter-budgets of 0, 1 and 2 bytes past step 1 (p = 5, N = 2: the
+    modulus needs 2 bytes)."""
+    real_engine = L._kd_engine
+    L._kd_engine = lambda: "cpython"
+    for n in (0, 1, 3, 4, 8):
+        heap(n)
+        print("tiny %d: %s" % (n, attempt(5, 2)))
+    L._kd_engine = real_engine
+
+
+{"finite": finite, "min": minimum, "budget": budget, "engines": engines, "tiny": tiny}[sys.argv[1]]()

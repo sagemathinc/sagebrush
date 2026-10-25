@@ -929,14 +929,18 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         runs until it is done or stopped (Stop interrupts it at every stage,
         and sagebrush.progress shows the stage).  A context that wants a
         limit sets padic.kedlaya_work, in the units of _kd_cost (about 25
-        microseconds each in the CLI).  Memory is guarded: a precision whose
-        working modulus alone can't fit this process is refused at once, and
-        one estimated to need more than a quarter of it before any work::
+        microseconds each in the CLI).  Memory is guarded, with the memory
+        guard's SagebrushMemoryError: a precision whose working modulus alone
+        can't fit this process is refused at once, and one estimated to need
+        more than a quarter of it before any work::
 
-            sage: EllipticCurve('14a1').padic_lseries(5).frobenius(10^100)  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: the Frobenius matrix at p = 5 to precision 10000...0 needs at least ... MiB just for its working modulus p^(prec + 4), more than this process's ... MiB
+            sage: try:  # sagebrush only
+            ....:     EllipticCurve('14a1').padic_lseries(5).frobenius(10^100)
+            ....: except MemoryError as e:
+            ....:     print(type(e).__name__, e.fixed, e.need_bytes > e.limit_bytes)
+            ....:     print(str(e).splitlines()[1])
+            SagebrushMemoryError False True
+            At the least, the Frobenius matrix at p = 5 to precision 10000...0 (just its working modulus p^(prec + 4)) needs about ... GB, but Sagebrush allows about ... for this whole process here.
         """
         sa = _sa()
         if algorithm not in ("mw", "approx"):
@@ -1381,8 +1385,8 @@ def _kd_engine():
 def _kd_label(engine, host):
     """The ledger's name for a JavaScript engine on a host: "v8" (Node, Deno,
     Chromium), "jsc" for JavaScriptCore under Bun, and "jsc (WebKit)" for
-    JavaScriptCore in a browser, whose table isn't established yet (no CI
-    job runs it: it is refused, like "spidermonkey" and "unknown")."""
+    JavaScriptCore in a browser, for which no table can be certified
+    (plan-kedlaya-webkit-ci r4), so it is refused, like "spidermonkey" and "unknown"."""
     if engine == "jsc" and host != "bun":
         return "jsc (WebKit)"
     return engine
@@ -1451,7 +1455,7 @@ class _KdV8:
 
 
 class _KdJSC:
-    """pyjs under JavaScriptCore (Bun; WebKit's waits for its CI job): an
+    """pyjs under JavaScriptCore (Bun only; WebKit's is refused): an
     upper bound over its layouts, as measured under Bun 1.3 at each layout
     step (test/kedlaya_jsc.mjs): a JSBigInt cell (header, length, 64-bit
     digits) rounded up to JSC's size classes, which step by at most 1.4
@@ -1545,13 +1549,16 @@ def _kd_ledger(p, N, K, W, L, a, t):
     return max(_kd_peak(p, K, W, L, a, t), _kd_peak(p, K + 2, W + 3, L, a, t) + 4 * t.I(bM)) + 4 * (t.I(bM) + 256) + t.CODE
 
 
-def _kd_mib(n):
-    return -(-n // (1 << 20))
-
-
-def _kd_refusal(text, need, cap):
-    import _sage_ffmat
-    return _sage_ffmat._refusal(text, need, cap)
+def _kd_memory(what, need, limit, allowance_for):
+    """The memory guard's refusal (D1's SagebrushMemoryError) of a call
+    that needs need bytes against its enforced allowance limit, before any
+    work; what says whether need is a lower bound or an upper estimate.
+    capacity, the memory observed free, is an observation beside D1's
+    fields: it decided nothing (D0)."""
+    import _capacity, _memguard
+    e = _memguard.memory_guard(what, need, limit, allowance_for)
+    e.capacity = _capacity.capacity()
+    return e
 
 
 def _kd_min_bytes(p, N):
@@ -1573,8 +1580,8 @@ def _kd_preflight(p, N, prec, Qc):
     need = _kd_min_bytes(p, N)
     what = "the Frobenius matrix at p = %d to precision %d" % (p, prec)
     if need > total:
-        raise _kd_refusal("%s needs at least %d MiB just for its working modulus p^(prec + 4), more than this "
-                          "process's %d MiB" % (what, _kd_mib(need), total >> 20), need, total)
+        raise _kd_memory("At the least, %s (just its working modulus p^(prec + 4))" % what, need, total,
+                         "this whole process")
     K, W = _kd_plan_fast(p, N)
     import _limits
     limit = _limits.finalize()["padic.kedlaya_work"]
@@ -1595,12 +1602,12 @@ def _kd_admit(p, N, K, W, a, engine, what, total):
     sizes are not established, at once.  Returns U."""
     t = _KD_TABLES.get(engine)
     if t is None:
-        raise _kd_refusal("%s: the memory estimate for this computation isn't established for this JavaScript "
-                          "engine (%s); the native package computes it" % (what, engine), None, total // 4)
+        # (not a memory refusal: no need is known here, so none is given,
+        # nor a memory error's fields)
+        raise NotImplementedError("%s: the memory estimate for this computation isn't established for this "
+                                  "JavaScript engine (%s); the native package computes it" % (what, engine))
     U = _kd_ledger(p, N, K, W, p, a, t)
     cap = total // 4
     if U > cap:
-        raise _kd_refusal("%s is estimated to need about %d MiB, more than sagebrush's budget of %d MiB for one "
-                          "computation (1/4 of this process's %d MiB)" % (what, _kd_mib(U), cap >> 20, total >> 20),
-                          U, cap)
+        raise _kd_memory("By an upper estimate, %s" % what, U, cap, "one computation")
     return U
